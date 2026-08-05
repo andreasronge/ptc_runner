@@ -127,6 +127,17 @@ host document only as an authenticated, process-local encrypted payload; their
 inspectable callback environments expose neither paths nor credential values.
 Generic runtime-service construction cannot mint a host binding, and a
 host-bound catalog requires activation to return a valid host authority.
+That activation is a deliberate exception to the operation deadline rather than
+cancellable work. Because only host-sealed runtime services carry a binding,
+the branch runs one code-owned step — decrypt the sealed host payload, then
+start the private owner and its credential lease — with no embedder-supplied
+callback, file, socket, or network reachable inside it. Its input is bounded by
+the confined read ceiling both `HostConfig` loaders share, so every host
+document a command or embedding acquires through them stays within it; an
+embedding that builds a `HostConfig` by other means owns that bound itself. The deadline is checked immediately before the step and
+rechecked after it, so an expired operation releases the authority instead of
+yielding a registry; a pathological activation delays the command rather than
+being cancelled.
 `PtcRunner.Kernel.RunCoordinator.prepare/2` compiles the captured workflow and
 mission component graphs, validates the public workflow entry, and performs
 provider-inert declaration checks without accepting a path, looking up an

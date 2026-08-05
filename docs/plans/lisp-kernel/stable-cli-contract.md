@@ -239,6 +239,21 @@ still revokes retained builders and credential access. Delete that owner only
 in the commit that replaces its lifecycle; an intermediate no-op close is not
 an acceptable simplification.
 
+Host-bound activation runs synchronously in the caller and is an explicit
+exception to the per-command deadline, on the same terms as application
+bootstrap. Only `from_host_payload/2` can seal a runtime binding, so that
+branch runs exactly one code-owned step: decrypt the sealed host payload, then
+start the private owner and its credential lease. It reaches no
+embedder-supplied callback, file, socket, or network, and its input is bounded
+by the confined read ceiling every command-loaded host document passes through.
+An embedding that constructs a `HostConfig` without that loader owns the bound
+itself.
+The operation deadline is checked immediately before that step and rechecked
+after it, so an expired operation releases the resulting authority instead of
+returning a usable registry. The residual non-guarantee is explicit: a
+pathological activation delays the command past its deadline rather than being
+cancelled.
+
 All selected OAuth aliases in one command use the session context. Authority
 identity still distinguishes aliases and grants. A future host needing several
 tenant partitions opens separate sessions; the stable CLI does not need
@@ -712,9 +727,9 @@ activation in deadline-cancelled workers, preserves
 authority, and rechecks expiry after host-bound activation. Host-bound
 activation itself still runs in the caller because its authority is owned by
 the process that created it and `transfer_to_registry/1` reparents to
-`self()`. Bounding that callback requires the explicit two-phase ownership
-handoff listed in Checkpoint C; it is not complete merely because the shipped
-activation returns promptly.
+`self()`. Checkpoint C keeps that step synchronous and records it as the
+bounded-input bootstrap exception described above, rather than wrapping
+repository-owned initialization in a second ownership protocol.
 
 One gate item stays structurally out of reach in process. `HostConfig` never
 enables `allow_insecure_loopback` for an OAuth authority and `HostInstallation`
@@ -768,12 +783,22 @@ evaluations and finalizes them exactly once at REPL close.
 
 Checkpoint C starts with a small stabilization prefix before adding doctor:
 
-- make the sealed provider descriptor authoritative during staged preparation;
-  reject `data_class` or `accepts_data` drift before preflight, credentials, or
-  acquisition, while retaining the owned-sink comparison as defense in depth;
-- bound host-bound runtime activation with an explicit two-phase ownership
-  handoff whose timeout and caller-death branches cannot strand or prematurely
-  destroy the returned authority;
+- (complete, `586f0de0`) make the sealed provider descriptor authoritative
+  during staged preparation; reject `data_class` or `accepts_data` drift before
+  preflight, credentials, or acquisition, while retaining the owned-sink
+  comparison as defense in depth;
+- record host-bound runtime activation as the code-owned bootstrap exception
+  above instead of bounding it. The expiry check before activation and the
+  release after it already exist, so this slice adds only the two missing
+  host-bound regressions — an expired deadline never activates the payload, and
+  an operation that expires during activation releases the owner and its lease
+  — plus the documented non-guarantee. Creator death is already covered by the
+  existing credential-drain regression. Both alternatives
+  are worse: decrypting in a worker would move the plaintext host document
+  through a process message for a partial bound, and a two-phase handoff would
+  add a second ownership protocol around initialization that performs no
+  external I/O and is already covered by the creator monitor, fence
+  arbitration, transfer reconciliation, and stale-authority protection;
 - decide whether `.env` loading is bounded run work or pre-run setup, and make
   both one-shot and `--check` use that decision;
 - return zero from `LoopbackListener.remaining/1` on expiry and prove a trickle
@@ -838,9 +863,9 @@ all and calls `load_and_build/3` with an empty registry. Behavioural drift
 between them has already produced one reachable privacy defect, so treat this
 slice as early simplification rather than work deferred behind later features.
 
-Checkpoint C pulls descriptor-authoritative acquisition, the remaining
-runtime-activation bound, `.env` ordering, listener expiry, and `--check`
-ownership parity forward from this slice. This section retains the broader
+Checkpoint C pulls descriptor-authoritative acquisition, the recorded
+runtime-activation bootstrap exception, `.env` ordering, listener expiry, and
+`--check` ownership parity forward from this slice. This section retains the broader
 command and REPL cutover after destination publication is complete:
 
 - finish shared `help`, `version`, `validate`, `models`, `doctor`, `run`, and
@@ -988,6 +1013,10 @@ them:
   service cancellation, or concurrency quotas;
 - a general object/transactional artifact store;
 - standalone durable OAuth authorization;
+- a two-phase ownership handoff that makes host-bound runtime activation
+  hard-cancellable; its trigger is a supported deployment that cannot accept
+  the bootstrap exception above, and decrypting in a worker is not an
+  acceptable substitute;
 - a new LLM adapter or removal of `req_llm`/`llm_db`;
 - a second general HTTP stack; a minimal native/port receive helper is allowed
   only when the shipped boundary cannot prove and enforce the slice-7 cap;

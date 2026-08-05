@@ -104,6 +104,63 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
+  test "an expired operation deadline never activates the host payload", %{tmp_dir: dir} do
+    host = load_host(dir, http_config())
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, services} = HostInstallation.runtime_services(host)
+    parent = self()
+    activation = services.activation
+
+    # Comparing owners after the call cannot separate "never started" from
+    # "started and then released"; only the first is correct once the deadline
+    # has already expired, so the activation itself reports whether it ran.
+    observed = fn ->
+      send(parent, :activated)
+      activation.()
+    end
+
+    services = replace_activation(services, observed)
+    owners_before = host_installation_owners()
+    expired = Deadline.from_expires_at(System.monotonic_time(:millisecond) - 1)
+
+    assert {:error, :operation_deadline_expired} =
+             InstallationCatalog.runtime_registry(catalog, services, ["remote"], expired)
+
+    refute_received :activated
+    assert host_installation_owners() == owners_before
+  end
+
+  @tag :tmp_dir
+  test "an operation expiring during activation releases the started authority", %{tmp_dir: dir} do
+    host = load_host(dir, http_config())
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, services} = HostInstallation.runtime_services(host)
+    parent = self()
+    deadline = Deadline.new(50)
+    activation = services.activation
+
+    # Host-bound activation is a synchronous bootstrap exception, so the bound
+    # on a slow one is that its authority is released rather than handed to a
+    # registry. Publishing the real authority first lets the test name the
+    # exact owner and lease that must not survive the expired operation.
+    delayed = fn ->
+      result = activation.()
+      send(parent, {:activated, result})
+      wait_until_expired(deadline)
+      result
+    end
+
+    services = replace_activation(services, delayed)
+
+    assert {:error, :operation_deadline_expired} =
+             InstallationCatalog.runtime_registry(catalog, services, ["remote"], deadline)
+
+    assert_received {:activated, {:ok, authority}}
+    refute Process.alive?(authority.pid)
+    refute Process.alive?(authority.lease_owner)
+  end
+
+  @tag :tmp_dir
   test "host-backed credential resolution runs outside the authority owner", %{tmp_dir: dir} do
     parent = self()
     host = load_host(dir, http_config())
@@ -1344,14 +1401,27 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     host
   end
 
-  defp replace_credential_resolver(services, resolver) do
-    services = %{services | credential_resolver: resolver}
+  defp replace_credential_resolver(services, resolver),
+    do: reseal_services(%{services | credential_resolver: resolver})
 
+  defp replace_activation(services, activation),
+    do: reseal_services(%{services | activation: activation})
+
+  defp reseal_services(services) do
     payload =
       {services.activation, services.credential_resolver, services.provider_application_mode,
        services.oauth_mode, services.runtime_binding, services.host_payload}
 
     %{services | attestation: Attestation.attest(ProviderRuntimeServices, payload)}
+  end
+
+  defp wait_until_expired(deadline) do
+    if Deadline.expired?(deadline) do
+      :ok
+    else
+      :erlang.yield()
+      wait_until_expired(deadline)
+    end
   end
 
   defp assert_eventually(predicate, attempts \\ 10_000)
