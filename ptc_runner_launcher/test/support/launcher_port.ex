@@ -596,12 +596,33 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
         receive do
           {:DOWN, ^monitor, :port, ^port, _reason} ->
             flush_queued_port_messages(port)
+            await_port_release(port, deadline_ms)
 
           {^port, _message} ->
             drain_closed_port(port, monitor, deadline_ms)
         after
           min(remaining_ms, 100) ->
             drain_closed_port(port, monitor, deadline_ms)
+        end
+    end
+  end
+
+  # A port monitor reports termination before the runtime releases the port
+  # table entry, so the DOWN alone does not mean Port.info/1 has stopped
+  # reporting the port. Owners observe teardown through Port.info/1, so wait
+  # for the entry to be released within the same bounded deadline.
+  defp await_port_release(port, deadline_ms) do
+    cond do
+      is_nil(Port.info(port)) ->
+        :ok
+
+      remaining_ms(deadline_ms) == 0 ->
+        :ok
+
+      true ->
+        receive do
+        after
+          1 -> await_port_release(port, deadline_ms)
         end
     end
   end
