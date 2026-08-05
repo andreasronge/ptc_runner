@@ -1131,6 +1131,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
   defp trace_calls(functions, operation) do
     test = self()
     tracer = spawn_link(fn -> forward_traces(test) end)
+    tracer_down = Process.monitor(tracer)
 
     # `:set_on_spawn` keeps the trace inside this invocation's process tree, so
     # an unrelated process cannot satisfy an ordering assertion.
@@ -1151,11 +1152,30 @@ defmodule Mix.Tasks.Ptc.RunTest do
       Enum.each(functions, fn {{module, function, arity}, _match_spec} ->
         :erlang.trace_pattern({module, function, arity}, false, [:local])
       end)
+
+      # Trace signals from the spawned execution owner can still be in flight
+      # when `operation.()` returns, so delivery is settled before the
+      # forwarder is stopped. A test process exits normally, which a linked
+      # process ignores, so it is stopped explicitly rather than left for the
+      # suite to accumulate.
+      delivered = :erlang.trace_delivered(:all)
+
+      receive do
+        {:trace_delivered, :all, ^delivered} -> :ok
+      after
+        5_000 -> flunk("trace delivery did not settle")
+      end
+
+      send(tracer, :stop)
+      assert_receive {:DOWN, ^tracer_down, :process, ^tracer, :normal}, 5_000
     end
   end
 
   defp forward_traces(test) do
     receive do
+      :stop ->
+        :ok
+
       message ->
         send(test, message)
         forward_traces(test)

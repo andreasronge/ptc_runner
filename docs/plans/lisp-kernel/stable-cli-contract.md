@@ -807,8 +807,18 @@ Checkpoint C starts with a small stabilization prefix before adding doctor:
   branch, so both paths apply the same selected-provider rule and neither
   charges the load to the run clock. `ProviderExecution.maybe_load_dotenv/2`
   and the sealed `dotenv_required?` query chain it used are deleted;
-- return zero from `LoopbackListener.remaining/1` on expiry and prove a trickle
-  client cannot extend the receive loop; and
+- (complete) return zero from `LoopbackListener.remaining/1` on expiry, decide
+  expiry before `:gen_tcp.recv/3` rather than delegating it to a zero timeout,
+  and keep `:authorization_timeout` distinct from `:invalid_callback_request`.
+  Regressions cover a callback already buffered before an expired accept, a
+  client that keeps trickling past the deadline, and a silent client that stops
+  mid-request. The pre-receive expiry branch remains fail-closed defense in
+  depth: its neighbouring branches report the same closed reason at the same
+  instant, so it is not independently observable through the socket. A
+  follow-up remains open: `Authorization.cancel_authorization/3` charges its
+  store mutation the residual budget of the interaction it is cleaning up, so
+  cancellation after expiry runs with a one-millisecond deadline whose failure
+  is discarded; and
 - move `--check` onto the shared execution-owner composition and delete the
   frontend-owned active path it replaces before doctor becomes another caller.
 
