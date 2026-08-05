@@ -234,6 +234,51 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert diagnostic.code == :provider_cleanup_failed
   end
 
+  test "a provider acquiring stricter than it declared is refused, not downgraded" do
+    # The owner opens sinks from the sealed declaration before any provider
+    # runs. A staged builder that acquires as :private_inspection while its
+    # descriptor declares :normal would otherwise emit through the normal sink
+    # the owner already opened.
+    fixture =
+      provider_fixture(
+        descriptor_accepts_data: [:normal, :private_inspection],
+        staged_data_class: :private_inspection,
+        acquire: fn _context ->
+          {:ok, capability} = fixture_capability()
+
+          {:ok,
+           %{
+             capabilities: [capability],
+             data_class: :private_inspection,
+             accepts_data: [:private_inspection]
+           }}
+        end
+      )
+
+    assert fixture.prepared.effective_data_class == :normal
+    parent = self()
+
+    caller =
+      spawn(fn ->
+        {:ok, owner} =
+          ExecutionSessionOwner.start(
+            fixture.prepared,
+            fixture.authority,
+            self(),
+            fixture.execution,
+            &never_notify/1
+          )
+
+        send(parent, {:execution_owner, owner})
+        send(parent, {:execution_result, ExecutionSessionOwner.await(owner)})
+      end)
+
+    assert_receive {:execution_owner, owner}, 5_000
+    on_exit(fn -> release(caller, ExecutionSessionOwner.pid(owner)) end)
+
+    assert_receive {:execution_result, {:error, :provider_data_class_drift}}, 5_000
+  end
+
   test "an execution from another catalog leaves the prepared run reusable" do
     fixture = provider_fixture()
     other = provider_fixture(installation_revision: "other-v1")
@@ -375,6 +420,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     selection_validation = Keyword.get(opts, :selection_validation, :declarative)
     body = Keyword.get(opts, :body, "(return {\"answer\" 42})")
     acquire = Keyword.get(opts, :acquire, fn _context -> fixture_capability() end)
+    staged_class = Keyword.get(opts, :staged_data_class)
 
     {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
 
@@ -385,7 +431,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
         credential_names: [],
         authorization_mode: :none,
         data_class: :normal,
-        accepts_data: [:normal],
+        accepts_data: Keyword.get(opts, :descriptor_accepts_data, [:normal]),
         requires: [],
         provides: [],
         destinations: [:workflow],
@@ -399,7 +445,16 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
       )
 
     builder = fn _selection, context ->
-      {:ok, %{credential_names: [], preflight: fn -> {:ok, fn %{} -> acquire.(context) end} end}}
+      staged = %{
+        credential_names: [],
+        preflight: fn -> {:ok, fn %{} -> acquire.(context) end} end
+      }
+
+      if staged_class do
+        {:ok, Map.merge(staged, %{data_class: staged_class, accepts_data: [staged_class]})}
+      else
+        {:ok, staged}
+      end
     end
 
     implementation =

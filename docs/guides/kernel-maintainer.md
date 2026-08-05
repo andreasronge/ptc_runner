@@ -186,8 +186,10 @@ rejects them; after `ProviderActiveSession` consumes and marks one, its runtime
 registry is opened and the active value and same session are passed to
 `RunBuilder`. A one-shot run does that inside the execution-session owner's
 subordinate worker, which calls `build_active_owned/5` with the owner-opened
-sinks; `--check` and the REPL still open the registry in the Mix adapter and
-call `build_active/4` until their parity cutover. After application admission, that session
+sinks. `--check` still opens the registry in the Mix adapter and calls
+`build_active/4`. The REPL is a third transitional path and opens no active
+session: it calls `load_and_build/3` with an empty registry. All three keep
+their current shape until the parity cutover. After application admission, that session
 anchors one absolute run deadline shared by active selection, construction,
 and Kernel execution. The active build atomically claims the session sealed to
 the exact prepared run; swapping sessions or replaying the same prepared/session

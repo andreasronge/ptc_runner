@@ -18,9 +18,14 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   so a validator cannot retain a process or port root. Caller death kills the
   linked worker while the session owner drains its provisional scope.
 
-  A successful caller owns both returned session and the consumed prepared
-  run. It must close the session and then release the prepared run's activity
-  marker. A failed open performs both operations before returning.
+  Cleanup responsibility differs by entry point. A frontend-owned caller of
+  `open/3` or `open_setup/3` owns both the returned session and the consumed
+  prepared run: it must close the session and then release the prepared run's
+  activity marker, and a failed open performs both operations before returning.
+  An execution-owned caller of `open_consumed_setup/5` supplies a preparation
+  the execution owner already consumed and a lifecycle owner that receives the
+  session, so a failed open closes neither; the execution owner remains
+  responsible for both.
   """
 
   alias PtcRunner.Kernel.BoundedWorker

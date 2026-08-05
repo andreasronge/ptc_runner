@@ -19,8 +19,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
   caller-death boundary.
   A provider-bearing prepared run is preflighted the same way, and its active
   session is passed here for runtime assembly. The one-shot path opens that
-  session inside the execution-session owner; `--check` and the REPL still open
-  it in the Mix adapter until their parity cutover.
+  session inside the execution-session owner and calls `build_active_owned/5`
+  with the owner's sinks; `--check` still opens it in the Mix adapter and calls
+  `build_active/4`. The REPL is a third transitional path: it calls
+  `load_and_build/3` with an empty registry and opens no active session at all.
+  All three converge here until their parity cutover.
   `PtcRunner.Kernel.ProviderAcquisition` then runs the selected providers'
   shared preparation, credentials, and dependency-ordered acquisition barrier.
   Active preparation, preflight, acquisition, and credential resolution are
@@ -769,15 +772,23 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
+  # Owner-opened sinks are fixed before any provider runs, from the sealed
+  # declaration's effective data class. A provider that acquires as a stricter
+  # class than it declared would otherwise emit through a sink opened for the
+  # weaker one, so the drift is refused rather than silently downgraded.
   defp execution_sinks(
-         _request,
-         _providers,
+         request,
+         providers,
          _opts,
          _failure_mode,
          {:opened_sinks, authority, opened_sinks}
        ) do
-    {:ok, authority, opened_sinks.event_sink, opened_sinks.inspection_sink,
-     opened_sinks.inspection_path}
+    if required_event_policy(request, providers) == EventSink.policy(opened_sinks.event_sink) do
+      {:ok, authority, opened_sinks.event_sink, opened_sinks.inspection_sink,
+       opened_sinks.inspection_path}
+    else
+      {:error, :provider_data_class_drift, opened_sinks}
+    end
   end
 
   defp validate_opened_sinks(opened_sinks, prepared, authority),
@@ -1506,12 +1517,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
       |> maybe_put(:trace_id, policy.trace_id)
       |> Keyword.put(:owner, owner)
 
-    effective_policy =
-      if policy.event_policy == :private or providers.data_class == :private_inspection,
-        do: :private,
-        else: :normal
+    EventSink.start(required_event_policy(request, providers), package.limits, opts)
+  end
 
-    EventSink.start(effective_policy, package.limits, opts)
+  # The sole rule for a run's event policy. Both the sink-opening path and the
+  # owned path that inherits already-opened sinks must decide it the same way.
+  defp required_event_policy(request, %{data_class: data_class}) do
+    if request.policy.event_policy == :private or data_class == :private_inspection,
+      do: :private,
+      else: :normal
   end
 
   defp inspection_sink(event_sink, opts, failure_mode),
