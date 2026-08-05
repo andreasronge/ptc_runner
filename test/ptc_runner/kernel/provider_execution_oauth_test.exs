@@ -78,6 +78,9 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   # streamable-HTTP transport always requires HTTPS. The run therefore stops at
   # that rule, which is exactly what makes this a clean probe of everything
   # before it — the authorization interaction and the run clock that follows it.
+  # Carrying the resulting bearer across the real MCP protocol boundary is
+  # covered separately by the credential-free Go OAuth end-to-end test; no
+  # single test spans both halves.
   test "one explicit authorization precedes the run it hands its context to" do
     parent = self()
     server = start_server(hold_token?: true)

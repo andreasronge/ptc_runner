@@ -709,8 +709,15 @@ transport always requires HTTPS. An in-process one-shot therefore proves the
 authorization interaction, the run clock that starts only after it settles, and
 the single execution-scoped context shared by selected authorities, but stops at
 that transport rule before the bearer token reaches an authenticated MCP
-request. Grant handoff through acquisition remains covered by the credential-free
-Go OAuth end-to-end test rather than by an in-process regression.
+request.
+
+Command-level context handoff is therefore covered up to acquisition, and
+authenticated bearer transport is covered independently by the credential-free
+Go OAuth end-to-end test, which constructs `Context`, `TokenManager`, and
+`MCPSource` directly rather than through `ExecutionSessionOwner`. No single test
+currently spans both. Closing that seam needs an HTTPS fixture or a trusted
+remote harness; do not widen `allow_insecure_loopback` into production
+`HostConfig` to reach it from a test.
 
 - adapt the in-memory Store to absolute deadlines with the pre-dispatch and
   in-transaction expiry checks;
