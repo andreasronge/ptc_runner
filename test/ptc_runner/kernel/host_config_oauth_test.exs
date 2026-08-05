@@ -1,7 +1,6 @@
 defmodule PtcRunner.Kernel.HostConfigOAuthTest do
   use ExUnit.Case, async: true
 
-  alias Mix.Tasks.Ptc.Run
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostConfig
@@ -11,6 +10,7 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
   alias PtcRunner.Kernel.MCPOAuth.Context
   alias PtcRunner.Kernel.MCPOAuth.Store
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
+  alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderRegistry
 
   test "decodes OAuth only when normalized static authentication is empty" do
@@ -241,12 +241,11 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
     assert {:ok, catalog} = HostInstallation.catalog(host)
     assert catalog.authorities["github"] == :host_runtime
 
-    assert %{"github" => authority} = Run.oauth_authorities(host, ["github"])
+    authority = host.install["github"].transport.oauth
     assert Authority.valid?(authority)
-    assert authority == host.install["github"].transport.oauth
 
     assert {:error, %CommandDiagnostic{} = diagnostic} =
-             Run.authorization_result(
+             ProviderExecution.authorization_result(
                {:error, {:authorization_timeout, "github"}},
                ["github"],
                catalog

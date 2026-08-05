@@ -41,11 +41,15 @@ Frontends own presentation and host choices. They must enter through
 `PtcRunner.Kernel.RunRequest`. The closed command pipeline uses
 `PtcRunner.Kernel.CommandEngine`; the existing Mix command still has its
 transitional argv and presentation adapter, but its runtime path now prepares
-through `RunCoordinator` and preflights destinations. One-shot runs then
-execute through a dedicated execution-session owner, whether or not they select
-providers. A provider-bearing one-shot opens `ProviderActiveSession` inside
-that owner's subordinate worker rather than in the adapter. `--check` and the
-REPL keep their existing adapter-owned sessions until their parity cutover.
+through `RunCoordinator` and preflights destinations. One-shot runs and
+`--check` both execute through a dedicated execution-session owner, whether or
+not they select providers, and a provider-bearing invocation opens
+`ProviderActiveSession` inside that owner's subordinate worker rather than in
+the adapter. A check differs from a run only in how the owner completes an
+assembled build: it reports the acquisition's safe connector snapshots instead
+of evaluating the entry, so both share one activity marker, session, registry,
+credential, OAuth, acquisition, and cleanup boundary. The REPL keeps its
+adapter-owned path until its parity cutover.
 Embedding frontends execute a sealed request through
 `PtcRunner.Kernel.RunBuilder.build/3`. For a provider-free request they may
 instead call the path-free `PtcRunner.Kernel.RunCoordinator` and pass its
@@ -193,14 +197,15 @@ effective projection/digest at construction and on every seal check, so
 provider-bearing preparation cannot bypass declaration processing by calling
 the constructor directly. Such provider-bearing values are presently
 continuation state for the staged command pipeline. `RunBuilder.build_prepared/3`
-rejects them; after `ProviderActiveSession` consumes and marks one, its runtime
-registry is opened and the active value and same session are passed to
-`RunBuilder`. A one-shot run does that inside the execution-session owner's
-subordinate worker, which calls `build_active_owned/5` with the owner-opened
-sinks. `--check` still opens the registry in the Mix adapter and calls
-`build_active/4`. The REPL is a third transitional path and opens no active
-session: it calls `load_and_build/3` with an empty registry. All three keep
-their current shape until the parity cutover. After application admission, that session
+rejects them; the execution-session owner consumes one when it opens its
+sinks, `ProviderActiveSession` then marks activity and opens the session, and
+the runtime registry, active value, and that same session are passed to
+`RunBuilder`. A run and a `--check` both do that inside the execution-session
+owner's subordinate worker, which calls `build_active_owned/5` with the
+owner-opened sinks and then completes through `execute_built/1` or
+`check_built/1`. The REPL remains transitional and opens no active session: it
+calls `load_and_build/3` with an empty registry, keeping its current shape
+until the parity cutover. After application admission, that session
 anchors one absolute run deadline shared by active selection, construction,
 and Kernel execution. The active build atomically claims the session sealed to
 the exact prepared run; swapping sessions or replaying the same prepared/session

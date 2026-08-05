@@ -819,8 +819,21 @@ Checkpoint C starts with a small stabilization prefix before adding doctor:
   store mutation the residual budget of the interaction it is cleaning up, so
   cancellation after expiry runs with a one-millisecond deadline whose failure
   is discarded; and
-- move `--check` onto the shared execution-owner composition and delete the
-  frontend-owned active path it replaces before doctor becomes another caller.
+- (complete) move `--check` onto the shared execution-owner composition. A
+  check now differs from a run only in the owner's completion step, so both
+  share the activity marker, session, registry, credentials, OAuth,
+  acquisition, and cleanup ownership, and `--check --authorize-mcp` reaches the
+  same authorization subphase. The replaced scaffolding is deleted with it: the
+  Mix adapter's session, registry, OAuth context, deadline, and authorization
+  helpers, `RunBuilder.build_active/4`, and `ProviderActiveSession`'s
+  frontend-owned `open/3`, `open_setup/3`, and `begin_run/3` together with the
+  ownership branch they required. Two terminal-cleanup follow-ups remain open
+  and are deliberately not patched with fresh ad-hoc timeouts:
+  `Authorization.cancel_authorization/3` charges its store mutation the residual
+  budget of the interaction it cleans up, and `ProviderExecution`'s
+  `close_owned_session/3` closes an alive session with `ProviderSession.close/1`,
+  whose call is unbounded, so an unresponsive session turns a bounded failure
+  into a wait. Both need a cleanup deadline supplied by the lifecycle owner.
 
 Keep these as independently reviewable commits in the Checkpoint C PR. Do not
 start doctor implementation until the descriptor and ownership boundaries are

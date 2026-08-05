@@ -91,8 +91,10 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           t(),
           (binary() -> term()),
           tracker(),
-          pid()
-        ) :: {:ok, PtcRunner.Kernel.ExecutionOutcome.t()} | {:error, term()}
+          pid(),
+          :run | :check
+        ) ::
+          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | [map()]} | {:error, term()}
   def execute(
         %PreparedRun{} = prepared,
         authority,
@@ -100,9 +102,11 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         %__MODULE__{} = execution,
         notifier,
         tracker,
-        lifecycle_owner
+        lifecycle_owner,
+        operation
       )
-      when is_function(notifier, 1) and is_function(tracker, 3) and is_pid(lifecycle_owner) do
+      when is_function(notifier, 1) and is_function(tracker, 3) and is_pid(lifecycle_owner) and
+             operation in [:run, :check] do
     with true <- valid?(execution),
          true <- PreparedRun.consumed_valid?(prepared),
          true <- PublicationAuthority.valid?(authority),
@@ -122,7 +126,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         execution,
         notifier,
         tracker,
-        session
+        session,
+        operation
       )
     else
       false -> {:error, :invalid_provider_execution}
@@ -141,7 +146,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         _execution,
         _notifier,
         _tracker,
-        _lifecycle_owner
+        _lifecycle_owner,
+        _operation
       ),
       do: {:error, :invalid_provider_execution}
 
@@ -152,7 +158,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          execution,
          notifier,
          tracker,
-         session
+         session,
+         operation
        ) do
     result =
       if execution.authorizations == [] do
@@ -162,7 +169,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           opened_sinks,
           execution,
           tracker,
-          session
+          session,
+          operation
         )
       else
         execute_after_authorization(
@@ -172,7 +180,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           execution,
           notifier,
           tracker,
-          session
+          session,
+          operation
         )
       end
 
@@ -193,7 +202,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
-  defp execute_ordinary(prepared, authority, opened_sinks, execution, tracker, session) do
+  defp execute_ordinary(prepared, authority, opened_sinks, execution, tracker, session, operation) do
     selected_names = selected_provider_names(prepared)
 
     with {:ok, session} <-
@@ -214,7 +223,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         tracker,
         :run,
         fn registry ->
-          build_and_execute(prepared, authority, opened_sinks, registry, session)
+          build_and_complete(prepared, authority, opened_sinks, registry, session, operation)
         end
       )
     end
@@ -227,7 +236,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          execution,
          notifier,
          tracker,
-         session
+         session,
+         operation
        ) do
     selected_names = selected_provider_names(prepared)
 
@@ -260,7 +270,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
                  |> authorization_result(selected_names, execution.catalog),
                {:ok, session} <-
                  ProviderActiveSession.begin_owned_run(session, prepared, execution.catalog) do
-            build_and_execute(prepared, authority, opened_sinks, registry, session)
+            build_and_complete(prepared, authority, opened_sinks, registry, session, operation)
           end
         end
       )
@@ -270,7 +280,11 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
-  defp build_and_execute(prepared, authority, opened_sinks, registry, session) do
+  # Every step above this one is shared by a run and a check: the same activity
+  # marker, session, registry, credentials, OAuth, acquisition, and cleanup
+  # ownership. Only the completion differs, so a check cannot drift into its own
+  # provider lifecycle.
+  defp build_and_complete(prepared, authority, opened_sinks, registry, session, operation) do
     with {:ok, built} <-
            RunBuilder.build_active_owned(
              prepared,
@@ -279,9 +293,12 @@ defmodule PtcRunner.Kernel.ProviderExecution do
              authority,
              opened_sinks
            ) do
-      RunBuilder.execute_built(built)
+      complete_operation(built, operation)
     end
   end
+
+  defp complete_operation(built, :run), do: RunBuilder.execute_built(built)
+  defp complete_operation(built, :check), do: RunBuilder.check_built(built)
 
   defp with_runtime_registry(
          execution,

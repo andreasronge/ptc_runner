@@ -158,8 +158,9 @@ defmodule PtcRunner.Kernel.MCPOAuth.LoopbackListener do
 
   # `:gen_tcp.recv/3` returns bytes the socket has already buffered even with a
   # zero timeout, so a client that keeps trickling would extend an expired
-  # interaction indefinitely. Expiry is therefore decided before the call
-  # rather than delegated to its timeout.
+  # interaction past its deadline, potentially until the request cap stops it.
+  # Expiry is therefore decided before the call rather than delegated to its
+  # timeout.
   defp receive_chunk(_socket, _accumulator, _deadline_ms, 0),
     do: {:error, :authorization_timeout}
 

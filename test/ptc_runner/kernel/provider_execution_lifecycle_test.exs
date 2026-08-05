@@ -292,6 +292,25 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert_declaration_refused(fixture)
   end
 
+  test "a check assembles its providers without ever executing the workflow" do
+    # The entry never terminates, so a check that returns at all proves the
+    # Kernel was not run; only the acquisition's safe snapshots come back.
+    fixture = provider_fixture(body: "(loop [] (recur))")
+
+    assert {:ok, owner} =
+             ExecutionSessionOwner.start(
+               fixture.prepared,
+               fixture.authority,
+               self(),
+               fixture.execution,
+               &never_notify/1,
+               :check
+             )
+
+    assert {:ok, []} = ExecutionSessionOwner.await(owner)
+    assert_receive {:provider_phase, :acquire}, 5_000
+  end
+
   test "an execution from another catalog leaves the prepared run reusable" do
     fixture = provider_fixture()
     other = provider_fixture(installation_revision: "other-v1")
