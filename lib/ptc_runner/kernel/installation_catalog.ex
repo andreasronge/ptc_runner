@@ -14,6 +14,9 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   activation deadline because it has no run selection.
   Catalog construction checks that active validators, connectivity probes, and
   local checks agree with their descriptors without invoking any callback.
+  Every builder placed in a run-bound registry carries the data policy its
+  validated sealed descriptor declares, so a staged preparation cannot
+  contradict the policy phase 5 and sink authorization already used.
   """
 
   alias PtcRunner.Kernel.Attestation
@@ -537,7 +540,11 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
     catalog.implementations
     |> Map.take(selected_names)
     |> Map.new(fn {name, _implementation} ->
-      {name, ProviderRegistry.staged(HostInstallation.runtime_builder(owner, name))}
+      {name,
+       ProviderRegistry.staged(
+         HostInstallation.runtime_builder(owner, name),
+         declared_policy(catalog, name)
+       )}
     end)
   end
 
@@ -556,9 +563,12 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
             implementation.builder
         end
 
-      {name, ProviderRegistry.staged(builder)}
+      {name, ProviderRegistry.staged(builder, declared_policy(catalog, name))}
     end)
   end
+
+  defp declared_policy(catalog, name),
+    do: catalog.descriptors |> Map.fetch!(name) |> ProviderDescriptor.data_policy()
 
   defp valid_runtime_selection?(catalog, selected_names)
        when is_list(selected_names) and length(selected_names) <= 128 do

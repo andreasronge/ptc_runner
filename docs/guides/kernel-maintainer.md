@@ -797,7 +797,12 @@ store context.
 Provider implementations later return capabilities plus optional safe connector metadata
 and an idempotent closer. Staged builders may also exchange bounded code-owned
 acquisition services after the global preflight and credential barrier; these
-opaque values never enter environments or artifacts. `ProviderAcquisition`
+opaque values never enter environments or artifacts. A run-bound registry keeps
+every builder bound to its sealed descriptor, so preparation reporting a data
+class or accepted-class set other than the declared one fails with
+`provider_declaration_mismatch` before preflight, credential resolution, or
+acquisition; the declaration phase 5 and sink authorization used stays
+authoritative. `ProviderAcquisition`
 resolves those dependencies and immediately commits each successful resource
 to the provider session's cleanup stack. For active commands, its preparation,
 preflight, and acquisition callbacks—including work behind the private host

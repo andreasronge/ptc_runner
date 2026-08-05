@@ -773,9 +773,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   # Owner-opened sinks are fixed before any provider runs, from the sealed
-  # declaration's effective data class. A provider that acquires as a stricter
-  # class than it declared would otherwise emit through a sink opened for the
-  # weaker one, so the drift is refused rather than silently downgraded.
+  # declaration's effective data class. Descriptor-bound preparation and the
+  # acquired-build comparison already refuse a provider whose data policy
+  # contradicts its declaration, so this is defense in depth: it re-derives the
+  # required policy from what was actually acquired and refuses drift rather
+  # than emitting a stricter class through a sink opened for the weaker one.
   defp execution_sinks(
          request,
          providers,
