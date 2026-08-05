@@ -239,11 +239,12 @@ defmodule PtcRunner.MixProject do
           "docs/guides/kernel-repl.md",
           "docs/guides/components-and-preludes.md",
           "docs/guides/embedding-in-elixir.md",
+          "docs/guides/coding-agent-review-workflow.md",
           "docs/guides/documentation-guidelines.md",
           "docs/guides/kernel-maintainer.md"
         ] ++ Path.wildcard("docs/conformance/*-audit.md"),
       groups_for_extras: [
-        Maintainers: ~r/docs\/guides\/kernel-maintainer\.md/,
+        Maintainers: ~r/docs\/guides\/(coding-agent-review-workflow|kernel-maintainer)\.md/,
         Contracts: ~r/docs\/trace-log-contract\.md/,
         Guides: ~r/docs\/guides\/.+\.md/,
         Reference: ~r/docs\/(ptc-lisp|clojure|function-reference|java-|signature-).+\.md/,

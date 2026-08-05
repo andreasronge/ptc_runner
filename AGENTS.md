@@ -21,6 +21,10 @@ Explore the codebase before proposing changes — never claim a feature is
 missing without evidence from the source files. When you find a problem, fix
 the code and the docs together.
 
+When independent Codex review is required, follow the focused
+[coding-agent review workflow](docs/guides/coding-agent-review-workflow.md); do
+not cold-review byte-identical trees more than once.
+
 Code documentation must not link to `docs/plans/`; plans are disposable. Move
 durable contracts into module docs, guides, or retained specifications first.
 
