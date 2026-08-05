@@ -190,6 +190,50 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert diagnostic.provider_activity
   end
 
+  test "a refusing closer outranks a post-acquisition build failure in the worker" do
+    # The oversized connector snapshot fails `RunConfig.new/1` after acquisition
+    # has already committed the refusing closer, which is the one shape that
+    # leaves the session open for the worker itself to close.
+    fixture =
+      provider_fixture(
+        acquire: fn _context ->
+          {:ok, capability} = fixture_capability()
+
+          {:ok,
+           %{
+             capabilities: [capability],
+             snapshot: %{"padding" => String.duplicate("x", 300_000)},
+             close: fn -> :failed end
+           }}
+        end
+      )
+
+    parent = self()
+
+    caller =
+      spawn(fn ->
+        {:ok, owner} =
+          ExecutionSessionOwner.start(
+            fixture.prepared,
+            fixture.authority,
+            self(),
+            fixture.execution,
+            &never_notify/1
+          )
+
+        send(parent, {:execution_owner, owner})
+        send(parent, {:execution_result, ExecutionSessionOwner.await(owner)})
+      end)
+
+    assert_receive {:execution_owner, owner}, 5_000
+    on_exit(fn -> release(caller, ExecutionSessionOwner.pid(owner)) end)
+
+    assert_receive {:execution_result, observed}, 5_000
+    assert {:error, %CommandDiagnostic{} = diagnostic} = observed
+    assert diagnostic.phase == :result_cleanup
+    assert diagnostic.code == :provider_cleanup_failed
+  end
+
   test "an execution from another catalog leaves the prepared run reusable" do
     fixture = provider_fixture()
     other = provider_fixture(installation_revision: "other-v1")
@@ -265,7 +309,9 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     end
   end
 
-  defp await_state(owner_pid, projection, attempts \\ 1_000)
+  # Yielding matters more than the attempt count: a bare spin starves the very
+  # worker these helpers are waiting on when schedulers are contended.
+  defp await_state(owner_pid, projection, attempts \\ 50_000)
 
   defp await_state(owner_pid, projection, attempts) when attempts > 0 do
     state = :sys.get_state(owner_pid)
@@ -273,6 +319,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     if projection.(state) do
       state
     else
+      :erlang.yield()
       await_state(owner_pid, projection, attempts - 1)
     end
   end
@@ -282,7 +329,12 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
   defp assert_eventually(callback, attempts \\ 50_000)
 
   defp assert_eventually(callback, attempts) when attempts > 0 do
-    if callback.(), do: :ok, else: assert_eventually(callback, attempts - 1)
+    if callback.() do
+      :ok
+    else
+      :erlang.yield()
+      assert_eventually(callback, attempts - 1)
+    end
   end
 
   defp assert_eventually(_callback, 0), do: flunk("condition did not become true")
