@@ -1085,7 +1085,26 @@ fine; temporarily reachable and unsafe is not.
    implemented; `:probe` and `:acquisition` fail closed;
 2. implement `:none`, `:probe`, and `:acquisition` behaviour through the
    existing session, registry, activity marker, operation deadline, and LIFO
-   cleanup stack;
+   cleanup stack. Two boundary corrections come first, because both get more
+   expensive once `DoctorPlan` consumes the result:
+
+   - (complete) the operation clock. Connectivity entered through
+     `begin_owned_run/3` and inherited `run_duration_ms`, which is the wrong
+     budget and one the shared-boundary language concealed. That entry point is
+     replaced by `ProviderActiveSession.begin_owned_operation/4` over
+     `ProviderSession.begin_operation/2`: the duration is supplied by the
+     operation rather than read from the session, so `:connect` anchors
+     `doctor_connectivity_timeout_ms`. The old names are deleted rather than
+     kept as aliases, so nothing can anchor a clock without saying which one;
+     and
+   - (complete) the result binding. `covers?/2` proved occurrence identity
+     only, which is not enough where alias names are not identity: the same
+     alias sequence names different sealed descriptors in another catalog.
+     `ConnectivityResult` is now sealed over the prepared and catalog
+     attestations, requires the trio at construction, re-derives every entry's
+     mode from the catalog, and refuses an outcome that does not match its
+     mode. `bound_to?/3` re-checks all of that, so `DoctorPlan` never has to
+     trust entries alone;
 3. add connect-mode planning to `DoctorPlan`, with frontend dispatch still
    disabled;
 4. prove and implement the MCP receive-boundary response cap;

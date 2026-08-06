@@ -210,7 +210,12 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     selected_names = selected_provider_names(prepared)
 
     with {:ok, session} <-
-           ProviderActiveSession.begin_owned_run(session, prepared, execution.catalog),
+           ProviderActiveSession.begin_owned_operation(
+             session,
+             prepared,
+             execution.catalog,
+             operation
+           ),
          {:ok, authorities} <- oauth_authorities(execution, selected_names),
          deadline <-
            oauth_operation_deadline(
@@ -276,7 +281,12 @@ defmodule PtcRunner.Kernel.ProviderExecution do
                  )
                  |> authorization_result(selected_names, execution.catalog),
                {:ok, session} <-
-                 ProviderActiveSession.begin_owned_run(session, prepared, execution.catalog) do
+                 ProviderActiveSession.begin_owned_operation(
+                   session,
+                   prepared,
+                   execution.catalog,
+                   operation
+                 ) do
             complete(prepared, authority, opened_sinks, registry, session, execution, operation)
           end
         end
@@ -325,12 +335,11 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # than reporting an occurrence nothing reached. This operation has no CLI
   # dispatch, so that branch is unreachable outside its own regressions.
   defp complete_connectivity(prepared, catalog, registry, session) do
-    with true <- prepared.catalog_attestation == catalog.attestation,
-         true <- ProviderRegistry.valid?(registry),
+    with true <- ProviderRegistry.valid?(registry),
          true <- ProviderSession.alive?(session),
+         deadline when not is_nil(deadline) <- ProviderSession.run_deadline(session),
          {:ok, entries} <- connectivity_entries(prepared, catalog),
-         {:ok, result} <- ConnectivityResult.new(entries),
-         true <- ConnectivityResult.covers?(result, prepared) do
+         {:ok, result} <- ConnectivityResult.new(prepared, catalog, entries) do
       {:ok, result}
     else
       {:error, %CommandDiagnostic{}} = error -> error
@@ -340,8 +349,9 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
   # A sealed declaration carries an inert projection, not its descriptor, so the
   # declared mode is read from the catalog the preparation was validated
-  # against. Alias names are not identity, which is why the attestation is
-  # rechecked above before any name is looked up here.
+  # against. `ConnectivityResult.new/3` re-derives every mode from that same
+  # catalog and refuses a result whose entries disagree, because alias names are
+  # not identity.
   defp connectivity_entries(prepared, catalog) do
     Enum.reduce_while(prepared.provider_declarations, {:ok, []}, fn declaration, {:ok, entries} ->
       case connectivity_entry(declaration, catalog.descriptors[declaration.name]) do

@@ -137,7 +137,9 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
     # While the token exchange is still in flight the ordinary run clock must
     # not have started, so authorization never spends the run budget.
     assert_receive {:token_pending, exchange}, 5_000
-    refute_received {:trace, _pid, :call, {ProviderActiveSession, :begin_owned_run, _arguments}}
+
+    refute_received {:trace, _pid, :call,
+                     {ProviderActiveSession, :begin_owned_operation, _arguments}}
 
     send(exchange, :release_token)
     assert {:error, :invalid_mcp_transport} = ExecutionSessionOwner.await(owner)
@@ -430,14 +432,16 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   defp trace_run_start do
     Code.ensure_loaded!(ProviderActiveSession)
 
-    assert :erlang.trace_pattern({ProviderActiveSession, :begin_owned_run, 3}, true, [:local]) ==
+    assert :erlang.trace_pattern({ProviderActiveSession, :begin_owned_operation, 4}, true, [
+             :local
+           ]) ==
              1
 
     assert :erlang.trace(:new_processes, true, [:call]) >= 0
 
     on_exit(fn ->
       :erlang.trace(:new_processes, false, [:call])
-      :erlang.trace_pattern({ProviderActiveSession, :begin_owned_run, 3}, false, [:local])
+      :erlang.trace_pattern({ProviderActiveSession, :begin_owned_operation, 4}, false, [:local])
     end)
   end
 
@@ -445,10 +449,17 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   # the next event of interest rather than from two independent matches.
   defp next_event do
     receive do
-      {:oauth_request, "POST", "/token"} -> :token_exchange
-      {:trace, _pid, :call, {ProviderActiveSession, :begin_owned_run, _arguments}} -> :run_started
-      {:oauth_request, _method, _path} -> next_event()
-      {:trace, _pid, :call, _mfa} -> next_event()
+      {:oauth_request, "POST", "/token"} ->
+        :token_exchange
+
+      {:trace, _pid, :call, {ProviderActiveSession, :begin_owned_operation, _arguments}} ->
+        :run_started
+
+      {:oauth_request, _method, _path} ->
+        next_event()
+
+      {:trace, _pid, :call, _mfa} ->
+        next_event()
     after
       5_000 -> flunk("no authorization or run event arrived")
     end

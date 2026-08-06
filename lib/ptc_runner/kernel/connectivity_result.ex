@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.ConnectivityResult do
   @moduledoc false
 
-  # Internal success value of the `:connect` execution operation.
+  # Sealed internal success value of the `:connect` execution operation.
   #
   # One entry per selected occurrence, in declaration order. Occurrences are
   # never collapsed by alias here: an alias may be selected once per
@@ -10,20 +10,36 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
   # the doctor plan that renders one group per alias, and it can only collapse
   # correctly if this value kept them apart.
   #
-  # The outcome set is closed and validated at construction rather than trusted
-  # from the producer, on the same terms as the doctor plan's settled outcomes:
-  # a value that cannot express an unknown result cannot smuggle one into a row.
+  # The value is bound to the exact preparation and catalog it answers for, not
+  # merely shaped like a plausible answer. Alias names are not identity: two
+  # catalogs can install the same alias over different sealed descriptors, so a
+  # result checked only for occurrence identity could report reachability for
+  # declarations it never touched. Construction therefore requires the trio,
+  # verifies that every entry's mode is the one its sealed descriptor declares,
+  # and seals the pair of attestations into the value. A consumer re-checks the
+  # binding with `bound_to?/3` rather than trusting the entries it holds.
+  #
+  # The outcome and mode vocabularies are closed and validated here rather than
+  # trusted from the producer, on the same terms as the doctor plan's settled
+  # outcomes: a value that cannot express an unknown result cannot smuggle one
+  # into a rendered row.
 
+  alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
 
   @destinations [:workflow, :mission]
   @modes [:none, :probe, :acquisition]
-  @outcomes [:skipped]
-  @keys [:name, :destination, :index, :mode, :outcome]
+  @outcomes [:skipped, :reachable]
+  @entry_keys [:name, :destination, :index, :mode, :outcome]
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @max_entries 128
 
-  @type outcome :: :skipped
+  @enforce_keys [:prepared_attestation, :catalog_attestation, :entries]
+  defstruct @enforce_keys ++ [attestation: nil]
+  @field_keys Enum.sort([:__struct__, :attestation | @enforce_keys])
+
+  @type outcome :: :skipped | :reachable
   @type entry :: %{
           name: binary(),
           destination: :workflow | :mission,
@@ -31,45 +47,94 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
           mode: :none | :probe | :acquisition,
           outcome: outcome()
         }
-  @type t :: [entry()]
+  @type t :: %__MODULE__{
+          prepared_attestation: binary(),
+          catalog_attestation: binary(),
+          entries: [entry()],
+          attestation: binary() | nil
+        }
 
   @spec outcomes() :: [outcome()]
   @doc false
   def outcomes, do: @outcomes
 
-  @spec new([entry()]) :: {:ok, t()} | {:error, :invalid_connectivity_result}
+  @spec new(PreparedRun.t(), InstallationCatalog.t(), [entry()]) ::
+          {:ok, t()} | {:error, :invalid_connectivity_result}
   @doc false
-  def new(entries) when is_list(entries) and length(entries) <= @max_entries do
-    if Enum.all?(entries, &valid_entry?/1) and ordered?(entries),
-      do: {:ok, entries},
-      else: {:error, :invalid_connectivity_result}
+  def new(%PreparedRun{} = prepared, %InstallationCatalog{} = catalog, entries)
+      when is_list(entries) and length(entries) <= @max_entries do
+    if bound_pair?(prepared, catalog) and entries_valid?(entries) and
+         answers_for?(entries, prepared, catalog) do
+      result = %__MODULE__{
+        prepared_attestation: prepared.attestation,
+        catalog_attestation: catalog.attestation,
+        entries: entries
+      }
+
+      {:ok, %{result | attestation: Attestation.attest(__MODULE__, payload(result))}}
+    else
+      {:error, :invalid_connectivity_result}
+    end
   end
 
-  def new(_entries), do: {:error, :invalid_connectivity_result}
+  def new(_prepared, _catalog, _entries), do: {:error, :invalid_connectivity_result}
 
   @spec valid?(term()) :: boolean()
   @doc false
-  def valid?(entries), do: match?({:ok, _entries}, new(entries))
+  def valid?(%__MODULE__{attestation: attestation} = result),
+    do:
+      Enum.sort(Map.keys(result)) == @field_keys and is_binary(result.prepared_attestation) and
+        is_binary(result.catalog_attestation) and entries_valid?(result.entries) and
+        Attestation.valid?(__MODULE__, payload(result), attestation)
+
+  def valid?(_result), do: false
 
   @doc """
-  Checks that a result answers for exactly the occurrences a preparation
-  selected, in the order it declared them.
+  Checks that a result answers for exactly this preparation against this
+  catalog.
 
-  A result that dropped, reordered, or invented an occurrence would let a later
-  plan settle a row nothing reached, so the correspondence is checked rather
-  than assumed.
+  Occurrence identity alone is not enough: the same alias sequence can name
+  different sealed descriptors in another catalog, so a consumer that settled
+  rows from an unbound result would be reporting reachability for declarations
+  nothing reached. The mode of every entry is re-derived from the catalog here
+  for the same reason.
   """
-  @spec covers?(term(), PreparedRun.t()) :: boolean()
-  def covers?(entries, %PreparedRun{} = prepared) do
-    valid?(entries) and
-      Enum.map(entries, &{&1.name, &1.destination, &1.index}) ==
-        Enum.map(prepared.provider_declarations, &{&1.name, &1.destination, &1.index})
+  @spec bound_to?(term(), term(), term()) :: boolean()
+  def bound_to?(
+        %__MODULE__{} = result,
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog
+      ) do
+    valid?(result) and bound_pair?(prepared, catalog) and
+      result.prepared_attestation == prepared.attestation and
+      result.catalog_attestation == catalog.attestation and
+      answers_for?(result.entries, prepared, catalog)
   end
 
-  def covers?(_entries, _prepared), do: false
+  def bound_to?(_result, _prepared, _catalog), do: false
+
+  @spec entries(t()) :: [entry()]
+  @doc false
+  def entries(%__MODULE__{entries: entries}), do: entries
+
+  # The preparation's lifecycle state is its caller's business — it is consumed
+  # while the operation runs and closed afterwards — so this checks only the
+  # binding claim: that these two belong together and the catalog is sealed.
+  defp bound_pair?(prepared, catalog) do
+    InstallationCatalog.valid?(catalog) and is_binary(prepared.attestation) and
+      prepared.catalog_attestation == catalog.attestation
+  end
+
+  defp payload(result),
+    do: {result.prepared_attestation, result.catalog_attestation, result.entries}
+
+  defp entries_valid?(entries) when is_list(entries) and length(entries) <= @max_entries,
+    do: Enum.all?(entries, &valid_entry?/1)
+
+  defp entries_valid?(_entries), do: false
 
   defp valid_entry?(%{} = entry) when not is_struct(entry) do
-    Enum.sort(Map.keys(entry)) == Enum.sort(@keys) and
+    Enum.sort(Map.keys(entry)) == Enum.sort(@entry_keys) and
       is_binary(entry.name) and entry.name =~ @name and
       entry.destination in @destinations and
       is_integer(entry.index) and entry.index >= 0 and
@@ -78,14 +143,32 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
 
   defp valid_entry?(_entry), do: false
 
-  # Declaration order is workflow before mission, ascending within a
-  # destination. Checking it here means a producer cannot hand back the same
-  # occurrences in an order that no longer says which one was reached first.
-  defp ordered?(entries) do
-    sites = Enum.map(entries, &{destination_rank(&1.destination), &1.index})
-    sites == Enum.sort(sites) and sites == Enum.uniq(sites)
+  # One entry per selected occurrence, in declaration order, each reporting the
+  # mode its own sealed descriptor declares.
+  defp answers_for?(entries, prepared, catalog) do
+    declarations = prepared.provider_declarations
+
+    length(entries) == length(declarations) and
+      Enum.zip(entries, declarations) |> Enum.all?(&answers_for_declaration?(&1, catalog))
   end
 
-  defp destination_rank(:workflow), do: 0
-  defp destination_rank(:mission), do: 1
+  defp answers_for_declaration?({entry, declaration}, catalog) do
+    case catalog.descriptors[declaration.name] do
+      %{connectivity_mode: mode} ->
+        entry.name == declaration.name and entry.destination == declaration.destination and
+          entry.index == declaration.index and entry.mode == mode and
+          outcome_matches_mode?(entry.outcome, mode)
+
+      _missing ->
+        false
+    end
+  end
+
+  # A declaration asking for no connectivity can only be skipped, and one that
+  # asks for connectivity can only be reported as reached. Neither may borrow
+  # the other's outcome, so a skipped occurrence can never render as a passing
+  # connectivity row.
+  defp outcome_matches_mode?(:skipped, :none), do: true
+  defp outcome_matches_mode?(:reachable, mode) when mode in [:probe, :acquisition], do: true
+  defp outcome_matches_mode?(_outcome, _mode), do: false
 end

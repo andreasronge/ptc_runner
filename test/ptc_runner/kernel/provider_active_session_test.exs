@@ -83,7 +83,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     refute_received {:validated_after_run_began, _deadline_ms}
 
     assert {:ok, session} =
-             ProviderActiveSession.begin_owned_run(session, prepared, catalog)
+             ProviderActiveSession.begin_owned_operation(session, prepared, catalog, :run)
 
     assert Deadline.valid?(ProviderSession.run_deadline(session))
     assert_receive {:validated_after_run_began, deadline_ms}
@@ -114,7 +114,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert PreparedRun.active_valid?(prepared)
 
     assert {:ok, session} =
-             ProviderActiveSession.begin_owned_run(session, prepared, catalog)
+             ProviderActiveSession.begin_owned_operation(session, prepared, catalog, :run)
 
     assert :ok = ProviderSession.close(session)
     assert PreparedRun.active_valid?(prepared)
@@ -144,7 +144,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
                    fn _session -> :ok end
                  ),
                {:ok, session} <-
-                 ProviderActiveSession.begin_owned_run(session, prepared, catalog),
+                 ProviderActiveSession.begin_owned_operation(session, prepared, catalog, :run),
                {:ok, registry} <- active_registry(),
                {:ok, built} <-
                  RunBuilder.build_active_owned(
@@ -629,7 +629,8 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert {:ok, wrong_session} =
              ProviderSession.start_active(other_limits, prepared.attestation)
 
-    assert {:ok, wrong_session} = ProviderSession.begin_run(wrong_session)
+    assert {:ok, wrong_session} =
+             ProviderSession.begin_operation(wrong_session, wrong_session.run_duration_ms)
 
     staged = fn _selection, _context ->
       send(parent, :unexpected_provider_preparation)
@@ -1139,7 +1140,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   defp open_owned(prepared, catalog, services) do
     with {:ok, _inputs} <- owned_inputs(prepared),
          {:ok, session} <- open_owned_setup(prepared, catalog, services) do
-      ProviderActiveSession.begin_owned_run(session, prepared, catalog)
+      ProviderActiveSession.begin_owned_operation(session, prepared, catalog, :run)
     end
   end
 

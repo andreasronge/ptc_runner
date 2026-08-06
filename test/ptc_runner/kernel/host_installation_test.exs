@@ -205,7 +205,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     limits = %{Limits.installed_defaults() | run_duration_ms: 500}
     assert {:ok, session} = ProviderSession.start_active(limits, "installed-deadline-boundary")
-    assert {:ok, session} = ProviderSession.begin_run(session)
+    assert {:ok, session} = ProviderSession.begin_operation(session, session.run_duration_ms)
     deadline = ProviderSession.run_deadline(session)
 
     active_context =
@@ -268,7 +268,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   test "nested active callback heap failures remain closed diagnostics" do
     limits = Limits.installed_defaults()
     assert {:ok, session} = ProviderSession.start_active(limits, "nested-heap-boundary")
-    assert {:ok, session} = ProviderSession.begin_run(session)
+    assert {:ok, session} = ProviderSession.begin_operation(session, session.run_duration_ms)
 
     occurrence = %{provider: "remote", destination: :mission, index: 0}
 

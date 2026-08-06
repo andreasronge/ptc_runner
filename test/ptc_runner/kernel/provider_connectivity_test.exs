@@ -5,12 +5,16 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.ConnectivityResult
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderActiveSession
+  alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderRuntimeServices
+  alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.SelectionRules
@@ -24,7 +28,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
 
     assert {:ok, result} = connect(prepared, execution)
 
-    assert result == [
+    assert ConnectivityResult.entries(result) == [
              %{
                name: "inert",
                destination: :workflow,
@@ -64,26 +68,48 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     assert diagnostic.provider_activity
   end
 
+  test "connectivity anchors its own clock instead of inheriting the run's" do
+    # The manifest narrows the run to a second while the host keeps ten for
+    # connectivity, so a connect that inherited the run clock would come out
+    # shorter and a connect that merely took the smaller of the two would too.
+    %{prepared: prepared, catalog: catalog} =
+      fixture(%{"inert" => [destination: :workflow]}, run_duration_ms: 1_000)
+
+    assert :ok = ProviderActivity.mark(prepared.provider_activity)
+    limits = prepared.request.package.limits
+    assert limits.run_duration_ms == 1_000
+    assert limits.doctor_connectivity_timeout_ms == 10_000
+
+    assert connect_remaining = begin_remaining(prepared, catalog, :connect)
+    assert run_remaining = begin_remaining(prepared, catalog, :run)
+
+    assert connect_remaining > limits.run_duration_ms
+    assert connect_remaining <= limits.doctor_connectivity_timeout_ms
+    assert run_remaining <= limits.run_duration_ms
+  end
+
   test "the result keeps every selected occurrence rather than collapsing aliases" do
     # One alias may be selected once per destination, and each occurrence has
     # its own selection. A result that collapsed them could not say which
     # occurrence was reached, and the doctor plan that groups by alias would be
     # grouping something already lost.
-    %{prepared: prepared, execution: execution} =
+    %{prepared: prepared, execution: execution, catalog: catalog} =
       fixture(%{"shared" => [destination: :both], "later" => [destination: :mission]})
 
     assert {:ok, result} = connect(prepared, execution)
 
     # Workflow before mission, then manifest order within a destination. The
     # same alias appears twice with different sites and is never merged.
-    assert Enum.map(result, &{&1.name, &1.destination, &1.index}) == [
+    entries = ConnectivityResult.entries(result)
+
+    assert Enum.map(entries, &{&1.name, &1.destination, &1.index}) == [
              {"shared", :workflow, 0},
              {"later", :mission, 0},
              {"shared", :mission, 1}
            ]
 
-    assert ConnectivityResult.covers?(result, prepared)
-    assert Enum.all?(result, &(&1.outcome == :skipped))
+    assert ConnectivityResult.bound_to?(result, prepared, catalog)
+    assert Enum.all?(entries, &(&1.outcome == :skipped))
   end
 
   test "an unimplemented connectivity mode fails closed without reaching a callback" do
@@ -180,6 +206,17 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     refute_received {:result, _result}
   end
 
+  defp begin_remaining(prepared, catalog, operation) do
+    limits = prepared.request.package.limits
+    {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
+    on_exit(fn -> ProviderSession.close(session) end)
+
+    {:ok, session} =
+      ProviderActiveSession.begin_owned_operation(session, prepared, catalog, operation)
+
+    session |> ProviderSession.run_deadline() |> Deadline.remaining()
+  end
+
   defp connect(prepared, execution),
     do: RunCoordinator.connect(prepared, authority(), execution, &notifier/1)
 
@@ -194,7 +231,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   # need no host document, and their `:none` mode is the case this commit
   # implements. `:probe` and `:acquisition` fixtures exist only to prove their
   # callbacks stay unreachable.
-  defp fixture(specifications) do
+  defp fixture(specifications, limit_overrides \\ []) do
     parent = self()
     {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
 
@@ -234,7 +271,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     {:ok, services} = ProviderRuntimeServices.new()
     {:ok, execution} = ProviderExecution.new(catalog, services, [])
 
-    prepared = prepared(catalog, specifications)
+    prepared = prepared(catalog, specifications, limit_overrides)
     on_exit(fn -> InstallationCatalog.close(catalog) end)
 
     %{prepared: prepared, catalog: catalog, execution: execution}
@@ -273,9 +310,10 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     end
   end
 
-  defp prepared(catalog, specifications) do
+  defp prepared(catalog, specifications, limit_overrides) do
     manifest = %{
       "version" => 1,
+      "limits" => Map.new(limit_overrides, fn {name, value} -> {Atom.to_string(name), value} end),
       "workflow" => %{
         "components" => [%{"id" => "app", "path" => "main.clj"}],
         "entry" => "app/run"

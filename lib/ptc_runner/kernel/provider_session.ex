@@ -224,13 +224,22 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
   def compatible_limits?(_session, _limits), do: false
 
-  @doc false
-  @spec begin_run(t()) ::
+  @doc """
+  Anchors the session's operation clock for however long this operation gets.
+
+  A run spends `run_duration_ms`; `doctor --connect` spends
+  `doctor_connectivity_timeout_ms`, which is a different and much shorter
+  budget. The duration is therefore supplied by the operation rather than read
+  from the session, so no operation can inherit a clock that was sized for
+  another one. `run_deadline/1` returns whichever was anchored.
+  """
+  @spec begin_operation(t(), pos_integer()) ::
           {:ok, t()} | {:error, :provider_session_unavailable}
-  def begin_run(%__MODULE__{} = session) do
+  def begin_operation(%__MODULE__{} = session, duration_ms)
+      when is_integer(duration_ms) and duration_ms > 0 do
     if valid?(session) and session.creator == self() and
          is_binary(session.operation_identity) and is_nil(session.run_deadline) do
-      run_deadline = Deadline.new(session.run_duration_ms)
+      run_deadline = Deadline.new(duration_ms)
       operation_deadline = Deadline.new(@claim_timeout_ms)
 
       result =
@@ -255,7 +264,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
     end
   end
 
-  def begin_run(_session), do: {:error, :provider_session_unavailable}
+  def begin_operation(_session, _duration_ms), do: {:error, :provider_session_unavailable}
 
   @doc false
   @spec run_deadline(term()) :: Deadline.t() | nil
