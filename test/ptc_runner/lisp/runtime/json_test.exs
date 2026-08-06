@@ -369,6 +369,20 @@ defmodule PtcRunner.Lisp.Runtime.JsonTest do
       assert %{"type" => "vector", "count" => 2} = Json.parse_string(encoded)
     end
 
+    test "describing keyword data refuses with a path into the summary" do
+      # The composition is only as encodable as the described values:
+      # `:examples` and `:sample` hold them verbatim. Coercing them would
+      # contradict the `:types` field the same summary reports, so the
+      # boundary is a positioned refusal rather than a silent conversion.
+      msg = eval_error(~S<(json/generate-string (describe [{"status" :active}]))>)
+
+      assert msg =~ "cannot encode a keyword as a JSON value"
+      assert msg =~ ~s|at [:keys "status" :examples 0]|
+
+      assert eval_error("(json/generate-string (describe ##Inf))") =~
+               "cannot encode ##Inf as a JSON value at [:examples 0]"
+    end
+
     test "a keyword value fails loudly with a named type_error" do
       msg = eval_error(~S<(json/generate-string {"server" :fs})>)
 
