@@ -931,9 +931,25 @@ commits in one Checkpoint C PR:
   creating the resource inside the owner, which is viable for the store but not
   for the registry, whose deadline-bounded activation must not run inside the
   owner's callback loop;
-- implement the default doctor applicability matrix from inert declarations;
-- keep validate/models inert, audited-local checks in phase 7, and every
-  unverified callback behind the phase-8 marker;
+- implement the default doctor applicability matrix from inert declarations.
+  Two survey findings scope this commit. The result contract is already closed
+  and complete: `CommandContract` fixes the `runtime`/`application`/`viewer`
+  prefix, the per-alias operation ranks, and separate default and connect
+  consistency rules, so the work is deriving rows rather than designing them.
+  A provider row has no failure code in any mode, so a check that fails must
+  fail the whole command with its catalogued diagnostic rather than appear as a
+  failing row;
+- build phase-7 audited-local execution, which does not exist yet. The
+  declaration side is complete — descriptors carry `local_preflight`, host
+  installations build the callback, `host_call` reaches it process-free through
+  the sealed payload, and `local_preflight/{environment,adapter,launcher}_unavailable`
+  are catalogued with `provider_activity: false` — but nothing invokes the
+  callback, for runs, checks, or doctor. The architecture section above
+  describes where that execution belongs; doctor is the first caller, so this
+  commit adds the bounded phase-7 step and the boundary translation from
+  `HostInstallation`'s internal reasons into those three closed codes. Keep
+  validate and models inert, and every unverified callback behind the phase-8
+  marker;
 - run `doctor --connect` through the ordinary provider-session prefix and its
   connectivity branch: probe `:probe`, use bounded acquisition/discovery for
   `:acquisition`, and skip `:none`;
