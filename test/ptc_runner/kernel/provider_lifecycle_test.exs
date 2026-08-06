@@ -826,6 +826,72 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     end
   end
 
+  test "a session terminated at its cleanup budget still loses its provider tasks" do
+    # Terminating a wedged session skips `terminate/2`, so the session itself
+    # can kill nothing. The external task owner it registered with observes the
+    # death and kills the run's callbacks anyway.
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 200)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    root = start_scope_root(registrar, parent)
+    assert :ok = ResourceRegistrar.commit(registrar, fn -> :ok end)
+
+    {:ok, state} = RunState.start(limits, provider_session: session)
+
+    assert :ok =
+             ProviderSession.bind_lifecycle(session, self(), state.pid, state.provider_tracker)
+
+    provider = start_provider_task(state, "wedged")
+    provider_monitor = Process.monitor(provider)
+    root_monitor = Process.monitor(root)
+    session_monitor = Process.monitor(session.pid)
+    assert Process.alive?(provider)
+
+    assert :ok = :sys.suspend(session.pid)
+    assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
+
+    assert_receive {:DOWN, ^session_monitor, :process, _, :killed}
+    assert_receive {:DOWN, ^provider_monitor, :process, ^provider, :killed}
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, _reason}
+    assert {:error, :closed} = RunState.attach_provider(state, spawn(fn -> :ok end))
+
+    RunState.close(state)
+    RunState.stop(state)
+  end
+
+  test "provider tasks are drained before the session runs a provider closer" do
+    parent = self()
+    limits = limits()
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    {:ok, state} = RunState.start(limits, provider_session: session)
+
+    assert :ok =
+             ProviderSession.bind_lifecycle(session, self(), state.pid, state.provider_tracker)
+
+    provider = start_provider_task(state, "drained")
+
+    assert :ok =
+             ResourceRegistrar.commit(registrar, fn ->
+               send(parent, {:closed, Process.alive?(provider)})
+               :ok
+             end)
+
+    assert Process.alive?(provider)
+    assert :ok = ProviderSession.close(session)
+
+    # No callback from this run may still be live when a connector closes.
+    assert_receive {:closed, false}
+    refute Process.alive?(provider)
+
+    RunState.close(state)
+    RunState.stop(state)
+  end
+
   test "successful Kernel cleanup terminates its provider session" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
@@ -1313,6 +1379,30 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
 
   defp capability(name) do
     Capability.new(name: name, input_schema: @schema, callback: fn _arguments -> {:ok, %{}} end)
+  end
+
+  defp start_scope_root(registrar, parent) do
+    root =
+      spawn(fn ->
+        owner = ResourceRegistrar.owner(registrar)
+        owner_monitor = Process.monitor(owner)
+        :ok = ResourceRegistrar.register_root(registrar)
+        send(parent, {:scope_root_ready, self()})
+
+        receive do
+          {:DOWN, ^owner_monitor, :process, ^owner, _reason} -> :ok
+        end
+      end)
+
+    assert_receive {:scope_root_ready, ^root}
+    root
+  end
+
+  defp start_provider_task(state, name) do
+    provider = spawn(fn -> receive do: (:stop -> :ok) end)
+    assert :ok = RunState.reserve_capability(state, :workflow, name)
+    assert :ok = RunState.attach_provider(state, provider)
+    provider
   end
 
   defp limits do

@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProviderScopeOwner
   alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Kernel.ResourceRegistrar
 
   test "committed scopes close once in reverse commit order" do
@@ -57,7 +58,10 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert :ok = ResourceRegistrar.abort(registrar)
 
     run_state = spawn(fn -> receive do: (:stop -> :ok) end)
-    assert :ok = ProviderSession.bind_lifecycle(session, self(), run_state)
+
+    assert :ok =
+             ProviderSession.bind_lifecycle(session, self(), run_state, task_tracker(run_state))
+
     assert ProviderSession.lifecycle_owner(session) == lifecycle_owner
 
     session_ref = Process.monitor(session.pid)
@@ -121,7 +125,14 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
     lifecycle_owner = spawn(fn -> receive do: (:stop -> :ok) end)
     run_state = spawn(fn -> receive do: (:stop -> :ok) end)
-    assert :ok = ProviderSession.bind_lifecycle(session, lifecycle_owner, run_state)
+
+    assert :ok =
+             ProviderSession.bind_lifecycle(
+               session,
+               lifecycle_owner,
+               run_state,
+               task_tracker(run_state)
+             )
 
     assert {:error, :operation_claimed} =
              ProviderSession.claim_operation(session, limits, identity)
@@ -793,20 +804,21 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
         lifecycle_owner = spawn(fn -> receive do: (:stop -> :ok) end)
         run_state = spawn(fn -> receive do: (:stop -> :ok) end)
-        :ok = ProviderSession.bind_lifecycle(session, lifecycle_owner, run_state)
-        send(parent, {:session_ready, session, lifecycle_owner, run_state})
+        {:ok, tracker} = ProviderTaskTracker.start(run_state)
+        :ok = ProviderSession.bind_lifecycle(session, lifecycle_owner, run_state, tracker)
+        send(parent, {:session_ready, session, lifecycle_owner, run_state, tracker})
         receive do: (:stop -> :ok)
       end)
 
-    assert_receive {:session_ready, session, lifecycle_owner, run_state}
+    assert_receive {:session_ready, session, lifecycle_owner, run_state, tracker}
     session_monitor = Process.monitor(session.pid)
 
     assert {:error, :provider_session_unavailable} =
-             ProviderSession.bind_lifecycle(session, self(), run_state)
+             ProviderSession.bind_lifecycle(session, self(), run_state, tracker)
 
     provider = spawn(fn -> receive do: (:stop -> :ok) end)
     provider_monitor = Process.monitor(provider)
-    assert :ok = ProviderSession.attach_provider(session, provider)
+    assert :ok = ProviderTaskTracker.attach(tracker, provider)
 
     Process.exit(creator, :kill)
     refute_receive :committed_closed
@@ -919,6 +931,11 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
   end
 
   defp limits, do: Limits.defaults()
+
+  defp task_tracker(run_state) do
+    {:ok, tracker} = ProviderTaskTracker.start(run_state)
+    tracker
+  end
 
   defp record_close(agent, value) do
     fn ->

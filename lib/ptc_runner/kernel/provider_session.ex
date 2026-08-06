@@ -9,8 +9,11 @@ defmodule PtcRunner.Kernel.ProviderSession do
   claims the operation before provider acquisition, so neither another prepared
   run nor a replay can share its cleanup boundary. Before provider
   callbacks can start, execution binds the session exactly once to its lifecycle
-  owner and run state. The session then tracks every provider task itself, so
-  owner or run-state death drains live tasks before any provider closer runs.
+  owner and to the run's one provider-task owner. That task owner is an
+  internal process outside both lifecycles and monitors the session in return,
+  so live tasks are drained before any provider closer runs and are killed
+  outright when the session or the run state disappears, including when the
+  session is terminated at its cleanup deadline and `terminate/2` never runs.
   Each scope starts provisional, activates immediately before acquisition, and
   is either committed with one provider close operation or aborted. Normal
   close and lifecycle-owner death drain committed scopes in reverse commit
@@ -44,6 +47,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProviderScopeOwner
+  alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Kernel.ResourceRegistrar
 
   @enforce_keys [
@@ -412,15 +416,15 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def close_with_unregistered(_session, _close), do: {:error, :provider_cleanup_failed}
 
   @doc false
-  @spec bind_lifecycle(t(), pid(), pid()) ::
+  @spec bind_lifecycle(t(), pid(), pid(), ProviderTaskTracker.t()) ::
           :ok | {:error, :provider_session_unavailable}
-  def bind_lifecycle(%__MODULE__{} = session, owner, run_state)
+  def bind_lifecycle(%__MODULE__{} = session, owner, run_state, %ProviderTaskTracker{} = tracker)
       when is_pid(owner) and is_pid(run_state) do
     if valid?(session) and
          (not session.fixed_lifecycle? or owner == session.creator) do
       call(
         session.pid,
-        {session.token, {:bind_lifecycle, owner, run_state}},
+        {session.token, {:bind_lifecycle, owner, run_state, tracker}},
         5_000,
         {:error, :provider_session_unavailable}
       )
@@ -429,37 +433,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
     end
   end
 
-  def bind_lifecycle(_session, _owner, _run_state),
+  def bind_lifecycle(_session, _owner, _run_state, _tracker),
     do: {:error, :provider_session_unavailable}
-
-  @doc false
-  @spec attach_provider(t(), pid()) :: :ok | {:error, :closed | :provider_down}
-  def attach_provider(%__MODULE__{} = session, provider) when is_pid(provider) do
-    if valid?(session) do
-      call(
-        session.pid,
-        {session.token, {:attach_provider, provider}},
-        :infinity,
-        {:error, :closed}
-      )
-    else
-      {:error, :closed}
-    end
-  end
-
-  @doc false
-  @spec drain_provider_tasks(t()) :: :ok
-  def drain_provider_tasks(%__MODULE__{} = session) do
-    if valid?(session) do
-      # A pre-close courtesy, not cleanup: it answers from session state or the
-      # session is wedged, and `close/1` owns the terminal budget either way.
-      call(session.pid, {session.token, :drain_provider_tasks}, @claim_reply_grace_ms, :ok)
-    else
-      :ok
-    end
-  end
-
-  def drain_provider_tasks(_session), do: :ok
 
   @doc false
   def activate_registrar(%ResourceRegistrar{} = registrar),
@@ -541,9 +516,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
        cleanup_deadline: nil,
        max_heap_words: limits.provider_heap_words,
        lifecycle_bound?: false,
-       run_state: nil,
-       run_state_monitor: nil,
-       providers: %{},
+       provider_tasks: nil,
        pending_registrations: %{},
        scopes: %{},
        scope_order: [],
@@ -767,8 +740,10 @@ defmodule PtcRunner.Kernel.ProviderSession do
     end
   end
 
+  # The task owner monitors the session in return, so it can kill this run's
+  # callbacks even when the session ends without running `terminate/2`.
   def handle_call(
-        {token, {:bind_lifecycle, owner, run_state}},
+        {token, {:bind_lifecycle, owner, run_state, tracker}},
         {executor, _tag},
         %{
           token: token,
@@ -778,26 +753,23 @@ defmodule PtcRunner.Kernel.ProviderSession do
         } = state
       )
       when is_pid(owner) and is_pid(run_state) do
-    if owner == executor and Process.alive?(state.owner) and Process.alive?(run_state) do
-      {:reply, :ok,
-       %{
-         state
-         | lifecycle_bound?: true,
-           run_state: run_state,
-           run_state_monitor: Process.monitor(run_state)
-       }}
+    with true <-
+           owner == executor and Process.alive?(state.owner) and Process.alive?(run_state),
+         :ok <- ProviderTaskTracker.watch(tracker, self()) do
+      {:reply, :ok, %{state | lifecycle_bound?: true, provider_tasks: tracker}}
     else
-      {:reply, {:error, :provider_session_unavailable}, state}
+      _unavailable -> {:reply, {:error, :provider_session_unavailable}, state}
     end
   end
 
   def handle_call(
-        {token, {:bind_lifecycle, owner, run_state}},
+        {token, {:bind_lifecycle, owner, run_state, tracker}},
         _from,
         %{token: token, lifecycle_fixed?: false, lifecycle_bound?: false} = state
       )
       when is_pid(owner) and is_pid(run_state) do
-    if Process.alive?(owner) and Process.alive?(run_state) do
+    with true <- Process.alive?(owner) and Process.alive?(run_state),
+         :ok <- ProviderTaskTracker.watch(tracker, self()) do
       Process.demonitor(state.owner_monitor, [:flush])
 
       {:reply, :ok,
@@ -806,30 +778,11 @@ defmodule PtcRunner.Kernel.ProviderSession do
          | owner: owner,
            owner_monitor: Process.monitor(owner),
            lifecycle_bound?: true,
-           run_state: run_state,
-           run_state_monitor: Process.monitor(run_state)
+           provider_tasks: tracker
        }}
     else
-      {:reply, {:error, :provider_session_unavailable}, state}
+      _unavailable -> {:reply, {:error, :provider_session_unavailable}, state}
     end
-  end
-
-  def handle_call(
-        {token, {:attach_provider, provider}},
-        _from,
-        %{token: token, lifecycle_bound?: true} = state
-      )
-      when is_pid(provider) do
-    if Process.alive?(provider) do
-      monitor = Process.monitor(provider)
-      {:reply, :ok, %{state | providers: Map.put(state.providers, monitor, provider)}}
-    else
-      {:reply, {:error, :provider_down}, state}
-    end
-  end
-
-  def handle_call({token, :drain_provider_tasks}, _from, state) when token == state.token do
-    {:reply, :ok, drain_provider_tasks_state(state)}
   end
 
   def handle_call({token, {:close_with_unregistered, close}}, _from, state)
@@ -837,7 +790,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
     state =
       state
       |> reject_pending_registrations()
-      |> drain_provider_tasks_state()
+      |> drain_provider_tasks()
       |> add_committed_close(close)
 
     {result, state} = drain(state)
@@ -845,7 +798,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
   end
 
   def handle_call({token, :close}, _from, state) when token == state.token do
-    state = state |> reject_pending_registrations() |> drain_provider_tasks_state()
+    state = state |> reject_pending_registrations() |> drain_provider_tasks()
     {result, state} = drain(state)
     {:stop, :normal, result, state}
   end
@@ -871,21 +824,9 @@ defmodule PtcRunner.Kernel.ProviderSession do
         {:DOWN, monitor, :process, owner, _reason},
         %{owner_monitor: monitor, owner: owner} = state
       ) do
-    state = state |> reject_pending_registrations() |> drain_provider_tasks_state()
+    state = state |> reject_pending_registrations() |> drain_provider_tasks()
     {_result, state} = drain(state)
     {:stop, :normal, state}
-  end
-
-  def handle_info(
-        {:DOWN, monitor, :process, run_state, _reason},
-        %{run_state_monitor: monitor, run_state: run_state} = state
-      ) do
-    state = drain_provider_tasks_state(state)
-    {:noreply, %{state | run_state: nil, run_state_monitor: nil}}
-  end
-
-  def handle_info({:DOWN, monitor, :process, _provider, _reason}, state) do
-    {:noreply, %{state | providers: Map.delete(state.providers, monitor)}}
   end
 
   def handle_info(
@@ -938,24 +879,19 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
   @impl GenServer
   def terminate(_reason, state) do
-    state = state |> reject_pending_registrations() |> drain_provider_tasks_state()
+    state = state |> reject_pending_registrations() |> drain_provider_tasks()
     {_result, _state} = drain(state)
     :ok
   end
 
-  defp drain_provider_tasks_state(%{providers: providers} = state) do
-    Enum.each(providers, fn {_monitor, provider} -> Process.exit(provider, :kill) end)
-    drain_provider_monitors(providers)
-    %{state | providers: %{}}
-  end
-
-  defp drain_provider_monitors(providers) when map_size(providers) == 0, do: :ok
-
-  defp drain_provider_monitors(providers) do
-    receive do
-      {:DOWN, monitor, :process, _provider, _reason} when is_map_key(providers, monitor) ->
-        drain_provider_monitors(Map.delete(providers, monitor))
-    end
+  # No provider callback from this run may still be live when a connector
+  # closes. The task owner is a separate process that runs no provider code and
+  # reaps each kill it issues, so this call settles; a session that is wedged
+  # long enough to be terminated instead has that owner kill the same tasks
+  # when it observes the session's death.
+  defp drain_provider_tasks(state) do
+    :ok = ProviderTaskTracker.drain_provider_tasks(state.provider_tasks)
+    state
   end
 
   defp abort_scope(scope, state) do

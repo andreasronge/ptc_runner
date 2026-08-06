@@ -60,6 +60,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.MissionInventory
   alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -316,15 +317,15 @@ defmodule PtcRunner.Kernel.RunConfig do
     do: ProviderSession.close(session)
 
   @doc false
-  @spec bind_provider_session(t(), pid(), pid()) ::
+  @spec bind_provider_session(t(), pid(), pid(), ProviderTaskTracker.t()) ::
           :ok | {:error, :provider_session_unavailable}
-  def bind_provider_session(%__MODULE__{provider_session: nil}, owner, run_state)
+  def bind_provider_session(%__MODULE__{provider_session: nil}, owner, run_state, _tracker)
       when is_pid(owner) and is_pid(run_state),
       do: :ok
 
-  def bind_provider_session(%__MODULE__{provider_session: session}, owner, run_state)
+  def bind_provider_session(%__MODULE__{provider_session: session}, owner, run_state, tracker)
       when is_pid(owner) and is_pid(run_state),
-      do: ProviderSession.bind_lifecycle(session, owner, run_state)
+      do: ProviderSession.bind_lifecycle(session, owner, run_state, tracker)
 
   # A trial artifact has to name the base a candidate replaced, not only the
   # candidate itself. The effective bundle hash already changes when source

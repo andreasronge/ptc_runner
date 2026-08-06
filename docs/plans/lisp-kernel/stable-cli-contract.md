@@ -824,19 +824,40 @@ Checkpoint C starts with a small stabilization prefix before adding doctor:
   helpers, `RunBuilder.build_active/4`, and `ProviderActiveSession`'s
   frontend-owned `open/3`, `open_setup/3`, and `begin_run/3` together with the
   ownership branch they required; and
-- (complete) bound terminal cleanup with the budget the lifecycle owner
-  installs. `ProviderSession.close/1` and `close_with_unregistered/2` now wait
-  `provider_cleanup_timeout_ms` plus one reply grace and terminate a session
-  that misses it, returning the classified cleanup failure instead of waiting
-  indefinitely. `Authorization.cancel_authorization/3` requires a supplied
+- (incomplete, superseded by the two entries below) bound terminal cleanup with
+  the budget the lifecycle owner installs. `ProviderSession.close/1` and
+  `close_with_unregistered/2` wait `provider_cleanup_timeout_ms` plus one reply
+  grace and terminate a session that misses it, returning the classified
+  cleanup failure instead of waiting indefinitely.
+  `Authorization.cancel_authorization/3` requires a supplied
   `:cleanup_deadline` rather than minting one from the residual budget of the
   interaction it cleans up, and `LoopbackListener.await/4` reports an
   uncommitted cancellation as `authorization_cleanup_failed` instead of
-  discarding it. One residual is scoped out of that repair: terminating a
-  wedged session skips the `terminate/2` that would kill its attached provider
-  tasks, because the session tracks them by monitor alone. Coupling those tasks
-  to session death is an ownership change of its own and must not be smuggled
-  into a terminal-deadline fix.
+  discarding it. That bounded the caller but left the cleanup it bounds
+  violating its own contract in two ways, so the entry does not stand alone:
+  terminating a wedged session skipped the `terminate/2` that would have killed
+  the provider tasks the session tracked by monitor alone, and every stage of
+  terminal cleanup still minted a fresh full budget, so sequential stages were
+  bounded individually and not together. Both are repaired below; the wait
+  bounds and the two classified failures above are retained unchanged;
+- (complete) make one external owner responsible for provider tasks.
+  `ProviderTaskTracker` is the sole owner of a run's live callbacks. It
+  monitors both `RunState` and the `ProviderSession`, so either lifecycle
+  disappearing kills and reaps every attached task — including a session
+  terminated at its cleanup deadline, where `terminate/2` cannot run. Session
+  attachment routes through that owner and the session's monitor-only provider
+  map is deleted, so a session drains through the one owner before any provider
+  closer runs rather than tracking tasks itself. A regression proves an
+  attached task is alive before the session is wedged and that the task, its
+  scope root, and further attachment are all gone once the wedged session is
+  terminated; a second proves a committed closer never observes a live task;
+  and
+- bound every terminal action with one absolute deadline. The first terminal
+  action anchors the session's `cleanup_deadline`; OAuth cancellation and the
+  later `close/1` or `close_with_unregistered/2` cleanup consume what remains
+  of that same deadline instead of each minting `Deadline.new/1` from the
+  cleanup duration again. `provider_cleanup_failed` and
+  `authorization_cleanup_failed` stay exactly as classified.
 
 Keep these as independently reviewable commits in the Checkpoint C PR. Do not
 start doctor implementation until the descriptor and ownership boundaries are
