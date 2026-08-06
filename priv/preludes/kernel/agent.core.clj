@@ -39,14 +39,9 @@
                  "messages" messages
                  "tools" [(agent.native/tool-schema)]}
         encoded (json/generate-string request)]
-    (cond
-      (not (string? encoded))
-      (fail (result/error :invalid-transcript :encoding-failed))
-
-      (> (count encoded) max-transcript-chars)
+    (if (> (count encoded) max-transcript-chars)
       (fail (result/error :transcript-limit :request-too-large))
-
-      :else request)))
+      request)))
 
 (defn- returned-outcome [value]
   {:status :returned :value value})

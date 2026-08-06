@@ -10,14 +10,12 @@
   (let [encoded (json/generate-string value)
         line-separator (json/parse-string "\"\\u2028\"")
         paragraph-separator (json/parse-string "\"\\u2029\"")]
-    (if (string? encoded)
-      (replace (replace encoded line-separator "\\u2028") paragraph-separator "\\u2029")
-      "")))
+    (replace (replace encoded line-separator "\\u2028") paragraph-separator "\\u2029")))
 
 (defn- escaped-text [value]
   (if (string? value)
     (let [encoded (inline-json value)]
-      (if (and (string? encoded) (>= (count encoded) 2))
+      (if (>= (count encoded) 2)
         (subs encoded 1 (dec (count encoded)))
         ""))
     ""))

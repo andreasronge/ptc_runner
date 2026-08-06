@@ -1415,7 +1415,7 @@ values.
 
 The `nil` return for both real JSON `null` and parse failure is a known ambiguity. Programs that need to distinguish should guard on `(empty? s)` or shape before calling.
 
-### DIV-24: `json/generate-string` returns `nil` on non-encodable input
+### DIV-24: `json/generate-string` refuses keyword values with a `type_error`
 
 | Field | Value |
 |-------|-------|
@@ -1424,28 +1424,34 @@ The `nil` return for both real JSON `null` and parse failure is a known ambiguit
 | **Source** | PtcRunner JSON support design decision |
 
 ```clojure
-;; Vanilla Jason.encode/1 silently coerces non-boolean atoms to JSON strings:
-;;   Jason.encode!(:fs)        ;=> "\"fs\""        (lossy auto-stringification)
-;;   Jason.encode!(%{a: 1})    ;=> "{\"a\":1}"     (atom key silently stringified)
+;; Cheshire stringifies keywords in both positions:
+;;   (cheshire.core/generate-string {:server :fs})  ;=> "{\"server\":\"fs\"}"
 
-;; PTC-Lisp deliberately rejects them up-front, returning nil:
-(json/generate-string :fs)                  ;=> nil      (non-boolean atom value)
-(json/generate-string {:server "fs"})       ;=> nil      (atom key)
-(json/generate-string {"server" :fs})       ;=> nil      (atom value)
-(json/generate-string {1 "a"})              ;=> "{\"1\":\"a\"}"   (integer keys allowed; carve-out, no round-trip)
-(json/generate-string ##Inf)                ;=> nil      (special-float carve-out)
-(json/generate-string {:tuple [{:ok 1}]})   ;=> nil      (any tuple, anywhere)
+;; PTC-Lisp agrees on keys and diverges on values:
+(json/generate-string {:server "fs"})       ;=> "{\"server\":\"fs\"}"  (key name, verbatim)
+(json/generate-string {:max-turns 3})       ;=> "{\"max-turns\":3}"    (no hyphen rewriting)
+(json/generate-string {1 "a"})              ;=> "{\"1\":\"a\"}"        (integer keys; no round-trip)
 
-;; Programs that want strings on the wire convert explicitly:
+(json/generate-string {"server" :fs})       ;=> type_error (keyword value)
+(json/generate-string :fs)                  ;=> type_error
+(json/generate-string ##Inf)                ;=> type_error (special-float carve-out)
+(json/generate-string {"t" [{:ok 1}]})      ;=> type_error (any tuple, anywhere)
+(json/generate-string {:a 1 "a" 2})         ;=> type_error (both keys encode to "a")
+
+;; Programs that want a keyword on the wire convert explicitly:
 (json/generate-string {"server" (name :fs)})
 ;=> "{\"server\":\"fs\"}"
 ```
 
-**Rationale:** Silently auto-stringifying keywords would erode PTC-Lisp's type signal at the wire boundary. The implementation runs a pre-validation walk (`encodable_value?` / `encodable_key?`) over the value tree *before* invoking `Jason.encode/1` — any non-boolean atom, atom-keyed map entry, tuple, PID, reference, or function short-circuits to `nil`. Special numeric literals (`##Inf`, `##-Inf`, and `##NaN`, represented by the bounded atoms `:infinity`, `:negative_infinity`, and `:nan`) are also rejected because they aren't valid JSON scalars.
+**Rationale — values.** Silently auto-stringifying a keyword *value* would erode PTC-Lisp's type signal at the wire boundary: `:fs` and `"fs"` are different values and JSON can express the difference nowhere. So a keyword value is refused, and the refusal names the position (`at ["server"]`) and the conversion that fixes it.
 
-Map-key validation is **stricter** than value validation: JSON only accepts string keys. Once stringified, atom and float keys preserve no type signal across a round-trip and would break the §4.3 round-trip property, so they are rejected at the key position even when acceptable as values. Integer keys are allowed (Jason's default stringifies them) but **do not round-trip** — `{1 "a"}` parses back as `%{"1" => "a"}`.
+**Rationale — keys.** A JSON object key is *always* a string, so there is no key type for stringification to erode; refusing keyword keys bought no type signal and cost a silent trap, because `describe` emits keyword keys and `(json/generate-string (describe x))` therefore produced `nil` (#1165). Keyword keys now encode as their name. The name is used **verbatim** — `KeyNormalizer.normalize_key/1`'s hyphen-to-underscore rewriting belongs to the tool boundary, and renaming a caller's key mid-encode would replace one silent trap with another. Keys that would collide after encoding (`{:a 1 "a" 2}`, `{1 "a" "1" "b"}`) are refused rather than emitted as a duplicate JSON key.
 
-The asymmetry with `parse-string` (returns `nil` on bad *input*) is the same DIV-* signal-value pattern: failures are observable as `nil` and the caller decides how to react.
+**Rationale — raising rather than signalling `nil`.** Spec rule 4: properties of input data may signal; properties of the program raise. `parse-string` consumes external text, so bad input signals `nil` (DIV-23). `generate-string` is handed a value the program itself constructed, so a value with no JSON encoding is a program fault. A bare `nil` was indistinguishable from an encoded empty value once `str` concatenated it, which is what #1165 cost. The refusal is a classified `type_error`, recoverable in the agent loop in the same sense as DIV-48's `find`, not an uncatchable crash.
+
+Round-trip (§4.3) holds for string-keyed data only. Integer keys were already a documented carve-out that does not round-trip (`{1 "a"}` parses back as `%{"1" => "a"}`); keyword keys join them (`{:a 1}` parses back as `%{"a" => 1}`).
+
+**Note.** Inside a private prelude the encoder's message is generalized to `private prelude evaluation failed with a type error` by the prelude-privacy boundary, and a private *session* collapses it further via `PtcRunner.Kernel.PrivateDiagnostic`. The position detail reaches ordinary programs only.
 
 ### GAP-S08: `even?`/`odd?` handle floats gracefully
 

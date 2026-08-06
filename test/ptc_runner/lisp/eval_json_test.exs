@@ -63,12 +63,17 @@ defmodule PtcRunner.Lisp.EvalJsonTest do
       assert result in [~S|{"a":1,"b":[2,3]}|, ~S|{"b":[2,3],"a":1}|]
     end
 
-    test "returns nil for keyword keys (DIV-24)" do
-      assert {:ok, %{return: nil}} = Lisp.run(~S|(json/generate-string {:server "fs"})|)
+    test "encodes keyword keys as their name (DIV-24)" do
+      assert {:ok, %{return: ~S|{"server":"fs"}|}} =
+               Lisp.run(~S|(json/generate-string {:server "fs"})|)
     end
 
-    test "returns nil for keyword values (DIV-24)" do
-      assert {:ok, %{return: nil}} = Lisp.run(~S|(json/generate-string {"server" :fs})|)
+    test "refuses keyword values, naming the position (DIV-24)" do
+      assert {:error, %{fail: %{reason: :type_error, message: message}}} =
+               Lisp.run(~S|(json/generate-string {"server" :fs})|)
+
+      assert message =~ "cannot encode a keyword as a JSON value"
+      assert message =~ ~s|at ["server"]|
     end
 
     test "encodes after explicit string conversion" do
@@ -76,12 +81,18 @@ defmodule PtcRunner.Lisp.EvalJsonTest do
                Lisp.run(~S|(json/generate-string {"server" (name :fs)})|)
     end
 
-    test "returns nil for positive infinity" do
-      assert {:ok, %{return: nil}} = Lisp.run("(json/generate-string ##Inf)")
+    test "refuses positive infinity" do
+      assert {:error, %{fail: %{reason: :type_error, message: message}}} =
+               Lisp.run("(json/generate-string ##Inf)")
+
+      assert message =~ "cannot encode ##Inf as a JSON value"
     end
 
-    test "returns nil for NaN" do
-      assert {:ok, %{return: nil}} = Lisp.run("(json/generate-string ##NaN)")
+    test "refuses NaN" do
+      assert {:error, %{fail: %{reason: :type_error, message: message}}} =
+               Lisp.run("(json/generate-string ##NaN)")
+
+      assert message =~ "cannot encode ##NaN as a JSON value"
     end
   end
 

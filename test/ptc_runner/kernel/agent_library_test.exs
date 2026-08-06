@@ -888,7 +888,12 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     {:ok, bundle} = agent_bundle(prompt_source: tiny_prompt_source())
 
-    assert {:ok, %{return: {:__ptc_fail__, failure}}} =
+    # An unencodable transcript now surfaces as a classified `type_error`
+    # instead of an opaque `:encoding-failed` reason (#1165). The encoder's
+    # detail is withheld here — and only here — because `agent.core` is a
+    # private prelude, so its internal message is generalized at that
+    # boundary; a user program gets the full position (see JsonTest).
+    assert {:error, %{fail: %{reason: :type_error, message: message}}} =
              Lisp.run_native(
                ~S|(agent.core/run (fn [] 1) {"max_turns" 1 "max_transcript_chars" 1000000})|,
                prelude: bundle.prelude,
@@ -897,10 +902,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                caller: :kernel
              )
 
-    {formatted_failure, false} = Lisp.format_value(failure)
-    assert formatted_failure =~ ":ok false"
-    assert formatted_failure =~ ":kind :invalid-transcript"
-    assert formatted_failure =~ ":reason :encoding-failed"
+    assert message =~ "private prelude evaluation failed with a type error"
   end
 
   test "an intermediate result on the final turn commits before turn-limit failure" do

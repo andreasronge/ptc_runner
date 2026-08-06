@@ -1811,7 +1811,7 @@
     },
     %{
       name: "json/generate-string",
-      description: "Encode a value as a JSON string; nil on non-encodable input.",
+      description: "Encode a value as a JSON string; type_error on non-encodable input.",
       binding: :normal,
       category: :json,
       dispatch: :env,
@@ -1821,11 +1821,11 @@
       ptc_extension?: false,
       examples: [],
       notes:
-        "Pre-validates the value tree before invoking Jason.encode/1. Atoms outside true/false/nil, atom-keyed maps, tuples, PIDs, references, and functions all produce nil rather than being silently coerced.",
-      see_also: ["json/parse-string"],
+        "Never returns nil. Keyword keys encode as their name verbatim ({:max-turns 3} -> {\"max-turns\":3}) and integer keys as decimal text. Keyword values, sets, tuples, PIDs, references, functions, and ##Inf/##NaN are refused with a type_error naming the position, e.g. at [\"config\" 0 :port]. Two keys that would encode to the same JSON key are refused rather than emitted as a duplicate.",
+      see_also: ["json/parse-string", "describe"],
       clojure_var: "cheshire.core/generate-string",
       divergences:
-        "DIV-24: returns nil on non-encodable input (atoms outside true/false/nil, atom keys, tuples, PIDs) rather than silently auto-stringifying. See docs/clojure-conformance-gaps.md."
+        "DIV-24: refuses keyword values with a type_error rather than stringifying them as Cheshire does; keyword keys do encode as their name. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "json/parse-string",
@@ -1953,8 +1953,8 @@
         }
       ],
       notes:
-        "Options map supports `:depth` (1-5), `:paths true`, and `:sample` (1-3). Output is capped; `:truncated true` and `:caps_hit` identify traversal caps. For capped root vectors, `:count_capped true` means `:count` is the scanned count.",
-      see_also: ["keys", "type", "json/parse-lines"],
+        "Options map supports `:depth` (1-5), `:paths true`, and `:sample` (1-3). Output is capped; `:truncated true` and `:caps_hit` identify traversal caps. For capped root vectors, `:count_capped true` means `:count` is the scanned count. The summary is keyword-keyed, so `(json/generate-string (describe x))` encodes those keys as their names.",
+      see_also: ["keys", "type", "json/parse-lines", "json/generate-string"],
       clojure_var: nil,
       divergences: nil
     },
