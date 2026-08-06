@@ -953,16 +953,16 @@ commits in one Checkpoint C PR:
   creating the resource inside the owner, which is viable for the store but not
   for the registry, whose deadline-bounded activation must not run inside the
   owner's callback loop;
-- implement the default doctor applicability matrix from inert declarations.
-  Two survey findings scope this commit. The result contract is already closed
+- (complete) implement the default doctor applicability matrix from inert
+  declarations. Two survey findings scope this commit. The result contract is already closed
   and complete: `CommandContract` fixes the `runtime`/`application`/`viewer`
   prefix, the per-alias operation ranks, and separate default and connect
   consistency rules, so the work is deriving rows rather than designing them.
   A provider row has no failure code in any mode, so a check that fails must
   fail the whole command with its catalogued diagnostic rather than appear as a
   failing row;
-- build phase-7 audited-local execution, which does not exist yet. The
-  declaration side is complete — descriptors carry `local_preflight`, host
+- (complete) build phase-7 audited-local execution. The declaration side was
+  already complete — descriptors carry `local_preflight`, host
   installations build the callback, `host_call` reaches it process-free through
   the sealed payload, and `local_preflight/{environment,adapter,launcher}_unavailable`
   are catalogued with `provider_activity: false` — but nothing invokes the
@@ -989,18 +989,35 @@ commits in one Checkpoint C PR:
   code would report a manifest error as a missing local dependency, so they keep
   their own diagnostics, and an unrecognised reason fails closed as an internal
   error instead of being forced into the nearest local code;
-- wire default doctor through the shared coordinator boundary, preserving this
-  separation exactly. `RunCoordinator` invokes `LocalPreflight` from the sealed
-  prepared/catalog/services inputs. `LocalPreflight` returns only success or a
-  diagnostic and never consumes `DoctorPlan` rows, so applicability keeps coming
-  from sealed declarations rather than from a rendering plan a caller could
-  shorten. After success, doctor settles all audited-local rows, because the
-  shared executor has proven every applicable occurrence. `CommandEngine` only
-  selects the command flow and renders the returned result: no callback
-  invocation, no deadline arithmetic, no occurrence traversal. Run, check, and
-  the REPL use the same phase-7 boundary before activity is marked.
-  `RunCoordinator.validation_result/1` is the shape precedent for what the
-  frontend calls;
+- (complete) wire default doctor through the shared coordinator boundary,
+  preserving this separation exactly. `RunCoordinator.local_checks/3` is that
+  boundary and the only entry to the step: it anchors the one deadline and
+  invokes `LocalPreflight` from the sealed prepared/catalog/services inputs.
+  `LocalPreflight` returns only success or a diagnostic and never consumes
+  `DoctorPlan` rows, so applicability keeps coming from sealed declarations
+  rather than from a rendering plan a caller could shorten. After success,
+  doctor settles all audited-local rows, because the shared executor has proven
+  every applicable occurrence. `CommandEngine` only selects the command flow and
+  renders the returned result: no callback invocation, no deadline arithmetic,
+  no occurrence traversal. Run, check, and the REPL reach the same boundary
+  through `ProviderExecution.execute/8`, immediately before
+  `ProviderActiveSession` marks activity.
+
+  Three supporting decisions were forced by wiring it, each recorded here
+  because none is visible from the entry above:
+
+  - the step needed a bound of its own, so `local_preflight_timeout_ms` joins
+    the installed-only limit family. It participates in effective identity like
+    selection validation, because run and `--check` cross phase 7 too;
+  - phase 7 runs before the marker for every caller but not in the same
+    consumption state — doctor still holds a claimed preparation while an
+    execution owner has already consumed one. `PreparedRun.inactive_valid?/1`
+    checks the invariant the step actually depends on, which is that the marker
+    is unset, rather than accepting either other predicate; and
+  - the plan's two environment facts had no producer. `DoctorEnvironment`
+    supplies them from this VM alone: the declared Elixir requirement, and
+    whether the optional viewer is on the code path. Neither can fail a
+    command, and a test pins the requirement constant against `mix.exs`;
 - run `doctor --connect` through the ordinary provider-session prefix and its
   connectivity branch: probe `:probe`, use bounded acquisition/discovery for
   `:acquisition`, and skip `:none`;

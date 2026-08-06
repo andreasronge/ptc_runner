@@ -161,6 +161,107 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["error"]["code"] == "internal_error"
   end
 
+  test "default doctor reports the environment without an application or host" do
+    assert {:ok, %CommandOutcome{} = outcome} = CommandEngine.prepare(["doctor"])
+
+    assert outcome.exit_status == 0
+    assert outcome.envelope["command"] == "doctor"
+    assert outcome.envelope["result"]["provider_activity"] == false
+
+    checks = outcome.envelope["result"]["checks"]
+    assert Enum.map(checks, & &1["name"]) == ["runtime", "application", "viewer"]
+
+    assert %{"status" => "skipped", "code" => "not_requested"} =
+             Enum.find(checks, &(&1["name"] == "application"))
+
+    assert_schema_valid(outcome.envelope)
+    assert CommandContract.valid_success_semantics?(:doctor, outcome.envelope["result"])
+  end
+
+  @tag :tmp_dir
+  test "default doctor defers every installed alias until an application selects it", %{
+    tmp_dir: directory
+  } do
+    host_path = write_host_config(directory, "doctor-surface", valid_host_config())
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", "--host-config", host_path])
+
+    checks = outcome.envelope["result"]["checks"]
+
+    assert %{"status" => "skipped", "code" => "application_required"} =
+             Enum.find(checks, &(&1["name"] == "provider/workspace/local"))
+
+    assert %{"status" => "skipped", "code" => "requires_connect"} =
+             Enum.find(checks, &(&1["name"] == "provider/workspace/connectivity"))
+
+    assert outcome.envelope["result"]["provider_activity"] == false
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a passing audited-local check settles its row without provider activity", %{
+    tmp_dir: directory
+  } do
+    shell = System.find_executable("sh")
+
+    host_path =
+      write_host_config(
+        directory,
+        "doctor-local-pass",
+        stdio_host_config(shell, shell, directory)
+      )
+
+    application = doctor_application(directory, "selects-stdio", mission: ["workspace"])
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    checks = outcome.envelope["result"]["checks"]
+
+    assert %{"status" => "pass", "code" => "available"} =
+             Enum.find(checks, &(&1["name"] == "provider/workspace/local"))
+
+    # Phase 7 runs before the marker, so a settled local row still reports no
+    # provider activity.
+    assert outcome.envelope["result"]["provider_activity"] == false
+    assert_schema_valid(outcome.envelope)
+    assert CommandContract.valid_success_semantics?(:doctor, outcome.envelope["result"])
+  end
+
+  @tag :tmp_dir
+  test "a failing audited-local check fails the command instead of the row", %{
+    tmp_dir: directory
+  } do
+    # The closed result contract has no failing provider row in any mode, so a
+    # local check that fails must surface as the command's own diagnostic.
+    host_path =
+      write_host_config(directory, "doctor-local-fail", %{
+        "credentials" => %{"key" => %{"literal" => "not-read"}},
+        "install" => %{
+          "model" => %{
+            "source" => "llm",
+            "installation_revision" => "model-v1",
+            "model" => "definitely-not-a-model",
+            "credential" => "key"
+          }
+        }
+      })
+
+    application = doctor_application(directory, "selects-model", workflow: ["model"])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    assert outcome.envelope["command"] == "doctor"
+    assert outcome.envelope["error"]["phase"] == "local_preflight"
+    assert outcome.envelope["error"]["code"] == "adapter_unavailable"
+    assert outcome.envelope["error"]["subject"]["name"] == "model"
+    assert outcome.envelope["error"]["subject"]["operation"] == "local"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    assert_schema_valid(outcome.envelope)
+  end
+
   test "command-specific invalid options preserve parser conflict precedence" do
     cases = [
       {:init, ["init", "project", "--input", "a", "--private-input", "b"]},
@@ -3997,6 +4098,46 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       }
     }
   end
+
+  defp stdio_host_config(command, launcher, cwd) do
+    %{
+      "runtime" => %{"stdio_launcher" => launcher},
+      "credentials" => %{"token" => %{"literal" => "test-secret"}},
+      "install" => %{
+        "workspace" => %{
+          "source" => "mcp",
+          "installation_revision" => "stdio-v1",
+          "transport" => %{
+            "type" => "stdio",
+            "command" => command,
+            "cwd" => cwd,
+            "inherit_environment" => false,
+            "env" => %{"TOKEN" => %{"binding" => "token"}}
+          },
+          "tools" => %{"read" => %{"as" => "workspace.read", "effect" => "read"}}
+        }
+      }
+    }
+  end
+
+  defp doctor_application(directory, name, providers) do
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "app", "path" => "main.clj"}],
+        "entry" => "app/run"
+      },
+      "input" => %{"value" => %{}},
+      "providers" => %{
+        "workflow" => provider_entries(Keyword.get(providers, :workflow, [])),
+        "mission" => provider_entries(Keyword.get(providers, :mission, []))
+      }
+    }
+
+    write_application(directory, name, manifest)
+  end
+
+  defp provider_entries(names), do: Enum.map(names, &%{"name" => &1, "config" => %{}})
 
   defp write_host_config(directory, name, bytes) when is_binary(bytes) do
     path = Path.join(directory, "#{name}.host.json")

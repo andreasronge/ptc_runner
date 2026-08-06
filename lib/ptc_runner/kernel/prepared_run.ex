@@ -123,6 +123,18 @@ defmodule PtcRunner.Kernel.PreparedRun do
 
   def consumed_valid?(_prepared), do: false
 
+  @doc false
+  @spec inactive_valid?(term()) :: boolean()
+  # Phase 7 runs before the activity marker for every caller, but not in the
+  # same consumption state: default doctor still holds a claimed preparation
+  # while an execution owner has already consumed one. Neither of those is the
+  # invariant the step depends on — that invariant is that the marker is unset,
+  # so this checks it directly rather than accepting both other predicates.
+  def inactive_valid?(%__MODULE__{} = prepared),
+    do: sealed_valid?(prepared) and ProviderActivity.value(prepared.provider_activity) == false
+
+  def inactive_valid?(_prepared), do: false
+
   defp sealed_valid?(%__MODULE__{attestation: attestation} = prepared) do
     Enum.sort(Map.keys(prepared)) == @field_keys and
       RunRequest.valid?(prepared.request) and

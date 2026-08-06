@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunCoordinator
 
   @enforce_keys [:catalog, :services, :authorizations]
   defstruct @enforce_keys ++ [attestation: nil]
@@ -111,6 +112,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          true <- PreparedRun.consumed_valid?(prepared),
          true <- PublicationAuthority.valid?(authority),
          true <- bound_to_prepared?(execution, prepared),
+         :ok <- RunCoordinator.local_checks(prepared, execution.catalog, execution.services),
          {:ok, session} <-
            ProviderActiveSession.open_consumed_setup(
              prepared,

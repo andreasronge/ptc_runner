@@ -20,14 +20,17 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LocalPreflight
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderPlan
+  alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
@@ -73,6 +76,46 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   def prepare(_request, _registry),
     do: {:error, diagnostic(:internal, :internal_error)}
+
+  @doc """
+  Runs the audited-local phase-7 step for one sealed preparation.
+
+  This is the only entry to that step. Applicability is derived from the sealed
+  trio rather than supplied, so no caller can narrow the work, and the result is
+  only success or one catalogued diagnostic — never a per-occurrence report a
+  caller could turn into a passing row. The coordinator anchors the single
+  deadline the whole step spends.
+
+  Every command crosses it before provider activity is marked: run, `--check`,
+  and the REPL through `ProviderExecution`, and default doctor by calling this
+  directly, because it opens no provider session at all.
+  """
+  @spec local_checks(
+          PreparedRun.t() | nil,
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t()
+        ) :: :ok | {:error, CommandDiagnostic.t()}
+  def local_checks(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services
+      ) do
+    LocalPreflight.run(prepared, catalog, services, local_deadline(prepared))
+  end
+
+  # A command that prepared no application selected no occurrence, so there is
+  # nothing to derive a check from. This clause exists so the decision stays
+  # here rather than in a frontend choosing whether to call the step at all.
+  def local_checks(nil, %InstallationCatalog{} = catalog, %ProviderRuntimeServices{}),
+    do: if(InstallationCatalog.valid?(catalog), do: :ok, else: internal_error())
+
+  def local_checks(_prepared, _catalog, _services), do: internal_error()
+
+  defp internal_error, do: {:error, diagnostic(:internal, :internal_error)}
+
+  defp local_deadline(prepared) do
+    Deadline.new(prepared.request.package.limits.local_preflight_timeout_ms)
+  end
 
   @doc false
   @spec execute(PreparedRun.t(), PublicationAuthority.t()) ::

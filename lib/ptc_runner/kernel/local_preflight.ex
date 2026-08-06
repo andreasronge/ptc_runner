@@ -127,7 +127,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # and its runtime-services binding, so a preparation cannot be reported or
   # checked against declarations it was never validated against.
   defp bound?(%PreparedRun{} = prepared, %InstallationCatalog{} = catalog, services) do
-    PreparedRun.valid?(prepared) and InstallationCatalog.valid?(catalog) and
+    PreparedRun.inactive_valid?(prepared) and InstallationCatalog.valid?(catalog) and
       ProviderRuntimeServices.valid?(services) and
       prepared.catalog_attestation == catalog.attestation and
       ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding)

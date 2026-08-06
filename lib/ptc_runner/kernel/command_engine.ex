@@ -19,11 +19,14 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.DoctorEnvironment
+  alias PtcRunner.Kernel.DoctorPlan
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
 
@@ -168,9 +171,95 @@ defmodule PtcRunner.Kernel.CommandEngine do
   defp prepare_arguments(%CommandArguments{command: :version}, run_ref, _destinations),
     do: {:ok, CommandOutcome.success(:version, run_ref, CommandContract.version_result())}
 
+  # Default doctor reaches the shared phase-7 boundary and renders what it
+  # returns. It selects the flow, assembles the sealed inputs, and projects the
+  # result: no callback is invoked here, no deadline computed, and no occurrence
+  # traversed. `doctor --connect` is a later slice.
+  defp prepare_arguments(
+         %CommandArguments{command: :doctor, options: options} = arguments,
+         run_ref,
+         _destinations
+       )
+       when not is_map_key(options, :connect) do
+    case catalog(Map.get(options, :host_config)) do
+      {:ok, host, catalog} ->
+        try do
+          result = doctor_outcome(arguments, run_ref, host, catalog)
+          InstallationCatalog.close(catalog)
+          result
+        rescue
+          exception ->
+            InstallationCatalog.close(catalog)
+            reraise exception, __STACKTRACE__
+        catch
+          kind, reason ->
+            InstallationCatalog.close(catalog)
+            :erlang.raise(kind, reason, __STACKTRACE__)
+        end
+
+      {:error, %CommandDiagnostic{} = diagnostic} ->
+        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+    end
+  end
+
   defp prepare_arguments(%CommandArguments{command: command} = arguments, run_ref, _destinations)
        when command in [:init, :doctor, :models],
        do: {:error, arguments_outcome(arguments, run_ref, :internal, :internal_error)}
+
+  defp doctor_outcome(arguments, run_ref, host, catalog) do
+    case doctor_preparation(arguments, catalog, run_ref) do
+      {:ok, prepared} ->
+        result = doctor_checks(host, catalog, prepared)
+        if prepared, do: PreparedRun.close(prepared)
+
+        case result do
+          {:ok, checks} ->
+            {:ok,
+             CommandOutcome.success(:doctor, run_ref, %{
+               "checks" => checks,
+               "provider_activity" => false
+             })}
+
+          {:error, diagnostic} ->
+            {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+        end
+
+      {:error, diagnostic} ->
+        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+    end
+  end
+
+  # An application is optional. Without one there is no selection to check, and
+  # every provider row reports that an application is required.
+  defp doctor_preparation(%CommandArguments{application: nil}, _catalog, _run_ref), do: {:ok, nil}
+
+  defp doctor_preparation(arguments, catalog, run_ref) do
+    with {:ok, request} <- request_arguments(arguments, catalog, run_ref) do
+      RunCoordinator.prepare(request, catalog)
+    end
+  end
+
+  # The plan is derived before the checks run and settled only after they all
+  # succeed, because a failing audited-local check fails the whole command: the
+  # closed contract has no failing provider row in any mode.
+  defp doctor_checks(host, catalog, prepared) do
+    with {:ok, rows} <- doctor_plan(catalog, prepared),
+         {:ok, services} <- doctor_services(host),
+         :ok <- RunCoordinator.local_checks(prepared, catalog, services),
+         {:ok, settled} <- DoctorPlan.settle_pending(rows),
+         {:ok, checks} <- DoctorPlan.checks(settled) do
+      {:ok, checks}
+    else
+      {:error, %CommandDiagnostic{} = diagnostic} -> {:error, diagnostic}
+      {:error, _reason} -> {:error, diagnostic(:internal, :internal_error)}
+    end
+  end
+
+  defp doctor_plan(catalog, prepared),
+    do: DoctorPlan.new(catalog, prepared, DoctorEnvironment.facts())
+
+  defp doctor_services(nil), do: ProviderRuntimeServices.new([])
+  defp doctor_services(host), do: HostInstallation.runtime_services(host)
 
   defp command_preparation(
          arguments,

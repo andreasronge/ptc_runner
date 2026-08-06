@@ -201,6 +201,18 @@ unique-list types, defaults, finite sets, ranges, and the closed cross-rules
 validation records `active_required`; `validate` reports
 `provider_declaration/selection_unverifiable` without running it.
 
+`RunCoordinator.local_checks/3` is the only entry to phase 7 and the only place
+a `local_preflight` callback runs. Every command crosses it before provider
+activity is marked: run, `--check`, and the REPL from `ProviderExecution`
+immediately before the session opens, and default doctor directly, because it
+opens no session. Applicability is derived from the sealed
+prepared/catalog/services trio rather than supplied, the coordinator anchors one
+`local_preflight_timeout_ms` deadline that every applicable occurrence spends,
+and the result is only `:ok` or one catalogued diagnostic. There is no
+per-occurrence report, because the closed result contract has no failing
+provider row: a failed check fails the whole command, and doctor settles its
+audited-local rows only after the step as a whole succeeded.
+
 Shipped live-LLM and stdio MCP descriptors declare `audited_local` callbacks.
 Those callbacks use the same model/adapter and executable/launcher checks as
 runtime provider preflight, without resolving credentials or contacting a
