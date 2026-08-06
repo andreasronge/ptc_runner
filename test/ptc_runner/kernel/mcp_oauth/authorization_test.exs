@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.Deadline
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Authorization
   alias PtcRunner.Kernel.MCPOAuth.Context
@@ -9,6 +10,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
   alias PtcRunner.Kernel.MCPOAuth.Metadata
   alias PtcRunner.Kernel.MCPOAuth.Store
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
+  alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Test.MCPOAuthRecordingStore
 
   setup do
@@ -482,6 +484,58 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
     assert remaining > 4_000 and remaining <= 5_000
   end
 
+  @tag timeout: 15_000
+  test "cancellation consumes the one anchored cleanup deadline", context do
+    parent = self()
+    request = request_fixture(context.authority, self())
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 1_000)
+    assert {:ok, session} = ProviderSession.start(limits)
+
+    {:ok, recording_store} =
+      MCPOAuthRecordingStore.wrap(context.store, self(),
+        interceptor: fn operation, deadline ->
+          if elem(operation, 0) == :cancel_flow, do: send(parent, {:cancel_deadline, deadline})
+          :delegate
+        end
+      )
+
+    {:ok, recording_context} =
+      Context.new(
+        tenant_id: "tenant",
+        principal_id: "alice",
+        store: recording_store,
+        deadline: Deadline.new(10_000)
+      )
+
+    assert {:ok, listener} = LoopbackListener.start(context.authority)
+
+    assert {:ok, pending} =
+             Authorization.begin_authorization(recording_context, context.authority,
+               authority_epoch: context.epoch,
+               redirect_uri: listener.redirect_uri,
+               request: request
+             )
+
+    # An earlier terminal action has already anchored this session's one budget.
+    assert {:ok, anchored} = ProviderSession.anchor_cleanup_deadline(session)
+
+    # No client connects, so the interaction spends its own timeout before
+    # failing. Cleanup then gets what is left of the anchored budget.
+    interaction = %{pending | deadline_ms: System.monotonic_time(:millisecond) + 300}
+
+    assert {:error, :authorization_timeout} =
+             LoopbackListener.await(listener, recording_context, interaction,
+               request: request,
+               anchor_cleanup_deadline: fn -> ProviderSession.anchor_cleanup_deadline(session) end
+             )
+
+    assert_received {:cancel_deadline, cancel_deadline}
+    assert cancel_deadline == anchored
+    assert Deadline.remaining(cancel_deadline) <= 700
+
+    assert :ok = ProviderSession.close(session)
+  end
+
   test "a silent client that never completes its request reports a timeout", context do
     request = request_fixture(context.authority, self())
     assert {:ok, listener} = LoopbackListener.start(context.authority)
@@ -621,9 +675,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
     end
   end
 
-  # Production supplies the lifecycle owner's installed cleanup budget; without
-  # it a failed interaction cannot cancel its pending authorization.
-  defp await_opts(request), do: [request: request, cleanup_timeout_ms: 5_000]
+  # Production supplies the operation that anchors the lifecycle owner's one
+  # cleanup deadline; without it a failed interaction cannot cancel its pending
+  # authorization.
+  defp await_opts(request),
+    do: [request: request, anchor_cleanup_deadline: fn -> {:ok, Deadline.new(5_000)} end]
 
   defp request_fixture(
          authority,

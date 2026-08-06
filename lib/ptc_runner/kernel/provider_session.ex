@@ -31,13 +31,18 @@ defmodule PtcRunner.Kernel.ProviderSession do
   force-close phase; abnormal session death permits that handoff during the
   cooperative owner-down window.
 
-  Cleanup shares the sealed `provider_cleanup_timeout_ms` deadline and runs
-  each close operation in a heap-bounded worker. That budget also bounds the
-  caller: `close/1` waits one reply grace beyond it and then terminates a
-  session that has not answered, so a wedged session becomes a classified
-  cleanup failure rather than an unbounded wait. Failures never stop later
-  cleanup attempts. This is a process-local ownership boundary, not a durable
-  resource journal or a security boundary against trusted code in the same VM.
+  The sealed `provider_cleanup_timeout_ms` is one budget for the whole terminal
+  episode, not one per stage. The first terminal action anchors this session's
+  absolute cleanup deadline; an OAuth cancellation and the reverse-order
+  cleanup that follows it each consume what remains of that one deadline, and
+  every close operation runs in a heap-bounded worker inside it. That budget
+  also bounds the caller: `close/1` waits one reply grace beyond it and then
+  terminates a session that has not answered, so a wedged session becomes a
+  classified cleanup failure rather than an unbounded wait. Aborting one
+  acquisition scope mid-run is not part of that episode and keeps its own
+  bounded budget. Failures never stop later cleanup attempts. This is a
+  process-local ownership boundary, not a durable resource journal or a
+  security boundary against trusted code in the same VM.
   """
 
   use GenServer
@@ -302,6 +307,30 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
   def cleanup_timeout(_session), do: nil
 
+  # Terminal cleanup spends one budget, not one per stage. The first terminal
+  # action anchors this session's absolute cleanup deadline, and every later
+  # action — an OAuth cancellation, then the session's own reverse-order
+  # cleanup — consumes what remains of that same deadline instead of minting
+  # the installed duration again. Anchoring belongs to the session because it
+  # is the only holder both stages share.
+  @doc false
+  @spec anchor_cleanup_deadline(term()) ::
+          {:ok, Deadline.t()} | {:error, :provider_cleanup_failed}
+  def anchor_cleanup_deadline(%__MODULE__{} = session) do
+    if valid?(session) do
+      call(
+        session.pid,
+        {session.token, :anchor_cleanup_deadline},
+        @claim_timeout_ms,
+        {:error, :provider_cleanup_failed}
+      )
+    else
+      {:error, :provider_cleanup_failed}
+    end
+  end
+
+  def anchor_cleanup_deadline(_session), do: {:error, :provider_cleanup_failed}
+
   @doc false
   @spec claim_operation(t(), Limits.t(), binary()) ::
           :ok
@@ -389,21 +418,27 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def close_with_unregistered(%__MODULE__{} = session, close)
       when is_function(close, 0) or is_nil(close) do
     if valid?(session) do
-      # Two cleanup owners share one terminal budget, so the session gets a fair
-      # half and the unregistered closer keeps the rest for the case where the
-      # session never answers. Reply grace extends only the call.
-      deadline = Deadline.new(session.cleanup_timeout_ms)
-      session_share = div(session.cleanup_timeout_ms, 2) + @claim_reply_grace_ms
+      # Two cleanup owners split the one installed budget by duration rather
+      # than anchoring a second deadline: the session gets a fair half, bounded
+      # inside by the one deadline it anchored, and the closer that outlives a
+      # session that never answers keeps the rest. Reply grace extends only the
+      # call, never the budget.
+      session_share_ms = div(session.cleanup_timeout_ms, 2)
 
       case call(
              session.pid,
              {session.token, {:close_with_unregistered, close}},
-             session_share,
+             session_share_ms + @claim_reply_grace_ms,
              :cleanup_unsettled
            ) do
         :cleanup_unsettled ->
           _terminated = settle_terminal_close(:cleanup_unsettled, session)
-          close_after_session_loss(session, close, Deadline.remaining(deadline))
+
+          close_after_session_loss(
+            session,
+            close,
+            session.cleanup_timeout_ms - session_share_ms
+          )
 
         result ->
           result
@@ -785,21 +820,20 @@ defmodule PtcRunner.Kernel.ProviderSession do
     end
   end
 
+  def handle_call({token, :anchor_cleanup_deadline}, _from, state) when token == state.token do
+    state = ensure_cleanup_deadline(state)
+    {:reply, {:ok, state.cleanup_deadline}, state}
+  end
+
   def handle_call({token, {:close_with_unregistered, close}}, _from, state)
       when token == state.token and (is_function(close, 0) or is_nil(close)) do
-    state =
-      state
-      |> reject_pending_registrations()
-      |> drain_provider_tasks()
-      |> add_committed_close(close)
-
+    state = state |> begin_terminal_cleanup() |> add_committed_close(close)
     {result, state} = drain(state)
     {:stop, :normal, result, state}
   end
 
   def handle_call({token, :close}, _from, state) when token == state.token do
-    state = state |> reject_pending_registrations() |> drain_provider_tasks()
-    {result, state} = drain(state)
+    {result, state} = state |> begin_terminal_cleanup() |> drain()
     {:stop, :normal, result, state}
   end
 
@@ -824,8 +858,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
         {:DOWN, monitor, :process, owner, _reason},
         %{owner_monitor: monitor, owner: owner} = state
       ) do
-    state = state |> reject_pending_registrations() |> drain_provider_tasks()
-    {_result, state} = drain(state)
+    {_result, state} = state |> begin_terminal_cleanup() |> drain()
     {:stop, :normal, state}
   end
 
@@ -879,9 +912,18 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
   @impl GenServer
   def terminate(_reason, state) do
-    state = state |> reject_pending_registrations() |> drain_provider_tasks()
-    {_result, _state} = drain(state)
+    {_result, _state} = state |> begin_terminal_cleanup() |> drain()
     :ok
+  end
+
+  # The first terminal action anchors the one cleanup deadline, before the task
+  # drain rather than after it, so every later stage measures against the
+  # instant cleanup actually began.
+  defp begin_terminal_cleanup(state) do
+    state
+    |> ensure_cleanup_deadline()
+    |> reject_pending_registrations()
+    |> drain_provider_tasks()
   end
 
   # No provider callback from this run may still be live when a connector
@@ -894,6 +936,9 @@ defmodule PtcRunner.Kernel.ProviderSession do
     state
   end
 
+  # Aborting one scope is ordinary mid-run failure handling, not the terminal
+  # episode, so it bounds itself rather than spending the terminal deadline the
+  # session has not anchored yet.
   defp abort_scope(scope, state) do
     case Map.fetch(state.scopes, scope) do
       {:ok, %{phase: phase} = entry} when phase in [:inactive, :active] ->
@@ -958,7 +1003,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
   defp close_after_session_loss(_session, nil, _remaining_ms),
     do: {:error, :provider_cleanup_failed}
 
-  # Whatever is left of the one anchored budget, never a second full one.
+  # The unspent half of the one installed budget, never a second full one.
   defp close_after_session_loss(session, close, remaining_ms) do
     _ =
       BoundedWorker.run(close,

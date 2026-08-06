@@ -16,7 +16,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.LoopbackListener do
   `:invalid_callback_request`.
   """
 
-  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Authorization
   alias PtcRunner.Kernel.MCPOAuth.Context
@@ -102,23 +101,23 @@ defmodule PtcRunner.Kernel.MCPOAuth.LoopbackListener do
 
   # A failed interaction must not leave a live pending authorization behind, so
   # an unsettled cancellation outranks the reason that triggered it rather than
-  # being discarded. Its budget is the lifecycle owner's installed provider
-  # cleanup timeout, anchored here because this is where cleanup begins.
+  # being discarded. Cancellation is the first terminal action here, so it
+  # anchors the lifecycle owner's one cleanup deadline through the supplied
+  # operation and spends that deadline; the session close that follows consumes
+  # what is left of the same one rather than minting the budget again.
   defp cancel_pending(context, pending, opts, error) do
-    with {:ok, timeout_ms} <- cleanup_timeout(opts),
+    with {:ok, deadline} <- anchor_cleanup_deadline(opts),
          :ok <-
-           Authorization.cancel_authorization(context, pending,
-             cleanup_deadline: Deadline.new(timeout_ms)
-           ) do
+           Authorization.cancel_authorization(context, pending, cleanup_deadline: deadline) do
       error
     else
       _unsettled -> {:error, :authorization_cleanup_failed}
     end
   end
 
-  defp cleanup_timeout(opts) do
-    case Keyword.get(opts, :cleanup_timeout_ms) do
-      timeout_ms when is_integer(timeout_ms) and timeout_ms > 0 -> {:ok, timeout_ms}
+  defp anchor_cleanup_deadline(opts) do
+    case Keyword.get(opts, :anchor_cleanup_deadline) do
+      anchor when is_function(anchor, 0) -> anchor.()
       _missing -> :error
     end
   end

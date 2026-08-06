@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.ProviderSessionTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProviderScopeOwner
   alias PtcRunner.Kernel.ProviderSession
@@ -835,6 +836,20 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert_receive {:DOWN, ^session_monitor, :process, _, :normal}
   end
 
+  test "the cleanup deadline is anchored once for the whole terminal episode" do
+    {:ok, session} = ProviderSession.start(limits())
+
+    assert {:ok, anchored} = ProviderSession.anchor_cleanup_deadline(session)
+    assert Deadline.valid?(anchored)
+
+    # A later terminal stage consumes the same absolute deadline rather than
+    # minting the installed cleanup duration again.
+    assert {:ok, ^anchored} = ProviderSession.anchor_cleanup_deadline(session)
+
+    assert :ok = ProviderSession.close(session)
+    assert {:error, :provider_cleanup_failed} = ProviderSession.anchor_cleanup_deadline(session)
+  end
+
   test "cleanup has one shared bound" do
     {:ok, order} = Agent.start_link(fn -> [] end)
     {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
@@ -908,10 +923,11 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
     assert_received {:DOWN, ^monitor, :process, _pid, :killed}
     # The unregistered closer keeps its share of the one terminal budget even
-    # when the session itself never answers.
+    # when the session itself never answers, and both shares together stay
+    # inside that one budget rather than each taking a fresh one.
     assert_received :unregistered_closed
     refute Process.alive?(session.pid)
-    assert elapsed < 5_000
+    assert elapsed < 1_000
   end
 
   test "tampered session and registrar handles are rejected" do

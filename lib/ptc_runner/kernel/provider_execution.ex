@@ -667,19 +667,21 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
-  # Terminal cleanup spends the lifecycle owner's installed provider cleanup
-  # budget, not whatever remained of the interaction being cleaned up.
+  # Terminal cleanup spends the one budget the lifecycle owner installed, and
+  # the session anchors it when cleanup actually begins. Anchoring lazily is the
+  # point: the interaction this accompanies may run for its whole authorization
+  # timeout before anything fails, and an eagerly anchored deadline would
+  # already be spent by then.
   defp cleanup_opts(session),
-    do: [cleanup_timeout_ms: ProviderSession.cleanup_timeout(session)]
+    do: [anchor_cleanup_deadline: fn -> ProviderSession.anchor_cleanup_deadline(session) end]
 
   defp cancel_pending(context, pending, session, error) do
-    case Authorization.cancel_authorization(
-           context,
-           pending,
-           cleanup_deadline: Deadline.new(ProviderSession.cleanup_timeout(session))
-         ) do
-      :ok -> error
-      {:error, _reason} -> {:error, :authorization_cleanup_failed}
+    with {:ok, deadline} <- ProviderSession.anchor_cleanup_deadline(session),
+         :ok <-
+           Authorization.cancel_authorization(context, pending, cleanup_deadline: deadline) do
+      error
+    else
+      _unsettled -> {:error, :authorization_cleanup_failed}
     end
   end
 

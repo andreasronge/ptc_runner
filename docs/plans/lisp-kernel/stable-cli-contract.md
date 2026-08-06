@@ -852,12 +852,18 @@ Checkpoint C starts with a small stabilization prefix before adding doctor:
   scope root, and further attachment are all gone once the wedged session is
   terminated; a second proves a committed closer never observes a live task;
   and
-- bound every terminal action with one absolute deadline. The first terminal
-  action anchors the session's `cleanup_deadline`; OAuth cancellation and the
-  later `close/1` or `close_with_unregistered/2` cleanup consume what remains
-  of that same deadline instead of each minting `Deadline.new/1` from the
-  cleanup duration again. `provider_cleanup_failed` and
-  `authorization_cleanup_failed` stay exactly as classified.
+- (complete) bound every terminal action with one absolute deadline. The first
+  terminal action anchors the session's `cleanup_deadline` through
+  `ProviderSession.anchor_cleanup_deadline/1`; OAuth cancellation and the later
+  `close/1` or `close_with_unregistered/2` cleanup consume what remains of that
+  same deadline instead of each minting the installed cleanup duration again.
+  `LoopbackListener` no longer mints a deadline at all — it receives the
+  anchoring operation and spends what it returns — and the unregistered closer
+  that outlives a session that never answers takes the unspent half of the one
+  budget by duration rather than a second anchor. Aborting one acquisition
+  scope mid-run is deliberately outside that episode and keeps its own bounded
+  budget. `provider_cleanup_failed` and `authorization_cleanup_failed` stay
+  exactly as classified.
 
 Keep these as independently reviewable commits in the Checkpoint C PR. Do not
 start doctor implementation until the descriptor and ownership boundaries are
