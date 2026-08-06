@@ -536,6 +536,42 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
     assert :ok = ProviderSession.close(session)
   end
 
+  @tag timeout: 15_000
+  test "a session that cannot anchor its budget is ended by the cancellation", context do
+    request = request_fixture(context.authority, self())
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 200)
+    assert {:ok, session} = ProviderSession.start(limits)
+    assert {:ok, listener} = LoopbackListener.start(context.authority)
+
+    assert {:ok, pending} =
+             Authorization.begin_authorization(context.context, context.authority,
+               authority_epoch: context.epoch,
+               redirect_uri: listener.redirect_uri,
+               request: request
+             )
+
+    expired = %{pending | deadline_ms: System.monotonic_time(:millisecond) - 1}
+    monitor = Process.monitor(session.pid)
+    assert :ok = :sys.suspend(session.pid)
+    started_at = System.monotonic_time(:millisecond)
+
+    assert {:error, :authorization_cleanup_failed} =
+             LoopbackListener.await(listener, context.context, expired,
+               request: request,
+               anchor_cleanup_deadline: fn -> ProviderSession.anchor_cleanup_deadline(session) end
+             )
+
+    elapsed = System.monotonic_time(:millisecond) - started_at
+
+    # Ending the wedged session here is what keeps the episode inside one
+    # budget: the close that follows a failed cancellation would otherwise
+    # start the same full wait again before killing it.
+    assert_received {:DOWN, ^monitor, :process, _pid, :killed}
+    assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
+    assert System.monotonic_time(:millisecond) - started_at < 1_000
+    assert elapsed < 1_000
+  end
+
   test "a silent client that never completes its request reports a timeout", context do
     request = request_fixture(context.authority, self())
     assert {:ok, listener} = LoopbackListener.start(context.authority)

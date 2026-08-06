@@ -7,8 +7,9 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
   # every attached task. Because the tracker is a separate process, that
   # guarantee survives an abnormal end of either owner — including a session
   # terminated at its cleanup deadline, where `terminate/2` never runs. A
-  # session drains through this owner before its own provider closers run, so
-  # no callback from the run is still live when a connector closes.
+  # session drains through this owner before its own provider closers run, and
+  # that drain also ends the owner, so no callback from the run is live when a
+  # connector closes and none can be attached behind it.
 
   use GenServer
 
@@ -40,26 +41,18 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
 
   def attach(_tracker, _provider), do: {:error, :closed}
 
-  # Kills and reaps every attached task without ending the tracker, so a
-  # session can prove its callbacks are gone before running provider closers
-  # and still own tasks attached by a later evaluation. A tracker that has
-  # already stopped drained on its way out, so a failed call means there is
-  # nothing left to drain rather than an unsettled one.
+  # Kills and reaps every attached task and then ends the tracker, so terminal
+  # cleanup can prove the run's callbacks are gone. Sealing is the point:
+  # draining without it would let a dispatch that raced the drain attach a live
+  # callback behind it while connector closers already run, so an attachment
+  # after this finds the owner closed and fails instead. Either lifecycle may
+  # call it, and calling it again once it has settled is a no-op.
   @spec drain_provider_tasks(t()) :: :ok
-  def drain_provider_tasks(%__MODULE__{} = tracker) do
-    _ = safe_call(tracker, :drain)
-    :ok
-  end
-
-  # A session that was never bound to a tracker never owned a task.
-  def drain_provider_tasks(_tracker), do: :ok
-
-  @spec close(t()) :: :ok
-  def close(%__MODULE__{pid: pid} = tracker) do
+  def drain_provider_tasks(%__MODULE__{pid: pid} = tracker) do
     ref = Process.monitor(pid)
 
     try do
-      _ = safe_call(tracker, :close)
+      _ = safe_call(tracker, :drain)
 
       receive do
         {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
@@ -68,6 +61,9 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
       Process.demonitor(ref, [:flush])
     end
   end
+
+  # A session that was never bound to a tracker never owned a task.
+  def drain_provider_tasks(_tracker), do: :ok
 
   @impl GenServer
   def init({token, run_state}) do
@@ -97,9 +93,6 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
   end
 
   def handle_call({token, :drain}, _from, %{token: token} = state),
-    do: {:reply, :ok, drain(state)}
-
-  def handle_call({token, :close}, _from, %{token: token} = state),
     do: {:stop, :normal, :ok, drain(state)}
 
   def handle_call(_request, _from, state), do: {:reply, {:error, :closed}, state}

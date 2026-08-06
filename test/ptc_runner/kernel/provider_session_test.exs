@@ -873,6 +873,86 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
   end
 
+  test "an unregistered close bounds the session's stack by the share it was given" do
+    # The caller reserves part of the one budget for the closer that must
+    # outlive a session which never answers. The session therefore bounds its
+    # own stack by that same share; otherwise a stack it could have worked
+    # through is killed at a bound only the caller knew about, and its oldest
+    # closer is never invoked at all.
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 600)
+    {:ok, session} = ProviderSession.start(limits)
+
+    for label <- [:first, :second] do
+      {:ok, registrar} = ProviderSession.open_registrar(session)
+      assert :ok = ResourceRegistrar.activate(registrar)
+
+      assert :ok =
+               ResourceRegistrar.commit(registrar, fn ->
+                 send(parent, {:closed, label})
+                 receive do: (:never -> :ok)
+               end)
+    end
+
+    assert {:error, :provider_cleanup_failed} =
+             ProviderSession.close_with_unregistered(session, fn ->
+               send(parent, {:closed, :unregistered})
+               receive do: (:never -> :ok)
+             end)
+
+    # Every closer on the stack is attempted. A session spending the whole
+    # anchored remainder instead of its share is killed part-way through and
+    # strands the oldest one.
+    assert_receive {:closed, :unregistered}
+    assert_receive {:closed, :second}
+    assert_receive {:closed, :first}
+  end
+
+  @tag timeout: 15_000
+  test "the cleanup deadline starts where the terminal action began" do
+    # Anchoring inside the session would measure from the instant it dequeued
+    # the request, so time already spent waiting for a busy session would be
+    # granted a second time.
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 1_000)
+    {:ok, session} = ProviderSession.start(limits)
+    parent = self()
+
+    suspender =
+      spawn(fn ->
+        true = :erlang.suspend_process(session.pid)
+        send(parent, :session_suspended)
+
+        receive do
+          :resume -> true = :erlang.resume_process(session.pid)
+        end
+      end)
+
+    assert_receive :session_suspended
+    Process.send_after(suspender, :resume, 300)
+
+    assert {:ok, deadline} = ProviderSession.anchor_cleanup_deadline(session)
+    assert Deadline.remaining(deadline) <= 700
+    assert :ok = ProviderSession.close(session)
+  end
+
+  test "an unregistered closer still runs at the smallest supported cleanup limit" do
+    # 100 ms is the smallest installable provider cleanup timeout, and it equals
+    # the reply grace. A split that took the grace off the top before halving
+    # would leave the session no budget at all and skip the closer it was just
+    # handed, leaving that resource open on the acquisition-failure path.
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+
+    assert :ok =
+             ProviderSession.close_with_unregistered(session, fn ->
+               send(parent, :minimum_budget_closed)
+               :ok
+             end)
+
+    assert_received :minimum_budget_closed
+  end
+
   test "cleanup continues in reverse order after a close failure" do
     {:ok, order} = Agent.start_link(fn -> [] end)
     {:ok, session} = ProviderSession.start(limits())
@@ -901,7 +981,8 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
     assert_received {:DOWN, ^monitor, :process, _pid, :killed}
     refute Process.alive?(session.pid)
-    assert elapsed < 5_000
+    # Bounded by the installed budget, not by a fixed interval unrelated to it.
+    assert elapsed < 1_000
   end
 
   test "an unresponsive session is terminated when closing an unregistered resource" do

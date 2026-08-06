@@ -858,12 +858,35 @@ Checkpoint C starts with a small stabilization prefix before adding doctor:
   `close/1` or `close_with_unregistered/2` cleanup consume what remains of that
   same deadline instead of each minting the installed cleanup duration again.
   `LoopbackListener` no longer mints a deadline at all — it receives the
-  anchoring operation and spends what it returns — and the unregistered closer
-  that outlives a session that never answers takes the unspent half of the one
-  budget by duration rather than a second anchor. Aborting one acquisition
-  scope mid-run is deliberately outside that episode and keeps its own bounded
-  budget. `provider_cleanup_failed` and `authorization_cleanup_failed` stay
-  exactly as classified.
+  anchoring operation and spends what it returns — the caller anchors where its
+  terminal action began so a busy session cannot restart the budget at dequeue,
+  and the session is told the share reserved for the closer that must outlive
+  it so both bounds agree. Aborting one acquisition scope mid-run is
+  deliberately outside that episode and keeps its own bounded budget.
+  `provider_cleanup_failed` and `authorization_cleanup_failed` stay exactly as
+  classified.
+
+  Three residuals are recorded rather than repaired here, each because closing
+  it is an ownership change rather than a deadline fix:
+
+  - The deadline bounds a session's own cleanup, not the last root's exit. A
+    scope reaper starts its own `provider_cleanup_timeout_ms` window when it
+    observes the session's death, so a terminated session's registered roots can
+    outlive the close that reported the failure, inside that separately bounded
+    tail. Folding the tail in means propagating the anchored deadline into the
+    scope reapers.
+  - A terminal stage that must ask the session for the anchored deadline can
+    only bound that request by the installed budget, because it cannot know the
+    remainder before the reply. A session that answers an OAuth cancellation and
+    then stops answering therefore costs one further budget on the close that
+    follows, before it is terminated. Removing it means returning the anchored
+    deadline out through the authorization subphase so the close inherits it
+    instead of asking.
+  - Caller death during a check aborts through the execution owner, which closes
+    the registry and the OAuth runtime before the session, while a close request
+    already delivered to that session continues concurrently. This is the
+    shipped abort ordering for runs as well, pinned by its own regression;
+    reversing it for the abort path is a separate ownership slice.
 
 Keep these as independently reviewable commits in the Checkpoint C PR. Do not
 start doctor implementation until the descriptor and ownership boundaries are

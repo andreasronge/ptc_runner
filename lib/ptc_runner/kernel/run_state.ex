@@ -240,7 +240,7 @@ defmodule PtcRunner.Kernel.RunState do
   def close_and_drain(%__MODULE__{} = state) do
     call(state, :close_and_drain)
   after
-    ProviderTaskTracker.close(state.provider_tracker)
+    ProviderTaskTracker.drain_provider_tasks(state.provider_tracker)
   end
 
   @spec stop(t()) :: :ok
@@ -248,7 +248,7 @@ defmodule PtcRunner.Kernel.RunState do
   def stop(%__MODULE__{} = state) do
     GenServer.stop(state.pid, :normal)
   after
-    ProviderTaskTracker.close(state.provider_tracker)
+    ProviderTaskTracker.drain_provider_tasks(state.provider_tracker)
   end
 
   # These two answer with the owner's data, and there is no substitute that

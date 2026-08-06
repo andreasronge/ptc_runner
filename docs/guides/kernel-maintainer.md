@@ -515,9 +515,13 @@ owner-down window and seals the set when force-close begins. This
 avoids a start-then-register gap, keeps provisional roots isolated, and removes
 reconciliation races between cleanup paths.
 Before callbacks can start, execution transfers the session from its build
-creator to the Runner or REPL session owner and binds its run state. The
-provider session itself tracks, cancels, and observes in-flight Kernel provider
-work before it runs any closer, including after owner or run state death.
+creator to the Runner or REPL session owner and binds it to the run's one
+provider-task owner. That owner is a separate process outside both lifecycles;
+it monitors the session and the run state, so in-flight Kernel provider work is
+drained before any closer runs and killed outright when either lifecycle
+disappears — including a session terminated at its cleanup deadline, where
+`terminate/2` never runs. The drain also ends that owner, so an attachment
+racing it is refused rather than accepted behind the closers.
 Normal close and lifecycle-owner death share one bounded reverse-order resource
 drain. Provider-free assembly carries no session and starts no provider owner.
 

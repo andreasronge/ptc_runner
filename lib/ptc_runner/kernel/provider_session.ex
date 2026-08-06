@@ -36,13 +36,17 @@ defmodule PtcRunner.Kernel.ProviderSession do
   absolute cleanup deadline; an OAuth cancellation and the reverse-order
   cleanup that follows it each consume what remains of that one deadline, and
   every close operation runs in a heap-bounded worker inside it. That budget
-  also bounds the caller: `close/1` waits one reply grace beyond it and then
-  terminates a session that has not answered, so a wedged session becomes a
-  classified cleanup failure rather than an unbounded wait. Aborting one
-  acquisition scope mid-run is not part of that episode and keeps its own
-  bounded budget. Failures never stop later cleanup attempts. This is a
-  process-local ownership boundary, not a durable resource journal or a
-  security boundary against trusted code in the same VM.
+  also bounds the caller: `close/1` waits one reply grace beyond what remains of
+  that deadline and then terminates a session that has not answered, so a wedged
+  session becomes a classified cleanup failure rather than an unbounded wait and
+  never a second budget. That deadline bounds this session's own cleanup, not
+  the last root's exit: terminating a wedged session ends the caller's wait, and
+  its scope reapers then observe that death and force their registered roots
+  within their own separately bounded tail. Aborting one acquisition scope
+  mid-run is likewise not part of the episode and keeps its own bounded budget.
+  Failures never stop later cleanup attempts. This is a process-local ownership
+  boundary, not a durable resource journal or a security boundary against
+  trusted code in the same VM.
   """
 
   use GenServer
@@ -318,18 +322,38 @@ defmodule PtcRunner.Kernel.ProviderSession do
           {:ok, Deadline.t()} | {:error, :provider_cleanup_failed}
   def anchor_cleanup_deadline(%__MODULE__{} = session) do
     if valid?(session) do
-      call(
-        session.pid,
-        {session.token, :anchor_cleanup_deadline},
-        @claim_timeout_ms,
-        {:error, :provider_cleanup_failed}
-      )
+      anchor_cleanup_deadline(session, session.cleanup_timeout_ms + @claim_reply_grace_ms)
     else
       {:error, :provider_cleanup_failed}
     end
   end
 
   def anchor_cleanup_deadline(_session), do: {:error, :provider_cleanup_failed}
+
+  # Anchoring is itself terminal work, so it is charged to the budget it
+  # anchors: a session that cannot answer within the share its caller can spare
+  # is wedged, and waiting a fixed interval unrelated to the installed limit
+  # would overrun that limit before cleanup had even started. Such a session is
+  # ended here rather than left for the next terminal action — an OAuth
+  # cancellation is followed by a close — to spend a second full budget
+  # discovering the same thing.
+  defp anchor_cleanup_deadline(session, timeout_ms) do
+    # Anchored where this terminal action began rather than where the session
+    # happens to dequeue it. A busy session would otherwise hand back a cutoff
+    # measured from its own dequeue, granting the time already spent waiting
+    # for it a second time. The session keeps the earliest anchor either way.
+    proposed = Deadline.new(session.cleanup_timeout_ms)
+
+    case call(
+           session.pid,
+           {session.token, {:anchor_cleanup_deadline, proposed}},
+           timeout_ms,
+           :cleanup_unsettled
+         ) do
+      {:ok, _deadline} = anchored -> anchored
+      _unsettled -> settle_terminal_close(:cleanup_unsettled, session)
+    end
+  end
 
   @doc false
   @spec claim_operation(t(), Limits.t(), binary()) ::
@@ -402,9 +426,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
   @spec close(t()) :: :ok | {:error, :provider_cleanup_failed}
   def close(%__MODULE__{} = session) do
     if valid?(session) do
-      session.pid
-      |> call({session.token, :close}, terminal_timeout(session), :cleanup_unsettled)
-      |> settle_terminal_close(session)
+      close_within_anchored_budget(session)
     else
       {:error, :provider_cleanup_failed}
     end
@@ -412,36 +434,55 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
   def close(_session), do: {:error, :provider_cleanup_failed}
 
+  # The caller waits what is left of the one anchored deadline, not the whole
+  # installed duration again: an OAuth cancellation may already have spent part
+  # of it, and waiting a fresh budget on top would make terminal cleanup last
+  # nearly two. Anchoring itself gets the installed budget, because a caller
+  # that has to ask cannot yet know the remainder, and a session that cannot
+  # answer within it is wedged: it is ended rather than waited on a second time.
+  defp close_within_anchored_budget(session) do
+    case anchor_cleanup_deadline(session, session.cleanup_timeout_ms + @claim_reply_grace_ms) do
+      {:ok, deadline} ->
+        session.pid
+        |> call(
+          {session.token, :close},
+          Deadline.remaining(deadline) + @claim_reply_grace_ms,
+          :cleanup_unsettled
+        )
+        |> settle_terminal_close(session)
+
+      # Anchoring already ended a session that could not answer within its own
+      # budget, so there is nothing left to wait for.
+      {:error, :provider_cleanup_failed} = error ->
+        error
+    end
+  end
+
   @doc false
   @spec close_with_unregistered(t(), (-> term()) | nil) ::
           :ok | {:error, :provider_cleanup_failed}
   def close_with_unregistered(%__MODULE__{} = session, close)
       when is_function(close, 0) or is_nil(close) do
     if valid?(session) do
-      # Two cleanup owners split the one installed budget by duration rather
-      # than anchoring a second deadline: the session gets a fair half, bounded
-      # inside by the one deadline it anchored, and the closer that outlives a
-      # session that never answers keeps the rest. Reply grace extends only the
-      # call, never the budget.
-      session_share_ms = div(session.cleanup_timeout_ms, 2)
+      # Two cleanup owners split the one budget: the session gets a fair share
+      # of what remains of the anchored deadline and bounds its own stack by
+      # that same share, so a stack it could not finish inside it is not killed
+      # at a bound only the caller knew about. The closer that must outlive a
+      # session which never answers keeps the rest. Anchoring is charged to the
+      # session's share, so a wedged session cannot spend the closer's.
+      started_at_ms = System.monotonic_time(:millisecond)
 
-      case call(
-             session.pid,
-             {session.token, {:close_with_unregistered, close}},
-             session_share_ms + @claim_reply_grace_ms,
-             :cleanup_unsettled
-           ) do
-        :cleanup_unsettled ->
-          _terminated = settle_terminal_close(:cleanup_unsettled, session)
+      {_share_ms, anchor_wait_ms} = cleanup_split(session.cleanup_timeout_ms)
 
-          close_after_session_loss(
-            session,
-            close,
-            session.cleanup_timeout_ms - session_share_ms
-          )
+      case anchor_cleanup_deadline(session, anchor_wait_ms) do
+        {:ok, deadline} ->
+          close_within_anchored_budget(session, close, deadline)
 
-        result ->
-          result
+        {:error, :provider_cleanup_failed} ->
+          # Anchoring already ended the wedged session. There is no anchored
+          # deadline to measure against, so the closer keeps what this call has
+          # not already spent of the installed budget.
+          close_after_session_loss(session, close, unspent_ms(session, started_at_ms))
       end
     else
       {:error, :provider_cleanup_failed}
@@ -449,6 +490,39 @@ defmodule PtcRunner.Kernel.ProviderSession do
   end
 
   def close_with_unregistered(_session, _close), do: {:error, :provider_cleanup_failed}
+
+  defp close_within_anchored_budget(session, close, deadline) do
+    {session_share_ms, wait_ms} = cleanup_split(Deadline.remaining(deadline))
+
+    case call(
+           session.pid,
+           {session.token, {:close_with_unregistered, close, session_share_ms}},
+           wait_ms,
+           :cleanup_unsettled
+         ) do
+      :cleanup_unsettled ->
+        _terminated = settle_terminal_close(:cleanup_unsettled, session)
+        # Measured against the absolute deadline, so the reply grace and any
+        # other elapsed time are already spent rather than granted again.
+        close_after_session_loss(session, close, Deadline.remaining(deadline))
+
+      result ->
+        result
+    end
+  end
+
+  # The two cleanup owners split what remains in half, and the reply grace that
+  # extends the call comes out of the caller's own half rather than off the top,
+  # so both keep a real share even at the smallest supported cleanup limit —
+  # where subtracting a full grace first would leave the session no budget at
+  # all and silently skip the closer it was handed.
+  defp cleanup_split(remaining_ms) do
+    share_ms = div(remaining_ms, 2)
+    {share_ms, share_ms + min(@claim_reply_grace_ms, div(remaining_ms, 4))}
+  end
+
+  defp unspent_ms(session, started_at_ms),
+    do: max(session.cleanup_timeout_ms - (System.monotonic_time(:millisecond) - started_at_ms), 0)
 
   @doc false
   @spec bind_lifecycle(t(), pid(), pid(), ProviderTaskTracker.t()) ::
@@ -820,14 +894,21 @@ defmodule PtcRunner.Kernel.ProviderSession do
     end
   end
 
-  def handle_call({token, :anchor_cleanup_deadline}, _from, state) when token == state.token do
-    state = ensure_cleanup_deadline(state)
+  def handle_call({token, {:anchor_cleanup_deadline, proposed}}, _from, state)
+      when token == state.token do
+    state = ensure_cleanup_deadline(state, proposed)
     {:reply, {:ok, state.cleanup_deadline}, state}
   end
 
-  def handle_call({token, {:close_with_unregistered, close}}, _from, state)
-      when token == state.token and (is_function(close, 0) or is_nil(close)) do
-    state = state |> begin_terminal_cleanup() |> add_committed_close(close)
+  def handle_call({token, {:close_with_unregistered, close, share_ms}}, _from, state)
+      when token == state.token and (is_function(close, 0) or is_nil(close)) and
+             is_integer(share_ms) and share_ms >= 0 do
+    state =
+      state
+      |> begin_terminal_cleanup()
+      |> narrow_cleanup_deadline(share_ms)
+      |> add_committed_close(close)
+
     {result, state} = drain(state)
     {:stop, :normal, result, state}
   end
@@ -916,6 +997,15 @@ defmodule PtcRunner.Kernel.ProviderSession do
     :ok
   end
 
+  # The caller keeps the rest of the one budget for a closer that must outlive
+  # this session, so the stack below is bounded by the share it was given
+  # instead of the whole remainder it would otherwise spend. Narrowing only ever
+  # shortens the anchored deadline.
+  defp narrow_cleanup_deadline(state, share_ms) do
+    share = Deadline.from_expires_at(System.monotonic_time(:millisecond) + share_ms)
+    %{state | cleanup_deadline: Deadline.earliest(state.cleanup_deadline, share)}
+  end
+
   # The first terminal action anchors the one cleanup deadline, before the task
   # drain rather than after it, so every later stage measures against the
   # instant cleanup actually began.
@@ -974,13 +1064,6 @@ defmodule PtcRunner.Kernel.ProviderSession do
         committed: [scope | state.committed]
     }
   end
-
-  # The lifecycle owner installs `provider_cleanup_timeout_ms` as this session's
-  # whole terminal budget, and the session bounds its own LIFO cleanup by it, so
-  # a reply that misses that budget plus one reply grace means the session is
-  # wedged rather than slow. Waiting past it would turn a bounded failure into a
-  # permanent one.
-  defp terminal_timeout(session), do: session.cleanup_timeout_ms + @claim_reply_grace_ms
 
   # Cleanup has already begun and cannot be re-entered, so the caller ends the
   # session rather than leaving it holding scope owners no one is waiting on.
@@ -1103,6 +1186,18 @@ defmodule PtcRunner.Kernel.ProviderSession do
     do: %{state | cleanup_deadline: Deadline.new(state.cleanup_timeout_ms)}
 
   defp ensure_cleanup_deadline(state), do: state
+
+  # A caller that entered terminal cleanup before this session dequeued its
+  # request supplies the earlier cutoff, and the earliest anchor always wins, so
+  # a queued request can only shorten the one budget, never restart it.
+  defp ensure_cleanup_deadline(state, proposed) do
+    if Deadline.valid?(proposed) do
+      anchored = state.cleanup_deadline || proposed
+      %{state | cleanup_deadline: Deadline.earliest(anchored, proposed)}
+    else
+      ensure_cleanup_deadline(state)
+    end
+  end
 
   defp close_roots(entry, deadline) do
     root_slots = if entry.roots_registered?, do: 1, else: 0

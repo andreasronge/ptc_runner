@@ -877,15 +877,19 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
 
     assert :ok =
              ResourceRegistrar.commit(registrar, fn ->
-               send(parent, {:closed, Process.alive?(provider)})
+               # The closer observes the exact window a racing dispatch would
+               # use: the session is still alive and the run is still open.
+               send(parent, {:closed, Process.alive?(provider), late_attach(state)})
                :ok
              end)
 
     assert Process.alive?(provider)
     assert :ok = ProviderSession.close(session)
 
-    # No callback from this run may still be live when a connector closes.
-    assert_receive {:closed, false}
+    # No callback from this run may still be live when a connector closes, and
+    # the drain that proved it also seals the owner, so one that raced it is
+    # refused rather than attached behind the closers.
+    assert_receive {:closed, false, {{:error, :closed}, :killed}}
     refute Process.alive?(provider)
 
     RunState.close(state)
@@ -1396,6 +1400,24 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
 
     assert_receive {:scope_root_ready, ^root}
     root
+  end
+
+  # Attaches from a separate process, since one process holds one reservation.
+  # A task the sealed owner accepted is killed here so the assertion reports the
+  # accepted attachment instead of timing out on a live one.
+  defp late_attach(state) do
+    Task.async(fn ->
+      task = spawn(fn -> receive do: (:stop -> :ok) end)
+      monitor = Process.monitor(task)
+      :ok = RunState.reserve_capability(state, :workflow, "late")
+      attached = RunState.attach_provider(state, task)
+      if attached == :ok, do: Process.exit(task, :kill)
+
+      receive do
+        {:DOWN, ^monitor, :process, ^task, reason} -> {attached, reason}
+      end
+    end)
+    |> Task.await()
   end
 
   defp start_provider_task(state, name) do
