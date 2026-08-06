@@ -410,8 +410,12 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
         authorization: manager
       )
 
-    caller = spawn(fn -> assert {:ok, _request} = MCPRequestContext.begin_request(context) end)
-    caller_ref = Process.monitor(caller)
+    # Monitoring after `spawn/1` races the callback: a caller that finishes
+    # first is already gone, so the monitor reports `:noproc` rather than the
+    # exit reason this asserts on.
+    {caller, caller_ref} =
+      spawn_monitor(fn -> assert {:ok, _request} = MCPRequestContext.begin_request(context) end)
+
     assert_receive {:DOWN, ^caller_ref, :process, ^caller, :normal}
     assert_receive :abnormal_release_attempt
 
@@ -495,8 +499,12 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
         authorization: manager
       )
 
-    caller = spawn(fn -> assert {:ok, _request} = MCPRequestContext.begin_request(context) end)
-    caller_ref = Process.monitor(caller)
+    # Monitoring after `spawn/1` races the callback: a caller that finishes
+    # first is already gone, so the monitor reports `:noproc` rather than the
+    # exit reason this asserts on.
+    {caller, caller_ref} =
+      spawn_monitor(fn -> assert {:ok, _request} = MCPRequestContext.begin_request(context) end)
+
     assert_receive {:DOWN, ^caller_ref, :process, ^caller, :normal}
     assert_receive :unavailable_owner_release_attempt
 
