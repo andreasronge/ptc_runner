@@ -16,19 +16,24 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
   @moduletag timeout: 180_000
 
   alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.TestSupport.LLMSupport
 
   setup_all do
     :ok = PtcRunner.Dotenv.load()
+    # Host installation admits a provider application through the prepared-run
+    # path; a directly registered builder has to start it itself.
+    {:ok, _started} = Application.ensure_all_started(:req_llm)
     :ok
   end
 
   @tag :tmp_dir
   test "a live model drives a remote MCP tool through a manifest run", %{tmp_dir: dir} do
     endpoint = System.fetch_env!("PTC_TEST_MCP_2026_ENDPOINT")
-    model = System.get_env("PTC_TEST_MODEL", "deepseek")
+    model = LLMSupport.model()
 
     builder =
       MCPSource.builder(
@@ -38,7 +43,13 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
         max_result_bytes: 500_000
       )
 
-    {:ok, registry} = ProviderRegistry.new(%{"remote-time" => builder})
+    # The endpoint is plain-HTTP loopback, which only `MCPSource.builder/1`
+    # admits, so this registry cannot come from a host config — and host
+    # installation is now the only thing that installs an `llm` provider. The
+    # workflow model is therefore registered directly, the way the registry's
+    # own built-in did before host-only registries replaced it.
+    {:ok, registry} =
+      ProviderRegistry.new(%{"remote-time" => builder, "llm" => &build_llm/2})
 
     File.write!(Path.join(dir, "agent.clj"), ~S"""
     (ns e2e.agent "Remote MCP e2e entry." {:visibility :prompt})
@@ -167,5 +178,17 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
              record["record_type"] == "evaluation-source" and
                record["payload"]["source"] =~ "city-time"
            end)
+  end
+
+  defp build_llm(%{"model" => model}, _context) do
+    requester = PtcRunner.LLM.callback(model, api_key: System.get_env("OPENROUTER_API_KEY"))
+
+    LLMCapability.new(
+      requester: fn request ->
+        request
+        |> ProviderRegistry.adapter_request()
+        |> requester.()
+      end
+    )
   end
 end

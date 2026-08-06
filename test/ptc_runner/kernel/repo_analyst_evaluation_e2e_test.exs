@@ -362,8 +362,12 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
     )
   end
 
+  # The trial input is passed to the run as an application logical name, and
+  # those are lowercase by grammar, so the suffix must be too. Base64 emits
+  # upper-case bytes and made this directory an invalid name in all but a
+  # fraction of runs.
   defp private_directory do
-    suffix = Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)
+    suffix = Base.encode32(:crypto.strong_rand_bytes(9), case: :lower, padding: false)
 
     path =
       Path.join(
