@@ -1,9 +1,10 @@
 # Stable CLI and transport-neutral application plan
 
-**Status:** accepted; Checkpoints A and B are complete and the remaining work
-continues through follow-up PRs.
-**Revised:** 2026-08-05 after Checkpoint B merged, to put the exposed
-execution-path parity and deadline debt ahead of bounded connectivity work.
+**Status:** accepted; Checkpoints A and B are complete, Checkpoint C's
+stabilization prefix is merged, and the remaining work continues through
+follow-up PRs.
+**Revised:** 2026-08-06 after the Checkpoint C stabilization prefix merged, to
+record that prefix as delivered and make doctor completion the active work.
 
 This plan delivers a stable command-line contract and a path-free execution
 core without designing infrastructure for a future hosted service. Exact
@@ -781,7 +782,16 @@ evaluations and finalizes them exactly once at REPL close.
 
 ### Slice 7: bounded connectivity and doctor
 
-Checkpoint C starts with a small stabilization prefix before adding doctor:
+**Stabilization prefix status (merged 2026-08-06):** PR #1180 merged as
+`7abc1728` and delivered every entry below. Descriptor authority, the recorded
+host-bound activation exception, pre-run dotenv loading, exact listener expiry,
+shared `--check` execution ownership, external provider-task ownership, and
+anchored terminal cleanup are all on `origin/main`, and the scaffolding each
+entry replaced is deleted. Doctor completion is the active work; it starts from
+the caller-death ordering repair named in the third residual below, because
+doctor becomes the fourth caller of that abort path.
+
+Checkpoint C started with a small stabilization prefix before adding doctor:
 
 - (complete, `586f0de0`) make the sealed provider descriptor authoritative
   during staged preparation; reject `data_class` or `accepts_data` drift before
@@ -886,12 +896,23 @@ Checkpoint C starts with a small stabilization prefix before adding doctor:
     the registry and the OAuth runtime before the session, while a close request
     already delivered to that session continues concurrently. This is the
     shipped abort ordering for runs as well, pinned by its own regression;
-    reversing it for the abort path is a separate ownership slice.
+    reversing it for the abort path is a separate ownership slice. Doctor
+    becomes the fourth caller of that path, so this residual is repaired first
+    in the doctor work below rather than inherited.
 
-Keep these as independently reviewable commits in the Checkpoint C PR. Do not
-start doctor implementation until the descriptor and ownership boundaries are
-shared and their replaced `--check` scaffolding is gone.
+The first two residuals stay recorded rather than repaired, because neither
+blocks the doctor contract below.
 
+Doctor completion delivers the following, again as independently reviewable
+commits in one Checkpoint C PR:
+
+- repair the abort ordering named in the third residual above. During run and
+  `--check` abort, the execution owner closes the provider session first and
+  keeps the registry and the OAuth runtime alive until that cleanup has
+  settled, because a committed provider closer runs against the runtime that
+  produced its resources. The OAuth store therefore also stops dying with the
+  execution worker: it is owned by the lifecycle owner, so killing a blocked
+  worker no longer destroys the store a session closer still needs;
 - implement the default doctor applicability matrix from inert declarations;
 - keep validate/models inert, audited-local checks in phase 7, and every
   unverified callback behind the phase-8 marker;
