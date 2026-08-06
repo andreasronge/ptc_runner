@@ -987,12 +987,37 @@ commits in one Checkpoint C PR:
   code would report a manifest error as a missing local dependency, so they keep
   their own diagnostics, and an unrecognised reason fails closed as an internal
   error instead of being forced into the nearest local code;
+- wire default doctor through the shared coordinator boundary, preserving this
+  separation exactly. `RunCoordinator` invokes `LocalPreflight` from the sealed
+  prepared/catalog/services inputs. `LocalPreflight` returns only success or a
+  diagnostic and never consumes `DoctorPlan` rows, so applicability keeps coming
+  from sealed declarations rather than from a rendering plan a caller could
+  shorten. After success, doctor settles all audited-local rows, because the
+  shared executor has proven every applicable occurrence. `CommandEngine` only
+  selects the command flow and renders the returned result: no callback
+  invocation, no deadline arithmetic, no occurrence traversal. Run, check, and
+  the REPL use the same phase-7 boundary before activity is marked.
+  `RunCoordinator.validation_result/1` is the shape precedent for what the
+  frontend calls;
 - run `doctor --connect` through the ordinary provider-session prefix and its
   connectivity branch: probe `:probe`, use bounded acquisition/discovery for
   `:acquisition`, and skip `:none`;
 - keep `MCPHTTPAdapter` as the single shipped HTTP boundary while adding an
   authoritative cap at or before the transport receive boundary; and
 - add shipped live-model probes with retries and redirects disabled.
+
+**Must complete before the Checkpoint C PR opens:** add a closed phase-7 timeout
+code to `DiagnosticCatalog` and report an exhausted audited-local budget with
+it. Phase 7 now spends one anchored deadline across every applicable occurrence,
+and the catalog has only `environment_unavailable`, `adapter_unavailable`, and
+`launcher_unavailable`, so an exhausted budget currently reports
+`internal_error`. That is safe and fail-closed but misleading for an expected
+operational outcome — a slow filesystem or adapter load is not an internal
+defect. It is deferred out of the executor commit only because adding a code
+changes the public diagnostic catalog and the generated envelope schema, which
+deserves its own reviewed commit rather than riding inside a refactor.
+`subject_operations/2` and `subject_occurrence_policy/3` already have
+`:local_preflight` catch-alls, so the code change itself is one row.
 
 **Gate:** default doctor performs no provider activity; connect checks use the
 selected occurrences, the same shared activation prefix as a run, their
