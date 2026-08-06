@@ -27,7 +27,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
              :invalid_prepared_run
              | :invalid_publication_authority
              | :provider_session_required}
-  def start(prepared, authority, caller), do: start(prepared, authority, caller, nil, nil)
+  def start(prepared, authority, caller),
+    do: start(prepared, authority, caller, nil, nil, :run)
 
   @doc false
   @spec start(
@@ -35,7 +36,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           PublicationAuthority.t(),
           pid(),
           ProviderExecution.t() | nil,
-          (binary() -> term()) | nil
+          (binary() -> term()) | nil,
+          :run | :check
         ) ::
           {:ok, t()}
           | {:error,
@@ -43,7 +45,10 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
              | :invalid_publication_authority
              | :provider_session_required
              | :invalid_provider_execution}
-  def start(prepared, authority, caller, provider_execution, notifier) when is_pid(caller) do
+  def start(prepared, authority, caller, provider_execution, notifier, operation \\ :run)
+
+  def start(prepared, authority, caller, provider_execution, notifier, operation)
+      when is_pid(caller) and operation in [:run, :check] do
     cond do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
@@ -69,7 +74,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
         case GenServer.start(
                __MODULE__,
-               {prepared, authority, caller, token, provider_execution, notifier}
+               {prepared, authority, caller, token, provider_execution, notifier, operation}
              ) do
           {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
           {:error, _reason} -> {:error, :invalid_prepared_run}
@@ -77,11 +82,14 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     end
   end
 
-  def start(_prepared, _authority, _caller, _provider_execution, _notifier),
+  def start(_prepared, _authority, _caller, _provider_execution, _notifier, _operation),
     do: {:error, :invalid_prepared_run}
 
+  # A check completes with the acquisition's safe connector snapshots where a
+  # run completes with a sealed execution outcome.
   @doc false
-  @spec await(t()) :: {:ok, PtcRunner.Kernel.ExecutionOutcome.t()} | {:error, term()}
+  @spec await(t()) ::
+          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | [map()]} | {:error, term()}
   def await(%__MODULE__{pid: pid, token: token}) do
     GenServer.call(pid, {token, :await}, :infinity)
   catch
@@ -93,7 +101,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   def pid(%__MODULE__{pid: pid}), do: pid
 
   @impl GenServer
-  def init({prepared, authority, caller, token, provider_execution, notifier}) do
+  def init({prepared, authority, caller, token, provider_execution, notifier, operation}) do
     caller_ref = Process.monitor(caller)
 
     initial = %{
@@ -117,14 +125,15 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     case RunBuilder.open_prepared_sinks(prepared, authority, self()) do
       {:ok, opened_sinks} ->
         if prepared.provider_declarations == [] do
-          open_provider_free(initial, authority, opened_sinks)
+          open_provider_free(initial, authority, opened_sinks, operation)
         else
           open_provider_execution(
             initial,
             authority,
             opened_sinks,
             provider_execution,
-            notifier
+            notifier,
+            operation
           )
         end
 
@@ -238,7 +247,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     :ok
   end
 
-  defp open_provider_free(initial, authority, opened_sinks) do
+  defp open_provider_free(initial, authority, opened_sinks, operation) do
     prepared = initial.prepared
 
     result =
@@ -259,7 +268,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
         {worker_pid, worker_ref} =
           spawn_monitor(fn ->
-            execution_result = RunBuilder.execute_built(built)
+            execution_result = complete_operation(built, operation)
             send(owner, {token, :execution_result, self(), execution_result})
           end)
 
@@ -301,7 +310,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
          authority,
          opened_sinks,
          provider_execution,
-         notifier
+         notifier,
+         operation
        ) do
     owner = self()
     token = initial.token
@@ -326,7 +336,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
                 provider_execution,
                 notifier,
                 tracker,
-                owner
+                owner,
+                operation
               )
 
             send(owner, {token, :execution_result, self(), execution_result})
@@ -362,6 +373,9 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         {:ok, next}
     end
   end
+
+  defp complete_operation(built, :run), do: RunBuilder.execute_built(built)
+  defp complete_operation(built, :check), do: RunBuilder.check_built(built)
 
   defp finish_or_wait(%{waiter: nil} = state), do: {:noreply, state}
 

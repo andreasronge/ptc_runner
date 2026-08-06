@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.Deadline
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Authorization
   alias PtcRunner.Kernel.MCPOAuth.Context
@@ -9,6 +10,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
   alias PtcRunner.Kernel.MCPOAuth.Metadata
   alias PtcRunner.Kernel.MCPOAuth.Store
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
+  alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Test.MCPOAuthRecordingStore
 
   setup do
@@ -277,7 +279,9 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
              Authorization.complete_authorization(bob, pending, callback, request: request)
 
     assert {:error, :invalid_authorization_context} =
-             Authorization.cancel_authorization(bob, pending, [])
+             Authorization.cancel_authorization(bob, pending,
+               cleanup_deadline: Deadline.new(1_000)
+             )
 
     assert {:ok, _grant} =
              Authorization.complete_authorization(
@@ -319,7 +323,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
         end
 
         result =
-          LoopbackListener.await(listener, context.context, pending, request: request)
+          LoopbackListener.await(listener, context.context, pending, await_opts(request))
 
         send(parent, {:awaited, result})
       end)
@@ -365,7 +369,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
           :go -> :ok
         end
 
-        LoopbackListener.await(listener, context.context, pending, request: request)
+        LoopbackListener.await(listener, context.context, pending, await_opts(request))
       end)
 
     assert :ok = :gen_tcp.controlling_process(listener.socket, task.pid)
@@ -386,6 +390,297 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
     assert {:error, :invalid_callback_request} = Task.await(task, 1_000)
   end
 
+  test "an expired interaction refuses a callback that is already buffered", context do
+    request = request_fixture(context.authority, self())
+    assert {:ok, listener} = LoopbackListener.start(context.authority)
+
+    assert {:ok, pending} =
+             Authorization.begin_authorization(context.context, context.authority,
+               authority_epoch: context.epoch,
+               redirect_uri: listener.redirect_uri,
+               request: request
+             )
+
+    state =
+      pending.url
+      |> URI.parse()
+      |> Map.fetch!(:query)
+      |> URI.decode_query()
+      |> Map.fetch!("state")
+
+    {:ok, socket} =
+      :gen_tcp.connect({127, 0, 0, 1}, listener.port, [:binary, active: false], 1_000)
+
+    target =
+      "/callback?" <>
+        URI.encode_query(%{
+          "code" => "late-code",
+          "state" => state,
+          "iss" => context.authority.issuer
+        })
+
+    # A complete, otherwise valid callback sitting in the socket before the
+    # listener ever accepts it. Accepting a connection or reading buffered
+    # bytes after expiry would complete an interaction whose deadline passed.
+    assert :ok =
+             :gen_tcp.send(
+               socket,
+               "GET #{target} HTTP/1.1\r\nHost: 127.0.0.1:#{listener.port}\r\n\r\n"
+             )
+
+    expired = %{pending | deadline_ms: System.monotonic_time(:millisecond) - 1}
+
+    assert {:error, :authorization_timeout} =
+             LoopbackListener.await(listener, context.context, expired, await_opts(request))
+
+    assert {:error, :closed} = :gen_tcp.recv(socket, 0, 1_000)
+  end
+
+  test "a blocked cancellation is reported, not silently accepted", context do
+    parent = self()
+    request = request_fixture(context.authority, self())
+
+    {:ok, blocked_store} =
+      MCPOAuthRecordingStore.wrap(context.store, self(),
+        interceptor: fn operation, deadline ->
+          if elem(operation, 0) == :cancel_flow do
+            send(parent, {:cancel_deadline, deadline})
+            {:return, {:error, :timeout}}
+          else
+            :delegate
+          end
+        end
+      )
+
+    {:ok, blocked_context} =
+      Context.new(
+        tenant_id: "tenant",
+        principal_id: "alice",
+        store: blocked_store,
+        deadline: Deadline.new(10_000)
+      )
+
+    assert {:ok, listener} = LoopbackListener.start(context.authority)
+
+    assert {:ok, pending} =
+             Authorization.begin_authorization(blocked_context, context.authority,
+               authority_epoch: context.epoch,
+               redirect_uri: listener.redirect_uri,
+               request: request
+             )
+
+    expired = %{pending | deadline_ms: System.monotonic_time(:millisecond) - 1}
+
+    # The interaction expired, but a cancellation that never commits leaves the
+    # pending authorization live, so the caller learns about the cleanup failure
+    # instead of a plain timeout.
+    assert {:error, :authorization_cleanup_failed} =
+             LoopbackListener.await(listener, blocked_context, expired, await_opts(request))
+
+    # Cleanup spends the supplied terminal budget, not whatever remained of the
+    # expired interaction it is cleaning up.
+    assert_received {:cancel_deadline, cancel_deadline}
+    remaining = Deadline.remaining(cancel_deadline)
+    assert remaining > 4_000 and remaining <= 5_000
+  end
+
+  @tag timeout: 15_000
+  test "cancellation consumes the one anchored cleanup deadline", context do
+    parent = self()
+    request = request_fixture(context.authority, self())
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 1_000)
+    assert {:ok, session} = ProviderSession.start(limits)
+
+    {:ok, recording_store} =
+      MCPOAuthRecordingStore.wrap(context.store, self(),
+        interceptor: fn operation, deadline ->
+          if elem(operation, 0) == :cancel_flow, do: send(parent, {:cancel_deadline, deadline})
+          :delegate
+        end
+      )
+
+    {:ok, recording_context} =
+      Context.new(
+        tenant_id: "tenant",
+        principal_id: "alice",
+        store: recording_store,
+        deadline: Deadline.new(10_000)
+      )
+
+    assert {:ok, listener} = LoopbackListener.start(context.authority)
+
+    assert {:ok, pending} =
+             Authorization.begin_authorization(recording_context, context.authority,
+               authority_epoch: context.epoch,
+               redirect_uri: listener.redirect_uri,
+               request: request
+             )
+
+    # An earlier terminal action has already anchored this session's one budget.
+    assert {:ok, anchored} = ProviderSession.anchor_cleanup_deadline(session)
+
+    # No client connects, so the interaction spends its own timeout before
+    # failing. Cleanup then gets what is left of the anchored budget.
+    interaction = %{pending | deadline_ms: System.monotonic_time(:millisecond) + 300}
+
+    assert {:error, :authorization_timeout} =
+             LoopbackListener.await(listener, recording_context, interaction,
+               request: request,
+               anchor_cleanup_deadline: fn -> ProviderSession.anchor_cleanup_deadline(session) end
+             )
+
+    assert_received {:cancel_deadline, cancel_deadline}
+    assert cancel_deadline == anchored
+    assert Deadline.remaining(cancel_deadline) <= 700
+
+    assert :ok = ProviderSession.close(session)
+  end
+
+  @tag timeout: 15_000
+  test "a session that cannot anchor its budget is ended by the cancellation", context do
+    request = request_fixture(context.authority, self())
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 200)
+    assert {:ok, session} = ProviderSession.start(limits)
+    assert {:ok, listener} = LoopbackListener.start(context.authority)
+
+    assert {:ok, pending} =
+             Authorization.begin_authorization(context.context, context.authority,
+               authority_epoch: context.epoch,
+               redirect_uri: listener.redirect_uri,
+               request: request
+             )
+
+    expired = %{pending | deadline_ms: System.monotonic_time(:millisecond) - 1}
+    monitor = Process.monitor(session.pid)
+    assert :ok = :sys.suspend(session.pid)
+    started_at = System.monotonic_time(:millisecond)
+
+    assert {:error, :authorization_cleanup_failed} =
+             LoopbackListener.await(listener, context.context, expired,
+               request: request,
+               anchor_cleanup_deadline: fn -> ProviderSession.anchor_cleanup_deadline(session) end
+             )
+
+    elapsed = System.monotonic_time(:millisecond) - started_at
+
+    # Ending the wedged session here is what keeps the episode inside one
+    # budget: the close that follows a failed cancellation would otherwise
+    # start the same full wait again before killing it.
+    assert_received {:DOWN, ^monitor, :process, _pid, :killed}
+    assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
+    assert System.monotonic_time(:millisecond) - started_at < 1_000
+    assert elapsed < 1_000
+  end
+
+  test "a silent client that never completes its request reports a timeout", context do
+    request = request_fixture(context.authority, self())
+    assert {:ok, listener} = LoopbackListener.start(context.authority)
+
+    assert {:ok, pending} =
+             Authorization.begin_authorization(context.context, context.authority,
+               authority_epoch: context.epoch,
+               redirect_uri: listener.redirect_uri,
+               request: request
+             )
+
+    pending = %{pending | deadline_ms: System.monotonic_time(:millisecond) + 200}
+
+    task =
+      Task.async(fn ->
+        receive do: (:go -> :ok)
+        LoopbackListener.await(listener, context.context, pending, await_opts(request))
+      end)
+
+    assert :ok = :gen_tcp.controlling_process(listener.socket, task.pid)
+    send(task.pid, :go)
+
+    {:ok, socket} =
+      :gen_tcp.connect({127, 0, 0, 1}, listener.port, [:binary, active: false], 1_000)
+
+    # A connection that stops mid-request is an expired interaction, not a
+    # malformed one; the distinction is what the caller reports to the user.
+    assert :ok =
+             :gen_tcp.send(
+               socket,
+               "GET /callback HTTP/1.1\r\nHost: 127.0.0.1:#{listener.port}\r\n"
+             )
+
+    assert {:error, :authorization_timeout} = Task.await(task, 5_000)
+
+    # Proves the interaction reached the receive loop; an accept that timed out
+    # first would satisfy the reason without ever handling a connection.
+    assert {:ok, response} = :gen_tcp.recv(socket, 0, 5_000)
+    assert response =~ "400 Bad Request"
+  end
+
+  test "a trickling client cannot extend an expired loopback interaction", context do
+    parent = self()
+    request = request_fixture(context.authority, self())
+
+    {:ok, observed_store} =
+      MCPOAuthRecordingStore.wrap(context.store, self(),
+        interceptor: fn operation, _deadline ->
+          if elem(operation, 0) == :cancel_flow, do: send(parent, :cancel_flow_issued)
+          :delegate
+        end
+      )
+
+    {:ok, observed_context} =
+      Context.new(
+        tenant_id: "tenant",
+        principal_id: "alice",
+        store: observed_store,
+        deadline: Deadline.new(10_000)
+      )
+
+    assert {:ok, listener} = LoopbackListener.start(context.authority)
+
+    assert {:ok, pending} =
+             Authorization.begin_authorization(observed_context, context.authority,
+               authority_epoch: context.epoch,
+               redirect_uri: listener.redirect_uri,
+               request: request
+             )
+
+    pending = %{pending | deadline_ms: System.monotonic_time(:millisecond) + 300}
+
+    task =
+      Task.async(fn ->
+        receive do: (:go -> :ok)
+        LoopbackListener.await(listener, observed_context, pending, await_opts(request))
+      end)
+
+    assert :ok = :gen_tcp.controlling_process(listener.socket, task.pid)
+    send(task.pid, :go)
+
+    {:ok, socket} =
+      :gen_tcp.connect({127, 0, 0, 1}, listener.port, [:binary, active: false], 1_000)
+
+    # A request head that never terminates, followed by bytes that keep
+    # arriving after the absolute deadline.
+    assert :ok =
+             :gen_tcp.send(
+               socket,
+               "GET /callback HTTP/1.1\r\nHost: 127.0.0.1:#{listener.port}\r\n"
+             )
+
+    client = spawn(fn -> trickle(socket, parent) end)
+    on_exit(fn -> if Process.alive?(client), do: Process.exit(client, :kill) end)
+
+    assert {:error, :authorization_timeout} = Task.await(task, 5_000)
+
+    # The 400 proves the connection was accepted and the receive loop ran, so
+    # the timeout cannot have come from an accept that expired first.
+    assert {:ok, response} = :gen_tcp.recv(socket, 0, 5_000)
+    assert response =~ "400 Bad Request"
+
+    # The listener's own responsibility is to issue the cancellation; whether
+    # the store commits it is bounded by the residual budget of the expired
+    # interaction, which is a separate concern from this boundary.
+    assert_receive :cancel_flow_issued, 1_000
+    assert_receive {:trickle_stopped, _reason}, 5_000
+  end
+
   test "loopback callback reports an expired interaction as an authorization timeout", context do
     request = request_fixture(context.authority, self())
     assert {:ok, listener} = LoopbackListener.start(context.authority)
@@ -400,8 +695,27 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
     expired = %{pending | deadline_ms: System.monotonic_time(:millisecond) - 1}
 
     assert {:error, :authorization_timeout} =
-             LoopbackListener.await(listener, context.context, expired, request: request)
+             LoopbackListener.await(listener, context.context, expired, await_opts(request))
   end
+
+  # Paces a deliberately slow client so the 16 KB request cap is not what ends
+  # the listener's loop. No assertion depends on the exact rate.
+  defp trickle(socket, parent) do
+    case :gen_tcp.send(socket, "X") do
+      :ok ->
+        Process.send_after(self(), :tick, 10)
+        receive do: (:tick -> trickle(socket, parent))
+
+      {:error, reason} ->
+        send(parent, {:trickle_stopped, reason})
+    end
+  end
+
+  # Production supplies the operation that anchors the lifecycle owner's one
+  # cleanup deadline; without it a failed interaction cannot cancel its pending
+  # authorization.
+  defp await_opts(request),
+    do: [request: request, anchor_cleanup_deadline: fn -> {:ok, Deadline.new(5_000)} end]
 
   defp request_fixture(
          authority,

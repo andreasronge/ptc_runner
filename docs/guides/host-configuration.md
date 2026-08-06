@@ -114,8 +114,12 @@ selected provider application. A reused host-owned application keeps whatever
 its own start applied, because it was already running.
 
 For a selected shipped LLM whose declared credential uses `env`, the Mix
-frontend loads the nearest `.env` through `PtcRunner.Dotenv` after provider
-activity begins and before resolving that credential. One declared credential
+frontend loads the nearest `.env` through `PtcRunner.Dotenv` once, after
+preparation has established which providers are selected and before any
+execution owner, provider session, or run clock exists. Loading is command
+setup rather than bounded run work: it reads the filesystem and mutates the VM
+environment, so it can be neither deadline-cancelled nor rolled back, and it
+never consumes the run budget. One declared credential
 triggers the load, but the load is not scoped to it: the loader walks up from
 the invocation directory to the filesystem root and sets every variable in the
 first `.env` it finds. This happens once per VM and those variables persist for

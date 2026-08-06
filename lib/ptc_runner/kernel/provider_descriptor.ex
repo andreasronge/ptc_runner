@@ -45,6 +45,10 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
           | :ptc_trace_snapshot
           | :ptc_inspection_snapshot
           | :custom
+  @type data_policy :: %{
+          data_class: :normal | :private_inspection,
+          accepts_data: [:normal | :private_inspection]
+        }
   @type t :: %__MODULE__{
           source: source(),
           installation_revision: binary(),
@@ -106,6 +110,17 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
         Attestation.valid?(__MODULE__, payload(descriptor), attestation)
 
   def valid?(_descriptor), do: false
+
+  @spec data_policy(t()) :: data_policy()
+  @doc """
+  Projects the declared data policy a run-bound builder must honor.
+
+  Run-bound registries carry only this projection. A complete descriptor also
+  holds selection rules, which are bounded but large enough that copying them
+  into every provider worker would compete with the provider heap limit.
+  """
+  def data_policy(%__MODULE__{} = descriptor),
+    do: %{data_class: descriptor.data_class, accepts_data: descriptor.accepts_data}
 
   @spec public_projection(t(), binary(), map()) :: map()
   @doc "Projects only selector-safe declaration identity for one occurrence."

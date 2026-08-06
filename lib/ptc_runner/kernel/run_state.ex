@@ -17,9 +17,11 @@ defmodule PtcRunner.Kernel.RunState do
   co-hosted session construction receives a one-shot transfer.
 
   Each capability reservation monitors the dispatching process. Every attached
-  provider is also registered with a small monitor-only tracker that
-  untrappably kills the callback if RunState dies, even when `terminate/2`
-  cannot run. If the
+  provider is also registered with the run's one provider-task owner, an
+  internal process external to both this process and the provider session. It
+  monitors both, so it untrappably kills every attached callback when either
+  lifecycle disappears — including a session terminated at its cleanup
+  deadline, where `terminate/2` cannot run. If the
   dispatching process dies mid-call (heap kill, timeout kill), the reservation
   is reclaimed only after the attached provider process has been killed and
   its `:DOWN` observed. Thus connector cleanup cannot begin while a callback
@@ -63,7 +65,7 @@ defmodule PtcRunner.Kernel.RunState do
   @type environment :: :workflow | :mission
 
   @typedoc """
-  Opaque handle to the process tracking this run's provider tasks.
+  Opaque handle to the one process that owns this run's provider tasks.
 
   Its shape is an implementation detail: callers receive it inside `t:t/0` and
   hand it back to the Kernel rather than inspecting it. Declaring it here keeps
@@ -71,7 +73,7 @@ defmodule PtcRunner.Kernel.RunState do
   `pid()` would be inaccurate because the handle also carries an ownership
   token.
   """
-  @type provider_tracker :: {atom(), term()}
+  @type provider_tracker :: %{:__struct__ => module(), :pid => pid(), :token => reference()}
 
   @type t :: %__MODULE__{
           pid: pid(),
@@ -89,7 +91,7 @@ defmodule PtcRunner.Kernel.RunState do
 
     if Keyword.keys(opts) -- [:owner, :provider_session, :run_deadline] == [] and
          valid_provider_session?(provider_session) and valid_run_deadline?(run_deadline) do
-      start_state({limits, token, owner, nil, false, nil, provider_session, run_deadline})
+      start_state({limits, token, owner, nil, false, nil, run_deadline})
     else
       {:error, :invalid_run_state}
     end
@@ -107,7 +109,7 @@ defmodule PtcRunner.Kernel.RunState do
          owner = self(),
          {:ok, state} <-
            start_state(
-             {limits, token, owner, nil, false, {event_sink, inspection_sink}, nil, run_deadline}
+             {limits, token, owner, nil, false, {event_sink, inspection_sink}, run_deadline}
            ) do
       {:ok, state}
     else
@@ -123,7 +125,7 @@ defmodule PtcRunner.Kernel.RunState do
     with true <- Keyword.keys(opts) -- [:owner] == [],
          {:ok, event_sink, handle} <- EventSink.prepare(:normal, limits, sink_opts),
          {:ok, state} <-
-           start_state({limits, token, owner, event_sink, true, nil, nil, nil}) do
+           start_state({limits, token, owner, event_sink, true, nil, nil}) do
       {:ok, state, struct!(EventSink, Map.put(handle, :pid, state.pid))}
     else
       _ -> {:error, :invalid_run_state}
@@ -138,7 +140,7 @@ defmodule PtcRunner.Kernel.RunState do
   @spec attach_provider(t(), pid()) :: :ok | {:error, :closed | :provider_down}
   @doc "Attaches the caller's live provider process to its capability reservation."
   def attach_provider(%__MODULE__{} = state, provider) when is_pid(provider) do
-    case attach_provider_task(state.provider_tracker, provider) do
+    case ProviderTaskTracker.attach(state.provider_tracker, provider) do
       :ok ->
         # The external task owner can still accept an attachment while its
         # run-state death notification is queued. This call closes that window
@@ -238,7 +240,7 @@ defmodule PtcRunner.Kernel.RunState do
   def close_and_drain(%__MODULE__{} = state) do
     call(state, :close_and_drain)
   after
-    drain_provider_tasks(state.provider_tracker)
+    ProviderTaskTracker.drain_provider_tasks(state.provider_tracker)
   end
 
   @spec stop(t()) :: :ok
@@ -246,7 +248,7 @@ defmodule PtcRunner.Kernel.RunState do
   def stop(%__MODULE__{} = state) do
     GenServer.stop(state.pid, :normal)
   after
-    drain_provider_tasks(state.provider_tracker)
+    ProviderTaskTracker.drain_provider_tasks(state.provider_tracker)
   end
 
   # These two answer with the owner's data, and there is no substitute that
@@ -296,30 +298,24 @@ defmodule PtcRunner.Kernel.RunState do
   @doc false
   def transfer_owner(state, owner) when is_pid(owner), do: call(state, {:transfer_owner, owner})
 
+  # Task ownership does not move with the session: the one tracker keeps it and
+  # starts monitoring the session when execution binds its lifecycle. This only
+  # refuses a session that could never be bound.
   @doc false
   @spec use_provider_session(t(), ProviderSession.t() | nil) ::
           {:ok, t()} | {:error, :invalid_run_state}
   def use_provider_session(%__MODULE__{} = state, nil), do: {:ok, state}
 
-  def use_provider_session(
-        %__MODULE__{provider_tracker: {:task_tracker, tracker}} = state,
-        session
-      ) do
-    if ProviderSession.valid?(session) do
-      :ok = ProviderTaskTracker.close(tracker)
-      {:ok, %{state | provider_tracker: {:provider_session, session}}}
-    else
-      {:error, :invalid_run_state}
-    end
+  def use_provider_session(%__MODULE__{} = state, session) do
+    if ProviderSession.valid?(session),
+      do: {:ok, state},
+      else: {:error, :invalid_run_state}
   end
 
   def use_provider_session(_state, _session), do: {:error, :invalid_run_state}
 
   @impl GenServer
-  def init(
-        {limits, token, owner, event_sink, owner_transferable?, repl_resources, _session,
-         run_deadline}
-      ) do
+  def init({limits, token, owner, event_sink, owner_transferable?, repl_resources, run_deadline}) do
     deadline_ms =
       if Deadline.valid?(run_deadline),
         do: Deadline.expires_at(run_deadline),
@@ -998,7 +994,7 @@ defmodule PtcRunner.Kernel.RunState do
   defp start_state(args) do
     case GenServer.start(__MODULE__, args) do
       {:ok, pid} ->
-        case start_provider_tracker(elem(args, 6), pid) do
+        case ProviderTaskTracker.start(pid) do
           {:ok, provider_tracker} ->
             token = elem(args, 1)
             {:ok, %__MODULE__{pid: pid, token: token, provider_tracker: provider_tracker}}
@@ -1012,27 +1008,6 @@ defmodule PtcRunner.Kernel.RunState do
         {:error, reason}
     end
   end
-
-  defp start_provider_tracker(nil, run_state) do
-    case ProviderTaskTracker.start(run_state) do
-      {:ok, tracker} -> {:ok, {:task_tracker, tracker}}
-      {:error, _reason} = error -> error
-    end
-  end
-
-  defp start_provider_tracker(session, _run_state),
-    do: {:ok, {:provider_session, session}}
-
-  defp attach_provider_task({:task_tracker, tracker}, provider),
-    do: ProviderTaskTracker.attach(tracker, provider)
-
-  defp attach_provider_task({:provider_session, session}, provider),
-    do: ProviderSession.attach_provider(session, provider)
-
-  defp drain_provider_tasks({:task_tracker, tracker}), do: ProviderTaskTracker.close(tracker)
-
-  defp drain_provider_tasks({:provider_session, session}),
-    do: ProviderSession.drain_provider_tasks(session)
 
   defp valid_provider_session?(nil), do: true
   defp valid_provider_session?(session), do: ProviderSession.valid?(session)

@@ -41,11 +41,15 @@ Frontends own presentation and host choices. They must enter through
 `PtcRunner.Kernel.RunRequest`. The closed command pipeline uses
 `PtcRunner.Kernel.CommandEngine`; the existing Mix command still has its
 transitional argv and presentation adapter, but its runtime path now prepares
-through `RunCoordinator` and preflights destinations. One-shot runs then
-execute through a dedicated execution-session owner, whether or not they select
-providers. A provider-bearing one-shot opens `ProviderActiveSession` inside
-that owner's subordinate worker rather than in the adapter. `--check` and the
-REPL keep their existing adapter-owned sessions until their parity cutover.
+through `RunCoordinator` and preflights destinations. One-shot runs and
+`--check` both execute through a dedicated execution-session owner, whether or
+not they select providers, and a provider-bearing invocation opens
+`ProviderActiveSession` inside that owner's subordinate worker rather than in
+the adapter. A check differs from a run only in how the owner completes an
+assembled build: it reports the acquisition's safe connector snapshots instead
+of evaluating the entry, so both share one activity marker, session, registry,
+credential, OAuth, acquisition, and cleanup boundary. The REPL keeps its
+adapter-owned path until its parity cutover.
 Embedding frontends execute a sealed request through
 `PtcRunner.Kernel.RunBuilder.build/3`. For a provider-free request they may
 instead call the path-free `PtcRunner.Kernel.RunCoordinator` and pass its
@@ -127,6 +131,17 @@ host document only as an authenticated, process-local encrypted payload; their
 inspectable callback environments expose neither paths nor credential values.
 Generic runtime-service construction cannot mint a host binding, and a
 host-bound catalog requires activation to return a valid host authority.
+That activation is a deliberate exception to the operation deadline rather than
+cancellable work. Because only host-sealed runtime services carry a binding,
+the branch runs one code-owned step — decrypt the sealed host payload, then
+start the private owner and its credential lease — with no embedder-supplied
+callback, file, socket, or network reachable inside it. Its input is bounded by
+the confined read ceiling both `HostConfig` loaders share, so every host
+document a command or embedding acquires through them stays within it; an
+embedding that builds a `HostConfig` by other means owns that bound itself.
+The deadline is checked immediately before the step and rechecked after it, so
+an expired operation releases the authority instead of yielding a registry; a
+pathological activation delays the command rather than being cancelled.
 `PtcRunner.Kernel.RunCoordinator.prepare/2` compiles the captured workflow and
 mission component graphs, validates the public workflow entry, and performs
 provider-inert declaration checks without accepting a path, looking up an
@@ -182,14 +197,15 @@ effective projection/digest at construction and on every seal check, so
 provider-bearing preparation cannot bypass declaration processing by calling
 the constructor directly. Such provider-bearing values are presently
 continuation state for the staged command pipeline. `RunBuilder.build_prepared/3`
-rejects them; after `ProviderActiveSession` consumes and marks one, its runtime
-registry is opened and the active value and same session are passed to
-`RunBuilder`. A one-shot run does that inside the execution-session owner's
-subordinate worker, which calls `build_active_owned/5` with the owner-opened
-sinks. `--check` still opens the registry in the Mix adapter and calls
-`build_active/4`. The REPL is a third transitional path and opens no active
-session: it calls `load_and_build/3` with an empty registry. All three keep
-their current shape until the parity cutover. After application admission, that session
+rejects them; the execution-session owner consumes one when it opens its
+sinks, `ProviderActiveSession` then marks activity and opens the session, and
+the runtime registry, active value, and that same session are passed to
+`RunBuilder`. A run and a `--check` both do that inside the execution-session
+owner's subordinate worker, which calls `build_active_owned/5` with the
+owner-opened sinks and then completes through `execute_built/1` or
+`check_built/1`. The REPL remains transitional and opens no active session: it
+calls `load_and_build/3` with an empty registry, keeping its current shape
+until the parity cutover. After application admission, that session
 anchors one absolute run deadline shared by active selection, construction,
 and Kernel execution. The active build atomically claims the session sealed to
 the exact prepared run; swapping sessions or replaying the same prepared/session
@@ -499,9 +515,13 @@ owner-down window and seals the set when force-close begins. This
 avoids a start-then-register gap, keeps provisional roots isolated, and removes
 reconciliation races between cleanup paths.
 Before callbacks can start, execution transfers the session from its build
-creator to the Runner or REPL session owner and binds its run state. The
-provider session itself tracks, cancels, and observes in-flight Kernel provider
-work before it runs any closer, including after owner or run state death.
+creator to the Runner or REPL session owner and binds it to the run's one
+provider-task owner. That owner is a separate process outside both lifecycles;
+it monitors the session and the run state, so in-flight Kernel provider work is
+drained before any closer runs and killed outright when either lifecycle
+disappears — including a session terminated at its cleanup deadline, where
+`terminate/2` never runs. The drain also ends that owner, so an attachment
+racing it is refused rather than accepted behind the closers.
 Normal close and lifecycle-owner death share one bounded reverse-order resource
 drain. Provider-free assembly carries no session and starts no provider owner.
 
@@ -797,7 +817,12 @@ store context.
 Provider implementations later return capabilities plus optional safe connector metadata
 and an idempotent closer. Staged builders may also exchange bounded code-owned
 acquisition services after the global preflight and credential barrier; these
-opaque values never enter environments or artifacts. `ProviderAcquisition`
+opaque values never enter environments or artifacts. A run-bound registry keeps
+every builder bound to its sealed descriptor, so preparation reporting a data
+class or accepted-class set other than the declared one fails with
+`provider_declaration_mismatch` before preflight, credential resolution, or
+acquisition; the declaration phase 5 and sink authorization used stays
+authoritative. `ProviderAcquisition`
 resolves those dependencies and immediately commits each successful resource
 to the provider session's cleanup stack. For active commands, its preparation,
 preflight, and acquisition callbacks—including work behind the private host
@@ -807,6 +832,13 @@ cleanup budget. `RunBuilder` assembles the returned capabilities and transfers
 the session into the run lifecycle. Exact
 declarative selection grammar belongs in `SelectionRules`; active transport
 behavior belongs in each provider module and the later runtime dispatcher.
+
+Ambient `.env` acquisition belongs to the CLI frontend, not the Kernel. The
+Mix adapter decides once, before the `--check`/one-shot branch, whether a
+selected live-LLM installation declares an environment-backed credential, and
+loads the nearest `.env` there, containing a loader failure as a closed command
+diagnostic. No Kernel module loads it, so an embedding acquires ambient
+environment state only when it chooses to.
 
 Provider occurrence contexts are path-free. They carry safe display identity,
 application content and effective digests, final bundle hashes, input

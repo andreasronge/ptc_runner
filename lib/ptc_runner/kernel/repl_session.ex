@@ -420,7 +420,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   defp bind_and_start_session(config, state) do
     case ReplSessionOwner.start(config, state, self()) do
       {:ok, pid, token} ->
-        case RunConfig.bind_provider_session(config, pid, state.pid) do
+        case RunConfig.bind_provider_session(config, pid, state.pid, state.provider_tracker) do
           :ok ->
             register_access(pid, token)
 

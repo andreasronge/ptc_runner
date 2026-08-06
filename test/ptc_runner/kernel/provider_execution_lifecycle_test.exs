@@ -234,84 +234,138 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert diagnostic.code == :provider_cleanup_failed
   end
 
-  test "a provider acquiring stricter than it declared is refused, not downgraded" do
-    # The owner opens sinks from the sealed declaration before any provider
-    # runs. A staged builder that acquires as :private_inspection while its
-    # descriptor declares :normal would otherwise emit through the normal sink
-    # the owner already opened.
+  test "a staged preparation stricter than its sealed declaration is refused" do
+    # Preparation, phase-5 identity, and the sinks the owner opened before any
+    # provider ran all come from the sealed descriptor. A builder preparing as
+    # :private_inspection while its descriptor declares :normal contradicts
+    # that declaration, so the run stops while every provider is still inert.
     fixture =
       provider_fixture(
+        credential_names: ["fixture-key"],
         descriptor_accepts_data: [:normal, :private_inspection],
         staged_data_class: :private_inspection,
-        acquire: fn _context ->
+        staged_accepts_data: [:normal, :private_inspection]
+      )
+
+    assert fixture.prepared.effective_data_class == :normal
+    assert_declaration_refused(fixture)
+  end
+
+  test "a staged preparation weaker than its sealed declaration is refused just as firmly" do
+    # The safe direction still contradicts the declaration the effective data
+    # class, event policy, and opened sinks were derived from, so it is refused
+    # rather than accepted because it happens to be stricter than needed.
+    fixture =
+      provider_fixture(
+        credential_names: ["fixture-key"],
+        descriptor_data_class: :private_inspection,
+        descriptor_accepts_data: [:normal, :private_inspection],
+        staged_accepts_data: [:normal, :private_inspection]
+      )
+
+    assert fixture.prepared.effective_data_class == :private_inspection
+    assert_declaration_refused(fixture)
+  end
+
+  test "a staged preparation accepting more classes than it declared is refused" do
+    # Phase 5 admitted this occurrence against the declared accepted classes.
+    # A builder that widens them at run time answers a different information
+    # flow question than the one the sealed plan approved.
+    fixture =
+      provider_fixture(
+        credential_names: ["fixture-key"],
+        descriptor_accepts_data: [:normal],
+        staged_accepts_data: [:normal, :private_inspection]
+      )
+
+    assert_declaration_refused(fixture)
+  end
+
+  test "a staged preparation accepting fewer classes than it declared is refused" do
+    fixture =
+      provider_fixture(
+        credential_names: ["fixture-key"],
+        descriptor_accepts_data: [:normal, :private_inspection],
+        staged_accepts_data: [:normal]
+      )
+
+    assert_declaration_refused(fixture)
+  end
+
+  test "a check assembles its providers without ever executing the workflow" do
+    # The entry never terminates, so a check that returns at all proves the
+    # Kernel was not run; only the acquisition's safe snapshots come back.
+    fixture = provider_fixture(body: "(loop [] (recur))")
+
+    assert {:ok, owner} =
+             ExecutionSessionOwner.start(
+               fixture.prepared,
+               fixture.authority,
+               self(),
+               fixture.execution,
+               &never_notify/1,
+               :check
+             )
+
+    assert {:ok, []} = ExecutionSessionOwner.await(owner)
+    assert_receive {:provider_phase, :acquire}, 5_000
+  end
+
+  test "a check closes its provider session inside the runtime that acquired it" do
+    # A run closes its session while the registry and the OAuth runtime that
+    # produced its resources are still alive. A check that left the close to the
+    # execution owner would unwind that runtime first and run connector closers
+    # against a store and managers that are already gone.
+    parent = self()
+
+    fixture =
+      provider_fixture(
+        acquire: fn context ->
+          scoped_root(parent, context)
           {:ok, capability} = fixture_capability()
 
           {:ok,
            %{
              capabilities: [capability],
-             data_class: :private_inspection,
-             accepts_data: [:private_inspection]
+             snapshot: nil,
+             close: fn ->
+               send(parent, :provider_closed)
+               :ok
+             end
            }}
         end
       )
 
-    assert fixture.prepared.effective_data_class == :normal
-    parent = self()
-
     caller =
       spawn(fn ->
+        receive do: (:go -> :ok)
+
         {:ok, owner} =
           ExecutionSessionOwner.start(
             fixture.prepared,
             fixture.authority,
             self(),
             fixture.execution,
-            &never_notify/1
+            &never_notify/1,
+            :check
           )
 
-        send(parent, {:execution_owner, owner})
         send(parent, {:execution_result, ExecutionSessionOwner.await(owner)})
       end)
 
-    assert_receive {:execution_owner, owner}, 5_000
-    on_exit(fn -> release(caller, ExecutionSessionOwner.pid(owner)) end)
+    # Tracing the caller before it starts anything makes the owner and its
+    # worker inherit the flag, so the order below is the order the run actually
+    # closed in rather than a snapshot taken after the fact.
+    trace_closes(caller, [:call, :set_on_spawn])
 
-    assert_receive {:execution_result, {:error, :provider_data_class_drift}}, 5_000
-  end
-
-  test "a provider acquiring weaker than it declared is refused just as firmly" do
-    # The safe direction still contradicts the sealed declaration the owner
-    # already opened a private sink for, so it is refused rather than accepted
-    # because it happens to be stricter than needed.
-    fixture =
-      provider_fixture(
-        descriptor_data_class: :private_inspection,
-        descriptor_accepts_data: [:normal, :private_inspection],
-        acquire: fn _context -> fixture_capability() end
-      )
-
-    assert fixture.prepared.effective_data_class == :private_inspection
-    parent = self()
-
-    caller =
-      spawn(fn ->
-        {:ok, owner} =
-          ExecutionSessionOwner.start(
-            fixture.prepared,
-            fixture.authority,
-            self(),
-            fixture.execution,
-            &never_notify/1
-          )
-
-        send(parent, {:execution_owner, owner})
-        send(parent, {:execution_result, ExecutionSessionOwner.await(owner)})
-      end)
-
-    assert_receive {:execution_owner, owner}, 5_000
-    on_exit(fn -> release(caller, ExecutionSessionOwner.pid(owner)) end)
-
-    assert_receive {:execution_result, {:error, :provider_data_class_drift}}, 5_000
+    try do
+      send(caller, :go)
+      assert_receive {:execution_result, {:ok, _snapshots}}, 5_000
+      assert [ProviderSession, ProviderRegistry] == [next_close(), next_close()]
+      assert_received :provider_closed
+    after
+      stop_trace_closes(caller)
+    end
   end
 
   test "an execution from another catalog leaves the prepared run reusable" do
@@ -431,11 +485,11 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     end)
   end
 
-  defp trace_closes(owner_pid) do
+  defp trace_closes(owner_pid, flags \\ [:call]) do
     Enum.each([ProviderRegistry, ProviderSession], &Code.ensure_loaded!/1)
     assert :erlang.trace_pattern({ProviderRegistry, :close, 1}, true, [:local]) == 1
     assert :erlang.trace_pattern({ProviderSession, :close, 1}, true, [:local]) == 1
-    assert :erlang.trace(owner_pid, true, [:call]) == 1
+    assert :erlang.trace(owner_pid, true, flags) == 1
   end
 
   defp next_close do
@@ -451,11 +505,40 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     :error, :badarg -> false
   end
 
+  # Every refused declaration must be refused for the same reason and while the
+  # provider is still inert: no credential resolution, no preflight, no
+  # acquisition, and no registered resource root.
+  defp assert_declaration_refused(fixture) do
+    _started = start_owned_execution(fixture)
+
+    assert_receive {:execution_result, {:error, :provider_declaration_mismatch}}, 5_000
+    refute_received {:resolved_credentials, _names}
+    refute_received {:provider_phase, :preflight}
+    refute_received {:provider_phase, :acquire}
+    refute_received {:provider_root, _root, _registration}
+  end
+
   defp provider_fixture(opts \\ []) do
+    parent = self()
     selection_validation = Keyword.get(opts, :selection_validation, :declarative)
     body = Keyword.get(opts, :body, "(return {\"answer\" 42})")
-    acquire = Keyword.get(opts, :acquire, fn _context -> fixture_capability() end)
-    staged_class = Keyword.get(opts, :staged_data_class)
+    credential_names = Keyword.get(opts, :credential_names, [])
+
+    # The default acquisition registers a resource root, so a refusal test can
+    # prove nothing was created rather than that nothing could have been.
+    acquire =
+      Keyword.get(opts, :acquire, fn context ->
+        scoped_root(parent, context)
+        fixture_capability()
+      end)
+
+    staged_policy =
+      %{
+        data_class: Keyword.get(opts, :staged_data_class),
+        accepts_data: Keyword.get(opts, :staged_accepts_data)
+      }
+      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+      |> Map.new()
 
     {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
 
@@ -463,7 +546,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
       ProviderDescriptor.new(
         source: :custom,
         installation_revision: Keyword.get(opts, :installation_revision, "lifecycle-v1"),
-        credential_names: [],
+        credential_names: credential_names,
         authorization_mode: :none,
         data_class: Keyword.get(opts, :descriptor_data_class, :normal),
         accepts_data: Keyword.get(opts, :descriptor_accepts_data, [:normal]),
@@ -481,15 +564,19 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
 
     builder = fn _selection, context ->
       staged = %{
-        credential_names: [],
-        preflight: fn -> {:ok, fn %{} -> acquire.(context) end} end
+        credential_names: credential_names,
+        preflight: fn ->
+          send(parent, {:provider_phase, :preflight})
+
+          {:ok,
+           fn %{} ->
+             send(parent, {:provider_phase, :acquire})
+             acquire.(context)
+           end}
+        end
       }
 
-      if staged_class do
-        {:ok, Map.merge(staged, %{data_class: staged_class, accepts_data: [staged_class]})}
-      else
-        {:ok, staged}
-      end
+      {:ok, Map.merge(staged, staged_policy)}
     end
 
     implementation =
@@ -503,7 +590,14 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     {:ok, catalog} =
       InstallationCatalog.new(%{"selected" => registration})
 
-    {:ok, services} = ProviderRuntimeServices.new()
+    {:ok, services} =
+      ProviderRuntimeServices.new(
+        credential_resolver: fn names ->
+          send(parent, {:resolved_credentials, names})
+          {:ok, Map.new(names, &{&1, "fixture-credential"})}
+        end
+      )
+
     {:ok, execution} = ProviderExecution.new(catalog, services, [])
     {:ok, authority} = PublicationAuthority.new([])
 

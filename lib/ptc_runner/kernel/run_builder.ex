@@ -18,12 +18,12 @@ defmodule PtcRunner.Kernel.RunBuilder do
   execution-session owner so the prepared run and both sinks share one
   caller-death boundary.
   A provider-bearing prepared run is preflighted the same way, and its active
-  session is passed here for runtime assembly. The one-shot path opens that
-  session inside the execution-session owner and calls `build_active_owned/5`
-  with the owner's sinks; `--check` still opens it in the Mix adapter and calls
-  `build_active/4`. The REPL is a third transitional path: it calls
-  `load_and_build/3` with an empty registry and opens no active session at all.
-  All three converge here until their parity cutover.
+  session is passed here for runtime assembly. One-shot runs and `--check` both
+  open that session inside the execution-session owner and call
+  `build_active_owned/5` with the owner's sinks, then complete through
+  `execute_built/1` or `check_built/1`. The REPL remains transitional: it calls
+  `load_and_build/3` with an empty registry and opens no active session at
+  all.
   `PtcRunner.Kernel.ProviderAcquisition` then runs the selected providers'
   shared preparation, credentials, and dependency-ordered acquisition barrier.
   Active preparation, preflight, acquisition, and credential resolution are
@@ -317,58 +317,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def preflight_prepared(_prepared, _opts), do: {:error, :invalid_prepared_run}
 
   @doc false
-  @spec build_active(
-          PreparedRun.t(),
-          ProviderRegistry.t(),
-          ProviderSession.t(),
-          keyword()
-        ) :: {:ok, map()} | {:error, term()}
-  def build_active(
-        %PreparedRun{} = prepared,
-        %ProviderRegistry{} = registry,
-        session,
-        opts
-      )
-      when is_list(opts) do
-    with true <- PreparedRun.active_valid?(prepared),
-         :ok <-
-           ProviderSession.claim_operation(
-             session,
-             prepared.request.package.limits,
-             prepared.attestation
-           ),
-         :ok <- validate_registry(registry),
-         :ok <- validate_build_options(opts),
-         :ok <- validate_installed_limits(prepared.request.package, registry, opts),
-         :ok <- validate_inspection_selection(prepared.request, opts) do
-      # Downstream provider/build failures close the session at the point that
-      # owns it. Only failures before that handoff are cleaned up here.
-      build_active_preflighted(prepared, registry, session, opts)
-    else
-      {:error, :operation_claimed} ->
-        {:error, :invalid_active_run}
-
-      {:error, :operation_mismatch} ->
-        prefer_cleanup_error({:error, :invalid_active_run}, close_live_session(session))
-
-      {:error, :provider_session_unavailable} ->
-        # Claim timeouts are ambiguous: the claim may have committed before
-        # its reply was lost. ProviderSession queues conditional cleanup that
-        # preserves a claimed session and closes only an abandoned one.
-        {:error, :invalid_active_run}
-
-      false ->
-        prefer_cleanup_error({:error, :invalid_active_run}, close_live_session(session))
-
-      {:error, _reason} = error ->
-        prefer_cleanup_error(error, close_live_session(session))
-    end
-  end
-
-  def build_active(_prepared, _registry, _session, _opts),
-    do: {:error, :invalid_active_run}
-
-  @doc false
   @spec build_active_owned(
           PreparedRun.t(),
           ProviderRegistry.t(),
@@ -591,26 +539,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp build_active_preflighted(prepared, registry, session, opts) do
-    with {:ok, providers} <-
-           providers(
-             prepared.request.package,
-             registry,
-             provider_input_class(prepared.request.input.authority),
-             opts,
-             session
-           ) do
-      build_with_providers(
-        prepared.request,
-        {prepared.workflow_bundle, prepared.mission_bundle},
-        prepared.entry_source,
-        providers,
-        opts,
-        :close_opened_sinks
-      )
-    end
-  end
-
   defp build_active_preflighted_owned(
          prepared,
          registry,
@@ -773,9 +701,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   # Owner-opened sinks are fixed before any provider runs, from the sealed
-  # declaration's effective data class. A provider that acquires as a stricter
-  # class than it declared would otherwise emit through a sink opened for the
-  # weaker one, so the drift is refused rather than silently downgraded.
+  # declaration's effective data class. Descriptor-bound preparation and the
+  # acquired-build comparison already refuse a provider whose data policy
+  # contradicts its declaration, so this is defense in depth: it re-derives the
+  # required policy from what was actually acquired and refuses drift rather
+  # than emitting a stricter class through a sink opened for the weaker one.
   defp execution_sinks(
          request,
          providers,
@@ -1098,6 +1028,36 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   def execute_built(%{config: %RunConfig{} = config}), do: reject_execution(config)
   def execute_built(_built), do: {:error, :invalid_execution_outcome}
+
+  # Completes an assembled build as a check rather than an execution: it reports
+  # the safe connector snapshots the acquisition produced, closes the provider
+  # session, and stops the sinks. It never evaluates the entry, finalizes a
+  # terminal event batch, or publishes an artifact, so nothing belonging only to
+  # execution can reach a destination through this path.
+  #
+  # Closing the session here is what keeps a check on the run's cleanup
+  # ordering: a run closes its session inside `PtcRunner.Kernel` while the
+  # registry and the OAuth runtime that produced its resources are still alive.
+  # Leaving it to the execution owner would unwind that runtime first and run
+  # connector closers against a store and managers that are already gone.
+  @doc false
+  @spec check_built(map()) :: {:ok, [map()]} | {:error, term()}
+  def check_built(%{config: %RunConfig{} = config, publication_authority: authority}) do
+    if PublicationAuthority.valid?(authority) do
+      snapshots = config.connector_snapshots
+      cleanup = RunConfig.close_provider_session(config)
+      stop_execution_sinks(config)
+
+      case cleanup do
+        :ok -> {:ok, snapshots}
+        {:error, :provider_cleanup_failed} = error -> error
+      end
+    else
+      reject_execution(config)
+    end
+  end
+
+  def check_built(_built), do: {:error, :invalid_execution_outcome}
 
   @doc false
   @spec publish_execution(ExecutionOutcome.t(), PublicationAuthority.t()) ::

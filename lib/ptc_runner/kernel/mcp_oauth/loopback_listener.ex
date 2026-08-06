@@ -7,6 +7,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.LoopbackListener do
   with one exact `Host` header and no request body. The socket is passive and
   owned by the foreground caller; callback parameters never enter another
   process, Logger, Telemetry, or command-line arguments.
+
+  The pending authorization's deadline is absolute. An interaction that has
+  already expired accepts no connection and reads no bytes, including bytes the
+  socket has already buffered, so a client cannot complete or extend an
+  authorization after its deadline. Expiry at any point reports
+  `:authorization_timeout`; only malformed input or a socket failure reports
+  `:invalid_callback_request`.
   """
 
   alias PtcRunner.Kernel.MCPOAuth.Authority
@@ -85,13 +92,35 @@ defmodule PtcRunner.Kernel.MCPOAuth.LoopbackListener do
         success
 
       {:error, _reason} = error ->
-        _ = Authorization.cancel_authorization(context, pending, [])
-        error
+        cancel_pending(context, pending, opts, error)
     end
   end
 
   def await(_listener, _context, _pending, _opts),
     do: {:error, :authorization_callback_failed}
+
+  # A failed interaction must not leave a live pending authorization behind, so
+  # an unsettled cancellation outranks the reason that triggered it rather than
+  # being discarded. Cancellation is the first terminal action here, so it
+  # anchors the lifecycle owner's one cleanup deadline through the supplied
+  # operation and spends that deadline; the session close that follows consumes
+  # what is left of the same one rather than minting the budget again.
+  defp cancel_pending(context, pending, opts, error) do
+    with {:ok, deadline} <- anchor_cleanup_deadline(opts),
+         :ok <-
+           Authorization.cancel_authorization(context, pending, cleanup_deadline: deadline) do
+      error
+    else
+      _unsettled -> {:error, :authorization_cleanup_failed}
+    end
+  end
+
+  defp anchor_cleanup_deadline(opts) do
+    case Keyword.get(opts, :anchor_cleanup_deadline) do
+      anchor when is_function(anchor, 0) -> anchor.()
+      _missing -> :error
+    end
+  end
 
   defp await_callback(listener, context, pending, opts) do
     case remaining(pending.deadline_ms) do
@@ -145,10 +174,23 @@ defmodule PtcRunner.Kernel.MCPOAuth.LoopbackListener do
         {:ok, accumulator}
 
       true ->
-        case :gen_tcp.recv(socket, 0, remaining(deadline_ms)) do
-          {:ok, chunk} -> receive_request(socket, accumulator <> chunk, deadline_ms)
-          _failure -> {:error, :invalid_callback_request}
-        end
+        receive_chunk(socket, accumulator, deadline_ms, remaining(deadline_ms))
+    end
+  end
+
+  # `:gen_tcp.recv/3` returns bytes the socket has already buffered even with a
+  # zero timeout, so a client that keeps trickling would extend an expired
+  # interaction past its deadline, potentially until the request cap stops it.
+  # Expiry is therefore decided before the call rather than delegated to its
+  # timeout.
+  defp receive_chunk(_socket, _accumulator, _deadline_ms, 0),
+    do: {:error, :authorization_timeout}
+
+  defp receive_chunk(socket, accumulator, deadline_ms, timeout_ms) do
+    case :gen_tcp.recv(socket, 0, timeout_ms) do
+      {:ok, chunk} -> receive_request(socket, accumulator <> chunk, deadline_ms)
+      {:error, :timeout} -> {:error, :authorization_timeout}
+      _failure -> {:error, :invalid_callback_request}
     end
   end
 
@@ -271,8 +313,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.LoopbackListener do
     end
   end
 
+  # Zero, not one: an expired interaction must reach the explicit timeout
+  # branches above instead of buying another millisecond of accept or receive.
   defp remaining(deadline_ms),
-    do: max(deadline_ms - System.monotonic_time(:millisecond), 1)
+    do: max(deadline_ms - System.monotonic_time(:millisecond), 0)
 
   defp response(status, reason, body) do
     "HTTP/1.1 #{status} #{reason}\r\n" <>

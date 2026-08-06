@@ -25,6 +25,36 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.TestSupport.MCPHTTPFixture
 
+  test "OAuth setup and each requested target use their exact independent deadlines" do
+    declarations = [
+      %{name: "first", config: %{"timeout_ms" => 5_000}},
+      %{name: "plain", config: %{"timeout_ms" => 1}},
+      %{name: "first", config: %{"timeout_ms" => 2_000}},
+      %{name: "second", config: %{"timeout_ms" => 3_000}}
+    ]
+
+    authorities = %{
+      "first" => %{authorization_timeout_ms: 7_000},
+      "plain" => nil,
+      "second" => %{authorization_timeout_ms: 4_000}
+    }
+
+    setup =
+      ProviderExecution.oauth_setup_deadline(
+        declarations,
+        authorities,
+        ["second", "first"],
+        1_000
+      )
+
+    first = ProviderExecution.oauth_target_deadline("first", declarations, authorities, 10_000)
+    second = ProviderExecution.oauth_target_deadline("second", declarations, authorities, 20_000)
+
+    assert Deadline.expires_at(setup) == 3_000
+    assert Deadline.expires_at(first) == 12_000
+    assert Deadline.expires_at(second) == 23_000
+  end
+
   test "loopback discovery fixture satisfies the shipped discovery boundary" do
     server = start_server()
     authority = authority(server.base)
@@ -69,7 +99,12 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
              )
 
     visit_authorization_url(self(), pending.url)
-    assert {:ok, grant} = LoopbackListener.await(listener, context, pending, [])
+
+    assert {:ok, grant} =
+             LoopbackListener.await(listener, context, pending,
+               anchor_cleanup_deadline: fn -> {:ok, Deadline.new(5_000)} end
+             )
+
     assert grant.status == :active
     assert grant.granted_scopes == MapSet.new(["read"])
     assert grant.access_token == "fixture-access-token"
@@ -112,6 +147,33 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
     refute_received {:oauth_request, "POST", "/token"}
     assert_received {:authorization_notice, _url}
     refute_received {:authorization_notice, _other}
+  end
+
+  test "a check authorizes exactly as the run it shares its session with" do
+    # `--check --authorize-mcp` was deferred to the execution-owner cutover.
+    # A check runs the same marker, session, registry, credentials, OAuth, and
+    # acquisition prefix, so it stops at the same transport rule as the run
+    # above and never reaches a second authorization.
+    parent = self()
+    server = start_server()
+    fixture = provider_fixture(server)
+    trace_run_start()
+
+    {:ok, owner} =
+      ExecutionSessionOwner.start(
+        fixture.prepared,
+        fixture.authority,
+        self(),
+        fixture.execution,
+        &visit_authorization_url(parent, &1),
+        :check
+      )
+
+    assert {:error, :invalid_mcp_transport} = ExecutionSessionOwner.await(owner)
+    assert [:token_exchange, :run_started] == [next_event(), next_event()]
+    assert_received {:authorization_notice, _url}
+    refute_received {:authorization_notice, _other}
+    refute_received {:oauth_request, "POST", "/token"}
   end
 
   test "selected authorities share one execution-scoped OAuth context" do

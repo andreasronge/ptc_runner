@@ -82,7 +82,23 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              | :invalid_publication_authority
              | :provider_session_required
              | term()}
-  def execute(%PreparedRun{} = prepared, authority) do
+  def execute(%PreparedRun{} = prepared, authority), do: open_free(prepared, authority, :run)
+
+  def execute(_prepared, _authority), do: {:error, :invalid_prepared_run}
+
+  @doc false
+  @spec check(PreparedRun.t(), PublicationAuthority.t()) ::
+          {:ok, [map()]}
+          | {:error,
+             :invalid_prepared_run
+             | :invalid_publication_authority
+             | :provider_session_required
+             | term()}
+  def check(%PreparedRun{} = prepared, authority), do: open_free(prepared, authority, :check)
+
+  def check(_prepared, _authority), do: {:error, :invalid_prepared_run}
+
+  defp open_free(prepared, authority, operation) do
     cond do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
@@ -94,12 +110,11 @@ defmodule PtcRunner.Kernel.RunCoordinator do
         {:error, :provider_session_required}
 
       true ->
-        with {:ok, owner} <- ExecutionSessionOwner.start(prepared, authority, self()),
+        with {:ok, owner} <-
+               ExecutionSessionOwner.start(prepared, authority, self(), nil, nil, operation),
              do: ExecutionSessionOwner.await(owner)
     end
   end
-
-  def execute(_prepared, _authority), do: {:error, :invalid_prepared_run}
 
   @doc false
   @spec execute(
@@ -115,7 +130,33 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              | :invalid_provider_execution
              | term()}
   def execute(%PreparedRun{} = prepared, authority, provider_execution, notifier)
-      when is_function(notifier, 1) do
+      when is_function(notifier, 1),
+      do: open_active(prepared, authority, provider_execution, notifier, :run)
+
+  def execute(_prepared, _authority, _provider_execution, _notifier),
+    do: {:error, :invalid_prepared_run}
+
+  @doc false
+  @spec check(
+          PreparedRun.t(),
+          PublicationAuthority.t(),
+          ProviderExecution.t(),
+          (binary() -> term())
+        ) ::
+          {:ok, [map()]}
+          | {:error,
+             :invalid_prepared_run
+             | :invalid_publication_authority
+             | :invalid_provider_execution
+             | term()}
+  def check(%PreparedRun{} = prepared, authority, provider_execution, notifier)
+      when is_function(notifier, 1),
+      do: open_active(prepared, authority, provider_execution, notifier, :check)
+
+  def check(_prepared, _authority, _provider_execution, _notifier),
+    do: {:error, :invalid_prepared_run}
+
+  defp open_active(prepared, authority, provider_execution, notifier, operation) do
     cond do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
@@ -136,14 +177,12 @@ defmodule PtcRunner.Kernel.RunCoordinator do
                  authority,
                  self(),
                  provider_execution,
-                 notifier
+                 notifier,
+                 operation
                ),
              do: ExecutionSessionOwner.await(owner)
     end
   end
-
-  def execute(_prepared, _authority, _provider_execution, _notifier),
-    do: {:error, :invalid_prepared_run}
 
   defp compile_required(components) do
     case Kernel.compile_bundle(components) do

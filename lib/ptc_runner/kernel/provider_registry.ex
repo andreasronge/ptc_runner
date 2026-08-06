@@ -23,6 +23,14 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   Preparation also freezes
   the provider's `data_class` and `accepts_data` policy so run assembly can
   reject an incompatible information flow before preflight or credentials.
+  A builder bound to the data policy declared by its sealed
+  `PtcRunner.Kernel.ProviderDescriptor` cannot contradict it: preparation
+  returning a different `data_class` or set of accepted classes than phase 5
+  admitted, and than sink authorization used, fails with
+  `:provider_declaration_mismatch` before preflight, credentials, or
+  acquisition. Explicit embedding builders registered without a declared policy
+  have no such declaration, so their preparation remains authoritative for
+  them.
   A staged provider may additionally require or provide a bounded, code-owned
   acquisition service. Services pass opaque values only between selected
   trusted providers after the barrier; they never enter Lisp environments,
@@ -74,6 +82,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ResourceRegistrar
 
   @application_content_digest ~r/\A[0-9a-f]{64}\z/
@@ -158,7 +167,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   @type staged_builder ::
           {:staged,
            (map(), context() ->
-              {:ok, prepared()} | {:error, term()})}
+              {:ok, prepared()} | {:error, term()}), ProviderDescriptor.data_policy() | nil}
   @type registry_builder :: builder() | staged_builder()
   @type credential_resolver ::
           ([binary()] -> {:ok, credential_values()} | {:error, term()})
@@ -254,18 +263,28 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   def oauth_authority_epoch(_registry, _name, _deadline),
     do: {:error, :authorization_context_required}
 
-  @spec staged((map(), context() -> {:ok, prepared()} | {:error, term()})) ::
-          staged_builder()
+  @spec staged(
+          (map(), context() -> {:ok, prepared()} | {:error, term()}),
+          ProviderDescriptor.data_policy() | nil
+        ) :: staged_builder()
   @doc """
-  Marks a trusted builder as staged.
+  Marks a trusted builder as staged, optionally bound to its declared policy.
 
   The preparation callback must be side-effect free. Its returned preflight
   callback may perform only non-secret local checks; the acquire callback is
   the first phase allowed to use resolved credentials or open a provider.
   Optional `:data_class` and `:accepts_data` fields default to normal-only and
-  must exactly match the acquired build.
+  must exactly match the acquired build. A builder bound to a declared policy
+  must also prepare exactly that policy; an installed catalog projects one from
+  the sealed descriptor of every builder it selects.
   """
-  def staged(prepare) when is_function(prepare, 2), do: {:staged, prepare}
+  def staged(prepare, declared_policy \\ nil)
+
+  def staged(prepare, nil) when is_function(prepare, 2), do: {:staged, prepare, nil}
+
+  def staged(prepare, %{data_class: _class, accepts_data: _accepts} = declared_policy)
+      when is_function(prepare, 2),
+      do: {:staged, prepare, declared_policy}
 
   @spec build(t(), binary(), map(), build_context()) ::
           {:ok, built_provider()} | {:error, term()}
@@ -307,12 +326,13 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   defp prepare_builder(builders, name, config, context) do
     case Map.fetch(builders, name) do
-      {:ok, {:staged, prepare}} ->
+      {:ok, {:staged, prepare, declared_policy}} ->
         invoke(
           fn -> prepare.(config, Map.put(context, :provider, name)) end,
           :provider_prepare_failed
         )
         |> normalize_prepared()
+        |> declared_policy_honored(declared_policy)
 
       {:ok, builder} when is_function(builder, 2) ->
         full_context = Map.put(context, :provider, name)
@@ -501,6 +521,28 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp normalize_prepared({:error, _reason} = error), do: error
   defp normalize_prepared(_result), do: {:error, :invalid_provider_preparation}
 
+  # Checked after normalization so an omitted field is compared as the
+  # normal-only default it becomes, not as an absent value. `accepts_data` is a
+  # set of admitted classes; the declaration keeps it in canonical order and a
+  # preparation need not.
+  defp declared_policy_honored(result, nil), do: result
+
+  defp declared_policy_honored({:ok, prepared}, %{data_class: class, accepts_data: accepts})
+       when is_list(accepts) do
+    if prepared.data_class == class and
+         MapSet.new(prepared.accepts_data) == MapSet.new(accepts),
+       do: {:ok, prepared},
+       else: {:error, :provider_declaration_mismatch}
+  end
+
+  defp declared_policy_honored({:error, _reason} = error, _declared_policy), do: error
+
+  # A bound builder whose declared policy is not that projection cannot be
+  # honored at all, so its preparation is refused rather than admitted
+  # unchecked.
+  defp declared_policy_honored(_result, _declared_policy),
+    do: {:error, :provider_declaration_mismatch}
+
   defp normalize_preflight({:ok, acquire}, data_class, accepts_data, requires, provides)
        when is_function(acquire, 1) and requires == [] do
     {:ok,
@@ -665,11 +707,16 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp default_credential_resolver(_names), do: {:error, :credential_resolver_missing}
 
   defp valid_builder?(builder) when is_function(builder, 2), do: true
-  defp valid_builder?({:staged, prepare}) when is_function(prepare, 2), do: true
+  defp valid_builder?({:staged, prepare, nil}) when is_function(prepare, 2), do: true
+
+  defp valid_builder?({:staged, prepare, %{data_class: class, accepts_data: accepts} = policy})
+       when is_function(prepare, 2) and map_size(policy) == 2,
+       do: valid_data_policy?(class, accepts)
+
   defp valid_builder?(_builder), do: false
 
   defp valid_data_policy?(data_class, accepts_data) do
-    data_class in [:normal, :private_inspection] and
+    data_class in [:normal, :private_inspection] and is_list(accepts_data) and
       accepts_data != [] and accepts_data == Enum.uniq(accepts_data) and
       Enum.all?(accepts_data, &(&1 in [:normal, :private_inspection]))
   end

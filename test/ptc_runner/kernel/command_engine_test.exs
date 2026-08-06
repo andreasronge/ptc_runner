@@ -2634,6 +2634,22 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     refute ProviderRegistry.valid?(Map.put(registry, :unexpected, :retained))
   end
 
+  test "provider registries reject a builder bound to a malformed declared policy" do
+    prepare = fn _selection, _context ->
+      {:ok, %{credential_names: [], preflight: fn -> :ok end}}
+    end
+
+    for policy <- [
+          %{data_class: :normal, accepts_data: :normal},
+          %{data_class: :normal, accepts_data: []},
+          %{data_class: :unknown, accepts_data: [:normal]},
+          %{data_class: :normal, accepts_data: [:normal, :unknown]}
+        ] do
+      assert {:error, :invalid_provider_registry} =
+               ProviderRegistry.new(%{"bound" => ProviderRegistry.staged(prepare, policy)})
+    end
+  end
+
   @tag :tmp_dir
   test "preparation and assembly reject invalid registries before consuming work", %{
     tmp_dir: directory

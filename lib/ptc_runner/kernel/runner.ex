@@ -93,7 +93,7 @@ defmodule PtcRunner.Kernel.Runner do
   end
 
   defp transfer_provider_cleanup(config, state) do
-    RunConfig.bind_provider_session(config, self(), state.pid)
+    RunConfig.bind_provider_session(config, self(), state.pid, state.provider_tracker)
   end
 
   defp run_claimed(entry_source, config, state) do

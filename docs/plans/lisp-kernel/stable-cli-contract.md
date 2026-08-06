@@ -239,6 +239,21 @@ still revokes retained builders and credential access. Delete that owner only
 in the commit that replaces its lifecycle; an intermediate no-op close is not
 an acceptable simplification.
 
+Host-bound activation runs synchronously in the caller and is an explicit
+exception to the per-command deadline, on the same terms as application
+bootstrap. Only `from_host_payload/2` can seal a runtime binding, so that
+branch runs exactly one code-owned step: decrypt the sealed host payload, then
+start the private owner and its credential lease. It reaches no
+embedder-supplied callback, file, socket, or network, and its input is bounded
+by the confined read ceiling every command-loaded host document passes through.
+An embedding that constructs a `HostConfig` without that loader owns the bound
+itself.
+The operation deadline is checked immediately before that step and rechecked
+after it, so an expired operation releases the resulting authority instead of
+returning a usable registry. The residual non-guarantee is explicit: a
+pathological activation delays the command past its deadline rather than being
+cancelled.
+
 All selected OAuth aliases in one command use the session context. Authority
 identity still distinguishes aliases and grants. A future host needing several
 tenant partitions opens separate sessions; the stable CLI does not need
@@ -712,9 +727,9 @@ activation in deadline-cancelled workers, preserves
 authority, and rechecks expiry after host-bound activation. Host-bound
 activation itself still runs in the caller because its authority is owned by
 the process that created it and `transfer_to_registry/1` reparents to
-`self()`. Bounding that callback requires the explicit two-phase ownership
-handoff listed in Checkpoint C; it is not complete merely because the shipped
-activation returns promptly.
+`self()`. Checkpoint C keeps that step synchronous and records it as the
+bounded-input bootstrap exception described above, rather than wrapping
+repository-owned initialization in a second ownership protocol.
 
 One gate item stays structurally out of reach in process. `HostConfig` never
 enables `allow_insecure_loopback` for an OAuth authority and `HostInstallation`
@@ -768,18 +783,110 @@ evaluations and finalizes them exactly once at REPL close.
 
 Checkpoint C starts with a small stabilization prefix before adding doctor:
 
-- make the sealed provider descriptor authoritative during staged preparation;
-  reject `data_class` or `accepts_data` drift before preflight, credentials, or
-  acquisition, while retaining the owned-sink comparison as defense in depth;
-- bound host-bound runtime activation with an explicit two-phase ownership
-  handoff whose timeout and caller-death branches cannot strand or prematurely
-  destroy the returned authority;
-- decide whether `.env` loading is bounded run work or pre-run setup, and make
-  both one-shot and `--check` use that decision;
-- return zero from `LoopbackListener.remaining/1` on expiry and prove a trickle
-  client cannot extend the receive loop; and
-- move `--check` onto the shared execution-owner composition and delete the
-  frontend-owned active path it replaces before doctor becomes another caller.
+- (complete, `586f0de0`) make the sealed provider descriptor authoritative
+  during staged preparation; reject `data_class` or `accepts_data` drift before
+  preflight, credentials, or acquisition, while retaining the owned-sink
+  comparison as defense in depth;
+- record host-bound runtime activation as the code-owned bootstrap exception
+  above instead of bounding it. The expiry check before activation and the
+  release after it already exist, so this slice adds only the two missing
+  host-bound regressions — an expired deadline never activates the payload, and
+  an operation that expires during activation releases the owner and its lease
+  — plus the documented non-guarantee. Creator death is already covered by the
+  existing credential-drain regression. Both alternatives
+  are worse: decrypting in a worker would move the plaintext host document
+  through a process message for a partial bound, and a two-phase handoff would
+  add a second ownership protocol around initialization that performs no
+  external I/O and is already covered by the creator monitor, fence
+  arbitration, transfer reconciliation, and stale-authority protection;
+- (complete) classify `.env` loading as command setup rather than bounded run
+  work, because dotenv discovery reads the filesystem and mutates the process
+  environment: it cannot be deadline-cancelled or rolled back, and an embedding
+  must not acquire ambient `.env` state implicitly inside the Kernel. The Mix
+  adapter decides once, after preparation and before the `--check`/one-shot
+  branch, so both paths apply the same selected-provider rule and neither
+  charges the load to the run clock. `ProviderExecution.maybe_load_dotenv/2`
+  and the sealed `dotenv_required?` query chain it used are deleted;
+- (complete) return zero from `LoopbackListener.remaining/1` on expiry, decide
+  expiry before `:gen_tcp.recv/3` rather than delegating it to a zero timeout,
+  and keep `:authorization_timeout` distinct from `:invalid_callback_request`.
+  Regressions cover a callback already buffered before an expired accept, a
+  client that keeps trickling past the deadline, and a silent client that stops
+  mid-request. The pre-receive expiry branch remains fail-closed defense in
+  depth: its neighbouring branches report the same closed reason at the same
+  instant, so it is not independently observable through the socket; and
+- (complete) move `--check` onto the shared execution-owner composition. A
+  check now differs from a run only in the owner's completion step, so both
+  share the activity marker, session, registry, credentials, OAuth,
+  acquisition, and cleanup ownership, and `--check --authorize-mcp` reaches the
+  same authorization subphase. The replaced scaffolding is deleted with it: the
+  Mix adapter's session, registry, OAuth context, deadline, and authorization
+  helpers, `RunBuilder.build_active/4`, and `ProviderActiveSession`'s
+  frontend-owned `open/3`, `open_setup/3`, and `begin_run/3` together with the
+  ownership branch they required; and
+- (incomplete, superseded by the two entries below) bound terminal cleanup with
+  the budget the lifecycle owner installs. `ProviderSession.close/1` and
+  `close_with_unregistered/2` wait `provider_cleanup_timeout_ms` plus one reply
+  grace and terminate a session that misses it, returning the classified
+  cleanup failure instead of waiting indefinitely.
+  `Authorization.cancel_authorization/3` requires a supplied
+  `:cleanup_deadline` rather than minting one from the residual budget of the
+  interaction it cleans up, and `LoopbackListener.await/4` reports an
+  uncommitted cancellation as `authorization_cleanup_failed` instead of
+  discarding it. That bounded the caller but left the cleanup it bounds
+  violating its own contract in two ways, so the entry does not stand alone:
+  terminating a wedged session skipped the `terminate/2` that would have killed
+  the provider tasks the session tracked by monitor alone, and every stage of
+  terminal cleanup still minted a fresh full budget, so sequential stages were
+  bounded individually and not together. Both are repaired below; the wait
+  bounds and the two classified failures above are retained unchanged;
+- (complete) make one external owner responsible for provider tasks.
+  `ProviderTaskTracker` is the sole owner of a run's live callbacks. It
+  monitors both `RunState` and the `ProviderSession`, so either lifecycle
+  disappearing kills and reaps every attached task — including a session
+  terminated at its cleanup deadline, where `terminate/2` cannot run. Session
+  attachment routes through that owner and the session's monitor-only provider
+  map is deleted, so a session drains through the one owner before any provider
+  closer runs rather than tracking tasks itself. A regression proves an
+  attached task is alive before the session is wedged and that the task, its
+  scope root, and further attachment are all gone once the wedged session is
+  terminated; a second proves a committed closer never observes a live task;
+  and
+- (complete) bound every terminal action with one absolute deadline. The first
+  terminal action anchors the session's `cleanup_deadline` through
+  `ProviderSession.anchor_cleanup_deadline/1`; OAuth cancellation and the later
+  `close/1` or `close_with_unregistered/2` cleanup consume what remains of that
+  same deadline instead of each minting the installed cleanup duration again.
+  `LoopbackListener` no longer mints a deadline at all — it receives the
+  anchoring operation and spends what it returns — the caller anchors where its
+  terminal action began so a busy session cannot restart the budget at dequeue,
+  and the session is told the share reserved for the closer that must outlive
+  it so both bounds agree. Aborting one acquisition scope mid-run is
+  deliberately outside that episode and keeps its own bounded budget.
+  `provider_cleanup_failed` and `authorization_cleanup_failed` stay exactly as
+  classified.
+
+  Three residuals are recorded rather than repaired here, each because closing
+  it is an ownership change rather than a deadline fix:
+
+  - The deadline bounds a session's own cleanup, not the last root's exit. A
+    scope reaper starts its own `provider_cleanup_timeout_ms` window when it
+    observes the session's death, so a terminated session's registered roots can
+    outlive the close that reported the failure, inside that separately bounded
+    tail. Folding the tail in means propagating the anchored deadline into the
+    scope reapers.
+  - A terminal stage that must ask the session for the anchored deadline can
+    only bound that request by the installed budget, because it cannot know the
+    remainder before the reply. A session that answers an OAuth cancellation and
+    then stops answering therefore costs one further budget on the close that
+    follows, before it is terminated. Removing it means returning the anchored
+    deadline out through the authorization subphase so the close inherits it
+    instead of asking.
+  - Caller death during a check aborts through the execution owner, which closes
+    the registry and the OAuth runtime before the session, while a close request
+    already delivered to that session continues concurrently. This is the
+    shipped abort ordering for runs as well, pinned by its own regression;
+    reversing it for the abort path is a separate ownership slice.
 
 Keep these as independently reviewable commits in the Checkpoint C PR. Do not
 start doctor implementation until the descriptor and ownership boundaries are
@@ -838,9 +945,9 @@ all and calls `load_and_build/3` with an empty registry. Behavioural drift
 between them has already produced one reachable privacy defect, so treat this
 slice as early simplification rather than work deferred behind later features.
 
-Checkpoint C pulls descriptor-authoritative acquisition, the remaining
-runtime-activation bound, `.env` ordering, listener expiry, and `--check`
-ownership parity forward from this slice. This section retains the broader
+Checkpoint C pulls descriptor-authoritative acquisition, the recorded
+runtime-activation bootstrap exception, `.env` ordering, listener expiry, and
+`--check` ownership parity forward from this slice. This section retains the broader
 command and REPL cutover after destination publication is complete:
 
 - finish shared `help`, `version`, `validate`, `models`, `doctor`, `run`, and
@@ -988,6 +1095,10 @@ them:
   service cancellation, or concurrency quotas;
 - a general object/transactional artifact store;
 - standalone durable OAuth authorization;
+- a two-phase ownership handoff that makes host-bound runtime activation
+  hard-cancellable; its trigger is a supported deployment that cannot accept
+  the bootstrap exception above, and decrypting in a worker is not an
+  acceptable substitute;
 - a new LLM adapter or removal of `req_llm`/`llm_db`;
 - a second general HTTP stack; a minimal native/port receive helper is allowed
   only when the shipped boundary cannot prove and enforce the slice-7 cap;

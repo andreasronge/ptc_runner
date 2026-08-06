@@ -47,21 +47,12 @@ defmodule Mix.Tasks.Ptc.Run do
   alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandEngine
-  alias PtcRunner.Kernel.CommandSubject
-  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.MCPOAuth.Authority
-  alias PtcRunner.Kernel.MCPOAuth.Authorization
-  alias PtcRunner.Kernel.MCPOAuth.Context, as: OAuthContext
-  alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
-  alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Kernel.PreparedRun
-  alias PtcRunner.Kernel.ProviderActiveSession
   alias PtcRunner.Kernel.ProviderExecution
-  alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
-  alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
@@ -149,70 +140,31 @@ defmodule Mix.Tasks.Ptc.Run do
          opts,
          runtime
        ) do
-    if Keyword.get(opts, :check, false) do
-      execute_check_prepared(prepared, run_opts, opts, runtime)
-    else
-      execute_one_shot(prepared, run_opts, opts, runtime)
-    end
-  end
-
-  defp execute_check_prepared(
-         %PreparedRun{provider_declarations: []} = prepared,
-         run_opts,
-         opts,
-         runtime
-       ) do
-    with {:ok, registry} <-
-           ProviderRegistry.new(%{}, installed_limits: runtime.catalog.installed_limits) do
-      try do
-        execute_with_registry(prepared, registry, nil, run_opts, opts, runtime.host)
-      after
-        ProviderRegistry.close(registry)
+    with :ok <- load_environment_credentials(prepared, runtime) do
+      if Keyword.get(opts, :check, false) do
+        execute_check(prepared, run_opts, runtime)
+      else
+        execute_one_shot(prepared, run_opts, opts, runtime)
       end
     end
   end
 
-  defp execute_check_prepared(
-         prepared,
-         run_opts,
-         opts,
-         %{authorizations: [_first | _rest]} = runtime
-       ) do
-    case ProviderActiveSession.open_setup(prepared, runtime.catalog, runtime.services) do
-      {:ok, setup_session} ->
-        execute_after_authorization_setup(
-          prepared,
-          setup_session,
-          run_opts,
-          opts,
-          runtime
-        )
-
-      {:error, %CommandDiagnostic{}} = error ->
-        error
+  # A check and a one-shot differ only in what the execution owner completes:
+  # both open the same session, registry, credentials, OAuth, acquisition, and
+  # cleanup ownership. `--check` rejects every artifact option, so its authority
+  # carries no destination and nothing is published.
+  defp execute_check(prepared, run_opts, runtime) do
+    with {:ok, authority} <- PublicationAuthority.new(run_opts),
+         {:ok, snapshots} <- check_owned(prepared, authority, runtime) do
+      report_check(resolved_view(snapshots, runtime.host))
     end
   end
 
-  defp execute_check_prepared(prepared, run_opts, opts, runtime) do
-    case ProviderActiveSession.open(prepared, runtime.catalog, runtime.services) do
-      {:ok, session} ->
-        case with :ok <- maybe_load_dotenv(prepared, runtime),
-                  do: active_registry(prepared, session, runtime) do
-          {:ok, registry, cleanup} ->
-            try do
-              execute_with_registry(prepared, registry, session, run_opts, opts, runtime.host)
-            after
-              cleanup.()
-            end
+  defp check_owned(%PreparedRun{provider_declarations: []} = prepared, authority, _runtime),
+    do: RunCoordinator.check(prepared, authority)
 
-          {:error, _reason} = error ->
-            _ = ProviderSession.close(session)
-            error
-        end
-
-      {:error, %CommandDiagnostic{}} = error ->
-        error
-    end
+  defp check_owned(prepared, authority, runtime) do
+    RunCoordinator.check(prepared, authority, runtime.execution, &notify_authorization_url/1)
   end
 
   defp execute_one_shot(prepared, run_opts, opts, runtime) do
@@ -227,61 +179,12 @@ defmodule Mix.Tasks.Ptc.Run do
     do: RunCoordinator.execute(prepared, authority)
 
   defp execute_owned(prepared, authority, runtime) do
-    RunCoordinator.execute(prepared, authority, runtime.execution, fn url ->
-      Mix.shell().info("Open this one-time authorization URL:\n#{url}")
-      :ok
-    end)
+    RunCoordinator.execute(prepared, authority, runtime.execution, &notify_authorization_url/1)
   end
 
-  defp execute_after_authorization_setup(prepared, setup_session, run_opts, opts, runtime) do
-    selected_names = selected_provider_names(prepared)
-    authorities = oauth_authorities(runtime.host, selected_names)
-
-    result =
-      with :ok <- maybe_load_dotenv(prepared, runtime),
-           deadline when not is_nil(deadline) <-
-             oauth_setup_deadline(
-               prepared.provider_declarations,
-               authorities,
-               selected_names,
-               System.monotonic_time(:millisecond)
-             ),
-           {:ok, registry, context, cleanup} <-
-             open_oauth_registry(runtime, selected_names, deadline) do
-        try do
-          with :ok <-
-                 authorize_installations(
-                   runtime.host,
-                   context,
-                   registry,
-                   prepared.provider_declarations,
-                   authorities,
-                   runtime.authorizations
-                 )
-                 |> authorization_result(selected_names, runtime.catalog),
-               {:ok, session} <-
-                 ProviderActiveSession.begin_run(setup_session, prepared, runtime.catalog) do
-            execute_with_registry(prepared, registry, session, run_opts, opts, runtime.host)
-          end
-        after
-          cleanup.()
-        end
-      else
-        nil -> {:error, :invalid_mcp_authorization}
-        {:error, _reason} = error -> error
-      end
-
-    close_unstarted_session(setup_session, result)
-  end
-
-  defp execute_with_registry(prepared, registry, session, run_opts, opts, host) do
-    with true <- Keyword.get(opts, :check, false),
-         {:ok, view} <- check(prepared, registry, session, host, run_opts) do
-      report_check(view)
-    else
-      false -> {:error, :invalid_check}
-      {:error, _reason} = error -> error
-    end
+  defp notify_authorization_url(url) do
+    Mix.shell().info("Open this one-time authorization URL:\n#{url}")
+    :ok
   end
 
   defp exclusive_destinations(opts) do
@@ -355,247 +258,19 @@ defmodule Mix.Tasks.Ptc.Run do
     end
   end
 
-  defp active_registry(
-         prepared,
-         session,
-         %{host: nil, catalog: catalog, services: services}
-       ) do
-    catalog
-    |> InstallationCatalog.runtime_registry(
-      services,
-      selected_provider_names(prepared),
-      ProviderSession.run_deadline(session)
-    )
-    |> registry_result(:run)
-  end
-
-  defp active_registry(prepared, session, runtime) do
-    selected_names = selected_provider_names(prepared)
-    authorities = oauth_authorities(runtime.host, selected_names)
-
-    if Enum.any?(authorities, fn {_name, authority} -> not is_nil(authority) end) do
-      run_deadline = ProviderSession.run_deadline(session)
-
-      oauth_deadline =
-        oauth_operation_deadline(
-          run_deadline,
-          prepared.provider_declarations,
-          authorities,
-          System.monotonic_time(:millisecond)
-        )
-
-      with {:ok, registry, _context, cleanup} <-
-             open_oauth_registry(runtime, selected_names, oauth_deadline) do
-        {:ok, registry, cleanup}
-      end
-    else
-      runtime.catalog
-      |> InstallationCatalog.runtime_registry(
-        runtime.services,
-        selected_names,
-        ProviderSession.run_deadline(session)
-      )
-      |> registry_result(:run)
-    end
-  end
-
-  defp open_oauth_registry(runtime, selected_names, deadline) do
-    with {:ok, memory} <- Memory.start_link(owner: self()) do
-      result =
-        with {:ok, store} <- Memory.store(memory),
-             {:ok, context} <-
-               OAuthContext.new(
-                 tenant_id: "local-cli",
-                 principal_id: "local-user",
-                 store: store,
-                 deadline: deadline
-               ),
-             {:ok, services} <-
-               HostInstallation.runtime_services(runtime.host,
-                 provider_application_mode: runtime.services.provider_application_mode,
-                 oauth_mode:
-                   {:context_factory,
-                    fn
-                      ^deadline -> {:ok, context}
-                      _other -> {:error, :authorization_context_required}
-                    end}
-               ),
-             {:ok, registry} <-
-               InstallationCatalog.runtime_registry(
-                 runtime.catalog,
-                 services,
-                 selected_names,
-                 deadline
-               )
-               |> registry_result({:oauth, selected_names, runtime.catalog}) do
-          {:ok, registry, context,
-           fn ->
-             ProviderRegistry.close(registry)
-             Memory.close(memory)
-           end}
-        end
-
-      case result do
-        {:ok, _registry, _context, _cleanup} = success ->
-          success
-
-        {:error, _reason} = error ->
-          error
-          |> registry_result({:oauth, selected_names, runtime.catalog})
-          |> then(&close_memory(memory, &1))
-      end
-    end
-  end
-
-  defp selected_provider_names(prepared),
-    do: prepared.provider_declarations |> Enum.map(& &1.name) |> Enum.uniq()
-
-  @doc false
-  @spec oauth_authorities(map(), [binary()]) :: %{binary() => Authority.t() | nil}
-  def oauth_authorities(%{install: install}, selected_names)
-      when is_map(install) and is_list(selected_names) do
-    Map.new(selected_names, fn name ->
-      authority =
-        case Map.get(install, name) do
-          %{source: :mcp, transport: %{oauth: %Authority{} = authority}} -> authority
-          _not_oauth -> nil
-        end
-
-      {name, authority}
-    end)
-  end
-
-  def oauth_authorities(_host, _selected_names), do: %{}
-
-  @doc false
-  @spec authorization_result(:ok | {:error, term()}, [binary()], InstallationCatalog.t()) ::
-          :ok | {:error, term()}
-  def authorization_result(:ok, _selected_names, _catalog), do: :ok
-
-  def authorization_result({:error, _reason} = result, selected_names, catalog),
-    do: registry_result(result, {:oauth, selected_names, catalog})
-
-  @doc false
-  @spec oauth_operation_deadline(Deadline.t(), [map()], map(), integer()) :: Deadline.t()
-  def oauth_operation_deadline(run_deadline, declarations, authorities, anchor_ms) do
-    Enum.reduce(declarations, run_deadline, fn declaration, deadline ->
-      case declaration do
-        %{name: name, config: %{"timeout_ms" => timeout_ms}}
-        when is_integer(timeout_ms) and timeout_ms > 0 ->
-          if Map.get(authorities, name) do
-            Deadline.earliest(deadline, Deadline.new(timeout_ms, anchor_ms))
-          else
-            deadline
-          end
-
-        _declaration ->
-          deadline
-      end
-    end)
-  end
-
-  @doc false
-  @spec oauth_setup_deadline([map()], map(), [binary()], integer()) :: Deadline.t() | nil
-  def oauth_setup_deadline(declarations, authorities, selected_names, anchor_ms) do
-    Enum.reduce(selected_names, nil, fn name, deadline ->
-      case oauth_target_deadline(name, declarations, authorities, anchor_ms) do
-        nil -> deadline
-        target when is_nil(deadline) -> target
-        target -> Deadline.earliest(deadline, target)
-      end
-    end)
-  end
-
-  @doc false
-  @spec oauth_target_deadline(binary(), [map()], map(), integer()) :: Deadline.t() | nil
-  def oauth_target_deadline(name, declarations, authorities, anchor_ms) do
-    case Map.get(authorities, name) do
-      %{authorization_timeout_ms: timeout_ms}
-      when is_integer(timeout_ms) and timeout_ms > 0 ->
-        Enum.reduce(declarations, Deadline.new(timeout_ms, anchor_ms), fn declaration, deadline ->
-          case declaration do
-            %{name: ^name, config: %{"timeout_ms" => occurrence_timeout_ms}}
-            when is_integer(occurrence_timeout_ms) and occurrence_timeout_ms > 0 ->
-              Deadline.earliest(deadline, Deadline.new(occurrence_timeout_ms, anchor_ms))
-
-            _other ->
-              deadline
-          end
-        end)
-
-      _not_oauth ->
-        nil
-    end
-  end
-
-  defp registry_result({:ok, registry}, :run),
-    do: {:ok, registry, fn -> ProviderRegistry.close(registry) end}
-
-  defp registry_result({:ok, registry}, {:oauth, _selected_names, _catalog}),
-    do: {:ok, registry}
-
-  defp registry_result({:error, :operation_deadline_expired}, :run),
-    do: {:error, CommandDiagnostic.new!(:execution, :run_timeout, provider_activity: true)}
-
-  defp registry_result(
-         {:error, {:authorization_timeout, name}},
-         {:oauth, _selected_names, _catalog}
-       ),
-       do: {:error, authorization_diagnostic(name)}
-
-  defp registry_result(
-         {:error, {:authorization_unavailable, name}},
-         {:oauth, _selected_names, _catalog}
-       ),
-       do: {:error, authorization_diagnostic(name)}
-
-  defp registry_result(
-         {:error, reason},
-         {:oauth, selected_names, catalog}
-       )
-       when reason in [:operation_deadline_expired, :timeout] do
-    name =
-      selected_names
-      |> Enum.filter(&(catalog.authorities[&1] != nil))
-      |> Enum.min()
-
-    {:error, authorization_diagnostic(name)}
-  end
-
-  defp registry_result({:error, _reason} = error, _operation), do: error
-
-  defp close_memory(%Memory{pid: pid}) do
-    if Process.alive?(pid), do: Memory.close(%Memory{pid: pid}), else: :ok
-  end
-
-  defp close_memory(memory, error) do
-    close_memory(memory)
-    error
-  end
-
-  defp close_unstarted_session(session, {:error, _reason} = error) do
-    if is_nil(ProviderSession.run_deadline(session)), do: ProviderSession.close(session)
-    error
-  end
-
-  defp close_unstarted_session(_session, result), do: result
-
-  defp authorization_diagnostic(name) do
-    {:ok, subject} = CommandSubject.provider(name, :authorization)
-
-    CommandDiagnostic.new!(:active_preflight, :authorization_unavailable,
-      provider_activity: true,
-      subject: subject
-    )
-  end
-
   defp provider_application_mode do
     if :req_llm in started_applications(), do: :host_owned, else: :command_vm
   end
 
-  defp maybe_load_dotenv(_prepared, %{host: nil}), do: :ok
+  # Dotenv discovery reads the filesystem and mutates the VM environment, so it
+  # is command setup rather than bounded run work: it cannot be cancelled by a
+  # deadline or rolled back, and an embedding must never acquire ambient `.env`
+  # state implicitly inside the Kernel. The CLI therefore decides once, after
+  # preparation has established which providers are selected and before any
+  # execution owner, provider session, or run clock exists.
+  defp load_environment_credentials(_prepared, %{host: nil}), do: :ok
 
-  defp maybe_load_dotenv(prepared, runtime) do
+  defp load_environment_credentials(prepared, runtime) do
     # Keyed on the declared credential, not on provider-application admission: a
     # direct `ollama:`/`openai-compat:` route needs no backing application but
     # can still resolve its credential from the nearest `.env`.
@@ -608,10 +283,22 @@ defmodule Mix.Tasks.Ptc.Run do
            _other -> false
          end
        end) do
-      Dotenv.load()
+      load_dotenv()
     else
       :ok
     end
+  end
+
+  # `PtcRunner.Dotenv` reads the file it finds with `File.read!/1`. Inside the
+  # execution owner that raise became a closed internal diagnostic; in the
+  # frontend it would otherwise put a raw exception and the `.env` path in the
+  # command's failure output.
+  defp load_dotenv do
+    Dotenv.load()
+  rescue
+    _exception -> {:error, :dotenv_unavailable}
+  catch
+    _kind, _reason -> {:error, :dotenv_unavailable}
   end
 
   defp started_applications,
@@ -632,80 +319,6 @@ defmodule Mix.Tasks.Ptc.Run do
       :ok
     else
       {:error, :invalid_mcp_authorization}
-    end
-  end
-
-  defp authorize_installations(
-         host,
-         context,
-         registry,
-         declarations,
-         authorities,
-         requested
-       ) do
-    Enum.reduce_while(requested, :ok, fn name, :ok ->
-      case Map.get(host.install, name) do
-        %{source: :mcp, transport: %{oauth: authority}} when not is_nil(authority) ->
-          deadline =
-            oauth_target_deadline(
-              name,
-              declarations,
-              authorities,
-              System.monotonic_time(:millisecond)
-            )
-
-          with true <- Deadline.valid?(deadline),
-               {:ok, authority_epoch} <-
-                 ProviderRegistry.oauth_authority_epoch(registry, name, deadline),
-               :ok <- authorize_installation(context, authority, authority_epoch, deadline) do
-            {:cont, :ok}
-          else
-            false ->
-              {:halt, {:error, :invalid_mcp_authorization}}
-
-            {:error, reason} when reason in [:timeout, :authorization_timeout] ->
-              {:halt, {:error, {:authorization_timeout, name}}}
-
-            {:error, :authorization_context_required} ->
-              {:halt, {:error, {:authorization_unavailable, name}}}
-
-            {:error, _reason} = error ->
-              {:halt, error}
-          end
-
-        _missing_or_not_oauth ->
-          {:halt, {:error, :invalid_mcp_authorization}}
-      end
-    end)
-  end
-
-  defp authorize_installation(context, authority, authority_epoch, deadline) do
-    with true <- Authority.cli_compatible?(authority),
-         {:ok, listener} <- LoopbackListener.start(authority) do
-      authorize_with_listener(context, authority, authority_epoch, deadline, listener)
-    else
-      false -> {:error, :mcp_authorization_not_cli_compatible}
-      {:error, _reason} = error -> error
-    end
-  end
-
-  defp authorize_with_listener(context, authority, authority_epoch, deadline, listener) do
-    case Authorization.begin_authorization(context, authority,
-           authority_epoch: authority_epoch,
-           deadline_ms: Deadline.expires_at(deadline),
-           redirect_uri: listener.redirect_uri
-         ) do
-      {:ok, pending} ->
-        Mix.shell().info("Open this one-time authorization URL:\n#{pending.url}")
-
-        case LoopbackListener.await(listener, context, pending, []) do
-          {:ok, _grant} -> :ok
-          {:error, _reason} = error -> error
-        end
-
-      {:error, _reason} = error ->
-        LoopbackListener.close(listener)
-        error
     end
   end
 
@@ -742,24 +355,8 @@ defmodule Mix.Tasks.Ptc.Run do
   defp maybe_request_option(opts, _key, nil), do: opts
   defp maybe_request_option(opts, key, value), do: Keyword.put(opts, key, value)
 
-  defp check(prepared, registry, session, host, opts) do
-    result =
-      if session,
-        do: RunBuilder.build_active(prepared, registry, session, opts),
-        else: RunBuilder.build_prepared(prepared, registry, opts)
-
-    with {:ok, built} <- result do
-      view = resolved_view(built, host)
-
-      case RunBuilder.close(built.config) do
-        :ok -> {:ok, view}
-        {:error, _reason} = error -> error
-      end
-    end
-  end
-
-  defp resolved_view(built, host) do
-    built.config.connector_snapshots
+  defp resolved_view(snapshots, host) do
+    snapshots
     |> Enum.map(fn snapshot ->
       installation = if host, do: host.install[snapshot["provider"]]
       resolved_provider(snapshot, installation)
