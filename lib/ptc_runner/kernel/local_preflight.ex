@@ -20,12 +20,20 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   #
   # ## Trust
   #
-  # Only `:audited_local` runs here, and only a host-installed shipped
-  # declaration may carry that value: `ProviderDescriptor` refuses it from a
-  # custom source and `InstallationCatalog` refuses it without a runtime
-  # binding. A catalog still holds the callbacks of its `:unverified`
-  # declarations — parity requires one — but they are active work and this step
-  # never invokes them.
+  # Only `:audited_local` runs here, and the two constructors bound which
+  # declarations may carry that value: `ProviderDescriptor` refuses it from a
+  # custom source, and `InstallationCatalog` refuses it without a host runtime
+  # binding. That is a bound on what may be *declared*. It is not an attestation
+  # that the implementation behind an admitted declaration came from a shipped
+  # recipe: whoever assembles a catalog in-process supplies its callbacks, and
+  # that code is already trusted — same-VM containment is an explicit non-goal.
+  # What the rules do guarantee is that manifest input, which can only select
+  # installed aliases and never register an implementation, can introduce
+  # nothing into this step.
+  #
+  # A catalog still holds the callbacks of its `:unverified` declarations —
+  # parity requires one — but they are active work and this step never invokes
+  # them.
   #
   # The prepared run, catalog, and runtime services must belong together. Alias
   # names are not identity: two catalogs can install the same alias over
@@ -180,11 +188,23 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     with {:ok, callback} <- callback(catalog, occurrence.name),
          {:ok, timeout_ms} <- remaining(deadline, occurrence) do
       case invoke(callback, occurrence.config, context, services, timeout_ms) do
-        :ok -> :ok
+        :ok -> settled(deadline, occurrence)
         :timed_out -> {:error, local_diagnostic(:local_check_timeout, occurrence)}
         {:error, reason} -> {:error, diagnostic(reason, occurrence)}
       end
     end
+  end
+
+  # The worker's bound is relative and starts after this process computed what
+  # remained, so scheduling delay between the two can let a success arrive past
+  # the anchored cutoff. Accepting it would let the step outrun the deadline it
+  # promises to spend, so success is confirmed against the absolute deadline.
+  # A failure keeps its own diagnostic: it is more informative than the budget
+  # having been spent, and reporting it does not extend the step.
+  defp settled(deadline, occurrence) do
+    if Deadline.expired?(deadline),
+      do: {:error, local_diagnostic(:local_check_timeout, occurrence)},
+      else: :ok
   end
 
   defp callback(catalog, name) do

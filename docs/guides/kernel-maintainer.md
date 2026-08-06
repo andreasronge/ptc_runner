@@ -216,11 +216,20 @@ audited-local rows only after the step as a whole succeeded.
 Shipped live-LLM and stdio MCP descriptors declare `audited_local` callbacks.
 Those callbacks use the same model/adapter and executable/launcher checks as
 runtime provider preflight, without resolving credentials or contacting a
-provider. `audited_local` is a trust declaration and only a host-installed
-shipped source may make it: `ProviderDescriptor` refuses it from a `:custom`
-source, and `InstallationCatalog` refuses it from a catalog without a runtime
-binding. A custom local check declares `unverified` and runs as active work
-after the phase-8 marker. A live-LLM descriptor also supplies a bounded completion probe for
+provider. `audited_local` is a trust declaration rather than a capability flag,
+and two constructors bound who may make it: `ProviderDescriptor` refuses it from
+a `:custom` source, and `InstallationCatalog` refuses it from a catalog without
+a host runtime binding. A custom local check declares `unverified` and runs as
+active work after the phase-8 marker.
+
+Those rules bound what may be *declared*. They do not attest that an admitted
+callback came from a shipped recipe: whoever assembles a catalog in-process
+supplies its implementations, and an embedder holding sealed host services can
+bind one it assembled itself. That code is already trusted — hostile same-VM
+containment is an explicit non-goal — and the guarantee that matters holds
+regardless: manifest input selects installed aliases and never registers an
+implementation, so nothing an application declares can introduce a callback
+into phase 7. A live-LLM descriptor also supplies a bounded completion probe for
 the active `doctor --connect` path. It resolves the declared credential only
 after local checks, disables adapter and HTTP retries and redirects, forces a
 one-token response ceiling, and makes exactly one request under the sealed

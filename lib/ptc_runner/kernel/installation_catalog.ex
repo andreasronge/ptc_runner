@@ -14,9 +14,11 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   activation deadline because it has no run selection.
   Catalog construction checks that active validators, connectivity probes, and
   local checks agree with their descriptors without invoking any callback. An
-  `:audited_local` declaration additionally requires a runtime binding, so only
-  a host-installed catalog can carry a check phase 7 runs before provider
-  activity.
+  `:audited_local` declaration additionally requires a runtime binding, so an
+  embedder-assembled catalog cannot carry a check phase 7 runs before provider
+  activity. The binding scopes that claim to a sealed host document; it does not
+  attest that the callback itself came from a shipped installation recipe, which
+  no in-process registration can prove about its own caller.
   Every builder placed in a run-bound registry carries the data policy its
   validated sealed descriptor declares, so a staged preparation cannot
   contradict the policy phase 5 and sink authorization already used.
@@ -264,10 +266,11 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
 
   # The second half of the audited-local trust rule `ProviderDescriptor` starts.
   # That module refuses the claim from a custom source; this one refuses it from
-  # any catalog without a host runtime binding, because an unbound catalog is
-  # assembled by its embedder rather than derived from a shipped installation
-  # recipe. Together they mean phase 7 can only ever reach a callback a host
-  # document installed.
+  # any catalog without a host runtime binding, because an unbound catalog was
+  # assembled without reference to a host document at all. Together they bound
+  # which declarations phase 7 will act on. They do not prove the callback's
+  # origin: an embedder holding sealed host services can bind a catalog it
+  # assembled itself, and it is trusted code either way.
   defp audited_local_bindings_valid?(%{runtime_binding: nil, descriptors: descriptors}),
     do: Enum.all?(descriptors, fn {_name, descriptor} -> not audited_local?(descriptor) end)
 

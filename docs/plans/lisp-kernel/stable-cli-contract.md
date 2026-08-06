@@ -1020,7 +1020,19 @@ commits in one Checkpoint C PR:
     command, and a test pins the requirement constant against `mix.exs`;
 - run `doctor --connect` through the ordinary provider-session prefix and its
   connectivity branch: probe `:probe`, use bounded acquisition/discovery for
-  `:acquisition`, and skip `:none`;
+  `:acquisition`, and skip `:none`. `ProviderExecution` has no connectivity
+  operation at all today, so this is the whole branch rather than a variation of
+  the run one. The shipped live-model probe it needs already exists, with
+  retries and redirects disabled, and the contract is strict: connect requires
+  an application and every provider row must pass, so any failed check fails the
+  command;
+
+- invoke `:unverified` local checks after the phase-8 marker, under the session
+  deadline, for run, `--check`, and `doctor --connect`. Nothing invokes them
+  today — that was already true before phase-7 execution existed, and restricting
+  `:audited_local` to shipped host declarations made it the only path a custom
+  local check has. Default doctor keeps reporting `active_check_required`
+  instead of running one;
 - keep `MCPHTTPAdapter` as the single shipped HTTP boundary while adding an
   authoritative cap at or before the transport receive boundary; and
 - add shipped live-model probes with retries and redirects disabled.
@@ -1044,8 +1056,23 @@ and refuses the whole step rather than skipping the untrusted occurrence, which
 would report a local check nothing verified. That guard is defense in depth
 rather than an independently reachable branch: `run/4` revalidates both seals
 first, so a value failing it crossed a constructor that should not have admitted
-it. Hostile same-VM containment stays an explicit non-goal — this bounds what
-may be declared, not what trusted code may do.
+it.
+
+The limit of both rules is recorded rather than closed, because closing it costs
+more than it buys. They bound what may be *declared*; they do not attest that an
+admitted callback came from a shipped recipe. An embedder holding sealed host
+services can bind a catalog it assembled itself and register its own closure
+under a shipped-source descriptor, and phase 7 will run it before the marker.
+Enforcing provenance is possible — an audited-local implementation could be
+required to be a closure defined in `HostInstallation` — but it would also make
+the step untestable: every phase-7 fixture, including the reason-translation
+table, injects a callback, and no shipped callback can be made to return each
+reachable reason on demand. The trade is accepted because the embedder in
+question is already trusted code that can run anything in this VM without
+phase 7, hostile same-VM containment stays an explicit non-goal, and the
+guarantee that actually matters is unaffected: manifest input selects installed
+aliases and never registers an implementation, so nothing an application
+declares can introduce a callback into this step.
 
 **Complete (phase-7 timeout code):** `local_preflight` / `local_check_timeout`
 is catalogued and reports an exhausted audited-local budget, whether the budget
@@ -1058,6 +1085,13 @@ The exhausted budget is deliberately reported outside the internal-reason
 translation table above. A callback that returns `:local_check_timeout` as its
 own reason is an unrecognised result and still fails closed, so a defect cannot
 be passed off as an operational outcome.
+
+Success is confirmed against the anchored deadline rather than accepted from the
+worker alone. The worker's bound is relative and starts after the step computed
+what remained, so scheduling delay between the two can deliver a success past
+the absolute cutoff; that success is reported as the timeout instead. The branch
+cannot be forced deterministically — it needs exactly that skew — so it is
+covered by reasoning rather than by a timing test that would flake either way.
 
 **Gate:** default doctor performs no provider activity; connect checks use the
 selected occurrences, the same shared activation prefix as a run, their

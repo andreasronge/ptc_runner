@@ -13,7 +13,9 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
   `:custom` registration declares `:unverified` instead, and its check becomes
   active work after the phase-8 marker.
   `PtcRunner.Kernel.InstallationCatalog` completes the rule: an
-  `:audited_local` declaration also requires a host runtime binding.
+  `:audited_local` declaration also requires a host runtime binding. Both rules
+  bound what may be declared; neither attests where an admitted implementation
+  came from.
   """
 
   alias PtcRunner.Kernel.Attestation
