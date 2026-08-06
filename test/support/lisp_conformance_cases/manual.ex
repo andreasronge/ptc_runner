@@ -7344,8 +7344,8 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["json/generate-string"],
         "(json/generate-string :fs)",
         "DIV-24",
-        nil,
-        "Non-encodable JSON values return nil instead of lossy stringification."
+        {:error, :type_error},
+        "Keyword values are refused with a type_error naming the position instead of being stringified as Cheshire does."
       ),
       div_case(
         "div/type-keyword-001",

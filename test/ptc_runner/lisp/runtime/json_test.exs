@@ -248,6 +248,19 @@ defmodule PtcRunner.Lisp.Runtime.JsonTest do
       end
     end
 
+    test "a special float in key position is refused, not stringified" do
+      # ##Inf is a number carried as a bounded atom; encoding it as the key
+      # "infinity" would turn a number into a word behind the caller's back.
+      for special <- [:infinity, :negative_infinity, :nan] do
+        msg = refusal(%{special => 1})
+        assert msg =~ "as a JSON object key"
+        assert msg =~ "JSON has no infinity or NaN literal"
+      end
+
+      assert eval_error("(json/generate-string {##Inf 1})") =~
+               "cannot encode ##Inf as a JSON object key"
+    end
+
     test "a refusal nested deep still reports its path" do
       assert refusal([%{"k" => [1, 2, [3, :bad]]}]) =~ ~s|at [0 "k" 2 1]|
     end

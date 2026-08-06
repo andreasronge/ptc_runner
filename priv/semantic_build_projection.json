@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "49dc222048aabb33cfa53b362664d4dc04074b65a0c7f3cbfd5dd568cccf1bb6",
+  "source_closure_hash": "5d92f325ffd3015802e86bfc9a931e3b03a66e00e9c8de110ef5d2bb4796b20e",
   "sources": [
     {
       "bytes": 870,
@@ -1377,9 +1377,9 @@
       "sha256": "5fa8cf00c7875aaf5bcdc45a32f2946e3806a4ccc00f119df9b98f5895c7ec32"
     },
     {
-      "bytes": 11337,
+      "bytes": 11802,
       "path": "lib/ptc_runner/lisp/runtime/json.ex",
-      "sha256": "5e3bba5c2d9b0348d237150a768cd28f02030c4fb1bf744f7be5bcbf02148161"
+      "sha256": "4eef81b1d88daef22aade68dcdbc53f6b75877e9e6d1f916d801e4031d769d66"
     },
     {
       "bytes": 16589,

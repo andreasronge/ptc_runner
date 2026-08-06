@@ -206,6 +206,16 @@ defmodule PtcRunner.Lisp.Runtime.Json do
   defp prepare_key(key, _path) when is_binary(key), do: key
   defp prepare_key(key, _path) when is_integer(key), do: Integer.to_string(key)
   defp prepare_key(key, path) when is_boolean(key) or is_nil(key), do: refuse_key(key, path)
+
+  # `##Inf` / `##-Inf` / `##NaN` are numbers carried as bounded atoms. Without
+  # this clause the keyword branch below would stringify `##Inf` to the key
+  # "infinity" — a number silently becoming a word.
+  defp prepare_key(key, path) when key in [:infinity, :negative_infinity, :nan] do
+    raise @prefix <>
+            "cannot encode #{special_float(key)} as a JSON object key#{position(path)}. " <>
+            "JSON has no infinity or NaN literal."
+  end
+
   defp prepare_key(key, _path) when is_atom(key), do: Atom.to_string(key)
 
   defp prepare_key(%LispKeyword{name: name} = key, path) do
