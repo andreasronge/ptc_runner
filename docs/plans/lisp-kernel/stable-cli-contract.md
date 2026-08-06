@@ -969,7 +969,24 @@ commits in one Checkpoint C PR:
   commit adds the bounded phase-7 step and the boundary translation from
   `HostInstallation`'s internal reasons into those three closed codes. Keep
   validate and models inert, and every unverified callback behind the phase-8
-  marker;
+  marker.
+
+  `local_preflight/4` reaches exactly two shipped sources, and its reachable
+  reasons divide cleanly, so the translation is a table rather than a judgement:
+
+  | Internal reason | Closed code |
+  | --- | --- |
+  | `invalid_compatibility_environment`, `invalid_mcp_working_directory`, `invalid_mcp_executable` | `environment_unavailable` |
+  | `mcp_stdio_launcher_unavailable`, `unsupported_mcp_stdio_platform` | `launcher_unavailable` |
+  | `invalid_llm_model` | `adapter_unavailable` |
+
+  Two reachable reasons are deliberately absent from that table.
+  `provider_destination_denied` and the per-source `invalid_*_selection` values
+  are declaration and selection failures rather than local-environment ones, and
+  they have their own catalogued phases. Mapping them into a `local_preflight`
+  code would report a manifest error as a missing local dependency, so they keep
+  their own diagnostics, and an unrecognised reason fails closed as an internal
+  error instead of being forced into the nearest local code;
 - run `doctor --connect` through the ordinary provider-session prefix and its
   connectivity branch: probe `:probe`, use bounded acquisition/discovery for
   `:acquisition`, and skip `:none`;
