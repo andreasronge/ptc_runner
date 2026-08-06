@@ -87,17 +87,22 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     assert_receive {:DOWN, ^manager_reference, :process, ^manager, :killed}, 5_000
   end
 
-  test "closing a handle that does not name a store terminates nothing" do
-    # The bounded close force-stops a wedged store, so it must first confirm the
-    # process is the one the handle names. A stale or forged handle pointing at
-    # an unrelated live process must close nothing rather than kill it.
-    stranger = spawn(fn -> receive do: (:never -> :ok) end)
+  test "closing a handle that does not name a store neither stops nor messages it" do
+    # A stale or forged handle must close nothing. The stranger is a real
+    # GenServer that would honour `:close`, because a process which merely
+    # ignores calls cannot show whether the message was sent at all.
+    parent = self()
+    {:ok, stranger} = Agent.start(fn -> parent end)
     on_exit(fn -> if Process.alive?(stranger), do: Process.exit(stranger, :kill) end)
 
     closer = Task.async(fn -> Memory.close(%Memory{pid: stranger}) end)
 
     assert :ok = Task.await(closer, 10_000)
     assert Process.alive?(stranger)
+
+    # Still serving its own protocol, so nothing reached it and its state is
+    # untouched.
+    assert Agent.get(stranger, & &1) == parent
   end
 
   setup do

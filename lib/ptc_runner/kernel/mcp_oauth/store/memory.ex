@@ -55,16 +55,24 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   @doc false
   @spec close(t()) :: :ok
   def close(%__MODULE__{pid: pid}) do
-    reference = Process.monitor(pid)
+    # Identity is confirmed before anything is sent, not just before the
+    # process is terminated. `:close` is a plausible message for an unrelated
+    # GenServer, so a stale or forged handle must not be able to stop or mutate
+    # one merely by naming its pid.
+    if store_process?(pid) do
+      reference = Process.monitor(pid)
 
-    _replied =
-      try do
-        GenServer.call(pid, :close, @close_timeout_ms)
-      catch
-        :exit, _reason -> :ok
-      end
+      _replied =
+        try do
+          GenServer.call(pid, :close, @close_timeout_ms)
+        catch
+          :exit, _reason -> :ok
+        end
 
-    await_close(pid, reference)
+      await_close(pid, reference)
+    else
+      :ok
+    end
   end
 
   defp await_close(pid, reference) do
@@ -77,13 +85,12 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
     end
   end
 
-  # `HostInstallationOwner.stop/4` sets the precedent: never force-stop a
-  # process without first confirming it is the one the handle names. A wedged
-  # store cannot answer a call, so identity comes from its start MFA rather than
-  # from a reply it will never send. A handle naming anything else closes
-  # nothing instead of killing an unrelated process.
+  # A wedged store cannot answer a call, so identity comes from its start MFA
+  # rather than from a reply it will never send. Re-checked here because the
+  # process could have died and its pid been reused between the call and the
+  # cutoff.
   defp terminate_store(pid, reference) do
-    if :proc_lib.translate_initial_call(pid) == {__MODULE__, :init, 1} do
+    if store_process?(pid) do
       Process.exit(pid, :kill)
 
       receive do
@@ -94,6 +101,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
       :ok
     end
   end
+
+  defp store_process?(pid), do: :proc_lib.translate_initial_call(pid) == {__MODULE__, :init, 1}
 
   @impl Store
   def transact(%__MODULE__{pid: pid}, operation, deadline) do

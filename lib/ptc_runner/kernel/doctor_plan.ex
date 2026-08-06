@@ -89,6 +89,27 @@ defmodule PtcRunner.Kernel.DoctorPlan do
 
   def settle(_rows, _name, _outcome), do: {:error, :invalid_doctor_plan}
 
+  @doc """
+  Settles every pending row as available.
+
+  Callers use this only after the shared phase-7 step reported `:ok`, which
+  verifies every applicable audited-local occurrence. A partial result cannot
+  reach here: that step reports the first failure instead of returning.
+  """
+  @spec settle_pending(t()) :: {:ok, t()} | {:error, :invalid_doctor_plan}
+  def settle_pending(rows) when is_list(rows) do
+    rows
+    |> pending()
+    |> Enum.reduce_while({:ok, rows}, fn row, {:ok, rows} ->
+      case settle(rows, row.name, {:pass, :available}) do
+        {:ok, settled} -> {:cont, {:ok, settled}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  def settle_pending(_rows), do: {:error, :invalid_doctor_plan}
+
   defp pending_named?(%{name: name, outcome: :audited_local}, name), do: true
   defp pending_named?(_row, _name), do: false
 
