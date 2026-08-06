@@ -563,18 +563,22 @@ more turns, model calls, and trace events than they allow:
 ```
 
 Every cataloged limit name is accepted. Existing application limits accept
-positive integers through 2,592,000,000. Three operational timeouts instead
+positive integers through 2,592,000,000. Four operational timeouts instead
 have narrow, installed-only contracts:
 
 | Limit | Installed default | Accepted range | Identity metadata |
 | --- | ---: | ---: | --- |
 | `provider_cleanup_timeout_ms` | 5,000 | 100–30,000 | Included |
+| `local_preflight_timeout_ms` | 5,000 | 100–30,000 | Included |
 | `selection_validation_timeout_ms` | 5,000 | 100–30,000 | Included |
 | `doctor_connectivity_timeout_ms` | 10,000 | 100–30,000 | Excluded; doctor-only |
 
-Applications cannot declare or narrow those three names. The first two are
+Applications cannot declare or narrow those four names. The first three are
 copied into sealed execution limits and marked as effective-identity
-participants; the doctor-only value is excluded. This slice seals that policy
+participants; the doctor-only value is excluded. `local_preflight_timeout_ms`
+bounds the whole audited-local step rather than one check: every applicable
+occurrence spends what remains of one anchored deadline, so a selection with
+many local checks cannot multiply it. This slice seals that policy
 before the later provider-lifecycle and doctor implementations consume the
 timeouts—it does not yet impose those deadlines. Any omitted name keeps its
 cataloged installed default.

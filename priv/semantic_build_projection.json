@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "f8acedf7b4a8639d6078efdb29fcd5e4a0f91d535cf4612fe47c5eeb2fbda005",
+  "source_closure_hash": "d338e69cbb98c1f651b82b34b94ad3851624c9bc7d6d3dcf48c27d81d1536527",
   "sources": [
     {
       "bytes": 870,
@@ -387,9 +387,9 @@
       "sha256": "102e7c52d89d15c23660358e88a78c23acdf89a1f58e665ee595640bc068f39f"
     },
     {
-      "bytes": 22958,
+      "bytes": 23992,
       "path": "lib/ptc_runner/kernel/installation_catalog.ex",
-      "sha256": "bd4f9beaff1ddadc20d9c92bb4c2f47b72b87098530624121b640b39df176002"
+      "sha256": "3ff9cbe03b34059b0dd38949605f0bf9b9f0c3045272f8a69825401166e2a397"
     },
     {
       "bytes": 11019,
@@ -412,14 +412,14 @@
       "sha256": "66a75b91d3f11fd3c53d6940cbf526e19e2a12ea020adf4d26fe884e544ed49a"
     },
     {
-      "bytes": 6882,
+      "bytes": 6930,
       "path": "lib/ptc_runner/kernel/limit_catalog.ex",
-      "sha256": "466c8a06e155f364590e6edb81a40ed619b1fbb85095cb09014e3ab86f7e545c"
+      "sha256": "46f2eec19e375a9593d54f39c233113a4f273cbae817a571e8668d23f1402404"
     },
     {
-      "bytes": 6919,
+      "bytes": 7136,
       "path": "lib/ptc_runner/kernel/limits.ex",
-      "sha256": "332e7a78bbca2f3ec29db51e141f243d96430f66cbf3785a49c310584145cd56"
+      "sha256": "6b030cf67ee17336df4af8828ea3762d20ae6a53e73dd8c3005c41ca8d49c8d5"
     },
     {
       "bytes": 4799,
@@ -437,9 +437,9 @@
       "sha256": "0c5aa66c084d3c4bfab77976b8aee02fd97c0850b85c83206e2620f2cf00f312"
     },
     {
-      "bytes": 9261,
+      "bytes": 10558,
       "path": "lib/ptc_runner/kernel/local_preflight.ex",
-      "sha256": "06bf32e5b159f963bd9e9d09270f6fb119d95d73864aa992472959814b6b3ec9"
+      "sha256": "65ef19b6e7ee9c969f309cb1461e414b3ec91f386a4c396a9e98c0a06bc1e5d3"
     },
     {
       "bytes": 5154,
@@ -692,9 +692,9 @@
       "sha256": "b0022b75ddec3890dd30bb54f95faaed5ed87312b3f0b3a8c3459ed642c01723"
     },
     {
-      "bytes": 10577,
+      "bytes": 11484,
       "path": "lib/ptc_runner/kernel/provider_descriptor.ex",
-      "sha256": "e0bf64330fcb0508b880222f0323cd7a6c6bf5f7d899124c74a176ba8d56d500"
+      "sha256": "aaf30f2f3912582fa35e1e0f36a79991fe6f9ba12061a4fa558cd4a904b9e180"
     },
     {
       "bytes": 4309,

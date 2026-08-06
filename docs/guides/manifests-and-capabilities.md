@@ -362,7 +362,7 @@ arguments and results, and canonical events.
 `subordinate_source_checks` is independent of `subordinate_evaluations` and
 mission capability quotas because a check compiles but never executes source.
 
-The host-only `provider_cleanup_timeout_ms`,
+The host-only `provider_cleanup_timeout_ms`, `local_preflight_timeout_ms`,
 `selection_validation_timeout_ms`, and `doctor_connectivity_timeout_ms` names
 are deliberately absent from the application schema. A manifest that declares
 one is rejected rather than narrowing host-owned operational policy.

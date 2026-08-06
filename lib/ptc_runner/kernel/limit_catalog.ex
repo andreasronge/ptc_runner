@@ -44,6 +44,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
 
   @installed_only [
     {:provider_cleanup_timeout_ms, 5_000, true},
+    {:local_preflight_timeout_ms, 5_000, true},
     {:selection_validation_timeout_ms, 5_000, true},
     {:doctor_connectivity_timeout_ms, 10_000, false}
   ]
