@@ -178,18 +178,15 @@ defmodule PtcRunner.Lisp.Runtime.Json do
   # so it is refused.
   # ----------------------------------------------------------------
 
-  defp prepare(value, _path) when is_binary(value) or is_number(value), do: value
+  defp prepare(value, path) when is_binary(value), do: valid_utf8!(value, path, "value")
+  defp prepare(value, _path) when is_number(value), do: value
   defp prepare(value, _path) when is_boolean(value) or is_nil(value), do: value
   defp prepare(value, path) when is_atom(value), do: refuse_value(value, path)
   defp prepare(%LispKeyword{} = value, path), do: refuse_value(value, path)
   defp prepare(%MapSet{} = value, path), do: refuse_value(value, path)
   defp prepare(%_{} = value, path), do: refuse_value(value, path)
 
-  defp prepare(value, path) when is_list(value) do
-    value
-    |> Enum.with_index()
-    |> Enum.map(fn {item, index} -> prepare(item, [index | path]) end)
-  end
+  defp prepare(value, path) when is_list(value), do: prepare_list(value, path, 0, [])
 
   defp prepare(value, path) when is_map(value) do
     Enum.reduce(value, %{}, fn {key, item}, acc ->
@@ -203,7 +200,21 @@ defmodule PtcRunner.Lisp.Runtime.Json do
 
   defp prepare(value, path), do: refuse_value(value, path)
 
-  defp prepare_key(key, _path) when is_binary(key), do: key
+  defp prepare_list([], _path, _index, acc), do: Enum.reverse(acc)
+
+  defp prepare_list([item | rest], path, index, acc),
+    do: prepare_list(rest, path, index + 1, [prepare(item, [index | path]) | acc])
+
+  # Only a host caller can hand us an improper list; PTC-Lisp cannot build one.
+  # Walking it here rather than through `Enum` keeps it on the refusal path
+  # instead of raising an unpositioned FunctionClauseError.
+  defp prepare_list(tail, path, index, _acc) do
+    raise @prefix <>
+            "cannot encode an improper list#{position(path)}. A JSON array needs a " <>
+            "proper list; the tail at index #{index} is #{kind(tail)}."
+  end
+
+  defp prepare_key(key, path) when is_binary(key), do: valid_utf8!(key, path, "object key")
   defp prepare_key(key, _path) when is_integer(key), do: Integer.to_string(key)
   defp prepare_key(key, path) when is_boolean(key) or is_nil(key), do: refuse_key(key, path)
 
@@ -243,6 +254,18 @@ defmodule PtcRunner.Lisp.Runtime.Json do
     raise @prefix <>
             "cannot encode #{kind(key)} as a JSON object key#{position(path)}. " <>
             "JSON object keys must be strings — use a string, an integer, or a keyword."
+  end
+
+  # Jason rejects invalid UTF-8 too, but only after the walk has finished and
+  # the position is gone; catching it here keeps the refusal located.
+  defp valid_utf8!(text, path, position_name) do
+    if String.valid?(text) do
+      text
+    else
+      raise @prefix <>
+              "cannot encode a string with invalid UTF-8 as a JSON " <>
+              "#{position_name}#{position(path)}. JSON strings must be valid UTF-8."
+    end
   end
 
   defp refuse_duplicate(acc, encoded_key, path) do
@@ -313,7 +336,8 @@ defmodule PtcRunner.Lisp.Runtime.Json do
   end
 
   defp step(step) when is_binary(step), do: inspect(clip(step))
-  defp step(step) when is_integer(step), do: Integer.to_string(step)
+  # Clipped like every other step: a bignum key renders as many digits as it has.
+  defp step(step) when is_integer(step), do: step |> Integer.to_string() |> clip()
   defp step(%LispKeyword{name: name}), do: ":" <> clip(name)
   defp step(step) when is_atom(step), do: clip(inspect(step))
   defp step(step), do: clip(inspect(step))

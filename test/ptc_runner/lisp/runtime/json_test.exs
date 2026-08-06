@@ -292,6 +292,31 @@ defmodule PtcRunner.Lisp.Runtime.JsonTest do
       assert String.valid?(msg)
     end
 
+    test "a bignum key is clipped like every other path step" do
+      big = String.to_integer(String.duplicate("9", 20_000))
+      msg = refusal(%{big => :bad})
+
+      assert byte_size(msg) < 1_000
+      assert msg =~ "…"
+    end
+
+    test "invalid UTF-8 is refused with its position, not left to Jason" do
+      value_msg = refusal(%{"outer" => <<255>>})
+      assert value_msg =~ "invalid UTF-8 as a JSON value"
+      assert value_msg =~ ~s|at ["outer"]|
+
+      key_msg = refusal(%{<<255>> => 1})
+      assert key_msg =~ "invalid UTF-8 as a JSON object key"
+    end
+
+    test "an improper list is refused rather than crashing the walk" do
+      msg = refusal(%{"rows" => [1 | 2]})
+
+      assert msg =~ "cannot encode an improper list"
+      assert msg =~ ~s|at ["rows"]|
+      assert msg =~ "the tail at index 1 is a number"
+    end
+
     test "a term with no JSON encoding is still named and positioned" do
       # Nothing may reach the refusal path unclassified: an unnamed host term
       # used to raise FunctionClauseError and lose the message entirely.
