@@ -278,6 +278,31 @@ defmodule PtcRunner.Lisp.Runtime.JsonTest do
       refute msg =~ long_key
       assert msg =~ "…"
     end
+
+    test "a key of combining marks is bounded by bytes, not graphemes" do
+      # "a" plus 20k combining acute accents is ONE grapheme but ~40KB. A
+      # grapheme cap would pass it through whole and put all of it in the
+      # message; eight such steps made a 65KB error.
+      combining = "a" <> String.duplicate("́", 20_000)
+      nested = Enum.reduce(1..10, :bad, fn _, acc -> %{combining => acc} end)
+
+      msg = refusal(nested)
+
+      assert byte_size(msg) < 1_000
+      assert String.valid?(msg)
+    end
+
+    test "a term with no JSON encoding is still named and positioned" do
+      # Nothing may reach the refusal path unclassified: an unnamed host term
+      # used to raise FunctionClauseError and lose the message entirely.
+      bitstring = <<1::1>>
+
+      assert refusal(%{"bits" => bitstring}) =~
+               ~s|cannot encode a bitstring as a JSON value at ["bits"]|
+
+      port = :erlang.list_to_port(~c"#Port<0.0>")
+      assert refusal(%{"port" => port}) =~ ~s|cannot encode a port as a JSON value at ["port"]|
+    end
   end
 
   describe "round-trip property (string-keyed maps only — §4.3)" do

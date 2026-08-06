@@ -32,7 +32,7 @@ defmodule PtcRunner.Lisp.Runtime.Json do
 
   # A refusal message locates the fault; it is not a rendering of the value.
   @max_path_steps 8
-  @max_step_chars 48
+  @max_step_bytes 48
 
   @doc """
   Parse a JSON string into an Elixir value.
@@ -283,6 +283,12 @@ defmodule PtcRunner.Lisp.Runtime.Json do
   defp kind(%_{} = value), do: "a #{Helpers.describe_type(value)}"
   defp kind(value) when is_map(value), do: "a map"
   defp kind(value) when is_list(value), do: "a list"
+  # A non-byte-aligned bitstring; the binary clause above took the rest.
+  defp kind(value) when is_bitstring(value), do: "a bitstring"
+  # With ports, these clauses cover every BEAM term — deliberately, and the
+  # compiler checks it. An unnamed term would reach `refuse_value/2`, raise
+  # FunctionClauseError, and lose the position the refusal exists to report.
+  defp kind(value) when is_port(value), do: "a port"
 
   defp hint(%LispKeyword{}), do: @keyword_hint
   defp hint(value) when is_atom(value), do: @keyword_hint
@@ -309,12 +315,25 @@ defmodule PtcRunner.Lisp.Runtime.Json do
   defp step(step) when is_binary(step), do: inspect(clip(step))
   defp step(step) when is_integer(step), do: Integer.to_string(step)
   defp step(%LispKeyword{name: name}), do: ":" <> clip(name)
-  defp step(step) when is_atom(step), do: inspect(step)
+  defp step(step) when is_atom(step), do: clip(inspect(step))
   defp step(step), do: clip(inspect(step))
 
-  defp clip(text) do
-    if String.length(text) > @max_step_chars,
-      do: String.slice(text, 0, @max_step_chars) <> "…",
-      else: text
+  # Bounded by BYTES, not graphemes. One base character followed by a run of
+  # combining marks is a single grapheme of unbounded size, so a grapheme cap
+  # would let a 200 KB key through and blow the message up with it.
+  defp clip(text) when byte_size(text) > @max_step_bytes do
+    text |> binary_part(0, @max_step_bytes) |> trim_to_valid() |> Kernel.<>("…")
+  end
+
+  defp clip(text), do: text
+
+  # A byte-length cut can land inside a UTF-8 sequence; drop the partial tail
+  # rather than put invalid bytes in a message. At most three steps.
+  defp trim_to_valid(<<>>), do: <<>>
+
+  defp trim_to_valid(prefix) do
+    if String.valid?(prefix),
+      do: prefix,
+      else: trim_to_valid(binary_part(prefix, 0, byte_size(prefix) - 1))
   end
 end
