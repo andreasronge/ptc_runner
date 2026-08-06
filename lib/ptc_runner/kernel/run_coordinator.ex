@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionSessionOwner
@@ -197,6 +198,30 @@ defmodule PtcRunner.Kernel.RunCoordinator do
       do: open_active(prepared, authority, provider_execution, notifier, :check)
 
   def check(_prepared, _authority, _provider_execution, _notifier),
+    do: {:error, :invalid_prepared_run}
+
+  @doc false
+  @spec connect(
+          PreparedRun.t(),
+          PublicationAuthority.t(),
+          ProviderExecution.t(),
+          (binary() -> term())
+        ) ::
+          {:ok, ConnectivityResult.t()}
+          | {:error,
+             :invalid_prepared_run
+             | :invalid_publication_authority
+             | :invalid_provider_execution
+             | term()}
+  # Internal only. `doctor --connect` is not dispatched from `CommandEngine`
+  # yet, and must not be until the transport bounds every response the
+  # connectivity modes can pull in. Connectivity answers for selected
+  # occurrences, so unlike a run it has no provider-free form.
+  def connect(%PreparedRun{} = prepared, authority, provider_execution, notifier)
+      when is_function(notifier, 1),
+      do: open_active(prepared, authority, provider_execution, notifier, :connect)
+
+  def connect(_prepared, _authority, _provider_execution, _notifier),
     do: {:error, :invalid_prepared_run}
 
   defp open_active(prepared, authority, provider_execution, notifier, operation) do

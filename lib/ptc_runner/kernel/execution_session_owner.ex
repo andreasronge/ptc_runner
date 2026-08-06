@@ -37,7 +37,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           pid(),
           ProviderExecution.t() | nil,
           (binary() -> term()) | nil,
-          :run | :check
+          :run | :check | :connect
         ) ::
           {:ok, t()}
           | {:error,
@@ -48,7 +48,26 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   def start(prepared, authority, caller, provider_execution, notifier, operation \\ :run)
 
   def start(prepared, authority, caller, provider_execution, notifier, operation)
-      when is_pid(caller) and operation in [:run, :check] do
+      when is_pid(caller) and operation in [:run, :check, :connect] do
+    with :ok <- admissible(prepared, authority, provider_execution, notifier, operation) do
+      token = make_ref()
+
+      case GenServer.start(
+             __MODULE__,
+             {prepared, authority, caller, token, provider_execution, notifier, operation}
+           ) do
+        {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
+        {:error, _reason} -> {:error, :invalid_prepared_run}
+      end
+    end
+  end
+
+  def start(_prepared, _authority, _caller, _provider_execution, _notifier, _operation),
+    do: {:error, :invalid_prepared_run}
+
+  # Every refusal here is decided before `init/1` consumes the prepared run, so
+  # a rejected start leaves that preparation reusable.
+  defp admissible(prepared, authority, provider_execution, notifier, operation) do
     cond do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
@@ -56,34 +75,30 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       not PublicationAuthority.valid?(authority) ->
         {:error, :invalid_publication_authority}
 
-      prepared.provider_declarations != [] and
-          not (ProviderExecution.valid?(provider_execution) and is_function(notifier, 1)) ->
+      prepared.provider_declarations == [] ->
+        provider_free_admissible(provider_execution, operation)
+
+      not (ProviderExecution.valid?(provider_execution) and is_function(notifier, 1)) ->
         {:error, :provider_session_required}
 
-      prepared.provider_declarations == [] and not is_nil(provider_execution) ->
-        {:error, :invalid_provider_execution}
-
-      # Decided before `init/1` consumes the prepared run, so an execution from
-      # another catalog leaves that preparation reusable.
-      prepared.provider_declarations != [] and
-          not ProviderExecution.bound_to_prepared?(provider_execution, prepared) ->
+      not ProviderExecution.bound_to_prepared?(provider_execution, prepared) ->
         {:error, :invalid_provider_execution}
 
       true ->
-        token = make_ref()
-
-        case GenServer.start(
-               __MODULE__,
-               {prepared, authority, caller, token, provider_execution, notifier, operation}
-             ) do
-          {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
-          {:error, _reason} -> {:error, :invalid_prepared_run}
-        end
+        :ok
     end
   end
 
-  def start(_prepared, _authority, _caller, _provider_execution, _notifier, _operation),
-    do: {:error, :invalid_prepared_run}
+  # Connectivity answers for selected occurrences, so it has nothing to do
+  # without any. Refusing keeps `:connect` off the provider-free completion,
+  # which builds the run config connectivity never wants.
+  defp provider_free_admissible(_provider_execution, :connect),
+    do: {:error, :provider_session_required}
+
+  defp provider_free_admissible(nil, _operation), do: :ok
+
+  defp provider_free_admissible(_provider_execution, _operation),
+    do: {:error, :invalid_provider_execution}
 
   # A check completes with the acquisition's safe connector snapshots where a
   # run completes with a sealed execution outcome.

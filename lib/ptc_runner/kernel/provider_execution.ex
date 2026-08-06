@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.MCPOAuth.Authority
@@ -93,9 +94,10 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           (binary() -> term()),
           tracker(),
           pid(),
-          :run | :check
+          :run | :check | :connect
         ) ::
-          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | [map()]} | {:error, term()}
+          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | [map()] | ConnectivityResult.t()}
+          | {:error, term()}
   def execute(
         %PreparedRun{} = prepared,
         authority,
@@ -107,7 +109,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         operation
       )
       when is_function(notifier, 1) and is_function(tracker, 3) and is_pid(lifecycle_owner) and
-             operation in [:run, :check] do
+             operation in [:run, :check, :connect] do
     with true <- valid?(execution),
          true <- PreparedRun.consumed_valid?(prepared),
          true <- PublicationAuthority.valid?(authority),
@@ -226,7 +228,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         tracker,
         :run,
         fn registry ->
-          build_and_complete(prepared, authority, opened_sinks, registry, session, operation)
+          complete(prepared, authority, opened_sinks, registry, session, execution, operation)
         end
       )
     end
@@ -275,7 +277,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
                  |> authorization_result(selected_names, execution.catalog),
                {:ok, session} <-
                  ProviderActiveSession.begin_owned_run(session, prepared, execution.catalog) do
-            build_and_complete(prepared, authority, opened_sinks, registry, session, operation)
+            complete(prepared, authority, opened_sinks, registry, session, execution, operation)
           end
         end
       )
@@ -285,10 +287,21 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
-  # Every step above this one is shared by a run and a check: the same activity
-  # marker, session, registry, credentials, OAuth, acquisition, and cleanup
-  # ownership. Only the completion differs, so a check cannot drift into its own
-  # provider lifecycle.
+  # Every step above this one is shared by a run, a check, and connectivity: the
+  # same activity marker, session, registry, credentials, OAuth, and cleanup
+  # ownership. Only the completion differs, so none of them can drift into its
+  # own provider lifecycle.
+  defp complete(prepared, authority, opened_sinks, registry, session, _execution, operation)
+       when operation in [:run, :check],
+       do: build_and_complete(prepared, authority, opened_sinks, registry, session, operation)
+
+  # Connectivity is the one completion that does not build a run config. A run
+  # and a check both acquire every selected provider to reach their result;
+  # connectivity decides per occurrence what its declaration asks for, so
+  # building one here would acquire providers a `:none` occurrence never wanted.
+  defp complete(prepared, _authority, _opened_sinks, registry, session, execution, :connect),
+    do: complete_connectivity(prepared, execution.catalog, registry, session)
+
   defp build_and_complete(prepared, authority, opened_sinks, registry, session, operation) do
     with {:ok, built} <-
            RunBuilder.build_active_owned(
@@ -301,6 +314,55 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       complete_operation(built, operation)
     end
   end
+
+  # Applicability comes from the sealed descriptor of each selected occurrence,
+  # in declaration order, so no caller can narrow the work or reorder it. The
+  # deadline the session claimed bounds the whole operation; `:none` occurrences
+  # spend none of it, because a declaration that asks for no connectivity is
+  # answered without a credential, a callback, or a provider.
+  #
+  # `:probe` and `:acquisition` are not implemented yet and fail closed rather
+  # than reporting an occurrence nothing reached. This operation has no CLI
+  # dispatch, so that branch is unreachable outside its own regressions.
+  defp complete_connectivity(prepared, catalog, registry, session) do
+    with true <- prepared.catalog_attestation == catalog.attestation,
+         true <- ProviderRegistry.valid?(registry),
+         true <- ProviderSession.alive?(session),
+         {:ok, entries} <- connectivity_entries(prepared, catalog),
+         {:ok, result} <- ConnectivityResult.new(entries),
+         true <- ConnectivityResult.covers?(result, prepared) do
+      {:ok, result}
+    else
+      {:error, %CommandDiagnostic{}} = error -> error
+      _invalid -> {:error, internal_diagnostic()}
+    end
+  end
+
+  # A sealed declaration carries an inert projection, not its descriptor, so the
+  # declared mode is read from the catalog the preparation was validated
+  # against. Alias names are not identity, which is why the attestation is
+  # rechecked above before any name is looked up here.
+  defp connectivity_entries(prepared, catalog) do
+    Enum.reduce_while(prepared.provider_declarations, {:ok, []}, fn declaration, {:ok, entries} ->
+      case connectivity_entry(declaration, catalog.descriptors[declaration.name]) do
+        {:ok, entry} -> {:cont, {:ok, entries ++ [entry]}}
+        {:error, _diagnostic} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp connectivity_entry(declaration, %{connectivity_mode: :none}) do
+    {:ok,
+     %{
+       name: declaration.name,
+       destination: declaration.destination,
+       index: declaration.index,
+       mode: :none,
+       outcome: :skipped
+     }}
+  end
+
+  defp connectivity_entry(_declaration, _descriptor), do: {:error, internal_diagnostic()}
 
   defp complete_operation(built, :run), do: RunBuilder.execute_built(built)
 

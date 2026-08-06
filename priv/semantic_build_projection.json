@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "e43bce988b69fcf5f005c8f8109bb8a675f76e90d7c07dd62f42eff7de58a138",
+  "source_closure_hash": "f032cbfc4d11f6520459742e1b4ce186f6455469186d649d765b1900a60ea48e",
   "sources": [
     {
       "bytes": 870,
@@ -247,6 +247,11 @@
       "sha256": "2e352d254afdc26086197a800a898d7d5eec653e5be6c3f9440f2ad1fa71acfc"
     },
     {
+      "bytes": 3417,
+      "path": "lib/ptc_runner/kernel/connectivity_result.ex",
+      "sha256": "95ba16aecb4e1018869a9243dd007a1131aa4529d22a413ae30991489e956a0e"
+    },
+    {
       "bytes": 2711,
       "path": "lib/ptc_runner/kernel/deadline.ex",
       "sha256": "29feacab46c7ea01f1281736fb83aeb5f53116dc868bbadd2ea6d238e97b8418"
@@ -322,9 +327,9 @@
       "sha256": "045af7e3f517de1320be1daf25a9f18a020502dd9ad0c9d3a9fc62aa2296f5f7"
     },
     {
-      "bytes": 16362,
+      "bytes": 16939,
       "path": "lib/ptc_runner/kernel/execution_session_owner.ex",
-      "sha256": "d74f066d731cb96ba4ed789f25e1b298911142c5d761d35da0af89150d8b12b1"
+      "sha256": "1bb0339ec9086e119b5ec8f1836408c021c6056b59aa5f0bfadb08d9e6bd3bfb"
     },
     {
       "bytes": 4437,
@@ -707,9 +712,9 @@
       "sha256": "798cc0516ef8c18f54aff21bbb1cbd914c89fab948316640608d9103ccc31646"
     },
     {
-      "bytes": 25007,
+      "bytes": 28026,
       "path": "lib/ptc_runner/kernel/provider_execution.ex",
-      "sha256": "6199f317262ce223f9e81ec89e4749153f2fb1f537bee008b90a911516ed4a7f"
+      "sha256": "e9bbd82470e01bc3af9089da910051bb380e9333b329031d84fb66559a0862c4"
     },
     {
       "bytes": 6850,
@@ -787,9 +792,9 @@
       "sha256": "abccceabb73cec6b5b71804049984daba65fad089391b86cd49188eb82c6b27c"
     },
     {
-      "bytes": 18158,
+      "bytes": 19175,
       "path": "lib/ptc_runner/kernel/run_coordinator.ex",
-      "sha256": "eae41bf7446e84f9598e006ff242a6e1a5c540da025e023173fd8aa5116d5721"
+      "sha256": "1c8260e59ea92b2f6bb30115b962a711da9c2f795143a1836855aff83dacb86e"
     },
     {
       "bytes": 3105,

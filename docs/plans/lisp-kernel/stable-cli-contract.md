@@ -1070,8 +1070,19 @@ intermediate commit ships a reachable `doctor --connect` that can perform
 provider work the transport does not yet bound. Internal and unreachable is
 fine; temporarily reachable and unsafe is not.
 
-1. add the internal connectivity operation to `ProviderExecution`, unreachable
-   from the CLI;
+1. (complete) add the internal connectivity operation to `ProviderExecution`,
+   unreachable from the CLI. `:connect` joins `:run` and `:check` in the
+   operation algebra, reaching the same activity marker, `ProviderSession`,
+   registry, sealed services, deadline ownership, and cleanup path, and
+   differing only in its completion. That completion does not build a run
+   config: a run and a check both acquire every selected provider, while
+   connectivity decides per occurrence what its declaration asks for.
+   `ConnectivityResult` is the internal success value — one entry per selected
+   occurrence in declaration order, with a closed outcome set validated at
+   construction and a `covers?/2` check against the preparation, so a later
+   plan cannot settle a row nothing reached. Connectivity has no provider-free
+   form, because it answers for selected occurrences. Only `:none` is
+   implemented; `:probe` and `:acquisition` fail closed;
 2. implement `:none`, `:probe`, and `:acquisition` behaviour through the
    existing session, registry, activity marker, operation deadline, and LIFO
    cleanup stack;
