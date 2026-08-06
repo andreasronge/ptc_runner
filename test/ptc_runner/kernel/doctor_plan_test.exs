@@ -175,6 +175,24 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
     assert {:ok, _checks} = DoctorPlan.checks(rows)
   end
 
+  test "projection refuses a row carrying an outcome the contract has no code for" do
+    # The rule that no provider row can express a failure has to hold at the
+    # boundary that renders rows, not only at the producers that build them.
+    catalog = catalog(%{"alpha" => []})
+    assert {:ok, rows} = DoctorPlan.new(catalog, nil, @environment)
+    assert {:ok, _checks} = DoctorPlan.checks(rows)
+
+    for forged <- [{:fail, :unavailable}, {:pass, :invented}, {:warn, :requires_connect}] do
+      tampered =
+        Enum.map(rows, fn
+          %{name: "provider/alpha/local"} = row -> %{row | outcome: forged}
+          row -> row
+        end)
+
+      assert {:error, :invalid_doctor_plan} = DoctorPlan.checks(tampered)
+    end
+  end
+
   test "an unknown environment fact is refused rather than defaulted" do
     catalog = catalog(%{"alpha" => []})
 

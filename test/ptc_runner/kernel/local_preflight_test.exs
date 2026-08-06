@@ -22,21 +22,26 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     prepared = prepared(catalog, ["inert"])
 
     assert :ok = LocalPreflight.run(prepared, catalog, services(), deadline())
-    refute_received {:audited_local, _destination, _selection, _limits}
+    refute_received {:audited_local, _step, _destination, _selection, _limits}
   end
 
   test "every occurrence of one alias is checked, in declaration order" do
     # The check is a property of an occurrence: each carries its own selection
     # and destination, so occurrences are never collapsed by alias.
     parent = self()
-    catalog = catalog(%{"audited" => audited(parent, destinations: [:workflow, :mission])})
+
+    catalog =
+      catalog(%{
+        "audited" => audited(parent, destinations: [:workflow, :mission], sequence: counter())
+      })
+
     prepared = prepared(catalog, ["audited"], ["audited"])
 
     assert :ok = LocalPreflight.run(prepared, catalog, services(), deadline())
 
-    assert_received {:audited_local, :workflow, %{}, true}
-    assert_received {:audited_local, :mission, %{}, true}
-    refute_received {:audited_local, _destination, _selection, _limits}
+    assert_received {:audited_local, 1, :workflow, %{}, true}
+    assert_received {:audited_local, 2, :mission, %{}, true}
+    refute_received {:audited_local, _step, _destination, _selection, _limits}
   end
 
   test "the first failing occurrence stops the step before later ones run" do
@@ -58,8 +63,8 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
 
     assert diagnostic.code == :environment_unavailable
     assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
-    assert_received {:audited_local, :workflow, _selection, true}
-    refute_received {:audited_local, :mission, _other, _limits}
+    assert_received {:audited_local, _workflow_step, :workflow, _selection, true}
+    refute_received {:audited_local, _mission_step, :mission, _other, _limits}
   end
 
   test "a later occurrence still fails the step after an earlier one passed" do
@@ -82,8 +87,8 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert diagnostic.phase == :local_preflight
     assert diagnostic.code == :adapter_unavailable
     assert diagnostic.subject.occurrence == %{destination: :mission, index: 0}
-    assert_received {:audited_local, :workflow, _workflow_selection, true}
-    assert_received {:audited_local, :mission, _mission_selection, true}
+    assert_received {:audited_local, _first, :workflow, _workflow_selection, true}
+    assert_received {:audited_local, _second, :mission, _mission_selection, true}
   end
 
   test "an exhausted budget stops the step before any callback runs" do
@@ -97,7 +102,7 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error}} =
              LocalPreflight.run(prepared, catalog, services(), expired)
 
-    refute_received {:audited_local, _destination, _selection, _limits}
+    refute_received {:audited_local, _step, _destination, _selection, _limits}
   end
 
   test "a callback that outruns the remaining budget fails closed" do
@@ -122,12 +127,12 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error}} =
              LocalPreflight.run(prepared, installed, services(), deadline())
 
-    refute_received {:audited_local, _destination, _selection, _limits}
+    refute_received {:audited_local, _step, _destination, _selection, _limits}
 
     # The same preparation is fine against the catalog it came from, so the
     # refusal is about binding rather than the preparation itself.
     assert :ok = LocalPreflight.run(prepared, foreign, services(), deadline())
-    assert_received {:audited_local, :workflow, _selection, true}
+    assert_received {:audited_local, _workflow_step, :workflow, _selection, true}
   end
 
   test "runtime services bound to a host cannot check an unbound catalog" do
@@ -140,7 +145,7 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error}} =
              LocalPreflight.run(prepared, catalog, host_bound_services(), deadline())
 
-    refute_received {:audited_local, _destination, _selection, _limits}
+    refute_received {:audited_local, _step, _destination, _selection, _limits}
   end
 
   test "each local failure reason translates to its exact closed code" do
@@ -204,22 +209,33 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     fn selection, context, _services ->
       send(
         parent,
-        {:audited_local, context.destination, selection, Map.has_key?(context, :limits)}
+        {:audited_local, 0, context.destination, selection, Map.has_key?(context, :limits)}
       )
 
       :ok
     end
   end
 
+  # Each occurrence runs in its own bounded worker, so their messages have no
+  # inter-sender ordering. A shared counter makes the executor's sequential
+  # traversal observable instead of assumed.
+  defp counter, do: :atomics.new(1, signed: false)
+
+  defp step(nil), do: 0
+  defp step(sequence), do: :atomics.add_get(sequence, 1, 1)
+
   # The callback reports every occurrence it sees, so a test can prove both that
   # each one ran and that none ran twice.
   defp audited(parent, options \\ []) do
     failing = Keyword.get(options, :failing, %{})
 
+    sequence = Keyword.get(options, :sequence)
+
     callback = fn selection, context, _services ->
       send(
         parent,
-        {:audited_local, context.destination, selection, Map.has_key?(context, :limits)}
+        {:audited_local, step(sequence), context.destination, selection,
+         Map.has_key?(context, :limits)}
       )
 
       case Map.get(failing, context.destination) do

@@ -56,10 +56,26 @@ defmodule PtcRunner.Kernel.DoctorPlan do
 
   def new(_catalog, _prepared, _environment), do: {:error, :invalid_doctor_plan}
 
+  # Every outcome the contract has a code for. Projection validates against this
+  # rather than trusting its producers, so the rule that no provider row can
+  # express a failure holds at the boundary that renders them.
+  @permitted [
+    {:pass, :supported},
+    {:warn, :unsupported},
+    {:pass, :valid},
+    {:skipped, :not_requested},
+    {:pass, :available},
+    {:warn, :optional_unavailable},
+    {:skipped, :application_required},
+    {:skipped, :active_check_required},
+    {:pass, :declarative},
+    {:skipped, :requires_connect}
+  ]
+
   @doc "Projects settled rows into the closed public check list."
   @spec checks(t()) :: {:ok, [map()]} | {:error, :invalid_doctor_plan}
   def checks(rows) when is_list(rows) do
-    if Enum.all?(rows, &match?(%{outcome: {_status, _code}}, &1)) do
+    if Enum.all?(rows, &permitted?/1) do
       {:ok, Enum.map(rows, &check/1)}
     else
       {:error, :invalid_doctor_plan}
@@ -109,6 +125,9 @@ defmodule PtcRunner.Kernel.DoctorPlan do
   end
 
   def settle_pending(_rows), do: {:error, :invalid_doctor_plan}
+
+  defp permitted?(%{outcome: outcome}), do: outcome in @permitted
+  defp permitted?(_row), do: false
 
   defp pending_named?(%{name: name, outcome: :audited_local}, name), do: true
   defp pending_named?(_row, _name), do: false

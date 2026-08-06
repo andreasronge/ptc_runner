@@ -1006,6 +1006,24 @@ commits in one Checkpoint C PR:
   authoritative cap at or before the transport receive boundary; and
 - add shipped live-model probes with retries and redirects disabled.
 
+**Open decision before the Checkpoint C PR opens:** nothing stops a `:custom`
+registration from declaring `local_preflight: :audited_local`, so default doctor
+can invoke a callback that is not shipped, code-owned code. The rule above says
+default doctor "may invoke only the shipped, code-owned `:audited_local`
+callbacks" and that a custom callback is `:unverified` active work, but
+`ProviderDescriptor` enforces neither: `shipped_consistent?/1` accepts any
+`:custom` descriptor. A custom audited-local callback receives the runtime
+services and runs unrestricted BEAM code, so it could resolve credentials or
+open a socket during a command that reports `provider_activity: false`.
+
+Hostile same-VM containment stays an explicit non-goal, so this is a
+declaration-contract question rather than a sandbox one: either restrict
+`:audited_local` to shipped sources and require `:unverified` for custom local
+checks, or state that a custom audited-local callback is trusted host-installed
+code and adjust the wording above. Deciding it also decides whether the existing
+custom-source doctor fixtures stay valid. Resolve it before the PR rather than
+shipping a rule the type system does not hold to.
+
 **Must complete before the Checkpoint C PR opens:** add a closed phase-7 timeout
 code to `DiagnosticCatalog` and report an exhausted audited-local budget with
 it. Phase 7 now spends one anchored deadline across every applicable occurrence,

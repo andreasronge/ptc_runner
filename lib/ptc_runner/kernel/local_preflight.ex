@@ -23,6 +23,13 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # different sealed descriptors, and accepting a mismatched trio would run one
   # catalog's callback against another's normalized occurrence.
   #
+  # How much that binding proves differs by catalog. A host-bound catalog
+  # carries a runtime binding, so its services are checked against it. An
+  # unbound catalog has no binding for services to carry, so any services
+  # constructed without one satisfy the check — the same limit
+  # `ProviderExecution` has, because the identity simply does not exist. The
+  # prepared-run attestation is exact in both cases.
+  #
   # ## Deadline
   #
   # The caller anchors one deadline for the whole step and every occurrence

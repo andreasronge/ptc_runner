@@ -55,10 +55,16 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   @doc false
   @spec close(t()) :: :ok
   def close(%__MODULE__{pid: pid}) do
-    # Identity is confirmed before anything is sent, not just before the
-    # process is terminated. `:close` is a plausible message for an unrelated
-    # GenServer, so a stale or forged handle must not be able to stop or mutate
-    # one merely by naming its pid.
+    # Checked before anything is sent, not just before the process is
+    # terminated: `:close` is a plausible message for an unrelated GenServer, so
+    # a handle naming the wrong pid must not stop or mutate one.
+    #
+    # This is a misdirection guard against a stale or reused pid, not an
+    # authentication boundary. `$initial_call` is process-local metadata that
+    # in-VM code can set for itself, and hostile same-VM containment is an
+    # explicit non-goal. It reliably distinguishes an unrelated process that
+    # happens to hold this pid, which is the failure this close can actually
+    # cause.
     if store_process?(pid) do
       reference = Process.monitor(pid)
 
