@@ -1020,12 +1020,36 @@ commits in one Checkpoint C PR:
     command, and a test pins the requirement constant against `mix.exs`;
 - run `doctor --connect` through the ordinary provider-session prefix and its
   connectivity branch: probe `:probe`, use bounded acquisition/discovery for
-  `:acquisition`, and skip `:none`. `ProviderExecution` has no connectivity
-  operation at all today, so this is the whole branch rather than a variation of
-  the run one. The shipped live-model probe it needs already exists, with
-  retries and redirects disabled, and the contract is strict: connect requires
-  an application and every provider row must pass, so any failed check fails the
-  command;
+  `:acquisition`, and skip `:none`. A survey before starting it fixes the shape:
+
+  - `ProviderExecution` has no connectivity operation at all, so this is the
+    whole branch rather than a variation of the run one. The prefix is already
+    shared and needs no change: `execute_ordinary/7` marks activity, opens the
+    session, resolves OAuth authorities, anchors the operation deadline, and
+    opens the runtime registry, and only `complete_operation/2` differs by
+    operation. Connectivity becomes the third completion, and unlike run and
+    check it does not go through `RunBuilder.build_active_owned/5` — it needs
+    the registry and the sealed services, not a Kernel run config;
+  - the two modes reach different places. An `:acquisition` occurrence goes
+    through the registry it shares with a run — `prepare`, preflight, `acquire`
+    with resolved credentials — and registers its closer on the same LIFO stack.
+    A `:probe` occurrence instead invokes `catalog.implementations[name]
+    .connectivity_probe` with the sealed services, because a probe is not a
+    builder and never enters the registry;
+  - the shipped live-model probe already exists and needs no work. It disables
+    adapter and HTTP retries and redirects, forces a one-token ceiling, resolves
+    its credential only after local checks, and spends
+    `doctor_connectivity_timeout_ms` intersected with any supplied occurrence
+    deadline; and
+  - the result contract is stricter than default doctor's and decides the
+    result shape. `CommandContract` admits a connect success only when the
+    application row is `pass/valid` and *every* provider row is `pass`, so
+    `doctor --connect` requires an application, and any failed check fails the
+    whole command with its catalogued diagnostic. The connectivity branch can
+    therefore return `:ok` or one diagnostic, exactly like the phase-7 step, and
+    `DoctorPlan` settles its remaining pending rows only after that success.
+    `DoctorPlan.new/3` gains the mode, because connect leaves pending what
+    default doctor settles as `requires_connect` or `active_check_required`;
 
 - invoke `:unverified` local checks after the phase-8 marker, under the session
   deadline, for run, `--check`, and `doctor --connect`. Nothing invokes them
