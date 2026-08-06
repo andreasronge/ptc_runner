@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "f5f04cbf38a30e2a92c12ead3aecb856b935414b15de3985bde3b456735753be",
+  "source_closure_hash": "06e5a395618d4af314a2a54ddf262ea0aa509da1cfef929ebd7496560995e738",
   "sources": [
     {
       "bytes": 870,
@@ -262,9 +262,9 @@
       "sha256": "755aa22d949754e510f7e4b567b68ea072784a1645ec369f6089374cb8aeae70"
     },
     {
-      "bytes": 7771,
+      "bytes": 8421,
       "path": "lib/ptc_runner/kernel/doctor_plan.ex",
-      "sha256": "0552897e4a1b6340577bbcc951ec78b3959f495cea75e4e1767ed461d8589caa"
+      "sha256": "889b8e1ecea0e9a9eaf8d5683d8a05bfaf37369c8c30660826bbba151c2b8f9a"
     },
     {
       "bytes": 4193,

@@ -157,6 +157,24 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
     assert_contract(checks, false)
   end
 
+  test "a preparation from another catalog is refused even when the aliases match" do
+    # Alias names are not identity. Both catalogs install "shared", but only one
+    # declares it audited-local, so accepting the foreign preparation would
+    # report rows derived from declarations it was never validated against.
+    installed = catalog(%{"shared" => [local_preflight: :audited_local]})
+    foreign = catalog(%{"shared" => []})
+
+    assert installed.attestation != foreign.attestation
+    prepared = prepared(foreign, ["shared"])
+
+    assert {:error, :invalid_doctor_plan} = DoctorPlan.new(installed, prepared, @environment)
+
+    # The same preparation is fine against the catalog it was prepared from, so
+    # the refusal is about binding rather than about the preparation itself.
+    assert {:ok, rows} = DoctorPlan.new(foreign, prepared, @environment)
+    assert {:ok, _checks} = DoctorPlan.checks(rows)
+  end
+
   test "an unknown environment fact is refused rather than defaulted" do
     catalog = catalog(%{"alpha" => []})
 

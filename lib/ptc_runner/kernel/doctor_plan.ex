@@ -34,13 +34,16 @@ defmodule PtcRunner.Kernel.DoctorPlan do
 
   `prepared` is `nil` when no application was requested. Its presence decides
   both the alias set — installed aliases without one, selected aliases with one
-  — and whether a selection row applies at all.
+  — and whether a selection row applies at all. A prepared run must be bound to
+  this exact catalog, on the same terms as
+  `PtcRunner.Kernel.ProviderExecution.bound_to_prepared?/2`.
   """
   @spec new(InstallationCatalog.t(), PreparedRun.t() | nil, environment()) ::
           {:ok, t()} | {:error, :invalid_doctor_plan}
   def new(%InstallationCatalog{} = catalog, prepared, environment) do
     with true <- InstallationCatalog.valid?(catalog),
          true <- is_nil(prepared) or PreparedRun.valid?(prepared),
+         true <- bound_to_catalog?(prepared, catalog),
          {:ok, runtime} <- environment_row("runtime", environment, :runtime, runtime_codes()),
          {:ok, viewer} <- environment_row("viewer", environment, :viewer, viewer_codes()),
          {:ok, aliases} <- aliases(catalog, prepared) do
@@ -88,6 +91,15 @@ defmodule PtcRunner.Kernel.DoctorPlan do
 
   defp pending_named?(%{name: name, outcome: :audited_local}, name), do: true
   defp pending_named?(_row, _name), do: false
+
+  # Alias names are not identity. Two catalogs can install the same aliases over
+  # different sealed descriptors, and every row below is read from the
+  # descriptor rather than the name, so a preparation from another catalog would
+  # be reported against declarations it was never validated against.
+  defp bound_to_catalog?(nil, _catalog), do: true
+
+  defp bound_to_catalog?(prepared, catalog),
+    do: prepared.catalog_attestation == catalog.attestation
 
   defp check(%{name: name, outcome: {status, code}}),
     do: %{"name" => name, "status" => Atom.to_string(status), "code" => Atom.to_string(code)}
