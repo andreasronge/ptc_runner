@@ -298,8 +298,14 @@ them, and only then unwinds that runtime in reverse acquisition order —
 listener, registry, store. Ownership matches that guarantee: the OAuth store
 and the host-bound registry authority both belong to the lifecycle owner rather
 than to the worker, so terminating a worker blocked in provider work does not
-destroy the store or revoke the authority that a session closer still needs. A
-failed session close outranks the result it would otherwise hide. The owner rejects an
+destroy the store or revoke the authority that a session closer still needs.
+Tearing those two down is bounded by its own outer-runtime bound rather than by
+the session's anchored cleanup deadline: that deadline belongs to the registered
+closers on the session's stack and is meant to be spendable in full, so
+inheriting its remainder would force-kill the store immediately whenever a
+session used its whole budget, skipping the cooperative stop that terminates its
+registered managers. A failed session close outranks the result it would
+otherwise hide. The owner rejects an
 execution that is not bound to its exact preparation before consuming that
 preparation, so a mismatched catalog or an authorization target the run never
 selected leaves the prepared run reusable.

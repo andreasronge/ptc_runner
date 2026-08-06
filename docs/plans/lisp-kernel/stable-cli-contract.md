@@ -922,6 +922,26 @@ commits in one Checkpoint C PR:
   managers too; only a store terminated because it stopped answering at all
   bypasses that step.
 
+  That store bound is deliberately its own outer-runtime bound and does not
+  consume the anchored cleanup deadline. The anchored deadline is the session's:
+  it governs the registered closers on the session's LIFO stack, which is what
+  "every registered closer" and the OAuth-cancellation/`close/1`/
+  `close_with_unregistered/2` entries above name. The execution owner's runtime
+  handles are not registered closers, and `ProviderRegistry.close/1` already
+  minted the same independent bound through `HostInstallationOwner.stop/4`
+  before this work, so the store now matches that shipped shape rather than
+  inventing one. Inheriting the remainder instead would be worse, not stricter:
+  the anchored deadline is designed to be fully spendable by the session's own
+  closers, so any session that used its whole budget would hand the store zero
+  milliseconds and force-kill it immediately — skipping the cooperative stop,
+  and with it the registered-manager termination above, exactly when cleanup is
+  already under stress. The cost is explicit: after session cleanup ends, an
+  unresponsive registry and an unresponsive store can each add up to two
+  seconds, so the owner's post-session unwind is bounded at roughly four
+  seconds beyond `provider_cleanup_timeout_ms`. Revisit this only if a
+  deployment needs one bound across both, which is a deadline-propagation slice
+  rather than an ownership change;
+
   One residual is recorded rather than repaired. A worker killed between
   creating a detached resource and registering it with the lifecycle owner
   leaves that resource untracked, so it is reaped by the owner's death instead
