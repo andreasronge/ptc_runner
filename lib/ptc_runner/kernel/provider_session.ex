@@ -29,7 +29,10 @@ defmodule PtcRunner.Kernel.ProviderSession do
   cooperative owner-down window.
 
   Cleanup shares the sealed `provider_cleanup_timeout_ms` deadline and runs
-  each close operation in a heap-bounded worker. Failures never stop later
+  each close operation in a heap-bounded worker. That budget also bounds the
+  caller: `close/1` waits one reply grace beyond it and then terminates a
+  session that has not answered, so a wedged session becomes a classified
+  cleanup failure rather than an unbounded wait. Failures never stop later
   cleanup attempts. This is a process-local ownership boundary, not a durable
   resource journal or a security boundary against trusted code in the same VM.
   """
@@ -366,12 +369,9 @@ defmodule PtcRunner.Kernel.ProviderSession do
   @spec close(t()) :: :ok | {:error, :provider_cleanup_failed}
   def close(%__MODULE__{} = session) do
     if valid?(session) do
-      call(
-        session.pid,
-        {session.token, :close},
-        :infinity,
-        {:error, :provider_cleanup_failed}
-      )
+      session.pid
+      |> call({session.token, :close}, terminal_timeout(session), :cleanup_unsettled)
+      |> settle_terminal_close(session)
     else
       {:error, :provider_cleanup_failed}
     end
@@ -385,14 +385,24 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def close_with_unregistered(%__MODULE__{} = session, close)
       when is_function(close, 0) or is_nil(close) do
     if valid?(session) do
+      # Two cleanup owners share one terminal budget, so the session gets a fair
+      # half and the unregistered closer keeps the rest for the case where the
+      # session never answers. Reply grace extends only the call.
+      deadline = Deadline.new(session.cleanup_timeout_ms)
+      session_share = div(session.cleanup_timeout_ms, 2) + @claim_reply_grace_ms
+
       case call(
              session.pid,
              {session.token, {:close_with_unregistered, close}},
-             :infinity,
-             :session_unavailable
+             session_share,
+             :cleanup_unsettled
            ) do
-        :session_unavailable -> close_after_session_loss(session, close)
-        result -> result
+        :cleanup_unsettled ->
+          _terminated = settle_terminal_close(:cleanup_unsettled, session)
+          close_after_session_loss(session, close, Deadline.remaining(deadline))
+
+        result ->
+          result
       end
     else
       {:error, :provider_cleanup_failed}
@@ -441,7 +451,9 @@ defmodule PtcRunner.Kernel.ProviderSession do
   @spec drain_provider_tasks(t()) :: :ok
   def drain_provider_tasks(%__MODULE__{} = session) do
     if valid?(session) do
-      call(session.pid, {session.token, :drain_provider_tasks}, :infinity, :ok)
+      # A pre-close courtesy, not cleanup: it answers from session state or the
+      # session is wedged, and `close/1` owns the terminal budget either way.
+      call(session.pid, {session.token, :drain_provider_tasks}, @claim_reply_grace_ms, :ok)
     else
       :ok
     end
@@ -982,12 +994,39 @@ defmodule PtcRunner.Kernel.ProviderSession do
     }
   end
 
-  defp close_after_session_loss(_session, nil), do: {:error, :provider_cleanup_failed}
+  # The lifecycle owner installs `provider_cleanup_timeout_ms` as this session's
+  # whole terminal budget, and the session bounds its own LIFO cleanup by it, so
+  # a reply that misses that budget plus one reply grace means the session is
+  # wedged rather than slow. Waiting past it would turn a bounded failure into a
+  # permanent one.
+  defp terminal_timeout(session), do: session.cleanup_timeout_ms + @claim_reply_grace_ms
 
-  defp close_after_session_loss(session, close) do
+  # Cleanup has already begun and cannot be re-entered, so the caller ends the
+  # session rather than leaving it holding scope owners no one is waiting on.
+  # Its roots monitor those owners and terminate with them; an OAuth
+  # terminalization root has already been handed out of the force-close set and
+  # is unaffected. The classified cleanup failure is what the caller reports.
+  defp settle_terminal_close(:cleanup_unsettled, session) do
+    monitor = Process.monitor(session.pid)
+    Process.exit(session.pid, :kill)
+
+    receive do
+      {:DOWN, ^monitor, :process, _pid, _reason} -> :ok
+    end
+
+    {:error, :provider_cleanup_failed}
+  end
+
+  defp settle_terminal_close(result, _session), do: result
+
+  defp close_after_session_loss(_session, nil, _remaining_ms),
+    do: {:error, :provider_cleanup_failed}
+
+  # Whatever is left of the one anchored budget, never a second full one.
+  defp close_after_session_loss(session, close, remaining_ms) do
     _ =
       BoundedWorker.run(close,
-        timeout_ms: session.cleanup_timeout_ms,
+        timeout_ms: max(remaining_ms, 1),
         max_heap_words: session.max_heap_words,
         cancel_with_caller: true
       )

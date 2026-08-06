@@ -136,23 +136,46 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
   def complete_authorization(_context, _pending, _parameters, _opts),
     do: {:error, :invalid_authorization}
 
+  @doc """
+  Cancels one pending authorization under a supplied terminal deadline.
+
+  The `:cleanup_deadline` option is required and belongs to the lifecycle owner
+  that installed the provider cleanup budget. Cancellation is terminal cleanup,
+  so it is never charged whatever remained of the interaction it cleans up, and
+  a caller must not treat an uncommitted cancellation as success.
+  """
   @spec cancel_authorization(Context.t(), PendingAuthorization.t(), keyword()) ::
           :ok | {:error, atom()}
-  def cancel_authorization(%Context{} = context, %PendingAuthorization{} = pending, _opts) do
-    if pending_context?(context, pending) do
-      Store.cancel_flow(
-        context.store,
-        pending.key,
-        pending.flow_id,
-        Deadline.new(max(remaining(pending.deadline_ms), 1))
-      )
+  def cancel_authorization(%Context{} = context, %PendingAuthorization{} = pending, opts) do
+    # Cancellation is terminal cleanup, so its budget belongs to the lifecycle
+    # owner that installed it and is anchored by the caller entering cleanup.
+    # Charging it whatever remained of the interaction it is cleaning up gave an
+    # expired interaction one millisecond and then discarded the outcome.
+    with {:ok, deadline} <- terminal_deadline(opts),
+         true <- pending_context?(context, pending) do
+      Store.cancel_flow(context.store, pending.key, pending.flow_id, deadline)
     else
-      {:error, :invalid_authorization_context}
+      {:error, _reason} = error -> error
+      false -> {:error, :invalid_authorization_context}
     end
   end
 
   def cancel_authorization(_context, _pending, _opts),
     do: {:error, :invalid_authorization}
+
+  defp terminal_deadline(opts) when is_list(opts) do
+    case Keyword.fetch(opts, :cleanup_deadline) do
+      {:ok, deadline} ->
+        if Deadline.valid?(deadline),
+          do: {:ok, deadline},
+          else: {:error, :invalid_authorization}
+
+      :error ->
+        {:error, :invalid_authorization}
+    end
+  end
+
+  defp terminal_deadline(_opts), do: {:error, :invalid_authorization}
 
   defp complete_callback(
          context,

@@ -265,7 +265,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
                    authorities,
                    execution.authorizations,
                    notifier,
-                   tracker
+                   tracker,
+                   session
                  )
                  |> authorization_result(selected_names, execution.catalog),
                {:ok, session} <-
@@ -548,7 +549,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          authorities,
          requested,
          notifier,
-         tracker
+         tracker,
+         session
        ) do
     Enum.reduce_while(requested, :ok, fn name, :ok ->
       authority = Map.get(authorities, name)
@@ -573,7 +575,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
                  authority_epoch,
                  deadline,
                  notifier,
-                 tracker
+                 tracker,
+                 session
                ) do
           :ok
         else
@@ -601,7 +604,15 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end)
   end
 
-  defp authorize_installation(context, authority, authority_epoch, deadline, notifier, tracker) do
+  defp authorize_installation(
+         context,
+         authority,
+         authority_epoch,
+         deadline,
+         notifier,
+         tracker,
+         session
+       ) do
     with true <- Authority.cli_compatible?(authority),
          {:ok, listener} <- LoopbackListener.start(authority),
          :ok <- tracker.(:put, :listener, listener) do
@@ -612,7 +623,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           authority_epoch,
           deadline,
           listener,
-          notifier
+          notifier,
+          session
         )
       after
         LoopbackListener.close(listener)
@@ -630,7 +642,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          authority_epoch,
          deadline,
          listener,
-         notifier
+         notifier,
+         session
        ) do
     case Authorization.begin_authorization(context, authority,
            authority_epoch: authority_epoch,
@@ -640,18 +653,33 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       {:ok, pending} ->
         case notify(notifier, pending.url, deadline) do
           :ok ->
-            case LoopbackListener.await(listener, context, pending, []) do
+            case LoopbackListener.await(listener, context, pending, cleanup_opts(session)) do
               {:ok, _grant} -> :ok
               {:error, _reason} = error -> error
             end
 
           {:error, _reason} = error ->
-            _ = Authorization.cancel_authorization(context, pending, [])
-            error
+            cancel_pending(context, pending, session, error)
         end
 
       {:error, _reason} = error ->
         error
+    end
+  end
+
+  # Terminal cleanup spends the lifecycle owner's installed provider cleanup
+  # budget, not whatever remained of the interaction being cleaned up.
+  defp cleanup_opts(session),
+    do: [cleanup_timeout_ms: ProviderSession.cleanup_timeout(session)]
+
+  defp cancel_pending(context, pending, session, error) do
+    case Authorization.cancel_authorization(
+           context,
+           pending,
+           cleanup_deadline: Deadline.new(ProviderSession.cleanup_timeout(session))
+         ) do
+      :ok -> error
+      {:error, _reason} -> {:error, :authorization_cleanup_failed}
     end
   end
 

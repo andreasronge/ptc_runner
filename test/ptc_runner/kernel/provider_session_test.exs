@@ -860,6 +860,48 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert [:first] = Agent.get(order, &Enum.reverse/1)
   end
 
+  test "an unresponsive session is terminated at its installed cleanup budget" do
+    # The lifecycle owner installs the whole terminal budget, so a session that
+    # cannot answer within it is ended rather than waited on forever.
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 200)
+    assert {:ok, session} = ProviderSession.start(limits)
+    assert :ok = :sys.suspend(session.pid)
+    monitor = Process.monitor(session.pid)
+
+    started_at = System.monotonic_time(:millisecond)
+    assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
+    elapsed = System.monotonic_time(:millisecond) - started_at
+
+    assert_received {:DOWN, ^monitor, :process, _pid, :killed}
+    refute Process.alive?(session.pid)
+    assert elapsed < 5_000
+  end
+
+  test "an unresponsive session is terminated when closing an unregistered resource" do
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 200)
+    assert {:ok, session} = ProviderSession.start(limits)
+    parent = self()
+    assert :ok = :sys.suspend(session.pid)
+    monitor = Process.monitor(session.pid)
+
+    started_at = System.monotonic_time(:millisecond)
+
+    assert {:error, :provider_cleanup_failed} =
+             ProviderSession.close_with_unregistered(session, fn ->
+               send(parent, :unregistered_closed)
+               :ok
+             end)
+
+    elapsed = System.monotonic_time(:millisecond) - started_at
+
+    assert_received {:DOWN, ^monitor, :process, _pid, :killed}
+    # The unregistered closer keeps its share of the one terminal budget even
+    # when the session itself never answers.
+    assert_received :unregistered_closed
+    refute Process.alive?(session.pid)
+    assert elapsed < 5_000
+  end
+
   test "tampered session and registrar handles are rejected" do
     {:ok, session} = ProviderSession.start(limits())
     {:ok, registrar} = ProviderSession.open_registrar(session)

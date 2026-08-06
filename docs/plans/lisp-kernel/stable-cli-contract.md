@@ -814,11 +814,7 @@ Checkpoint C starts with a small stabilization prefix before adding doctor:
   client that keeps trickling past the deadline, and a silent client that stops
   mid-request. The pre-receive expiry branch remains fail-closed defense in
   depth: its neighbouring branches report the same closed reason at the same
-  instant, so it is not independently observable through the socket. A
-  follow-up remains open: `Authorization.cancel_authorization/3` charges its
-  store mutation the residual budget of the interaction it is cleaning up, so
-  cancellation after expiry runs with a one-millisecond deadline whose failure
-  is discarded; and
+  instant, so it is not independently observable through the socket; and
 - (complete) move `--check` onto the shared execution-owner composition. A
   check now differs from a run only in the owner's completion step, so both
   share the activity marker, session, registry, credentials, OAuth,
@@ -827,13 +823,20 @@ Checkpoint C starts with a small stabilization prefix before adding doctor:
   Mix adapter's session, registry, OAuth context, deadline, and authorization
   helpers, `RunBuilder.build_active/4`, and `ProviderActiveSession`'s
   frontend-owned `open/3`, `open_setup/3`, and `begin_run/3` together with the
-  ownership branch they required. Two terminal-cleanup follow-ups remain open
-  and are deliberately not patched with fresh ad-hoc timeouts:
-  `Authorization.cancel_authorization/3` charges its store mutation the residual
-  budget of the interaction it cleans up, and `ProviderExecution`'s
-  `close_owned_session/3` closes an alive session with `ProviderSession.close/1`,
-  whose call is unbounded, so an unresponsive session turns a bounded failure
-  into a wait. Both need a cleanup deadline supplied by the lifecycle owner.
+  ownership branch they required; and
+- (complete) bound terminal cleanup with the budget the lifecycle owner
+  installs. `ProviderSession.close/1` and `close_with_unregistered/2` now wait
+  `provider_cleanup_timeout_ms` plus one reply grace and terminate a session
+  that misses it, returning the classified cleanup failure instead of waiting
+  indefinitely. `Authorization.cancel_authorization/3` requires a supplied
+  `:cleanup_deadline` rather than minting one from the residual budget of the
+  interaction it cleans up, and `LoopbackListener.await/4` reports an
+  uncommitted cancellation as `authorization_cleanup_failed` instead of
+  discarding it. One residual is scoped out of that repair: terminating a
+  wedged session skips the `terminate/2` that would kill its attached provider
+  tasks, because the session tracks them by monitor alone. Coupling those tasks
+  to session death is an ownership change of its own and must not be smuggled
+  into a terminal-deadline fix.
 
 Keep these as independently reviewable commits in the Checkpoint C PR. Do not
 start doctor implementation until the descriptor and ownership boundaries are

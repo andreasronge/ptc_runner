@@ -99,7 +99,10 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
              )
 
     visit_authorization_url(self(), pending.url)
-    assert {:ok, grant} = LoopbackListener.await(listener, context, pending, [])
+
+    assert {:ok, grant} =
+             LoopbackListener.await(listener, context, pending, cleanup_timeout_ms: 5_000)
+
     assert grant.status == :active
     assert grant.granted_scopes == MapSet.new(["read"])
     assert grant.access_token == "fixture-access-token"

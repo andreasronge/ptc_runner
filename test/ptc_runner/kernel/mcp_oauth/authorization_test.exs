@@ -277,7 +277,9 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
              Authorization.complete_authorization(bob, pending, callback, request: request)
 
     assert {:error, :invalid_authorization_context} =
-             Authorization.cancel_authorization(bob, pending, [])
+             Authorization.cancel_authorization(bob, pending,
+               cleanup_deadline: Deadline.new(1_000)
+             )
 
     assert {:ok, _grant} =
              Authorization.complete_authorization(
@@ -319,7 +321,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
         end
 
         result =
-          LoopbackListener.await(listener, context.context, pending, request: request)
+          LoopbackListener.await(listener, context.context, pending, await_opts(request))
 
         send(parent, {:awaited, result})
       end)
@@ -365,7 +367,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
           :go -> :ok
         end
 
-        LoopbackListener.await(listener, context.context, pending, request: request)
+        LoopbackListener.await(listener, context.context, pending, await_opts(request))
       end)
 
     assert :ok = :gen_tcp.controlling_process(listener.socket, task.pid)
@@ -427,9 +429,57 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
     expired = %{pending | deadline_ms: System.monotonic_time(:millisecond) - 1}
 
     assert {:error, :authorization_timeout} =
-             LoopbackListener.await(listener, context.context, expired, request: request)
+             LoopbackListener.await(listener, context.context, expired, await_opts(request))
 
     assert {:error, :closed} = :gen_tcp.recv(socket, 0, 1_000)
+  end
+
+  test "a blocked cancellation is reported, not silently accepted", context do
+    parent = self()
+    request = request_fixture(context.authority, self())
+
+    {:ok, blocked_store} =
+      MCPOAuthRecordingStore.wrap(context.store, self(),
+        interceptor: fn operation, deadline ->
+          if elem(operation, 0) == :cancel_flow do
+            send(parent, {:cancel_deadline, deadline})
+            {:return, {:error, :timeout}}
+          else
+            :delegate
+          end
+        end
+      )
+
+    {:ok, blocked_context} =
+      Context.new(
+        tenant_id: "tenant",
+        principal_id: "alice",
+        store: blocked_store,
+        deadline: Deadline.new(10_000)
+      )
+
+    assert {:ok, listener} = LoopbackListener.start(context.authority)
+
+    assert {:ok, pending} =
+             Authorization.begin_authorization(blocked_context, context.authority,
+               authority_epoch: context.epoch,
+               redirect_uri: listener.redirect_uri,
+               request: request
+             )
+
+    expired = %{pending | deadline_ms: System.monotonic_time(:millisecond) - 1}
+
+    # The interaction expired, but a cancellation that never commits leaves the
+    # pending authorization live, so the caller learns about the cleanup failure
+    # instead of a plain timeout.
+    assert {:error, :authorization_cleanup_failed} =
+             LoopbackListener.await(listener, blocked_context, expired, await_opts(request))
+
+    # Cleanup spends the supplied terminal budget, not whatever remained of the
+    # expired interaction it is cleaning up.
+    assert_received {:cancel_deadline, cancel_deadline}
+    remaining = Deadline.remaining(cancel_deadline)
+    assert remaining > 4_000 and remaining <= 5_000
   end
 
   test "a silent client that never completes its request reports a timeout", context do
@@ -448,7 +498,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
     task =
       Task.async(fn ->
         receive do: (:go -> :ok)
-        LoopbackListener.await(listener, context.context, pending, request: request)
+        LoopbackListener.await(listener, context.context, pending, await_opts(request))
       end)
 
     assert :ok = :gen_tcp.controlling_process(listener.socket, task.pid)
@@ -507,7 +557,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
     task =
       Task.async(fn ->
         receive do: (:go -> :ok)
-        LoopbackListener.await(listener, observed_context, pending, request: request)
+        LoopbackListener.await(listener, observed_context, pending, await_opts(request))
       end)
 
     assert :ok = :gen_tcp.controlling_process(listener.socket, task.pid)
@@ -555,7 +605,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
     expired = %{pending | deadline_ms: System.monotonic_time(:millisecond) - 1}
 
     assert {:error, :authorization_timeout} =
-             LoopbackListener.await(listener, context.context, expired, request: request)
+             LoopbackListener.await(listener, context.context, expired, await_opts(request))
   end
 
   # Paces a deliberately slow client so the 16 KB request cap is not what ends
@@ -570,6 +620,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
         send(parent, {:trickle_stopped, reason})
     end
   end
+
+  # Production supplies the lifecycle owner's installed cleanup budget; without
+  # it a failed interaction cannot cancel its pending authorization.
+  defp await_opts(request), do: [request: request, cleanup_timeout_ms: 5_000]
 
   defp request_fixture(
          authority,
