@@ -67,7 +67,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   test "loopback authorization fixture completes a real code exchange" do
     server = start_server()
     authority = authority(server.base)
-    {:ok, memory} = Memory.start_link(owner: self())
+    {:ok, memory} = Memory.start(owner: self())
     on_exit(fn -> Memory.close(memory) end)
     {:ok, store} = Memory.store(memory)
     deadline = Deadline.new(5_000)
@@ -198,8 +198,8 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
     assert_receive {:authorization_notice, _second}, 5_000
 
     # ...but the execution opens exactly one store to back their shared context.
-    assert_receive {:trace, _pid, :call, {Memory, :start_link, _arguments}}, 5_000
-    refute_received {:trace, _pid, :call, {Memory, :start_link, _other}}
+    assert_receive {:trace, _pid, :call, {Memory, :start, _arguments}}, 5_000
+    refute_received {:trace, _pid, :call, {Memory, :start, _other}}
   end
 
   test "caller death during the OAuth interaction unwinds every tracked resource in order" do
@@ -247,23 +247,29 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
       owner_pid,
       state.worker_pid,
       state.provider_session.pid,
-      state.oauth_memory.pid,
       state.registry.authority_owner.pid,
       state.opened_sinks.event_sink.pid,
       fixture.prepared.provider_activity.owner
     ]
 
     references = Enum.map(watched, &{&1, Process.monitor(&1)})
+    store_reference = Process.monitor(state.oauth_memory.pid)
     trace_resource_closes(owner_pid)
 
     try do
-      # The store and the loopback socket are bound to the worker and die with
-      # it; the registry authority and the session outlive it, so their relative
-      # close order is the one this unwind has to get right.
+      # The session closes first because its committed closers still belong to
+      # this runtime; the listener, registry, and store it depended on unwind
+      # only once that cleanup has settled.
       Process.exit(caller, :kill)
 
-      assert [LoopbackListener, ProviderRegistry, Memory, ProviderSession] ==
+      assert [ProviderSession, LoopbackListener, ProviderRegistry, Memory] ==
                [next_close(), next_close(), next_close(), next_close()]
+
+      # `:normal` rather than `:killed` is the point: the store is owned by the
+      # lifecycle owner, so killing the blocked worker no longer destroys the
+      # store a session closer would still need.
+      store_pid = state.oauth_memory.pid
+      assert_receive {:DOWN, ^store_reference, :process, ^store_pid, :normal}, 5_000
 
       Enum.each(references, fn {pid, reference} ->
         assert_receive {:DOWN, ^reference, :process, ^pid, _reason}, 5_000
@@ -412,12 +418,12 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
 
   defp trace_oauth_stores do
     Code.ensure_loaded!(Memory)
-    assert :erlang.trace_pattern({Memory, :start_link, 1}, true, [:local]) == 1
+    assert :erlang.trace_pattern({Memory, :start, 1}, true, [:local]) == 1
     assert :erlang.trace(:new_processes, true, [:call]) >= 0
 
     on_exit(fn ->
       :erlang.trace(:new_processes, false, [:call])
-      :erlang.trace_pattern({Memory, :start_link, 1}, false, [:local])
+      :erlang.trace_pattern({Memory, :start, 1}, false, [:local])
     end)
   end
 

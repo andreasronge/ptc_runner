@@ -437,21 +437,22 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     %{state | prepared: nil}
   end
 
-  # The worker acquires session, then OAuth memory, then registry, then
-  # listener, so aborting unwinds that order exactly: listener, registry,
-  # memory, session. Closing the registry before its backing store keeps
-  # terminal OAuth persistence available, and closing the session last keeps
-  # its scoped process and port roots alive until every resource that may have
-  # registered one is already closed.
+  # The session closes first because its committed closers belong to the
+  # runtime that acquired them: one may still release an admission, persist a
+  # token response, or reach the authority the registry holds. Only once that
+  # cleanup has settled do the resources it depended on unwind, in the reverse
+  # of the order the worker opened them: listener, registry, then the OAuth
+  # store. Closing the registry before its backing store keeps terminal OAuth
+  # persistence available for that last step.
   defp close_runtime_resources(state) do
-    if state.oauth_listener, do: LoopbackListener.close(state.oauth_listener)
-    close_registry(state.registry)
-    if state.oauth_memory, do: Memory.close(state.oauth_memory)
-
     cleanup =
       if state.provider_session && ProviderSession.alive?(state.provider_session),
         do: ProviderSession.close(state.provider_session),
         else: :ok
+
+    if state.oauth_listener, do: LoopbackListener.close(state.oauth_listener)
+    close_registry(state.registry)
+    if state.oauth_memory, do: Memory.close(state.oauth_memory)
 
     %{
       state

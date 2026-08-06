@@ -18,7 +18,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
 
   setup do
     authority = authority()
-    {:ok, memory} = Memory.start_link(owner: self())
+    {:ok, memory} = Memory.start(owner: self())
     {:ok, store} = Memory.store(memory)
 
     {:ok, context} =

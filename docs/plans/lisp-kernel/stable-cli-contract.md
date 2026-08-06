@@ -910,9 +910,27 @@ commits in one Checkpoint C PR:
   `--check` abort, the execution owner closes the provider session first and
   keeps the registry and the OAuth runtime alive until that cleanup has
   settled, because a committed provider closer runs against the runtime that
-  produced its resources. The OAuth store therefore also stops dying with the
-  execution worker: it is owned by the lifecycle owner, so killing a blocked
-  worker no longer destroys the store a session closer still needs;
+  produced its resources. Ownership is corrected to match: the OAuth store and
+  the host-bound registry authority both belong to the lifecycle owner rather
+  than to the execution worker, so terminating a blocked worker no longer
+  destroys the store or revokes the authority a session closer still needs.
+  Closing a detached store is itself a bounded terminal action: it stops
+  cooperatively, then terminates a store that will not answer, and refuses to
+  force-stop a process its handle does not identify as that store. Retry
+  ownership never outliving the backing store also moves from the explicit
+  close to every cooperative stop, so owner death now terminates registered
+  managers too; only a store terminated because it stopped answering at all
+  bypasses that step.
+
+  One residual is recorded rather than repaired. A worker killed between
+  creating a detached resource and registering it with the lifecycle owner
+  leaves that resource untracked, so it is reaped by the owner's death instead
+  of by a cooperative close. The window is bounded by the owner's own lifetime
+  and is not a regression — the previous worker-linked resources were killed
+  outright at the same point, also without a cooperative close. Closing it means
+  creating the resource inside the owner, which is viable for the store but not
+  for the registry, whose deadline-bounded activation must not run inside the
+  owner's callback loop;
 - implement the default doctor applicability matrix from inert declarations;
 - keep validate/models inert, audited-local checks in phase 7, and every
   unverified callback behind the phase-8 marker;

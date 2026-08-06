@@ -562,7 +562,7 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
         MapSet.new()
       )
 
-    {:ok, memory} = Memory.start_link(owner: self())
+    {:ok, memory} = Memory.start(owner: self())
     {:ok, store} = Memory.store(memory)
 
     {:ok, context} =

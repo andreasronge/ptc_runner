@@ -19,7 +19,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
       {:ok, Map.new(names, &{&1, "resolved"})}
     end
 
-    assert {:ok, memory} = Memory.start_link(owner: self())
+    assert {:ok, memory} = Memory.start(owner: self())
     assert {:ok, store} = Memory.store(memory)
 
     assert {:ok, context} =

@@ -175,7 +175,7 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
       )
 
     assert {:ok, catalog} = HostInstallation.catalog(host)
-    assert {:ok, memory} = Memory.start_link(owner: self())
+    assert {:ok, memory} = Memory.start(owner: self())
     assert {:ok, store} = Memory.store(memory)
     deadline = Deadline.new(1_000)
 
@@ -194,7 +194,7 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
              )
 
     assert {:ok, registry} =
-             InstallationCatalog.runtime_registry(catalog, services, ["github"], deadline)
+             InstallationCatalog.runtime_registry(catalog, services, ["github"], deadline, self())
 
     assert {:ok, authority_epoch} =
              ProviderRegistry.oauth_authority_epoch(registry, "github", deadline)

@@ -1037,9 +1037,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
   #
   # Closing the session here is what keeps a check on the run's cleanup
   # ordering: a run closes its session inside `PtcRunner.Kernel` while the
-  # registry and the OAuth runtime that produced its resources are still alive.
-  # Leaving it to the execution owner would unwind that runtime first and run
-  # connector closers against a store and managers that are already gone.
+  # registry and the OAuth runtime that produced its resources are still alive,
+  # so a check closes its own session in the same place rather than returning an
+  # open one to the execution owner.
   @doc false
   @spec check_built(map()) :: {:ok, [map()]} | {:error, term()}
   def check_built(%{config: %RunConfig{} = config, publication_authority: authority}) do

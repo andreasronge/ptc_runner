@@ -52,7 +52,61 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     refute_received {:execution_result, _result}
   end
 
-  test "caller death while acquisition blocks closes the registry before the session" do
+  test "caller death runs a committed closer before the runtime that produced it closes" do
+    # A committed provider closer belongs to the runtime that acquired it: it
+    # may still release an admission, persist a token response, or reach the
+    # authority the registry holds. Aborting must therefore close the session
+    # first and leave that runtime standing until the closer has settled.
+    parent = self()
+
+    fixture =
+      provider_fixture(
+        body: "(loop [] (recur))",
+        acquire: fn context ->
+          scoped_root(parent, context)
+          {:ok, capability} = fixture_capability()
+
+          {:ok,
+           %{
+             capabilities: [capability],
+             close: fn ->
+               send(parent, {:provider_closing, self()})
+               receive do: (:release -> :ok)
+             end
+           }}
+        end
+      )
+
+    started = start_owned_execution(fixture)
+    state = await_state(started.owner_pid, & &1.registry)
+
+    # Killing on the acquire callback would race `ResourceRegistrar.commit/2`,
+    # so wait until the session actually holds the committed closer.
+    assert_eventually(fn -> :sys.get_state(state.provider_session.pid).committed != [] end)
+
+    trace_closes(started.owner_pid)
+
+    try do
+      Process.exit(started.caller, :kill)
+
+      # The session is the first thing the abort closes...
+      assert ProviderSession == next_close()
+      assert_receive {:provider_closing, closer}, 5_000
+
+      # ...and the owner is blocked inside that close while the committed closer
+      # runs, so nothing can have unwound the registry underneath it yet.
+      refute_received {:trace, _owner, :call, {ProviderRegistry, :close, _arguments}}
+
+      send(closer, :release)
+      assert ProviderRegistry == next_close()
+    after
+      stop_trace_closes(started.owner_pid)
+    end
+
+    refute_received {:execution_result, _result}
+  end
+
+  test "caller death while acquisition blocks closes the session before the registry" do
     parent = self()
 
     fixture =
@@ -87,7 +141,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     try do
       Process.exit(started.caller, :kill)
 
-      assert [ProviderRegistry, ProviderSession] == [next_close(), next_close()]
+      assert [ProviderSession, ProviderRegistry] == [next_close(), next_close()]
       assert_all_down(watched)
     after
       stop_trace_closes(started.owner_pid)

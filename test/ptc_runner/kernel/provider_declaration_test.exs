@@ -471,7 +471,8 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     owner = authority.pid
     assert :ok = :sys.suspend(owner)
 
-    transfer = Task.async(fn -> HostInstallationAuthority.transfer_to_registry(authority) end)
+    transfer =
+      Task.async(fn -> HostInstallationAuthority.transfer_to_registry(authority, self()) end)
 
     assert Task.yield(transfer, 1_250) ==
              {:ok, {:error, :invalid_host_installation_authority}}
@@ -515,7 +516,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
       spawn(fn ->
         receive do: (:activate -> :ok)
 
-        result = HostInstallationAuthority.transfer_to_registry(authority)
+        result = HostInstallationAuthority.transfer_to_registry(authority, self())
         send(parent, {:pending_transfer_result, result})
       end)
 
@@ -571,7 +572,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
 
     registry_holder =
       spawn(fn ->
-        result = HostInstallationAuthority.transfer_to_registry(authority)
+        result = HostInstallationAuthority.transfer_to_registry(authority, self())
         send(parent, {:cross_process_registry, self(), result})
         receive do: (:hold -> :ok)
       end)
@@ -604,7 +605,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert {:error, :authorization_context_required} =
              InstallationCatalog.runtime_registry(catalog, services)
 
-    assert {:ok, memory} = Memory.start_link(owner: self())
+    assert {:ok, memory} = Memory.start(owner: self())
     assert {:ok, store} = Memory.store(memory)
 
     parent = self()
@@ -648,7 +649,8 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                catalog,
                services,
                ["selected"],
-               operation_deadline
+               operation_deadline,
+               self()
              )
 
     assert_receive {:oauth_factory_deadline, shared_deadline}
@@ -684,7 +686,13 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     expired = Deadline.from_expires_at(System.monotonic_time(:millisecond) - 1)
 
     assert {:error, :operation_deadline_expired} =
-             InstallationCatalog.runtime_registry(catalog, services, ["selected"], expired)
+             InstallationCatalog.runtime_registry(
+               catalog,
+               services,
+               ["selected"],
+               expired,
+               self()
+             )
   end
 
   test "a runtime registry is refused when activation finishes after the deadline" do
@@ -702,7 +710,13 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert {:ok, services} = ProviderRuntimeServices.new(activation: activation)
 
     assert {:error, :operation_deadline_expired} =
-             InstallationCatalog.runtime_registry(catalog, services, ["selected"], deadline)
+             InstallationCatalog.runtime_registry(
+               catalog,
+               services,
+               ["selected"],
+               deadline,
+               self()
+             )
   end
 
   test "an unbound catalog cancels an activation that never returns" do
@@ -723,7 +737,8 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                catalog,
                services,
                ["selected"],
-               Deadline.new(150)
+               Deadline.new(150),
+               self()
              )
 
     assert_receive {:activation_entered, worker}, 5_000
@@ -747,7 +762,8 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                catalog,
                services,
                ["selected"],
-               Deadline.new(1_000)
+               Deadline.new(1_000),
+               self()
              )
 
     refute Process.alive?(owner)
@@ -787,7 +803,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                }
              })
 
-    assert {:ok, memory} = Memory.start_link(owner: self())
+    assert {:ok, memory} = Memory.start(owner: self())
     assert {:ok, store} = Memory.store(memory)
 
     assert {:ok, context} =

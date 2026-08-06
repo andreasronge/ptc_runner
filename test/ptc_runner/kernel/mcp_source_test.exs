@@ -2242,7 +2242,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         allow_insecure_loopback: true
       )
 
-    {:ok, memory} = Memory.start_link(owner: self())
+    {:ok, memory} = Memory.start(owner: self())
     {:ok, store} = Memory.store(memory)
 
     {:ok, context} =

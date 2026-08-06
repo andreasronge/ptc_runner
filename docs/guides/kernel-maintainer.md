@@ -292,9 +292,14 @@ host configuration or the authorization-URL notifier. The owner remains the
 fixed lifecycle owner for the provider session, registry, OAuth store,
 loopback listener, prepared run, and sinks, while an authorized subordinate
 worker performs provider setup, authorization, and Kernel work and reuses the
-owner's already-opened sealed sinks. Aborting unwinds in the exact reverse of
-that acquisition order — listener, registry, store, session — and a failed
-session close outranks the result it would otherwise hide. The owner rejects an
+owner's already-opened sealed sinks. Aborting closes the provider session
+first, because its committed closers still belong to the runtime that acquired
+them, and only then unwinds that runtime in reverse acquisition order —
+listener, registry, store. Ownership matches that guarantee: the OAuth store
+and the host-bound registry authority both belong to the lifecycle owner rather
+than to the worker, so terminating a worker blocked in provider work does not
+destroy the store or revoke the authority that a session closer still needs. A
+failed session close outranks the result it would otherwise hide. The owner rejects an
 execution that is not bound to its exact preparation before consuming that
 preparation, so a mismatched catalog or an authorization target the run never
 selected leaves the prepared run reusable.

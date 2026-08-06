@@ -217,6 +217,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
            ) do
       with_runtime_registry(
         execution,
+        ProviderSession.lifecycle_owner(session),
         selected_names,
         authorities,
         deadline,
@@ -251,6 +252,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
            ) do
       with_runtime_registry(
         execution,
+        ProviderSession.lifecycle_owner(session),
         selected_names,
         authorities,
         deadline,
@@ -312,6 +314,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
   defp with_runtime_registry(
          execution,
+         lifecycle_owner,
          selected_names,
          authorities,
          deadline,
@@ -323,16 +326,17 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       with_registry(
         execution.catalog,
         execution.services,
+        lifecycle_owner,
         selected_names,
         deadline,
         tracker,
         operation,
-        callback,
-        nil
+        callback
       )
     else
       with_memory_runtime(
         execution,
+        lifecycle_owner,
         selected_names,
         deadline,
         tracker,
@@ -342,16 +346,20 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
+  # The store belongs to the lifecycle owner, not to this bounded worker.
+  # Terminating a worker blocked in provider work must not destroy the store a
+  # committed provider closer still needs while the session closes.
   defp with_memory_runtime(
          execution,
+         lifecycle_owner,
          selected_names,
          deadline,
          tracker,
          operation,
          callback
        ) do
-    with {:ok, memory} <- Memory.start_link(owner: self()),
-         :ok <- tracker.(:put, :memory, memory) do
+    with {:ok, memory} <- Memory.start(owner: lifecycle_owner),
+         :ok <- tracked_memory(tracker, memory) do
       try do
         with {:ok, store} <- Memory.store(memory),
              {:ok, context} <-
@@ -370,12 +378,12 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           with_registry(
             execution.catalog,
             services,
+            lifecycle_owner,
             selected_names,
             deadline,
             tracker,
             operation,
-            callback,
-            context
+            registry_callback(callback, context)
           )
         end
       after
@@ -387,24 +395,56 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
+  # The authorization branch's callback also needs the shared OAuth context.
+  # Binding it here keeps one registry-opening shape rather than teaching that
+  # step which branch supplied its callback.
+  defp registry_callback(callback, context) when is_function(callback, 2),
+    do: fn registry -> callback.(registry, context) end
+
+  defp registry_callback(callback, _context) when is_function(callback, 1), do: callback
+
+  # An untracked store has no owner that would close it, and it is no longer
+  # linked to this worker, so a refused registration closes it here instead of
+  # leaving it to the lifecycle owner's own death.
+  defp tracked_memory(tracker, memory) do
+    case tracker.(:put, :memory, memory) do
+      :ok ->
+        :ok
+
+      {:error, _reason} = error ->
+        Memory.close(memory)
+        error
+    end
+  end
+
+  # The registry is opened for the lifecycle owner, not for this worker: a
+  # host-bound authority is revoked when its owner dies, and the owner must be
+  # able to close resources acquired through the registry after terminating a
+  # worker that is blocked in provider work.
   defp with_registry(
          catalog,
          services,
+         lifecycle_owner,
          selected_names,
          deadline,
          tracker,
          operation,
-         callback,
-         context
+         callback
        ) do
     result =
-      InstallationCatalog.runtime_registry(catalog, services, selected_names, deadline)
+      InstallationCatalog.runtime_registry(
+        catalog,
+        services,
+        selected_names,
+        deadline,
+        lifecycle_owner
+      )
       |> registry_result(operation, selected_names, catalog)
 
     with {:ok, registry} <- result,
          :ok <- tracker.(:put, :registry, registry) do
       try do
-        if is_nil(context), do: callback.(registry), else: callback.(registry, context)
+        callback.(registry)
       after
         ProviderRegistry.close(registry)
         _ = tracker.(:drop, :registry, registry)

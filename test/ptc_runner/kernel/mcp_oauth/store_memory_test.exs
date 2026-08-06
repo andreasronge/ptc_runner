@@ -54,8 +54,54 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     assert_receive {:claim_principal_deadline, ^deadline}
   end
 
+  test "closing an unresponsive store terminates it instead of waiting for it" do
+    # The store is detached from the worker that used it, so closing it is a
+    # terminal action on the abort path. A wedged store must not hold that abort
+    # open, and it must be gone when the close returns.
+    {:ok, memory} = Memory.start(owner: self())
+    reference = Process.monitor(memory.pid)
+    assert :ok = :sys.suspend(memory.pid)
+
+    closer = Task.async(fn -> Memory.close(memory) end)
+
+    assert :ok = Task.await(closer, 10_000)
+    assert_receive {:DOWN, ^reference, :process, _pid, _reason}, 5_000
+    refute Process.alive?(memory.pid)
+  end
+
+  test "a store destroyed by its owner's death takes its registered managers with it" do
+    # Retry ownership must never outlive the backing store. Owner death destroys
+    # the store just as an explicit close does, so a manager registered against
+    # it cannot be left running against a store that no longer exists.
+    owner = spawn(fn -> receive do: (:never -> :ok) end)
+    {:ok, memory} = Memory.start(owner: owner)
+    manager = spawn(fn -> receive do: (:never -> :ok) end)
+    assert :ok = Memory.register_manager(memory, manager)
+
+    store_reference = Process.monitor(memory.pid)
+    manager_reference = Process.monitor(manager)
+
+    Process.exit(owner, :kill)
+
+    assert_receive {:DOWN, ^store_reference, :process, _store, :normal}, 5_000
+    assert_receive {:DOWN, ^manager_reference, :process, ^manager, :killed}, 5_000
+  end
+
+  test "closing a handle that does not name a store terminates nothing" do
+    # The bounded close force-stops a wedged store, so it must first confirm the
+    # process is the one the handle names. A stale or forged handle pointing at
+    # an unrelated live process must close nothing rather than kill it.
+    stranger = spawn(fn -> receive do: (:never -> :ok) end)
+    on_exit(fn -> if Process.alive?(stranger), do: Process.exit(stranger, :kill) end)
+
+    closer = Task.async(fn -> Memory.close(%Memory{pid: stranger}) end)
+
+    assert :ok = Task.await(closer, 10_000)
+    assert Process.alive?(stranger)
+  end
+
   setup do
-    {:ok, memory} = Memory.start_link(owner: self())
+    {:ok, memory} = Memory.start(owner: self())
     {:ok, store} = Memory.store(memory)
     authority = authority()
 

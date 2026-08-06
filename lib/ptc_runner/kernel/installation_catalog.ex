@@ -143,7 +143,7 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
           {:ok, ProviderRegistry.t()} | {:error, atom()}
   def runtime_registry(%__MODULE__{} = catalog, %ProviderRuntimeServices{} = services) do
     if valid?(catalog) do
-      runtime_registry(catalog, services, names(catalog), Deadline.new(5_000))
+      runtime_registry(catalog, services, names(catalog), Deadline.new(5_000), self())
     else
       {:error, :invalid_provider_registry}
     end
@@ -151,20 +151,32 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
 
   def runtime_registry(_catalog, _services), do: {:error, :invalid_provider_registry}
 
+  # `registry_owner` is explicit because a host-bound authority is revoked when
+  # the process that owns it dies. Activation runs in a disposable worker, so
+  # naming the longer-lived owner here is what keeps the registry usable while
+  # that worker is terminated and the resources acquired through it are closed.
   @doc false
-  @spec runtime_registry(t(), ProviderRuntimeServices.t(), [binary()], Deadline.t()) ::
+  @spec runtime_registry(t(), ProviderRuntimeServices.t(), [binary()], Deadline.t(), pid()) ::
           {:ok, ProviderRegistry.t()} | {:error, atom()}
   def runtime_registry(
         %__MODULE__{} = catalog,
         %ProviderRuntimeServices{} = services,
         selected_names,
-        deadline
-      ) do
+        deadline,
+        registry_owner
+      )
+      when is_pid(registry_owner) do
     with true <- valid?(catalog),
          true <- ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding),
          true <- valid_runtime_selection?(catalog, selected_names),
          :ok <- validate_operation_deadline(deadline),
-         {:ok, owner} <- activate_registry_owner(services, catalog.runtime_binding, deadline),
+         {:ok, owner} <-
+           activate_registry_owner(
+             services,
+             catalog.runtime_binding,
+             deadline,
+             registry_owner
+           ),
          :ok <- release_expired_owner(owner, deadline) do
       open_runtime_registry(catalog, services, selected_names, owner, deadline)
     else
@@ -173,7 +185,7 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
     end
   end
 
-  def runtime_registry(_catalog, _services, _selected_names, _deadline),
+  def runtime_registry(_catalog, _services, _selected_names, _deadline, _registry_owner),
     do: {:error, :invalid_provider_registry}
 
   defp split_registrations(registrations) when map_size(registrations) <= 128 do
@@ -329,10 +341,10 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   end
 
   # An unbound catalog's activation owns nothing, so it runs under the deadline.
-  # A host-bound authority belongs to whichever process created it, so its
-  # activation cannot move into a disposable worker without re-parenting
-  # ownership; `release_expired_owner/2` bounds that one after the fact.
-  defp activate_registry_owner(services, nil, deadline) do
+  # A host-bound authority belongs to whichever process created it, so activation
+  # stays in the caller and the transfer below re-parents it to `registry_owner`;
+  # `release_expired_owner/2` bounds that one after the fact.
+  defp activate_registry_owner(services, nil, deadline, _registry_owner) do
     case ProviderRuntimeServices.activate_process_free(services, deadline) do
       {:ok, nil} -> {:ok, nil}
       {:error, :operation_deadline_expired} = error -> error
@@ -340,22 +352,22 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
     end
   end
 
-  defp activate_registry_owner(services, runtime_binding, _deadline)
+  defp activate_registry_owner(services, runtime_binding, _deadline, registry_owner)
        when is_binary(runtime_binding) do
     case ProviderRuntimeServices.activate(services) do
       {:ok, nil} ->
         {:error, :invalid_provider_registry}
 
       {:ok, catalog_owner} ->
-        transfer_registry_owner(catalog_owner)
+        transfer_registry_owner(catalog_owner, registry_owner)
 
       {:error, _reason} ->
         {:error, :invalid_provider_registry}
     end
   end
 
-  defp transfer_registry_owner(catalog_owner) do
-    case HostInstallationAuthority.transfer_to_registry(catalog_owner) do
+  defp transfer_registry_owner(catalog_owner, registry_owner) do
+    case HostInstallationAuthority.transfer_to_registry(catalog_owner, registry_owner) do
       {:ok, registry_owner} ->
         {:ok, registry_owner}
 

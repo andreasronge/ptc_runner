@@ -124,7 +124,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     expired = Deadline.from_expires_at(System.monotonic_time(:millisecond) - 1)
 
     assert {:error, :operation_deadline_expired} =
-             InstallationCatalog.runtime_registry(catalog, services, ["remote"], expired)
+             InstallationCatalog.runtime_registry(catalog, services, ["remote"], expired, self())
 
     refute_received :activated
     assert host_installation_owners() == owners_before
@@ -153,7 +153,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     services = replace_activation(services, delayed)
 
     assert {:error, :operation_deadline_expired} =
-             InstallationCatalog.runtime_registry(catalog, services, ["remote"], deadline)
+             InstallationCatalog.runtime_registry(catalog, services, ["remote"], deadline, self())
 
     assert_received {:activated, {:ok, authority}}
     refute Process.alive?(authority.pid)
@@ -473,6 +473,57 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert_receive {:DOWN, ^lease_ref, :process, _, :normal}
     assert :undefined = :ets.info(lease_table)
     refute_receive {:creator_death_credential_result, _result}
+  end
+
+  @tag :tmp_dir
+  test "a registry opened for another owner outlives the process that opened it", %{tmp_dir: dir} do
+    # Activation runs in a disposable worker while the registry it produces is
+    # tracked and closed by a longer-lived lifecycle owner. Binding the
+    # authority to the worker would revoke it the moment that worker is
+    # terminated, before the resources acquired through it can be closed.
+    parent = self()
+    host = load_host(dir, http_config())
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, services} = HostInstallation.runtime_services(host)
+
+    services =
+      replace_credential_resolver(services, fn ["token"] -> {:ok, %{"token" => "test-secret"}} end)
+
+    lifecycle_owner = spawn(fn -> receive do: (:never -> :ok) end)
+
+    on_exit(fn ->
+      if Process.alive?(lifecycle_owner), do: Process.exit(lifecycle_owner, :kill)
+    end)
+
+    worker =
+      spawn(fn ->
+        result =
+          InstallationCatalog.runtime_registry(
+            catalog,
+            services,
+            ["remote"],
+            Deadline.new(5_000),
+            lifecycle_owner
+          )
+
+        send(parent, {:worker_registry, result})
+        receive do: (:never -> :ok)
+      end)
+
+    worker_ref = Process.monitor(worker)
+    assert_receive {:worker_registry, {:ok, registry}}
+    authority_ref = Process.monitor(registry.authority_owner.pid)
+
+    Process.exit(worker, :kill)
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}
+
+    # The authority survives its opener, so the registry still works...
+    assert {:ok, %{"token" => "test-secret"}} =
+             ProviderRegistry.resolve_credentials(registry, ["token"])
+
+    # ...and it is the lifecycle owner it now follows.
+    Process.exit(lifecycle_owner, :kill)
+    assert_receive {:DOWN, ^authority_ref, :process, _pid, :normal}, 5_000
   end
 
   @tag :tmp_dir
