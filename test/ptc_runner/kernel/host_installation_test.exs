@@ -960,6 +960,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       |> context(:workflow)
       |> update_in([:limits], &Map.put(&1, :provider_heap_words, 20_000))
 
+    assert is_binary(catalog.runtime_binding)
     assert descriptor.local_preflight == :audited_local
     assert descriptor.connectivity_mode == :probe
     assert descriptor.probe_effect == :completion
@@ -1497,6 +1498,10 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     provider_context = context(host.directory, destination)
     assert {:ok, runtime_services} = HostInstallation.runtime_services(host)
 
+    # An audited-local declaration cannot be sealed into an unbound catalog, so
+    # a host recipe that stopped binding its catalog would fail construction
+    # rather than quietly install a check phase 7 refuses to run.
+    assert is_binary(catalog.runtime_binding)
     assert descriptor.local_preflight == :audited_local
     assert is_function(implementation.local_preflight, 3)
 

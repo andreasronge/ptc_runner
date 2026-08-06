@@ -29,6 +29,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.Kernel.TypedCanonicalJSON
   alias PtcRunner.Test.MCPOAuthRecordingStore
+  alias PtcRunner.TestSupport.HostBoundFixture
 
   @moduletag :tmp_dir
   @dense_services ~w(
@@ -123,6 +124,77 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
 
     assert {:error, :invalid_installation_catalog} =
              InstallationCatalog.new(%{}, owner: self())
+  end
+
+  test "an audited-local declaration requires a shipped source and a host binding" do
+    # `:audited_local` permits phase 7 to run a callback before provider
+    # activity is marked, so it is a trust claim rather than a capability flag.
+    # Neither half of the rule may be relaxed by whoever assembles the catalog.
+    assert {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
+
+    base = [
+      source: :custom,
+      installation_revision: "custom-v1",
+      credential_names: [],
+      authorization_mode: :none,
+      data_class: :normal,
+      accepts_data: [:normal],
+      requires: [],
+      provides: [],
+      destinations: [:workflow],
+      workflow_llm?: true,
+      connectivity_mode: :probe,
+      probe_effect: :metadata,
+      selection_validation: :declarative,
+      selection_rules: rules,
+      authority_fingerprint: nil,
+      local_preflight: :audited_local
+    ]
+
+    assert {:error, :invalid_provider_descriptor} = ProviderDescriptor.new(base)
+
+    # A custom registration declares the check it does have, and that value is
+    # accepted: the rule restricts the trust level, not local checks as such.
+    assert {:ok, unverified} =
+             ProviderDescriptor.new(Keyword.put(base, :local_preflight, :unverified))
+
+    assert unverified.local_preflight == :unverified
+
+    assert {:ok, shipped} = ProviderDescriptor.new(Keyword.put(base, :source, :llm))
+    assert shipped.local_preflight == :audited_local
+
+    builder = fn _selection, _context -> {:error, :inactive_provider} end
+    probe = fn _selection, _context, _services -> :ok end
+    check = fn _selection, _context, _services -> :ok end
+
+    registrations = fn descriptor ->
+      %{
+        "checked" => %{
+          descriptor: descriptor,
+          authority: nil,
+          implementation: %{
+            builder: builder,
+            connectivity_probe: probe,
+            local_preflight: check
+          }
+        }
+      }
+    end
+
+    # An unbound catalog is assembled by its embedder rather than derived from a
+    # host document, so it cannot carry the claim even for a shipped source.
+    assert {:error, :invalid_installation_catalog} =
+             InstallationCatalog.new(registrations.(shipped))
+
+    assert {:ok, unverified_catalog} = InstallationCatalog.new(registrations.(unverified))
+    assert InstallationCatalog.valid?(unverified_catalog)
+
+    binding = HostBoundFixture.runtime_services().runtime_binding
+
+    assert {:ok, catalog} =
+             InstallationCatalog.new(registrations.(shipped), runtime_binding: binding)
+
+    assert InstallationCatalog.valid?(catalog)
   end
 
   test "selection rules reject executable or caller-owned schema terms" do

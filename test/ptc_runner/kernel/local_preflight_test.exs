@@ -4,8 +4,6 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.Deadline
-  alias PtcRunner.Kernel.HostConfig
-  alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LocalPreflight
   alias PtcRunner.Kernel.PreparedRun
@@ -13,73 +11,80 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.SelectionRules
+  alias PtcRunner.TestSupport.HostBoundFixture
 
   @deadline_ms 5_000
 
   test "a run declaring no audited-local check invokes nothing" do
-    parent = self()
-    catalog = catalog(%{"inert" => [local_preflight: :none, callback: reporter(parent)]})
+    catalog = catalog(%{"inert" => [local_preflight: :none]})
     prepared = prepared(catalog, ["inert"])
 
     assert :ok = LocalPreflight.run(prepared, catalog, services(), deadline())
-    refute_received {:audited_local, _step, _destination, _selection, _limits}
+    refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
   end
 
-  test "every occurrence of one alias is checked, in declaration order" do
+  test "an unverified check is never invoked before provider activity" do
+    # Catalog parity requires an `:unverified` declaration to register its
+    # callback, so the callback is present here. Invoking it would run active
+    # work in a phase whose whole contract is that no provider work has begun.
+    catalog = catalog(%{"custom" => [source: :custom, local_preflight: :unverified]})
+    prepared = prepared(catalog, ["custom"])
+
+    assert is_function(catalog.implementations["custom"].local_preflight, 3)
+    assert :ok = LocalPreflight.run(prepared, catalog, services(), deadline())
+    refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
+  end
+
+  test "every applicable occurrence is checked, in declaration order" do
     # The check is a property of an occurrence: each carries its own selection
-    # and destination, so occurrences are never collapsed by alias.
-    parent = self()
+    # and destination, so occurrences are never collapsed by alias. Traversal
+    # runs workflow before mission and follows declaration order within a
+    # destination.
+    sequence = counter()
 
     catalog =
       catalog(%{
-        "audited" => audited(parent, destinations: [:workflow, :mission], sequence: counter())
+        "model" => [destination: :workflow, sequence: sequence],
+        "tools-a" => [destination: :mission, sequence: sequence],
+        "tools-b" => [destination: :mission, sequence: sequence]
       })
 
-    prepared = prepared(catalog, ["audited"], ["audited"])
+    prepared = prepared(catalog, ["model"], ["tools-a", "tools-b"])
 
     assert :ok = LocalPreflight.run(prepared, catalog, services(), deadline())
 
-    assert_received {:audited_local, 1, :workflow, %{}, true}
-    assert_received {:audited_local, 2, :mission, %{}, true}
-    refute_received {:audited_local, _step, _destination, _selection, _limits}
+    assert_received {:audited_local, 1, "model", :workflow, %{}, true}
+    assert_received {:audited_local, 2, "tools-a", :mission, %{}, true}
+    assert_received {:audited_local, 3, "tools-b", :mission, %{}, true}
+    refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
   end
 
   test "the first failing occurrence stops the step before later ones run" do
-    parent = self()
-
     catalog =
       catalog(%{
-        "audited" =>
-          audited(parent,
-            destinations: [:workflow, :mission],
-            failing: %{workflow: :invalid_mcp_executable}
-          )
+        "model" => [destination: :workflow, failing: :invalid_mcp_executable],
+        "tools" => [destination: :mission]
       })
 
-    prepared = prepared(catalog, ["audited"], ["audited"])
+    prepared = prepared(catalog, ["model"], ["tools"])
 
     assert {:error, %CommandDiagnostic{} = diagnostic} =
              LocalPreflight.run(prepared, catalog, services(), deadline())
 
     assert diagnostic.code == :environment_unavailable
     assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
-    assert_received {:audited_local, _workflow_step, :workflow, _selection, true}
-    refute_received {:audited_local, _mission_step, :mission, _other, _limits}
+    assert_received {:audited_local, _step, "model", :workflow, _selection, true}
+    refute_received {:audited_local, _later, "tools", :mission, _other, _limits}
   end
 
   test "a later occurrence still fails the step after an earlier one passed" do
-    parent = self()
-
     catalog =
       catalog(%{
-        "audited" =>
-          audited(parent,
-            destinations: [:workflow, :mission],
-            failing: %{mission: :invalid_llm_model}
-          )
+        "model" => [destination: :workflow],
+        "tools" => [destination: :mission, failing: :invalid_llm_model]
       })
 
-    prepared = prepared(catalog, ["audited"], ["audited"])
+    prepared = prepared(catalog, ["model"], ["tools"])
 
     assert {:error, %CommandDiagnostic{} = diagnostic} =
              LocalPreflight.run(prepared, catalog, services(), deadline())
@@ -87,28 +92,26 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert diagnostic.phase == :local_preflight
     assert diagnostic.code == :adapter_unavailable
     assert diagnostic.subject.occurrence == %{destination: :mission, index: 0}
-    assert_received {:audited_local, _first, :workflow, _workflow_selection, true}
-    assert_received {:audited_local, _second, :mission, _mission_selection, true}
+    assert_received {:audited_local, _first, "model", :workflow, _workflow_selection, true}
+    assert_received {:audited_local, _second, "tools", :mission, _mission_selection, true}
   end
 
   test "an exhausted budget stops the step before any callback runs" do
     # Every occurrence spends the caller's one anchored deadline, so a step that
     # begins with nothing left never reaches a callback.
-    parent = self()
-    catalog = catalog(%{"audited" => audited(parent)})
-    prepared = prepared(catalog, ["audited"])
+    catalog = catalog(%{"model" => []})
+    prepared = prepared(catalog, ["model"])
     expired = Deadline.new(1, System.monotonic_time(:millisecond) - 10_000)
 
     assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error}} =
              LocalPreflight.run(prepared, catalog, services(), expired)
 
-    refute_received {:audited_local, _step, _destination, _selection, _limits}
+    refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
   end
 
   test "a callback that outruns the remaining budget fails closed" do
-    parent = self()
-    catalog = catalog(%{"audited" => audited(parent, failing: %{workflow: :block})})
-    prepared = prepared(catalog, ["audited"])
+    catalog = catalog(%{"model" => [failing: :block]})
+    prepared = prepared(catalog, ["model"])
 
     assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error}} =
              LocalPreflight.run(prepared, catalog, services(), Deadline.new(200))
@@ -117,9 +120,8 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
   test "a preparation and catalog that do not belong together are refused" do
     # Alias names are not identity: running one catalog's callback against
     # another's normalized occurrence checks declarations it never validated.
-    parent = self()
-    installed = catalog(%{"shared" => audited(parent, installation_revision: "installed-v1")})
-    foreign = catalog(%{"shared" => audited(parent, installation_revision: "foreign-v1")})
+    installed = catalog(%{"shared" => [installation_revision: "installed-v1"]})
+    foreign = catalog(%{"shared" => [installation_revision: "foreign-v1"]})
     prepared = prepared(foreign, ["shared"])
 
     assert installed.attestation != foreign.attestation
@@ -127,25 +129,49 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error}} =
              LocalPreflight.run(prepared, installed, services(), deadline())
 
-    refute_received {:audited_local, _step, _destination, _selection, _limits}
+    refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
 
     # The same preparation is fine against the catalog it came from, so the
     # refusal is about binding rather than the preparation itself.
     assert :ok = LocalPreflight.run(prepared, foreign, services(), deadline())
-    assert_received {:audited_local, _workflow_step, :workflow, _selection, true}
+    assert_received {:audited_local, _workflow_step, "shared", :workflow, _selection, true}
   end
 
-  test "runtime services bound to a host cannot check an unbound catalog" do
-    # The trio has to agree on all three sides: services carrying a host binding
-    # belong to that host's catalog, not to a custom one that never had it.
-    parent = self()
-    catalog = catalog(%{"audited" => audited(parent)})
-    prepared = prepared(catalog, ["audited"])
+  test "services sealed from another host cannot check this catalog" do
+    # The trio has to agree on all three sides. A host-bound catalog is checked
+    # only by services its own host document sealed, and generic services carry
+    # no host payload to compare at all.
+    catalog = catalog(%{"model" => []})
+    prepared = prepared(catalog, ["model"])
 
-    assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error}} =
-             LocalPreflight.run(prepared, catalog, host_bound_services(), deadline())
+    for foreign <- [HostBoundFixture.runtime_services("other-v1"), generic_services()] do
+      assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error}} =
+               LocalPreflight.run(prepared, catalog, foreign, deadline())
+    end
 
-    refute_received {:audited_local, _step, _destination, _selection, _limits}
+    refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
+  end
+
+  test "an untrusted declaration is refused before any callback runs" do
+    # `ProviderDescriptor` refuses `:audited_local` from a custom source and
+    # `InstallationCatalog` refuses it without a runtime binding, so neither
+    # trio below can be built through a constructor. Phase 7 revalidates what it
+    # is handed rather than trusting it, and refuses the whole step: skipping
+    # the untrusted occurrence would report a local check nothing verified.
+    catalog = catalog(%{"model" => []})
+    prepared = prepared(catalog, ["model"])
+
+    untrusted = [
+      %{catalog | descriptors: %{"model" => %{catalog.descriptors["model"] | source: :custom}}},
+      %{catalog | runtime_binding: nil}
+    ]
+
+    for forged <- untrusted do
+      assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error}} =
+               LocalPreflight.run(prepared, forged, services(), deadline())
+    end
+
+    refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
   end
 
   test "each local failure reason translates to its exact closed code" do
@@ -193,9 +219,8 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
   end
 
   defp refuse(reason) do
-    parent = self()
-    catalog = catalog(%{"audited" => audited(parent, failing: %{workflow: reason})})
-    prepared = prepared(catalog, ["audited"])
+    catalog = catalog(%{"model" => [failing: reason]})
+    prepared = prepared(catalog, ["model"])
 
     assert {:error, %CommandDiagnostic{} = diagnostic} =
              LocalPreflight.run(prepared, catalog, services(), deadline())
@@ -204,17 +229,6 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
   end
 
   defp deadline, do: Deadline.new(@deadline_ms)
-
-  defp reporter(parent) do
-    fn selection, context, _services ->
-      send(
-        parent,
-        {:audited_local, 0, context.destination, selection, Map.has_key?(context, :limits)}
-      )
-
-      :ok
-    end
-  end
 
   # Each occurrence runs in its own bounded worker, so their messages have no
   # inter-sender ordering. A shared counter makes the executor's sequential
@@ -225,20 +239,21 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
   defp step(sequence), do: :atomics.add_get(sequence, 1, 1)
 
   # The callback reports every occurrence it sees, so a test can prove both that
-  # each one ran and that none ran twice.
-  defp audited(parent, options \\ []) do
-    failing = Keyword.get(options, :failing, %{})
-
+  # each one ran and that none ran twice. The phase-7 context carries the
+  # occurrence rather than the alias, so the name is closed over from the
+  # registration instead.
+  defp callback(parent, name, options) do
+    failing = Keyword.get(options, :failing)
     sequence = Keyword.get(options, :sequence)
 
-    callback = fn selection, context, _services ->
+    fn selection, context, _services ->
       send(
         parent,
-        {:audited_local, step(sequence), context.destination, selection,
+        {:audited_local, step(sequence), name, context.destination, selection,
          Map.has_key?(context, :limits)}
       )
 
-      case Map.get(failing, context.destination) do
+      case failing do
         nil -> :ok
         :raise -> raise "the audited-local check refused"
         :block -> receive do: (:never -> :ok)
@@ -246,45 +261,27 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
         reason -> {:error, reason}
       end
     end
-
-    Keyword.merge(options, local_preflight: :audited_local, callback: callback)
   end
 
-  defp services do
+  # The binding is a pure function of the host document, so services sealed from
+  # the same document are interchangeable and one sealed elsewhere is not.
+  defp services, do: HostBoundFixture.runtime_services()
+
+  defp generic_services do
     {:ok, services} =
       ProviderRuntimeServices.new(credential_resolver: fn _names -> {:ok, %{}} end)
 
     services
   end
 
-  defp host_bound_services do
-    document = %{
-      "install" => %{
-        "history" => %{
-          "source" => "ptc_trace_snapshot",
-          "installation_revision" => "history-v1",
-          "directory" => "traces"
-        }
-      }
-    }
-
-    {:ok, decoded} = HostConfig.decode(document, "/tmp")
-
-    host =
-      struct!(HostConfig,
-        path: "/tmp/ptc-host.json",
-        directory: "/tmp",
-        runtime: decoded.runtime,
-        limits: decoded.limits,
-        credentials: decoded.credentials,
-        install: decoded.install
-      )
-
-    {:ok, services} = HostInstallation.runtime_services(host)
-    services
-  end
-
+  # Phase 7 runs only host-installed audited-local checks, so every fixture is a
+  # shipped source in a host-bound catalog. `:llm` and `:mcp` are the two
+  # sources the shipped recipes declare audited-local, and they are also the
+  # workflow and mission sides of an occurrence list. An alias declares one
+  # destination and a manifest may name it once per destination, so an
+  # audited-local alias has exactly one occurrence.
   defp catalog(specifications) do
+    parent = self()
     {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
 
     registrations =
@@ -292,39 +289,77 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
         mode = Keyword.get(options, :local_preflight, :audited_local)
 
         {:ok, descriptor} =
-          ProviderDescriptor.new(
-            source: :custom,
+          rules
+          |> descriptor_options(
+            Keyword.get(options, :destination, :workflow),
+            Keyword.get(options, :source, :shipped)
+          )
+          |> Keyword.merge(
             installation_revision: Keyword.get(options, :installation_revision, "doctor-v1"),
-            credential_names: [],
-            authorization_mode: :none,
-            data_class: :normal,
-            accepts_data: [:normal],
-            requires: [],
-            provides: [],
-            destinations: Keyword.get(options, :destinations, [:workflow]),
-            workflow_llm?: false,
-            connectivity_mode: :none,
-            probe_effect: nil,
-            selection_validation: :declarative,
-            selection_rules: rules,
-            authority_fingerprint: nil,
             local_preflight: mode
           )
+          |> ProviderDescriptor.new()
 
         builder = fn _selection, _context -> {:ok, %{credential_names: []}} end
+        probe = fn _selection, _context, _services -> :ok end
 
         implementation =
-          if mode == :none,
-            do: %{builder: builder},
-            else: %{builder: builder, local_preflight: Keyword.fetch!(options, :callback)}
+          %{builder: builder}
+          |> maybe_put(mode != :none, :local_preflight, callback(parent, name, options))
+          |> maybe_put(descriptor.connectivity_mode == :probe, :connectivity_probe, probe)
 
         {name, %{descriptor: descriptor, implementation: implementation, authority: nil}}
       end)
 
-    {:ok, catalog} = InstallationCatalog.new(registrations)
+    {:ok, catalog} =
+      InstallationCatalog.new(registrations, runtime_binding: services().runtime_binding)
+
     on_exit(fn -> InstallationCatalog.close(catalog) end)
     catalog
   end
+
+  defp maybe_put(implementation, false, _key, _value), do: implementation
+  defp maybe_put(implementation, true, key, value), do: Map.put(implementation, key, value)
+
+  defp descriptor_options(rules, destination, source) do
+    base = [
+      credential_names: [],
+      authorization_mode: :none,
+      data_class: :normal,
+      accepts_data: [:normal],
+      requires: [],
+      provides: [],
+      selection_validation: :declarative,
+      selection_rules: rules,
+      authority_fingerprint: nil
+    ]
+
+    Keyword.merge(base, shape(destination, source))
+  end
+
+  defp shape(:workflow, :shipped),
+    do: [
+      source: :llm,
+      destinations: [:workflow],
+      workflow_llm?: true,
+      connectivity_mode: :probe,
+      probe_effect: :metadata
+    ]
+
+  defp shape(:mission, :shipped),
+    do: [
+      source: :mcp,
+      destinations: [:mission],
+      workflow_llm?: false,
+      connectivity_mode: :acquisition,
+      probe_effect: nil
+    ]
+
+  defp shape(destination, :custom),
+    do:
+      destination
+      |> shape(:shipped)
+      |> Keyword.merge(source: :custom, connectivity_mode: :none, probe_effect: nil)
 
   defp prepared(catalog, workflow, mission \\ []) do
     manifest = %{

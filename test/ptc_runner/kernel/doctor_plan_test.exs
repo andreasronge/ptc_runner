@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.SelectionRules
+  alias PtcRunner.TestSupport.HostBoundFixture
 
   @environment %{runtime: :supported, viewer: :available}
 
@@ -220,16 +221,21 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
     assert CommandContract.valid_success_semantics?(:doctor, result)
   end
 
+  # Rows come from sealed declarations, so most fixtures are plain custom
+  # registrations. `:audited_local` is the exception: it is a trust claim only a
+  # shipped source in a host-bound catalog may make, and `:llm` is one of the
+  # two shipped recipes that make it.
   defp catalog(specifications) do
     {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
 
     registrations =
       Map.new(specifications, fn {name, options} ->
         authority = authority(Keyword.get(options, :authorization_mode, :none))
+        audited? = Keyword.get(options, :local_preflight, :none) == :audited_local
 
         {:ok, descriptor} =
           ProviderDescriptor.new(
-            source: :custom,
+            source: if(audited?, do: :llm, else: :custom),
             installation_revision: "doctor-v1",
             credential_names: Keyword.get(options, :credential_names, []),
             authorization_mode: Keyword.get(options, :authorization_mode, :none),
@@ -238,9 +244,10 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
             requires: [],
             provides: [],
             destinations: Keyword.get(options, :destinations, [:workflow]),
-            workflow_llm?: false,
-            connectivity_mode: Keyword.get(options, :connectivity_mode, :none),
-            probe_effect: Keyword.get(options, :probe_effect),
+            workflow_llm?: audited?,
+            connectivity_mode:
+              Keyword.get(options, :connectivity_mode, if(audited?, do: :probe, else: :none)),
+            probe_effect: Keyword.get(options, :probe_effect, if(audited?, do: :metadata)),
             selection_validation: Keyword.get(options, :selection_validation, :declarative),
             selection_rules: rules,
             authority_fingerprint: authority && authority.fingerprint,
@@ -250,14 +257,25 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
         {name,
          %{
            descriptor: descriptor,
-           implementation: implementation(options),
+           implementation: implementation(options, descriptor),
            authority: authority
          }}
       end)
 
-    {:ok, catalog} = InstallationCatalog.new(registrations)
+    {:ok, catalog} =
+      InstallationCatalog.new(registrations, runtime_binding: runtime_binding(registrations))
+
     on_exit(fn -> InstallationCatalog.close(catalog) end)
     catalog
+  end
+
+  # An unbound catalog cannot carry an audited-local declaration at all, so a
+  # fixture that declares one seals itself against a real host document.
+  defp runtime_binding(registrations) do
+    if Enum.any?(registrations, fn {_name, %{descriptor: descriptor}} ->
+         descriptor.local_preflight == :audited_local
+       end),
+       do: HostBoundFixture.runtime_services().runtime_binding
   end
 
   # The descriptor's fingerprint is taken from the authority it is bound to, so
@@ -287,7 +305,7 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
     authority
   end
 
-  defp implementation(options) do
+  defp implementation(options, descriptor) do
     builder = fn _selection, _context -> {:ok, %{credential_names: []}} end
 
     implementation =
@@ -316,7 +334,7 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
       end
     end)
     |> then(fn implementation ->
-      if Keyword.get(options, :connectivity_mode, :none) == :probe do
+      if descriptor.connectivity_mode == :probe do
         Map.put(implementation, :connectivity_probe, fn _selection, _context, _services -> :ok end)
       else
         implementation

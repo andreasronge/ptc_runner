@@ -18,6 +18,15 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # selection and destination decide what is verified — so occurrences are never
   # collapsed by alias before execution.
   #
+  # ## Trust
+  #
+  # Only `:audited_local` runs here, and only a host-installed shipped
+  # declaration may carry that value: `ProviderDescriptor` refuses it from a
+  # custom source and `InstallationCatalog` refuses it without a runtime
+  # binding. A catalog still holds the callbacks of its `:unverified`
+  # declarations — parity requires one — but they are active work and this step
+  # never invokes them.
+  #
   # The prepared run, catalog, and runtime services must belong together. Alias
   # names are not identity: two catalogs can install the same alias over
   # different sealed descriptors, and accepting a mismatched trio would run one
@@ -101,10 +110,10 @@ defmodule PtcRunner.Kernel.LocalPreflight do
         ) :: :ok | {:error, CommandDiagnostic.t()}
   def run(prepared, catalog, services, deadline) do
     with true <- bound?(prepared, catalog, services),
-         true <- Deadline.valid?(deadline) do
-      catalog
-      |> applicable(prepared)
-      |> check_each(prepared, catalog, services, deadline)
+         true <- Deadline.valid?(deadline),
+         occurrences = applicable(catalog, prepared),
+         true <- trusted?(catalog, occurrences) do
+      check_each(occurrences, prepared, catalog, services, deadline)
     else
       _invalid -> {:error, internal_diagnostic()}
     end
@@ -131,6 +140,22 @@ defmodule PtcRunner.Kernel.LocalPreflight do
       match?(%{local_preflight: :audited_local}, catalog.descriptors[declaration.name])
     end)
   end
+
+  # Fail-closed defense in depth. `ProviderDescriptor` refuses `:audited_local`
+  # from a custom source and `InstallationCatalog` refuses it without a runtime
+  # binding, and `bound?/3` above revalidates both seals, so a trio that reaches
+  # here failing this check crossed a constructor that should not have admitted
+  # it. Refusing the whole step is deliberate: skipping the untrusted occurrence
+  # instead would report a passing local check nothing verified.
+  defp trusted?(_catalog, []), do: true
+
+  defp trusted?(%{runtime_binding: binding} = catalog, occurrences) when is_binary(binding) do
+    Enum.all?(occurrences, fn occurrence ->
+      match?(%{source: source} when source != :custom, catalog.descriptors[occurrence.name])
+    end)
+  end
+
+  defp trusted?(_catalog, _occurrences), do: false
 
   defp check_each([], _prepared, _catalog, _services, _deadline), do: :ok
 

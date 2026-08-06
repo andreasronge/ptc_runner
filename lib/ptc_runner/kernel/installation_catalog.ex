@@ -13,7 +13,10 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   adapter intentionally opens the complete catalog under its own bounded
   activation deadline because it has no run selection.
   Catalog construction checks that active validators, connectivity probes, and
-  local checks agree with their descriptors without invoking any callback.
+  local checks agree with their descriptors without invoking any callback. An
+  `:audited_local` declaration additionally requires a runtime binding, so only
+  a host-installed catalog can carry a check phase 7 runs before provider
+  activity.
   Every builder placed in a run-bound registry carries the data policy its
   validated sealed descriptor declares, so a staged preparation cannot
   contradict the policy phase 5 and sink authorization already used.
@@ -242,7 +245,7 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
 
   defp catalog_support_valid?(catalog) do
     Limits.valid?(catalog.installed_limits) and valid_runtime_binding?(catalog.runtime_binding) and
-      runtime_authority_bindings_valid?(catalog)
+      runtime_authority_bindings_valid?(catalog) and audited_local_bindings_valid?(catalog)
   end
 
   defp valid_runtime_binding?(nil), do: true
@@ -258,6 +261,21 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
            {_name, %Authority{}} -> false
            {_name, authority} -> authority in [nil, :host_runtime]
          end)
+
+  # The second half of the audited-local trust rule `ProviderDescriptor` starts.
+  # That module refuses the claim from a custom source; this one refuses it from
+  # any catalog without a host runtime binding, because an unbound catalog is
+  # assembled by its embedder rather than derived from a shipped installation
+  # recipe. Together they mean phase 7 can only ever reach a callback a host
+  # document installed.
+  defp audited_local_bindings_valid?(%{runtime_binding: nil, descriptors: descriptors}),
+    do: Enum.all?(descriptors, fn {_name, descriptor} -> not audited_local?(descriptor) end)
+
+  defp audited_local_bindings_valid?(%{runtime_binding: binding}) when is_binary(binding),
+    do: true
+
+  defp audited_local?(%{local_preflight: :audited_local}), do: true
+  defp audited_local?(_descriptor), do: false
 
   defp valid_implementation?(descriptor, implementation)
        when is_map(implementation) and not is_struct(implementation) do

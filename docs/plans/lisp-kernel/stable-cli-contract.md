@@ -430,7 +430,9 @@ stop after inert declaration work. Default doctor may invoke only the shipped,
 code-owned `:audited_local` callbacks in phase 7; those may inspect decoded
 configuration and loaded adapter/executable availability, but may not resolve a
 credential, start an application/process/port, contact a provider, or perform
-network work. A custom `:unverified` callback is active work: default doctor
+network work. Only a shipped source in a host-bound catalog may declare
+`:audited_local`, and both constructors enforce that rather than trusting the
+declaration. A custom `:unverified` callback is active work: default doctor
 reports that an active check is required, while run and `doctor --connect`
 invoke it only after the phase-8 marker under the session deadline.
 
@@ -1006,23 +1008,27 @@ commits in one Checkpoint C PR:
   authoritative cap at or before the transport receive boundary; and
 - add shipped live-model probes with retries and redirects disabled.
 
-**Open decision before the Checkpoint C PR opens:** nothing stops a `:custom`
-registration from declaring `local_preflight: :audited_local`, so default doctor
-can invoke a callback that is not shipped, code-owned code. The rule above says
-default doctor "may invoke only the shipped, code-owned `:audited_local`
-callbacks" and that a custom callback is `:unverified` active work, but
-`ProviderDescriptor` enforces neither: `shipped_consistent?/1` accepts any
-`:custom` descriptor. A custom audited-local callback receives the runtime
-services and runs unrestricted BEAM code, so it could resolve credentials or
-open a socket during a command that reports `provider_activity: false`.
+**Resolved (audited-local trust):** `:audited_local` is now a declaration
+contract the constructors hold to, not only prose. Nothing but a host-bound
+shipped installation may declare it, so default doctor cannot reach a callback
+that is not shipped, code-owned code. Two rules carry it, and both run at
+construction rather than at execution, because an invalid trust claim must not
+survive sealing and later be reinterpreted as a skipped check:
 
-Hostile same-VM containment stays an explicit non-goal, so this is a
-declaration-contract question rather than a sandbox one: either restrict
-`:audited_local` to shipped sources and require `:unverified` for custom local
-checks, or state that a custom audited-local callback is trusted host-installed
-code and adjust the wording above. Deciding it also decides whether the existing
-custom-source doctor fixtures stay valid. Resolve it before the PR rather than
-shipping a rule the type system does not hold to.
+- `ProviderDescriptor.new/1` refuses `local_preflight: :audited_local` from a
+  `:custom` source. A custom registration declares `:unverified`, whose check is
+  active work after the phase-8 marker; and
+- `InstallationCatalog.new/2` refuses an `:audited_local` descriptor when it has
+  no `runtime_binding`, because an unbound catalog is assembled by its embedder
+  rather than derived from a shipped installation recipe.
+
+`LocalPreflight` keeps a fail-closed guard for a trio that fails either rule,
+and refuses the whole step rather than skipping the untrusted occurrence, which
+would report a local check nothing verified. That guard is defense in depth
+rather than an independently reachable branch: `run/4` revalidates both seals
+first, so a value failing it crossed a constructor that should not have admitted
+it. Hostile same-VM containment stays an explicit non-goal — this bounds what
+may be declared, not what trusted code may do.
 
 **Must complete before the Checkpoint C PR opens:** add a closed phase-7 timeout
 code to `DiagnosticCatalog` and report an exhausted audited-local budget with

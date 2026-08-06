@@ -204,7 +204,11 @@ validation records `active_required`; `validate` reports
 Shipped live-LLM and stdio MCP descriptors declare `audited_local` callbacks.
 Those callbacks use the same model/adapter and executable/launcher checks as
 runtime provider preflight, without resolving credentials or contacting a
-provider. A live-LLM descriptor also supplies a bounded completion probe for
+provider. `audited_local` is a trust declaration and only a host-installed
+shipped source may make it: `ProviderDescriptor` refuses it from a `:custom`
+source, and `InstallationCatalog` refuses it from a catalog without a runtime
+binding. A custom local check declares `unverified` and runs as active work
+after the phase-8 marker. A live-LLM descriptor also supplies a bounded completion probe for
 the active `doctor --connect` path. It resolves the declared credential only
 after local checks, disables adapter and HTTP retries and redirects, forces a
 one-token response ceiling, and makes exactly one request under the sealed
