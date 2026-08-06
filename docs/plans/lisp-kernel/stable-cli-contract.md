@@ -1059,7 +1059,38 @@ commits in one Checkpoint C PR:
   instead of running one;
 - keep `MCPHTTPAdapter` as the single shipped HTTP boundary while adding an
   authoritative cap at or before the transport receive boundary; and
-- add shipped live-model probes with retries and redirects disabled.
+- (complete) add shipped live-model probes with retries and redirects disabled.
+  `HostInstallation` already builds one: it disables adapter and HTTP retries
+  and redirects, forces a one-token ceiling, resolves its credential only after
+  local checks, and runs in a heap- and time-bounded worker. The remaining
+  connect work is orchestration and transport enforcement, not another probe.
+
+**Connect build order (do not vary):** the CLI surface is enabled last, so no
+intermediate commit ships a reachable `doctor --connect` that can perform
+provider work the transport does not yet bound. Internal and unreachable is
+fine; temporarily reachable and unsafe is not.
+
+1. add the internal connectivity operation to `ProviderExecution`, unreachable
+   from the CLI;
+2. implement `:none`, `:probe`, and `:acquisition` behaviour through the
+   existing session, registry, activity marker, operation deadline, and LIFO
+   cleanup stack;
+3. add connect-mode planning to `DoctorPlan`, with frontend dispatch still
+   disabled;
+4. prove and implement the MCP receive-boundary response cap;
+5. only then enable `doctor --connect` in `CommandEngine`; and
+6. integration review, acceptance gates, then the cumulative PR review.
+
+Step 2 carries a constraint the phrase "a probe calls the catalog
+implementation directly" must not be read as weakening. Direct means selecting
+the sealed callback rather than routing it through the registry, which builds
+providers a probe does not need. It does not mean invoking a raw function: a
+probe still runs only with the runtime-service and catalog binding checked, only
+after activity is marked, inside a heap- and time-bounded worker it can be
+cancelled with, under the connectivity deadline intersected with any occurrence
+deadline, and behind the same privacy translation that keeps credentials and
+response material out of every diagnostic. The only thing that differs from
+acquisition is where the callback comes from.
 
 **Resolved (audited-local trust):** `:audited_local` is now a declaration
 contract the constructors hold to, not only prose. Nothing but a host-bound
