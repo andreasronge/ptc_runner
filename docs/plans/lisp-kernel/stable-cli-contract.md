@@ -1047,18 +1047,17 @@ first, so a value failing it crossed a constructor that should not have admitted
 it. Hostile same-VM containment stays an explicit non-goal — this bounds what
 may be declared, not what trusted code may do.
 
-**Must complete before the Checkpoint C PR opens:** add a closed phase-7 timeout
-code to `DiagnosticCatalog` and report an exhausted audited-local budget with
-it. Phase 7 now spends one anchored deadline across every applicable occurrence,
-and the catalog has only `environment_unavailable`, `adapter_unavailable`, and
-`launcher_unavailable`, so an exhausted budget currently reports
-`internal_error`. That is safe and fail-closed but misleading for an expected
-operational outcome — a slow filesystem or adapter load is not an internal
-defect. It is deferred out of the executor commit only because adding a code
-changes the public diagnostic catalog and the generated envelope schema, which
-deserves its own reviewed commit rather than riding inside a refactor.
-`subject_operations/2` and `subject_occurrence_policy/3` already have
-`:local_preflight` catch-alls, so the code change itself is one row.
+**Complete (phase-7 timeout code):** `local_preflight` / `local_check_timeout`
+is catalogued and reports an exhausted audited-local budget, whether the budget
+ran out before an occurrence started or while one was running. Before it, phase
+7 reported `internal_error` for a spent budget: safe and fail-closed, but
+misleading for an expected operational outcome — a slow filesystem or adapter
+load is not an internal defect.
+
+The exhausted budget is deliberately reported outside the internal-reason
+translation table above. A callback that returns `:local_check_timeout` as its
+own reason is an unrecognised result and still fails closed, so a defect cannot
+be passed off as an operational outcome.
 
 **Gate:** default doctor performs no provider activity; connect checks use the
 selected occurrences, the same shared activation prefix as a run, their

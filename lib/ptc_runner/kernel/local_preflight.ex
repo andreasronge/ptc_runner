@@ -66,10 +66,13 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # Destination and selection failures keep their own phases deliberately.
   # Folding them into a local code would report a manifest error as a missing
   # local dependency. Anything else — an unknown reason, an unrecognised result
-  # shape, a raise, or a callback that outruns the remaining budget — fails
-  # closed as an internal error rather than being forced into the nearest local
-  # code. The catalog has no phase-7 timeout code, so an exhausted budget is
-  # reported the same way.
+  # shape, or a raise — fails closed as an internal error rather than being
+  # forced into the nearest local code.
+  #
+  # An exhausted budget is the exception, because it is an expected operational
+  # outcome rather than a defect: a slow filesystem or adapter load reports
+  # `:local_preflight` / `:local_check_timeout`, whether the budget ran out
+  # before an occurrence started or while one was running.
 
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.CommandDiagnostic
@@ -175,9 +178,10 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     }
 
     with {:ok, callback} <- callback(catalog, occurrence.name),
-         {:ok, timeout_ms} <- remaining(deadline) do
+         {:ok, timeout_ms} <- remaining(deadline, occurrence) do
       case invoke(callback, occurrence.config, context, services, timeout_ms) do
         :ok -> :ok
+        :timed_out -> {:error, local_diagnostic(:local_check_timeout, occurrence)}
         {:error, reason} -> {:error, diagnostic(reason, occurrence)}
       end
     end
@@ -191,10 +195,12 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   end
 
   # Every occurrence spends the caller's one anchored budget, so the step is
-  # bounded by that deadline no matter how many occurrences apply.
-  defp remaining(deadline) do
+  # bounded by that deadline no matter how many occurrences apply. An exhausted
+  # budget is the same operational outcome whether it runs out before an
+  # occurrence starts or while one is running, so both report the same code.
+  defp remaining(deadline, occurrence) do
     case Deadline.remaining(deadline) do
-      0 -> {:error, internal_diagnostic()}
+      0 -> {:error, local_diagnostic(:local_check_timeout, occurrence)}
       timeout_ms -> {:ok, timeout_ms}
     end
   end
@@ -207,9 +213,13 @@ defmodule PtcRunner.Kernel.LocalPreflight do
         cancel_with_caller: true
       )
 
+    # The exhausted budget is reported as a bare atom rather than through the
+    # `{:error, reason}` translation, so a callback returning the timeout reason
+    # itself cannot forge the code: an unrecognised result still fails closed.
     case result do
       {:ok, :ok} -> :ok
       {:ok, {:error, reason}} when is_atom(reason) -> {:error, reason}
+      {:error, :timeout} -> :timed_out
       _unrecognised -> {:error, :internal}
     end
   end

@@ -65,6 +65,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "a required provider adapter is unavailable"},
     {:local_preflight, :launcher_unavailable, 4, false,
      "a required provider launcher is unavailable"},
+    {:local_preflight, :local_check_timeout, 4, false, "an audited-local check timed out"},
     {:active_preflight, :provider_application_unavailable, 4, false,
      "a required provider application is unavailable"},
     {:active_preflight, :selection_rejected, 4, false,

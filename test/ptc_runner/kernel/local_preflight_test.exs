@@ -98,23 +98,41 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
 
   test "an exhausted budget stops the step before any callback runs" do
     # Every occurrence spends the caller's one anchored deadline, so a step that
-    # begins with nothing left never reaches a callback.
+    # begins with nothing left never reaches a callback. A spent budget is an
+    # expected operational outcome, not an internal defect.
     catalog = catalog(%{"model" => []})
     prepared = prepared(catalog, ["model"])
     expired = Deadline.new(1, System.monotonic_time(:millisecond) - 10_000)
 
-    assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error}} =
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
              LocalPreflight.run(prepared, catalog, services(), expired)
 
+    assert diagnostic.phase == :local_preflight
+    assert diagnostic.code == :local_check_timeout
+    assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
+    refute diagnostic.provider_activity
     refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
   end
 
-  test "a callback that outruns the remaining budget fails closed" do
+  test "a callback that outruns the remaining budget reports the same timeout" do
     catalog = catalog(%{"model" => [failing: :block]})
     prepared = prepared(catalog, ["model"])
 
-    assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error}} =
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
              LocalPreflight.run(prepared, catalog, services(), Deadline.new(200))
+
+    assert diagnostic.phase == :local_preflight
+    assert diagnostic.code == :local_check_timeout
+    assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
+    refute diagnostic.provider_activity
+  end
+
+  test "a callback cannot report the timeout code itself" do
+    # The step reports an exhausted budget outside the reason translation, so a
+    # callback claiming that reason is an unrecognised result and fails closed
+    # rather than passing off a defect as an expected operational outcome.
+    assert %CommandDiagnostic{phase: :internal, code: :internal_error} =
+             refuse(:local_check_timeout)
   end
 
   test "a preparation and catalog that do not belong together are refused" do

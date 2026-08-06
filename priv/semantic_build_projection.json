@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "d338e69cbb98c1f651b82b34b94ad3851624c9bc7d6d3dcf48c27d81d1536527",
+  "source_closure_hash": "9c29de7b5a1b7ce93411cf174576b9f6af54a89f152bf802b8c1042ad9dcf200",
   "sources": [
     {
       "bytes": 870,
@@ -260,6 +260,11 @@
       "bytes": 17179,
       "path": "lib/ptc_runner/kernel/dispatcher.ex",
       "sha256": "755aa22d949754e510f7e4b567b68ea072784a1645ec369f6089374cb8aeae70"
+    },
+    {
+      "bytes": 1493,
+      "path": "lib/ptc_runner/kernel/doctor_environment.ex",
+      "sha256": "1b9b24860c8f206074faedb2b98ec0de8e8d07619915fd802200ed5efc63d5f5"
     },
     {
       "bytes": 9790,
@@ -437,9 +442,9 @@
       "sha256": "0c5aa66c084d3c4bfab77976b8aee02fd97c0850b85c83206e2620f2cf00f312"
     },
     {
-      "bytes": 10558,
+      "bytes": 11294,
       "path": "lib/ptc_runner/kernel/local_preflight.ex",
-      "sha256": "65ef19b6e7ee9c969f309cb1461e414b3ec91f386a4c396a9e98c0a06bc1e5d3"
+      "sha256": "063cfbbccf687321a3372b170aa202880e4a566a059cdf50db811b44ad9e69aa"
     },
     {
       "bytes": 5154,
@@ -637,9 +642,9 @@
       "sha256": "02ff9e58838861347d0ef49572ce2c54bda1ad65d0e5e99f2ec1e2a5ae25dd27"
     },
     {
-      "bytes": 19339,
+      "bytes": 19979,
       "path": "lib/ptc_runner/kernel/prepared_run.ex",
-      "sha256": "bb0fcefa410bbf2202a85aacea3d54bb9b330bd357ad6655253554df0316f8c0"
+      "sha256": "07e7681a91a23d852864ae79c25002a92cec44aacc7c22a6b344cb7ccb7506d5"
     },
     {
       "bytes": 3709,
@@ -702,9 +707,9 @@
       "sha256": "798cc0516ef8c18f54aff21bbb1cbd914c89fab948316640608d9103ccc31646"
     },
     {
-      "bytes": 24873,
+      "bytes": 25007,
       "path": "lib/ptc_runner/kernel/provider_execution.ex",
-      "sha256": "cef6f4056a939266bcd918840a8c42d565db302693cf0dcb018d7fdbdb5d67e6"
+      "sha256": "6199f317262ce223f9e81ec89e4749153f2fb1f537bee008b90a911516ed4a7f"
     },
     {
       "bytes": 6850,
@@ -782,9 +787,9 @@
       "sha256": "abccceabb73cec6b5b71804049984daba65fad089391b86cd49188eb82c6b27c"
     },
     {
-      "bytes": 16295,
+      "bytes": 18158,
       "path": "lib/ptc_runner/kernel/run_coordinator.ex",
-      "sha256": "d5a464c3d94965ec38fc4c80fccbc1ba7d8da55058186fe5d754740b0795e023"
+      "sha256": "eae41bf7446e84f9598e006ff242a6e1a5c540da025e023173fd8aa5116d5721"
     },
     {
       "bytes": 3105,
