@@ -1030,17 +1030,28 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def execute_built(_built), do: {:error, :invalid_execution_outcome}
 
   # Completes an assembled build as a check rather than an execution: it reports
-  # the safe connector snapshots the acquisition produced and stops the sinks.
-  # It never evaluates the entry, finalizes a terminal event batch, or
-  # publishes an artifact, so nothing belonging only to execution can reach a
-  # destination through this path.
+  # the safe connector snapshots the acquisition produced, closes the provider
+  # session, and stops the sinks. It never evaluates the entry, finalizes a
+  # terminal event batch, or publishes an artifact, so nothing belonging only to
+  # execution can reach a destination through this path.
+  #
+  # Closing the session here is what keeps a check on the run's cleanup
+  # ordering: a run closes its session inside `PtcRunner.Kernel` while the
+  # registry and the OAuth runtime that produced its resources are still alive.
+  # Leaving it to the execution owner would unwind that runtime first and run
+  # connector closers against a store and managers that are already gone.
   @doc false
   @spec check_built(map()) :: {:ok, [map()]} | {:error, term()}
   def check_built(%{config: %RunConfig{} = config, publication_authority: authority}) do
     if PublicationAuthority.valid?(authority) do
       snapshots = config.connector_snapshots
+      cleanup = RunConfig.close_provider_session(config)
       stop_execution_sinks(config)
-      {:ok, snapshots}
+
+      case cleanup do
+        :ok -> {:ok, snapshots}
+        {:error, :provider_cleanup_failed} = error -> error
+      end
     else
       reject_execution(config)
     end

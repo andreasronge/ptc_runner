@@ -311,6 +311,63 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert_receive {:provider_phase, :acquire}, 5_000
   end
 
+  test "a check closes its provider session inside the runtime that acquired it" do
+    # A run closes its session while the registry and the OAuth runtime that
+    # produced its resources are still alive. A check that left the close to the
+    # execution owner would unwind that runtime first and run connector closers
+    # against a store and managers that are already gone.
+    parent = self()
+
+    fixture =
+      provider_fixture(
+        acquire: fn context ->
+          scoped_root(parent, context)
+          {:ok, capability} = fixture_capability()
+
+          {:ok,
+           %{
+             capabilities: [capability],
+             snapshot: nil,
+             close: fn ->
+               send(parent, :provider_closed)
+               :ok
+             end
+           }}
+        end
+      )
+
+    caller =
+      spawn(fn ->
+        receive do: (:go -> :ok)
+
+        {:ok, owner} =
+          ExecutionSessionOwner.start(
+            fixture.prepared,
+            fixture.authority,
+            self(),
+            fixture.execution,
+            &never_notify/1,
+            :check
+          )
+
+        send(parent, {:execution_result, ExecutionSessionOwner.await(owner)})
+      end)
+
+    # Tracing the caller before it starts anything makes the owner and its
+    # worker inherit the flag, so the order below is the order the run actually
+    # closed in rather than a snapshot taken after the fact.
+    trace_closes(caller, [:call, :set_on_spawn])
+
+    try do
+      send(caller, :go)
+      assert_receive {:execution_result, {:ok, _snapshots}}, 5_000
+      assert [ProviderSession, ProviderRegistry] == [next_close(), next_close()]
+      assert_received :provider_closed
+    after
+      stop_trace_closes(caller)
+    end
+  end
+
   test "an execution from another catalog leaves the prepared run reusable" do
     fixture = provider_fixture()
     other = provider_fixture(installation_revision: "other-v1")
@@ -428,11 +485,11 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     end)
   end
 
-  defp trace_closes(owner_pid) do
+  defp trace_closes(owner_pid, flags \\ [:call]) do
     Enum.each([ProviderRegistry, ProviderSession], &Code.ensure_loaded!/1)
     assert :erlang.trace_pattern({ProviderRegistry, :close, 1}, true, [:local]) == 1
     assert :erlang.trace_pattern({ProviderSession, :close, 1}, true, [:local]) == 1
-    assert :erlang.trace(owner_pid, true, [:call]) == 1
+    assert :erlang.trace(owner_pid, true, flags) == 1
   end
 
   defp next_close do

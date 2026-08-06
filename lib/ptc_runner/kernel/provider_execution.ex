@@ -299,7 +299,16 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   end
 
   defp complete_operation(built, :run), do: RunBuilder.execute_built(built)
-  defp complete_operation(built, :check), do: RunBuilder.check_built(built)
+
+  # A check closes its own provider session inside this runtime, exactly where a
+  # run closes its own, so its cleanup failure is classified here rather than
+  # reaching the owner as a bare reason after the session is already gone.
+  defp complete_operation(built, :check) do
+    case RunBuilder.check_built(built) do
+      {:error, :provider_cleanup_failed} -> {:error, cleanup_diagnostic()}
+      result -> result
+    end
+  end
 
   defp with_runtime_registry(
          execution,
