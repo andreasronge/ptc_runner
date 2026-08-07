@@ -8,6 +8,99 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
   alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Kernel.ResourceRegistrar
 
+  test "a wedged session cannot outrun the operation deadline" do
+    # `:sys.suspend/1` wedges the session deterministically, with no timing
+    # margin: the call cannot be served at all until it is resumed. Before this
+    # slice `open_registrar/1` waited a fixed five seconds and activate, commit,
+    # and abort waited `:infinity`, so a short operation budget bought nothing.
+    {:ok, limits} = Limits.installed(%{run_duration_ms: 200})
+    {:ok, session} = ProviderSession.start_active(limits, "wedged-operation")
+    on_exit(fn -> Process.exit(session.pid, :kill) end)
+    {:ok, session} = ProviderSession.begin_operation(session, :run)
+
+    assert :ok = :sys.suspend(session.pid)
+
+    started_at_ms = System.monotonic_time(:millisecond)
+    assert {:error, :provider_session_unavailable} = ProviderSession.open_registrar(session)
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at_ms
+
+    assert Deadline.expired?(ProviderSession.run_deadline(session))
+
+    # The error alone proves nothing — a fixed timeout returns the same value,
+    # just later. The bound is the claim, so the elapsed time is the assertion.
+    # 200ms of budget against the 5s this used to wait leaves no ambiguity.
+    assert elapsed_ms < 1_000
+
+    assert :ok = :sys.resume(session.pid)
+  end
+
+  test "a scope refused after its deadline leaves nothing behind" do
+    # The caller gave up, so the reply is worthless — but the handler would
+    # still have created a controller, a root owner, and a reaper, and put the
+    # scope in `scope_order` where only session close would ever reap it. Both
+    # sides fence on the same absolute instant instead.
+    {:ok, limits} = Limits.installed(%{run_duration_ms: 200})
+    {:ok, session} = ProviderSession.start_active(limits, "fenced-operation")
+    on_exit(fn -> ProviderSession.close(session) end)
+    {:ok, session} = ProviderSession.begin_operation(session, :run)
+
+    assert :ok = :sys.suspend(session.pid)
+    assert {:error, :provider_session_unavailable} = ProviderSession.open_registrar(session)
+    assert :ok = :sys.resume(session.pid)
+
+    # The request is still queued and is served now, after the deadline. It must
+    # not become a scope nothing holds a handle to.
+    assert %{scopes: scopes, scope_order: order} = :sys.get_state(session.pid)
+    assert scopes == %{}
+    assert order == []
+  end
+
+  test "an abort spends its own cleanup budget, not the operation's" do
+    # Abort commonly begins because the operation deadline expired. Spending
+    # that deadline would hand cleanup a zero remainder and skip cooperative
+    # release, so each abort episode anchors one fresh cleanup budget.
+    {:ok, limits} = Limits.installed(%{run_duration_ms: 200, provider_cleanup_timeout_ms: 5_000})
+    {:ok, session} = ProviderSession.start_active(limits, "abort-budget")
+    on_exit(fn -> ProviderSession.close(session) end)
+    {:ok, session} = ProviderSession.begin_operation(session, :run)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    burn_until(Deadline.expires_at(ProviderSession.run_deadline(session)) + 5)
+    assert Deadline.expired?(ProviderSession.run_deadline(session))
+
+    # The operation budget is gone and the abort still settles cooperatively.
+    assert :ok = ResourceRegistrar.abort(registrar)
+    assert %{scopes: %{}, scope_order: []} = :sys.get_state(session.pid)
+  end
+
+  test "a commit refused after its deadline leaves the closer with its caller" do
+    # A commit that landed after its caller gave up would be owned twice: the
+    # session would close it, and the caller's unregistered-closer recovery
+    # would run it as well. The session refuses ownership past the same instant
+    # the caller stops waiting, so the closer stays with exactly one owner.
+    {:ok, closed} = Agent.start_link(fn -> 0 end)
+    {:ok, limits} = Limits.installed(%{run_duration_ms: 200})
+    {:ok, session} = ProviderSession.start_active(limits, "commit-fence")
+    on_exit(fn -> ProviderSession.close(session) end)
+    {:ok, session} = ProviderSession.begin_operation(session, :run)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    burn_until(Deadline.expires_at(ProviderSession.run_deadline(session)) + 5)
+
+    close = fn -> Agent.update(closed, &(&1 + 1)) && :ok end
+    assert {:error, :resource_registrar_unavailable} = ResourceRegistrar.commit(registrar, close)
+
+    # The session took no ownership, so closing it runs nothing...
+    assert :ok = ProviderSession.close(session)
+    assert Agent.get(closed, & &1) == 0
+
+    # ...and the caller still holds the only copy.
+    assert :ok = close.()
+    assert Agent.get(closed, & &1) == 1
+  end
+
   test "committed scopes close once in reverse commit order" do
     {:ok, order} = Agent.start_link(fn -> [] end)
     {:ok, session} = ProviderSession.start(limits())
@@ -1030,6 +1123,12 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
   end
 
   defp limits, do: Limits.defaults()
+
+  # The subject here is a deadline, so the fixture consumes real time without a
+  # timer the suite forbids.
+  defp burn_until(target_ms) do
+    if System.monotonic_time(:millisecond) < target_ms, do: burn_until(target_ms), else: :ok
+  end
 
   defp task_tracker(run_state) do
     {:ok, tracker} = ProviderTaskTracker.start(run_state)

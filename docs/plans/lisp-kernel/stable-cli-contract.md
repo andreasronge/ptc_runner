@@ -1093,18 +1093,37 @@ commits in one Checkpoint C PR:
   `local_check_timeout` losing wording that named only the audited step. No pair
   is added or removed.
 
-  **Residual (registrar scope is not deadline-bounded):** every scope in the
-  runtime is opened with `ProviderSession.open_registrar/1`, whose call timeout
-  is a fixed five seconds, and activated, committed, and aborted through
-  `registrar_call/3`, which waits `:infinity`. Under a short
-  `doctor_connectivity_timeout_ms` a slow or stalled session can therefore
-  overrun the operation budget during setup, or hang, rather than returning the
-  timeout the operation promises. This is a property of the shared primitive
-  rather than of any one caller — `ProviderAcquisition`, active selection
-  validation, and the unverified check all use it identically — so closing it
-  means bounding open and activation by the operation deadline and abort by the
-  cleanup budget inside `ProviderSession`, which changes the run path. It is
-  therefore its own reviewed slice rather than a fix at one call site.
+  **Closed (registrar scope lifecycle bounds):** scopes were opened with a fixed
+  five-second call timeout and activated, committed, and aborted with
+  `:infinity`, so a stalled session could overrun a short operation budget or
+  hang, and one abort minted a fresh full cleanup budget per scope inside the
+  handler. The runtime now has three deadline classes and each registrar action
+  belongs to exactly one:
+
+  - the **operation deadline** bounds useful work — open, activate, and the
+    commit attempt — and the registrar carries the deadline it was opened
+    under, so a handle cannot be replayed against a longer one;
+  - a **per-scope abort deadline**, one freshly anchored
+    `provider_cleanup_timeout_ms` per abort episode, anchored by the caller
+    where the episode begins and shared by every action inside it. N
+    independent aborts may spend N budgets. That is deliberate: anchoring the
+    terminal deadline here would let one early rejected scope exhaust the
+    session's eventual shutdown, and spending the operation deadline would hand
+    cleanup a zero remainder exactly when abort is most often triggered by that
+    deadline expiring. If aggregate abort latency ever proves excessive, the
+    answer is a separate command-wide provisional-cleanup ceiling as a
+    deliberate contract change, not overloading either neighbour; and
+  - the **terminal cleanup deadline**, anchored once when the session enters its
+    final episode and shared across the whole LIFO stack, is untouched.
+
+  Late execution is fenced rather than raced. `open` and `commit` carry the same
+  absolute instant the caller stops waiting on, and the handler refuses to
+  mutate past it, so a reply nobody is waiting for cannot leave a scope with no
+  handle or a closer with two owners. When a commit cannot be confirmed before
+  expiry the caller keeps the closer and runs the existing unregistered-closer
+  recovery under cleanup authority, which leaves exactly one owner. Regressions
+  wedge the session with `:sys.suspend/1` and read `:sys.get_state/1`, so the
+  fences are proved by suspension and state rather than by timing margins.
 
   **Ordering (decided, first answer wrong):** active selection validation runs
   first and the unverified check follows. The first attempt reversed them on the

@@ -436,7 +436,13 @@ defmodule PtcRunner.Kernel.ProviderSession do
           {:ok, ResourceRegistrar.t()} | {:error, :provider_session_unavailable}
   def open_registrar(%__MODULE__{} = session) do
     if valid?(session) and session.creator == self() do
-      case call(session.pid, {session.token, :open_registrar}, 5_000) do
+      deadline = session.run_deadline
+
+      case call(
+             session.pid,
+             {session.token, {:open_registrar, deadline}},
+             operation_call_timeout(deadline, 5_000)
+           ) do
         {:ok, scope, scope_controller, root_owner, cleanup_owner} ->
           {:ok,
            ResourceRegistrar.new(
@@ -445,7 +451,9 @@ defmodule PtcRunner.Kernel.ProviderSession do
              scope,
              scope_controller,
              root_owner,
-             cleanup_owner
+             cleanup_owner,
+             deadline,
+             session.cleanup_timeout_ms
            )}
 
         _failure ->
@@ -580,25 +588,51 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def bind_lifecycle(_session, _owner, _run_state, _tracker),
     do: {:error, :provider_session_unavailable}
 
+  # Activation and commit are useful work and spend the operation's budget. The
+  # registrar carries the deadline it was opened under, so a handle cannot be
+  # replayed against a longer one.
   @doc false
-  def activate_registrar(%ResourceRegistrar{} = registrar),
-    do: registrar_call(registrar, :activate, {:error, :resource_registrar_unavailable})
+  def activate_registrar(%ResourceRegistrar{} = registrar) do
+    deadline = ResourceRegistrar.operation_deadline(registrar)
+
+    registrar_call(
+      registrar,
+      {:activate, deadline},
+      operation_call_timeout(deadline, :infinity),
+      {:error, :resource_registrar_unavailable}
+    )
+  end
 
   @doc false
   def commit_registrar(%ResourceRegistrar{} = registrar, close)
-      when is_function(close, 0) or is_nil(close),
-      do:
-        registrar_call(
-          registrar,
-          {:commit, close},
-          {:error, :resource_registrar_unavailable}
-        )
+      when is_function(close, 0) or is_nil(close) do
+    deadline = ResourceRegistrar.operation_deadline(registrar)
+
+    registrar_call(
+      registrar,
+      {:commit, close, deadline},
+      operation_call_timeout(deadline, :infinity),
+      {:error, :resource_registrar_unavailable}
+    )
+  end
 
   def commit_registrar(_registrar, _close), do: {:error, :resource_registrar_unavailable}
 
+  # One freshly anchored cleanup budget per abort episode, anchored here where
+  # the episode begins so the session cannot hand back a cutoff measured from
+  # its own dequeue. It is neither the operation deadline nor the session's
+  # terminal one: see `abort_scope/3`.
   @doc false
-  def abort_registrar(%ResourceRegistrar{} = registrar),
-    do: registrar_call(registrar, :abort, {:error, :provider_cleanup_failed})
+  def abort_registrar(%ResourceRegistrar{} = registrar) do
+    deadline = Deadline.new(ResourceRegistrar.cleanup_timeout_ms(registrar))
+
+    registrar_call(
+      registrar,
+      {:abort, deadline},
+      Deadline.remaining(deadline) + @claim_reply_grace_ms,
+      {:error, :provider_cleanup_failed}
+    )
+  end
 
   @doc false
   def register_root(%ResourceRegistrar{} = registrar),
@@ -735,72 +769,47 @@ defmodule PtcRunner.Kernel.ProviderSession do
   end
 
   @impl true
-  def handle_call({token, :open_registrar}, {executor, _tag}, state)
+  def handle_call({token, {:open_registrar, deadline}}, {executor, _tag}, state)
       when token == state.token and executor == state.executor do
     scope = make_ref()
 
-    case ProviderScopeOwner.start(self(), state.cleanup_timeout_ms) do
-      {:ok, {scope_controller, root_owner, scope_reaper}} ->
-        entry = %{
-          phase: :inactive,
-          close: nil,
-          roots_registered?: false,
-          scope_controller: scope_controller,
-          root_owner: root_owner,
-          scope_reaper: scope_reaper
-        }
-
-        {:reply, {:ok, scope, scope_controller, root_owner, scope_reaper},
-         %{
-           state
-           | scopes: Map.put(state.scopes, scope, entry),
-             scope_order: [scope | state.scope_order]
-         }}
-
-      {:error, :provider_scope_unavailable} ->
-        {:reply, {:error, :provider_session_unavailable}, state}
+    # A reply the caller already stopped waiting for must not leave a scope
+    # behind that nothing holds a handle to. Both sides fence on the same
+    # absolute instant, so a scope is created only while its opener can still
+    # receive it.
+    if operation_expired?(deadline) do
+      {:reply, {:error, :provider_session_unavailable}, state}
+    else
+      open_scope(scope, state)
     end
   end
 
-  def handle_call({token, {:registrar, scope, :activate}}, _from, state)
+  def handle_call({token, {:registrar, scope, {:activate, deadline}}}, _from, state)
       when token == state.token do
-    case Map.fetch(state.scopes, scope) do
-      {:ok, %{phase: :inactive, scope_controller: scope_controller} = entry}
-      when is_pid(scope_controller) ->
-        if Process.alive?(scope_controller) do
-          {:reply, :ok, put_in(state.scopes[scope], %{entry | phase: :active})}
-        else
-          {:reply, {:error, :resource_registrar_unavailable}, state}
-        end
-
-      _missing_or_closed ->
-        {:reply, {:error, :resource_registrar_unavailable}, state}
+    if operation_expired?(deadline) do
+      {:reply, {:error, :resource_registrar_unavailable}, state}
+    else
+      activate_scope(scope, state)
     end
   end
 
-  def handle_call({token, {:registrar, scope, {:commit, close}}}, _from, state)
+  # A commit that lands after its caller gave up would leave the closer owned
+  # twice, so the session refuses to take ownership past the same absolute
+  # instant the caller stops waiting on. Past it the caller keeps the closer and
+  # runs the unregistered-closer recovery under cleanup authority.
+  def handle_call({token, {:registrar, scope, {:commit, close, deadline}}}, _from, state)
       when token == state.token do
-    case Map.fetch(state.scopes, scope) do
-      {:ok, %{phase: :active, scope_controller: scope_controller} = entry}
-      when (is_function(close, 0) or is_nil(close)) and is_pid(scope_controller) ->
-        if Process.alive?(scope_controller) do
-          entry = %{entry | phase: :committed, close: close}
-
-          {:reply, :ok,
-           %{put_in(state.scopes[scope], entry) | committed: [scope | state.committed]}}
-        else
-          {:reply, {:error, :resource_registrar_unavailable}, state}
-        end
-
-      _missing_or_closed ->
-        {:reply, {:error, :resource_registrar_unavailable}, state}
+    if operation_expired?(deadline) do
+      {:reply, {:error, :resource_registrar_unavailable}, state}
+    else
+      commit_scope(scope, close, state)
     end
   end
 
-  def handle_call({token, {:registrar, scope, :abort}}, _from, state)
+  def handle_call({token, {:registrar, scope, {:abort, deadline}}}, _from, state)
       when token == state.token do
     state = reject_pending_registrations(state, scope)
-    {result, state} = abort_scope(scope, state)
+    {result, state} = abort_scope(scope, deadline, state)
     {:reply, result, state}
   end
 
@@ -1061,13 +1070,76 @@ defmodule PtcRunner.Kernel.ProviderSession do
     state
   end
 
+  defp open_scope(scope, state) do
+    case ProviderScopeOwner.start(self(), state.cleanup_timeout_ms) do
+      {:ok, {scope_controller, root_owner, scope_reaper}} ->
+        entry = %{
+          phase: :inactive,
+          close: nil,
+          roots_registered?: false,
+          scope_controller: scope_controller,
+          root_owner: root_owner,
+          scope_reaper: scope_reaper
+        }
+
+        {:reply, {:ok, scope, scope_controller, root_owner, scope_reaper},
+         %{
+           state
+           | scopes: Map.put(state.scopes, scope, entry),
+             scope_order: [scope | state.scope_order]
+         }}
+
+      {:error, :provider_scope_unavailable} ->
+        {:reply, {:error, :provider_session_unavailable}, state}
+    end
+  end
+
+  defp activate_scope(scope, state) do
+    case Map.fetch(state.scopes, scope) do
+      {:ok, %{phase: :inactive, scope_controller: scope_controller} = entry}
+      when is_pid(scope_controller) ->
+        if Process.alive?(scope_controller) do
+          {:reply, :ok, put_in(state.scopes[scope], %{entry | phase: :active})}
+        else
+          {:reply, {:error, :resource_registrar_unavailable}, state}
+        end
+
+      _missing_or_closed ->
+        {:reply, {:error, :resource_registrar_unavailable}, state}
+    end
+  end
+
+  defp commit_scope(scope, close, state) do
+    case Map.fetch(state.scopes, scope) do
+      {:ok, %{phase: :active, scope_controller: scope_controller} = entry}
+      when (is_function(close, 0) or is_nil(close)) and is_pid(scope_controller) ->
+        if Process.alive?(scope_controller) do
+          entry = %{entry | phase: :committed, close: close}
+
+          {:reply, :ok,
+           %{put_in(state.scopes[scope], entry) | committed: [scope | state.committed]}}
+        else
+          {:reply, {:error, :resource_registrar_unavailable}, state}
+        end
+
+      _missing_or_closed ->
+        {:reply, {:error, :resource_registrar_unavailable}, state}
+    end
+  end
+
   # Aborting one scope is ordinary mid-run failure handling, not the terminal
-  # episode, so it bounds itself rather than spending the terminal deadline the
-  # session has not anchored yet.
-  defp abort_scope(scope, state) do
+  # episode, so it spends neither the operation deadline nor the terminal
+  # cleanup deadline. It gets one freshly anchored cleanup budget per abort
+  # episode, anchored by the caller where the episode began, and every action
+  # inside that episode shares it. N independent aborts may therefore spend N
+  # budgets: that is deliberate, because anchoring the terminal deadline here
+  # would let one early rejected scope exhaust the session's eventual shutdown,
+  # and spending the operation deadline would hand cleanup a zero remainder
+  # exactly when abort is most often triggered by that deadline expiring.
+  defp abort_scope(scope, deadline, state) do
     case Map.fetch(state.scopes, scope) do
       {:ok, %{phase: phase} = entry} when phase in [:inactive, :active] ->
-        cleanup = close_roots(entry, Deadline.new(state.cleanup_timeout_ms))
+        cleanup = close_roots(entry, deadline)
 
         {:ok, remove_scope(scope, state)}
         |> merge_abort_cleanup(cleanup)
@@ -1318,18 +1390,29 @@ defmodule PtcRunner.Kernel.ProviderSession do
   defp normalize_registration_result(_failure),
     do: {:error, :resource_registrar_unavailable}
 
-  defp registrar_call(registrar, operation, fallback) do
+  defp registrar_call(registrar, operation, timeout, fallback) do
     if ResourceRegistrar.valid?(registrar) do
       call(
         registrar.session,
         {registrar.token, {:registrar, registrar.scope, operation}},
-        :infinity,
+        timeout,
         fallback
       )
     else
       fallback
     end
   end
+
+  # Useful work spends the operation's own budget. A session with no operation
+  # deadline is a direct embedding, which keeps the synchronous semantics it has
+  # always had rather than gaining a duration invented here.
+  defp operation_call_timeout(nil, default), do: default
+
+  defp operation_call_timeout(deadline, _default),
+    do: Deadline.remaining(deadline) + @claim_reply_grace_ms
+
+  defp operation_expired?(nil), do: false
+  defp operation_expired?(deadline), do: Deadline.expired?(deadline)
 
   defp call(pid, request, timeout, fallback \\ {:error, :provider_session_unavailable}) do
     GenServer.call(pid, request, timeout)

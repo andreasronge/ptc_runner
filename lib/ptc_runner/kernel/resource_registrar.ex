@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
   """
 
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.ProviderSession
 
   @enforce_keys [
@@ -20,6 +21,8 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
     :scope_controller,
     :root_owner,
     :cleanup_owner,
+    :operation_deadline,
+    :cleanup_timeout_ms,
     :attestation
   ]
   defstruct @enforce_keys
@@ -32,14 +35,35 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
             scope_controller: pid(),
             root_owner: pid(),
             cleanup_owner: pid(),
+            operation_deadline: Deadline.t() | nil,
+            cleanup_timeout_ms: pos_integer(),
             attestation: binary()
           }
 
   @doc false
-  @spec new(pid(), reference(), reference(), pid(), pid(), pid()) :: t()
-  def new(session, token, scope, scope_controller, root_owner, cleanup_owner)
+  @spec new(
+          pid(),
+          reference(),
+          reference(),
+          pid(),
+          pid(),
+          pid(),
+          Deadline.t() | nil,
+          pos_integer()
+        ) :: t()
+  def new(
+        session,
+        token,
+        scope,
+        scope_controller,
+        root_owner,
+        cleanup_owner,
+        operation_deadline,
+        cleanup_timeout_ms
+      )
       when is_pid(session) and is_reference(token) and is_reference(scope) and
-             is_pid(scope_controller) and is_pid(root_owner) and is_pid(cleanup_owner) do
+             is_pid(scope_controller) and is_pid(root_owner) and is_pid(cleanup_owner) and
+             is_integer(cleanup_timeout_ms) and cleanup_timeout_ms > 0 do
     registrar = %__MODULE__{
       session: session,
       token: token,
@@ -47,6 +71,8 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
       scope_controller: scope_controller,
       root_owner: root_owner,
       cleanup_owner: cleanup_owner,
+      operation_deadline: operation_deadline,
+      cleanup_timeout_ms: cleanup_timeout_ms,
       attestation: <<>>
     }
 
@@ -61,6 +87,8 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
         is_pid(registrar.scope_controller) and
         is_pid(registrar.root_owner) and
         is_pid(registrar.cleanup_owner) and
+        (is_nil(registrar.operation_deadline) or Deadline.valid?(registrar.operation_deadline)) and
+        is_integer(registrar.cleanup_timeout_ms) and registrar.cleanup_timeout_ms > 0 and
         Attestation.valid?(__MODULE__, payload(registrar), registrar.attestation)
 
   def valid?(_registrar), do: false
@@ -113,8 +141,20 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
   def abort(%__MODULE__{} = registrar), do: ProviderSession.abort_registrar(registrar)
   def abort(_registrar), do: {:error, :provider_cleanup_failed}
 
+  # The two budgets are sealed with the handle: a registrar that could be
+  # rebound to a longer deadline, or to a cleanup budget its session never
+  # installed, would let a caller widen the bounds its own scope spends.
   defp payload(registrar),
     do:
       {registrar.session, registrar.token, registrar.scope, registrar.scope_controller,
-       registrar.root_owner, registrar.cleanup_owner}
+       registrar.root_owner, registrar.cleanup_owner, registrar.operation_deadline,
+       registrar.cleanup_timeout_ms}
+
+  @doc false
+  @spec operation_deadline(t()) :: Deadline.t() | nil
+  def operation_deadline(%__MODULE__{} = registrar), do: registrar.operation_deadline
+
+  @doc false
+  @spec cleanup_timeout_ms(t()) :: pos_integer()
+  def cleanup_timeout_ms(%__MODULE__{} = registrar), do: registrar.cleanup_timeout_ms
 end
