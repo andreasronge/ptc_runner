@@ -1215,6 +1215,45 @@ deadline, and behind the same privacy translation that keeps credentials and
 response material out of every diagnostic. The only thing that differs from
 acquisition is where the callback comes from.
 
+**Resolved (which active rows connect settles):** review called active selection
+validation for a `:none` occurrence a defect. It is not one, and the closed
+result contract decides it rather than the reviewer or the implementation.
+`CommandContract` admits a connect success only when *every* provider row is
+`pass`, and those rows come from three independent sealed declarations: `local`
+exists for every visible alias and is governed by `local_preflight`; `selection`
+exists once an application named the occurrence and is governed by
+`selection_validation`; and `credentials`, `authorization`, and `connectivity`
+exist only when `credential_names`, `authorization_mode`, and
+`connectivity_mode` respectively say they apply.
+
+`connectivity_mode: :none` therefore removes exactly one row — the connectivity
+row, which `DoctorPlan` omits rather than skips — and says nothing about the
+occurrence's other rows. A `:none` occurrence that also declares
+`selection_validation: :active` still renders a selection row that only a real
+validator run can move off `active_check_required`, so filtering validators by
+connectivity mode would leave a row unsettled, make the connect outcome invalid,
+and do it by building the second, weaker pipeline the acquisition subset was
+rejected for. The declaration is sealed independently too: `validation_state` is
+derived from `selection_validation` alone in phase 5 and never consults the
+connectivity mode.
+
+The rule is that a mode governs only its own row, and `doctor --connect` settles
+every active row the sealed declarations produce:
+
+- every `selection_validation: :active` validator, which run, `--check`, and
+  connect already share through
+  `ProviderActiveSession.begin_owned_operation/4` — connect needs no selection
+  path of its own, and giving it one is the defect to avoid;
+- every `local_preflight: :audited_local` check in phase 7, and every
+  `local_preflight: :unverified` check after the phase-8 marker;
+- credential resolution for every occurrence declaring credentials; and
+- the connectivity work of each `:probe` and `:acquisition` occurrence.
+
+An `authorization_mode: :oauth` occurrence has no settling path in V1: its row
+demands `pass/available` while standalone OAuth execution is disabled, so connect
+fails with `active_preflight/authorization_required` exactly as the OAuth section
+specifies. That is the contract holding, not a gap to close here.
+
 **Resolved (audited-local trust):** `:audited_local` is now a declaration
 contract the constructors hold to, not only prose. Nothing but a host-bound
 shipped installation may declare it, so default doctor cannot reach a callback
