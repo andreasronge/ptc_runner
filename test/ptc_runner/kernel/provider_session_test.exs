@@ -74,6 +74,37 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert %{scopes: %{}, scope_order: []} = :sys.get_state(stale.pid)
   end
 
+  test "an active session hands out no scope before its operation starts" do
+    # Between `start_active/2` and `begin_operation/2` the session has an
+    # identity but no anchored budget. Sealing that would have the server itself
+    # mint the unbounded handle the sealed-budget rule exists to prevent, so the
+    # scope is refused until the operation it belongs to has started.
+    {:ok, limits} = Limits.installed(%{run_duration_ms: 2_000})
+    {:ok, session} = ProviderSession.start_active(limits, "pre-begin")
+    on_exit(fn -> ProviderSession.close(session) end)
+
+    assert ProviderSession.run_deadline(session) == nil
+    assert {:error, :provider_session_unavailable} = ProviderSession.open_registrar(session)
+    assert %{scopes: %{}, scope_order: []} = :sys.get_state(session.pid)
+
+    # Once the operation is anchored the same session opens scopes normally.
+    {:ok, begun} = ProviderSession.begin_operation(session, :run)
+    assert {:ok, _registrar} = ProviderSession.open_registrar(begun)
+  end
+
+  test "an embedding session without an operation still opens scopes" do
+    # A session with no identity at all is a direct embedding, which keeps the
+    # synchronous semantics it has always had. The refusal above must not catch
+    # it, or every embedded acquisition breaks.
+    {:ok, session} = ProviderSession.start(limits())
+    on_exit(fn -> ProviderSession.close(session) end)
+
+    assert ProviderSession.run_deadline(session) == nil
+    assert {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    assert :ok = ResourceRegistrar.abort(registrar)
+  end
+
   test "a stale handle cannot mint a registrar with no budget" do
     # The fence being server-authoritative is not enough on its own. During a
     # live operation the pre-begin handle passes that fence, so if the budget
@@ -96,7 +127,10 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert :ok = :sys.suspend(stale.pid)
     started_at_ms = System.monotonic_time(:millisecond)
     assert {:error, :resource_registrar_unavailable} = ResourceRegistrar.activate(registrar)
-    assert System.monotonic_time(:millisecond) - started_at_ms < 3_000
+    # Wide on purpose. The bound only has to separate "spends the 2s budget"
+    # from "waits forever", and the unsealed-budget mutation never returns at
+    # all, so a tight margin buys nothing and flakes under load.
+    assert System.monotonic_time(:millisecond) - started_at_ms < 10_000
   end
 
   test "an invalid registrar handle is refused rather than raising" do
@@ -131,6 +165,10 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     # Abort commonly begins because the operation deadline expired. Spending
     # that deadline would hand cleanup a zero remainder and skip cooperative
     # release, so each abort episode anchors one fresh cleanup budget.
+    #
+    # This guards the invariant rather than evidencing a change: the session
+    # already anchored a fresh budget per abort before the deadline classes
+    # existed, so it passes at the base commit too.
     {:ok, limits} = Limits.installed(%{run_duration_ms: 200, provider_cleanup_timeout_ms: 5_000})
     {:ok, session} = ProviderSession.start_active(limits, "abort-budget")
     on_exit(fn -> ProviderSession.close(session) end)

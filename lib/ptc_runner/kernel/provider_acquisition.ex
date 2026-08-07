@@ -743,7 +743,10 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   defp preserve_expired_acquisition(provider, {:ok, built}, diagnostic) do
     case ResourceRegistrar.commit(provider.registrar, built.close) do
       :ok -> {:error, diagnostic}
-      {:error, :provider_cleanup_failed} -> {:error, diagnostic}
+      # The cleanup failure is the newer fact and outranks the expiry that
+      # preceded it, matching what `handle_acquisition/3` does with the same
+      # answer. Reporting the expiry here would lose the unreleased resource.
+      {:error, :provider_cleanup_failed} -> {:error, unreleased_diagnostic()}
       {:error, _reason} -> {:unregistered_provider_close, diagnostic, built.close}
     end
   end

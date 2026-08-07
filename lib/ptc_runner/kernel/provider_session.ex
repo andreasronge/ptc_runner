@@ -47,6 +47,39 @@ defmodule PtcRunner.Kernel.ProviderSession do
   Failures never stop later cleanup attempts. This is a process-local ownership
   boundary, not a durable resource journal or a security boundary against
   trusted code in the same VM.
+
+  ## Scope lifecycle budgets
+
+  Three deadline classes cover a scope, and each registrar action belongs to
+  exactly one. The operation deadline bounds useful work — opening, activating,
+  and attempting to commit a scope. A per-scope abort deadline, one freshly
+  anchored `provider_cleanup_timeout_ms` per abort episode, bounds tearing one
+  provisional scope down while the session stays usable; N independent aborts
+  may spend N budgets, because anchoring the terminal deadline at a mid-run
+  abort would let one early rejected scope exhaust the session's eventual
+  shutdown, and spending the operation deadline would hand cleanup a zero
+  remainder exactly when abort is most often triggered by that deadline
+  expiring. The terminal episode above is the third.
+
+  The session's own anchored deadline decides, never a caller's copy of it, and
+  the budget sealed into a `ResourceRegistrar` is returned by the session rather
+  than supplied: `begin_operation/2` returns a new sealed handle while the
+  pre-begin one stays valid carrying no deadline, so either could otherwise mint
+  a legitimately attested handle that waits forever. For the same reason an
+  active session refuses to open a scope until its operation has started; a
+  session with no operation identity is a direct embedding and keeps its
+  synchronous semantics.
+
+  Commit is the only ownership-transfer edge and the only call that may not
+  abandon its reply. Every branch of the commit handler replies, and the branch
+  that takes ownership replies in the same return, so a reply exists exactly
+  when the session owns the closer; signals arrive in send order, so a reply
+  that was ever sent precedes any `:DOWN` from that session. A commit therefore
+  keeps its request alive across timeouts — the operation budget, then one
+  freshly anchored cleanup budget — and a session silent through both is wedged
+  and is killed, after which a single zero-timeout look at the reply assigns the
+  owner. Timeouts decide only when to escalate; ownership is always assigned by
+  a reply or a `:DOWN`, never by elapsed time.
   """
 
   use GenServer
@@ -880,10 +913,21 @@ defmodule PtcRunner.Kernel.ProviderSession do
     # operation had expired.
     deadline = state.run_deadline
 
-    if operation_expired?(deadline) do
-      {:reply, {:error, :provider_session_unavailable}, state}
-    else
-      open_scope(scope, deadline, state)
+    cond do
+      # An active session between `start_active` and `begin_operation` has an
+      # identity but no anchored budget yet. Sealing that `nil` would have the
+      # server itself mint the unbounded handle the sealed-budget rule exists to
+      # prevent, so the scope is refused until the operation it belongs to has
+      # started. A session with no identity at all is a direct embedding, which
+      # keeps its documented synchronous semantics.
+      is_binary(state.operation_identity) and is_nil(deadline) ->
+        {:reply, {:error, :provider_session_unavailable}, state}
+
+      operation_expired?(deadline) ->
+        {:reply, {:error, :provider_session_unavailable}, state}
+
+      true ->
+        open_scope(scope, deadline, state)
     end
   end
 
@@ -912,7 +956,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def handle_call({token, {:registrar, scope, {:abort, deadline}}}, _from, state)
       when token == state.token do
     state = reject_pending_registrations(state, scope)
-    {result, state} = abort_scope(scope, deadline, state)
+    {result, state} = abort_scope(scope, abort_budget(deadline, state), state)
     {:reply, result, state}
   end
 
@@ -1253,6 +1297,18 @@ defmodule PtcRunner.Kernel.ProviderSession do
   # would let one early rejected scope exhaust the session's eventual shutdown,
   # and spending the operation deadline would hand cleanup a zero remainder
   # exactly when abort is most often triggered by that deadline expiring.
+  # The abort budget is anchored by the caller, which is right — the episode
+  # begins there — but the session still spends it, so it bounds its own spend
+  # rather than trusting the term it was handed. A malformed one would otherwise
+  # crash the session mid-command instead of aborting one scope.
+  defp abort_budget(deadline, state) do
+    installed = Deadline.new(state.cleanup_timeout_ms)
+
+    if Deadline.valid?(deadline),
+      do: Deadline.earliest(deadline, installed),
+      else: installed
+  end
+
   defp abort_scope(scope, deadline, state) do
     case Map.fetch(state.scopes, scope) do
       {:ok, %{phase: phase} = entry} when phase in [:inactive, :active] ->
