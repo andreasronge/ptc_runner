@@ -282,19 +282,54 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
   end
 
-  test "every unverified outcome reports provider activity" do
-    # The mirror of the phase-7 assertion above. Same conditions and same codes;
-    # activity is the one rendered field that must differ, because it is a fact
-    # about the marker rather than about the check.
-    assert refuse_unverified(:invalid_llm_model).provider_activity
-    assert refuse_unverified(:provider_destination_denied).provider_activity
-    assert refuse_unverified(:something_new).provider_activity
+  test "every unverified outcome reports its own phase and code, with activity" do
+    # Asserting activity alone would pass on `internal_error`, which also
+    # reports activity here — so each case pins the phase and code it must not
+    # collapse into.
+    for {reason, phase, code} <- [
+          {:invalid_llm_model, :local_preflight, :adapter_unavailable},
+          {:invalid_mcp_executable, :local_preflight, :environment_unavailable},
+          {:mcp_stdio_launcher_unavailable, :local_preflight, :launcher_unavailable},
+          {:provider_destination_denied, :active_preflight, :selection_rejected},
+          {:invalid_mcp_selection, :active_preflight, :selection_rejected}
+        ] do
+      diagnostic = refuse_unverified(reason)
+
+      assert diagnostic.phase == phase, "#{reason} reported #{diagnostic.phase}"
+      assert diagnostic.code == code, "#{reason} reported #{diagnostic.code}"
+      assert diagnostic.provider_activity
+      assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
+    end
+
+    # An unknown reason still fails closed, and that outcome also carries
+    # activity — which is exactly why the cases above pin their codes.
+    assert %CommandDiagnostic{phase: :internal, code: :internal_error} =
+             refuse_unverified(:something_new)
+  end
+
+  test "a declaration reason keeps its own phase before the marker and not after" do
+    # Phase 7 refuses to fold a manifest error into a local code. Past the
+    # marker that phase is unreachable rather than unattractive: it is
+    # pre-classification and pinned to no activity, so a run could not render
+    # it. The occurrence and subject operation survive the change of phase.
+    before = refuse(:provider_destination_denied)
+    assert before.phase == :provider_declaration
+    assert before.code == :placement_denied
+    refute before.provider_activity
+
+    refute CommandContract.unclassified_diagnostic_phase?(:local_preflight)
+    assert CommandContract.unclassified_diagnostic_phase?(:provider_declaration)
+
+    after_marker = refuse_unverified(:provider_destination_denied)
+    assert after_marker.phase == :active_preflight
+    assert after_marker.subject.operation == before.subject.operation
+    assert after_marker.subject.occurrence == before.subject.occurrence
   end
 
   test "the local-preflight codes are admitted wherever a local check can run" do
-    # Run and check render through the same unclassified run mode — `run --check`
-    # is not a separate command surface — and both doctor modes reach a local
-    # check of one kind or another. `validate` and `models` open no session and
+    # A run admits every catalogued pair and renders a post-marker failure
+    # through the classified branch, which is why `local_preflight` must not be
+    # a pre-classification phase. `validate` and `models` open no session and
     # invoke no callback, so admitting these codes there would let them report a
     # check they cannot run.
     for code <- [
@@ -303,12 +338,12 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
           :launcher_unavailable,
           :local_check_timeout
         ] do
-      for mode <- [:run_unclassified, :doctor, {:doctor, :connect}] do
+      for mode <- [:run, :doctor, {:doctor, :connect}] do
         assert CommandContract.diagnostic_allowed?(mode, :local_preflight, code),
                "#{inspect(mode)} must admit local_preflight/#{code}"
       end
 
-      for mode <- [:validate, :models] do
+      for mode <- [:validate, :models, :run_unclassified] do
         refute CommandContract.diagnostic_allowed?(mode, :local_preflight, code),
                "#{inspect(mode)} must not admit local_preflight/#{code}"
       end

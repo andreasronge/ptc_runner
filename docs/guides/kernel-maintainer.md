@@ -202,7 +202,7 @@ validation records `active_required`; `validate` reports
 `provider_declaration/selection_unverifiable` without running it.
 
 `RunCoordinator.local_checks/3` is the only entry to phase 7 and the only place
-a `local_preflight` callback runs. Every command crosses it before provider
+an `audited_local` callback runs. Every command crosses it before provider
 activity is marked: run, `--check`, and the REPL from `ProviderExecution`
 immediately before the session opens, and default doctor directly, because it
 opens no session. Applicability is derived from the sealed
@@ -212,6 +212,19 @@ and the result is only `:ok` or one catalogued diagnostic. There is no
 per-occurrence report, because the closed result contract has no failing
 provider row: a failed check fails the whole command, and doctor settles its
 audited-local rows only after the step as a whole succeeded.
+
+`unverified` callbacks are the other half and never run there.
+`LocalPreflight.run_unverified/4` is their only entry, reached from the shared
+operation prefix after the phase-8 marker and bounded by the operation deadline
+rather than by `local_preflight_timeout_ms`. Run, `--check`, and
+`doctor --connect` all cross it; default doctor does not, and reports
+`active_check_required` instead. The two steps derive applicability separately,
+so neither can reach the other's declarations, and they share the reason
+translation with one deliberate difference: after the marker,
+`provider_declaration` is unreachable — it is a pre-classification phase pinned
+to `provider_activity: false` — so a declaration-class reason reports
+`active_preflight/selection_rejected`, keeping its `:selection` subject and
+occurrence.
 
 Shipped live-LLM and stdio MCP descriptors declare `audited_local` callbacks.
 Those callbacks use the same model/adapter and executable/launcher checks as

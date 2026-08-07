@@ -321,8 +321,23 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   defp local_diagnostic(code, occurrence, activity),
     do: subject_diagnostic(:local_preflight, code, :local, occurrence, activity)
 
-  defp declaration_diagnostic(code, occurrence, activity),
-    do: subject_diagnostic(:provider_declaration, code, :selection, occurrence, activity)
+  # Before the marker a declaration-class reason is a manifest error and keeps
+  # its own phase, which is why phase 7 does not fold these into a local code.
+  #
+  # After the marker that phase is unreachable rather than merely unattractive:
+  # `provider_declaration` is a pre-classification phase pinned to
+  # `provider_activity: false`, so a post-marker run could not render it at all.
+  # What an unverified callback reports there is a provider refusing its own
+  # selection, which is exactly `active_preflight/selection_rejected` — the code
+  # active selection validation already uses for that, carrying the same
+  # `:selection` subject and occurrence. The placement/selection distinction is
+  # a phase-7 refinement and is deliberately not carried across the marker,
+  # because past it the command has stopped checking declarations.
+  defp declaration_diagnostic(code, occurrence, false),
+    do: subject_diagnostic(:provider_declaration, code, :selection, occurrence, false)
+
+  defp declaration_diagnostic(_code, occurrence, true),
+    do: subject_diagnostic(:active_preflight, :selection_rejected, :selection, occurrence, true)
 
   # Activity is a fact about the marker rather than about the check, so it is
   # supplied by the step that knows which side of the marker it runs on. The

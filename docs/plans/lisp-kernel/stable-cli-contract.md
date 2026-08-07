@@ -1061,14 +1061,24 @@ commits in one Checkpoint C PR:
   Two questions were settled before writing it, because both changed what gets
   built rather than how.
 
-  **The phase a post-marker failure reports (decided):** the run mode gains the
-  existing `local_preflight` codes. `CommandContract` admitted them for `doctor`
-  and `doctor --connect` only, so a `:unverified` failure during a run had no
-  admissible code at all. Reporting it under `active_preflight` instead would
-  have avoided widening anything, but `:local` exists only as a
-  `local_preflight` subject operation, so the failure would have lost the
-  operation name its own doctor row uses. One condition keeps one code whoever
-  asks, and the widening is additive.
+  **The phase a post-marker failure reports (settled, first answer wrong):** the
+  local codes keep their phase and the run mode needed no widening at all. The
+  question was posed as "run cannot report these codes", from reading
+  `diagnostic_pair_allowed?/3` alone; `diagnostic_rows(:run)` returns every
+  catalogued row, and `local_preflight` is a classified phase, so a post-marker
+  failure already renders through the classified branch. Adding the codes to
+  `:run_unclassified` — the answer that reading implied — admits an envelope
+  that cannot exist, because that branch pins `provider_activity` to false and
+  reports execution as not started. It was added and then reverted under review.
+
+  What is real is the constraint underneath: `provider_declaration` *is*
+  pre-classification and pinned to no activity, so a post-marker declaration
+  reason cannot render for a run whatever the activity policy says. Those
+  reasons therefore report `active_preflight/selection_rejected` past the
+  marker, keeping their `:selection` subject and occurrence, while phase 7 keeps
+  the declaration phase that stops a manifest error being read as a missing
+  local dependency. The placement/selection distinction is a phase-7 refinement
+  and is deliberately not carried across the marker.
 
   **Activity (decided):** `LocalPreflight` builds its diagnostics without
   `provider_activity`, which is correct in phase 7 and wrong after the marker,
@@ -1078,8 +1088,10 @@ commits in one Checkpoint C PR:
   not be constructed at all — it raised, and the step's own rescue turned the
   real outcome into `internal_error`. `local_preflight` is now the one phase
   that spans the marker and pins neither value, because the flag is what carries
-  which side of the marker a check ran on. The envelope schema change is
-  additive: four pairs gain a boolean `provider_activity`, and none is removed.
+  which side of the marker a check ran on. The whole envelope-schema delta is
+  those four rows relaxing `provider_activity` from `false` to a boolean, plus
+  `local_check_timeout` losing wording that named only the audited step. No pair
+  is added or removed.
 
   Ordering against active selection validation is deliberately free — a local
   check contacts nothing, so running it first is the cheaper order, not a
