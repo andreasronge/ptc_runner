@@ -256,7 +256,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "21.0.11+10"
+          java-version: "21.0.11+10.0.LTS"
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
@@ -316,7 +316,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "21.0.11+10"
+          java-version: "21.0.11+10.0.LTS"
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
