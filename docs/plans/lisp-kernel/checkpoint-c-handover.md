@@ -1,8 +1,11 @@
 # Handover: Checkpoint C, `doctor --connect`
 
 Branch: `codex/stable-cli-checkpoint-c-doctor`
-Head: `e1ad00f6` — pushed, tree clean, 52 commits over `origin/main`, rebased
-onto `origin/main` (`0b3273c5`) on 2026-08-07 and currently 0 behind
+Head: the tip of this branch — pushed, tree clean, rebased onto `origin/main`
+(`0b3273c5`) on 2026-08-07 and 0 behind it. The last code commit is
+`e1ad00f6`; anything after it is plan documentation. Confirm with
+`git log --oneline -3` rather than trusting a SHA written here — a handover
+that names its own head is stale the moment it is committed.
 Gates: `mix precommit` green (5741 root, 72 viewer, 36 launcher); docs gate
 green; `mix dialyzer` and `MIX_ENV=test mix dialyzer` both at 0 errors
 PR: not opened
@@ -89,12 +92,16 @@ above. `ResourceRegistrar.commit/2`'s spec omitted
 returns, so three ownership branches and `unreleased_diagnostic/0` read as dead
 code to the type checker. The twelve opacity violations were closed by
 completing the `@doc false` accessor set the module had already started, not by
-dropping `@opaque` — no module outside `ProviderSession` reads a registrar
-field, so the fence still earns its keep for the ~10 that hold a `t()`. One cold
-Fable review; its two P2s produced that approach and corrected the moduledoc's
-half-false claim that callers cannot *construct* a handle (they can — `new/8`
-attests whatever it is given; what contains a minted handle is the session's
-server-side authority).
+dropping `@opaque` — no *compiled* module outside `ProviderSession` reads a
+registrar field, so the fence still earns its keep for the ~10 that hold a
+`t()`. Two cold
+Fable reviews: the first rejected an earlier draft that dropped `@opaque`
+outright and caught a half-false claim that callers cannot *construct* a handle
+(they can — `new/8` attests whatever it is given; what contains a minted handle
+is the session's server-side authority). The second reviewed the replacement
+cold and was clean, having checked each of the eleven rewritten call sites for a
+`token`/`scope` swap — both are `reference()`, so neither the compiler nor
+Dialyzer would catch one.
 
 ## Remaining, in order
 
@@ -164,6 +171,20 @@ All are in `stable-cli-contract.md` with reasoning:
   holds; kept as the correct answer to a future regression).
 - `test "an abort spends its own cleanup budget"` passes at the slice base — it
   guards the invariant but is not evidence for the slice. Labelled as such.
+- `ResourceRegistrar.commit/2` and `activate/1` can each return
+  `{:error, :provider_session_unavailable}` — the session's fallback
+  `handle_call` reply, passed through verbatim — which neither spec admits.
+  Reachable only out of contract, because it needs a handle whose token does not
+  match the session's, and `new/8` minting such a handle is exactly the forgery
+  the `ResourceRegistrar` moduledoc now says is possible. Dialyzer cannot see it
+  (a `gen_server` reply is `term()`), and every production caller has an
+  `{:error, _}` fallback. Same class as the spec bug `e1ad00f6` fixed, so it is
+  named here rather than left to be rediscovered.
+- `e1ad00f6`'s message says "no module outside `ProviderSession` reads a
+  registrar field". True of compiled code only: four `.exs` test files read
+  fields, including `scope_controller` and `root_owner`, which the accessor set
+  deliberately does not cover. Scripts are not compiled, so the Dialyzer fence
+  holds and the decision stands, but the sentence overstates.
 - The phase-8 credential union bounds the *selection*, not the occurrence. On
   the ordinary `acquire/6` run path a preparation can still report a credential
   another selected provider declared and be handed it; `acquire_targets/7` and
