@@ -361,6 +361,52 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert_received {:allocated, words} when words > 200_000
   end
 
+  test "a session from another preparation cannot supply the scope or the clock" do
+    # The session is a fourth thing that must belong to this operation. One
+    # opened for a different preparation would otherwise hand over the deadline
+    # the callback spends and the scope its resources are owned by.
+    catalog = catalog(%{"custom" => [source: :custom, local_preflight: :unverified]})
+    prepared = prepared(catalog, ["custom"])
+    foreign = prepared(catalog, ["custom"])
+
+    assert :ok = ProviderActivity.mark(prepared.provider_activity)
+    assert :ok = ProviderActivity.mark(foreign.provider_activity)
+    assert prepared.attestation != foreign.attestation
+
+    assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error}} =
+             LocalPreflight.run_unverified(prepared, catalog, services(), session(foreign))
+
+    refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
+
+    # The same preparation is fine with its own session, so the refusal is about
+    # the binding rather than the preparation.
+    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
+    assert_received {:audited_local, _step, "custom", :workflow, %{}, true}
+  end
+
+  test "a callback does not start once scope setup has spent the budget" do
+    # Opening and activating the scope is a call into the session and spends
+    # real time, so the budget is measured after it. A deadline that expires
+    # during setup must stop the callback starting, not merely change how its
+    # result is reported afterwards.
+    catalog = catalog(%{"custom" => [source: :custom, local_preflight: :unverified]})
+    prepared = prepared(catalog, ["custom"], [], %{"run_duration_ms" => 1})
+    assert :ok = ProviderActivity.mark(prepared.provider_activity)
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             LocalPreflight.run_unverified(
+               prepared,
+               catalog,
+               services(),
+               expired_session(prepared)
+             )
+
+    assert diagnostic.phase == :local_preflight
+    assert diagnostic.code == :local_check_timeout
+    assert diagnostic.provider_activity
+    refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
+  end
+
   test "a declaration reason keeps its own phase before the marker and not after" do
     # Phase 7 refuses to fold a manifest error into a local code. Past the
     # marker that phase is unreachable rather than unattractive: it is
@@ -428,6 +474,21 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
   end
 
   defp deadline, do: Deadline.new(@deadline_ms)
+
+  # A session whose operation clock is already spent. The step must refuse to
+  # start a callback under it rather than report the timeout after the fact.
+  defp expired_session(prepared) do
+    limits = prepared.request.package.limits
+    {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
+    on_exit(fn -> ProviderSession.close(session) end)
+    {:ok, session} = ProviderSession.begin_operation(session, :run)
+    burn_until(Deadline.expires_at(ProviderSession.run_deadline(session)) + 5)
+    session
+  end
+
+  defp burn_until(target_ms) do
+    if System.monotonic_time(:millisecond) < target_ms, do: burn_until(target_ms), else: :ok
+  end
 
   # A root registers itself from inside the callback's scope, which is the
   # protocol a real adapter follows, so aborting that scope is what must end it.
@@ -610,9 +671,10 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
       |> shape(:shipped)
       |> Keyword.merge(source: :custom, connectivity_mode: :none, probe_effect: nil)
 
-  defp prepared(catalog, workflow, mission \\ []) do
+  defp prepared(catalog, workflow, mission \\ [], limits \\ %{}) do
     manifest = %{
       "version" => 1,
+      "limits" => limits,
       "workflow" => %{
         "components" => [%{"id" => "app", "path" => "main.clj"}],
         "entry" => "app/run"

@@ -192,6 +192,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     deadline = ProviderSession.run_deadline(session)
 
     with true <- bound?(prepared, catalog, services, :active),
+         true <- owns_operation?(session, prepared),
          true <- Deadline.valid?(deadline) do
       catalog
       |> applicable(prepared, :unverified)
@@ -238,6 +239,18 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   defp lifecycle_valid?(prepared, :inactive), do: PreparedRun.inactive_valid?(prepared)
   defp lifecycle_valid?(prepared, :active), do: PreparedRun.active_valid?(prepared)
 
+  # The session is a fourth thing that must belong to the same operation, on the
+  # same terms as the trio. A valid session opened for another preparation, or
+  # one built by hand with wider limits, would otherwise supply the deadline the
+  # callback spends and the scope its resources are owned by — so the check
+  # would run outside the sealed budget and lifecycle of the run it answers for.
+  # The caller checks this too; the step does not depend on that, because a
+  # boundary that revalidates its trio has no reason to trust its session.
+  defp owns_operation?(session, prepared) do
+    ProviderSession.bound_to_operation?(session, prepared.attestation) and
+      ProviderSession.compatible_limits?(session, prepared.request.package.limits)
+  end
+
   defp applicable(catalog, prepared, mode) do
     Enum.filter(prepared.provider_declarations, fn declaration ->
       match?(%{local_preflight: ^mode}, catalog.descriptors[declaration.name])
@@ -273,17 +286,29 @@ defmodule PtcRunner.Kernel.LocalPreflight do
 
   defp check(occurrence, prepared, catalog, services, deadline, step) do
     with {:ok, callback} <- callback(catalog, occurrence.name, step.activity),
-         {:ok, timeout_ms} <- remaining(deadline, occurrence, step.activity),
          {:ok, result} <-
            scoped(step, prepared, occurrence, fn context ->
-             invoke(
-               callback,
-               occurrence.config,
-               context,
-               services,
-               timeout_ms,
-               step.max_heap_words
-             )
+             # The budget is measured after the scope is open, not before.
+             # Opening and activating a registrar is a call into the session and
+             # spends real time, so a timeout computed first can outlive the
+             # deadline that backed it and let a callback start work the
+             # operation is no longer entitled to. Confirming afterwards, as
+             # `settled/3` does, changes only the reported result — it cannot
+             # undo what the callback already did.
+             case Deadline.remaining(deadline) do
+               0 ->
+                 :timed_out
+
+               timeout_ms ->
+                 invoke(
+                   callback,
+                   occurrence.config,
+                   context,
+                   services,
+                   timeout_ms,
+                   step.max_heap_words
+                 )
+             end
            end) do
       case result do
         :ok -> settled(deadline, occurrence, step.activity)
@@ -349,17 +374,6 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     case Map.fetch(catalog.implementations, name) do
       {:ok, %{local_preflight: callback}} when is_function(callback, 3) -> {:ok, callback}
       _missing -> {:error, internal_diagnostic(activity)}
-    end
-  end
-
-  # Every occurrence spends the caller's one anchored budget, so the step is
-  # bounded by that deadline no matter how many occurrences apply. An exhausted
-  # budget is the same operational outcome whether it runs out before an
-  # occurrence starts or while one is running, so both report the same code.
-  defp remaining(deadline, occurrence, activity) do
-    case Deadline.remaining(deadline) do
-      0 -> {:error, local_diagnostic(:local_check_timeout, occurrence, activity)}
-      timeout_ms -> {:ok, timeout_ms}
     end
   end
 

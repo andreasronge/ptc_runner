@@ -419,8 +419,11 @@ The catalog also owns the phase/code-specific source kinds, provider-subject
 operations, operation-specific occurrence policy, and activity policy used by
 both constructors and the generated schema. Provider diagnostics cannot carry
 document provenance and non-provider diagnostics cannot carry provider
-subjects. Activity is fixed false through local preflight and fixed true for
-active preflight and provider acquisition. Provider execution and provider
+subjects. Activity is fixed false through the phases that precede the marker,
+fixed true for active preflight and provider acquisition, and a plain boolean
+for local preflight alone, because that phase spans the marker: the
+audited-local step reports false and the post-marker `unverified` step reports
+true. Provider execution and provider
 cleanup codes also require true, while other later codes admit the marker's
 actual monotonic value. Occurrence indices use the manifest's closed `0..31`
 bound in both the typed subject constructor and the generated envelope schema.
