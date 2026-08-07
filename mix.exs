@@ -36,13 +36,35 @@ defmodule PtcRunner.MixProject do
         ]
       ],
       dialyzer: [
-        plt_core_path: "priv/plts",
+        plt_core_path: dialyzer_plt_core_path(),
         plt_file: {:no_warn, "priv/plts/project.plt"},
         plt_add_apps: [:ex_unit, :mix, :req, :req_llm, :llm_db, :recon],
         ignore_warnings: ".dialyzer_ignore.exs",
         list_unused_filters: true
       ]
     ]
+  end
+
+  # The core PLT (Erlang/Elixir/OTP plus `plt_add_apps`) is identical across
+  # every worktree of this repo: mise.toml pins the same Elixir/OTP build,
+  # and worktree branches share one mix.lock unless a branch deliberately
+  # changes deps. Keeping it worktree-local means the first Dialyzer run in
+  # every fresh worktree rebuilds it from scratch. Outside CI, share one
+  # copy under the user's cache directory instead. `plt_file` (this
+  # project's own module signatures) stays worktree-local: unlike the core
+  # PLT, it legitimately differs between branches with diverging code, and
+  # concurrent worktree sessions writing the same project PLT would race.
+  #
+  # CI keeps the repo-local "priv/plts" path because `setup-elixir`
+  # restores/saves it via `actions/cache`, keyed by OS/arch/OTP/Elixir/
+  # mix.lock — an external-cache scheme that expects a path inside the
+  # checkout, not the user cache directory of an ephemeral runner.
+  defp dialyzer_plt_core_path do
+    if System.get_env("CI") do
+      "priv/plts"
+    else
+      Path.expand("~/.cache/ptc_runner/dialyzer_plts")
+    end
   end
 
   # Run "mix help compile.app" to learn about applications.

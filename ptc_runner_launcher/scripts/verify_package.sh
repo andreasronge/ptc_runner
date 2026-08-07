@@ -21,8 +21,26 @@ if [ -f "$checksum_path" ]; then
   cp "$checksum_path" "$checksum_backup"
 fi
 
-CC_PRECOMPILER_PRECOMPILE_ONLY_LOCAL=true \
-  ELIXIR_MAKE_CACHE_DIR="$package_tmp_dir/cache" \
+# CI's mcp-stdio-launcher matrix already builds every listed target natively,
+# one per runner (ubuntu-22.04, ubuntu-24.04-arm, macos-15, macos-15-intel).
+# Locally, precompiling every target on every run just doubles native-compile
+# time for coverage CI already has; restrict to the host target outside CI.
+# An unrecognized host falls through to the full multi-target build.
+precompile_target=""
+if [ -z "${CI:-}" ]; then
+  case "$(uname -s):$(uname -m)" in
+    Darwin:arm64) precompile_target="aarch64-apple-darwin" ;;
+    Darwin:x86_64) precompile_target="x86_64-apple-darwin" ;;
+    Linux:aarch64 | Linux:arm64) precompile_target="aarch64-linux-gnu" ;;
+    Linux:x86_64) precompile_target="x86_64-linux-gnu" ;;
+  esac
+fi
+
+if [ -n "$precompile_target" ]; then
+  export PTC_RUNNER_LAUNCHER_PRECOMPILE_TARGET="$precompile_target"
+fi
+
+ELIXIR_MAKE_CACHE_DIR="$package_tmp_dir/cache" \
   MIX_ENV=prod \
   mix elixir_make.precompile
 
