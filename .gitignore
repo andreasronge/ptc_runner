@@ -65,3 +65,6 @@ repo-analyst/private/
 
 # Personal Claude Code overrides
 .claude/settings.local.json
+
+# ExDNA clone-detection parse cache (large, machine-local)
+.ex_dna_cache

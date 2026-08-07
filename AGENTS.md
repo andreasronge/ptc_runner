@@ -25,6 +25,11 @@ When independent Codex review is required, follow the focused
 [coding-agent review workflow](docs/guides/coding-agent-review-workflow.md); do
 not cold-review byte-identical trees more than once.
 
+Do not copy a helper into a second module to avoid an import. `mix precommit`
+fails on duplication that is not already in `.duplication-baseline.json`;
+extract the shared logic, or suppress it with a reason when the repetition is
+deliberate. See the [duplication gate](docs/guides/duplication-gate.md).
+
 Code documentation must not link to `docs/plans/`; plans are disposable. Move
 durable contracts into module docs, guides, or retained specifications first.
 
