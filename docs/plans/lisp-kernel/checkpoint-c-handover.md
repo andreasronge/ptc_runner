@@ -12,21 +12,21 @@ git log --oneline origin/main..HEAD -- lib/ | head -1  # last commit carrying co
 
 A handover that names its own head is stale the moment it is committed, and this
 one was already wrong twice from trying.
-Gates: `mix precommit` green (5765 root, 72 viewer, 36 launcher); docs gate
+Gates: `mix precommit` green (5774 root, 72 viewer, 36 launcher); docs gate
 green; `mix dialyzer` and `MIX_ENV=test mix dialyzer` both at 0 errors
 PR: not opened
-CLI safety: `doctor --connect` is still unreachable from `CommandEngine`, which
-is correct — see the ordering constraint below.
+CLI safety: `doctor --connect` is still unreachable from `CommandEngine`.
+Slice #4 has landed, so enabling it is now the next step rather than a
+violation — see "Remaining" below.
 
 The authoritative plan is `docs/plans/lisp-kernel/stable-cli-contract.md`. This
 file is disposable and only describes where the work stands.
 
 ## Start here
 
-1. Read the MCP receive-cap requirement at the end of the slice-7 section in
-   `stable-cli-contract.md`, and "Connect build order" steps 4–6. That is the
+1. Read "Connect build order" steps 5–6 in `stable-cli-contract.md`. That is the
    contract; this file only says how far along it is. The connect-settlement
-   gaps above them are all closed.
+   gaps and the receive cap above them are all closed.
 2. Read "Settled decisions" at the bottom of this file before designing
    anything. Two of the three were re-derived the hard way by someone who had
    not read them.
@@ -208,19 +208,58 @@ rather than an inline authority. The second found a false uniqueness claim in a
 test comment about which shipped sources admit an audited-local declaration
 without connectivity. Neither round's finding was reachable from any gate.
 
+**MCP transport receive cap** (slice #4). Socket-buffer configuration turned out
+to be authoritative, so neither Mint's passive receive loop nor a native helper
+was needed and `MCPHTTPAdapter` is still the only HTTP boundary. The full proof
+is in `stable-cli-contract.md` at the end of the slice-7 section; the two facts
+worth carrying are that `Mint.Core.Util.inet_opts/2` *raises* `buffer` to
+`max(buffer, sndbuf, recbuf)` on every `initiate/5` — which is why passing it
+through `:transport_opts` had no effect and the bound looked unreachable — and
+that applying it after an active-mode connect is too late, because the socket is
+already armed under the old buffer.
+
+Measuring it turned up a second, larger hole that the slice also closes: Mint
+buffers *unparsed* input with no ceiling, so a peer that never completes a
+status line, a chunk-size line, or a chunk extension emits no Mint response, no
+declared limit ever runs, and 64 MiB from the peer became 80–134 MiB resident.
+The adapter now counts raw socket payloads before parsing them, and **resets the
+count whenever Mint returns a response**. The reset is load-bearing, not an
+optimisation: the first draft used a cumulative wire ceiling, and a cold review
+demonstrated it would refuse a legitimate 2 MiB SSE response sent as 100-byte
+events, because chunked framing scales with the chunk count rather than with one
+message. The reasoning is in the plan; do not "simplify" it back to a running
+total.
+
+Nine mutations were checked and all fail. One property is not pinned by a test
+— that `mode: :passive` closes the arm-before-cap window — because it cannot be
+forced deterministically. It is covered instead by a canary on the two Mint
+behaviours the ordering depends on, which is what will fail on a Mint bump. That
+same review showed the window is materially wider over TLS than over TCP, so the
+ceiling is applied before the caller-supplied peer verifier rather than after.
+
+Three cold rounds, two Fable and one codex. The first rejected the cumulative
+wire ceiling described above. The second found the pending ceiling short by one
+TLS record — enough to refuse a single legitimate https message — and, twice
+over, prose asserting a peak memory bound the code does not provide. The third
+(codex, base-guarded to the slice) found the post-handshake TLS window as a
+[P1]: with a 30 ms deschedule between Mint's connect and the ceiling being
+reapplied, `ssl` delivers a whole 409600-byte operating-system buffer under a
+16 KiB ceiling, 10/10. Round two had seen the same phenomenon and rated it [P2]
+after failing to reproduce it on the real sequence; codex was right that it is
+reachable. It cannot be prevented — both candidate fixes were measured and fail
+— so the receive loop now enforces the per-message bound rather than trusting
+the socket option. A fourth round, codex again and cold against the same slice
+base, was clean. All three finding rounds found things no gate did.
+The residual it recorded rather than closed: total bytes *read* is unbounded,
+because bare `1xx` responses reset the counter and advance no ceiling. That is
+bandwidth, not memory, and the deadline ends it; closing it means the cumulative
+ceiling the first round rejected.
+
 ## Remaining, in order
 
-1. **#4 MCP transport receive cap.** The plan says *prove* the bound first: the
-   current active-mode Mint loop applies cumulative limits only after a socket
-   message has already reached the command process. Either an authoritative
-   per-message maximum via socket-buffer configuration, or Mint passive receive
-   with an explicit byte cap. `MCPHTTPAdapter` stays the single shipped HTTP
-   boundary. **Nothing enables the CLI before this lands.** Nothing learned in
-   the slices above transfers to it — it is a different subsystem and a natural
-   place to start with a fresh context.
-
-2. **#5 enable `doctor --connect` in `CommandEngine`**, then integration review,
-   gates, cumulative `origin/main` review, PR.
+1. **#5 enable `doctor --connect` in `CommandEngine`**, then integration review,
+   gates, cumulative `origin/main` review, PR. #4 has landed, so the safety
+   reason the CLI stayed off is discharged.
 
    The shape #5 has to write is already pinned by
    `test "a completed connect operation settles every row the contract demands"`
@@ -233,9 +272,7 @@ without connectivity. Neither round's finding was reachable from any gate.
 
 ## Distance to a PR
 
-One slice (#4) plus the CLI enable. #4 is the large one and needs a proof before
-an implementation. Do not shorten the order: #4 gates #5 for a real safety
-reason, which is why the CLI has stayed off this long.
+The CLI enable, then the gates and the cumulative review. #4 is done.
 
 ## Review discipline that has been working
 
@@ -252,6 +289,11 @@ reason, which is why the CLI has stayed off this long.
   a false security claim, a non-minimal opacity change, and three bare-reason
   producers all passed a green `mix precommit`. Budget for a cold review per
   slice rather than treating it as optional.
+- Codex credits came back on 2026-08-08 and the outstanding cumulative pass is
+  still worth doing before the PR. Note the CLI form: this version rejects a
+  `[PROMPT]` alongside `--base`, `--commit`, or `--uncommitted`, so a
+  base-guarded review has to run bare and a focused one has to go through
+  `codex exec`.
 - Codex found three [P1]s on the unverified-check slice that Fable did not, and
   Fable found substantive findings on the registrar slice, slice #8, the type
   contract, slice #7, and both halves of #3; they find different classes.

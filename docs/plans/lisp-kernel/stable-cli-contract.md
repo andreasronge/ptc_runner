@@ -1188,8 +1188,10 @@ commits in one Checkpoint C PR:
   is that nothing bounds what it may do. Running unrestricted work before the
   selection is accepted spends cost and causes side effects for a selection the
   validator then rejects, so the order is a contract rather than a preference;
-- keep `MCPHTTPAdapter` as the single shipped HTTP boundary while adding an
-  authoritative cap at or before the transport receive boundary; and
+- (complete) keep `MCPHTTPAdapter` as the single shipped HTTP boundary while
+  adding an authoritative cap at or before the transport receive boundary. No
+  second HTTP stack and no native or port helper were needed; see the proof at
+  the end of this section; and
 - (complete) add shipped live-model probes with retries and redirects disabled.
   `HostInstallation` already builds one: it disables adapter and HTTP retries
   and redirects, forces a one-token ceiling, consumes the credential phase-8
@@ -1518,7 +1520,7 @@ fine; temporarily reachable and unsafe is not.
      `:mcp_invalid_snapshot_identity`, which a snapshot-identity build genuinely
      produces. Both were found by review, not by tests, which is why the table
      now has a test pinning every branch against the catalog and the contract;
-4. prove and implement the MCP receive-boundary response cap;
+4. (complete) prove and implement the MCP receive-boundary response cap;
 5. only then enable `doctor --connect` in `CommandEngine`; and
 6. integration review, acceptance gates, then the cumulative PR review.
 
@@ -1647,14 +1649,147 @@ to `internal_error` alongside `init`, so a fixture written now would pin the stu
 rather than the contract; its dispatch lands with the shared command surface, and
 the check belongs beside it.
 
-The current active-mode Mint loop applies cumulative limits only after one
-socket message has already reached the command process, so finite response
-fixtures cannot establish this hard bound. First prove and test an authoritative
-per-message maximum through socket-buffer configuration; otherwise use Mint's
-passive receive mode with an explicit byte cap. Keep the adapter as the public
-boundary. A minimal native or port receive helper is a last resort only if
-neither shipped mechanism can prove the bound, and any such helper is its own
-narrowly reviewed commit. Do not add a second general HTTP stack.
+**Complete (the receive ceiling), and the proof it was asked for.** Socket-buffer
+configuration is authoritative, so the passive-receive alternative was not
+needed and neither was a native or port helper. `MCPHTTPAdapter` is still the
+only HTTP boundary. What the proof had to establish, in the order it was
+measured:
+
+- **`buffer` is the per-message maximum, and it is exact.** For TCP the driver
+  reads at most `buffer` bytes per armed read, so no `{:tcp, _, data}` exceeds
+  it: measured exactly, at 128 B through 128 KiB, against an 8 MiB single write.
+- **Why the cap could not be established before.** Passing `buffer` through
+  Mint's `:transport_opts` does nothing. `Mint.Core.Util.inet_opts/2` runs on
+  every `initiate/5` and *raises* `buffer` to `max(buffer, sndbuf, recbuf)`,
+  which on an ordinary loopback socket is the operating system's ~400 KiB
+  `recbuf`. The transport applies the requested value and Mint then overwrites
+  it. This is the fact the earlier attempts were missing, and it is why finite
+  response fixtures could not show the bound.
+- **Applying it after `connect/4` is not enough either.** In active mode
+  `initiate/5` has already armed `active: :once`, and the driver services that
+  read under the buffer in force when it was armed: a 163 KiB message arrived
+  under a 16 KiB ceiling. The connection is therefore opened in `:passive` mode,
+  the one mode whose `initiate/5` does not arm, the ceiling is applied to the
+  unarmed socket, and `set_mode/2` activates it afterwards.
+- **TLS bounds ciphertext, not plaintext.** A record carried over from a
+  previous read can be delivered alongside a full buffer, so the guarantee on
+  `:https` is the ceiling plus at most one TLS record. `buffer` below 16_384
+  buys nothing at all — a single record is delivered whole — so
+  `:max_receive_bytes` is required to be a whole number of 16_384-byte records
+  and the two are expressed in the same unit. Swept over four buffer sizes,
+  seven peer record sizes and both TLS versions, the worst delivery exceeded
+  `buffer` by 2 bytes, and the worst seen anywhere was 3392 — always well inside
+  one record.
+
+The per-message cap alone would not have closed the gate. Measuring it turned up
+a second and larger hole: Mint buffers *unparsed* input with no ceiling of its
+own. A peer that never completes a status line, a chunk-size line, or a chunk
+extension emits no Mint response at all, so `max_body_bytes`, `max_headers`, and
+`max_header_bytes` never run — they bound what is kept, and nothing was ever
+parsed to keep. 64 MiB from such a peer became 80–134 MiB resident and burned
+the whole operation budget. The adapter therefore also counts raw socket
+payloads before handing them to `Mint.HTTP.stream/2`, and refuses over
+`max_header_bytes + max_receive_bytes`. The over-limit message is refused before
+it is parsed, so it never reaches Mint's buffer, and the attack now returns
+`:response_exceeded` in milliseconds with no measurable growth.
+
+**The count resets whenever Mint returns any response, and that reset is the
+contract.** The first attempt was a cumulative wire ceiling of
+`max_header_bytes + max_body_bytes + max_receive_bytes` — "every byte the
+declared limits admit, plus one message of slack". Review showed that to be
+wrong, with measurements: chunked framing costs about six bytes per chunk, so
+its overhead scales with the *chunk count* and not with one message. A 2 MiB
+`text/event-stream` sent as 100-byte events — the shape a server produces when
+it interleaves progress notifications with a result — spends ~126 KiB on
+framing and was refused at about 1.66 MiB, silently cutting the declared body
+budget by a fifth. Any fixed slack is a guess at how finely a peer chunks.
+Resetting on parse progress removes the guess instead of enlarging it: framing
+is consumed as it is parsed and never accumulates, only bytes that yield nothing
+do, and the ceiling drops to what a legitimate peer can send *before* Mint emits
+anything — one header block plus one message. It is also a tighter bound on the
+buffer than the cumulative version was.
+
+The pending ceiling is `max_header_bytes` plus one whole delivered message —
+`max_receive_bytes` plus one TLS record. The record term applies on both schemes
+rather than only on `:https`: over TCP the socket bound is exact, so a record of
+slack in a defensive ceiling costs nothing, and paying it uniformly removes a
+scheme-split branch that no test could reach. The term is not decoration: without it a single
+delivered https message, which the same module documents as possibly carrying
+one record beyond the buffer, could breach the ceiling on its own. A review
+measured a 24000-byte TLS message under a 16 KiB ceiling and a 17408-byte
+pending ceiling — a spurious `:response_exceeded` on a legitimate response.
+
+**The per-message bound is enforced, not merely configured**, and the third
+review round is why. The socket option makes it true; it does not make it
+*hold*. Mint raises `buffer` at the end of its connect, and over TLS the `ssl`
+connection process accumulates under the raised value if the worker is
+descheduled before the ceiling is reapplied — lowering `buffer` afterwards does
+not shrink what has already accumulated. Measured on the real sequence: bounded
+at 17536 bytes with no gap and with a 5 ms gap, and 409600 bytes — a whole
+operating-system receive buffer — 10 times out of 10 with a 30 ms gap. Two
+attempted fixes do not work and were measured before being discarded: putting
+`buffer` in `:transport_opts` changes nothing, because Mint's raise happens
+after the handshake; and shrinking `recbuf`/`sndbuf` so that
+`max(buffer, sndbuf, recbuf)` equals the ceiling fails because the operating
+system clamps a 16 KiB `recbuf` back up to ~320 KiB. The window is therefore
+structural, and the receive loop refuses any single message over the declared
+maximum instead. That refusal is the one part of the slice no mutation test
+catches, and deliberately so: with the socket ceiling in place no test peer can
+produce an oversized message, which is the same reason the other fail-closed
+branches on this branch are uncovered. It is covered by the measurement above
+instead. Every other mutation — the ceiling never applied, `:https` dispatched
+through `:inet`, the pending ceiling removed or loosened or off by one, the
+reset removed, the record term dropped, and both validation bounds — fails. It costs a
+legitimate peer nothing, because the window closes before the request is sent
+and anything accumulating inside it was unsolicited.
+
+Resident bytes for one response are bounded, but *not* by a plain sum of the
+declared numbers, and an earlier draft of this section claimed they were. A
+reset zeroes the counter while Mint's leftover survives it, so the unparsed
+remainder is the pending ceiling plus the message that carried the reset. It
+does not ratchet past that — Mint's leftover is always a prefix of the
+incomplete front token, and emitting anything consumes that prefix whole, so
+leftover at a reset is at most one message; review confirmed a flat peak across
+41 consecutive reset rounds. The bound is the accumulated body and headers, plus
+the pending ceiling, plus two delivered messages.
+
+Total bytes *read* is deliberately not bounded, and the slice does not claim
+otherwise. A peer may send bare `1xx` informational responses indefinitely:
+Mint emits a response for each, so the counter resets, and a bare informational
+advances neither the header nor the body ceiling. Review pushed 76 MiB in three
+seconds this way, ending in `:timeout` with a peak Mint buffer of 22 bytes. That
+is bandwidth and scheduling, not memory, and the operation deadline is what ends
+it. Bounding it means a cumulative wire ceiling, which is exactly what the reset
+exists to avoid, so it is recorded here rather than closed.
+
+`mode: :passive` closes the arm-before-cap window by construction rather than by
+a test. The window is real — between `initiate/5`'s arm and `set_mode/2` one
+message can be delivered under the raised buffer — and no deterministic
+mechanism here can land a peer's bytes inside it; a peer that answers on accept
+rather than on request was tried and does not reach it.
+
+Over TLS the window is not as narrow as "computation with no I/O" suggests,
+which is why the ceiling is now applied *before* the peer verifier rather than
+after. The `ssl` connection process reads and decrypts on its own schedule under
+whatever buffer is in force at the time, and `:ssl.setopts/2` is itself a call
+into that process. Review demonstrated 311 KiB delivered in one message under a
+16 KiB ceiling by widening the gap artificially to 30 ms — 19× the ceiling, not
+one record — while the real sequence held at exactly 16 KiB across 20 runs
+including under load. The verifier was the only step in that gap running
+caller-supplied code, and therefore the only one with no bound at all; moving it
+after the ceiling costs nothing, because a rejected peer is closed either way.
+Plain HTTP has no such window: `:gen_tcp` connects unarmed and no driver read
+happens until activation. What is pinned instead is the pair of Mint
+behaviours the ordering depends on: that `initiate/5` raises `buffer`, and that
+only passive mode leaves the socket unarmed. Both are dependency behaviour that
+no assertion about the adapter's own output would notice changing, so they fail
+first and by name on a Mint bump.
+
+The `:https` branch of the ceiling is exercised against a real TLS socket
+through a `@doc false` seam, because `request/1` trusts the operating system
+certificate store alone and no loopback server it can reach speaks TLS. Making
+that trust injectable was rejected: a test-only trust knob on the single shipped
+HTTP boundary is a worse thing to ship than a narrow seam.
 
 ### Slice 8: destination preflight and publication
 

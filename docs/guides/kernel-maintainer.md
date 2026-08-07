@@ -1054,7 +1054,37 @@ Streamable HTTP and MCP OAuth use the shared direct-Mint
 `MCPHTTPAdapter` HTTP/1 boundary. Each request owns one non-pooled connection,
 enforces cumulative response-header and body ceilings, and carries one absolute
 deadline across bounded DNS resolution, peer pinning, connection, and response
-streaming. Returning `:halt` after a complete SSE response, response-size
+streaming.
+
+Two further ceilings bound what a peer may *deliver*, as opposed to what is
+kept, and both are enforced before Mint parses anything.
+
+`:max_receive_bytes` is applied as the socket's `buffer` and caps one socket
+message. Because Mint raises `buffer` to `max(buffer, sndbuf, recbuf)` whenever
+it initiates a connection, the adapter connects in `:passive` mode, applies the
+ceiling to the still-unarmed socket, and activates afterwards. Over TLS the
+ceiling bounds the ciphertext read, so one TLS record of already-decrypted
+carry-over may be delivered with it. The receive loop additionally refuses any
+single message over that declared maximum, because the socket option makes the
+bound true rather than enforcing it: Mint's raise happens at the end of its
+connect, and over TLS the `ssl` process accumulates under the raised value if
+the worker is descheduled before the ceiling is reapplied.
+
+A derived pending ceiling — `max_header_bytes` plus one whole delivered message
+(`max_receive_bytes` plus one TLS record), so that a single delivered message can
+never breach it alone — caps
+what Mint may hold *unparsed*, and resets whenever Mint returns any response. A
+peer that never completes a status line, a chunk-size line, or a chunk extension
+yields no response, so no ceiling on a parsed value can see it and Mint buffers
+the remainder without one of its own. The reset is what keeps the ceiling
+independent of the transfer encoding: chunked framing costs bytes per chunk, so
+a cumulative wire ceiling would refuse a legitimate finely chunked body.
+Resident bytes are bounded by the accumulated body and headers, the pending
+ceiling, and two delivered messages — a reset zeroes the counter while Mint's
+leftover survives it, and that leftover is at most one message. Total bytes
+*read* is not bounded: bare `1xx` informational responses reset the counter and
+advance no ceiling, so a peer can spend bandwidth until the deadline without
+accumulating anything. Returning `:halt` after a complete SSE response, response-size
 rejection, or SSE parser rejection closes the response stream. Killing the
 request task on deadline expiry, caller death, provider close, or source-owner
 death closes it as well. HTTP cancellation never sends
