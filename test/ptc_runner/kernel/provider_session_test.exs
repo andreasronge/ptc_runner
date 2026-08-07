@@ -55,6 +55,25 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert order == []
   end
 
+  test "a stale pre-operation handle cannot open an unbounded scope" do
+    # `begin_operation/2` returns a new sealed handle and the pre-begin one
+    # stays valid with `run_deadline: nil`. If the fence trusted the caller's
+    # copy of the deadline, that stale handle would send `nil` and open a scope
+    # with no bound at all, after the operation had already expired.
+    {:ok, limits} = Limits.installed(%{run_duration_ms: 200})
+    {:ok, stale} = ProviderSession.start_active(limits, "stale-handle")
+    on_exit(fn -> ProviderSession.close(stale) end)
+    {:ok, begun} = ProviderSession.begin_operation(stale, :run)
+
+    assert ProviderSession.run_deadline(stale) == nil
+    assert Deadline.valid?(ProviderSession.run_deadline(begun))
+
+    burn_until(Deadline.expires_at(ProviderSession.run_deadline(begun)) + 5)
+
+    assert {:error, :provider_session_unavailable} = ProviderSession.open_registrar(stale)
+    assert %{scopes: %{}, scope_order: []} = :sys.get_state(stale.pid)
+  end
+
   test "an invalid registrar handle is refused rather than raising" do
     # The budgets are read from the handle, so a tampered one must be proved
     # before either field is touched: an invalid deadline would otherwise raise

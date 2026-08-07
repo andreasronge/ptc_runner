@@ -796,14 +796,17 @@ defmodule PtcRunner.Kernel.ProviderSession do
   end
 
   @impl true
-  def handle_call({token, {:open_registrar, deadline}}, {executor, _tag}, state)
+  def handle_call({token, {:open_registrar, _deadline}}, {executor, _tag}, state)
       when token == state.token and executor == state.executor do
     scope = make_ref()
 
-    # A reply the caller already stopped waiting for must not leave a scope
-    # behind that nothing holds a handle to. Both sides fence on the same
-    # absolute instant, so a scope is created only while its opener can still
-    # receive it.
+    # The fence is the session's own anchored deadline, never the caller's copy
+    # of it. `begin_operation/2` returns a new sealed handle and the pre-begin
+    # one stays valid with `run_deadline: nil`, so a caller holding the stale
+    # handle would otherwise send `nil` and open an unbounded scope after the
+    # operation had expired.
+    deadline = state.run_deadline
+
     if operation_expired?(deadline) do
       {:reply, {:error, :provider_session_unavailable}, state}
     else
@@ -811,9 +814,9 @@ defmodule PtcRunner.Kernel.ProviderSession do
     end
   end
 
-  def handle_call({token, {:registrar, scope, {:activate, deadline}}}, _from, state)
+  def handle_call({token, {:registrar, scope, {:activate, _deadline}}}, _from, state)
       when token == state.token do
-    if operation_expired?(deadline) do
+    if operation_expired?(state.run_deadline) do
       {:reply, {:error, :resource_registrar_unavailable}, state}
     else
       activate_scope(scope, state)
@@ -824,9 +827,9 @@ defmodule PtcRunner.Kernel.ProviderSession do
   # twice, so the session refuses to take ownership past the same absolute
   # instant the caller stops waiting on. Past it the caller keeps the closer and
   # runs the unregistered-closer recovery under cleanup authority.
-  def handle_call({token, {:registrar, scope, {:commit, close, deadline}}}, _from, state)
+  def handle_call({token, {:registrar, scope, {:commit, close, _deadline}}}, _from, state)
       when token == state.token do
-    if operation_expired?(deadline) do
+    if operation_expired?(state.run_deadline) do
       {:reply, {:error, :resource_registrar_unavailable}, state}
     else
       commit_scope(scope, close, state)
