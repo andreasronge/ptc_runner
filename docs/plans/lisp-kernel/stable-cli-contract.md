@@ -1251,8 +1251,28 @@ fine; temporarily reachable and unsafe is not.
      before the operation branch — the sequence this document already pins.
      Having connect resolve only the remainder its closure missed would give it
      a credential path of its own, which is the second weaker pipeline the
-     acquisition subset was rejected for. Moving it changes the shared run path,
-     so it lands as its own reviewed commit;
+     acquisition subset was rejected for.
+
+     This is not a move. It changes the authority and sequencing model for every
+     active command, so it is its own architectural slice built to an explicit
+     plan rather than folded into neighbouring work:
+
+     1. required credentials are derived from the sealed selected declarations,
+        never from callback reports — the same rule that decides the acquisition
+        closure, for the same reason;
+     2. resolution happens after registry and OAuth context setup and before any
+        provider callback;
+     3. it happens once, with deterministic alias and occurrence attribution;
+     4. the resolved values are passed into acquisition and probes, and no
+        downstream code calls the host resolver again;
+     5. a missing credential fails before prepare, preflight, probe, or
+        acquisition rather than partway through one;
+     6. regressions prove the run and check behaviour changed intentionally —
+        a credential failure now surfaces earlier than it did — and that a
+        doctor-connect credentials row cannot pass without resolution; and
+     7. a regression proves the shipped LLM probe consumes the pre-resolved
+        credential instead of resolving its own, since it resolves one today
+        inside `prepare_llm_connectivity_probe`;
    - **a selected OAuth occurrence.** The contract returns
      `active_preflight/authorization_required` after the marker and without
      opening an interaction. Nothing constructs that code today, so an OAuth
