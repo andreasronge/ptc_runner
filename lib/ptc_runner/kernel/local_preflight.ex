@@ -44,11 +44,12 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # exactly why it cannot run in phase 7 and why default doctor reports
   # `active_check_required` rather than calling it.
   #
-  # Both report through the same codes, because they report the same conditions
-  # and differ only in when they are allowed to look. They differ in one
-  # rendered field: everything `run_unverified/4` reports carries
-  # `provider_activity`, which is a fact about the marker rather than about the
-  # check, so the flag is supplied rather than assumed.
+  # They share the local half of the translation below, because those are the
+  # same conditions found at different times, and they differ in two ways. Every
+  # outcome of `run_unverified/4` carries `provider_activity`, which is a fact
+  # about the marker rather than about the check, so the flag is supplied rather
+  # than assumed. And the declaration half of the table does not survive the
+  # marker: see it for why.
   #
   # The prepared run, catalog, and runtime services must belong together. Alias
   # names are not identity: two catalogs can install the same alias over
@@ -81,16 +82,28 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   #   * `:local_preflight` / `:launcher_unavailable` —
   #     `mcp_stdio_launcher_unavailable`, `unsupported_mcp_stdio_platform`
   #   * `:local_preflight` / `:adapter_unavailable` — `invalid_llm_model`
-  #   * `:provider_declaration` / `:placement_denied` —
-  #     `provider_destination_denied`
-  #   * `:provider_declaration` / `:selection_invalid` — the per-source
-  #     `invalid_*_selection` reasons
   #
-  # Destination and selection failures keep their own phases deliberately.
-  # Folding them into a local code would report a manifest error as a missing
-  # local dependency. Anything else — an unknown reason, an unrecognised result
-  # shape, or a raise — fails closed as an internal error rather than being
-  # forced into the nearest local code.
+  # Those three are identical in both steps. The declaration-class reasons are
+  # not, because their phase is reachable from only one side of the marker:
+  #
+  #   * before it — `:provider_declaration` / `:placement_denied` for
+  #     `provider_destination_denied`, and `:provider_declaration` /
+  #     `:selection_invalid` for the per-source `invalid_*_selection` reasons.
+  #     They keep their own phase deliberately: folding them into a local code
+  #     would report a manifest error as a missing local dependency; and
+  #   * after it — `:active_preflight` / `:selection_rejected` for both.
+  #     `:provider_declaration` is a pre-classification phase pinned to
+  #     `provider_activity: false`, so a post-marker run could not render it at
+  #     all. What a callback reports there is a provider refusing its own
+  #     selection, which is what that code already means for active selection
+  #     validation, and the `:selection` subject and occurrence are unchanged.
+  #     The placement/selection distinction is a phase-7 refinement and does not
+  #     cross the marker, because past it the command has stopped checking
+  #     declarations.
+  #
+  # Anything else — an unknown reason, an unrecognised result shape, or a raise
+  # — fails closed as an internal error rather than being forced into the
+  # nearest local code.
   #
   # An exhausted budget is the exception, because it is an expected operational
   # outcome rather than a defect: a slow filesystem or adapter load reports
