@@ -86,6 +86,18 @@ consume the map; the shipped LLM probe no longer resolves its own. One cold
 Fable review, no P1; its P2 corrected an over-claimed per-occurrence guarantee.
 Six new regressions and three retargeted, each mutation-checked.
 
+**Acquisition reason translation** (`4a011766`). Slice #7. `AcquisitionReason`
+classifies a callback's bare reason at the three sites in `ProviderAcquisition`
+that still hold the occurrence, so an unreachable MCP server stops reading as an
+implementation defect. Only an active command is classified — embedding keeps
+the bare reason, whose ~20 MCP and replay values the suite discriminates between
+and three closed codes cannot carry — discriminated by whether the session holds
+an operation deadline, the same boundary slice #8 draws. One cold Fable review
+found a [P1]: the table missed `:mcp_invalid_snapshot_identity`, which any build
+of a host installing `snapshot_identity` produces. Two drafts were needed to
+honour "translations are added with their producers", so the table now has a
+test pinning every branch against the catalog and the contract.
+
 **Registrar handle type contract** (`e1ad00f6`). Repairs the Dialyzer regression
 above. `ResourceRegistrar.commit/2`'s spec omitted
 `{:error, :provider_cleanup_failed}`, which `ProviderSession.settle_commit/2`
@@ -105,15 +117,7 @@ Dialyzer would catch one.
 
 ## Remaining, in order
 
-1. **#7 raw acquisition-reason translation.** A builder/preflight/acquire
-   callback returning `{:error, reason}` propagates as a bare term, and
-   consumers collapse it to `internal_error` — an unreachable MCP server reads
-   as an implementation defect. Fix where the occurrence is still in scope
-   (`prepare_provider/7` and neighbours), because a `provider_acquisition` code
-   requires a subject bearing one. Changes the shared run path. **Must land
-   before CLI exposure**, but does not block #8.
-
-2. **#3 connect-mode `DoctorPlan` settlement.** `DoctorPlan.new/3` gains the
+1. **#3 connect-mode `DoctorPlan` settlement.** `DoctorPlan.new/3` gains the
    mode; connect leaves pending what default doctor settles as
    `requires_connect` / `active_check_required`. Also closes the OAuth gap:
    `active_preflight/authorization_required` is constructed *nowhere in the
@@ -121,22 +125,21 @@ Dialyzer would catch one.
    against an empty store. Connect must refuse it before any provider work, and
    `run` needs the same refusal.
 
-3. **#4 MCP transport receive cap.** The plan says *prove* the bound first: the
+2. **#4 MCP transport receive cap.** The plan says *prove* the bound first: the
    current active-mode Mint loop applies cumulative limits only after a socket
    message has already reached the command process. Either an authoritative
    per-message maximum via socket-buffer configuration, or Mint passive receive
    with an explicit byte cap. `MCPHTTPAdapter` stays the single shipped HTTP
    boundary. **Nothing enables the CLI before this lands.**
 
-4. **#5 enable `doctor --connect` in `CommandEngine`**, then integration review,
+3. **#5 enable `doctor --connect` in `CommandEngine`**, then integration review,
    gates, cumulative `origin/main` review, PR.
 
 ## Distance to a PR
 
-Three slices (#7, #3, #4) plus the CLI enable. #4 is the large one and needs a
-proof before an implementation; #7 and #3 are moderate. Do not shorten the
-order: #4 gates #5 for a real safety reason, which is why the CLI has stayed off
-through 52 commits.
+Two slices (#3, #4) plus the CLI enable. #4 is the large one and needs a proof
+before an implementation; #3 is moderate. Do not shorten the order: #4 gates #5
+for a real safety reason, which is why the CLI has stayed off this long.
 
 ## Review discipline that has been working
 
