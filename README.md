@@ -23,6 +23,33 @@ has to take it all back. PtcRunner inverts that: the boundary is the language
 and the capability grant, and a container is optional defense in depth rather
 than the thing holding the line.
 
+```mermaid
+flowchart TB
+  op["Operator host document<br/>installs providers, credentials, ceilings"]
+  mf["Project manifest<br/>selects installed names and narrows limits<br/>cannot grant authority"]
+
+  subgraph WF["Workflow environment — trusted"]
+    wp["replaceable preludes: agent.core, agent.prompt<br/>may call the model"]
+  end
+
+  subgraph MS["Mission environment — confined"]
+    mp["replaceable preludes: cap, result, your domain API<br/>task tools only — no model, no re-entry"]
+  end
+
+  op ==>|grants| WF
+  op ==>|grants| MS
+  mf -.->|selects| WF
+  mf -.->|selects| MS
+  WF -->|prompt| model(["LLM"])
+  model -->|"PTC-Lisp program (untrusted)"| MS
+```
+
+Authority flows one way: the operator grants it, the project may only select
+and narrow it, and generated code runs in the environment that was given the
+least. The mission returns a bounded value to the workflow, which decides
+whether to continue. The preludes are ordinary PTC-Lisp you can replace
+without touching either boundary.
+
 - **The language has no escape hatches.** PTC-Lisp is a small, eager subset of
   Clojure. There is no `eval`, no macros, no host interop, no lazy or infinite
   sequences, and no ambient filesystem, network, or process access. Generated
