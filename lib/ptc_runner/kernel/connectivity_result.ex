@@ -118,10 +118,12 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
   def entries(%__MODULE__{entries: entries}), do: entries
 
   # The preparation's lifecycle state is its caller's business — it is consumed
-  # while the operation runs and closed afterwards — so this checks only the
-  # binding claim: that these two belong together and the catalog is sealed.
+  # while the operation runs and closed afterwards — but its seal is not. A
+  # caller-authored `%PreparedRun{}` that kept a stale attestation while its
+  # declarations were edited would otherwise get those declarations attested
+  # here, so the seal is recomputed rather than read.
   defp bound_pair?(prepared, catalog) do
-    InstallationCatalog.valid?(catalog) and is_binary(prepared.attestation) and
+    PreparedRun.sealed?(prepared) and InstallationCatalog.valid?(catalog) and
       prepared.catalog_attestation == catalog.attestation
   end
 

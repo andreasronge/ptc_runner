@@ -231,7 +231,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         authorities,
         deadline,
         tracker,
-        :run,
+        operation,
         fn registry ->
           complete(prepared, authority, opened_sinks, registry, session, execution, operation)
         end
@@ -339,12 +339,22 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          true <- ProviderSession.alive?(session),
          deadline when not is_nil(deadline) <- ProviderSession.run_deadline(session),
          {:ok, entries} <- connectivity_entries(prepared, catalog),
-         {:ok, result} <- ConnectivityResult.new(prepared, catalog, entries) do
+         {:ok, result} <- ConnectivityResult.new(prepared, catalog, entries),
+         false <- Deadline.expired?(deadline) do
       {:ok, result}
     else
+      true -> {:error, connectivity_timeout_diagnostic()}
       {:error, %CommandDiagnostic{}} = error -> error
       _invalid -> {:error, internal_diagnostic()}
     end
+  end
+
+  # Evidence that arrives after the operation's own cutoff is not evidence the
+  # operation may report. Registry setup can finish near the connectivity
+  # deadline and this process can resume past it, so success is confirmed
+  # against the deadline rather than assumed from having reached the end.
+  defp connectivity_timeout_diagnostic do
+    CommandDiagnostic.new!(:active_preflight, :connectivity_unavailable, provider_activity: true)
   end
 
   # A sealed declaration carries an inert projection, not its descriptor, so the
@@ -533,11 +543,24 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
   defp registry_result(
          {:error, :operation_deadline_expired},
-         :run,
+         operation,
+         _selected_names,
+         _catalog
+       )
+       when operation in [:run, :check],
+       do: {:error, CommandDiagnostic.new!(:execution, :run_timeout, provider_activity: true)}
+
+  # Connectivity spends a different budget, so exhausting it is not a run
+  # timeout. `execution/run_timeout` also names a phase the connect contract
+  # does not admit, which would turn a spent connectivity budget into an
+  # unrenderable outcome.
+  defp registry_result(
+         {:error, :operation_deadline_expired},
+         :connect,
          _selected_names,
          _catalog
        ),
-       do: {:error, CommandDiagnostic.new!(:execution, :run_timeout, provider_activity: true)}
+       do: {:error, connectivity_timeout_diagnostic()}
 
   defp registry_result(
          {:error, reason},

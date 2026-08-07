@@ -78,10 +78,10 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   Anchors the operation clock this operation is entitled to and validates
   selections behind it.
 
-  The duration is chosen by operation rather than read from the session: a run
-  spends `run_duration_ms`, while `doctor --connect` spends the much shorter
-  `doctor_connectivity_timeout_ms`. Sharing this boundary without choosing the
-  duration would let connectivity silently inherit a run's clock.
+  The operation names its own clock rather than inheriting one: a run spends
+  `run_duration_ms`, while `doctor --connect` spends the much shorter
+  `doctor_connectivity_timeout_ms`. Both budgets are sealed into the session
+  from its limits, so naming the operation cannot widen either.
   """
   @spec begin_owned_operation(
           ProviderSession.t(),
@@ -99,7 +99,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     if PreparedRun.active_valid?(prepared) and InstallationCatalog.valid?(catalog) and
          prepared.catalog_attestation == catalog.attestation and
          ProviderSession.bound_to_operation?(session, prepared.attestation) do
-      do_begin_run(session, prepared, catalog, operation_duration(prepared, operation))
+      do_begin_run(session, prepared, catalog, operation)
     else
       reject_begin_run(session, prepared)
     end
@@ -107,12 +107,6 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
 
   def begin_owned_operation(_session, _prepared, _catalog, _operation),
     do: {:error, internal_diagnostic(false)}
-
-  defp operation_duration(prepared, :connect),
-    do: prepared.request.package.limits.doctor_connectivity_timeout_ms
-
-  defp operation_duration(prepared, _operation),
-    do: prepared.request.package.limits.run_duration_ms
 
   defp open_consumed(prepared, catalog, services, ownership) do
     case ProviderActivity.mark(prepared.provider_activity) do
@@ -147,8 +141,8 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  defp do_begin_run(session, prepared, catalog, duration_ms) do
-    case ProviderSession.begin_operation(session, duration_ms) do
+  defp do_begin_run(session, prepared, catalog, operation) do
+    case ProviderSession.begin_operation(session, operation) do
       {:ok, session} ->
         validate_open_session(session, prepared, catalog)
 

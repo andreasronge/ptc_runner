@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActiveSession
   alias PtcRunner.Kernel.ProviderActivity
@@ -86,6 +87,51 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     assert connect_remaining > limits.run_duration_ms
     assert connect_remaining <= limits.doctor_connectivity_timeout_ms
     assert run_remaining <= limits.run_duration_ms
+  end
+
+  test "the connectivity budget, not the run's, bounds work inside the operation" do
+    # The installed connectivity budget is 100ms while the run clock keeps its
+    # default, so a validator that burns 250ms survives a run and cannot survive
+    # a connect. Its own `selection_validation_timeout_ms` is far larger, which
+    # is what makes the operation clock the thing being observed here.
+    {:ok, installed} = Limits.installed(%{doctor_connectivity_timeout_ms: 100})
+
+    %{prepared: prepared, execution: execution} =
+      fixture(
+        %{"slow" => [destination: :workflow, selection_validation: :active]},
+        installed_limits: installed
+      )
+
+    limits = prepared.request.package.limits
+    assert limits.selection_validation_timeout_ms > 250
+    assert limits.run_duration_ms > 250
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+    assert diagnostic.phase == :active_preflight
+    assert diagnostic.code == :selection_validation_timeout
+    assert diagnostic.provider_activity
+  end
+
+  test "a session anchors only the budgets its own limits sealed" do
+    # The operation names its clock; it cannot supply one. A session sealed from
+    # one limit set therefore cannot be claimed with another that widened either
+    # budget behind its back.
+    %{prepared: prepared} = fixture(%{"inert" => [destination: :workflow]})
+    limits = prepared.request.package.limits
+    {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
+    on_exit(fn -> ProviderSession.close(session) end)
+
+    assert ProviderSession.compatible_limits?(session, limits)
+
+    widened = %{
+      limits
+      | doctor_connectivity_timeout_ms: limits.doctor_connectivity_timeout_ms + 1
+    }
+
+    refute ProviderSession.compatible_limits?(session, widened)
+
+    assert {:error, :provider_session_unavailable} =
+             ProviderSession.begin_operation(session, :invented)
   end
 
   test "the result keeps every selected occurrence rather than collapsing aliases" do
@@ -231,8 +277,10 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   # need no host document, and their `:none` mode is the case this commit
   # implements. `:probe` and `:acquisition` fixtures exist only to prove their
   # callbacks stay unreachable.
-  defp fixture(specifications, limit_overrides \\ []) do
+  defp fixture(specifications, options \\ []) do
     parent = self()
+    installed = Keyword.get(options, :installed_limits)
+    limit_overrides = Keyword.delete(options, :installed_limits)
     {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
 
     registrations =
@@ -253,7 +301,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
             workflow_llm?: false,
             connectivity_mode: mode,
             probe_effect: if(mode == :probe, do: :metadata),
-            selection_validation: :declarative,
+            selection_validation: Keyword.get(options, :selection_validation, :declarative),
             selection_rules: rules,
             authority_fingerprint: nil,
             local_preflight: :none
@@ -262,16 +310,17 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
         {name,
          %{
            descriptor: descriptor,
-           implementation: implementation(parent, name, mode),
+           implementation: implementation(parent, name, options, mode),
            authority: nil
          }}
       end)
 
-    {:ok, catalog} = InstallationCatalog.new(registrations)
+    catalog_options = if installed, do: [installed_limits: installed], else: []
+    {:ok, catalog} = InstallationCatalog.new(registrations, catalog_options)
     {:ok, services} = ProviderRuntimeServices.new()
     {:ok, execution} = ProviderExecution.new(catalog, services, [])
 
-    prepared = prepared(catalog, specifications, limit_overrides)
+    prepared = prepared(catalog, specifications, limit_overrides, installed)
     on_exit(fn -> InstallationCatalog.close(catalog) end)
 
     %{prepared: prepared, catalog: catalog, execution: execution}
@@ -280,7 +329,13 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   defp destinations(:both), do: [:workflow, :mission]
   defp destinations(destination), do: [destination]
 
-  defp implementation(parent, name, mode) do
+  # Busy-waiting rather than sleeping: the subject of these tests is a clock, so
+  # the fixture has to consume real time without a timer the suite forbids.
+  defp burn_until(target_ms) do
+    if System.monotonic_time(:millisecond) < target_ms, do: burn_until(target_ms), else: :ok
+  end
+
+  defp implementation(parent, name, options, mode) do
     {:ok, capability} =
       Capability.new(
         name: "fixture",
@@ -300,6 +355,16 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
 
     implementation = %{builder: builder}
 
+    implementation =
+      if Keyword.get(options, :selection_validation, :declarative) == :active do
+        Map.put(implementation, :selection_validator, fn _selection, _context ->
+          burn_until(System.monotonic_time(:millisecond) + 250)
+          :ok
+        end)
+      else
+        implementation
+      end
+
     if mode == :probe do
       Map.put(implementation, :connectivity_probe, fn _selection, _context, _services ->
         send(parent, {:probe_invoked, name})
@@ -310,7 +375,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     end
   end
 
-  defp prepared(catalog, specifications, limit_overrides) do
+  defp prepared(catalog, specifications, limit_overrides, installed) do
     manifest = %{
       "version" => 1,
       "limits" => Map.new(limit_overrides, fn {name, value} -> {Atom.to_string(name), value} end),
@@ -330,8 +395,12 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
       "main.clj" => "(ns app) (defn run [_input] (return {\"answer\" 42}))"
     }
 
-    {:ok, request} =
-      ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+    options =
+      if installed,
+        do: [result_projection: :json, installed_limits: installed],
+        else: [result_projection: :json]
+
+    {:ok, request} = ApplicationPackage.request_memory("ptc.json", documents, options)
 
     {:ok, prepared} = RunCoordinator.prepare(request, catalog)
     prepared

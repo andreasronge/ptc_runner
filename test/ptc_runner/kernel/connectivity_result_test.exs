@@ -97,6 +97,27 @@ defmodule PtcRunner.Kernel.ConnectivityResultTest do
     refute ConnectivityResult.valid?(rebound)
   end
 
+  test "a caller-authored preparation cannot have its declarations attested" do
+    # Keeping a stale attestation while editing declarations would otherwise get
+    # those edited declarations sealed into a result, which is the one thing the
+    # binding exists to prevent.
+    %{prepared: prepared, catalog: catalog} = fixture()
+
+    forged = %{
+      prepared
+      | provider_declarations:
+          Enum.map(prepared.provider_declarations, &Map.put(&1, :name, "other"))
+    }
+
+    assert forged.attestation == prepared.attestation
+
+    assert {:error, :invalid_connectivity_result} =
+             ConnectivityResult.new(forged, catalog, entries())
+
+    assert {:ok, result} = ConnectivityResult.new(prepared, catalog, entries())
+    refute ConnectivityResult.bound_to?(result, forged, catalog)
+  end
+
   test "the closed outcome vocabulary is what the plan will settle from" do
     assert ConnectivityResult.outcomes() == [:skipped, :reachable]
     refute ConnectivityResult.valid?(:not_a_result)

@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   use GenServer
 
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
@@ -100,11 +101,13 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   defp provider_free_admissible(_provider_execution, _operation),
     do: {:error, :invalid_provider_execution}
 
-  # A check completes with the acquisition's safe connector snapshots where a
-  # run completes with a sealed execution outcome.
+  # Each operation completes with its own evidence: a run with a sealed
+  # execution outcome, a check with the acquisition's safe connector snapshots,
+  # and connectivity with the sealed per-occurrence result.
   @doc false
   @spec await(t()) ::
-          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | [map()]} | {:error, term()}
+          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | [map()] | ConnectivityResult.t()}
+          | {:error, term()}
   def await(%__MODULE__{pid: pid, token: token}) do
     GenServer.call(pid, {token, :await}, :infinity)
   catch

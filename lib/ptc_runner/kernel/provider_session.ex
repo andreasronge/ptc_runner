@@ -67,6 +67,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
     :fixed_lifecycle?,
     :operation_identity,
     :run_duration_ms,
+    :connectivity_duration_ms,
     :run_deadline,
     :cleanup_timeout_ms,
     :max_heap_words,
@@ -87,6 +88,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
             fixed_lifecycle?: boolean(),
             operation_identity: binary() | nil,
             run_duration_ms: pos_integer(),
+            connectivity_duration_ms: pos_integer(),
             run_deadline: Deadline.t() | nil,
             cleanup_timeout_ms: pos_integer(),
             max_heap_words: pos_integer(),
@@ -136,6 +138,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
             fixed_lifecycle?: fixed_lifecycle?,
             operation_identity: operation_identity,
             run_duration_ms: limits.run_duration_ms,
+            connectivity_duration_ms: limits.doctor_connectivity_timeout_ms,
             run_deadline: nil,
             cleanup_timeout_ms: limits.provider_cleanup_timeout_ms,
             max_heap_words: limits.provider_heap_words,
@@ -219,27 +222,30 @@ defmodule PtcRunner.Kernel.ProviderSession do
     valid?(session) and Limits.valid?(limits) and
       session.cleanup_timeout_ms == limits.provider_cleanup_timeout_ms and
       session.max_heap_words == limits.provider_heap_words and
+      session.connectivity_duration_ms == limits.doctor_connectivity_timeout_ms and
       compatible_run_duration?(session, limits)
   end
 
   def compatible_limits?(_session, _limits), do: false
 
   @doc """
-  Anchors the session's operation clock for however long this operation gets.
+  Anchors the operation clock this operation is entitled to.
 
   A run spends `run_duration_ms`; `doctor --connect` spends
   `doctor_connectivity_timeout_ms`, which is a different and much shorter
-  budget. The duration is therefore supplied by the operation rather than read
-  from the session, so no operation can inherit a clock that was sized for
-  another one. `run_deadline/1` returns whichever was anchored.
+  budget. The caller names its operation rather than supplying a duration:
+  both budgets are sealed into the session from the limits it was started with,
+  so no caller can anchor a clock longer than the one its limits allow, and no
+  operation can silently inherit a clock sized for another.
+  `run_deadline/1` returns whichever was anchored.
   """
-  @spec begin_operation(t(), pos_integer()) ::
+  @spec begin_operation(t(), :run | :check | :connect) ::
           {:ok, t()} | {:error, :provider_session_unavailable}
-  def begin_operation(%__MODULE__{} = session, duration_ms)
-      when is_integer(duration_ms) and duration_ms > 0 do
+  def begin_operation(%__MODULE__{} = session, operation)
+      when operation in [:run, :check, :connect] do
     if valid?(session) and session.creator == self() and
          is_binary(session.operation_identity) and is_nil(session.run_deadline) do
-      run_deadline = Deadline.new(duration_ms)
+      run_deadline = Deadline.new(sealed_duration(session, operation))
       operation_deadline = Deadline.new(@claim_timeout_ms)
 
       result =
@@ -264,7 +270,10 @@ defmodule PtcRunner.Kernel.ProviderSession do
     end
   end
 
-  def begin_operation(_session, _duration_ms), do: {:error, :provider_session_unavailable}
+  def begin_operation(_session, _operation), do: {:error, :provider_session_unavailable}
+
+  defp sealed_duration(session, :connect), do: session.connectivity_duration_ms
+  defp sealed_duration(session, _operation), do: session.run_duration_ms
 
   @doc false
   @spec run_deadline(term()) :: Deadline.t() | nil
@@ -1331,6 +1340,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
       session.fixed_lifecycle?,
       session.operation_identity,
       session.run_duration_ms,
+      session.connectivity_duration_ms,
       session.run_deadline,
       session.cleanup_timeout_ms,
       session.max_heap_words

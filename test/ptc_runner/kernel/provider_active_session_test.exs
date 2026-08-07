@@ -630,7 +630,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
              ProviderSession.start_active(other_limits, prepared.attestation)
 
     assert {:ok, wrong_session} =
-             ProviderSession.begin_operation(wrong_session, wrong_session.run_duration_ms)
+             ProviderSession.begin_operation(wrong_session, :run)
 
     staged = fn _selection, _context ->
       send(parent, :unexpected_provider_preparation)

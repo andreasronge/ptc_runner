@@ -1097,14 +1097,35 @@ fine; temporarily reachable and unsafe is not.
      `doctor_connectivity_timeout_ms`. The old names are deleted rather than
      kept as aliases, so nothing can anchor a clock without saying which one;
      and
-   - (complete) the result binding. `covers?/2` proved occurrence identity
+   - (complete, repaired under review) the result binding. `covers?/2` proved
+     occurrence identity
      only, which is not enough where alias names are not identity: the same
      alias sequence names different sealed descriptors in another catalog.
      `ConnectivityResult` is now sealed over the prepared and catalog
      attestations, requires the trio at construction, re-derives every entry's
      mode from the catalog, and refuses an outcome that does not match its
      mode. `bound_to?/3` re-checks all of that, so `DoctorPlan` never has to
-     trust entries alone;
+     trust entries alone. Review found the seal itself unchecked — a
+     caller-authored `%PreparedRun{}` keeping a stale attestation could have its
+     edited declarations attested — so `PreparedRun.sealed?/1` now exposes the
+     lifecycle-independent seal check the binding needs;
+
+   Review of the foundation slice found two further repairs and one residual.
+   Sealing both budgets into the session closed a hole the first correction
+   opened: taking a duration argument let any caller anchor a clock longer than
+   its limits allowed, so `begin_operation/2` now takes the operation and reads
+   the budget the session sealed from its own limits. Registry setup is tagged
+   with the real operation, because an exhausted connectivity budget was
+   classified as `execution/run_timeout` — a phase the connect contract does not
+   admit and a budget connectivity never spends.
+
+   The residual: two expired-deadline branches — registry setup returning
+   `:operation_deadline_expired` under `:connect`, and connectivity success
+   arriving after its own cutoff — cannot be forced deterministically. An active
+   validator is itself killed at the operation deadline, so nothing can carry
+   execution past it on purpose. Both stay as fail-closed branches covered by
+   reasoning, while the deterministic regressions prove the connectivity clock
+   is the one that bounds work inside the operation;
 3. add connect-mode planning to `DoctorPlan`, with frontend dispatch still
    disabled;
 4. prove and implement the MCP receive-boundary response cap;

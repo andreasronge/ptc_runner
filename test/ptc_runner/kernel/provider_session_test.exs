@@ -54,7 +54,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
     assert_receive {:session_handed_off, ^session}
     assert ProviderSession.lifecycle_owner(session) == lifecycle_owner
-    assert {:ok, session} = ProviderSession.begin_operation(session, session.run_duration_ms)
+    assert {:ok, session} = ProviderSession.begin_operation(session, :run)
     assert {:ok, registrar} = ProviderSession.open_registrar(session)
     assert :ok = ResourceRegistrar.abort(registrar)
 
@@ -113,7 +113,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     Process.send_after(suspender, :resume, 5_250)
 
     assert {:error, :provider_session_unavailable} =
-             ProviderSession.begin_operation(session, session.run_duration_ms)
+             ProviderSession.begin_operation(session, :run)
 
     assert_receive {:DOWN, ^monitor, :process, _, :normal}, 1_000
     refute ProviderSession.alive?(session)
@@ -123,7 +123,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     identity = "prepared-operation"
     limits = limits()
     {:ok, session} = ProviderSession.start_active(limits, identity)
-    {:ok, session} = ProviderSession.begin_operation(session, session.run_duration_ms)
+    {:ok, session} = ProviderSession.begin_operation(session, :run)
     assert :ok = ProviderSession.claim_operation(session, limits, identity)
 
     lifecycle_owner = spawn(fn -> receive do: (:stop -> :ok) end)
