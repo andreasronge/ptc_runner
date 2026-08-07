@@ -2,10 +2,16 @@
 
 Branch: `codex/stable-cli-checkpoint-c-doctor`
 Head: the tip of this branch — pushed, tree clean, rebased onto `origin/main`
-(`0b3273c5`) on 2026-08-07 and 0 behind it. The last commit carrying code is
-`4a011766`; anything after it is plan documentation. Confirm with
-`git log --oneline -3` rather than trusting a SHA written here — a handover that
-names its own head is stale the moment it is committed.
+(`0b3273c5`) on 2026-08-07 and 0 behind it. Do not trust a SHA written here for
+where the work stands; derive it:
+
+```text
+git log --oneline origin/main..HEAD | head -3          # where the branch is
+git log --oneline origin/main..HEAD -- lib/ | head -1  # last commit carrying code
+```
+
+A handover that names its own head is stale the moment it is committed, and this
+one was already wrong twice from trying.
 Gates: `mix precommit` green (5750 root, 72 viewer, 36 launcher); docs gate
 green; `mix dialyzer` and `MIX_ENV=test mix dialyzer` both at 0 errors
 PR: not opened
