@@ -69,9 +69,11 @@ mix compile
 ```
 
 Run `./scripts/install-hooks.sh` once per clone. Linked worktrees share the
-clone's installed hook wrappers, so they do not need to reinstall them. The
-first Dialyzer run in a worktree builds its local `priv/plts` cache and is
-expected to be slower.
+clone's installed hook wrappers, so they do not need to reinstall them.
+Outside CI, the Dialyzer core PLT lives under `~/.cache/ptc_runner/` and is
+shared across every worktree, so only the very first Dialyzer run on a
+machine builds it from scratch; each worktree still keeps its own
+project-specific `priv/plts/project.plt`.
 
 If a timing-sensitive test fails only in the full suite, rerun the exact file
 and line reported by ExUnit. Do not bypass the hook; use
