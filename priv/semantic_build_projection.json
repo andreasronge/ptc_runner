@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "c55e1a801b8b2626ddf8af03073e9f2fc8f71bcd3bcf66574f9aecfd3015d9aa",
+  "source_closure_hash": "56a2279e498bdc4f74d1dce449f7024e9befaf3a86d8855df9c003b843036703",
   "sources": [
     {
       "bytes": 870,
@@ -452,9 +452,9 @@
       "sha256": "0c5aa66c084d3c4bfab77976b8aee02fd97c0850b85c83206e2620f2cf00f312"
     },
     {
-      "bytes": 16860,
+      "bytes": 17900,
       "path": "lib/ptc_runner/kernel/local_preflight.ex",
-      "sha256": "29ed48c386e8fe8b4bde423ee1d381fa6506f3fa723c2a3b3e7eb09977f98a10"
+      "sha256": "763ccee857b2477828aeb0a084a18b8e9671e359107e58c08f4595399d368953"
     },
     {
       "bytes": 5154,

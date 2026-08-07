@@ -1,15 +1,19 @@
 defmodule PtcRunner.Kernel.LocalPreflight do
   @moduledoc false
 
-  # Phase-7 audited-local execution, shared by every command that reaches it.
+  # Local declaration checks, on both sides of the phase-8 marker.
   #
-  # This is the only place a `:local_preflight` implementation callback runs. It
-  # executes before the phase-8 marker and enables no provider activity: a
-  # shipped audited-local check may inspect decoded configuration and loaded
-  # adapter or executable availability, but may not resolve a credential, start
-  # an application, process, or port, contact a provider, or perform network
-  # work. Reaching a host installation is a process-free decrypt of the sealed
-  # payload, not an activation.
+  # `run/4` is the only place an `:audited_local` callback runs. It executes
+  # before the marker and enables no provider activity: a shipped audited-local
+  # check may inspect decoded configuration and loaded adapter or executable
+  # availability, but may not resolve a credential, start an application,
+  # process, or port, contact a provider, or perform network work. Reaching a
+  # host installation is a process-free decrypt of the sealed payload, not an
+  # activation.
+  #
+  # `run_unverified/4` is the only place an `:unverified` callback runs, and it
+  # is past the marker where none of those limits apply. The two steps are
+  # described together under "The two steps" below.
   #
   # Applicability is derived here rather than supplied. Every selected
   # occurrence whose sealed descriptor declares `:audited_local` is checked, in
