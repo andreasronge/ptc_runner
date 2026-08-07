@@ -200,20 +200,18 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   def check(_prepared, _authority, _provider_execution, _notifier),
     do: {:error, :invalid_prepared_run}
 
-  @doc """
-  Runs the connectivity operation for one sealed preparation.
-
-  Internal only. `doctor --connect` is not dispatched from `CommandEngine` yet,
-  and must not be until the transport bounds every response the connectivity
-  modes can pull in. Connectivity answers for selected occurrences, so unlike a
-  run it has no provider-free form.
-
-  It takes no authorization notifier, and refuses an execution carrying
-  authorization targets, because a health check must never open an interactive
-  authorization or ask a human for anything. The refusal is deliberate rather
-  than a silent downgrade to the non-interactive path: a caller that asked for
-  authorization and got a check that skipped it would be told the wrong thing.
-  """
+  # Internal only, like its `execute/4` and `check/4` neighbours.
+  # `doctor --connect` is not dispatched from `CommandEngine` yet, and must not
+  # be until the transport bounds every response the connectivity modes can pull
+  # in. Connectivity answers for selected occurrences, so unlike a run it has no
+  # provider-free form.
+  #
+  # It takes no authorization notifier and refuses an execution carrying
+  # authorization targets, because a health check must never open an interactive
+  # authorization or ask a human for anything. The refusal is deliberate rather
+  # than a silent downgrade to the non-interactive path: a caller that asked for
+  # authorization and got a check that skipped it would be told the wrong thing.
+  @doc false
   @spec connect(PreparedRun.t(), PublicationAuthority.t(), ProviderExecution.t()) ::
           {:ok, ConnectivityResult.t()}
           | {:error,
