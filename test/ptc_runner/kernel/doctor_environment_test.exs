@@ -18,7 +18,7 @@ defmodule PtcRunner.Kernel.DoctorEnvironmentTest do
     assert facts.viewer in [:available, :unavailable]
 
     {:ok, catalog} = InstallationCatalog.new()
-    assert {:ok, rows} = DoctorPlan.new(catalog, nil, facts)
+    assert {:ok, rows} = DoctorPlan.new(catalog, nil, facts, :default)
     assert {:ok, _checks} = DoctorPlan.checks(rows)
   end
 

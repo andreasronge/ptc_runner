@@ -7,6 +7,8 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.Deadline
+  alias PtcRunner.Kernel.DoctorEnvironment
+  alias PtcRunner.Kernel.DoctorPlan
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
@@ -330,6 +332,73 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
 
     assert ConnectivityResult.bound_to?(result, prepared, catalog)
     assert Enum.all?(entries, &(&1.outcome == :skipped))
+  end
+
+  test "a completed connect operation settles every row the contract demands" do
+    # The whole slice end to end: a real operation runs each kind of active work
+    # a custom declaration can ask for — an active selection validator, an
+    # unverified local check, credential resolution, a probe, and an
+    # acquisition — and the plan derived before it is settled from what it
+    # returned. `CommandContract` is the judge, because connect admits a success
+    # only when the application row is `pass/valid` and *every* provider row is
+    # `pass`, so a row this settlement missed cannot hide.
+    #
+    # The audited-local check is the one kind absent here, because only a
+    # host-bound shipped source may declare it. `DoctorPlanTest` covers its row
+    # in both modes, and the phase-7 step has its own regressions.
+    %{prepared: prepared, execution: execution, catalog: catalog} =
+      fixture(%{
+        "keyed" => [
+          destination: :workflow,
+          credential_names: ["keyed-key"],
+          selection_validation: :active,
+          validator: :fast
+        ],
+        "probed" => [
+          destination: :workflow,
+          connectivity_mode: :probe,
+          local_preflight: :unverified
+        ],
+        "built" => [destination: :mission, connectivity_mode: :acquisition]
+      })
+
+    # The plan is derived while the preparation is still claimed, exactly as
+    # default doctor derives its own before phase 7 runs.
+    environment = DoctorEnvironment.facts()
+    assert {:ok, rows} = DoctorPlan.new(catalog, prepared, environment, :connect)
+    assert {:ok, result} = connect(prepared, execution)
+
+    # Settlement happens after the operation consumed the preparation, which is
+    # why the binding is checked against the seal rather than the lifecycle.
+    refute PreparedRun.valid?(prepared)
+    assert {:ok, settled} = DoctorPlan.settle_connect(rows, result, prepared, catalog)
+    assert {:ok, checks} = DoctorPlan.checks(settled)
+
+    outcome = %{"checks" => checks, "provider_activity" => true}
+    assert CommandContract.valid_success_result?(:doctor, outcome)
+    assert CommandContract.valid_success_semantics?(:doctor, outcome)
+
+    assert Enum.map(checks, & &1["name"]) == [
+             "runtime",
+             "application",
+             "viewer",
+             "provider/built/local",
+             "provider/built/selection",
+             "provider/built/connectivity",
+             "provider/keyed/local",
+             "provider/keyed/selection",
+             "provider/keyed/credentials",
+             "provider/probed/local",
+             "provider/probed/selection",
+             "provider/probed/connectivity"
+           ]
+
+    # Each pending row was settled by work that actually ran.
+    assert_received {:validated, "keyed"}
+    assert_received {:resolved_credentials, ["keyed-key"]}
+    assert_received {:local_checked, "probed"}
+    assert_received {:probe_invoked, "probed"}
+    assert_received {:acquired, "built"}
   end
 
   test "a selection needing no connectivity still settles its active selection row" do

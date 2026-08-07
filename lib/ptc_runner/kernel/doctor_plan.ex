@@ -1,28 +1,52 @@
 defmodule PtcRunner.Kernel.DoctorPlan do
   @moduledoc false
 
-  # Deterministic default-doctor plan.
+  # Deterministic doctor plan, in either mode.
   #
   # Every row comes from sealed declarations and the two supplied environment
   # facts. Nothing here activates a provider, resolves a credential, acquires a
   # resource, or opens a connection, so the plan is identical whether or not the
-  # command later executes an audited-local check.
+  # command later executes anything.
+  #
+  # The mode decides only which rows arrive unsettled. Default doctor performs
+  # no provider activity, so every active row is settled inertly as
+  # `requires_connect` or `active_check_required`, and the one step it does run
+  # — the audited-local phase-7 check — leaves its rows pending.
+  # `doctor --connect` runs all of them, so each becomes pending instead and is
+  # settled from what the connect operation returned.
   #
   # The closed result contract has no failing provider row in any mode, so this
   # module cannot express one. A check that fails must fail the whole command
   # with its catalogued diagnostic instead.
 
+  alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
 
   @operations [:local, :selection, :credentials, :authorization, :connectivity]
+  @modes [:default, :connect]
 
+  # Every code a connect plan cannot hold: the two that say default doctor
+  # declined the work rather than doing it, and the two an application-less plan
+  # reports, which connect has no form for. Together with the `:audited_local`
+  # marker they are all of what `new/4` can construct and `:connect` cannot, so
+  # refusing them lets the connect settlement recognise any plan derived under
+  # the other mode.
+  @deferred [
+    {:skipped, :requires_connect},
+    {:skipped, :active_check_required},
+    {:skipped, :application_required},
+    {:skipped, :not_requested}
+  ]
+
+  @type mode :: :default | :connect
   @type operation :: :local | :selection | :credentials | :authorization | :connectivity
   @type settled :: {:pass | :warn | :skipped, atom()}
   @type row ::
           %{name: binary(), outcome: settled()}
           | %{name: binary(), alias: binary(), operation: operation(), outcome: settled()}
           | %{name: binary(), alias: binary(), operation: :local, outcome: :audited_local}
+          | %{name: binary(), alias: binary(), operation: operation(), outcome: :pending}
   @type environment :: %{
           runtime: :supported | :unsupported,
           viewer: :available | :unavailable
@@ -30,31 +54,41 @@ defmodule PtcRunner.Kernel.DoctorPlan do
   @type t :: [row()]
 
   @doc """
-  Derives the ordered default-doctor rows.
+  Derives the ordered doctor rows for one mode.
 
   `prepared` is `nil` when no application was requested. Its presence decides
   both the alias set — installed aliases without one, selected aliases with one
   — and whether a selection row applies at all. A prepared run must be bound to
   this exact catalog, on the same terms as
   `PtcRunner.Kernel.ProviderExecution.bound_to_prepared?/2`.
+
+  Connect requires one: the closed contract admits a connect success only when
+  the application row is `pass/valid`, so a connect plan without an application
+  could not be projected at all.
+
+  Neither mode takes a default, because the two produce different unsettled
+  rows from the same declarations and a caller that did not say which it wanted
+  would get one of them by accident.
   """
-  @spec new(InstallationCatalog.t(), PreparedRun.t() | nil, environment()) ::
+  @spec new(InstallationCatalog.t(), PreparedRun.t() | nil, environment(), mode()) ::
           {:ok, t()} | {:error, :invalid_doctor_plan}
-  def new(%InstallationCatalog{} = catalog, prepared, environment) do
+  def new(%InstallationCatalog{} = catalog, prepared, environment, mode) when mode in @modes do
     with true <- InstallationCatalog.valid?(catalog),
          true <- is_nil(prepared) or PreparedRun.valid?(prepared),
+         true <- mode == :default or not is_nil(prepared),
          true <- bound_to_catalog?(prepared, catalog),
          {:ok, runtime} <- environment_row("runtime", environment, :runtime, runtime_codes()),
          {:ok, viewer} <- environment_row("viewer", environment, :viewer, viewer_codes()),
          {:ok, aliases} <- aliases(catalog, prepared) do
       {:ok,
-       [runtime, application_row(prepared), viewer] ++ provider_rows(catalog, aliases, prepared)}
+       [runtime, application_row(prepared), viewer] ++
+         provider_rows(catalog, aliases, prepared, mode)}
     else
       _invalid -> {:error, :invalid_doctor_plan}
     end
   end
 
-  def new(_catalog, _prepared, _environment), do: {:error, :invalid_doctor_plan}
+  def new(_catalog, _prepared, _environment, _mode), do: {:error, :invalid_doctor_plan}
 
   # Every outcome the contract has a code for. Projection validates against this
   # rather than trusting its producers, so the rule that no provider row can
@@ -83,11 +117,6 @@ defmodule PtcRunner.Kernel.DoctorPlan do
   end
 
   def checks(_rows), do: {:error, :invalid_doctor_plan}
-
-  @doc "Returns the rows an audited-local phase-7 check must settle, in order."
-  @spec pending(t()) :: [row()]
-  def pending(rows) when is_list(rows),
-    do: Enum.filter(rows, &match?(%{outcome: :audited_local}, &1))
 
   @doc "Settles one pending row with an outcome the closed contract allows."
   @spec settle(t(), binary(), settled()) :: {:ok, t()} | {:error, :invalid_doctor_plan}
@@ -125,6 +154,126 @@ defmodule PtcRunner.Kernel.DoctorPlan do
   end
 
   def settle_pending(_rows), do: {:error, :invalid_doctor_plan}
+
+  @doc """
+  Settles a connect-mode plan from the connect operation's sealed result.
+
+  There is one settlement step in this mode, because there is one operation.
+  `PtcRunner.Kernel.RunCoordinator.connect/3` fails closed on the first
+  audited-local check, active selection validator, unverified check, credential
+  resolution, or connectivity attempt that does not succeed, so a result
+  existing at all is what settles every row but the connectivity ones.
+
+  Those are settled from the entries themselves rather than from the same
+  success, because the plan reports one row per alias while the operation
+  answers per occurrence: an alias passes only when every occurrence of it was
+  reached. `ConnectivityResult.bound_to?/3` is checked first, since alias names
+  are not identity — a result from another catalog installing the same aliases
+  would otherwise settle rows for declarations nothing touched.
+
+  An authorization row is never settled. Its own contract has no settling path
+  in V1: the row demands `pass/available` while standalone OAuth execution is
+  disabled, and `PtcRunner.Kernel.ProviderExecution` refuses a selected OAuth
+  occurrence before any provider work. Reaching one here means an operation
+  reported success for a selection that cannot succeed, so this fails closed
+  rather than claiming an authorization nothing performed.
+
+  The rows are trusted to have come from `new/4` with the same trio, on the same
+  terms as `settle_pending/1` — a plan carries no seal of its own. What is
+  checked is that its provider aliases are the preparation's selected ones and
+  that its pending connectivity rows are exactly the aliases the result reports
+  reached, so a plan derived from another application or another set of
+  connectivity modes is refused rather than settled.
+  """
+  @spec settle_connect(t(), ConnectivityResult.t(), PreparedRun.t(), InstallationCatalog.t()) ::
+          {:ok, t()} | {:error, :invalid_doctor_plan}
+  def settle_connect(rows, result, prepared, catalog) when is_list(rows) do
+    with true <- ConnectivityResult.bound_to?(result, prepared, catalog),
+         true <- plan_aliases(rows) == MapSet.new(prepared.provider_declarations, & &1.name),
+         {:ok, pending_connectivity} <- pending_connectivity_aliases(rows),
+         true <- pending_connectivity == reached_aliases(ConnectivityResult.entries(result)) do
+      settle_connect_rows(rows)
+    else
+      _invalid -> {:error, :invalid_doctor_plan}
+    end
+  end
+
+  def settle_connect(_rows, _result, _prepared, _catalog), do: {:error, :invalid_doctor_plan}
+
+  # The aliases the result reports as reached, and only those. An occurrence a
+  # `:none` declaration skipped contributes nothing, and an alias holding both a
+  # reached and a skipped occurrence is reported as neither, so it can never
+  # cover a connectivity row. A validated result cannot mix them today — the
+  # outcome must match the mode its sealed descriptor declares — but a settled
+  # row must not depend on that holding elsewhere.
+  defp reached_aliases(entries) do
+    {reached, skipped} =
+      Enum.reduce(entries, {MapSet.new(), MapSet.new()}, fn entry, {reached, skipped} ->
+        case entry.outcome do
+          :reachable -> {MapSet.put(reached, entry.name), skipped}
+          _other -> {reached, MapSet.put(skipped, entry.name)}
+        end
+      end)
+
+    MapSet.difference(reached, skipped)
+  end
+
+  defp plan_aliases(rows), do: for(%{alias: name} <- rows, into: MapSet.new(), do: name)
+
+  # A connect plan leaves every connectivity row pending, because only the
+  # operation's own result can settle one. A settled connectivity row here is a
+  # plan from the other mode, and settling around it would project a connect
+  # success whose connectivity rows still said `requires_connect`.
+  defp pending_connectivity_aliases(rows) do
+    Enum.reduce_while(rows, {:ok, MapSet.new()}, fn
+      %{operation: :connectivity, alias: name, outcome: :pending}, {:ok, names} ->
+        {:cont, {:ok, MapSet.put(names, name)}}
+
+      %{operation: :connectivity}, _accumulated ->
+        {:halt, :error}
+
+      _row, accumulated ->
+        {:cont, accumulated}
+    end)
+  end
+
+  defp settle_connect_rows(rows) do
+    rows
+    |> Enum.reduce_while({:ok, []}, fn row, {:ok, settled} ->
+      case settle_connect_row(row) do
+        {:ok, row} -> {:cont, {:ok, [row | settled]}}
+        :error -> {:halt, {:error, :invalid_doctor_plan}}
+      end
+    end)
+    |> case do
+      {:ok, settled} -> {:ok, Enum.reverse(settled)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp settle_connect_row(%{outcome: :pending, operation: :authorization}), do: :error
+
+  defp settle_connect_row(%{outcome: :pending} = row),
+    do: {:ok, %{row | outcome: {:pass, :available}}}
+
+  # Refusing the codes themselves is what makes the mode check total rather than
+  # partial. The connectivity guard above catches a deferred connectivity row,
+  # but a deferred credentials or authorization row has no connectivity row to
+  # be caught by, and an application-less plan has neither; either would
+  # otherwise settle into a check list that fails only at the closed result
+  # contract, as an internal error rather than as this refusal.
+  defp settle_connect_row(%{outcome: outcome}) when outcome in @deferred, do: :error
+
+  defp settle_connect_row(%{outcome: {status, code}} = row)
+       when is_atom(status) and is_atom(code),
+       do: {:ok, row}
+
+  # `:audited_local` reaches here only from a default-mode plan, whose rows this
+  # step has no evidence for: the audited-local check it names ran under a
+  # different settlement.
+  defp settle_connect_row(_row), do: :error
+
+  defp pending(rows), do: Enum.filter(rows, &match?(%{outcome: :audited_local}, &1))
 
   defp permitted?(%{outcome: outcome}), do: outcome in @permitted
   defp permitted?(_row), do: false
@@ -188,12 +337,12 @@ defmodule PtcRunner.Kernel.DoctorPlan do
       else: {:error, :invalid_doctor_plan}
   end
 
-  defp provider_rows(catalog, aliases, prepared) do
+  defp provider_rows(catalog, aliases, prepared, mode) do
     Enum.flat_map(aliases, fn name ->
       descriptor = Map.fetch!(catalog.descriptors, name)
 
       Enum.flat_map(@operations, fn operation ->
-        case outcome(operation, descriptor, prepared) do
+        case outcome(operation, descriptor, prepared, mode) do
           nil -> []
           outcome -> [provider_row(name, operation, outcome)]
         end
@@ -211,33 +360,51 @@ defmodule PtcRunner.Kernel.DoctorPlan do
   end
 
   # Every group starts with `local`, which is what makes an alias visible at all.
-  defp outcome(:local, _descriptor, nil), do: {:skipped, :application_required}
-  defp outcome(:local, %{local_preflight: :none}, _prepared), do: {:pass, :available}
-  defp outcome(:local, %{local_preflight: :audited_local}, _prepared), do: :audited_local
+  # Neither local mode reaches this without an application, and connect requires
+  # one, so the `nil` clause belongs to default doctor's installed surface alone.
+  defp outcome(:local, _descriptor, nil, _mode), do: {:skipped, :application_required}
+  defp outcome(:local, %{local_preflight: :none}, _prepared, _mode), do: {:pass, :available}
 
-  defp outcome(:local, %{local_preflight: :unverified}, _prepared),
+  # Both local modes are pending under connect, which runs the audited-local
+  # step in phase 7 and the unverified one after the phase-8 marker. Under
+  # default doctor only the first runs, and the second says so.
+  defp outcome(:local, %{local_preflight: :audited_local}, _prepared, :default),
+    do: :audited_local
+
+  defp outcome(:local, %{local_preflight: :unverified}, _prepared, :default),
     do: {:skipped, :active_check_required}
+
+  defp outcome(:local, %{local_preflight: mode}, _prepared, :connect)
+       when mode in [:audited_local, :unverified],
+       do: :pending
 
   # A selection only exists once an application named one, so this row is absent
   # rather than skipped when no application was requested.
-  defp outcome(:selection, _descriptor, nil), do: nil
+  defp outcome(:selection, _descriptor, nil, _mode), do: nil
 
-  defp outcome(:selection, %{selection_validation: :declarative}, _prepared),
+  defp outcome(:selection, %{selection_validation: :declarative}, _prepared, _mode),
     do: {:pass, :declarative}
 
-  defp outcome(:selection, %{selection_validation: :active}, _prepared),
+  defp outcome(:selection, %{selection_validation: :active}, _prepared, :default),
     do: {:skipped, :active_check_required}
 
-  # The remaining operations are active work by definition. They appear only
-  # when the declaration says they apply, and default doctor always defers them.
-  defp outcome(:credentials, %{credential_names: []}, _prepared), do: nil
-  defp outcome(:credentials, _descriptor, _prepared), do: {:skipped, :requires_connect}
+  defp outcome(:selection, %{selection_validation: :active}, _prepared, :connect), do: :pending
 
-  defp outcome(:authorization, %{authorization_mode: :oauth}, _prepared),
+  # The remaining operations are active work by definition. They appear only
+  # when the declaration says they apply. Default doctor defers all of them;
+  # connect settles each from what its operation returned, except authorization,
+  # which has no settling path in V1 at all.
+  defp outcome(:credentials, %{credential_names: []}, _prepared, _mode), do: nil
+  defp outcome(:credentials, _descriptor, _prepared, :default), do: {:skipped, :requires_connect}
+  defp outcome(:credentials, _descriptor, _prepared, :connect), do: :pending
+
+  defp outcome(:authorization, %{authorization_mode: :oauth}, _prepared, :default),
     do: {:skipped, :requires_connect}
 
-  defp outcome(:authorization, _descriptor, _prepared), do: nil
+  defp outcome(:authorization, %{authorization_mode: :oauth}, _prepared, :connect), do: :pending
+  defp outcome(:authorization, _descriptor, _prepared, _mode), do: nil
 
-  defp outcome(:connectivity, %{connectivity_mode: :none}, _prepared), do: nil
-  defp outcome(:connectivity, _descriptor, _prepared), do: {:skipped, :requires_connect}
+  defp outcome(:connectivity, %{connectivity_mode: :none}, _prepared, _mode), do: nil
+  defp outcome(:connectivity, _descriptor, _prepared, :default), do: {:skipped, :requires_connect}
+  defp outcome(:connectivity, _descriptor, _prepared, :connect), do: :pending
 end

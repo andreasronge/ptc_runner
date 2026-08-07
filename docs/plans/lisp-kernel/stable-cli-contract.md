@@ -1329,12 +1329,52 @@ fine; temporarily reachable and unsafe is not.
    execution past it on purpose. Both stay as fail-closed branches covered by
    reasoning, while the deterministic regressions prove the connectivity clock
    is the one that bounds work inside the operation;
-3. add connect-mode planning to `DoctorPlan`, with frontend dispatch still
-   disabled. Review of the connectivity modes found three gaps the operation
-   cannot close on its own. None is a regression — `authorization_required` is
-   constructed nowhere in the tree, and a bare acquisition reason is what an
-   ordinary run already propagates — but each becomes a wrong public answer the
-   moment the command is reachable, so all three close before step 5:
+3. (complete) add connect-mode planning to `DoctorPlan`, with frontend dispatch
+   still disabled. Review of the connectivity modes found three gaps the
+   operation cannot close on its own. None was a regression —
+   `authorization_required` was constructed nowhere in the tree, and a bare
+   acquisition reason is what an ordinary run already propagates — but each
+   becomes a wrong public answer the moment the command is reachable, so all
+   three closed before step 5.
+
+   `DoctorPlan.new/4` takes the mode and neither mode has a default, because
+   the two derive different unsettled rows from the same declarations. Connect
+   leaves pending what default doctor settles as `requires_connect` or
+   `active_check_required`, plus the audited-local rows default doctor also
+   leaves pending; connect runs all of them, so one marker covers them all
+   where default doctor's `:audited_local` names the single step that settles
+   it. Connect also requires an application, because the closed contract admits
+   a connect success only with a `pass/valid` application row.
+
+   `settle_connect/4` is the one settlement, because there is one operation.
+   The operation fails closed on the first check, validator, resolution, or
+   probe that does not succeed, so a result existing at all settles every row
+   but the connectivity ones; those come from the entries, because the plan
+   reports per alias while the result answers per occurrence. It consumes
+   `ConnectivityResult.bound_to?/3` and `entries/1`, which existed with tests
+   and no caller until now, and it checks the binding against the seal rather
+   than the lifecycle — the preparation is already consumed by then, which is
+   what `PreparedRun.sealed?/1` is for. `ConnectivityResult.outcomes/0` had no
+   consumer even after this and is deleted.
+
+   Four refusals rather than a settlement, each with its own regression: a
+   result not bound to this preparation and catalog; a plan whose provider
+   aliases are not the preparation's selected ones; a pending connectivity row
+   the result does not report reached, or a reached alias the plan has no row
+   for; and any row carrying a marker or code only the other mode produces. The
+   last covers every outcome `new/4` can construct that connect cannot — the
+   two deferrals, the audited-local marker, and the two an application-less
+   plan reports — because the earlier checks do not reach them: a deferred
+   credentials row has no connectivity row to be caught by, and an
+   application-less surface can have an alias set matching a real selection's.
+   Without it such a plan settles and fails only at the closed result contract,
+   as an internal error rather than as this refusal. What is deliberately *not*
+   checked is that the rows came from `new/4` with the same trio: a plan
+   carries no seal of its own, exactly as `settle_pending/1` already assumes.
+
+   An authorization row is never settled. Its contract has no settling path in
+   V1, and the schema would accept `pass/available` for it, so this refusal is
+   the only thing standing between a wrong claim and a rendered row.
 
    - **credentials for a `:none` occurrence.** The credentials row exists
      whenever `credential_names` is non-empty, independent of connectivity mode,

@@ -256,7 +256,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   end
 
   defp doctor_plan(catalog, prepared),
-    do: DoctorPlan.new(catalog, prepared, DoctorEnvironment.facts())
+    do: DoctorPlan.new(catalog, prepared, DoctorEnvironment.facts(), :default)
 
   defp doctor_services(nil), do: ProviderRuntimeServices.new([])
   defp doctor_services(host), do: HostInstallation.runtime_services(host)

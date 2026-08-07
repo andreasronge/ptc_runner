@@ -118,8 +118,7 @@ defmodule PtcRunner.Kernel.ConnectivityResultTest do
     refute ConnectivityResult.bound_to?(result, forged, catalog)
   end
 
-  test "the closed outcome vocabulary is what the plan will settle from" do
-    assert ConnectivityResult.outcomes() == [:skipped, :reachable]
+  test "a value that is not a result at all is refused rather than inspected" do
     refute ConnectivityResult.valid?(:not_a_result)
     refute ConnectivityResult.bound_to?(:not_a_result, nil, nil)
   end

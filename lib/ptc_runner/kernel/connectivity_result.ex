@@ -64,10 +64,6 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
           attestation: binary() | nil
         }
 
-  @spec outcomes() :: [outcome()]
-  @doc false
-  def outcomes, do: @outcomes
-
   @spec new(PreparedRun.t(), InstallationCatalog.t(), [entry()]) ::
           {:ok, t()} | {:error, :invalid_connectivity_result}
   @doc false
