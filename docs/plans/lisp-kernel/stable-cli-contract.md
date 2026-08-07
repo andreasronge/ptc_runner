@@ -1353,22 +1353,66 @@ fine; temporarily reachable and unsafe is not.
      active command, so it is its own architectural slice built to an explicit
      plan rather than folded into neighbouring work:
 
-     1. required credentials are derived from the sealed selected declarations,
-        never from callback reports — the same rule that decides the acquisition
-        closure, for the same reason;
-     2. resolution happens after registry and OAuth context setup and before any
-        provider callback;
-     3. it happens once, with deterministic alias and occurrence attribution;
-     4. the resolved values are passed into acquisition and probes, and no
-        downstream code calls the host resolver again;
-     5. a missing credential fails before prepare, preflight, probe, or
-        acquisition rather than partway through one;
-     6. regressions prove the run and check behaviour changed intentionally —
-        a credential failure now surfaces earlier than it did — and that a
-        doctor-connect credentials row cannot pass without resolution; and
-     7. a regression proves the shipped LLM probe consumes the pre-resolved
-        credential instead of resolving its own, since it resolves one today
-        inside `prepare_llm_connectivity_probe`;
+     1. (complete) required credentials are derived from the sealed selected
+        declarations, never from callback reports — the same rule that decides
+        the acquisition closure, for the same reason;
+     2. (complete) resolution happens after registry and OAuth context setup and
+        before any provider callback;
+     3. (complete) it happens once, with deterministic alias attribution.
+        Attribution is per alias and not per occurrence, because
+        `subject_occurrence_policy(:active_preflight, :credential_unavailable, _)`
+        is `:forbidden` — a credential diagnostic cannot carry an occurrence at
+        all. Nor can it name the credential: the resolver answers for the batch.
+        The alias reported is the first in manifest order that declares a
+        credential, replacing an `Enum.find(providers, hd(providers), ...)` that
+        depended on preparation order;
+     4. (complete) the resolved values are passed into acquisition and probes,
+        and no downstream code calls the host resolver again;
+     5. (complete) a missing credential fails before prepare, preflight, probe,
+        or acquisition rather than partway through one;
+     6. (complete) regressions prove the run and check behaviour changed
+        intentionally — a credential failure now surfaces earlier than it did —
+        and that a doctor-connect credentials row cannot pass without
+        resolution; and
+     7. (complete) a regression proves the shipped LLM probe consumes the
+        pre-resolved credential instead of resolving its own. It is handed a
+        value that differs from the host document's literal, so a probe that
+        resolved its own would produce the other one.
+
+     Two consequences were not visible from the seven points and are recorded
+     because they changed code beyond them.
+
+     The supplied union became the ordinary run path's declaration guard, and
+     its limit is recorded rather than hidden. The handover noted that
+     `acquire_targets/6` compares every preparation with its sealed declaration
+     through `declarations_honored/2` while `acquire/5` does not. The run path
+     now has a bound it did not have: the union is sealed and whole-selection,
+     so a name no selected declaration required can never appear in it, and
+     acquisition refuses with `provider_declaration_mismatch` before preflight
+     rather than resolving it.
+
+     That bound is the union, not the occurrence, and an independent review was
+     right to say so. Within one selection, a preparation can still report a
+     credential a *different* selected provider declared and be served it,
+     because `acquire/6` has no sealed per-occurrence declarations to compare
+     against. Only `acquire_targets/7`, which is handed a plan, and
+     `ConnectivityProbe`, which subsets from the sealed descriptor, are
+     per-occurrence tight. This is left open deliberately: the fix is to give
+     the ordinary path the same sealed declarations, which is the
+     `acquire/6`–`acquire_targets/7` unification and its own simplification
+     slice, not a third check bolted on here. The exposure is bounded by a trust
+     boundary this plan already records — manifest input selects installed
+     aliases and never registers an implementation, so reaching it requires an
+     in-process embedder-assembled catalog with a custom builder, the same case
+     the audited-local trust rules record as accepted.
+
+     Direct embedding keeps resolving inside acquisition, and that is not a
+     second pipeline. It has no sealed declarations to derive a union from
+     before preparation and no operation deadline to bound one, which is the
+     synchronous contract `ProviderRegistry` already documents for it. What
+     stops the pipeline re-growing is that the branch is fenced: an active
+     command — one whose session carries an operation deadline — reaching it is
+     refused rather than served;
    - **a selected OAuth occurrence.** The contract returns
      `active_preflight/authorization_required` after the marker and without
      opening an interaction. Nothing constructs that code today, so an OAuth

@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderAcquisition
   alias PtcRunner.Kernel.ProviderActiveSession
+  alias PtcRunner.Kernel.ProviderCredentials
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
@@ -320,29 +321,91 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
+  # Phase-8 step 5, and the one place any active command resolves an ordinary
+  # credential. It sits here rather than inside either branch because the branch
+  # is exactly what must not decide it: acquisition answers for the closure it
+  # acquires, and a `:none` occurrence declaring a credential is inside no
+  # closure, so a connectivity-local remainder pass would be a second credential
+  # pipeline with a different derivation rule.
+  #
+  # Reached from both the ordinary and the post-authorization branch, so the
+  # registry and the OAuth context already exist and no provider callback below
+  # this line has run yet.
+  defp complete(prepared, authority, opened_sinks, registry, session, execution, operation) do
+    with {:ok, credentials} <-
+           ProviderCredentials.resolve(prepared, execution.catalog, registry, session) do
+      complete(
+        prepared,
+        authority,
+        opened_sinks,
+        registry,
+        session,
+        execution,
+        operation,
+        credentials
+      )
+    end
+  end
+
   # Every step above this one is shared by a run, a check, and connectivity: the
   # same activity marker, session, registry, credentials, OAuth, and cleanup
   # ownership. Only the completion differs, so none of them can drift into its
   # own provider lifecycle.
-  defp complete(prepared, authority, opened_sinks, registry, session, _execution, operation)
+  defp complete(
+         prepared,
+         authority,
+         opened_sinks,
+         registry,
+         session,
+         _execution,
+         operation,
+         credentials
+       )
        when operation in [:run, :check],
-       do: build_and_complete(prepared, authority, opened_sinks, registry, session, operation)
+       do:
+         build_and_complete(
+           prepared,
+           authority,
+           opened_sinks,
+           registry,
+           session,
+           operation,
+           credentials
+         )
 
   # Connectivity is the one completion that does not build a run config. A run
   # and a check both acquire every selected provider to reach their result;
   # connectivity decides per occurrence what its declaration asks for, so
   # building one here would acquire providers a `:none` occurrence never wanted.
-  defp complete(prepared, _authority, _opened_sinks, registry, session, execution, :connect),
-    do: complete_connectivity(prepared, execution, registry, session)
+  defp complete(
+         prepared,
+         _authority,
+         _opened_sinks,
+         registry,
+         session,
+         execution,
+         :connect,
+         credentials
+       ),
+       do: complete_connectivity(prepared, execution, registry, session, credentials)
 
-  defp build_and_complete(prepared, authority, opened_sinks, registry, session, operation) do
+  defp build_and_complete(
+         prepared,
+         authority,
+         opened_sinks,
+         registry,
+         session,
+         operation,
+         credentials
+       ) do
     with {:ok, built} <-
            RunBuilder.build_active_owned(
              prepared,
              registry,
              session,
              authority,
-             opened_sinks
+             opened_sinks,
+             credentials
            ) do
       complete_operation(built, operation)
     end
@@ -366,15 +429,24 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # from sealed declarations, and are sealed into a result only once every
   # execution step above has succeeded, so no entry can report an occurrence
   # nothing reached.
-  defp complete_connectivity(prepared, execution, registry, session) do
+  defp complete_connectivity(prepared, execution, registry, session, credentials) do
     catalog = execution.catalog
 
     with true <- ProviderRegistry.valid?(registry),
          true <- ProviderSession.alive?(session),
          deadline when not is_nil(deadline) <- ProviderSession.run_deadline(session),
          {:ok, entries} <- connectivity_entries(prepared, catalog),
-         :ok <- acquire_connectivity_targets(prepared, catalog, registry, session, entries),
-         :ok <- ConnectivityProbe.run(prepared, catalog, execution.services, deadline),
+         :ok <-
+           acquire_connectivity_targets(
+             prepared,
+             catalog,
+             registry,
+             session,
+             entries,
+             credentials
+           ),
+         :ok <-
+           ConnectivityProbe.run(prepared, catalog, execution.services, deadline, credentials),
          {:ok, result} <- ConnectivityResult.new(prepared, catalog, entries),
          false <- Deadline.expired?(deadline) do
       {:ok, result}
@@ -392,7 +464,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # own. Connectivity publishes nothing, so its artifact preflight has nothing
   # to authorize, and the acquired closure stays on the session's LIFO stack for
   # the ordinary close rather than unwinding through a path of its own.
-  defp acquire_connectivity_targets(prepared, catalog, registry, session, entries) do
+  defp acquire_connectivity_targets(prepared, catalog, registry, session, entries, credentials) do
     case Enum.filter(entries, &(&1.mode == :acquisition)) do
       [] ->
         :ok
@@ -405,7 +477,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
             session,
             Enum.map(targets, &Map.take(&1, [:destination, :index])),
             fn _effective_class -> :ok end,
-            plan
+            plan,
+            credentials
           )
           |> acquisition_result(session)
         end

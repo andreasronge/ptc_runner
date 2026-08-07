@@ -27,6 +27,13 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
   # smaller — including an exact tie — the outcome stays a connectivity-class
   # diagnostic, because this step never consults another operation's clock.
   #
+  # ## Credentials
+  #
+  # A probe is handed the credentials phase-8 step 5 already resolved and never
+  # resolves its own, so one command reads a credential once no matter how many
+  # occurrences need it. Each occurrence receives only the names its own sealed
+  # descriptor declares, on the same least-privilege terms acquisition uses.
+  #
   # ## Failure translation
   #
   # A failure is reported through the closed diagnostic catalog, never as a
@@ -68,14 +75,16 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
           PreparedRun.t(),
           InstallationCatalog.t(),
           ProviderRuntimeServices.t(),
-          Deadline.t()
+          Deadline.t(),
+          %{binary() => binary()}
         ) :: :ok | {:error, CommandDiagnostic.t()}
-  def run(prepared, catalog, services, deadline) do
+  def run(prepared, catalog, services, deadline, credentials) do
     with true <- bound?(prepared, catalog, services),
-         true <- Deadline.valid?(deadline) do
+         true <- Deadline.valid?(deadline),
+         true <- is_map(credentials) and not is_struct(credentials) do
       catalog
       |> applicable(prepared)
-      |> probe_each(prepared, catalog, services, deadline)
+      |> probe_each(prepared, catalog, services, deadline, credentials)
     else
       _invalid -> {:error, internal_diagnostic()}
     end
@@ -103,24 +112,25 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
     end)
   end
 
-  defp probe_each([], _prepared, _catalog, _services, _deadline), do: :ok
+  defp probe_each([], _prepared, _catalog, _services, _deadline, _credentials), do: :ok
 
-  defp probe_each(occurrences, prepared, catalog, services, deadline) do
+  defp probe_each(occurrences, prepared, catalog, services, deadline, credentials) do
     Enum.reduce_while(occurrences, :ok, fn occurrence, :ok ->
-      case probe(occurrence, prepared, catalog, services, deadline) do
+      case probe(occurrence, prepared, catalog, services, deadline, credentials) do
         :ok -> {:cont, :ok}
         {:error, _diagnostic} = error -> {:halt, error}
       end
     end)
   end
 
-  defp probe(occurrence, prepared, catalog, services, deadline) do
+  defp probe(occurrence, prepared, catalog, services, deadline, credentials) do
     limits = prepared.request.package.limits
 
     context = %{
       destination: occurrence.destination,
       limits: limits,
-      doctor_occurrence_deadline_ms: Deadline.expires_at(deadline)
+      doctor_occurrence_deadline_ms: Deadline.expires_at(deadline),
+      credentials: declared_credentials(catalog, occurrence.name, credentials)
     }
 
     with {:ok, callback} <- callback(catalog, occurrence.name),
@@ -139,6 +149,16 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
   # promises to spend, so success is confirmed against the absolute deadline.
   defp settled(deadline) do
     if Deadline.expired?(deadline), do: {:error, timeout_diagnostic()}, else: :ok
+  end
+
+  # Least privilege, and a fail-closed empty map rather than the whole union if
+  # the descriptor is somehow missing: an occurrence that cannot be looked up
+  # here is refused a moment later by `callback/2` anyway.
+  defp declared_credentials(catalog, name, credentials) do
+    case Map.fetch(catalog.descriptors, name) do
+      {:ok, descriptor} -> Map.take(credentials, descriptor.credential_names)
+      :error -> %{}
+    end
   end
 
   defp callback(catalog, name) do

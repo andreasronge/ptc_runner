@@ -25,10 +25,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
   `load_and_build/3` with an empty registry and opens no active session at
   all.
   `PtcRunner.Kernel.ProviderAcquisition` then runs the selected providers'
-  shared preparation, credentials, and dependency-ordered acquisition barrier.
-  Active preparation, preflight, acquisition, and credential resolution are
-  owner-linked and bounded by the session's run deadline; preflight releases
-  share the provider-cleanup budget. Registry builders no longer open a second
+  shared preparation and dependency-ordered acquisition barrier, against the
+  credentials phase-8 step 5 already resolved and `build_active_owned/6`
+  supplies. Active preparation, preflight, and acquisition are owner-linked and
+  bounded by the session's run deadline; preflight releases share the
+  provider-cleanup budget. Registry builders no longer open a second
   provider-session owner.
 
   A provider-bearing build remains owned by its build creator until execution
@@ -322,14 +323,16 @@ defmodule PtcRunner.Kernel.RunBuilder do
           ProviderRegistry.t(),
           ProviderSession.t(),
           PublicationAuthority.t(),
-          map()
+          map(),
+          %{binary() => binary()}
         ) :: {:ok, map()} | {:error, term()}
   def build_active_owned(
         %PreparedRun{} = prepared,
         %ProviderRegistry{} = registry,
         session,
         authority,
-        opened_sinks
+        opened_sinks,
+        credentials
       ) do
     lifecycle_owner = ProviderSession.lifecycle_owner(session)
 
@@ -359,7 +362,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
         registry,
         session,
         authority,
-        opened_sinks
+        opened_sinks,
+        credentials
       )
     else
       {:error, :operation_claimed} ->
@@ -379,7 +383,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  def build_active_owned(_prepared, _registry, _session, _authority, _opened_sinks),
+  def build_active_owned(_prepared, _registry, _session, _authority, _opened_sinks, _credentials),
     do: {:error, :invalid_active_run}
 
   defp validate_registry(registry) do
@@ -526,7 +530,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
              prepared.request.package,
              registry,
              provider_input_class(prepared.request.input.authority),
-             opts
+             opts,
+             nil,
+             nil
            ) do
       build_with_opened_sinks(
         prepared.request,
@@ -544,7 +550,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
          registry,
          session,
          authority,
-         opened_sinks
+         opened_sinks,
+         credentials
        ) do
     with {:ok, providers} <-
            providers(
@@ -552,7 +559,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
              registry,
              provider_input_class(prepared.request.input.authority),
              PublicationAuthority.options(authority),
-             session
+             session,
+             credentials
            ) do
       build_with_opened_sinks(
         prepared.request,
@@ -589,7 +597,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
              request.package,
              registry,
              provider_input_class(request.input.authority),
-             opts
+             opts,
+             nil,
+             nil
            ) do
       build_with_providers(request, bundles, entry_source, providers, opts, failure_mode)
     end
@@ -903,7 +913,10 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end)
   end
 
-  defp providers(manifest, registry, input_class, opts, session \\ nil)
+  # `credentials` is the active command's phase-8 step-5 result and is `nil` only
+  # for a direct embedding build, which opens its own unbounded session and lets
+  # the registry resolve synchronously.
+  defp providers(manifest, registry, input_class, opts, session, credentials)
        when input_class in [:normal, :private_inspection] do
     if provider_free?(manifest.providers) do
       with :ok <- preflight_trace(manifest.events.policy, input_class, opts),
@@ -911,13 +924,13 @@ defmodule PtcRunner.Kernel.RunBuilder do
         {:ok, empty_providers(input_class)}
       end
     else
-      open_provider_session(manifest, registry, input_class, opts, session)
+      open_provider_session(manifest, registry, input_class, opts, session, credentials)
     end
   end
 
-  defp open_provider_session(manifest, registry, input_class, opts, nil) do
+  defp open_provider_session(manifest, registry, input_class, opts, nil, credentials) do
     with {:ok, session} <- ProviderSession.start(manifest.limits) do
-      finish_provider_session(manifest, registry, session, input_class, opts, true)
+      finish_provider_session(manifest, registry, session, input_class, opts, true, credentials)
     end
   end
 
@@ -926,16 +939,32 @@ defmodule PtcRunner.Kernel.RunBuilder do
          registry,
          input_class,
          opts,
-         session
+         session,
+         credentials
        ) do
-    finish_provider_session(manifest, registry, session, input_class, opts, false)
+    finish_provider_session(manifest, registry, session, input_class, opts, false, credentials)
   end
 
-  defp finish_provider_session(manifest, registry, session, input_class, opts, preflight?) do
+  defp finish_provider_session(
+         manifest,
+         registry,
+         session,
+         input_class,
+         opts,
+         preflight?,
+         credentials
+       ) do
     result =
-      ProviderAcquisition.acquire(manifest, registry, session, input_class, fn effective_class ->
-        preflight_provider_artifacts(preflight?, manifest, effective_class, opts)
-      end)
+      ProviderAcquisition.acquire(
+        manifest,
+        registry,
+        session,
+        input_class,
+        fn effective_class ->
+          preflight_provider_artifacts(preflight?, manifest, effective_class, opts)
+        end,
+        credentials
+      )
 
     case result do
       {:ok, _providers} = success ->

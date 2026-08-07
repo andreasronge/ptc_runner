@@ -15,11 +15,18 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   Trusted staged builders enforce a global preparation barrier. Every selected
   provider first performs pure selection checks, then every provider completes
-  non-secret local preflight, then the registry resolves the union of declared
-  credentials once before any provider is acquired. Active command assembly
-  bounds preparation, preflight, acquisition, and credential resolution by its
-  shared run deadline; preflight releases share the provider-cleanup budget.
-  Direct embedding retains the synchronous semantics selected by its caller.
+  non-secret local preflight, and no provider is acquired before the union of
+  declared credentials has been resolved exactly once.
+
+  *When* that resolution happens differs by caller, and the difference is the
+  authority each one has. An active command resolves at phase-8 step 5 from its
+  sealed declarations, before any provider callback runs, and supplies the map;
+  `resolve_credentials/2` is not called again below that point. Direct embedding
+  has no sealed declarations to derive a union from before preparation, so it
+  keeps resolving here, from what preparation reported, with the synchronous
+  semantics its caller selected. Active command assembly bounds preparation,
+  preflight, and acquisition by its shared run deadline; preflight releases
+  share the provider-cleanup budget.
   Preparation also freezes
   the provider's `data_class` and `accepts_data` policy so run assembly can
   reject an incompatible information flow before preflight or credentials.

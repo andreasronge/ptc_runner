@@ -45,6 +45,84 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     refute_received {:probe_invoked, _name}
   end
 
+  test "connect resolves the credential of an occurrence no closure reaches" do
+    # The gap this step closes. `:none` asks for no connectivity work, so no
+    # closure reaches this occurrence and nothing prepares it — yet its
+    # declaration carries a credential, and the connect result contract requires
+    # a `pass/available` credentials row for it. Resolving the remainder inside
+    # the connectivity branch would have given connect a credential path of its
+    # own; resolving the sealed union at step 5 answers for it without one.
+    %{prepared: prepared, execution: execution} =
+      fixture(%{"inert" => [destination: :workflow, credential_names: ["inert-key"]]})
+
+    assert {:ok, _result} = connect(prepared, execution)
+
+    assert_received {:resolved_credentials, ["inert-key"]}
+    refute_received {:builder_invoked, _name}
+    refute_received {:probe_invoked, _name}
+  end
+
+  test "connect fails on an unresolvable credential before any provider work" do
+    # Without this the row could only be settled by claiming a credential nobody
+    # read. The failure is attributed per alias, because the catalogue forbids an
+    # occurrence on this pair.
+    %{prepared: prepared, execution: execution} =
+      fixture(
+        %{"inert" => [destination: :workflow, credential_names: ["inert-key"]]},
+        credential_resolver: fn _names -> {:error, :credential_unavailable} end
+      )
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+    assert diagnostic.phase == :active_preflight
+    assert diagnostic.code == :credential_unavailable
+    assert diagnostic.provider_activity
+    assert diagnostic.subject.name == "inert"
+    assert diagnostic.subject.operation == :credentials
+    assert diagnostic.subject.occurrence == nil
+
+    refute_received {:builder_invoked, _name}
+    refute_received {:probe_invoked, _name}
+  end
+
+  test "a probe is handed the resolved credential rather than resolving its own" do
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "reachable" => [
+          destination: :workflow,
+          connectivity_mode: :probe,
+          credential_names: ["reachable-key"],
+          probe: :ok
+        ]
+      })
+
+    assert {:ok, _result} = connect(prepared, execution)
+
+    assert_received {:resolved_credentials, ["reachable-key"]}
+    assert_received {:probe_credentials, %{"reachable-key" => "connect-secret"}}
+    refute_received {:resolved_credentials, _other}
+  end
+
+  test "a probe receives only the credentials its own declaration names" do
+    # Least privilege across occurrences: the union is command-wide, so handing
+    # it over whole would show one provider another's secret.
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "other" => [destination: :workflow, credential_names: ["other-key"]],
+        "reachable" => [
+          destination: :workflow,
+          connectivity_mode: :probe,
+          credential_names: ["reachable-key"],
+          probe: :ok
+        ]
+      })
+
+    assert {:ok, _result} = connect(prepared, execution)
+
+    assert_received {:resolved_credentials, ["other-key", "reachable-key"]}
+    assert_received {:probe_credentials, delivered}
+    assert delivered == %{"reachable-key" => "connect-secret"}
+  end
+
   test "a run over the same declaration does acquire it" do
     # The contrast is what makes the assertion above mean something: the builder
     # is reachable from this fixture, and connectivity is why it stays untouched.
@@ -597,7 +675,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   defp fixture(specifications, options \\ []) do
     parent = self()
     installed = Keyword.get(options, :installed_limits)
-    limit_overrides = Keyword.delete(options, :installed_limits)
+    limit_overrides = Keyword.drop(options, [:installed_limits, :credential_resolver])
     {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
 
     registrations =
@@ -609,7 +687,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
           ProviderDescriptor.new(
             source: :custom,
             installation_revision: Keyword.get(options, :revision, "connect-v1"),
-            credential_names: [],
+            credential_names: Keyword.get(options, :credential_names, []),
             authorization_mode: Keyword.get(options, :authorization_mode, :none),
             data_class: :normal,
             accepts_data: [:normal],
@@ -635,7 +713,16 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
 
     catalog_options = if installed, do: [installed_limits: installed], else: []
     {:ok, catalog} = InstallationCatalog.new(registrations, catalog_options)
-    {:ok, services} = ProviderRuntimeServices.new()
+
+    {:ok, services} =
+      ProviderRuntimeServices.new(
+        credential_resolver:
+          Keyword.get(options, :credential_resolver, fn names ->
+            send(parent, {:resolved_credentials, Enum.sort(names)})
+            {:ok, Map.new(names, &{&1, "connect-secret"})}
+          end)
+      )
+
     {:ok, execution} = ProviderExecution.new(catalog, services, [])
 
     prepared = prepared(catalog, specifications, limit_overrides, installed)
@@ -712,7 +799,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
 
       {:ok,
        %{
-         credential_names: [],
+         credential_names: Keyword.get(options, :credential_names, []),
          requires: requires,
          provides: provides,
          preflight: fn -> {:ok, acquire} end
@@ -766,8 +853,9 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   end
 
   defp probe(parent, name, behaviour) do
-    fn _selection, _context, _services ->
+    fn _selection, context, _services ->
       send(parent, {:probe_invoked, name})
+      send(parent, {:probe_credentials, Map.get(context, :credentials)})
 
       case behaviour do
         :ok -> :ok

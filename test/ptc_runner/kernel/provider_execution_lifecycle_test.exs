@@ -288,6 +288,65 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert diagnostic.code == :provider_cleanup_failed
   end
 
+  test "an unresolvable credential fails a run before any provider callback" do
+    # Phase-8 step 5 is what moved: a run used to prepare and preflight every
+    # selected provider and only then discover its credential was unavailable,
+    # paying for callbacks against a command that could never complete. The
+    # union now comes from the sealed declarations, so it can be — and is —
+    # resolved while every provider is still inert.
+    parent = self()
+
+    fixture =
+      provider_fixture(
+        credential_names: ["fixture-key"],
+        credential_resolver: fn names ->
+          send(parent, {:resolved_credentials, names})
+          {:error, :credential_unavailable}
+        end
+      )
+
+    _started = start_owned_execution(fixture)
+
+    assert_receive {:execution_result, {:error, %CommandDiagnostic{} = diagnostic}}, 5_000
+    assert diagnostic.phase == :active_preflight
+    assert diagnostic.code == :credential_unavailable
+    assert diagnostic.provider_activity
+
+    # Attribution is per alias, not per occurrence: the catalogue forbids an
+    # occurrence on this pair, and the resolver answers for the whole batch
+    # rather than naming which credential failed.
+    assert diagnostic.subject.name == "selected"
+    assert diagnostic.subject.operation == :credentials
+    assert diagnostic.subject.occurrence == nil
+
+    assert_received {:resolved_credentials, ["fixture-key"]}
+    refute_received {:provider_phase, :prepare}
+    refute_received {:provider_phase, :preflight}
+    refute_received {:provider_phase, :acquire}
+    refute_received {:provider_root, _root, _registration}
+  end
+
+  test "a run refuses a builder asking for a credential its declaration omits" do
+    # The sealed declaration decides what may be read, so a builder cannot widen
+    # it at run time. Connectivity gets this from `declarations_honored/2`, which
+    # compares against a plan; an ordinary run has no plan, and the supplied
+    # union is the guard in its place — a name the declarations never required
+    # cannot appear in it, and acquisition refuses rather than resolving again.
+    fixture = provider_fixture(credential_names: [], builder_credential_names: ["smuggled"])
+
+    _started = start_owned_execution(fixture)
+
+    assert_receive {:execution_result, {:error, :provider_declaration_mismatch}}, 5_000
+
+    # Nothing declared a credential, so step 5 asked the resolver for nothing,
+    # and the smuggled name reached it by no other route either.
+    refute_received {:resolved_credentials, _names}
+    assert_received {:provider_phase, :prepare}
+    refute_received {:provider_phase, :preflight}
+    refute_received {:provider_phase, :acquire}
+    refute_received {:provider_root, _root, _registration}
+  end
+
   test "a staged preparation stricter than its sealed declaration is refused" do
     # Preparation, phase-5 identity, and the sinks the owner opened before any
     # provider ran all come from the sealed descriptor. A builder preparing as
@@ -559,14 +618,21 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     :error, :badarg -> false
   end
 
-  # Every refused declaration must be refused for the same reason and while the
-  # provider is still inert: no credential resolution, no preflight, no
-  # acquisition, and no registered resource root.
+  # Every refused declaration must be refused for the same reason and before the
+  # provider builds anything: no preflight, no acquisition, and no registered
+  # resource root.
+  #
+  # Credentials are the deliberate exception, and asserting they were read is
+  # what pins the ordering here. Phase-8 step 5 resolves them from the sealed
+  # declarations before any provider callback runs, so a mismatch found during
+  # preparation is necessarily found after resolution. Moving resolution back
+  # behind preparation would leave this resolver untouched, because preparation
+  # is what fails.
   defp assert_declaration_refused(fixture) do
     _started = start_owned_execution(fixture)
 
     assert_receive {:execution_result, {:error, :provider_declaration_mismatch}}, 5_000
-    refute_received {:resolved_credentials, _names}
+    assert_received {:resolved_credentials, ["fixture-key"]}
     refute_received {:provider_phase, :preflight}
     refute_received {:provider_phase, :acquire}
     refute_received {:provider_root, _root, _registration}
@@ -617,8 +683,10 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
       )
 
     builder = fn _selection, context ->
+      send(parent, {:provider_phase, :prepare})
+
       staged = %{
-        credential_names: credential_names,
+        credential_names: Keyword.get(opts, :builder_credential_names, credential_names),
         preflight: fn ->
           send(parent, {:provider_phase, :preflight})
 
@@ -644,12 +712,14 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     {:ok, catalog} =
       InstallationCatalog.new(%{"selected" => registration})
 
+    default_resolver = fn names ->
+      send(parent, {:resolved_credentials, names})
+      {:ok, Map.new(names, &{&1, "fixture-credential"})}
+    end
+
     {:ok, services} =
       ProviderRuntimeServices.new(
-        credential_resolver: fn names ->
-          send(parent, {:resolved_credentials, names})
-          {:ok, Map.new(names, &{&1, "fixture-credential"})}
-        end
+        credential_resolver: Keyword.get(opts, :credential_resolver, default_resolver)
       )
 
     {:ok, execution} = ProviderExecution.new(catalog, services, [])

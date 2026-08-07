@@ -955,10 +955,15 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     descriptor = catalog.descriptors["live"]
     implementation = catalog.implementations["live"]
 
+    # Deliberately not the host document's literal. Phase-8 step 5 resolves the
+    # credential once and hands it down, so the value the probe actually uses is
+    # the supplied one; a probe that resolved its own would reach for the host
+    # document and produce "probe-secret" instead.
     probe_context =
       dir
       |> context(:workflow)
       |> update_in([:limits], &Map.put(&1, :provider_heap_words, 20_000))
+      |> Map.put(:credentials, %{"key" => "pre-resolved-secret"})
 
     assert is_binary(catalog.runtime_binding)
     assert descriptor.local_preflight == :audited_local
@@ -979,7 +984,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash", request}
     request_pid = Map.fetch!(request, :probe_pid)
     refute warmup_pid == request_pid
-    assert request.api_key == "probe-secret"
+    assert request.api_key == "pre-resolved-secret"
     assert request.cache == false
     assert request.max_tokens == 1
     assert request.max_retries == 0
@@ -993,6 +998,20 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
              implementation.connectivity_probe.(selection, probe_context, runtime_services)
 
     assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash", _request}
+    refute_receive {:host_llm_request, _, _}
+
+    # No fallback: the credential this installation declares is resolvable from
+    # the host document, so a probe that still resolved its own would succeed
+    # here rather than refuse. It refuses, and reaches no adapter at all.
+    Application.put_env(:ptc_runner, :host_llm_test_result, nil)
+
+    assert {:error, :llm_connectivity_unavailable} =
+             implementation.connectivity_probe.(
+               selection,
+               Map.put(probe_context, :credentials, %{}),
+               runtime_services
+             )
+
     refute_receive {:host_llm_request, _, _}
     assert :ok = InstallationCatalog.close(catalog)
   end

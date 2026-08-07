@@ -226,6 +226,51 @@ to `provider_activity: false` — so a declaration-class reason reports
 `active_preflight/selection_rejected`, keeping its `:selection` subject and
 occurrence.
 
+### Credential resolution
+
+Every active command resolves its ordinary credentials once, at phase-8 step 5,
+through `ProviderCredentials`. The step runs after the registry
+and OAuth context exist and before any provider callback below it, so a missing
+credential fails while every provider is still inert instead of partway through
+a preparation or an acquisition.
+
+The required set is the union of `credential_names` over the sealed descriptor
+of *every* selected declaration — never what a prepare callback reported, on the
+same rule that decides the acquisition closure. Deriving it from callback reports
+would make the authority to read a credential depend on invoking the code that
+reads it. Because the union is whole-selection rather than whole-closure,
+`doctor --connect` can answer for an occurrence that declares
+`connectivity_mode: :none`: nothing acquires or probes it, but its credentials
+row still exists and a connect success requires it to pass.
+
+Consumers receive that map and take a subset of it; neither resolves again, and
+a preparation asking for a name the union does not contain is drift that fails
+closed with `provider_declaration_mismatch`. How tight the subset is differs by
+path, and the difference is what each path can compare against.
+`ConnectivityProbe` subsets per occurrence from the sealed descriptor, so a
+probe sees only its own credential. `ProviderAcquisition.acquire_targets/7`
+requires each preparation to report exactly its sealed declaration, so a target
+does too. `acquire/6` has no plan to compare against and enforces only the union
+bound: within a selection, a preparation can still name a credential another
+selected provider declared. Closing that means carrying sealed per-occurrence
+declarations down the ordinary path, which is the `acquire/6`–`acquire_targets/7`
+unification rather than another check. What holds everywhere today is that no
+credential outside the selection's own sealed union is resolved or handed to
+anything.
+
+Failure attribution is per alias and never per occurrence:
+`subject_occurrence_policy/3` forbids an occurrence on
+`active_preflight`/`credential_unavailable`, and the resolver answers for the
+whole batch rather than naming which credential failed. The alias reported is
+the first in manifest order that declares a credential — deterministic, and
+independent of both resolver behaviour and the order providers are prepared in.
+
+Direct embedding is the one caller that still resolves inside acquisition. It
+has no sealed declarations to derive a union from before preparation and no
+operation deadline to bound one, so it keeps the registry's synchronous
+semantics; an active command reaching that branch is refused rather than served,
+which is what stops a second credential pipeline from re-growing.
+
 Shipped live-LLM and stdio MCP descriptors declare `audited_local` callbacks.
 Those callbacks use the same model/adapter and executable/launcher checks as
 runtime provider preflight, without resolving credentials or contacting a
@@ -243,10 +288,11 @@ containment is an explicit non-goal — and the guarantee that matters holds
 regardless: manifest input selects installed aliases and never registers an
 implementation, so nothing an application declares can introduce a callback
 into phase 7. A live-LLM descriptor also supplies a bounded completion probe for
-the active `doctor --connect` path. It resolves the declared credential only
-after local checks, disables adapter and HTTP retries and redirects, forces a
-one-token response ceiling, and makes exactly one request under the sealed
-doctor timeout and provider heap limit.
+the active `doctor --connect` path. It consumes the credential the command
+resolved at phase-8 step 5 rather than resolving one of its own, disables
+adapter and HTTP retries and redirects, forces a one-token response ceiling, and
+makes exactly one request under the sealed doctor timeout and provider heap
+limit.
 
 After every selection is normalized, the coordinator derives aggregate data
 class, flow, and event privacy, then builds
@@ -286,9 +332,9 @@ rejects them; the execution-session owner consumes one when it opens its
 sinks, `ProviderActiveSession` then marks activity and opens the session, and
 the runtime registry, active value, and that same session are passed to
 `RunBuilder`. A run and a `--check` both do that inside the execution-session
-owner's subordinate worker, which calls `build_active_owned/5` with the
-owner-opened sinks and then completes through `execute_built/1` or
-`check_built/1`. The REPL remains transitional and opens no active session: it
+owner's subordinate worker, which calls `build_active_owned/6` with the
+owner-opened sinks and the phase-8 step-5 credentials, then completes through
+`execute_built/1` or `check_built/1`. The REPL remains transitional and opens no active session: it
 calls `load_and_build/3` with an empty registry, keeping its current shape
 until the parity cutover. After application admission, that session
 anchors one absolute run deadline shared by active selection, construction,

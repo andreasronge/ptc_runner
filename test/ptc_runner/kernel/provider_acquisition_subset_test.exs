@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderAcquisition
+  alias PtcRunner.Kernel.ProviderCredentials
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
@@ -66,24 +67,34 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
     assert_received {:acquired, "leaf"}
   end
 
-  test "the credential union is resolved once for the whole closure" do
+  test "the resolved union covers every selection, not only the acquired closure" do
+    # The closure here is beta and leaf; alpha is outside it and stays
+    # callback-inert. Its credential is resolved anyway, because the union comes
+    # from the sealed selection rather than from whatever this operation happens
+    # to acquire. That is what lets one connect settle a credentials row for an
+    # occurrence no closure reaches, without a second derivation rule.
     context = fixture()
 
     assert {:ok, _acquired} = acquire(context, [workflow(1)])
     assert_received {:resolved, names}
-    assert names == ["beta-key", "leaf-key"]
+    assert names == ["alpha-key", "beta-key", "leaf-key"]
     refute_received {:resolved, _other}
+    refute_received {:prepared, "alpha"}
   end
 
   test "a preparation that contradicts its sealed declaration fails closed" do
     # Runtime binding compares the data policy only, so a builder could
     # otherwise widen its own credentials or dependencies after the plan that
-    # authorised it was fixed.
+    # authorised it was fixed. The credential it invented is not in the resolved
+    # union either — the union is sealed, so a name a builder adds afterwards
+    # can never appear in it — but the declaration check refuses this before
+    # acquisition ever consults the map.
     context = fixture(drifting: %{"leaf" => ["extra-key"]})
 
     assert {:error, :provider_declaration_mismatch} = acquire(context, [workflow(1)])
+    assert_received {:resolved, names}
+    refute "extra-key" in names
     refute_received {:acquired, _name}
-    refute_received {:resolved, _names}
   end
 
   test "an unknown or empty target set costs no callback at all" do
@@ -131,15 +142,27 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
     assert_receive {:closed, "leaf"}, 5_000
   end
 
+  # Credentials are resolved the way phase-8 step 5 resolves them, from the same
+  # sealed pair, so these targets are acquired against the real union rather
+  # than a map this file invented.
   defp acquire(context, targets) do
-    ProviderAcquisition.acquire_targets(
-      context.package,
-      context.registry,
-      context.session,
-      targets,
-      fn _effective_class -> :ok end,
-      context.plan
-    )
+    with {:ok, credentials} <-
+           ProviderCredentials.resolve(
+             context.prepared,
+             context.catalog,
+             context.registry,
+             context.session
+           ) do
+      ProviderAcquisition.acquire_targets(
+        context.package,
+        context.registry,
+        context.session,
+        targets,
+        fn _effective_class -> :ok end,
+        context.plan,
+        credentials
+      )
+    end
   end
 
   defp workflow(index), do: %{destination: :workflow, index: index}

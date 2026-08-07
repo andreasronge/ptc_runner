@@ -3,30 +3,45 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   Acquires one prepared run's selected providers through its active session.
 
   The acquisition barrier prepares every selected provider, validates service
-  dependencies and information-flow policy, completes local preflight, resolves
-  the credential union once, and then acquires providers in dependency order.
-  Each acquired provider is committed to its provisional registrar immediately,
-  before the next provider can run.
+  dependencies and information-flow policy, completes local preflight, and then
+  acquires providers in dependency order. Each acquired provider is committed to
+  its provisional registrar immediately, before the next provider can run.
 
-  For an active command, provider preparation, preflight, acquisition, and
-  credential resolution run in owner-linked bounded work using the remaining
-  shared run deadline and provider heap limit. Preflight releases use one
-  shared provider-cleanup budget. A direct embedding session without an
-  operation deadline retains the registry's synchronous callback semantics.
+  Credentials are supplied, not resolved here. An active command resolves them
+  once at phase-8 step 5 from its sealed declarations, before any provider
+  callback runs, and hands the map down. Each provider then receives only the
+  names its own preparation reported, and a preparation reporting a name the
+  supplied map does not cover is drift that fails closed.
 
-  `acquire_subset/6` narrows which providers are acquired without narrowing any
+  That bound is the sealed *union*, not the individual declaration, and the
+  difference matters on this path. `acquire_targets/7` additionally requires
+  each preparation to report exactly what its sealed declaration says, so a
+  target can only ever see its own credential. `acquire/6` has no plan to
+  compare against, so a preparation that reports a name belonging to a
+  *different* selected provider is still inside the union and still served.
+  Closing that needs the ordinary path to carry sealed per-occurrence
+  declarations too, which is the `acquire/6`–`acquire_targets/7` unification
+  rather than another check here; until then the guarantee this path enforces
+  is that no credential outside the selection's own sealed union is ever
+  resolved or handed to anything.
+
+  For an active command, provider preparation, preflight, and acquisition run in
+  owner-linked bounded work using the remaining shared run deadline and provider
+  heap limit. Preflight releases use one shared provider-cleanup budget. A
+  direct embedding session without an operation deadline supplies no map and
+  retains the registry's synchronous credential and callback semantics.
+
+  `acquire_targets/7` narrows which providers are acquired without narrowing any
   judgement about the application: see its documentation for what stays
-  whole-application and why. An ordinary run and check acquire `:all`, which is
-  the same path this module always took.
+  whole-application and why. An ordinary run and check use `acquire/6`, which is
+  the same complete path this module always took.
 
   This module does not own the provider session. Its caller closes that session
   after any error and retains it with a successful acquisition result.
   """
 
   alias PtcRunner.Kernel.ApplicationPackage
-  alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.CommandDiagnostic
-  alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
@@ -38,6 +53,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   @type input_class :: :normal | :private_inspection
   @type artifact_preflight :: (input_class() -> :ok | {:error, term()})
   @type occurrence :: %{destination: :workflow | :mission, index: non_neg_integer()}
+  @type credentials :: %{binary() => binary()} | nil
   @type plan :: %{
           effective_class: input_class(),
           occurrences: [map()],
@@ -50,7 +66,8 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
           ProviderRegistry.t(),
           ProviderSession.t(),
           input_class(),
-          artifact_preflight()
+          artifact_preflight(),
+          credentials()
         ) ::
           {:ok, map()}
           | {:error, term()}
@@ -60,10 +77,12 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
         %ProviderRegistry{} = registry,
         session,
         input_class,
-        artifact_preflight
+        artifact_preflight,
+        credentials
       )
       when input_class in [:normal, :private_inspection] and
-             is_function(artifact_preflight, 1) do
+             is_function(artifact_preflight, 1) and
+             (is_nil(credentials) or (is_map(credentials) and not is_struct(credentials))) do
     max_heap_words = package.limits.provider_heap_words
 
     with {:ok, prepared} <-
@@ -73,11 +92,18 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
          effective_class <- effective_data_class(input_class, prepared),
          :ok <- providers_accept(prepared, effective_class),
          :ok <- artifact_preflight.(effective_class) do
-      complete_acquisition(prepared, registry, session, effective_class, max_heap_words)
+      complete_acquisition(
+        prepared,
+        registry,
+        session,
+        effective_class,
+        max_heap_words,
+        credentials
+      )
     end
   end
 
-  def acquire(_package, _registry, _session, _input_class, _artifact_preflight),
+  def acquire(_package, _registry, _session, _input_class, _artifact_preflight, _credentials),
     do: {:error, :invalid_provider_acquisition}
 
   @doc """
@@ -107,6 +133,10 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   Inside the closure, each preparation is compared with its sealed declaration
   and drift fails closed. Dependency-only providers are support work: acquired
   and cleaned up like any other, and never reported as a caller's own result.
+
+  `credentials` is the map phase-8 step 5 resolved for the whole selection. It
+  is deliberately wider than this closure: connectivity must answer for every
+  selected occurrence, including ones no closure reaches.
   """
   @spec acquire_targets(
           ApplicationPackage.t(),
@@ -114,7 +144,8 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
           ProviderSession.t(),
           [occurrence()],
           artifact_preflight(),
-          plan()
+          plan(),
+          credentials()
         ) ::
           {:ok, map()}
           | {:error, term()}
@@ -125,9 +156,11 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
         session,
         targets,
         artifact_preflight,
-        %{effective_class: effective_class, occurrences: occurrences} = plan
+        %{effective_class: effective_class, occurrences: occurrences} = plan,
+        credentials
       )
-      when is_list(targets) and is_function(artifact_preflight, 1) do
+      when is_list(targets) and is_function(artifact_preflight, 1) and
+             (is_nil(credentials) or (is_map(credentials) and not is_struct(credentials))) do
     max_heap_words = package.limits.provider_heap_words
 
     with :ok <- validate_plan(plan, package),
@@ -141,7 +174,8 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
         registry,
         session,
         effective_class,
-        max_heap_words
+        max_heap_words,
+        credentials
       )
     end
   end
@@ -152,7 +186,8 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
         _session,
         _targets,
         _artifact_preflight,
-        _plan
+        _plan,
+        _credentials
       ),
       do: {:error, :invalid_provider_acquisition}
 
@@ -272,15 +307,23 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       Enum.sort(provider.accepts_data) == Enum.sort(declaration.accepts_data)
   end
 
-  defp complete_acquisition(prepared, registry, session, effective_class, max_heap_words) do
-    with {:ok, preflighted} <- preflight_providers(prepared, session, max_heap_words) do
+  defp complete_acquisition(
+         prepared,
+         registry,
+         session,
+         effective_class,
+         max_heap_words,
+         credentials
+       ) do
+    with :ok <- credentials_honored(credentials, prepared),
+         {:ok, preflighted} <- preflight_providers(prepared, session, max_heap_words) do
       try do
-        with {:ok, credentials} <-
-               resolve_provider_credentials(registry, preflighted, session, max_heap_words),
+        with {:ok, resolved} <-
+               provider_credentials(credentials, registry, preflighted, session),
              {:ok, acquired} <-
                acquire_providers(
                  preflighted,
-                 credentials,
+                 resolved,
                  effective_class,
                  session,
                  max_heap_words
@@ -645,66 +688,44 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     |> Enum.sort()
   end
 
-  defp resolve_provider_credentials(registry, providers, session, max_heap_words) do
-    names = credential_names(providers)
+  # A supplied map is the active command's phase-8 step-5 result, and it is the
+  # complete union the sealed declarations require. A preparation asking for a
+  # name it does not contain has therefore widened its credentials past anything
+  # the selection declared, so it is refused beside `declarations_honored/2` and
+  # before preflight, where drift costs no further callback.
+  #
+  # This is a union bound, not a per-occurrence one: within the union a
+  # preparation can still name a credential another selected provider declared.
+  # `declarations_honored/2` closes that for targets because it has sealed
+  # declarations to compare each preparation against; giving this path the same
+  # check means threading those declarations through it, which is the
+  # `acquire/6`–`acquire_targets/7` unification rather than a second check here.
+  defp credentials_honored(nil, _prepared), do: :ok
 
+  defp credentials_honored(credentials, prepared) do
+    if MapSet.subset?(
+         MapSet.new(credential_names(prepared)),
+         MapSet.new(Map.keys(credentials))
+       ),
+       do: :ok,
+       else: {:error, :provider_declaration_mismatch}
+  end
+
+  defp provider_credentials(credentials, _registry, _preflighted, _session)
+       when is_map(credentials),
+       do: {:ok, credentials}
+
+  # Direct embedding: no sealed declarations to derive a union from before
+  # preparation, and no operation deadline to bound it, so the registry's
+  # synchronous resolution stays its documented contract. An active command is
+  # refused here rather than silently served, because a command reaching this
+  # branch would be resolving credentials a second time and outside its budget.
+  defp provider_credentials(nil, registry, preflighted, session) do
     case ProviderSession.execution_deadline(session) do
-      {:ok, nil} ->
-        ProviderRegistry.resolve_credentials(registry, names)
-
-      {:ok, deadline} when names == [] ->
-        if Deadline.expired?(deadline),
-          do: {:error, run_timeout_diagnostic()},
-          else: {:ok, %{}}
-
-      {:ok, deadline} ->
-        resolve_active_credentials(registry, names, providers, session, deadline, max_heap_words)
-
-      :error ->
-        {:error, :provider_session_unavailable}
+      {:ok, nil} -> ProviderRegistry.resolve_credentials(registry, credential_names(preflighted))
+      {:ok, _deadline} -> {:error, :invalid_provider_acquisition}
+      :error -> {:error, :provider_session_unavailable}
     end
-  end
-
-  defp resolve_active_credentials(
-         registry,
-         names,
-         providers,
-         session,
-         deadline,
-         max_heap_words
-       ) do
-    result =
-      case Deadline.remaining(deadline) do
-        0 ->
-          {:error, :timeout}
-
-        timeout_ms ->
-          BoundedWorker.run(fn -> ProviderRegistry.resolve_credentials(registry, names) end,
-            timeout_ms: timeout_ms,
-            max_heap_words: max_heap_words,
-            cancel_with_caller: true,
-            cancel_with: ProviderSession.worker_cancel_target(session)
-          )
-      end
-
-    if Deadline.expired?(deadline) do
-      {:error, credential_diagnostic(providers)}
-    else
-      case result do
-        {:ok, {:ok, credentials}} -> {:ok, credentials}
-        _failure -> {:error, credential_diagnostic(providers)}
-      end
-    end
-  end
-
-  defp credential_diagnostic(providers) do
-    provider = Enum.find(providers, hd(providers), &(&1.credential_names != []))
-    {:ok, subject} = CommandSubject.provider(provider.provider, :credentials)
-
-    CommandDiagnostic.new!(:active_preflight, :credential_unavailable,
-      subject: subject,
-      provider_activity: true
-    )
   end
 
   # An expired operation deadline during scope setup is that operation's own

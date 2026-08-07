@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActiveSession
   alias PtcRunner.Kernel.ProviderActivity
+  alias PtcRunner.Kernel.ProviderCredentials
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
@@ -164,13 +165,16 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
                    :run
                  ),
                {:ok, registry} <- active_registry(),
+               {:ok, credentials} <-
+                 ProviderCredentials.resolve(prepared, catalog, registry, session),
                {:ok, built} <-
                  RunBuilder.build_active_owned(
                    prepared,
                    registry,
                    session,
                    authority,
-                   opened_sinks
+                   opened_sinks,
+                   credentials
                  ) do
             {:ok, built, registry, session}
           end
@@ -227,19 +231,23 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
              ProviderRegistry.new(%{"selected" => ProviderRegistry.staged(staged)})
 
     assert {:error, :provider_dependency_unavailable} =
-             build_owned(prepared, registry, session, [])
+             build_owned(prepared, catalog, registry, session, [])
 
     refute ProviderSession.alive?(session)
     assert :ok = PreparedRun.close(prepared)
   end
 
-  test "active build resolves credentials after every preflight and before acquisition" do
+  test "active build resolves credentials before any provider callback" do
+    # Phase-8 step 5. The order is asserted from the drained mailbox rather than
+    # from three `assert_receive`s, which match anywhere in it and so would have
+    # passed against either order.
     parent = self()
-    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
+    {:ok, prepared, catalog} = credential_fixture()
     assert {:ok, session} = open_owned(prepared, catalog, services())
 
     staged = fn _selection, context ->
       send(parent, {:provider_context_deadline, context.deadline, context.deadline_ms})
+      send(parent, :credential_prepared)
 
       {:ok,
        %{
@@ -267,14 +275,18 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
                credential_resolver: resolver
              )
 
-    assert {:ok, built} = build_owned(prepared, registry, session, [])
+    assert {:ok, built} = build_owned(prepared, catalog, registry, session, [])
     run_deadline = ProviderSession.run_deadline(session)
 
     assert_receive {:provider_context_deadline, ^run_deadline, deadline_ms}
     assert deadline_ms == Deadline.expires_at(run_deadline)
-    assert_receive :credential_preflighted
-    assert_receive :credential_resolved
-    assert_receive :credential_acquired
+
+    assert drained_phases() == [
+             :credential_resolved,
+             :credential_prepared,
+             :credential_preflighted,
+             :credential_acquired
+           ]
 
     assert :ok = RunBuilder.close(built)
     assert :ok = PreparedRun.close(prepared)
@@ -283,7 +295,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   test "active credential resolution is killed at the shared run deadline" do
     parent = self()
     limits = %{Limits.installed_defaults() | run_duration_ms: 1_000}
-    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end, ["first"], limits)
+    {:ok, prepared, catalog} = credential_fixture(limits)
     assert {:ok, session} = open_owned(prepared, catalog, services())
 
     resolver = fn ["secret"] ->
@@ -299,7 +311,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
               code: :credential_unavailable,
               provider_activity: true,
               subject: %{name: "selected", operation: :credentials, occurrence: nil}
-            }} = build_owned(prepared, registry, session, [])
+            }} = build_owned(prepared, catalog, registry, session, [])
 
     assert_receive {:credential_resolver_started, worker}
     refute Process.alive?(worker)
@@ -318,7 +330,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     end
 
     {:ok, registry} = active_registry(credential_resolver: resolver)
-    assert {:ok, built} = build_owned(prepared, registry, session, [])
+    assert {:ok, built} = build_owned(prepared, catalog, registry, session, [])
     refute_receive :unexpected_credential_resolution
 
     assert :ok = RunBuilder.close(built)
@@ -374,7 +386,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
                   operation: :acquisition,
                   occurrence: %{destination: :workflow, index: 0}
                 }
-              }} = build_owned(prepared, registry, session, [])
+              }} = build_owned(prepared, catalog, registry, session, [])
 
       assert_receive {:provider_callback_started, ^blocked_phase, worker}
       refute Process.alive?(worker)
@@ -418,7 +430,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
              )
 
     assert {:error, %CommandDiagnostic{code: :provider_unavailable}} =
-             build_owned(prepared, registry, session, [])
+             build_owned(prepared, catalog, registry, session, [])
 
     assert_receive {:blocking_preflight_release, release_worker}
     refute Process.alive?(release_worker)
@@ -475,7 +487,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
             installed_limits: limits
           )
 
-        result = build_owned(prepared, registry, session, [])
+        result = build_owned(prepared, catalog, registry, session, [])
         send(parent, {:boundary_result, result})
         :ok = PreparedRun.close(prepared)
       end)
@@ -513,7 +525,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
 
   test "active credential resolution dies when its provider session closes" do
     parent = self()
-    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
+    {:ok, prepared, catalog} = credential_fixture()
 
     resolver = fn ["secret"] ->
       send(parent, {:session_close_credential_worker, self()})
@@ -525,7 +537,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
         {:ok, session} = open_owned(prepared, catalog, services())
         send(parent, {:session_close_credential_session, session})
         {:ok, registry} = credential_registry(resolver)
-        result = build_owned(prepared, registry, session, [])
+        result = build_owned(prepared, catalog, registry, session, [])
         assert :ok = PreparedRun.close(prepared)
         send(parent, {:session_close_build_result, result})
         receive do: (:stop -> :ok)
@@ -572,7 +584,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
         {:ok, registry} =
           ProviderRegistry.new(%{"selected" => ProviderRegistry.staged(staged)})
 
-        result = build_owned(prepared, registry, session, [])
+        result = build_owned(prepared, catalog, registry, session, [])
         send(parent, {:release_after_close_result, result})
         :ok = PreparedRun.close(prepared)
       end)
@@ -593,7 +605,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
 
   test "active credential resolution dies with its caller and session" do
     parent = self()
-    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
+    {:ok, prepared, catalog} = credential_fixture()
 
     resolver = fn ["secret"] ->
       send(parent, {:caller_death_credential_worker, self()})
@@ -605,7 +617,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
         {:ok, session} = open_owned(prepared, catalog, services())
         send(parent, {:caller_death_credential_session, session})
         {:ok, registry} = credential_registry(resolver)
-        build_owned(prepared, registry, session, [])
+        build_owned(prepared, catalog, registry, session, [])
       end)
 
     assert_receive {:caller_death_credential_session, session}
@@ -627,7 +639,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert {:ok, registry} = ProviderRegistry.new(%{})
 
     assert {:error, :invalid_active_run} =
-             build_owned(second, registry, first_session, [])
+             build_owned(second, second_catalog, registry, first_session, [])
 
     refute ProviderSession.alive?(first_session)
     assert :ok = ProviderSession.close(second_session)
@@ -659,7 +671,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
              ProviderRegistry.new(%{"selected" => ProviderRegistry.staged(staged)})
 
     assert {:error, :invalid_active_run} =
-             build_owned(prepared, registry, wrong_session, [])
+             build_owned(prepared, catalog, registry, wrong_session, [])
 
     refute_receive :unexpected_provider_preparation
     refute ProviderSession.alive?(wrong_session)
@@ -671,20 +683,20 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert {:ok, session} = open_owned(prepared, catalog, services())
     assert {:ok, registry} = active_registry()
 
-    assert {:ok, built} = build_owned(prepared, registry, session, [])
+    assert {:ok, built} = build_owned(prepared, catalog, registry, session, [])
     assert built.config.run_deadline == ProviderSession.run_deadline(session)
 
     assert {:error, :invalid_active_run} =
-             build_owned(prepared, registry, session, [])
+             build_owned(prepared, catalog, registry, session, [])
 
     assert {:error, :invalid_active_run} =
-             build_owned(prepared, registry, session, unknown: true)
+             build_owned(prepared, catalog, registry, session, unknown: true)
 
     {:ok, other, other_catalog} = fixture(fn _selection, _context -> :ok end)
     assert {:ok, other_session} = open_owned(other, other_catalog, services())
 
     assert {:error, :invalid_active_run} =
-             build_owned(other, registry, session, [])
+             build_owned(other, other_catalog, registry, session, [])
 
     assert ProviderSession.alive?(session)
 
@@ -699,13 +711,13 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
     assert {:ok, session} = open_owned(prepared, catalog, services())
     assert {:ok, registry} = active_registry()
-    assert {:ok, built} = build_owned(prepared, registry, session, [])
+    assert {:ok, built} = build_owned(prepared, catalog, registry, session, [])
 
     assert true = :erlang.suspend_process(session.pid)
 
     try do
       assert {:error, :invalid_active_run} =
-               build_owned(prepared, registry, session, [])
+               build_owned(prepared, catalog, registry, session, [])
     after
       if Process.alive?(session.pid), do: :erlang.resume_process(session.pid)
     end
@@ -984,12 +996,28 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     close(session, host_prepared)
   end
 
+  # The sealed descriptor is what phase-8 step 5 derives its union from, so a
+  # fixture whose builder asks for a credential has to declare it too. A builder
+  # asking for one its declaration omits is drift, and is refused rather than
+  # resolved; that is its own regression rather than these tests' subject.
+  defp credential_fixture(limits \\ nil),
+    do:
+      fixture(
+        fn _selection, _context -> :ok end,
+        ["first"],
+        limits,
+        "custom-v1",
+        nil,
+        ["secret"]
+      )
+
   defp fixture(
          callback,
          modes \\ ["first"],
          limits \\ nil,
          revision \\ "custom-v1",
-         provider_application \\ nil
+         provider_application \\ nil,
+         credential_names \\ []
        ) do
     limits = limits || Limits.installed_defaults()
     {:ok, rules} = rules()
@@ -998,7 +1026,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
       ProviderDescriptor.new(
         source: :custom,
         installation_revision: revision,
-        credential_names: [],
+        credential_names: credential_names,
         authorization_mode: :none,
         data_class: :normal,
         accepts_data: [:normal],
@@ -1198,12 +1226,41 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     inputs
   end
 
-  defp build_owned(prepared, registry, session, opts) do
-    build_owned(owned_inputs!(prepared), prepared, registry, session, opts)
+  # The provider lifecycle messages in the order they were actually sent.
+  # `assert_receive` matches anywhere in the mailbox, so it cannot show order.
+  defp drained_phases(accumulated \\ []) do
+    receive do
+      phase
+      when phase in [
+             :credential_resolved,
+             :credential_prepared,
+             :credential_preflighted,
+             :credential_acquired
+           ] ->
+        drained_phases([phase | accumulated])
+    after
+      0 -> Enum.reverse(accumulated)
+    end
   end
 
-  defp build_owned({authority, sinks}, prepared, registry, session, _opts) do
-    RunBuilder.build_active_owned(prepared, registry, session, authority, sinks)
+  # A faithful miniature of the phase-8 sequence `ProviderExecution` runs: step 5
+  # resolves the sealed credential union before any provider callback, and the
+  # execution owner closes the session whichever step fails. Resolving here
+  # rather than handing over a literal map is what keeps these tests pinned to
+  # the shipped derivation instead of one this file invented.
+  defp build_owned(prepared, catalog, registry, session, opts) do
+    case ProviderCredentials.resolve(prepared, catalog, registry, session) do
+      {:ok, credentials} ->
+        build_owned(owned_inputs!(prepared), prepared, registry, session, credentials, opts)
+
+      {:error, _diagnostic} = error ->
+        if ProviderSession.alive?(session), do: ProviderSession.close(session)
+        error
+    end
+  end
+
+  defp build_owned({authority, sinks}, prepared, registry, session, credentials, _opts) do
+    RunBuilder.build_active_owned(prepared, registry, session, authority, sinks, credentials)
   end
 
   defp services(mode \\ :host_owned) do
