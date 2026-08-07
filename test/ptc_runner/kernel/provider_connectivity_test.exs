@@ -622,6 +622,76 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     assert diagnostic.provider_activity
   end
 
+  test "run, check, and connect all refuse a selected OAuth occurrence up front" do
+    # Standalone V1 disables OAuth execution and `--authorize-mcp` is the only
+    # shipped path to a grant, so an occurrence nobody named has no store to draw
+    # one from. Refusing before the branch is what keeps the answer honest: the
+    # alternative walks into acquisition against an empty store and blames
+    # whatever the transport happens to say.
+    for operation <- [:run, :check, :connect] do
+      %{prepared: prepared, execution: execution} =
+        fixture(%{
+          "authorized" => [
+            destination: :workflow,
+            authorization_mode: :oauth,
+            selection_validation: :active,
+            validator: :fast,
+            local_preflight: :unverified
+          ]
+        })
+
+      assert {:error, %CommandDiagnostic{} = diagnostic} =
+               dispatch(operation, prepared, execution)
+
+      assert diagnostic.phase == :active_preflight
+      assert diagnostic.code == :authorization_required
+      assert diagnostic.provider_activity
+      assert diagnostic.subject.name == "authorized"
+      assert diagnostic.subject.operation == :authorization
+
+      # Per alias, not per occurrence: one grant serves every occurrence of an
+      # alias, so naming one of them would be arbitrary. That is also what tells
+      # this refusal apart from `AcquisitionReason`'s mid-acquisition variant of
+      # the same code, which knows the occurrence that hit it.
+      assert diagnostic.subject.occurrence == nil
+
+      # Before any provider work: this declaration asks for an active selection
+      # validator and an unverified local check, and both are unrestricted work
+      # that would otherwise have run for a selection already refused.
+      refute_received {:validated, _name}
+      refute_received {:local_checked, _name}
+      refute_received {:builder_invoked, _name}
+    end
+  end
+
+  test "the refusal skips an authorized alias and names the first unauthorized one" do
+    # The refusal is per alias rather than a whole-selection veto, so a selection
+    # carrying several unauthorized aliases needs a deterministic rule for which
+    # one is reported. It is manifest order, matching credential attribution.
+    #
+    # The fixture separates that from the two orderings it could be confused
+    # with. Manifest order runs the workflow destination before the mission one,
+    # so it names "zeta"; both alphabetical order and a minimum over the names
+    # would name "alpha" instead.
+    %{prepared: prepared, catalog: catalog} =
+      fixture(%{
+        "authorized" => [destination: :workflow, authorization_mode: :oauth],
+        "zeta" => [destination: :workflow, authorization_mode: :oauth],
+        "alpha" => [destination: :mission, authorization_mode: :oauth]
+      })
+
+    assert Enum.map(prepared.provider_declarations, & &1.name) == ["authorized", "zeta", "alpha"]
+
+    {:ok, services} = ProviderRuntimeServices.new()
+    {:ok, execution} = ProviderExecution.new(catalog, services, ["authorized"])
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             RunCoordinator.execute(prepared, authority(), execution, &never_notify/1)
+
+    assert diagnostic.code == :authorization_required
+    assert diagnostic.subject.name == "zeta"
+  end
+
   test "connectivity refuses an execution that asked for authorization" do
     # A health check must never open an interactive authorization or ask a
     # human for anything. Refusing is deliberate: silently running the

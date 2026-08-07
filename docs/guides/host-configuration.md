@@ -424,9 +424,13 @@ PtcRunner does not verify signed metadata and therefore refuses to consume
 unsigned fields beside it. Authorization-server or client metadata requiring
 PAR or DPoP is likewise unsupported.
 
-Normal execution never opens an authorization interaction. An absent,
-rejected, expired-without-refresh, or indeterminate grant returns
-`mcp_authorization_required`. A `401` rejects only the bearer generation
+Normal execution never opens an authorization interaction. A command refuses a
+selected OAuth installation that no `--authorize-mcp` named before any provider
+work, reporting `active_preflight` / `authorization_required` for that alias.
+Beyond that point an absent, rejected, expired-without-refresh, or
+indeterminate grant returns `mcp_authorization_required`, which a command
+reports as that same closed code against the occurrence that hit it. A `401`
+rejects only the bearer generation
 actually sent. A valid `403 insufficient_scope` challenge stores a private
 scope requirement for the next explicit authorization in the same store
 lifetime. That server response overrides the sent generation's nominal token

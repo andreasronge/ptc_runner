@@ -188,30 +188,91 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          operation
        ) do
     result =
-      if execution.authorizations == [] do
-        execute_ordinary(
-          prepared,
-          authority,
-          opened_sinks,
-          execution,
-          tracker,
-          session,
-          operation
-        )
-      else
-        execute_after_authorization(
-          prepared,
-          authority,
-          opened_sinks,
-          execution,
-          notifier,
-          tracker,
-          session,
-          operation
-        )
+      case unauthorized_oauth_alias(prepared, execution) do
+        nil ->
+          execute_authorized(
+            prepared,
+            authority,
+            opened_sinks,
+            execution,
+            notifier,
+            tracker,
+            session,
+            operation
+          )
+
+        name ->
+          {:error, authorization_required_diagnostic(name)}
       end
 
     close_owned_session(result, session, tracker)
+  end
+
+  defp execute_authorized(
+         prepared,
+         authority,
+         opened_sinks,
+         execution,
+         notifier,
+         tracker,
+         session,
+         operation
+       ) do
+    if execution.authorizations == [] do
+      execute_ordinary(
+        prepared,
+        authority,
+        opened_sinks,
+        execution,
+        tracker,
+        session,
+        operation
+      )
+    else
+      execute_after_authorization(
+        prepared,
+        authority,
+        opened_sinks,
+        execution,
+        notifier,
+        tracker,
+        session,
+        operation
+      )
+    end
+  end
+
+  # Standalone V1 disables OAuth execution: `mix ptc.run --authorize-mcp NAME` is
+  # the only shipped path to a grant, so a selected OAuth occurrence nobody named
+  # has no store to draw one from. It used to walk into acquisition against an
+  # empty one and fail with whatever that path produced.
+  #
+  # The refusal sits here, before either branch, because both are cost this
+  # command cannot use. The interactive branch would open a browser interaction
+  # for one alias before discovering another can never be served, and the
+  # ordinary branch would run active selection validators and unverified local
+  # checks — unrestricted active work — for a selection that is already refused.
+  # That is the same rule the validator/unverified ordering rests on.
+  #
+  # It is nevertheless past the phase-8 marker, which `active_preflight` requires
+  # and the OAuth contract states: the session is open, so a refusal here reports
+  # activity honestly rather than claiming a command that never started.
+  #
+  # `PtcRunner.Kernel.AcquisitionReason` mints this same code for the different
+  # question of an authorization failing underneath an alias that *was*
+  # authorized — a revoked grant, a failed refresh — discovered mid-acquisition.
+  # The two cannot both answer for one alias: reaching acquisition at all means
+  # this refusal did not fire. They are told apart by their subject, because
+  # authorization is per alias while a mid-acquisition failure knows the exact
+  # occurrence that hit it.
+  defp unauthorized_oauth_alias(prepared, execution) do
+    authorized = MapSet.new(execution.authorizations)
+
+    Enum.find_value(prepared.provider_declarations, fn %{name: name} ->
+      if not MapSet.member?(authorized, name) and
+           match?(%{authorization_mode: :oauth}, execution.catalog.descriptors[name]),
+         do: name
+    end)
   end
 
   # A failed session close outranks the result it would otherwise hide, matching
@@ -1038,6 +1099,20 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     {:ok, subject} = CommandSubject.provider(name, :authorization)
 
     CommandDiagnostic.new!(:active_preflight, :authorization_unavailable,
+      provider_activity: true,
+      subject: subject
+    )
+  end
+
+  # Attribution is per alias and carries no occurrence, because a grant, an
+  # authority, and a store are all per alias: every occurrence of one alias
+  # shares the single authorization that is missing, so naming one of them would
+  # be arbitrary. The alias reported is the first in manifest order, the same
+  # deterministic rule credential attribution uses.
+  defp authorization_required_diagnostic(name) do
+    {:ok, subject} = CommandSubject.provider(name, :authorization)
+
+    CommandDiagnostic.new!(:active_preflight, :authorization_required,
       provider_activity: true,
       subject: subject
     )

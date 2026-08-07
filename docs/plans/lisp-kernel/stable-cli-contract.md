@@ -1413,12 +1413,29 @@ fine; temporarily reachable and unsafe is not.
      stops the pipeline re-growing is that the branch is fenced: an active
      command — one whose session carries an operation deadline — reaching it is
      refused rather than served;
-   - **a selected OAuth occurrence.** The contract returns
+   - **(complete) a selected OAuth occurrence.** The contract returns
      `active_preflight/authorization_required` after the marker and without
-     opening an interaction. Nothing constructs that code today, so an OAuth
-     selection walks into acquisition against an empty store and fails later
-     with whatever that path produces. Connect must refuse it before any
-     provider work, and `run` needs the same refusal; and
+     opening an interaction. An OAuth selection used to walk into acquisition
+     against an empty store and fail with whatever that path produced.
+     `ProviderExecution` now refuses the first selected alias, in manifest
+     order, that declares `:oauth` and is not an explicit authorization target,
+     and run, `--check`, and connect share the refusal.
+
+     Its placement is the same argument the validator/unverified ordering
+     rests on. It sits before both execution branches, so the interactive one
+     never opens a browser round trip for one alias before discovering another
+     can never be served, and the ordinary one never spends an active selection
+     validator or an unverified local check on a selection already refused. It
+     is nevertheless past the phase-8 marker, which `active_preflight` pins and
+     the OAuth section above requires.
+
+     Attribution is per alias and carries no occurrence, because a grant, an
+     authority, and a store are all per alias. That is also what keeps it from
+     colliding with `AcquisitionReason`, which mints the same code with an
+     occurrence for the different question of an authorization failing
+     underneath an alias that *was* authorized. The two are mutually exclusive
+     per alias: reaching acquisition at all means this refusal found nothing;
+     and
    - **(complete) raw acquisition reasons.** A builder, preflight, or acquire
      callback returning `{:error, reason}` propagated as a bare term through
      `ProviderAcquisition`, and the connectivity boundary could not classify it:

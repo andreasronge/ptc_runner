@@ -377,6 +377,62 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
     refute_received {:oauth_request, "POST", "/token"}
   end
 
+  test "a selected OAuth provider nobody authorized is refused before the interaction" do
+    # Standalone V1 disables OAuth execution, so a selection nobody named with
+    # `--authorize-mcp` has no grant and no store to find one in. Without the
+    # up-front refusal this run reaches acquisition against an empty store and
+    # stops at the HTTPS-only transport rule as `provider_acquisition` /
+    # `provider_unavailable` — an accurate description of the wrong thing, since
+    # the transport is not what is missing.
+    server = start_server()
+    fixture = provider_fixture(server, ["fixture"], authorize: [])
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             RunCoordinator.execute(
+               fixture.prepared,
+               fixture.authority,
+               fixture.execution,
+               fn _url -> flunk("a refused selection must never open an interaction") end
+             )
+
+    assert diagnostic.phase == :active_preflight
+    assert diagnostic.code == :authorization_required
+    assert diagnostic.provider_activity
+    assert diagnostic.subject.name == "fixture"
+    assert diagnostic.subject.operation == :authorization
+    assert diagnostic.subject.occurrence == nil
+
+    # The refusal is past the marker rather than one of the pre-session ones:
+    # the preparation was consumed and is no longer reusable, unlike the
+    # unselected-target refusal below. That is what lets it report activity at
+    # all. It nevertheless reaches no OAuth endpoint — no discovery, no
+    # authorization URL, no token exchange.
+    refute PreparedRun.valid?(fixture.prepared)
+    refute_received {:oauth_request, _method, _path}
+  end
+
+  test "one unauthorized selection refuses before another one's interaction opens" do
+    # Both are selected and OAuth-capable, and only "fixture" was named. The
+    # refusal precedes the interactive branch entirely, so the operator is never
+    # walked through a browser round trip for a command that cannot succeed.
+    server = start_server()
+
+    fixture =
+      provider_fixture(server, ["fixture", "second"], authorize: ["fixture"])
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             RunCoordinator.execute(
+               fixture.prepared,
+               fixture.authority,
+               fixture.execution,
+               fn _url -> flunk("a refused selection must never open an interaction") end
+             )
+
+    assert diagnostic.code == :authorization_required
+    assert diagnostic.subject.name == "second"
+    refute_received {:oauth_request, _method, _path}
+  end
+
   test "authorizing a provider the run never selected leaves the prepared run reusable" do
     server = start_server()
 
