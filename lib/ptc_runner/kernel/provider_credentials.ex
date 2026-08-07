@@ -79,14 +79,12 @@ defmodule PtcRunner.Kernel.ProviderCredentials do
     _kind, _reason -> {:error, internal_diagnostic()}
   end
 
-  @doc """
-  Projects the credential names the sealed selected declarations require.
-
-  Public so a consumer can prove it received the union it was promised without
-  re-deriving the rule from descriptors of its own.
-  """
+  # Projects the credential names the sealed selected declarations require. This
+  # was briefly public, justified by a consumer that could prove it received the
+  # union it was promised; no such consumer was ever written, and an unused
+  # abstraction is worse than a smaller one.
   @spec required_names(PreparedRun.t(), InstallationCatalog.t()) :: [binary()]
-  def required_names(%PreparedRun{} = prepared, %InstallationCatalog{} = catalog) do
+  defp required_names(%PreparedRun{} = prepared, %InstallationCatalog{} = catalog) do
     prepared.provider_declarations
     |> Enum.flat_map(&Map.fetch!(catalog.descriptors, &1.name).credential_names)
     |> Enum.uniq()
