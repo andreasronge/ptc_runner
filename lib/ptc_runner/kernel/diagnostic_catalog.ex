@@ -387,10 +387,17 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
              :application,
              :bundle,
              :provider_declaration,
-             :destination,
-             :local_preflight
+             :destination
            ],
       do: false
+
+  # `local_preflight` spans the marker, so the phase cannot assert either value.
+  # The audited-local step runs before activity and reports false; the
+  # `:unverified` step runs after it and reports true. They describe the same
+  # conditions through the same codes and differ only here, which is what the
+  # flag is for — pinning the phase would force one of the two steps to borrow
+  # another phase's codes and, with them, an operation name that did not fail.
+  def provider_activity_policy(:local_preflight, _code), do: :boolean
 
   def provider_activity_policy(phase, _code)
       when phase in [:active_preflight, :provider_acquisition],

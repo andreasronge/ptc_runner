@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LocalPreflight
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderApplicationGate
@@ -87,25 +88,28 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
           ProviderSession.t(),
           PreparedRun.t(),
           InstallationCatalog.t(),
+          ProviderRuntimeServices.t(),
           :run | :check | :connect
         ) :: {:ok, ProviderSession.t()} | {:error, CommandDiagnostic.t()}
   def begin_owned_operation(
         session,
         %PreparedRun{} = prepared,
         %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services,
         operation
       )
       when operation in [:run, :check, :connect] do
     if PreparedRun.active_valid?(prepared) and InstallationCatalog.valid?(catalog) and
          prepared.catalog_attestation == catalog.attestation and
+         ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding) and
          ProviderSession.bound_to_operation?(session, prepared.attestation) do
-      do_begin_run(session, prepared, catalog, operation)
+      do_begin_run(session, prepared, catalog, services, operation)
     else
       reject_begin_run(session, prepared)
     end
   end
 
-  def begin_owned_operation(_session, _prepared, _catalog, _operation),
+  def begin_owned_operation(_session, _prepared, _catalog, _services, _operation),
     do: {:error, internal_diagnostic(false)}
 
   defp open_consumed(prepared, catalog, services, ownership) do
@@ -141,10 +145,10 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  defp do_begin_run(session, prepared, catalog, operation) do
+  defp do_begin_run(session, prepared, catalog, services, operation) do
     case ProviderSession.begin_operation(session, operation) do
       {:ok, session} ->
-        validate_open_session(session, prepared, catalog)
+        validate_open_session(session, prepared, catalog, services)
 
       # `ProviderSession.begin_operation/2` queues token-authenticated cleanup when its
       # bounded call becomes unavailable. Do not follow that timeout with an
@@ -154,13 +158,25 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  defp validate_open_session(session, prepared, catalog) do
-    case validate_active_selections(session, prepared, catalog) do
-      :ok ->
-        {:ok, session}
-
-      {:error, %CommandDiagnostic{} = diagnostic} ->
-        fail_with_session(session, diagnostic)
+  # Both post-marker declaration checks spend the operation clock this call just
+  # anchored. The unverified local check goes first because it contacts nothing:
+  # a selection validator may reach a provider, so paying for it before a purely
+  # local check has ruled the occurrence out would spend the budget in the wrong
+  # order. That is a cost argument, not a contract — neither step depends on the
+  # other's result.
+  defp validate_open_session(session, prepared, catalog, services) do
+    with :ok <-
+           LocalPreflight.run_unverified(
+             prepared,
+             catalog,
+             services,
+             ProviderSession.run_deadline(session)
+           ),
+         :ok <- validate_active_selections(session, prepared, catalog) do
+      {:ok, session}
+    else
+      {:error, %CommandDiagnostic{} = diagnostic} -> fail_with_session(session, diagnostic)
+      _invalid -> fail_with_session(session, internal_diagnostic(true))
     end
   rescue
     _exception -> fail_with_session(session, internal_diagnostic(true))

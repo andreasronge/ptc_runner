@@ -432,7 +432,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   defp trace_run_start do
     Code.ensure_loaded!(ProviderActiveSession)
 
-    assert :erlang.trace_pattern({ProviderActiveSession, :begin_owned_operation, 4}, true, [
+    assert :erlang.trace_pattern({ProviderActiveSession, :begin_owned_operation, 5}, true, [
              :local
            ]) ==
              1
@@ -441,7 +441,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
 
     on_exit(fn ->
       :erlang.trace(:new_processes, false, [:call])
-      :erlang.trace_pattern({ProviderActiveSession, :begin_owned_operation, 4}, false, [:local])
+      :erlang.trace_pattern({ProviderActiveSession, :begin_owned_operation, 5}, false, [:local])
     end)
   end
 

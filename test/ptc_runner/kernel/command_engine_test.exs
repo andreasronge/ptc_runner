@@ -1231,11 +1231,17 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     {:ok, local_subject} =
       CommandSubject.provider("safe", :local, %{destination: :workflow, index: 0})
 
-    assert {:error, :invalid_command_diagnostic} =
-             CommandDiagnostic.new(:local_preflight, :adapter_unavailable,
-               subject: local_subject,
-               provider_activity: true
-             )
+    # `local_preflight` is the one phase that spans the marker: the audited-local
+    # step reports before activity and the `:unverified` step reports after it,
+    # through the same codes. The phase therefore pins neither value and the flag
+    # carries which side ran, so both constructions are valid here.
+    for activity <- [false, true] do
+      assert {:ok, %CommandDiagnostic{provider_activity: ^activity}} =
+               CommandDiagnostic.new(:local_preflight, :adapter_unavailable,
+                 subject: local_subject,
+                 provider_activity: activity
+               )
+    end
 
     {:ok, application_subject} =
       CommandSubject.provider("safe", :application, nil)

@@ -235,6 +235,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
              session,
              prepared,
              execution.catalog,
+             execution.services,
              operation
            ),
          {:ok, authorities} <- oauth_authorities(execution, selected_names),
@@ -306,6 +307,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
                    session,
                    prepared,
                    execution.catalog,
+                   execution.services,
                    operation
                  ) do
             complete(prepared, authority, opened_sinks, registry, session, execution, operation)

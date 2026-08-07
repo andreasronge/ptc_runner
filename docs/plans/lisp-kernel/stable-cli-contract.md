@@ -1058,19 +1058,32 @@ commits in one Checkpoint C PR:
   local check has. Default doctor keeps reporting `active_check_required`
   instead of running one.
 
-  Two questions must be settled before writing it, because both change what
-  gets built rather than how. First, the phase a post-marker failure reports:
-  `CommandContract` admits `local_preflight` codes for `doctor` and
-  `doctor --connect` only, so a `:unverified` failure during a run has no
-  admissible code today. Either the run mode gains the local-preflight codes —
-  they describe the same condition whoever asks — or the post-marker check
-  reports under `active_preflight`, which already carries the marker and is
-  admitted by every mode that can reach one. Second, activity: `LocalPreflight`
-  builds its diagnostics without `provider_activity`, which is correct in phase
-  7 and wrong after the marker, so the constructors take the flag rather than
-  assuming it. Its ordering against active selection validation is deliberately
-  free — a local check contacts nothing, so running it first is the cheaper
-  order, not a contract;
+  Two questions were settled before writing it, because both changed what gets
+  built rather than how.
+
+  **The phase a post-marker failure reports (decided):** the run mode gains the
+  existing `local_preflight` codes. `CommandContract` admitted them for `doctor`
+  and `doctor --connect` only, so a `:unverified` failure during a run had no
+  admissible code at all. Reporting it under `active_preflight` instead would
+  have avoided widening anything, but `:local` exists only as a
+  `local_preflight` subject operation, so the failure would have lost the
+  operation name its own doctor row uses. One condition keeps one code whoever
+  asks, and the widening is additive.
+
+  **Activity (decided):** `LocalPreflight` builds its diagnostics without
+  `provider_activity`, which is correct in phase 7 and wrong after the marker,
+  so its constructors take the flag rather than assuming it. That alone was not
+  enough: `DiagnosticCatalog.provider_activity_policy/2` pinned the whole
+  `local_preflight` phase to `false`, so an honest post-marker diagnostic could
+  not be constructed at all — it raised, and the step's own rescue turned the
+  real outcome into `internal_error`. `local_preflight` is now the one phase
+  that spans the marker and pins neither value, because the flag is what carries
+  which side of the marker a check ran on. The envelope schema change is
+  additive: four pairs gain a boolean `provider_activity`, and none is removed.
+
+  Ordering against active selection validation is deliberately free — a local
+  check contacts nothing, so running it first is the cheaper order, not a
+  contract;
 - keep `MCPHTTPAdapter` as the single shipped HTTP boundary while adding an
   authoritative cap at or before the transport receive boundary; and
 - (complete) add shipped live-model probes with retries and redirects disabled.
@@ -1233,8 +1246,13 @@ fine; temporarily reachable and unsafe is not.
      for its closure and a shipped probe resolves its own, so the unsettled case
      is exactly a `:none` occurrence that declares a credential: nothing asks
      for it, and a connect success would claim a credential nobody resolved.
-     This is settlement work rather than connectivity work — it is a row the
-     connectivity operation never answers for;
+
+     **Decided:** resolution moves to phase-8 step 5, once per selected alias,
+     before the operation branch — the sequence this document already pins.
+     Having connect resolve only the remainder its closure missed would give it
+     a credential path of its own, which is the second weaker pipeline the
+     acquisition subset was rejected for. Moving it changes the shared run path,
+     so it lands as its own reviewed commit;
    - **a selected OAuth occurrence.** The contract returns
      `active_preflight/authorization_required` after the marker and without
      opening an interaction. Nothing constructs that code today, so an OAuth

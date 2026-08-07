@@ -32,8 +32,23 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # nothing into this step.
   #
   # A catalog still holds the callbacks of its `:unverified` declarations —
-  # parity requires one — but they are active work and this step never invokes
-  # them.
+  # parity requires one — but they are active work, so `run/4` never invokes
+  # them and `run_unverified/4` is their only entry.
+  #
+  # ## The two steps
+  #
+  # `run/4` is phase 7: audited-local only, before the marker, and the trust
+  # rules below bound what may declare it. `run_unverified/4` is phase 8:
+  # `:unverified` only, after the marker, under the operation deadline its
+  # caller anchored. Nothing bounds what an unverified callback may do, which is
+  # exactly why it cannot run in phase 7 and why default doctor reports
+  # `active_check_required` rather than calling it.
+  #
+  # Both report through the same codes, because they report the same conditions
+  # and differ only in when they are allowed to look. They differ in one
+  # rendered field: everything `run_unverified/4` reports carries
+  # `provider_activity`, which is a fact about the marker rather than about the
+  # check, so the flag is supplied rather than assumed.
   #
   # The prepared run, catalog, and runtime services must belong together. Alias
   # names are not identity: two catalogs can install the same alias over
@@ -120,35 +135,77 @@ defmodule PtcRunner.Kernel.LocalPreflight do
           Deadline.t()
         ) :: :ok | {:error, CommandDiagnostic.t()}
   def run(prepared, catalog, services, deadline) do
-    with true <- bound?(prepared, catalog, services),
+    with true <- bound?(prepared, catalog, services, :inactive),
          true <- Deadline.valid?(deadline),
-         occurrences = applicable(catalog, prepared),
+         occurrences = applicable(catalog, prepared, :audited_local),
          true <- trusted?(catalog, occurrences) do
-      check_each(occurrences, prepared, catalog, services, deadline)
+      check_each(occurrences, prepared, catalog, services, deadline, false)
     else
-      _invalid -> {:error, internal_diagnostic()}
+      _invalid -> {:error, internal_diagnostic(false)}
     end
   rescue
-    _exception -> {:error, internal_diagnostic()}
+    _exception -> {:error, internal_diagnostic(false)}
   catch
-    _kind, _reason -> {:error, internal_diagnostic()}
+    _kind, _reason -> {:error, internal_diagnostic(false)}
+  end
+
+  @doc """
+  Runs every applicable unverified local check for one prepared run.
+
+  This is the only entry to an `:unverified` callback, and it is reachable only
+  after the phase-8 marker: nothing bounds what such a callback may do, so it
+  cannot be trusted with the pre-activity window that `run/4` occupies. Default
+  doctor reports `active_check_required` rather than calling this; run, check,
+  and `doctor --connect` call it under the operation deadline their session
+  anchored.
+
+  There is no trust gate here, unlike `run/4`. `:unverified` is precisely the
+  declaration that makes no trust claim, so there is nothing to verify — the
+  marker, not the declaration, is what makes the call admissible.
+  """
+  @spec run_unverified(
+          PreparedRun.t(),
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t(),
+          Deadline.t()
+        ) :: :ok | {:error, CommandDiagnostic.t()}
+  def run_unverified(prepared, catalog, services, deadline) do
+    with true <- bound?(prepared, catalog, services, :active),
+         true <- Deadline.valid?(deadline) do
+      catalog
+      |> applicable(prepared, :unverified)
+      |> check_each(prepared, catalog, services, deadline, true)
+    else
+      _invalid -> {:error, internal_diagnostic(true)}
+    end
+  rescue
+    _exception -> {:error, internal_diagnostic(true)}
+  catch
+    _kind, _reason -> {:error, internal_diagnostic(true)}
   end
 
   # One trio, one catalog. This mirrors `ProviderExecution.bound_to_prepared?/2`
   # and its runtime-services binding, so a preparation cannot be reported or
   # checked against declarations it was never validated against.
-  defp bound?(%PreparedRun{} = prepared, %InstallationCatalog{} = catalog, services) do
-    PreparedRun.inactive_valid?(prepared) and InstallationCatalog.valid?(catalog) and
+  #
+  # The lifecycle half differs by step and cannot be shared: phase 7 runs before
+  # the execution owner consumes the preparation, and the post-marker step runs
+  # while it is consumed. Checking the wrong one would reject every valid call.
+  defp bound?(%PreparedRun{} = prepared, %InstallationCatalog{} = catalog, services, lifecycle) do
+    lifecycle_valid?(prepared, lifecycle) and InstallationCatalog.valid?(catalog) and
       ProviderRuntimeServices.valid?(services) and
       prepared.catalog_attestation == catalog.attestation and
       ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding)
   end
 
-  defp bound?(_prepared, _catalog, _services), do: false
+  defp bound?(_prepared, _catalog, _services, _lifecycle), do: false
 
-  defp applicable(catalog, prepared) do
+  defp lifecycle_valid?(prepared, :inactive), do: PreparedRun.inactive_valid?(prepared)
+  defp lifecycle_valid?(prepared, :active), do: PreparedRun.active_valid?(prepared)
+
+  defp applicable(catalog, prepared, mode) do
     Enum.filter(prepared.provider_declarations, fn declaration ->
-      match?(%{local_preflight: :audited_local}, catalog.descriptors[declaration.name])
+      match?(%{local_preflight: ^mode}, catalog.descriptors[declaration.name])
     end)
   end
 
@@ -168,29 +225,29 @@ defmodule PtcRunner.Kernel.LocalPreflight do
 
   defp trusted?(_catalog, _occurrences), do: false
 
-  defp check_each([], _prepared, _catalog, _services, _deadline), do: :ok
+  defp check_each([], _prepared, _catalog, _services, _deadline, _activity), do: :ok
 
-  defp check_each(occurrences, prepared, catalog, services, deadline) do
+  defp check_each(occurrences, prepared, catalog, services, deadline, activity) do
     Enum.reduce_while(occurrences, :ok, fn occurrence, :ok ->
-      case check(occurrence, prepared, catalog, services, deadline) do
+      case check(occurrence, prepared, catalog, services, deadline, activity) do
         :ok -> {:cont, :ok}
         {:error, _diagnostic} = error -> {:halt, error}
       end
     end)
   end
 
-  defp check(occurrence, prepared, catalog, services, deadline) do
+  defp check(occurrence, prepared, catalog, services, deadline, activity) do
     context = %{
       destination: occurrence.destination,
       limits: prepared.request.package.limits
     }
 
-    with {:ok, callback} <- callback(catalog, occurrence.name),
-         {:ok, timeout_ms} <- remaining(deadline, occurrence) do
+    with {:ok, callback} <- callback(catalog, occurrence.name, activity),
+         {:ok, timeout_ms} <- remaining(deadline, occurrence, activity) do
       case invoke(callback, occurrence.config, context, services, timeout_ms) do
-        :ok -> settled(deadline, occurrence)
-        :timed_out -> {:error, local_diagnostic(:local_check_timeout, occurrence)}
-        {:error, reason} -> {:error, diagnostic(reason, occurrence)}
+        :ok -> settled(deadline, occurrence, activity)
+        :timed_out -> {:error, local_diagnostic(:local_check_timeout, occurrence, activity)}
+        {:error, reason} -> {:error, diagnostic(reason, occurrence, activity)}
       end
     end
   end
@@ -201,16 +258,16 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # promises to spend, so success is confirmed against the absolute deadline.
   # A failure keeps its own diagnostic: it is more informative than the budget
   # having been spent, and reporting it does not extend the step.
-  defp settled(deadline, occurrence) do
+  defp settled(deadline, occurrence, activity) do
     if Deadline.expired?(deadline),
-      do: {:error, local_diagnostic(:local_check_timeout, occurrence)},
+      do: {:error, local_diagnostic(:local_check_timeout, occurrence, activity)},
       else: :ok
   end
 
-  defp callback(catalog, name) do
+  defp callback(catalog, name, activity) do
     case Map.fetch(catalog.implementations, name) do
       {:ok, %{local_preflight: callback}} when is_function(callback, 3) -> {:ok, callback}
-      _missing -> {:error, internal_diagnostic()}
+      _missing -> {:error, internal_diagnostic(activity)}
     end
   end
 
@@ -218,9 +275,9 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # bounded by that deadline no matter how many occurrences apply. An exhausted
   # budget is the same operational outcome whether it runs out before an
   # occurrence starts or while one is running, so both report the same code.
-  defp remaining(deadline, occurrence) do
+  defp remaining(deadline, occurrence, activity) do
     case Deadline.remaining(deadline) do
-      0 -> {:error, local_diagnostic(:local_check_timeout, occurrence)}
+      0 -> {:error, local_diagnostic(:local_check_timeout, occurrence, activity)}
       timeout_ms -> {:ok, timeout_ms}
     end
   end
@@ -244,37 +301,44 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     end
   end
 
-  defp diagnostic(reason, occurrence) when reason in @environment_reasons,
-    do: local_diagnostic(:environment_unavailable, occurrence)
+  defp diagnostic(reason, occurrence, activity) when reason in @environment_reasons,
+    do: local_diagnostic(:environment_unavailable, occurrence, activity)
 
-  defp diagnostic(reason, occurrence) when reason in @launcher_reasons,
-    do: local_diagnostic(:launcher_unavailable, occurrence)
+  defp diagnostic(reason, occurrence, activity) when reason in @launcher_reasons,
+    do: local_diagnostic(:launcher_unavailable, occurrence, activity)
 
-  defp diagnostic(reason, occurrence) when reason in @adapter_reasons,
-    do: local_diagnostic(:adapter_unavailable, occurrence)
+  defp diagnostic(reason, occurrence, activity) when reason in @adapter_reasons,
+    do: local_diagnostic(:adapter_unavailable, occurrence, activity)
 
-  defp diagnostic(:provider_destination_denied, occurrence),
-    do: declaration_diagnostic(:placement_denied, occurrence)
+  defp diagnostic(:provider_destination_denied, occurrence, activity),
+    do: declaration_diagnostic(:placement_denied, occurrence, activity)
 
-  defp diagnostic(reason, occurrence) when reason in @selection_reasons,
-    do: declaration_diagnostic(:selection_invalid, occurrence)
+  defp diagnostic(reason, occurrence, activity) when reason in @selection_reasons,
+    do: declaration_diagnostic(:selection_invalid, occurrence, activity)
 
-  defp diagnostic(_reason, _occurrence), do: internal_diagnostic()
+  defp diagnostic(_reason, _occurrence, activity), do: internal_diagnostic(activity)
 
-  defp local_diagnostic(code, occurrence),
-    do: subject_diagnostic(:local_preflight, code, :local, occurrence)
+  defp local_diagnostic(code, occurrence, activity),
+    do: subject_diagnostic(:local_preflight, code, :local, occurrence, activity)
 
-  defp declaration_diagnostic(code, occurrence),
-    do: subject_diagnostic(:provider_declaration, code, :selection, occurrence)
+  defp declaration_diagnostic(code, occurrence, activity),
+    do: subject_diagnostic(:provider_declaration, code, :selection, occurrence, activity)
 
-  defp subject_diagnostic(phase, code, operation, occurrence) do
+  # Activity is a fact about the marker rather than about the check, so it is
+  # supplied by the step that knows which side of the marker it runs on. The
+  # same condition reported before and after the marker differs only here.
+  defp subject_diagnostic(phase, code, operation, occurrence, activity) do
     site = %{destination: occurrence.destination, index: occurrence.index}
 
     case CommandSubject.provider(occurrence.name, operation, site) do
-      {:ok, subject} -> CommandDiagnostic.new!(phase, code, subject: subject)
-      {:error, _reason} -> internal_diagnostic()
+      {:ok, subject} ->
+        CommandDiagnostic.new!(phase, code, subject: subject, provider_activity: activity)
+
+      {:error, _reason} ->
+        internal_diagnostic(activity)
     end
   end
 
-  defp internal_diagnostic, do: CommandDiagnostic.new!(:internal, :internal_error)
+  defp internal_diagnostic(activity),
+    do: CommandDiagnostic.new!(:internal, :internal_error, provider_activity: activity)
 end

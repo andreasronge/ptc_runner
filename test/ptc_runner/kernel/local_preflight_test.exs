@@ -2,11 +2,13 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LocalPreflight
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.RunCoordinator
@@ -236,12 +238,102 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     refute refuse(:something_new).provider_activity
   end
 
+  test "an unverified check is refused until the marker is set, then runs" do
+    # The same trio, the same callback, and the marker is the only thing that
+    # changes between the refusal and the call.
+    catalog = catalog(%{"custom" => [source: :custom, local_preflight: :unverified]})
+    prepared = prepared(catalog, ["custom"])
+
+    assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error} = refusal} =
+             LocalPreflight.run_unverified(prepared, catalog, services(), deadline())
+
+    assert refusal.provider_activity
+    refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
+
+    assert :ok = ProviderActivity.mark(prepared.provider_activity)
+    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), deadline())
+    assert_received {:audited_local, _step, "custom", :workflow, %{}, true}
+  end
+
+  test "the post-marker step runs unverified checks and never audited-local ones" do
+    # Applicability is derived per step, so neither can reach the other's
+    # declarations however the catalog mixes them.
+    catalog =
+      catalog(%{
+        "audited" => [destination: :workflow],
+        "custom" => [destination: :mission, source: :custom, local_preflight: :unverified]
+      })
+
+    prepared = prepared(catalog, ["audited"], ["custom"])
+    assert :ok = ProviderActivity.mark(prepared.provider_activity)
+
+    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), deadline())
+    assert_received {:audited_local, _step, "custom", :mission, %{}, true}
+    refute_received {:audited_local, _step, "audited", _destination, _selection, _limits}
+  end
+
+  test "an unverified failure names its exact occurrence and keeps the closed code" do
+    diagnostic = refuse_unverified(:invalid_llm_model)
+
+    assert diagnostic.phase == :local_preflight
+    assert diagnostic.code == :adapter_unavailable
+    assert diagnostic.subject.name == "custom"
+    assert diagnostic.subject.operation == :local
+    assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
+  end
+
+  test "every unverified outcome reports provider activity" do
+    # The mirror of the phase-7 assertion above. Same conditions and same codes;
+    # activity is the one rendered field that must differ, because it is a fact
+    # about the marker rather than about the check.
+    assert refuse_unverified(:invalid_llm_model).provider_activity
+    assert refuse_unverified(:provider_destination_denied).provider_activity
+    assert refuse_unverified(:something_new).provider_activity
+  end
+
+  test "the local-preflight codes are admitted wherever a local check can run" do
+    # Run and check render through the same unclassified run mode — `run --check`
+    # is not a separate command surface — and both doctor modes reach a local
+    # check of one kind or another. `validate` and `models` open no session and
+    # invoke no callback, so admitting these codes there would let them report a
+    # check they cannot run.
+    for code <- [
+          :environment_unavailable,
+          :adapter_unavailable,
+          :launcher_unavailable,
+          :local_check_timeout
+        ] do
+      for mode <- [:run_unclassified, :doctor, {:doctor, :connect}] do
+        assert CommandContract.diagnostic_allowed?(mode, :local_preflight, code),
+               "#{inspect(mode)} must admit local_preflight/#{code}"
+      end
+
+      for mode <- [:validate, :models] do
+        refute CommandContract.diagnostic_allowed?(mode, :local_preflight, code),
+               "#{inspect(mode)} must not admit local_preflight/#{code}"
+      end
+    end
+  end
+
   defp refuse(reason) do
     catalog = catalog(%{"model" => [failing: reason]})
     prepared = prepared(catalog, ["model"])
 
     assert {:error, %CommandDiagnostic{} = diagnostic} =
              LocalPreflight.run(prepared, catalog, services(), deadline())
+
+    diagnostic
+  end
+
+  defp refuse_unverified(reason) do
+    catalog =
+      catalog(%{"custom" => [source: :custom, local_preflight: :unverified, failing: reason]})
+
+    prepared = prepared(catalog, ["custom"])
+    assert :ok = ProviderActivity.mark(prepared.provider_activity)
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             LocalPreflight.run_unverified(prepared, catalog, services(), deadline())
 
     diagnostic
   end

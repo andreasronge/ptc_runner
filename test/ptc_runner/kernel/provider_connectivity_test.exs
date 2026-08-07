@@ -224,6 +224,42 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     refute_received {:probe_invoked, _name}
   end
 
+  test "run, check, and connect all invoke an unverified local check" do
+    # The step is wired into the shared operation prefix rather than into any
+    # one branch, so all three operations reach it. Default doctor does not,
+    # which its own regressions cover.
+    for operation <- [:run, :check, :connect] do
+      %{prepared: prepared, execution: execution} =
+        fixture(%{"custom" => [destination: :workflow, local_preflight: :unverified]})
+
+      assert {:ok, _result} = dispatch(operation, prepared, execution)
+      assert_received {:local_checked, "custom"}
+    end
+  end
+
+  test "an unverified failure reports its closed code with activity true" do
+    # `local_preflight` spans the marker: the phase keeps its codes and the
+    # activity flag carries which side of the marker the check ran on.
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "custom" => [
+          destination: :workflow,
+          local_preflight: :unverified,
+          local_failing: true
+        ]
+      })
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+    assert diagnostic.phase == :local_preflight
+    assert diagnostic.code == :adapter_unavailable
+    assert diagnostic.provider_activity
+    assert diagnostic.subject.operation == :local
+    assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
+
+    # The local check settles before anything reaches a provider.
+    refute_received {:builder_invoked, _name}
+  end
+
   test "a probe reaches its sealed callback and never the builder" do
     # A probe answers reachability without building anything, so the registry
     # path that a run takes must stay untouched.
@@ -505,15 +541,26 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     limits = prepared.request.package.limits
     {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
     on_exit(fn -> ProviderSession.close(session) end)
+    {:ok, services} = ProviderRuntimeServices.new()
 
     {:ok, session} =
-      ProviderActiveSession.begin_owned_operation(session, prepared, catalog, operation)
+      ProviderActiveSession.begin_owned_operation(session, prepared, catalog, services, operation)
 
     session |> ProviderSession.run_deadline() |> Deadline.remaining()
   end
 
   defp connect(prepared, execution),
     do: RunCoordinator.connect(prepared, authority(), execution)
+
+  defp dispatch(:connect, prepared, execution), do: connect(prepared, execution)
+
+  defp dispatch(:run, prepared, execution),
+    do: RunCoordinator.execute(prepared, authority(), execution, &never_notify/1)
+
+  defp dispatch(:check, prepared, execution),
+    do: RunCoordinator.check(prepared, authority(), execution, &never_notify/1)
+
+  defp never_notify(_url), do: flunk("no operation here may notify authorization")
 
   defp authority do
     {:ok, authority} = PublicationAuthority.new([])
@@ -552,7 +599,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
             selection_validation: Keyword.get(options, :selection_validation, :declarative),
             selection_rules: rules,
             authority_fingerprint: authority && authority.fingerprint,
-            local_preflight: :none
+            local_preflight: Keyword.get(options, :local_preflight, :none)
           )
 
         {name,
@@ -671,6 +718,16 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
         end)
       else
         implementation
+      end
+
+    implementation =
+      if Keyword.get(options, :local_preflight, :none) == :none do
+        implementation
+      else
+        Map.put(implementation, :local_preflight, fn _selection, _context, _services ->
+          send(parent, {:local_checked, name})
+          if Keyword.get(options, :local_failing), do: {:error, :invalid_llm_model}, else: :ok
+        end)
       end
 
     if mode == :probe do
