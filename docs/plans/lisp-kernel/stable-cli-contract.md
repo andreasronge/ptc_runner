@@ -1056,7 +1056,21 @@ commits in one Checkpoint C PR:
   today — that was already true before phase-7 execution existed, and restricting
   `:audited_local` to shipped host declarations made it the only path a custom
   local check has. Default doctor keeps reporting `active_check_required`
-  instead of running one;
+  instead of running one.
+
+  Two questions must be settled before writing it, because both change what
+  gets built rather than how. First, the phase a post-marker failure reports:
+  `CommandContract` admits `local_preflight` codes for `doctor` and
+  `doctor --connect` only, so a `:unverified` failure during a run has no
+  admissible code today. Either the run mode gains the local-preflight codes —
+  they describe the same condition whoever asks — or the post-marker check
+  reports under `active_preflight`, which already carries the marker and is
+  admitted by every mode that can reach one. Second, activity: `LocalPreflight`
+  builds its diagnostics without `provider_activity`, which is correct in phase
+  7 and wrong after the marker, so the constructors take the flag rather than
+  assuming it. Its ordering against active selection validation is deliberately
+  free — a local check contacts nothing, so running it first is the cheaper
+  order, not a contract;
 - keep `MCPHTTPAdapter` as the single shipped HTTP boundary while adding an
   authoritative cap at or before the transport receive boundary; and
 - (complete) add shipped live-model probes with retries and redirects disabled.
