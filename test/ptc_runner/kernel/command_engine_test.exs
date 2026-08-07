@@ -161,6 +161,54 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["error"]["code"] == "internal_error"
   end
 
+  @tag :tmp_dir
+  test "validate never invokes an audited-local check that doctor does", %{tmp_dir: directory} do
+    # The alias names an executable that cannot exist, so its shipped
+    # audited-local check must fail whenever it runs. Default doctor runs it and
+    # reports the closed local code; `validate` sees the same host, the same
+    # application, and the same selection, and succeeds — which it could only do
+    # by never invoking the callback. Asserting `validate` merely succeeds would
+    # prove nothing without doctor failing beside it on identical input.
+    manifest =
+      valid_manifest(%{
+        "providers" => %{
+          "workflow" => [],
+          "mission" => [%{"name" => "workspace", "config" => %{}}]
+        }
+      })
+
+    application = write_application(directory, "inert-validate", manifest)
+
+    host_path =
+      write_host_config(directory, "inert-validate", %{
+        "install" => %{
+          "workspace" => %{
+            "source" => "mcp",
+            "installation_revision" => "inert-v1",
+            "transport" => %{
+              "type" => "stdio",
+              "command" => "ptc-nonexistent-executable-9f3a"
+            },
+            "tools" => %{"read" => %{"as" => "workspace.read", "effect" => "read"}}
+          }
+        }
+      })
+
+    assert {:error, %CommandOutcome{} = doctored} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    assert doctored.envelope["error"]["phase"] == "local_preflight"
+    assert doctored.envelope["error"]["provider_activity"] == false
+
+    assert {:ok, %CommandOutcome{} = validated} =
+             CommandEngine.prepare(["validate", application, "--host-config", host_path])
+
+    assert validated.exit_status == 0
+    assert validated.envelope["command"] == "validate"
+    assert validated.envelope["result"]["provider_activity"] == false
+    assert_schema_valid(validated.envelope)
+  end
+
   test "default doctor reports the environment without an application or host" do
     assert {:ok, %CommandOutcome{} = outcome} = CommandEngine.prepare(["doctor"])
 

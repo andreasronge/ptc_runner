@@ -194,6 +194,56 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     assert diagnostic.provider_activity
   end
 
+  test "the reverse deadline ordering reports the same operation class" do
+    # The contract is that work receives only the minimum effective deadline and
+    # keeps no candidate or tie metadata: the diagnostic comes from the operation
+    # class executing at expiry, never from whichever candidate supplied the
+    # minimum. The test above proves it with the connectivity budget as the
+    # minimum; this is the same expiry with the intrinsic validation limit as the
+    # minimum instead, and it must answer identically.
+    {:ok, installed} = Limits.installed(%{selection_validation_timeout_ms: 100})
+
+    %{prepared: prepared, execution: execution} =
+      fixture(
+        %{"slow" => [destination: :workflow, selection_validation: :active]},
+        installed_limits: installed
+      )
+
+    limits = prepared.request.package.limits
+    assert limits.selection_validation_timeout_ms == 100
+    assert limits.doctor_connectivity_timeout_ms > 250
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+    assert diagnostic.phase == :active_preflight
+    assert diagnostic.code == :selection_validation_timeout
+    assert diagnostic.provider_activity
+  end
+
+  test "an exact tie between the two candidates is still deterministic" do
+    # Neither candidate is smaller, so nothing but the operation class can decide
+    # the code. A tie broken by candidate order would be a coin flip between
+    # `selection_validation_timeout` and `connectivity_timeout`.
+    {:ok, installed} =
+      Limits.installed(%{
+        doctor_connectivity_timeout_ms: 100,
+        selection_validation_timeout_ms: 100
+      })
+
+    %{prepared: prepared, execution: execution} =
+      fixture(
+        %{"slow" => [destination: :workflow, selection_validation: :active]},
+        installed_limits: installed
+      )
+
+    limits = prepared.request.package.limits
+    assert limits.selection_validation_timeout_ms == limits.doctor_connectivity_timeout_ms
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+    assert diagnostic.phase == :active_preflight
+    assert diagnostic.code == :selection_validation_timeout
+    assert diagnostic.provider_activity
+  end
+
   test "an exhausted connectivity budget reports a catalogued operation-wide timeout" do
     # The budget belongs to the operation: it can be spent before any occurrence
     # is reached, so the diagnostic carries no subject. Constructing it must not
