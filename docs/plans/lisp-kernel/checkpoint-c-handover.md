@@ -40,20 +40,26 @@ and switches branches under you. **Never `git add -A` / `git add .` /
 `git commit -a` here.** Stage explicit paths, and run `git show --stat <sha>`
 before every push.
 
-This was not hypothetical: commit `37413ae8` shipped a README diagram and a
-`mix.exs` ExDoc change written by that process, including a CDN `<script>`
-injected into generated HexDocs. A reviewer caught it, not the fourteen
-`git add -A` calls that produced it. It has since been amended out
-(`1b53ea23`) after confirming both changes were already on `origin/main`.
+This was not hypothetical: the commit now on the branch as `f3e9d62b` first
+shipped a README diagram and a `mix.exs` ExDoc change written by that process,
+including a CDN `<script>` injected into generated HexDocs. A reviewer caught
+it, not the fourteen `git add -A` calls that produced it. It was amended out
+after confirming both changes were already on `origin/main`.
 
 ## Facts that cost time to rediscover
 
 **`mix precommit` does not run Dialyzer; `mix prepush` does.** The registrar
 lifecycle-budget slice pushed a 16-error Dialyzer regression that survived
 several commits behind a green per-commit gate, and only surfaced when a push
-was attempted. Bisect: `6878a4bc~1` = 0, `6878a4bc` = 6, `d7fd0ffc` = 16. Run
+was attempted. Bisect: `c6fa661e~1` = 0, `c6fa661e` = 6, `a4709f1e` = 16. Run
 `mix dialyzer` yourself before believing a branch is clean. CI uses
 `MIX_ENV=test`, which analyses `test/support` too; run both.
+
+**The 2026-08-07 rebase orphaned every commit id before `238a112a`.** The
+SHAs above have been remapped once already; if one does not resolve, find the
+commit by subject with `git log --oneline origin/main..HEAD --grep=...` rather
+than trusting the id. This matters because the review discipline below tells
+you to base-guard a review to a slice base.
 
 **Rebasing this branch costs more than `git merge-tree` suggests.** Most of its
 commits regenerate `priv/semantic_build_projection.json` — 35 of 52 at the last
@@ -95,7 +101,14 @@ attribute it to your slice. `PTC_PRE_PUSH_MAX_CASES=2` reduces the pressure.
 
 ## Completed, in the order it landed
 
-**Connectivity modes** (`b3d34845`, `74f64a28`, `4443c136`). Resolved the
+The `(complete)` markers in `stable-cli-contract.md` are the full record; this
+list starts partway through the branch, at the point where notes were first
+kept. The earlier entries it omits — the abort-ordering repair (`1379e7a2`),
+the default doctor applicability matrix, phase-7 audited-local execution, the
+shared coordinator boundary, and the audited-local trust rule — all landed on
+this branch too, and are marked complete in the plan.
+
+**Connectivity modes** (`02bf7741`, `eb8e1ebd`, `af01b229`). Resolved the
 inherited semantic question: `connectivity_mode` governs only the connectivity
 row, so a `:none` occurrence declaring `selection_validation: :active` still
 runs its validator. `CommandContract` is the deciding evidence — connect admits
@@ -104,7 +117,7 @@ independent sealed declarations. Then implemented `:probe` and `:acquisition`:
 acquisition barrier first in dependency order, probes in declaration order,
 entries projected in manifest order only on success.
 
-**Unverified local checks** (`9a5f52e8`..`9c61b5fb`). `LocalPreflight.run_unverified/4`
+**Unverified local checks** (`e1800ed8`..`ec00d0fa`). `LocalPreflight.run_unverified/4`
 is the only entry to an `:unverified` callback, reached from the shared
 operation prefix so run, check, and connect all cross it; default doctor still
 reports `active_check_required`. It runs *after* active selection validation —
@@ -112,7 +125,7 @@ that order is a contract, not a preference, because an unverified callback is
 unrestricted active work and must not be paid for on a selection the validator
 then rejects. Seven review rounds.
 
-**Registrar lifecycle budgets** (`6878a4bc`..`7bed8c86`, now rebased). Three
+**Registrar lifecycle budgets** (`c6fa661e`..`675bf51e`). Three
 deadline classes, server-authoritative fences, budgets sealed into the handle,
 and commit ownership decided by the reply channel rather than a scheduling
 grace. The durable contract now lives in the `ProviderSession` moduledoc under
@@ -279,10 +292,12 @@ All are in `stable-cli-contract.md` with reasoning:
   `{:error, _}` fallback. Same class as the spec bug `e1ad00f6` fixed, so it is
   named here rather than left to be rediscovered.
 - `e1ad00f6`'s message says "no module outside `ProviderSession` reads a
-  registrar field". True of compiled code only: four `.exs` test files read
-  fields, including `scope_controller` and `root_owner`, which the accessor set
-  deliberately does not cover. Scripts are not compiled, so the Dialyzer fence
-  holds and the decision stands, but the sentence overstates.
+  registrar field". True of compiled code only: three `.exs` test files read
+  fields — `provider_session_test`, `mcp_request_context_test`, and
+  `mcp_oauth/token_manager_test` — including `scope_controller`, which the
+  accessor set deliberately does not cover. (`root_owner` is the other
+  uncovered field, and no test reads it.) Scripts are not compiled, so the
+  Dialyzer fence holds and the decision stands, but the sentence overstates.
 - The phase-8 credential union bounds the *selection*, not the occurrence. On
   the ordinary `acquire/6` run path a preparation can still report a credential
   another selected provider declared and be handed it; `acquire_targets/7` and
@@ -296,8 +311,9 @@ All are in `stable-cli-contract.md` with reasoning:
   from another application, catalog, or mode is refused; what it cannot see is a
   plan whose aliases and connectivity modes coincide while some other
   declaration differs. Sealing the plan would close it. Recorded rather than
-  built, because the only caller is `CommandEngine`, which holds one catalog and
-  one preparation.
+  built, because `settle_connect/4` has no production caller yet and its only
+  intended one is `CommandEngine`, which holds a single catalog and a single
+  preparation.
 - The up-front OAuth refusal makes `execute_ordinary`'s memory-runtime branch
   unreachable in practice: with `authorizations == []`, any selected OAuth alias
   is now refused first, so `oauth_authorities/2` always answers `%{}` on that

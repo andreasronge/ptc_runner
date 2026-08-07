@@ -87,9 +87,14 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   caller could turn into a passing row. The coordinator anchors the single
   deadline the whole step spends.
 
-  Every command crosses it before provider activity is marked: run, `--check`,
-  and the REPL through `ProviderExecution`, and default doctor by calling this
-  directly, because it opens no provider session at all.
+  Every active command crosses it before provider activity is marked: run,
+  `--check`, and `doctor --connect` through `ProviderExecution`, and default
+  doctor by calling this directly, because it opens no provider session at all.
+
+  The REPL does not, and saying so is not an omission to fix here. It builds
+  providers through the direct-embedding registry rather than through an
+  execution owner, so it crosses neither this step nor the activity marker.
+  Routing it through the shared boundary is its own slice.
   """
   @spec local_checks(
           PreparedRun.t() | nil,

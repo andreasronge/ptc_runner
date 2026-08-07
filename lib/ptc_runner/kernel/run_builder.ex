@@ -20,7 +20,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   A provider-bearing prepared run is preflighted the same way, and its active
   session is passed here for runtime assembly. One-shot runs and `--check` both
   open that session inside the execution-session owner and call
-  `build_active_owned/5` with the owner's sinks, then complete through
+  `build_active_owned/6` with the owner's sinks, then complete through
   `execute_built/1` or `check_built/1`. The REPL remains transitional: it calls
   `load_and_build/3` with an empty registry and opens no active session at
   all.

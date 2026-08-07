@@ -799,7 +799,8 @@ Checkpoint C started with a small stabilization prefix before adding doctor:
   during staged preparation; reject `data_class` or `accepts_data` drift before
   preflight, credentials, or acquisition, while retaining the owned-sink
   comparison as defense in depth;
-- record host-bound runtime activation as the code-owned bootstrap exception
+- (complete) record host-bound runtime activation as the code-owned bootstrap
+  exception
   above instead of bounding it. The expiry check before activation and the
   release after it already exist, so this slice adds only the two missing
   host-bound regressions — an expired deadline never activates the payload, and
@@ -819,7 +820,8 @@ Checkpoint C started with a small stabilization prefix before adding doctor:
   branch, so both paths apply the same selected-provider rule and neither
   charges the load to the run clock. `ProviderExecution.maybe_load_dotenv/2`
   and the sealed `dotenv_required?` query chain it used are deleted;
-- (complete) return zero from `LoopbackListener.remaining/1` on expiry, decide
+- (complete) return zero from `LoopbackListener`'s private remaining-time
+  helper on expiry, decide
   expiry before `:gen_tcp.recv/3` rather than delegating it to a zero timeout,
   and keep `:authorization_timeout` distinct from `:invalid_callback_request`.
   Regressions cover a callback already buffered before an expired accept, a
@@ -908,7 +910,8 @@ blocks the doctor contract below.
 Doctor completion delivers the following, again as independently reviewable
 commits in one Checkpoint C PR:
 
-- repair the abort ordering named in the third residual above. During run and
+- (complete) repair the abort ordering named in the third residual above.
+  During run and
   `--check` abort, the execution owner closes the provider session first and
   keeps the registry and the OAuth runtime alive until that cleanup has
   settled, because a committed provider closer runs against the runtime that
@@ -999,9 +1002,12 @@ commits in one Checkpoint C PR:
   doctor settles all audited-local rows, because the shared executor has proven
   every applicable occurrence. `CommandEngine` only selects the command flow and
   renders the returned result: no callback invocation, no deadline arithmetic,
-  no occurrence traversal. Run, check, and the REPL reach the same boundary
-  through `ProviderExecution.execute/8`, immediately before
-  `ProviderActiveSession` marks activity.
+  no occurrence traversal. Run, check, and `doctor --connect` reach the same
+  boundary through `ProviderExecution.execute/8`, immediately before
+  `ProviderActiveSession` marks activity. The REPL does not: it still builds
+  providers through the direct-embedding registry, so it crosses neither this
+  step nor the marker. Routing it through the shared boundary is slice 9's
+  entry, not a gap here.
 
   Three supporting decisions were forced by wiring it, each recorded here
   because none is visible from the entry above:
@@ -1018,8 +1024,8 @@ commits in one Checkpoint C PR:
     supplies them from this VM alone: the declared Elixir requirement, and
     whether the optional viewer is on the code path. Neither can fail a
     command, and a test pins the requirement constant against `mix.exs`;
-- run `doctor --connect` through the ordinary provider-session prefix and its
-  connectivity branch: probe `:probe`, use bounded acquisition/discovery for
+- (complete) run `doctor --connect` through the ordinary provider-session
+  prefix and its connectivity branch: probe `:probe`, use bounded acquisition/discovery for
   `:acquisition`, and skip `:none`. A survey before starting it fixes the shape:
 
   - `ProviderExecution` has no connectivity operation at all, so this is the
@@ -1028,7 +1034,7 @@ commits in one Checkpoint C PR:
     session, resolves OAuth authorities, anchors the operation deadline, and
     opens the runtime registry, and only `complete_operation/2` differs by
     operation. Connectivity becomes the third completion, and unlike run and
-    check it does not go through `RunBuilder.build_active_owned/5` — it needs
+    check it does not go through `RunBuilder.build_active_owned/6` — it needs
     the registry and the sealed services, not a Kernel run config;
   - the two modes reach different places. An `:acquisition` occurrence goes
     through the registry it shares with a run — `prepare`, preflight, `acquire`
@@ -1037,8 +1043,9 @@ commits in one Checkpoint C PR:
     .connectivity_probe` with the sealed services, because a probe is not a
     builder and never enters the registry;
   - the shipped live-model probe already exists and needs no work. It disables
-    adapter and HTTP retries and redirects, forces a one-token ceiling, resolves
-    its credential only after local checks, and spends
+    adapter and HTTP retries and redirects, forces a one-token ceiling, consumes
+    the credential phase-8 step 5 resolved rather than resolving its own, and
+    spends
     `doctor_connectivity_timeout_ms` intersected with any supplied occurrence
     deadline; and
   - the result contract is stricter than default doctor's and decides the
@@ -1048,15 +1055,16 @@ commits in one Checkpoint C PR:
     whole command with its catalogued diagnostic. The connectivity branch can
     therefore return `:ok` or one diagnostic, exactly like the phase-7 step, and
     `DoctorPlan` settles its remaining pending rows only after that success.
-    `DoctorPlan.new/3` gains the mode, because connect leaves pending what
+    `DoctorPlan.new/4` gains the mode, because connect leaves pending what
     default doctor settles as `requires_connect` or `active_check_required`;
 
-- invoke `:unverified` local checks after the phase-8 marker, under the session
-  deadline, for run, `--check`, and `doctor --connect`. Nothing invokes them
-  today — that was already true before phase-7 execution existed, and restricting
-  `:audited_local` to shipped host declarations made it the only path a custom
-  local check has. Default doctor keeps reporting `active_check_required`
-  instead of running one.
+- (complete) invoke `:unverified` local checks after the phase-8 marker, under
+  the session deadline, for run, `--check`, and `doctor --connect`. Nothing
+  invoked them before this — that was already true before phase-7 execution
+  existed, and restricting `:audited_local` to shipped host declarations made it
+  the only path a custom local check has. `LocalPreflight.run_unverified/4` is
+  the single entry, reached from the shared operation prefix. Default doctor
+  keeps reporting `active_check_required` instead of running one.
 
   Two questions were settled before writing it, because both changed what gets
   built rather than how.
@@ -1184,8 +1192,8 @@ commits in one Checkpoint C PR:
   authoritative cap at or before the transport receive boundary; and
 - (complete) add shipped live-model probes with retries and redirects disabled.
   `HostInstallation` already builds one: it disables adapter and HTTP retries
-  and redirects, forces a one-token ceiling, resolves its credential only after
-  local checks, and runs in a heap- and time-bounded worker. The remaining
+  and redirects, forces a one-token ceiling, consumes the credential phase-8
+  step 5 resolved, and runs in a heap- and time-bounded worker. The remaining
   connect work is orchestration and transport enforcement, not another probe.
 
 **Connect build order (do not vary):** the CLI surface is enabled last, so no
@@ -1215,16 +1223,18 @@ fine; temporarily reachable and unsafe is not.
    translation table. It hands the operation deadline to the callback as
    `:doctor_occurrence_deadline_ms`, which is how a shipped probe intersects its
    intrinsic budget with the operation's. The acquisition half calls
-   `ProviderAcquisition.acquire_targets/6` with the `:acquisition` occurrences
+   `ProviderAcquisition.acquire_targets/7` with the `:acquisition` occurrences
    as targets and a no-op artifact preflight, because connectivity publishes
    nothing. Three corrections came first, because all of them get more expensive
    once `DoctorPlan` consumes the result:
 
    - (complete, repaired under review) the acquisition subset primitive.
-     `ProviderAcquisition.acquire_subset/6` narrows which providers are
-     acquired without narrowing any judgement about the application, and
-     `acquire/5` is that primitive with `:all`, so an ordinary run and check
-     take the path they always took. Every whole-application judgement stays
+     `ProviderAcquisition.acquire_targets/7` narrows which providers are
+     acquired without narrowing any judgement about the application, while
+     `acquire/6` keeps the whole-selection path, so an ordinary run and check
+     take the path they always took. (Both arities grew by one when phase-8
+     credential resolution began supplying the resolved map; an earlier
+     `acquire_subset/6` was the rejected first attempt and no longer exists.) Every whole-application judgement stays
      whole-application — all selected providers are prepared, and dependency
      validity, the single-workflow-LLM rule, the effective data class, and the
      providers' acceptance of it are decided over the complete set — because
@@ -1239,7 +1249,7 @@ fine; temporarily reachable and unsafe is not.
      invoke a callback depend on invoking callbacks, and lets executable code
      redirect which executable code runs.
 
-     `acquire_targets/6` therefore plans from sealed evidence.
+     `acquire_targets/7` therefore plans from sealed evidence.
      `ProviderAcquisition.plan/2` projects the graph from `PreparedRun`'s
      declarations and the exact catalog they were validated against, the closure
      is computed from those sealed `requires`/`provides` before any builder
@@ -1256,7 +1266,7 @@ fine; temporarily reachable and unsafe is not.
      effective class, and acceptance inertly in phase 5, and seals the result.
      An application whose classes disagree never becomes a preparation at all,
      which is a stronger guarantee than re-checking it here would have been.
-     `acquire/5` keeps the complete preparation path unchanged for ordinary runs
+     `acquire/6` keeps the complete preparation path unchanged for ordinary runs
      and embedding. Providers pulled in only as dependencies are support work:
      acquired and cleaned up like any other, and never a successful connectivity
      row. Cleanup stays the session's, so a failure mid-closure leaves the
@@ -1424,8 +1434,8 @@ fine; temporarily reachable and unsafe is not.
 
      The supplied union became the ordinary run path's declaration guard, and
      its limit is recorded rather than hidden. The handover noted that
-     `acquire_targets/6` compares every preparation with its sealed declaration
-     through `declarations_honored/2` while `acquire/5` does not. The run path
+     `acquire_targets/7` compares every preparation with its sealed declaration
+     through `declarations_honored/2` while `acquire/6` does not. The run path
      now has a bound it did not have: the union is sealed and whole-selection,
      so a name no selected declaration required can never appear in it, and
      acquisition refuses with `provider_declaration_mismatch` before preflight
@@ -1627,9 +1637,10 @@ telemetry, or envelopes; transport status, headers, and body remain bounded. An
 adversarial peer cannot deliver a transport-sized binary into the command
 process before the response limit rejects it. Fixtures prove `validate` invokes
 no local callback, default doctor invokes only audited-local callbacks, and an
-unverified check cannot run before activity is true. Connectivity fixtures prove
-that either deadline-candidate ordering and an exact tie retain the connectivity
-operation-class diagnostic.
+unverified check cannot run before activity is true. Connectivity fixtures prove that under either
+deadline-candidate ordering, and under an exact tie, the diagnostic comes from
+the class of work executing when the budget expired rather than from whichever
+candidate supplied the minimum.
 
 `models` was named here too and has moved to slice 9's gate. It is still stubbed
 to `internal_error` alongside `init`, so a fixture written now would pin the stub
@@ -1660,11 +1671,19 @@ exactly `<run_ref>.jsonl` and `<run_ref>.private.jsonl`, respectively.
 ### Slice 9: commands and REPL parity
 
 Checkpoint B left three transitional execution paths, not two: one-shot runs
-through `ExecutionSessionOwner` and `build_active_owned/5`, `--check` opens its
-own session and calls `build_active/4`, and the REPL opens no active session at
-all and calls `load_and_build/3` with an empty registry. Behavioural drift
-between them has already produced one reachable privacy defect, so treat this
-slice as early simplification rather than work deferred behind later features.
+through `ExecutionSessionOwner` and `build_active_owned/6`, `--check` opening
+its own session and calling `build_active/4`, and the REPL opening no active
+session at all and calling `load_and_build/3` with an empty registry.
+Behavioural drift between them has already produced one reachable privacy
+defect, so treat this slice as early simplification rather than work deferred
+behind later features.
+
+Checkpoint C closed the second of those: `--check` now shares the execution
+owner's composition and `build_active/4` is deleted. The REPL path is
+unchanged and is the one that remains — it still calls `load_and_build/3` with
+a registry it built itself, so it crosses neither phase 7 nor the phase-8
+activity marker. That is this slice's work, and nothing in Checkpoint C should
+be read as having done it.
 
 Checkpoint C pulls descriptor-authoritative acquisition, the recorded
 runtime-activation bootstrap exception, `.env` ordering, listener expiry, and
