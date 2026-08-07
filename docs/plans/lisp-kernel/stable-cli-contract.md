@@ -1568,11 +1568,16 @@ Acquisition-backed discovery closes every provisional and acquired resource on
 the shared stack. Credentials and response material never reach logs,
 telemetry, or envelopes; transport status, headers, and body remain bounded. An
 adversarial peer cannot deliver a transport-sized binary into the command
-process before the response limit rejects it. Fixtures prove validate/models
-invoke no local callback, default doctor invokes only audited-local callbacks,
-and an unverified check cannot run before activity is true. Connectivity
-fixtures prove that either deadline-candidate ordering and an exact tie retain
-the connectivity operation-class diagnostic.
+process before the response limit rejects it. Fixtures prove `validate` invokes
+no local callback, default doctor invokes only audited-local callbacks, and an
+unverified check cannot run before activity is true. Connectivity fixtures prove
+that either deadline-candidate ordering and an exact tie retain the connectivity
+operation-class diagnostic.
+
+`models` was named here too and has moved to slice 9's gate. It is still stubbed
+to `internal_error` alongside `init`, so a fixture written now would pin the stub
+rather than the contract; its dispatch lands with the shared command surface, and
+the check belongs beside it.
 
 The current active-mode Mint loop applies cumulative limits only after one
 socket message has already reached the command process, so finite response
@@ -1610,7 +1615,8 @@ runtime-activation bootstrap exception, `.env` ordering, listener expiry, and
 command and REPL cutover after destination publication is complete:
 
 - finish shared `help`, `version`, `validate`, `models`, `doctor`, `run`, and
-  `init` rendering and dispatch;
+  `init` rendering and dispatch, and prove `models` invokes no local callback
+  once it has one — the slice-7 gate named it before it existed;
 - route Mix one-shot and existing REPL modes through the shared preparation and
   session boundaries;
 - add manifest-only `--host-config HOST.json` to the REPL, require it for a
@@ -1745,6 +1751,18 @@ conformance tests:
 The following are out of scope until a concrete adapter or deployment requires
 them:
 
+- unifying `ProviderAcquisition.acquire/6` and `acquire_targets/7`. This is the
+  one deferral with a *known* cost rather than a speculative one, and it buys
+  two fixes at once. The ordinary run path has no sealed per-occurrence
+  declarations to compare a preparation against, so it cannot run
+  `declarations_honored/2` and its credential bound is the selection's union
+  rather than the occurrence's — a preparation can report a credential another
+  selected provider declared and be handed it. Both close by giving `acquire/6`
+  the plan `acquire_targets/7` already takes. It is deferred rather than done
+  because the two entries differ in more than the plan: `acquire/6` derives the
+  whole-application judgements from its preparations, while `acquire_targets/7`
+  relies on phase 5 having sealed them, so merging them is a simplification
+  slice with its own review rather than a parameter change;
 - remote OAuth stores, cross-clock deadline translation, possibly-dispatched
   mutation algebra, generated replay catalogs, and store-local identity;
 - durable cleanup journals, reservation generations, restart reconstruction,

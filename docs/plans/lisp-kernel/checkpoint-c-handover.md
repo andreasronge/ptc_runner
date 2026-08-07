@@ -59,6 +59,26 @@ of deferring to one fixup at the end. Verify afterwards with
 `git diff <old-head> HEAD --stat`: it must list only files the upstream changed,
 never your own.
 
+**Coverage on this repo has false negatives — do not read it literally.**
+`mix test --cover` reports single-line `defp f(...), do: expr` clause bodies as
+uncovered even when they are heavily exercised. It flagged
+`ProviderCredentials`'s no-credentials-declared path, which is an ordinary case
+rather than a defensive one; putting a `raise` in that clause failed 14 of 34
+connectivity tests. Verify a suspicious "uncovered" line with a probe before
+writing a test for it. Three tests also fail under `--cover` and pass without it
+— `HostConfigTest`, `RunCoordinatorExecutionTest`, `SemanticRevisionTest` — so
+instrumentation artifacts, not regressions. Coverage output lands in a gitignored
+`cover/` with several hundred files; delete it afterwards. Total sits at ~84%,
+and most genuinely uncovered lines are fail-closed clauses reachable only with
+values callers cannot construct, which is deliberate.
+
+**Dialyzer and Credo do not see an unreferenced *public* function.** Dialyzer
+reports unused private ones — that is how a dead `unreleased_diagnostic/0`
+surfaced — but a public function with no caller needs its own audit. One was
+found this way (`ProviderCredentials.required_names/2`, since made private).
+When auditing, match function names as fixed strings: a `?` suffix breaks a
+regex scan and will report live code as dead.
+
 **`InspectionAnalysisProfileTest` fails under load.** The
 "PTC-Lisp reaches exact evidence" case reports `:memory_exceeded` when the
 machine is busy and passes when it is quiet. Verified pre-existing: it fails at
@@ -142,6 +162,17 @@ and the contract.
    *is* now constructed — `AcquisitionReason` mints it for an authorization
    failure discovered mid-acquisition. #3 owns the different question of
    refusing a selected OAuth occurrence up front; the two must not collide.
+
+   **An acceptance check #3 already has.** Five functions have real tests and
+   zero production callers: `ConnectivityResult.bound_to?/3`, `entries/1`,
+   `outcomes/1`, `valid?/1`, and `DoctorPlan.pending/1`. They are not dead —
+   they were built ahead of their consumer, and that consumer is #3. The plan
+   says `bound_to?/3` exists so `DoctorPlan` never has to trust entries alone.
+   So if #3 lands without calling `bound_to?/3` and consuming `entries/1`,
+   either #3 is wrong or those functions are dead and should go. `pending/1` is
+   the weaker case — `settle_pending/1` uses it internally and only tests reach
+   it directly, so it may want to be private once #3 has decided whether connect
+   mode needs it.
 
 2. **#4 MCP transport receive cap.** The plan says *prove* the bound first: the
    current active-mode Mint loop applies cumulative limits only after a socket
