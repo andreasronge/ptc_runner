@@ -14,6 +14,11 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   shared provider-cleanup budget. A direct embedding session without an
   operation deadline retains the registry's synchronous callback semantics.
 
+  `acquire_subset/6` narrows which providers are acquired without narrowing any
+  judgement about the application: see its documentation for what stays
+  whole-application and why. An ordinary run and check acquire `:all`, which is
+  the same path this module always took.
+
   This module does not own the provider session. Its caller closes that session
   after any error and retains it with a successful acquisition result.
   """
@@ -42,15 +47,59 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
           {:ok, map()}
           | {:error, term()}
           | {:unregistered_provider_close, term(), ProviderRegistry.close()}
-  def acquire(
+  def acquire(package, registry, session, input_class, artifact_preflight),
+    do: acquire_subset(package, registry, session, input_class, artifact_preflight, :all)
+
+  @doc """
+  Acquires a subset of one prepared run's selected providers.
+
+  The subset names occurrence indices over the package's selected providers in
+  `workflow`-then-`mission` order — the same indices the barrier already uses to
+  identify an occurrence. `:all` is the whole application and is what an
+  ordinary run and check pass.
+
+  Every whole-application judgement stays whole-application, because narrowing
+  them is how a subset would quietly become a weaker pipeline. All selected
+  providers are prepared, and dependency validity, the single-workflow-LLM rule,
+  the effective data class, and the providers' acceptance of that class are all
+  decided over the complete set. Preparation is also the step that yields each
+  provider's `requires`/`provides`, so the dependency closure below is computed
+  from what the builders actually report rather than from a declaration that
+  might disagree with them.
+
+  Only the effectful steps narrow: the subset is expanded to its complete
+  dependency closure, and preflight, the one credential union, and
+  dependency-order acquisition cover exactly that closure. Providers pulled in
+  only as dependencies are support work — they are acquired and cleaned up like
+  any other, but a caller cannot tell them apart from its targets here and must
+  not report them as results of its own.
+
+  Ordering, cleanup, and failure behaviour are the barrier's throughout: partial
+  acquisition unwinds in reverse, preflights are released once, and an
+  unregistered closer is surfaced rather than dropped.
+  """
+  @spec acquire_subset(
+          ApplicationPackage.t(),
+          ProviderRegistry.t(),
+          ProviderSession.t(),
+          input_class(),
+          artifact_preflight(),
+          :all | [non_neg_integer()]
+        ) ::
+          {:ok, map()}
+          | {:error, term()}
+          | {:unregistered_provider_close, term(), ProviderRegistry.close()}
+  def acquire_subset(
         %ApplicationPackage{} = package,
         %ProviderRegistry{} = registry,
         session,
         input_class,
-        artifact_preflight
+        artifact_preflight,
+        targets
       )
       when input_class in [:normal, :private_inspection] and
-             is_function(artifact_preflight, 1) do
+             is_function(artifact_preflight, 1) and
+             (targets == :all or is_list(targets)) do
     max_heap_words = package.limits.provider_heap_words
 
     with {:ok, prepared} <-
@@ -60,7 +109,8 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
          effective_class <- effective_data_class(input_class, prepared),
          :ok <- providers_accept(prepared, effective_class),
          :ok <- artifact_preflight.(effective_class),
-         {:ok, preflighted} <- preflight_providers(prepared, session, max_heap_words) do
+         {:ok, selected} <- dependency_closure(prepared, targets),
+         {:ok, preflighted} <- preflight_providers(selected, session, max_heap_words) do
       try do
         with {:ok, credentials} <-
                resolve_provider_credentials(
@@ -91,8 +141,61 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     end
   end
 
-  def acquire(_package, _registry, _session, _input_class, _artifact_preflight),
-    do: {:error, :invalid_provider_acquisition}
+  def acquire_subset(
+        _package,
+        _registry,
+        _session,
+        _input_class,
+        _artifact_preflight,
+        _targets
+      ),
+      do: {:error, :invalid_provider_acquisition}
+
+  # `:all` keeps the prepared list exactly as it is, so an ordinary run and
+  # check reach the same providers in the same order they always did.
+  defp dependency_closure(prepared, :all), do: {:ok, prepared}
+
+  defp dependency_closure(prepared, targets) do
+    by_index = Map.new(prepared, &{&1.index, &1})
+
+    if Enum.all?(targets, &Map.has_key?(by_index, &1)) do
+      {:ok, expand_closure(prepared, by_index, MapSet.new(targets))}
+    else
+      {:error, :invalid_provider_acquisition}
+    end
+  end
+
+  # Dependencies are followed to a fixed point: a provider pulled in for its
+  # service may require services of its own. Whole-set validation above already
+  # proved every required service is provided exactly once, so this cannot
+  # diverge and cannot silently drop an unsatisfiable requirement.
+  defp expand_closure(prepared, by_index, selected) do
+    providers_by_service =
+      Enum.reduce(prepared, %{}, fn provider, accumulated ->
+        Enum.reduce(provider.provides, accumulated, &Map.put(&2, &1, provider.index))
+      end)
+
+    closed = close_over(selected, by_index, providers_by_service)
+
+    # The prepared order is the barrier's order; the closure is a filter on it
+    # rather than a new sequence.
+    Enum.filter(prepared, &MapSet.member?(closed, &1.index))
+  end
+
+  defp close_over(selected, by_index, providers_by_service) do
+    added =
+      selected
+      |> Enum.flat_map(fn index -> Map.fetch!(by_index, index).requires end)
+      |> Enum.map(&Map.get(providers_by_service, &1))
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
+
+    next = MapSet.union(selected, added)
+
+    if MapSet.equal?(next, selected),
+      do: selected,
+      else: close_over(next, by_index, providers_by_service)
+  end
 
   defp sort_snapshots(snapshots), do: Enum.sort_by(snapshots, &Map.get(&1, "provider", ""))
 

@@ -1089,6 +1089,26 @@ fine; temporarily reachable and unsafe is not.
    cleanup stack. Three corrections come first, because all of them get more
    expensive once `DoctorPlan` consumes the result:
 
+   - (complete) the acquisition subset primitive.
+     `ProviderAcquisition.acquire_subset/6` narrows which providers are
+     acquired without narrowing any judgement about the application, and
+     `acquire/5` is that primitive with `:all`, so an ordinary run and check
+     take the path they always took. Every whole-application judgement stays
+     whole-application — all selected providers are prepared, and dependency
+     validity, the single-workflow-LLM rule, the effective data class, and the
+     providers' acceptance of it are decided over the complete set — because
+     narrowing them is exactly how a subset becomes a second, weaker pipeline.
+     Only the effectful steps narrow: the subset expands to its complete
+     dependency closure, and preflight, the one credential union, and
+     dependency-order acquisition cover that closure. The closure is computed
+     from the `requires`/`provides` the builders report at preparation rather
+     than from declarations alone, because preparation is the step this module
+     has them from, and that is also the graph acquisition will actually walk.
+     Providers pulled in only as dependencies are support work: acquired and
+     cleaned up like any other, and never a successful connectivity row.
+     Cleanup stays the session's, so a failure mid-closure leaves the acquired
+     prefix on its stack rather than unwinding through a path of its own;
+
    - (decided) execution order versus reporting order. The barrier acquires in
      dependency-order waves while the result validates declaration order, so
      the two cannot be the same without building a second incremental
