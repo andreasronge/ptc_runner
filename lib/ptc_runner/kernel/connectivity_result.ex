@@ -10,6 +10,16 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
   # the doctor plan that renders one group per alias, and it can only collapse
   # correctly if this value kept them apart.
   #
+  # Declaration order is the canonical *reporting* order and says nothing about
+  # execution order. This is a success projection: on failure no result exists
+  # at all, so there is no partial evidence whose sequence could be read. The
+  # operation acquires its targets through the shared dependency-order barrier
+  # and probes in a separately pinned order, then builds these entries in
+  # manifest order afterwards. A reader may rely on the output being stable and
+  # matching the manifest; a reader may not infer what ran first, and a failure
+  # names the occurrence that actually failed rather than the earliest declared
+  # one.
+  #
   # The value is bound to the exact preparation and catalog it answers for, not
   # merely shaped like a plausible answer. Alias names are not identity: two
   # catalogs can install the same alias over different sealed descriptors, so a

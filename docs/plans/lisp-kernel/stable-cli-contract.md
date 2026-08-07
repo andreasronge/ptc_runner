@@ -1079,14 +1079,32 @@ fine; temporarily reachable and unsafe is not.
    connectivity decides per occurrence what its declaration asks for.
    `ConnectivityResult` is the internal success value — one entry per selected
    occurrence in declaration order, with a closed outcome set validated at
-   construction and a `covers?/2` check against the preparation, so a later
-   plan cannot settle a row nothing reached. Connectivity has no provider-free
+   construction and, after the repairs in step 2 below, a `bound_to?/3` check
+   against the exact preparation and catalog, so a later plan cannot settle a
+   row nothing reached. Connectivity has no provider-free
    form, because it answers for selected occurrences. Only `:none` is
    implemented; `:probe` and `:acquisition` fail closed;
 2. implement `:none`, `:probe`, and `:acquisition` behaviour through the
    existing session, registry, activity marker, operation deadline, and LIFO
    cleanup stack. Three corrections come first, because all of them get more
    expensive once `DoctorPlan` consumes the result:
+
+   - (decided) execution order versus reporting order. The barrier acquires in
+     dependency-order waves while the result validates declaration order, so
+     the two cannot be the same without building a second incremental
+     acquisition engine with cached prerequisites and interleaved probes.
+     `ConnectivityResult` is a canonical success projection rather than an
+     execution trace — on failure no result exists at all — so declaration
+     order means stable output matching the manifest, not the order callbacks
+     happened. The pinned shape: compute every `:acquisition` target and its
+     dependency closure inertly from sealed `requires`/`provides`; prepare,
+     validate, resolve the credential union once, and acquire that closure
+     through the existing dependency-order barrier; then run probes in
+     declaration order; then build success entries in declaration order.
+     Dependency-only providers are support work and never become successful
+     connectivity rows. A failure reports the occurrence that actually failed,
+     and the contract deliberately promises no manifest-first failure
+     precedence;
 
    - (complete) connectivity is non-interactive by construction.
      `ProviderExecution` could carry authorization targets, which would have

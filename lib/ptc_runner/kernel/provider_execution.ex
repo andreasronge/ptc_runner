@@ -102,7 +102,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           PublicationAuthority.t(),
           map(),
           t(),
-          (binary() -> term()),
+          (binary() -> term()) | nil,
           tracker(),
           pid(),
           :run | :check | :connect

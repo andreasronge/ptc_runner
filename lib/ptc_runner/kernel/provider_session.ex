@@ -68,6 +68,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
     :operation_identity,
     :run_duration_ms,
     :connectivity_duration_ms,
+    :begun_operation,
     :run_deadline,
     :cleanup_timeout_ms,
     :max_heap_words,
@@ -89,6 +90,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
             operation_identity: binary() | nil,
             run_duration_ms: pos_integer(),
             connectivity_duration_ms: pos_integer(),
+            begun_operation: :run | :check | :connect | nil,
             run_deadline: Deadline.t() | nil,
             cleanup_timeout_ms: pos_integer(),
             max_heap_words: pos_integer(),
@@ -139,6 +141,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
             operation_identity: operation_identity,
             run_duration_ms: limits.run_duration_ms,
             connectivity_duration_ms: limits.doctor_connectivity_timeout_ms,
+            begun_operation: nil,
             run_deadline: nil,
             cleanup_timeout_ms: limits.provider_cleanup_timeout_ms,
             max_heap_words: limits.provider_heap_words,
@@ -258,7 +261,11 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
       case result do
         :ok ->
-          {:ok, session |> Map.put(:run_deadline, run_deadline) |> seal()}
+          {:ok,
+           session
+           |> Map.put(:run_deadline, run_deadline)
+           |> Map.put(:begun_operation, operation)
+           |> seal()}
 
         {:error, :provider_session_unavailable} = error ->
           abandon_unclaimed(session)
@@ -379,7 +386,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
           | {:error, :operation_claimed | :operation_mismatch | :provider_session_unavailable}
   def claim_operation(%__MODULE__{} = session, %Limits{} = limits, identity)
       when is_binary(identity) do
-    if valid?(session) and Limits.valid?(limits) and Deadline.valid?(session.run_deadline) do
+    if valid?(session) and Limits.valid?(limits) and Deadline.valid?(session.run_deadline) and
+         claimable_operation?(session) do
       deadline = Deadline.new(@claim_timeout_ms)
 
       result =
@@ -414,6 +422,15 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
   def claim_operation(_session, _limits, _identity),
     do: {:error, :provider_session_unavailable}
+
+  # The claim boundary validates identity and limits, not which clock this
+  # session anchored. A connect session holds `doctor_connectivity_timeout_ms`,
+  # which an application that narrowed `run_duration_ms` can make the longer of
+  # the two, so claiming it for a run or a check would hand execution a budget
+  # its limits never granted. The operation the session began with is sealed
+  # into it for exactly this check.
+  defp claimable_operation?(%__MODULE__{begun_operation: operation}),
+    do: operation in [:run, :check]
 
   @spec open_registrar(t()) ::
           {:ok, ResourceRegistrar.t()} | {:error, :provider_session_unavailable}
@@ -1341,6 +1358,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
       session.operation_identity,
       session.run_duration_ms,
       session.connectivity_duration_ms,
+      session.begun_operation,
       session.run_deadline,
       session.cleanup_timeout_ms,
       session.max_heap_words

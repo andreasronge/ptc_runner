@@ -90,6 +90,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the provider does not implement the declared connectivity check"},
     {:active_preflight, :connectivity_outcome_unknown, 4, false,
      "the connectivity outcome could not be committed safely"},
+    {:active_preflight, :connectivity_timeout, 4, false,
+     "the connectivity operation exceeded its budget"},
     {:active_preflight, :authorization_unavailable, 4, true,
      "the authorization service is temporarily unavailable"},
     {:active_preflight, :connectivity_unavailable, 4, true,
@@ -246,6 +248,12 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   @spec subject_policy(phase(), atom()) :: :required | :optional | :forbidden
   def subject_policy(:host, :installation_revision_missing), do: :required
+
+  # The one active-preflight outcome that belongs to the operation rather than
+  # to an occurrence. A budget spent before or between occurrences cannot be
+  # attributed to any of them, and naming an arbitrary one would report a
+  # provider as unreachable when nothing had reached it yet.
+  def subject_policy(:active_preflight, :connectivity_timeout), do: :forbidden
 
   def subject_policy(phase, code) do
     cond do

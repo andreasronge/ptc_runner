@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.Deadline
@@ -111,6 +112,48 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     assert diagnostic.phase == :active_preflight
     assert diagnostic.code == :selection_validation_timeout
     assert diagnostic.provider_activity
+  end
+
+  test "an exhausted connectivity budget reports a catalogued operation-wide timeout" do
+    # The budget belongs to the operation: it can be spent before any occurrence
+    # is reached, so the diagnostic carries no subject. Constructing it must not
+    # raise — an active-preflight code that required a subject would be turned
+    # into `internal_error` by the outer rescue and the real outcome lost.
+    diagnostic =
+      CommandDiagnostic.new!(:active_preflight, :connectivity_timeout, provider_activity: true)
+
+    assert diagnostic.subject == nil
+    assert diagnostic.provider_activity
+
+    assert CommandContract.diagnostic_allowed?(
+             {:doctor, :connect},
+             :active_preflight,
+             :connectivity_timeout
+           )
+  end
+
+  test "a connect session cannot be claimed for a run or a check" do
+    # A connect session holds the connectivity budget, which an application that
+    # narrowed `run_duration_ms` can make the longer of the two. Claiming it for
+    # a run would hand execution a budget its limits never granted.
+    {:ok, installed} = Limits.installed(%{doctor_connectivity_timeout_ms: 30_000})
+
+    %{prepared: prepared} =
+      fixture(%{"inert" => [destination: :workflow]},
+        installed_limits: installed,
+        run_duration_ms: 1_000
+      )
+
+    assert :ok = ProviderActivity.mark(prepared.provider_activity)
+    limits = prepared.request.package.limits
+    assert limits.doctor_connectivity_timeout_ms > limits.run_duration_ms
+
+    {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
+    on_exit(fn -> ProviderSession.close(session) end)
+    {:ok, session} = ProviderSession.begin_operation(session, :connect)
+
+    assert {:error, :provider_session_unavailable} =
+             ProviderSession.claim_operation(session, limits, prepared.attestation)
   end
 
   test "a session anchors only the budgets its own limits sealed" do
