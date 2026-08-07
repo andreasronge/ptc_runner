@@ -444,6 +444,12 @@ defmodule PtcRunner.Kernel.ProviderSession do
           {:ok, ResourceRegistrar.t()} | {:error, :provider_session_unavailable}
   def open_registrar(%__MODULE__{} = session) do
     if valid?(session) and session.creator == self() do
+      # The caller's copy of the deadline sizes its own wait and nothing else.
+      # The budget sealed into the handle comes back from the session, because
+      # a pre-begin handle still carries `run_deadline: nil` and sealing that
+      # would mint a legitimately attested registrar whose activate and commit
+      # wait forever — server authority over the fence is worth little if the
+      # caller still decides the budget the handle carries.
       deadline = session.run_deadline
 
       case call(
@@ -451,7 +457,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
              {session.token, {:open_registrar, deadline}},
              operation_call_timeout(deadline, 5_000)
            ) do
-        {:ok, scope, scope_controller, root_owner, cleanup_owner} ->
+        {:ok, scope, scope_controller, root_owner, cleanup_owner, sealed_deadline} ->
           {:ok,
            ResourceRegistrar.new(
              session.pid,
@@ -460,7 +466,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
              scope_controller,
              root_owner,
              cleanup_owner,
-             deadline,
+             sealed_deadline,
              session.cleanup_timeout_ms
            )}
 
@@ -676,10 +682,18 @@ defmodule PtcRunner.Kernel.ProviderSession do
       {:DOWN, ^monitor, :process, _pid, _reason} -> :ok
     end
 
-    case :gen_server.wait_response(request_id, 0) do
+    # `receive_response/2` consumes the request's monitor either way, so a wedged
+    # commit does not leave the dead session's `:DOWN` sitting in this mailbox.
+    case :gen_server.receive_response(request_id, 0) do
       # The session owned the closer and is now gone without running it. The
       # caller must not run it — the session may already have drained it — so
       # this reports an unreleased resource rather than a refused commit.
+      #
+      # The fence makes this unreachable today: accepting a commit needs a live
+      # deadline, and settle begins only after the operation budget and a whole
+      # cleanup budget have elapsed, so a pre-expiry acceptance's reply was
+      # already consumed by the first wait. It is kept as the correct answer if
+      # that fence ever regresses.
       {:reply, :ok} -> {:error, :provider_cleanup_failed}
       _absent_or_failed -> {:error, :resource_registrar_unavailable}
     end
@@ -1187,7 +1201,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
       _ = close_roots(entry, Deadline.new(state.cleanup_timeout_ms))
       {:reply, {:error, :provider_session_unavailable}, state}
     else
-      {:reply, {:ok, scope, entry.scope_controller, entry.root_owner, entry.scope_reaper},
+      {:reply,
+       {:ok, scope, entry.scope_controller, entry.root_owner, entry.scope_reaper, deadline},
        %{
          state
          | scopes: Map.put(state.scopes, scope, entry),

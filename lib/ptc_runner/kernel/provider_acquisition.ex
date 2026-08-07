@@ -525,9 +525,11 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
 
       # The session took ownership and then became unreachable without running
       # the closer. It is the only owner this closer ever had, so re-running it
-      # here would be a second run of work that may already have happened.
+      # here would be a second run of work that may already have happened. The
+      # reason is minted here rather than reported by a provider, so it carries
+      # its catalogued code instead of a bare atom a consumer would collapse.
       {:error, :provider_cleanup_failed} ->
-        {:halt, {:error, :provider_cleanup_failed}}
+        {:halt, {:error, unreleased_diagnostic()}}
 
       {:error, _reason} ->
         {:halt, {:unregistered_provider_close, :provider_session_unavailable, built.close}}
@@ -540,7 +542,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
         {:halt, {:error, :provider_data_policy_changed}}
 
       {:error, :provider_cleanup_failed} ->
-        {:halt, {:error, :provider_cleanup_failed}}
+        {:halt, {:error, unreleased_diagnostic()}}
 
       {:error, _reason} ->
         {:halt, {:unregistered_provider_close, :provider_data_policy_changed, built.close}}
@@ -732,6 +734,12 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   defp reverse_success({:ok, values}), do: {:ok, Enum.reverse(values)}
   defp reverse_success({:error, _reason} = error), do: error
 
+  # The deadline that produced `{:deadline_expired, ...}` is the one the session
+  # fences commit with, and it never re-anchors, so in practice the commit below
+  # is always refused and the closer always leaves with its caller. The other
+  # two clauses are kept because they are the correct answers if a commit does
+  # land — the reported diagnostic is the same either way, only the owner of the
+  # closer differs.
   defp preserve_expired_acquisition(provider, {:ok, built}, diagnostic) do
     case ResourceRegistrar.commit(provider.registrar, built.close) do
       :ok -> {:error, diagnostic}
@@ -742,6 +750,9 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
 
   defp preserve_expired_acquisition(_provider, _callback_result, diagnostic),
     do: {:error, diagnostic}
+
+  defp unreleased_diagnostic,
+    do: CommandDiagnostic.new!(:result_cleanup, :provider_cleanup_failed, provider_activity: true)
 
   defp release_expired_preflight({:ok, phase}, preflighted, session, max_heap_words),
     do:

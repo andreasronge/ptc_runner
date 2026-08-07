@@ -74,6 +74,31 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert %{scopes: %{}, scope_order: []} = :sys.get_state(stale.pid)
   end
 
+  test "a stale handle cannot mint a registrar with no budget" do
+    # The fence being server-authoritative is not enough on its own. During a
+    # live operation the pre-begin handle passes that fence, so if the budget
+    # sealed into the registrar came from the caller's copy it would be `nil` —
+    # a legitimately attested handle whose activate and commit wait forever.
+    # The sealed budget therefore comes back from the session too.
+    {:ok, limits} = Limits.installed(%{run_duration_ms: 10_000})
+    {:ok, stale} = ProviderSession.start_active(limits, "stale-budget")
+    on_exit(fn -> Process.exit(stale.pid, :kill) end)
+    {:ok, begun} = ProviderSession.begin_operation(stale, :run)
+
+    assert ProviderSession.run_deadline(stale) == nil
+    assert Deadline.valid?(ProviderSession.run_deadline(begun))
+
+    # The operation is live, so opening through the stale handle succeeds.
+    assert {:ok, registrar} = ProviderSession.open_registrar(stale)
+
+    # ...and the handle it produced still carries the operation's budget, so a
+    # wedged session cannot make its activate wait forever.
+    assert :ok = :sys.suspend(stale.pid)
+    started_at_ms = System.monotonic_time(:millisecond)
+    assert {:error, :resource_registrar_unavailable} = ResourceRegistrar.activate(registrar)
+    assert System.monotonic_time(:millisecond) - started_at_ms < 11_000
+  end
+
   test "an invalid registrar handle is refused rather than raising" do
     # The budgets are read from the handle, so a tampered one must be proved
     # before either field is touched: an invalid deadline would otherwise raise

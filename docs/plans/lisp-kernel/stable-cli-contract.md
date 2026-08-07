@@ -1116,7 +1116,14 @@ commits in one Checkpoint C PR:
   - the **terminal cleanup deadline**, anchored once when the session enters its
     final episode and shared across the whole LIFO stack, is untouched.
 
-  Two residuals are covered by reasoning rather than by tests. The fence is
+  The budget sealed into a registrar comes back from the session rather than
+  from the caller's copy, for the same reason the fence does. During a live
+  operation a pre-begin handle passes the fence, so sealing its `nil` deadline
+  would have minted a legitimately attested registrar whose activate and commit
+  waited forever — server authority over the fence buys little while the caller
+  still decides the budget the handle carries.
+
+  Three residuals are covered by reasoning rather than by tests. The fence is
   rechecked after `ProviderScopeOwner.start/2`, because startup can itself
   outlast the caller and a scope inserted past that point has no handle anywhere
   to abort it; forcing that branch needs startup to straddle the deadline, which
@@ -1125,7 +1132,13 @@ commits in one Checkpoint C PR:
   setup call that is live at its precheck and expires while waiting: it is
   classified as the operation-class timeout rather than an internal error in all
   three callers — local checks, selection validation, and acquisition — but only
-  the already-expired case is reachable on demand.
+  the already-expired case is reachable on demand. The third is the settle path
+  finding a committed reply: accepting a commit requires a live deadline, the
+  deadline never re-anchors, and settle begins only after the operation budget
+  and a whole cleanup budget have elapsed, so a pre-expiry acceptance's reply
+  was already consumed by the first wait. The branch is kept as the correct
+  answer if that fence ever regresses, which is also why the reason it produces
+  carries its catalogued code rather than a bare atom.
 
   Late execution is fenced rather than raced, and the fence is the session's own
   anchored deadline rather than the caller's copy of it: `begin_operation/2`
