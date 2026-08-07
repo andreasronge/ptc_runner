@@ -40,6 +40,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   after any error and retains it with a successful acquisition result.
   """
 
+  alias PtcRunner.Kernel.AcquisitionReason
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.Deadline
@@ -168,7 +169,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
          :ok <- artifact_preflight.(effective_class),
          {:ok, prepared} <-
            prepare_providers(package, registry, session, max_heap_words, closure),
-         :ok <- declarations_honored(prepared, closure) do
+         :ok <- declarations_honored(prepared, closure, session) do
       complete_acquisition(
         prepared,
         registry,
@@ -287,12 +288,13 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   # closure that is detectable and must fail: adopting the callback's version
   # would let it widen its own dependencies, credentials, or class after the
   # plan was fixed.
-  defp declarations_honored(prepared, closure) do
+  defp declarations_honored(prepared, closure, session) do
     declared = Map.new(closure, &{site(&1), &1})
 
-    if Enum.all?(prepared, &honors_declaration?(&1, Map.get(declared, site(&1)))),
-      do: :ok,
-      else: {:error, :provider_declaration_mismatch}
+    case Enum.find(prepared, &(not honors_declaration?(&1, Map.get(declared, site(&1))))) do
+      nil -> :ok
+      drifting -> callback_error(:provider_declaration_mismatch, drifting, session)
+    end
   end
 
   defp honors_declaration?(_provider, nil), do: false
@@ -315,7 +317,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
          max_heap_words,
          credentials
        ) do
-    with :ok <- credentials_honored(credentials, prepared),
+    with :ok <- credentials_honored(credentials, prepared, session),
          {:ok, preflighted} <- preflight_providers(prepared, session, max_heap_words) do
       try do
         with {:ok, resolved} <-
@@ -424,9 +426,9 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
 
         {:cont, {:ok, [entry | prepared]}}
 
-      {:ok, {:error, _reason} = error} ->
+      {:ok, {:error, reason}} ->
         _ = ResourceRegistrar.abort(registrar)
-        {:halt, error}
+        {:halt, callback_error(reason, occurrence, session)}
 
       {:deadline_expired, _callback_result, %CommandDiagnostic{} = diagnostic} ->
         _ = ResourceRegistrar.abort(registrar)
@@ -455,9 +457,9 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
 
           {:cont, {:ok, [entry | preflighted]}}
 
-        {:ok, {:error, _reason} = error} ->
+        {:ok, {:error, reason}} ->
           ProviderCallbackBoundary.release_preflights(preflighted, session, max_heap_words)
-          {:halt, error}
+          {:halt, callback_error(reason, provider, session)}
 
         {:deadline_expired, callback_result, %CommandDiagnostic{} = diagnostic} ->
           release_expired_preflight(callback_result, preflighted, session, max_heap_words)
@@ -519,7 +521,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       result =
         acquire_provider(provider, provider_credentials, services, session, max_heap_words)
 
-      handle_acquisition(result, provider, current)
+      handle_acquisition(result, provider, session, current)
     end)
   end
 
@@ -549,7 +551,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     end
   end
 
-  defp handle_acquisition({:ok, built}, provider, current)
+  defp handle_acquisition({:ok, built}, provider, _session, current)
        when built.data_class == provider.data_class and
               built.accepts_data == provider.accepts_data do
     case ResourceRegistrar.commit(provider.registrar, built.close) do
@@ -579,10 +581,10 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     end
   end
 
-  defp handle_acquisition({:ok, built}, provider, _current) do
+  defp handle_acquisition({:ok, built}, provider, session, _current) do
     case ResourceRegistrar.commit(provider.registrar, built.close) do
       :ok ->
-        {:halt, {:error, :provider_data_policy_changed}}
+        {:halt, callback_error(:provider_data_policy_changed, provider, session)}
 
       {:error, :provider_cleanup_failed} ->
         {:halt, {:error, unreleased_diagnostic()}}
@@ -595,13 +597,34 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   defp handle_acquisition(
          {:unregistered_provider_close, _reason, _close} = cleanup,
          _provider,
+         _session,
          _current
        ),
        do: {:halt, cleanup}
 
-  defp handle_acquisition({:error, _reason} = error, provider, _current) do
+  # A diagnostic already carries its occurrence; only a bare reason from the
+  # acquire callback still needs one attached.
+  defp handle_acquisition({:error, %CommandDiagnostic{}} = error, provider, _session, _current) do
     _ = ResourceRegistrar.abort(provider.registrar)
     {:halt, error}
+  end
+
+  defp handle_acquisition({:error, reason}, provider, session, _current) do
+    _ = ResourceRegistrar.abort(provider.registrar)
+    {:halt, callback_error(reason, provider, session)}
+  end
+
+  # An active command must classify here, because a `provider_acquisition` code
+  # requires a subject bearing an occurrence and this is the last frame that
+  # knows which occurrence produced the reason. Direct embedding keeps the bare
+  # reason: it has no envelope to render a diagnostic into, and the raw
+  # vocabulary is far richer than three closed codes can express.
+  defp callback_error(reason, occurrence, session) do
+    case ProviderSession.execution_deadline(session) do
+      {:ok, nil} -> {:error, reason}
+      {:ok, _deadline} -> {:error, AcquisitionReason.diagnostic(reason, occurrence)}
+      :error -> {:error, reason}
+    end
   end
 
   defp services_available?(provider, exports),
@@ -700,15 +723,15 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   # declarations to compare each preparation against; giving this path the same
   # check means threading those declarations through it, which is the
   # `acquire/6`–`acquire_targets/7` unification rather than a second check here.
-  defp credentials_honored(nil, _prepared), do: :ok
+  defp credentials_honored(nil, _prepared, _session), do: :ok
 
-  defp credentials_honored(credentials, prepared) do
-    if MapSet.subset?(
-         MapSet.new(credential_names(prepared)),
-         MapSet.new(Map.keys(credentials))
-       ),
-       do: :ok,
-       else: {:error, :provider_declaration_mismatch}
+  defp credentials_honored(credentials, prepared, session) do
+    covered = MapSet.new(Map.keys(credentials))
+
+    case Enum.find(prepared, &(not MapSet.subset?(MapSet.new(&1.credential_names), covered))) do
+      nil -> :ok
+      drifting -> callback_error(:provider_declaration_mismatch, drifting, session)
+    end
   end
 
   defp provider_credentials(credentials, _registry, _preflighted, _session)

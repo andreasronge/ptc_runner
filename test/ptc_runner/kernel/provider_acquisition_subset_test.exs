@@ -91,7 +91,15 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
     # acquisition ever consults the map.
     context = fixture(drifting: %{"leaf" => ["extra-key"]})
 
-    assert {:error, :provider_declaration_mismatch} = acquire(context, [workflow(1)])
+    # Classified, because this is a command session: the drift is reported as the
+    # closed policy-changed code naming the occurrence that drifted, rather than
+    # as a bare atom the command boundary would collapse to `internal_error`.
+    assert {:error, %CommandDiagnostic{} = diagnostic} = acquire(context, [workflow(1)])
+    assert diagnostic.phase == :provider_acquisition
+    assert diagnostic.code == :provider_policy_changed
+    assert diagnostic.subject.name == "leaf"
+    assert diagnostic.subject.operation == :acquisition
+
     assert_received {:resolved, names}
     refute "extra-key" in names
     refute_received {:acquired, _name}
@@ -165,6 +173,39 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
     end
   end
 
+  test "an embedding keeps the bare reason a command has classified" do
+    # Two callers, one pipeline. A command must classify — a `provider_acquisition`
+    # code needs a subject bearing an occurrence, and this is the last frame that
+    # has one. An embedding must not: it has no envelope to render a diagnostic
+    # into, and the raw vocabulary is far richer than three closed codes can
+    # express, so collapsing it would destroy information its callers rely on.
+    # The two are told apart by the same question phase-8 credential resolution
+    # asks — whether the session carries an operation deadline.
+    context = fixture(failing: "leaf", failing_reason: :mcp_timeout)
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = acquire(context, [workflow(1)])
+    assert diagnostic.phase == :provider_acquisition
+    assert diagnostic.code == :provider_unavailable
+    assert diagnostic.subject.name == "leaf"
+
+    embedded = fixture(failing: "leaf", failing_reason: :mcp_timeout, embedding: true)
+    assert {:error, :mcp_timeout} = acquire_embedded(embedded, [workflow(1)])
+  end
+
+  # The embedding entry: no phase-8 step 5 ran, so no map is supplied and the
+  # registry resolves synchronously, exactly as `RunBuilder`'s embedding path does.
+  defp acquire_embedded(context, targets) do
+    ProviderAcquisition.acquire_targets(
+      context.package,
+      context.registry,
+      context.session,
+      targets,
+      fn _effective_class -> :ok end,
+      context.plan,
+      nil
+    )
+  end
+
   defp workflow(index), do: %{destination: :workflow, index: index}
 
   defp acquired_names(acquired) do
@@ -193,7 +234,19 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
 
     limits = prepared.request.package.limits
     {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
-    {:ok, session} = ProviderSession.begin_operation(session, :run)
+
+    # An embedding opens the plain session `RunBuilder` opens for it, which
+    # carries no operation deadline — the same distinction acquisition uses to
+    # decide whether to classify.
+    {:ok, session} =
+      if Keyword.get(options, :embedding) do
+        # The unbegun session this fixture opened is not the one an embedding
+        # uses, so it is closed here rather than left for creator death.
+        ProviderSession.close(session)
+        ProviderSession.start(limits)
+      else
+        ProviderSession.begin_operation(session, :run)
+      end
 
     on_exit(fn ->
       ProviderSession.close(session)
@@ -301,14 +354,15 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
           provides,
           credentials,
           data_class,
-          Keyword.get(options, :failing)
+          Keyword.get(options, :failing),
+          Keyword.get(options, :failing_reason, :provider_unavailable)
         )
     }
 
     %{descriptor: descriptor, implementation: implementation, authority: nil}
   end
 
-  defp builder(parent, name, requires, provides, credentials, data_class, failing) do
+  defp builder(parent, name, requires, provides, credentials, data_class, failing, reason) do
     fn _selection, _context ->
       send(parent, {:prepared, name})
 
@@ -330,7 +384,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
            {:ok,
             fn _credentials, _services ->
               if name == failing do
-                {:error, :provider_unavailable}
+                {:error, reason}
               else
                 send(parent, {:acquired, name})
 

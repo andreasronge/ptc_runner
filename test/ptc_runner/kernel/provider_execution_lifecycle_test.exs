@@ -336,7 +336,11 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
 
     _started = start_owned_execution(fixture)
 
-    assert_receive {:execution_result, {:error, :provider_declaration_mismatch}}, 5_000
+    assert_receive {:execution_result, {:error, %CommandDiagnostic{} = diagnostic}}, 5_000
+    assert diagnostic.phase == :provider_acquisition
+    assert diagnostic.code == :provider_policy_changed
+    assert diagnostic.subject.name == "selected"
+    assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
 
     # Nothing declared a credential, so step 5 asked the resolver for nothing,
     # and the smuggled name reached it by no other route either.
@@ -631,7 +635,18 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
   defp assert_declaration_refused(fixture) do
     _started = start_owned_execution(fixture)
 
-    assert_receive {:execution_result, {:error, :provider_declaration_mismatch}}, 5_000
+    # Past the phase-8 marker the reason is classified where the occurrence is
+    # still in scope, so the refusal arrives as the closed acquisition code for
+    # a preparation that contradicted its declaration, naming the occurrence
+    # that did it rather than as a bare atom the command boundary would have
+    # collapsed to `internal_error`.
+    assert_receive {:execution_result, {:error, %CommandDiagnostic{} = diagnostic}}, 5_000
+    assert diagnostic.phase == :provider_acquisition
+    assert diagnostic.code == :provider_policy_changed
+    assert diagnostic.provider_activity
+    assert diagnostic.subject.name == "selected"
+    assert diagnostic.subject.operation == :acquisition
+    assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
     assert_received {:resolved_credentials, ["fixture-key"]}
     refute_received {:provider_phase, :preflight}
     refute_received {:provider_phase, :acquire}

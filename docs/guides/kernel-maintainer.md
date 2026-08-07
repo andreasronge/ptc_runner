@@ -226,6 +226,39 @@ to `provider_activity: false` — so a declaration-class reason reports
 `active_preflight/selection_rejected`, keeping its `:selection` subject and
 occurrence.
 
+### Acquisition reasons
+
+A provider's prepare, preflight, or acquire callback answers `{:error, reason}`
+with an atom and nothing else. Every `provider_acquisition` code requires a
+subject bearing an occurrence, so once that reason leaves the loop that knows
+which occurrence produced it there is nothing to attribute it to, and the
+command boundary fails closed as `internal_error` — reporting an unreachable MCP
+server as a defect in this program. `AcquisitionReason` therefore classifies at
+the three sites in `ProviderAcquisition` that still hold the occurrence.
+
+Only an active command is classified. Direct embedding keeps the bare reason: it
+has no envelope to render a diagnostic into, and its vocabulary — the MCP source
+alone distinguishes a timeout from an authentication failure from an oversized
+catalog — is far richer than three closed codes can carry. The two are told
+apart by whether the session carries an operation deadline, the same question
+phase-8 credential resolution asks.
+
+Acquisition's own codes follow one rule rather than a judgement per reason:
+`provider_unavailable` when the provider could not be reached or started,
+`provider_protocol_error` when it answered and the answer was unusable, and
+`provider_policy_changed` when a preparation contradicted its sealed
+declaration. Three groups keep a phase of their own instead, because what they
+describe is not acquisition failing — a rejected credential, a declaration or
+selection reason, and a local-environment reason each report the phase they
+belong to, reusing phase 7's groupings so one condition is not named two ways
+depending on which step observed it.
+
+Anything else fails closed as an internal error, and translations are added with
+their producers: a reason nothing can currently return has no branch. That rule
+is load-bearing rather than decorative — the first draft of this table carried
+six reasons the stdio and discovery paths normalize away before a builder can
+return them, and omitted one that a snapshot-identity build genuinely produces.
+
 ### Credential resolution
 
 Every active command resolves its ordinary credentials once, at phase-8 step 5,

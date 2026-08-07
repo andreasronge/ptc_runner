@@ -383,6 +383,56 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     refute_received {:builder_invoked, _name}
   end
 
+  test "an unreachable provider is reported as unreachable, not as an internal defect" do
+    # The motivating case. A builder answers `{:error, :mcp_transport_error}` —
+    # a bare atom carrying no subject — and every `provider_acquisition` code
+    # requires one bearing an occurrence. Classified anywhere later than the
+    # loop that holds the occurrence, this arrives with nothing to attribute it
+    # to and fails closed as `internal_error`, telling the operator their
+    # unreachable MCP server is a bug in this program.
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "unreachable" => [
+          destination: :workflow,
+          connectivity_mode: :acquisition,
+          builder_error: :mcp_transport_error
+        ]
+      })
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+
+    assert diagnostic.phase == :provider_acquisition
+    assert diagnostic.code == :provider_unavailable
+    assert diagnostic.provider_activity
+    assert diagnostic.subject.name == "unreachable"
+    assert diagnostic.subject.operation == :acquisition
+    assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
+
+    assert CommandContract.diagnostic_allowed?(
+             {:doctor, :connect},
+             diagnostic.phase,
+             diagnostic.code
+           )
+  end
+
+  test "a reason the table does not know still fails closed" do
+    # Translations are added with their producers. An unrecognised reason must
+    # not be forced into the nearest acquisition code, because that would report
+    # a defect as an operational outcome.
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "strange" => [
+          destination: :workflow,
+          connectivity_mode: :acquisition,
+          builder_error: :something_no_producer_returns
+        ]
+      })
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+    assert diagnostic.phase == :internal
+    assert diagnostic.code == :internal_error
+  end
+
   test "an acquisition mode builds through the registry and never probes" do
     %{prepared: prepared, execution: execution} =
       fixture(%{"built" => [destination: :workflow, connectivity_mode: :acquisition]})
@@ -797,13 +847,19 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     builder = fn _selection, _context ->
       send(parent, {:builder_invoked, name})
 
-      {:ok,
-       %{
-         credential_names: Keyword.get(options, :credential_names, []),
-         requires: requires,
-         provides: provides,
-         preflight: fn -> {:ok, acquire} end
-       }}
+      case Keyword.get(options, :builder_error) do
+        nil ->
+          {:ok,
+           %{
+             credential_names: Keyword.get(options, :credential_names, []),
+             requires: requires,
+             provides: provides,
+             preflight: fn -> {:ok, acquire} end
+           }}
+
+        reason ->
+          {:error, reason}
+      end
     end
 
     implementation =

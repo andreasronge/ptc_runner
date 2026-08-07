@@ -1419,16 +1419,38 @@ fine; temporarily reachable and unsafe is not.
      selection walks into acquisition against an empty store and fails later
      with whatever that path produces. Connect must refuse it before any
      provider work, and `run` needs the same refusal; and
-   - **raw acquisition reasons.** A builder, preflight, or acquire callback
-     returning `{:error, reason}` propagates as a bare term through
-     `ProviderAcquisition`, and the connectivity boundary cannot classify it: a
-     `provider_acquisition` code requires a subject bearing an occurrence and
-     the bare reason carries none, so it fails closed as `internal_error` and
-     reports an unreachable provider as an implementation defect. The fix
-     belongs where the occurrence is still in scope — `prepare_provider/7` and
-     its preflight and acquire neighbours — and it changes the shared run path,
-     so it is its own reviewed commit rather than a translation invented at the
-     connectivity boundary;
+   - **(complete) raw acquisition reasons.** A builder, preflight, or acquire
+     callback returning `{:error, reason}` propagated as a bare term through
+     `ProviderAcquisition`, and the connectivity boundary could not classify it:
+     a `provider_acquisition` code requires a subject bearing an occurrence and
+     the bare reason carries none, so it failed closed as `internal_error` and
+     reported an unreachable provider as an implementation defect.
+     `AcquisitionReason` now classifies at the three sites that still hold the
+     occurrence.
+
+     Two decisions were forced by building it. **Only an active command is
+     classified**: direct embedding keeps the bare reason, because it has no
+     envelope to render a diagnostic into and its vocabulary is far richer than
+     three closed codes — roughly twenty distinct MCP and replay reasons, which
+     the suite discriminates between. Classifying it uniformly collapsed that
+     into three codes and would have rewritten twenty-seven tests into strictly
+     weaker assertions. The discriminator is whether the session carries an
+     operation deadline, the same boundary phase-8 credential resolution draws.
+
+     **The table is grouped by one rule**, not per reason: unreachable or
+     unstartable is `provider_unavailable`, answered-but-unusable is
+     `provider_protocol_error`, and a contradicted sealed declaration is
+     `provider_policy_changed`. A rejected credential, a declaration or
+     selection reason, and a local-environment reason each keep their own phase,
+     reusing phase 7's groupings.
+
+     The "translations are added with their producers" rule proved load-bearing
+     rather than decorative. A first draft covered one of nine reachable MCP
+     reasons; a second carried six that the stdio and discovery paths normalize
+     away before a builder can return them, and still omitted
+     `:mcp_invalid_snapshot_identity`, which a snapshot-identity build genuinely
+     produces. Both were found by review, not by tests, which is why the table
+     now has a test pinning every branch against the catalog and the contract;
 4. prove and implement the MCP receive-boundary response cap;
 5. only then enable `doctor --connect` in `CommandEngine`; and
 6. integration review, acceptance gates, then the cumulative PR review.
