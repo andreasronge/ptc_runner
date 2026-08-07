@@ -28,6 +28,8 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.Deadline
+  alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderCallbackBoundary
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderSession
@@ -35,6 +37,12 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
 
   @type input_class :: :normal | :private_inspection
   @type artifact_preflight :: (input_class() -> :ok | {:error, term()})
+  @type occurrence :: %{destination: :workflow | :mission, index: non_neg_integer()}
+  @type plan :: %{
+          effective_class: input_class(),
+          occurrences: [map()],
+          package_digest: binary()
+        }
 
   @doc false
   @spec acquire(
@@ -47,145 +55,187 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
           {:ok, map()}
           | {:error, term()}
           | {:unregistered_provider_close, term(), ProviderRegistry.close()}
-  def acquire(package, registry, session, input_class, artifact_preflight),
-    do: acquire_subset(package, registry, session, input_class, artifact_preflight, :all)
-
-  @doc """
-  Acquires a subset of one prepared run's selected providers.
-
-  The subset names occurrence indices over the package's selected providers in
-  `workflow`-then-`mission` order — the same indices the barrier already uses to
-  identify an occurrence. `:all` is the whole application and is what an
-  ordinary run and check pass.
-
-  Every whole-application judgement stays whole-application, because narrowing
-  them is how a subset would quietly become a weaker pipeline. All selected
-  providers are prepared, and dependency validity, the single-workflow-LLM rule,
-  the effective data class, and the providers' acceptance of that class are all
-  decided over the complete set. Preparation is also the step that yields each
-  provider's `requires`/`provides`, so the dependency closure below is computed
-  from what the builders actually report rather than from a declaration that
-  might disagree with them.
-
-  Only the effectful steps narrow: the subset is expanded to its complete
-  dependency closure, and preflight, the one credential union, and
-  dependency-order acquisition cover exactly that closure. Providers pulled in
-  only as dependencies are support work — they are acquired and cleaned up like
-  any other, but a caller cannot tell them apart from its targets here and must
-  not report them as results of its own.
-
-  Ordering, cleanup, and failure behaviour are the barrier's throughout: partial
-  acquisition unwinds in reverse, preflights are released once, and an
-  unregistered closer is surfaced rather than dropped.
-  """
-  @spec acquire_subset(
-          ApplicationPackage.t(),
-          ProviderRegistry.t(),
-          ProviderSession.t(),
-          input_class(),
-          artifact_preflight(),
-          :all | [non_neg_integer()]
-        ) ::
-          {:ok, map()}
-          | {:error, term()}
-          | {:unregistered_provider_close, term(), ProviderRegistry.close()}
-  def acquire_subset(
+  def acquire(
         %ApplicationPackage{} = package,
         %ProviderRegistry{} = registry,
         session,
         input_class,
-        artifact_preflight,
-        targets
+        artifact_preflight
       )
       when input_class in [:normal, :private_inspection] and
-             is_function(artifact_preflight, 1) and
-             (targets == :all or is_list(targets)) do
+             is_function(artifact_preflight, 1) do
     max_heap_words = package.limits.provider_heap_words
 
     with {:ok, prepared} <-
-           prepare_providers(package, registry, session, max_heap_words),
+           prepare_providers(package, registry, session, max_heap_words, :all),
          :ok <- validate_provider_dependencies(prepared),
          :ok <- validate_single_workflow_llm(prepared),
          effective_class <- effective_data_class(input_class, prepared),
          :ok <- providers_accept(prepared, effective_class),
-         :ok <- artifact_preflight.(effective_class),
-         {:ok, selected} <- dependency_closure(prepared, targets),
-         {:ok, preflighted} <- preflight_providers(selected, session, max_heap_words) do
-      try do
-        with {:ok, credentials} <-
-               resolve_provider_credentials(
-                 registry,
-                 preflighted,
-                 session,
-                 max_heap_words
-               ),
-             {:ok, acquired} <-
-               acquire_providers(
-                 preflighted,
-                 credentials,
-                 effective_class,
-                 session,
-                 max_heap_words
-               ) do
-          {:ok,
-           acquired
-           |> Map.put(:workflow, finalize_capabilities(acquired.workflow))
-           |> Map.put(:mission, finalize_capabilities(acquired.mission))
-           |> Map.put(:snapshots, sort_snapshots(acquired.snapshots))
-           |> Map.put(:provider_session, session)
-           |> Map.delete(:exports)}
-        end
-      after
-        ProviderCallbackBoundary.release_preflights(preflighted, session, max_heap_words)
-      end
+         :ok <- artifact_preflight.(effective_class) do
+      complete_acquisition(prepared, registry, session, effective_class, max_heap_words)
     end
   end
 
-  def acquire_subset(
+  def acquire(_package, _registry, _session, _input_class, _artifact_preflight),
+    do: {:error, :invalid_provider_acquisition}
+
+  @doc """
+  Acquires the sealed acquisition targets of one prepared run, and nothing else.
+
+  This is the connectivity entry. Its contract is that a provider the sealed
+  declarations did not name — directly or as a dependency — stays completely
+  callback-inert: not prepared, not preflighted, not asked for credentials, not
+  acquired. Preparation is provider work, not a lookup. A prepare callback can
+  fail the whole operation, block until the deadline, spend the budget a real
+  target needed, and register provisional roots that outlive it, so "prepare
+  everything and then narrow" narrows nothing that matters.
+
+  `plan` is therefore sealed evidence rather than discovered evidence. It comes
+  from `plan/2` over a `PreparedRun` and the exact catalog it was validated
+  against, and it supplies both halves this operation needs without invoking
+  anything: the dependency graph that decides the closure, and the
+  whole-application judgements phase 5 already made. Deriving the closure from
+  callback-reported `requires`/`provides` instead would make the authority to
+  invoke a callback depend on invoking callbacks, and would let executable code
+  redirect which executable code runs.
+
+  Targets are `{destination, index}` occurrences, the same identity the sealed
+  declarations and `ConnectivityResult` use. They are checked against the plan
+  before any callback runs, so an unknown or empty target set costs nothing.
+
+  Inside the closure, each preparation is compared with its sealed declaration
+  and drift fails closed. Dependency-only providers are support work: acquired
+  and cleaned up like any other, and never reported as a caller's own result.
+  """
+  @spec acquire_targets(
+          ApplicationPackage.t(),
+          ProviderRegistry.t(),
+          ProviderSession.t(),
+          [occurrence()],
+          artifact_preflight(),
+          plan()
+        ) ::
+          {:ok, map()}
+          | {:error, term()}
+          | {:unregistered_provider_close, term(), ProviderRegistry.close()}
+  def acquire_targets(
+        %ApplicationPackage{} = package,
+        %ProviderRegistry{} = registry,
+        session,
+        targets,
+        artifact_preflight,
+        %{effective_class: effective_class, occurrences: occurrences} = plan
+      )
+      when is_list(targets) and is_function(artifact_preflight, 1) do
+    max_heap_words = package.limits.provider_heap_words
+
+    with :ok <- validate_plan(plan, package),
+         {:ok, closure} <- sealed_closure(occurrences, targets),
+         :ok <- artifact_preflight.(effective_class),
+         {:ok, prepared} <-
+           prepare_providers(package, registry, session, max_heap_words, closure),
+         :ok <- declarations_honored(prepared, closure) do
+      complete_acquisition(
+        prepared,
+        registry,
+        session,
+        effective_class,
+        max_heap_words
+      )
+    end
+  end
+
+  def acquire_targets(
         _package,
         _registry,
         _session,
-        _input_class,
+        _targets,
         _artifact_preflight,
-        _targets
+        _plan
       ),
       do: {:error, :invalid_provider_acquisition}
 
-  # `:all` keeps the prepared list exactly as it is, so an ordinary run and
-  # check reach the same providers in the same order they always did.
-  defp dependency_closure(prepared, :all), do: {:ok, prepared}
+  @doc """
+  Projects the sealed acquisition plan of one prepared run against its catalog.
 
-  defp dependency_closure(prepared, targets) do
-    by_index = Map.new(prepared, &{&1.index, &1})
+  Alias names are not identity, so the preparation and the catalog must be the
+  pair phase 5 validated together. Everything here is read from sealed values:
+  no descriptor is consulted for a name the preparation did not declare, and no
+  callback is invoked.
+  """
+  @spec plan(PreparedRun.t(), InstallationCatalog.t()) ::
+          {:ok, plan()} | {:error, :invalid_provider_acquisition}
+  def plan(%PreparedRun{} = prepared, %InstallationCatalog{} = catalog) do
+    if prepared.catalog_attestation == catalog.attestation and
+         InstallationCatalog.valid?(catalog) do
+      occurrences =
+        Enum.map(prepared.provider_declarations, fn declaration ->
+          descriptor = Map.fetch!(catalog.descriptors, declaration.name)
 
-    if Enum.all?(targets, &Map.has_key?(by_index, &1)) do
-      {:ok, expand_closure(prepared, by_index, MapSet.new(targets))}
+          %{
+            name: declaration.name,
+            destination: declaration.destination,
+            index: declaration.index,
+            config: declaration.config,
+            requires: descriptor.requires,
+            provides: descriptor.provides,
+            credential_names: descriptor.credential_names,
+            workflow_llm?: descriptor.workflow_llm?,
+            data_class: descriptor.data_class,
+            accepts_data: descriptor.accepts_data
+          }
+        end)
+
+      {:ok,
+       %{
+         effective_class: prepared.effective_data_class,
+         occurrences: occurrences,
+         package_digest: prepared.request.package.application_content_digest
+       }}
+    else
+      {:error, :invalid_provider_acquisition}
+    end
+  rescue
+    _exception -> {:error, :invalid_provider_acquisition}
+  end
+
+  def plan(_prepared, _catalog), do: {:error, :invalid_provider_acquisition}
+
+  defp validate_plan(%{package_digest: digest}, package) do
+    if digest == package.application_content_digest,
+      do: :ok,
+      else: {:error, :invalid_provider_acquisition}
+  end
+
+  defp validate_plan(_plan, _package), do: {:error, :invalid_provider_acquisition}
+
+  # The closure comes from sealed `requires`/`provides` alone, so it is decided
+  # before any builder runs. Phase 5 already proved the graph is satisfiable and
+  # acyclic over these same values, which is why following it to a fixed point
+  # terminates and cannot silently drop a requirement.
+  defp sealed_closure(occurrences, targets) do
+    by_site = Map.new(occurrences, &{{&1.destination, &1.index}, &1})
+
+    if targets != [] and Enum.all?(targets, &Map.has_key?(by_site, site(&1))) do
+      providers_by_service =
+        Enum.reduce(occurrences, %{}, fn occurrence, accumulated ->
+          Enum.reduce(occurrence.provides, accumulated, &Map.put(&2, &1, site(occurrence)))
+        end)
+
+      sites = close_over(MapSet.new(targets, &site/1), by_site, providers_by_service)
+      {:ok, Enum.filter(occurrences, &MapSet.member?(sites, site(&1)))}
     else
       {:error, :invalid_provider_acquisition}
     end
   end
 
-  # Dependencies are followed to a fixed point: a provider pulled in for its
-  # service may require services of its own. Whole-set validation above already
-  # proved every required service is provided exactly once, so this cannot
-  # diverge and cannot silently drop an unsatisfiable requirement.
-  defp expand_closure(prepared, by_index, selected) do
-    providers_by_service =
-      Enum.reduce(prepared, %{}, fn provider, accumulated ->
-        Enum.reduce(provider.provides, accumulated, &Map.put(&2, &1, provider.index))
-      end)
+  defp site(%{destination: destination, index: index}), do: {destination, index}
 
-    closed = close_over(selected, by_index, providers_by_service)
-
-    # The prepared order is the barrier's order; the closure is a filter on it
-    # rather than a new sequence.
-    Enum.filter(prepared, &MapSet.member?(closed, &1.index))
-  end
-
-  defp close_over(selected, by_index, providers_by_service) do
+  defp close_over(selected, by_site, providers_by_service) do
     added =
       selected
-      |> Enum.flat_map(fn index -> Map.fetch!(by_index, index).requires end)
+      |> Enum.flat_map(fn site -> Map.fetch!(by_site, site).requires end)
       |> Enum.map(&Map.get(providers_by_service, &1))
       |> Enum.reject(&is_nil/1)
       |> MapSet.new()
@@ -194,15 +244,70 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
 
     if MapSet.equal?(next, selected),
       do: selected,
-      else: close_over(next, by_index, providers_by_service)
+      else: close_over(next, by_site, providers_by_service)
+  end
+
+  # Runtime binding checks the data policy only, so the rest of a preparation
+  # could contradict the declaration this operation planned from. Inside the
+  # closure that is detectable and must fail: adopting the callback's version
+  # would let it widen its own dependencies, credentials, or class after the
+  # plan was fixed.
+  defp declarations_honored(prepared, closure) do
+    declared = Map.new(closure, &{site(&1), &1})
+
+    if Enum.all?(prepared, &honors_declaration?(&1, Map.get(declared, site(&1)))),
+      do: :ok,
+      else: {:error, :provider_declaration_mismatch}
+  end
+
+  defp honors_declaration?(_provider, nil), do: false
+
+  defp honors_declaration?(provider, declaration) do
+    provider.provider == declaration.name and
+      Enum.sort(provider.credential_names) == Enum.sort(declaration.credential_names) and
+      Enum.sort(provider.requires) == Enum.sort(declaration.requires) and
+      Enum.sort(provider.provides) == Enum.sort(declaration.provides) and
+      provider.workflow_llm? == declaration.workflow_llm? and
+      provider.data_class == declaration.data_class and
+      Enum.sort(provider.accepts_data) == Enum.sort(declaration.accepts_data)
+  end
+
+  defp complete_acquisition(prepared, registry, session, effective_class, max_heap_words) do
+    with {:ok, preflighted} <- preflight_providers(prepared, session, max_heap_words) do
+      try do
+        with {:ok, credentials} <-
+               resolve_provider_credentials(registry, preflighted, session, max_heap_words),
+             {:ok, acquired} <-
+               acquire_providers(
+                 preflighted,
+                 credentials,
+                 effective_class,
+                 session,
+                 max_heap_words
+               ) do
+          {:ok, acquisition_result(acquired, session)}
+        end
+      after
+        ProviderCallbackBoundary.release_preflights(preflighted, session, max_heap_words)
+      end
+    end
+  end
+
+  defp acquisition_result(acquired, session) do
+    acquired
+    |> Map.put(:workflow, finalize_capabilities(acquired.workflow))
+    |> Map.put(:mission, finalize_capabilities(acquired.mission))
+    |> Map.put(:snapshots, sort_snapshots(acquired.snapshots))
+    |> Map.put(:provider_session, session)
+    |> Map.delete(:exports)
   end
 
   defp sort_snapshots(snapshots), do: Enum.sort_by(snapshots, &Map.get(&1, "provider", ""))
 
-  defp prepare_providers(package, registry, session, max_heap_words) do
+  defp prepare_providers(package, registry, session, max_heap_words, closure) do
     package
     |> provider_specs()
-    |> Enum.with_index()
+    |> selected_specs(closure)
     |> Enum.reduce_while({:ok, []}, fn {{destination, spec}, index}, {:ok, prepared} ->
       case ProviderSession.open_registrar(session) do
         {:ok, registrar} ->
@@ -490,10 +595,24 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     if workflow_llms > 1, do: {:error, :ambiguous_workflow_llm}, else: :ok
   end
 
+  # Occurrence identity is `{destination, index}` with the index restarting per
+  # destination, which is what the sealed declarations and `ConnectivityResult`
+  # use. A single global counter would have named a mission occurrence by a
+  # number no other boundary agrees with.
   defp provider_specs(package) do
     for destination <- [:workflow, :mission],
-        spec <- Map.fetch!(package.providers, destination),
-        do: {destination, spec}
+        {spec, index} <- Enum.with_index(Map.fetch!(package.providers, destination)),
+        do: {{destination, spec}, index}
+  end
+
+  defp selected_specs(specs, :all), do: specs
+
+  defp selected_specs(specs, closure) do
+    sites = MapSet.new(closure, &site/1)
+
+    Enum.filter(specs, fn {{destination, _spec}, index} ->
+      MapSet.member?(sites, {destination, index})
+    end)
   end
 
   defp credential_names(prepared) do
