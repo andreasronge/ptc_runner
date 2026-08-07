@@ -61,20 +61,27 @@ defmodule PtcRunner.Kernel.ProviderSession do
   remainder exactly when abort is most often triggered by that deadline
   expiring. The terminal episode above is the third.
 
-  The session's own anchored deadline decides, never a caller's copy of it, and
-  the budget sealed into a `ResourceRegistrar` is returned by the session rather
-  than supplied: `begin_operation/2` returns a new sealed handle while the
-  pre-begin one stays valid carrying no deadline, so either could otherwise mint
-  a legitimately attested handle that waits forever. For the same reason an
+  The session's own anchored deadline decides *admission* — the open, activate,
+  and commit fences — never a caller's copy of it; an abort is deliberately
+  anchored by its caller, where the episode begins, and the session only clamps
+  what it will spend. The operation deadline sealed into a `ResourceRegistrar`
+  is likewise returned by the session rather than supplied: `begin_operation/2`
+  returns a new sealed handle while the pre-begin one stays valid carrying no
+  deadline, so either could otherwise mint a legitimately attested handle that
+  waits forever. The handle's cleanup budget is not returned this way — it is
+  pinned by the session attestation instead, and `claim_operation/3` validates
+  limit equality, so the two budgets are protected by different mechanisms. For the same reason an
   active session refuses to open a scope until its operation has started; a
   session with no operation identity is a direct embedding and keeps its
   synchronous semantics.
 
   Commit is the only ownership-transfer edge and the only call that may not
   abandon its reply. Every branch of the commit handler replies, and the branch
-  that takes ownership replies in the same return, so a reply exists exactly
-  when the session owns the closer; signals arrive in send order, so a reply
-  that was ever sent precedes any `:DOWN` from that session. A commit therefore
+  that takes ownership replies in the same return, so a reply is sent if and
+  only if the handler took ownership — and a session killed between that state
+  change and the reply leaving will never run the closer, so the caller taking
+  it is still exactly one owner. Signals arrive in send order, so a reply that
+  was ever sent precedes any `:DOWN` from that session. A commit therefore
   keeps its request alive across timeouts — the operation budget, then one
   freshly anchored cleanup budget — and a session silent through both is wedged
   and is killed, after which a single zero-timeout look at the reply assigns the
