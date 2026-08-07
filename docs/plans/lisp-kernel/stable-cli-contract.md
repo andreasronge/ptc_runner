@@ -1127,12 +1127,36 @@ commits in one Checkpoint C PR:
   three callers — local checks, selection validation, and acquisition — but only
   the already-expired case is reachable on demand.
 
-  Late execution is fenced rather than raced. `open` and `commit` carry the same
-  absolute instant the caller stops waiting on, and the handler refuses to
-  mutate past it, so a reply nobody is waiting for cannot leave a scope with no
-  handle or a closer with two owners. When a commit cannot be confirmed before
-  expiry the caller keeps the closer and runs the existing unregistered-closer
-  recovery under cleanup authority, which leaves exactly one owner. Regressions
+  Late execution is fenced rather than raced, and the fence is the session's own
+  anchored deadline rather than the caller's copy of it: `begin_operation/2`
+  returns a new sealed handle while the pre-begin one stays valid with
+  `run_deadline: nil`, so trusting the request would let a stale handle open an
+  unbounded scope.
+
+  Commit is the only ownership-transfer edge and is the only call that may not
+  abandon its reply. The reply *is* the ownership record — every branch of the
+  handler replies, and the branch that takes ownership does so in the same
+  `{:reply, :ok, state}` return — so a reply exists if and only if the session
+  owns the closer. Signals from the session arrive in send order, so a reply
+  that was ever sent is delivered before any `:DOWN` from it. Keeping the
+  request id alive across a timeout therefore converts an elapsed-time guess
+  into an event. A commit waits its operation budget, then one freshly anchored
+  cleanup budget, and a session silent through both is wedged by this module's
+  existing definition and is killed; a brutal kill runs no terminate callback,
+  so after the `:DOWN` a session that never replied has never run and never
+  will run that closer, and the caller owns it. A reply that arrives saying the
+  session had taken ownership reports an unreleased resource instead, because
+  re-running it there could repeat work the session already drained. Timeouts
+  decide only when to escalate; every branch ends with ownership assigned by a
+  reply or a `:DOWN`.
+
+  An earlier attempt fenced commit with the shared deadline plus a reply grace.
+  That is a scheduling margin, not a fence: a session descheduled after the
+  state transition but before the reply is sent leaves the caller concluding
+  failure while the session retains the closer, and `close_with_unregistered/2`
+  then re-adds it through `add_committed_close/2` — a second owner, a second
+  entry in the cleanup-slot count, and half the terminal budget spent on a
+  phantom. Regressions
   wedge the session with `:sys.suspend/1` and read `:sys.get_state/1`, so the
   fences are proved by suspension and state rather than by timing margins.
 

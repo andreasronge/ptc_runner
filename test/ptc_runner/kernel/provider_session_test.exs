@@ -121,6 +121,40 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert %{scopes: %{}, scope_order: []} = :sys.get_state(session.pid)
   end
 
+  test "a wedged session cannot leave a committed closer ambiguously owned" do
+    # A session that never answers is the case a reply grace cannot decide. The
+    # commit keeps its request alive, spends one cleanup budget waiting for the
+    # truth, and then settles the question with an event rather than a duration:
+    # the session is killed, and a brutal kill runs no terminate callback, so a
+    # session that never replied has never run and never will run this closer.
+    # Ownership therefore falls to the caller, provably once.
+    {:ok, closed} = Agent.start_link(fn -> 0 end)
+
+    {:ok, limits} =
+      Limits.installed(%{run_duration_ms: 200, provider_cleanup_timeout_ms: 300})
+
+    {:ok, session} = ProviderSession.start_active(limits, "wedged-commit")
+    {:ok, session} = ProviderSession.begin_operation(session, :run)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    parent = self()
+    close = fn -> Agent.update(closed, &(&1 + 1)) && :ok end
+    reference = Process.monitor(session.pid)
+
+    # Suspended and never resumed: the commit can never be served.
+    assert :ok = :sys.suspend(session.pid)
+    spawn(fn -> send(parent, {:commit, ResourceRegistrar.commit(registrar, close)}) end)
+
+    # The caller is told it owns the closer, rather than being left to guess.
+    assert_receive {:commit, {:error, :resource_registrar_unavailable}}, 5_000
+
+    # And it was told so by an event: the wedged session was killed, so nothing
+    # else can ever run this closer.
+    assert_receive {:DOWN, ^reference, :process, _pid, _reason}, 5_000
+    assert Agent.get(closed, & &1) == 0
+  end
+
   test "a commit refused after its deadline leaves the closer with its caller" do
     # A commit that landed after its caller gave up would be owned twice: the
     # session would close it, and the caller's unregistered-closer recovery

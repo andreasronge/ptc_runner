@@ -514,6 +514,12 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
 
         {:cont, {:ok, next}}
 
+      # The session took ownership and then became unreachable without running
+      # the closer. It is the only owner this closer ever had, so re-running it
+      # here would be a second run of work that may already have happened.
+      {:error, :provider_cleanup_failed} ->
+        {:halt, {:error, :provider_cleanup_failed}}
+
       {:error, _reason} ->
         {:halt, {:unregistered_provider_close, :provider_session_unavailable, built.close}}
     end
@@ -523,6 +529,9 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     case ResourceRegistrar.commit(provider.registrar, built.close) do
       :ok ->
         {:halt, {:error, :provider_data_policy_changed}}
+
+      {:error, :provider_cleanup_failed} ->
+        {:halt, {:error, :provider_cleanup_failed}}
 
       {:error, _reason} ->
         {:halt, {:unregistered_provider_close, :provider_data_policy_changed, built.close}}
@@ -708,6 +717,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   defp preserve_expired_acquisition(provider, {:ok, built}, diagnostic) do
     case ResourceRegistrar.commit(provider.registrar, built.close) do
       :ok -> {:error, diagnostic}
+      {:error, :provider_cleanup_failed} -> {:error, diagnostic}
       {:error, _reason} -> {:unregistered_provider_close, diagnostic, built.close}
     end
   end

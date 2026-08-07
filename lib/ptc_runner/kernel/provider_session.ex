@@ -623,15 +623,66 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
   def commit_registrar(_registrar, _close), do: {:error, :resource_registrar_unavailable}
 
+  # Commit is the only ownership-transfer edge, so it is the only call that may
+  # not abandon its reply. The reply *is* the ownership record: every branch of
+  # the commit handler replies, and the branch that takes ownership does so in
+  # the same `{:reply, :ok, state}` return, so a reply is sent if and only if
+  # the session owns the closer.
+  #
+  # Signals from the session arrive in send order, so a reply that was ever sent
+  # is delivered before any `:DOWN` from that same session. Keeping the request
+  # id alive across a timeout therefore turns an ambiguous elapsed-time answer
+  # into an event: a reply, or proof that none exists. A grace period decides
+  # nothing here — it only decides when to escalate.
   defp commit_valid_registrar(registrar, close) do
     deadline = ResourceRegistrar.operation_deadline(registrar)
+    request = {registrar.token, {:registrar, registrar.scope, {:commit, close, deadline}}}
+    request_id = :gen_server.send_request(registrar.session, request)
 
-    registrar_call(
+    await_commit(
       registrar,
-      {:commit, close, deadline},
+      request_id,
       operation_call_timeout(deadline, :infinity),
-      {:error, :resource_registrar_unavailable}
+      &reconcile_commit/2
     )
+  end
+
+  # The operation budget is spent, but the answer is still owed. A silent
+  # session gets one freshly anchored cleanup budget to produce it — the same
+  # per-episode budget an abort spends — before it is treated as wedged.
+  defp reconcile_commit(registrar, request_id) do
+    budget = Deadline.new(ResourceRegistrar.cleanup_timeout_ms(registrar))
+    await_commit(registrar, request_id, Deadline.remaining(budget), &settle_commit/2)
+  end
+
+  # Silent for a whole cleanup budget is this module's existing definition of
+  # wedged, and its existing answer is to kill. A brutal kill runs no terminate
+  # callback, so after the `:DOWN` the session is provably inert: it has run,
+  # and will run, nothing further. One last look at the mailbox then says
+  # whether it had taken ownership before going silent.
+  defp settle_commit(registrar, request_id) do
+    monitor = Process.monitor(registrar.session)
+    Process.exit(registrar.session, :kill)
+
+    receive do
+      {:DOWN, ^monitor, :process, _pid, _reason} -> :ok
+    end
+
+    case :gen_server.wait_response(request_id, 0) do
+      # The session owned the closer and is now gone without running it. The
+      # caller must not run it — the session may already have drained it — so
+      # this reports an unreleased resource rather than a refused commit.
+      {:reply, :ok} -> {:error, :provider_cleanup_failed}
+      _absent_or_failed -> {:error, :resource_registrar_unavailable}
+    end
+  end
+
+  defp await_commit(registrar, request_id, timeout_ms, escalate) do
+    case :gen_server.wait_response(request_id, timeout_ms) do
+      {:reply, reply} -> reply
+      {:error, {_reason, _server}} -> {:error, :resource_registrar_unavailable}
+      :timeout -> escalate.(registrar, request_id)
+    end
   end
 
   # One freshly anchored cleanup budget per abort episode, anchored here where
