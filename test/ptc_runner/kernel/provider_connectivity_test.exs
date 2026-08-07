@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActiveSession
   alias PtcRunner.Kernel.ProviderActivity
@@ -174,6 +175,38 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     end
   end
 
+  test "connectivity refuses an execution that asked for authorization" do
+    # A health check must never open an interactive authorization or ask a
+    # human for anything. Refusing is deliberate: silently running the
+    # non-interactive path would report a check that skipped what was asked for.
+    %{prepared: prepared, catalog: catalog} =
+      fixture(%{"authorized" => [destination: :mission, authorization_mode: :oauth]})
+
+    {:ok, services} = ProviderRuntimeServices.new()
+    {:ok, interactive} = ProviderExecution.new(catalog, services, ["authorized"])
+
+    refute ProviderExecution.non_interactive?(interactive)
+    assert {:error, :invalid_provider_execution} = connect(prepared, interactive)
+
+    # The refusal happens before the preparation is consumed, so it stays usable.
+    assert PreparedRun.valid?(prepared)
+    refute_received {:builder_invoked, _name}
+
+    # A notifier is not merely unused by connectivity: there is nowhere to pass
+    # one, and the owner refuses a connect that carries it.
+    assert {:error, :provider_session_required} =
+             ExecutionSessionOwner.start(
+               prepared,
+               authority(),
+               self(),
+               execution_for(catalog),
+               fn _url -> flunk("connectivity must not notify authorization") end,
+               :connect
+             )
+
+    assert PreparedRun.valid?(prepared)
+  end
+
   test "a preparation from another catalog is refused before the session opens" do
     # Alias names are not identity: both catalogs install "inert", and only the
     # sealed attestation distinguishes the declarations behind it.
@@ -230,7 +263,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
                    authority(),
                    self(),
                    execution,
-                   &notifier/1,
+                   nil,
                    :connect
                  )
 
@@ -252,6 +285,12 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     refute_received {:result, _result}
   end
 
+  defp execution_for(catalog) do
+    {:ok, services} = ProviderRuntimeServices.new()
+    {:ok, execution} = ProviderExecution.new(catalog, services, [])
+    execution
+  end
+
   defp begin_remaining(prepared, catalog, operation) do
     limits = prepared.request.package.limits
     {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
@@ -264,9 +303,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   end
 
   defp connect(prepared, execution),
-    do: RunCoordinator.connect(prepared, authority(), execution, &notifier/1)
-
-  defp notifier(_url), do: flunk("connectivity must not notify authorization")
+    do: RunCoordinator.connect(prepared, authority(), execution)
 
   defp authority do
     {:ok, authority} = PublicationAuthority.new([])
@@ -286,13 +323,14 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     registrations =
       Map.new(specifications, fn {name, options} ->
         mode = Keyword.get(options, :connectivity_mode, :none)
+        authority = authority(Keyword.get(options, :authorization_mode, :none))
 
         {:ok, descriptor} =
           ProviderDescriptor.new(
             source: :custom,
             installation_revision: Keyword.get(options, :revision, "connect-v1"),
             credential_names: [],
-            authorization_mode: :none,
+            authorization_mode: Keyword.get(options, :authorization_mode, :none),
             data_class: :normal,
             accepts_data: [:normal],
             requires: [],
@@ -303,7 +341,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
             probe_effect: if(mode == :probe, do: :metadata),
             selection_validation: Keyword.get(options, :selection_validation, :declarative),
             selection_rules: rules,
-            authority_fingerprint: nil,
+            authority_fingerprint: authority && authority.fingerprint,
             local_preflight: :none
           )
 
@@ -311,7 +349,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
          %{
            descriptor: descriptor,
            implementation: implementation(parent, name, options, mode),
-           authority: nil
+           authority: authority
          }}
       end)
 
@@ -324,6 +362,33 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     on_exit(fn -> InstallationCatalog.close(catalog) end)
 
     %{prepared: prepared, catalog: catalog, execution: execution}
+  end
+
+  # The descriptor's fingerprint comes from the authority it is bound to, so an
+  # OAuth fixture cannot drift from the binding the catalog seals.
+  defp authority(:none), do: nil
+
+  defp authority(:oauth) do
+    {:ok, authority} =
+      Authority.from_host(
+        %{
+          "installation_id" => "connect-primary",
+          "issuer" => "https://auth.example",
+          "scope_ceiling" => ["read"],
+          "default_scopes" => ["read"],
+          "client" => %{
+            "registration" => "pre_registered",
+            "client_id" => "connect-client",
+            "token_endpoint_auth_method" => "none",
+            "grant_types" => ["authorization_code"],
+            "loopback_redirect" => %{"host" => "127.0.0.1", "path" => "/callback"}
+          }
+        },
+        "https://mcp.example/mcp",
+        MapSet.new()
+      )
+
+    authority
   end
 
   defp destinations(:both), do: [:workflow, :mission]
@@ -353,7 +418,15 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
        }}
     end
 
-    implementation = %{builder: builder}
+    implementation =
+      if Keyword.get(options, :authorization_mode, :none) == :oauth do
+        %{
+          builder: builder,
+          oauth_builder: fn _selection, _context, _runtime -> {:ok, %{credential_names: []}} end
+        }
+      else
+        %{builder: builder}
+      end
 
     implementation =
       if Keyword.get(options, :selection_validation, :declarative) == :active do

@@ -1085,8 +1085,19 @@ fine; temporarily reachable and unsafe is not.
    implemented; `:probe` and `:acquisition` fail closed;
 2. implement `:none`, `:probe`, and `:acquisition` behaviour through the
    existing session, registry, activity marker, operation deadline, and LIFO
-   cleanup stack. Two boundary corrections come first, because both get more
+   cleanup stack. Three corrections come first, because all of them get more
    expensive once `DoctorPlan` consumes the result:
+
+   - (complete) connectivity is non-interactive by construction.
+     `ProviderExecution` could carry authorization targets, which would have
+     routed a health check through the interactive authorization path.
+     `RunCoordinator.connect/3` takes no notifier, `ProviderExecution.execute/8`
+     requires connectivity to carry none, and both the execution owner and the
+     execution refuse an execution with authorization targets. The refusal is
+     deliberate rather than a silent downgrade to the non-interactive path: a
+     caller that asked for authorization and got a check that skipped it would
+     be told the wrong thing. Refusing before `init/1` consumes the preparation
+     leaves it reusable;
 
    - (complete) the operation clock. Connectivity entered through
      `begin_owned_run/3` and inherited `run_duration_ms`, which is the wrong

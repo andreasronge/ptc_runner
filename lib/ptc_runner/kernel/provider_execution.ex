@@ -71,6 +71,17 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   def valid?(_execution), do: false
 
   @doc """
+  Checks that this execution requests no explicit authorization.
+
+  `doctor --connect` must never notify or open an interaction, so it refuses an
+  execution carrying authorization targets rather than quietly running the
+  non-interactive path and reporting a check that skipped what was asked for.
+  """
+  @spec non_interactive?(term()) :: boolean()
+  def non_interactive?(%__MODULE__{authorizations: []} = execution), do: valid?(execution)
+  def non_interactive?(_execution), do: false
+
+  @doc """
   Checks that this execution belongs to the exact preparation it will run.
 
   Callers must decide this before the owner consumes the prepared run, so an
@@ -108,9 +119,11 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         lifecycle_owner,
         operation
       )
-      when is_function(notifier, 1) and is_function(tracker, 3) and is_pid(lifecycle_owner) and
+      when is_function(tracker, 3) and is_pid(lifecycle_owner) and
              operation in [:run, :check, :connect] do
-    with true <- valid?(execution),
+    with true <- notifier_matches_operation?(notifier, operation),
+         true <- valid?(execution),
+         true <- operation != :connect or non_interactive?(execution),
          true <- PreparedRun.consumed_valid?(prepared),
          true <- PublicationAuthority.valid?(authority),
          true <- bound_to_prepared?(execution, prepared),
@@ -154,6 +167,12 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         _operation
       ),
       do: {:error, :invalid_provider_execution}
+
+  # Connectivity carries no notifier at all, so the interactive branch below is
+  # unreachable for it by construction rather than by the branch happening not
+  # to be taken.
+  defp notifier_matches_operation?(notifier, :connect), do: is_nil(notifier)
+  defp notifier_matches_operation?(notifier, _operation), do: is_function(notifier, 1)
 
   defp execute_with_session(
          prepared,

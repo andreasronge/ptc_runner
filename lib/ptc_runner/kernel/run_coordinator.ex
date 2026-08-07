@@ -200,28 +200,31 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   def check(_prepared, _authority, _provider_execution, _notifier),
     do: {:error, :invalid_prepared_run}
 
-  @doc false
-  @spec connect(
-          PreparedRun.t(),
-          PublicationAuthority.t(),
-          ProviderExecution.t(),
-          (binary() -> term())
-        ) ::
+  @doc """
+  Runs the connectivity operation for one sealed preparation.
+
+  Internal only. `doctor --connect` is not dispatched from `CommandEngine` yet,
+  and must not be until the transport bounds every response the connectivity
+  modes can pull in. Connectivity answers for selected occurrences, so unlike a
+  run it has no provider-free form.
+
+  It takes no authorization notifier, and refuses an execution carrying
+  authorization targets, because a health check must never open an interactive
+  authorization or ask a human for anything. The refusal is deliberate rather
+  than a silent downgrade to the non-interactive path: a caller that asked for
+  authorization and got a check that skipped it would be told the wrong thing.
+  """
+  @spec connect(PreparedRun.t(), PublicationAuthority.t(), ProviderExecution.t()) ::
           {:ok, ConnectivityResult.t()}
           | {:error,
              :invalid_prepared_run
              | :invalid_publication_authority
              | :invalid_provider_execution
              | term()}
-  # Internal only. `doctor --connect` is not dispatched from `CommandEngine`
-  # yet, and must not be until the transport bounds every response the
-  # connectivity modes can pull in. Connectivity answers for selected
-  # occurrences, so unlike a run it has no provider-free form.
-  def connect(%PreparedRun{} = prepared, authority, provider_execution, notifier)
-      when is_function(notifier, 1),
-      do: open_active(prepared, authority, provider_execution, notifier, :connect)
+  def connect(%PreparedRun{} = prepared, authority, provider_execution),
+    do: open_active(prepared, authority, provider_execution, nil, :connect)
 
-  def connect(_prepared, _authority, _provider_execution, _notifier),
+  def connect(_prepared, _authority, _provider_execution),
     do: {:error, :invalid_prepared_run}
 
   defp open_active(prepared, authority, provider_execution, notifier, operation) do

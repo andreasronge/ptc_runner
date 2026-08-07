@@ -79,16 +79,28 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       prepared.provider_declarations == [] ->
         provider_free_admissible(provider_execution, operation)
 
-      not (ProviderExecution.valid?(provider_execution) and is_function(notifier, 1)) ->
+      not (ProviderExecution.valid?(provider_execution) and
+               notifier_matches_operation?(notifier, operation)) ->
         {:error, :provider_session_required}
 
       not ProviderExecution.bound_to_prepared?(provider_execution, prepared) ->
+        {:error, :invalid_provider_execution}
+
+      # Decided here, before `init/1` consumes the preparation, so a connect
+      # that asked for authorization leaves its preparation reusable rather
+      # than being spent on a check that would have skipped it.
+      operation == :connect and not ProviderExecution.non_interactive?(provider_execution) ->
         {:error, :invalid_provider_execution}
 
       true ->
         :ok
     end
   end
+
+  # Connectivity never notifies or opens an interaction, so it carries no
+  # authorization notifier at all.
+  defp notifier_matches_operation?(notifier, :connect), do: is_nil(notifier)
+  defp notifier_matches_operation?(notifier, _operation), do: is_function(notifier, 1)
 
   # Connectivity answers for selected occurrences, so it has nothing to do
   # without any. Refusing keeps `:connect` off the provider-free completion,
