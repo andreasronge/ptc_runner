@@ -6,8 +6,17 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
   scope and is inert until activated. Successful acquisition commits one
   provider close operation for the scope; failed acquisition aborts it.
   Each scope has a private signal owner for process roots. A root monitors that
-  owner and registers synchronously before its start operation returns. Callers
-  cannot construct or retarget registrar handles.
+  owner and registers synchronously before its start operation returns.
+
+  A handle cannot be *retargeted*: every field is covered by the sealed
+  attestation `valid?/1` checks on entry, so mutating one invalidates it. It can
+  be *constructed* — `new/8` attests whatever arguments it is given, and
+  `PtcRunner.Kernel.Attestation` is explicitly not a security boundary against
+  code running in the same VM. What contains a minted handle is the session's
+  own authority rather than this struct: it honours only scope references it
+  opened, fences activate and commit with the deadline it sealed for itself
+  rather than the one the handle carries, and clamps an abort to a budget it
+  installed.
   """
 
   alias PtcRunner.Kernel.Attestation
@@ -28,6 +37,11 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
   defstruct @enforce_keys
   @field_keys Enum.sort([:__struct__ | @enforce_keys])
 
+  # Opaque, and `PtcRunner.Kernel.ProviderSession` reaches the fields it needs
+  # through the `@doc false` accessors below rather than by matching the struct.
+  # The fence is worth keeping because roughly ten other modules hold a `t()`
+  # without ever reading one of its fields, and the static check is what keeps
+  # it that way.
   @opaque t :: %__MODULE__{
             session: pid(),
             token: reference(),
@@ -129,8 +143,13 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
   def activate(_registrar), do: {:error, :resource_registrar_unavailable}
 
   @doc false
+  # `:provider_cleanup_failed` is the settle path's answer when a wedged session
+  # is killed and its mailbox then shows it had taken ownership of the closer.
+  # Omitting it made every caller's match on that reason unreachable to the type
+  # checker, which is how the branch that reports an unreleased resource came to
+  # look like dead code.
   @spec commit(t(), (-> term()) | nil) ::
-          :ok | {:error, :resource_registrar_unavailable}
+          :ok | {:error, :resource_registrar_unavailable | :provider_cleanup_failed}
   def commit(%__MODULE__{} = registrar, close) when is_function(close, 0) or is_nil(close),
     do: ProviderSession.commit_registrar(registrar, close)
 
@@ -157,4 +176,24 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
   @doc false
   @spec cleanup_timeout_ms(t()) :: pos_integer()
   def cleanup_timeout_ms(%__MODULE__{} = registrar), do: registrar.cleanup_timeout_ms
+
+  # `ProviderSession` addresses a scope by these three, and adopts a
+  # terminalization root through the fourth. They complete the accessor set the
+  # two budgets above started, so the session never has to match this struct and
+  # the opaque fence stays intact for every other holder of a `t()`.
+  @doc false
+  @spec session(t()) :: pid()
+  def session(%__MODULE__{} = registrar), do: registrar.session
+
+  @doc false
+  @spec token(t()) :: reference()
+  def token(%__MODULE__{} = registrar), do: registrar.token
+
+  @doc false
+  @spec scope(t()) :: reference()
+  def scope(%__MODULE__{} = registrar), do: registrar.scope
+
+  @doc false
+  @spec cleanup_owner(t()) :: pid()
+  def cleanup_owner(%__MODULE__{} = registrar), do: registrar.cleanup_owner
 end

@@ -646,7 +646,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
   # registrar carries the deadline it was opened under, so a handle cannot be
   # replayed against a longer one.
   @doc false
-  def activate_registrar(%ResourceRegistrar{} = registrar) do
+  def activate_registrar(registrar) do
     if ResourceRegistrar.valid?(registrar) do
       activate_valid_registrar(registrar)
     else
@@ -666,7 +666,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
   end
 
   @doc false
-  def commit_registrar(%ResourceRegistrar{} = registrar, close)
+  def commit_registrar(registrar, close)
       when is_function(close, 0) or is_nil(close) do
     if ResourceRegistrar.valid?(registrar) do
       commit_valid_registrar(registrar, close)
@@ -690,8 +690,12 @@ defmodule PtcRunner.Kernel.ProviderSession do
   # nothing here — it only decides when to escalate.
   defp commit_valid_registrar(registrar, close) do
     deadline = ResourceRegistrar.operation_deadline(registrar)
-    request = {registrar.token, {:registrar, registrar.scope, {:commit, close, deadline}}}
-    request_id = :gen_server.send_request(registrar.session, request)
+
+    request =
+      {ResourceRegistrar.token(registrar),
+       {:registrar, ResourceRegistrar.scope(registrar), {:commit, close, deadline}}}
+
+    request_id = :gen_server.send_request(ResourceRegistrar.session(registrar), request)
 
     await_commit(
       registrar,
@@ -715,8 +719,9 @@ defmodule PtcRunner.Kernel.ProviderSession do
   # and will run, nothing further. One last look at the mailbox then says
   # whether it had taken ownership before going silent.
   defp settle_commit(registrar, request_id) do
-    monitor = Process.monitor(registrar.session)
-    Process.exit(registrar.session, :kill)
+    session = ResourceRegistrar.session(registrar)
+    monitor = Process.monitor(session)
+    Process.exit(session, :kill)
 
     receive do
       {:DOWN, ^monitor, :process, _pid, _reason} -> :ok
@@ -752,7 +757,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
   # its own dequeue. It is neither the operation deadline nor the session's
   # terminal one: see `abort_scope/3`.
   @doc false
-  def abort_registrar(%ResourceRegistrar{} = registrar) do
+  def abort_registrar(registrar) do
     if ResourceRegistrar.valid?(registrar) do
       abort_valid_registrar(registrar)
     else
@@ -775,11 +780,11 @@ defmodule PtcRunner.Kernel.ProviderSession do
   end
 
   @doc false
-  def register_root(%ResourceRegistrar{} = registrar),
+  def register_root(registrar),
     do: register_root(registrar, @registration_timeout_ms)
 
   @doc false
-  def register_root(%ResourceRegistrar{} = registrar, timeout_ms)
+  def register_root(registrar, timeout_ms)
       when is_integer(timeout_ms) and timeout_ms > 0 do
     if ResourceRegistrar.valid?(registrar) do
       response_deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
@@ -788,9 +793,9 @@ defmodule PtcRunner.Kernel.ProviderSession do
         response_deadline_ms - min(@registration_mutation_reserve_ms, div(timeout_ms, 2))
 
       call(
-        registrar.session,
-        {registrar.token,
-         {:registrar, registrar.scope,
+        ResourceRegistrar.session(registrar),
+        {ResourceRegistrar.token(registrar),
+         {:registrar, ResourceRegistrar.scope(registrar),
           {:register_root, mutation_deadline_ms, response_deadline_ms}}},
         timeout_ms,
         {:error, :resource_registrar_unavailable}
@@ -803,9 +808,13 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def register_root(_registrar, _timeout_ms), do: {:error, :resource_registrar_unavailable}
 
   @doc false
-  def handoff_root(%ResourceRegistrar{} = registrar, root) when is_pid(root) do
+  def handoff_root(registrar, root) when is_pid(root) do
     if ResourceRegistrar.valid?(registrar) do
-      case ProviderScopeOwner.handoff(registrar.cleanup_owner, registrar.session, root) do
+      case ProviderScopeOwner.handoff(
+             ResourceRegistrar.cleanup_owner(registrar),
+             ResourceRegistrar.session(registrar),
+             root
+           ) do
         :ok ->
           :ok
 
@@ -1573,8 +1582,9 @@ defmodule PtcRunner.Kernel.ProviderSession do
   defp registrar_call(registrar, operation, timeout, fallback) do
     if ResourceRegistrar.valid?(registrar) do
       call(
-        registrar.session,
-        {registrar.token, {:registrar, registrar.scope, operation}},
+        ResourceRegistrar.session(registrar),
+        {ResourceRegistrar.token(registrar),
+         {:registrar, ResourceRegistrar.scope(registrar), operation}},
         timeout,
         fallback
       )
