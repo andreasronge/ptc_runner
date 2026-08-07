@@ -509,7 +509,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `json/generate-string` | `(json/generate-string v)` | Encode a value as a JSON string; nil on non-encodable input. |
+| `json/generate-string` | `(json/generate-string v)` | Encode a value as a JSON string; type_error on non-encodable input. |
 | `json/parse-lines` * | `(json/parse-lines s)` | Parse line-delimited JSON into a vector; blank lines are skipped. |
 | `json/parse-string` | `(json/parse-string s)` | Parse a JSON string into a value; nil on failure. |
 

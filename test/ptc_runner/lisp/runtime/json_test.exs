@@ -1,9 +1,24 @@
 defmodule PtcRunner.Lisp.Runtime.JsonTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Json
 
   doctest PtcRunner.Lisp.Runtime.Json
+
+  # `generate_string/1` either returns a JSON string or raises a named
+  # `type_error`; every refusal assertion goes through this.
+  defp refusal(value) do
+    assert_raise(RuntimeError, fn -> Json.generate_string(value) end).message
+  end
+
+  defp eval_error(src) do
+    case Lisp.run(src) do
+      {:error, %{fail: %{message: msg}}} -> msg
+      {:ok, %{return: value}} -> flunk("expected error, got #{inspect(value)}\n#{src}")
+    end
+  end
 
   describe "parse_string/1 — happy paths" do
     test "parses a JSON object into a string-keyed map" do
@@ -133,55 +148,185 @@ defmodule PtcRunner.Lisp.Runtime.JsonTest do
     end
   end
 
-  describe "generate_string/1 — failure modes (DIV-24: nil, never raise)" do
-    test "returns nil for atom values outside true/false/nil (e.g. PTC-Lisp keywords)" do
-      assert Json.generate_string(:fs) == nil
-      assert Json.generate_string(%{"server" => :fs}) == nil
+  describe "generate_string/1 — keyword keys encode as their name (#1165)" do
+    test "a keyword key becomes a JSON string key" do
+      assert Json.generate_string(%{:server => "fs"}) == ~S|{"server":"fs"}|
     end
 
-    test "returns nil for atom-keyed maps (including booleans/nil as keys)" do
-      assert Json.generate_string(%{:server => "fs"}) == nil
-      assert Json.generate_string(%{true => 1}) == nil
-      assert Json.generate_string(%{false => 1}) == nil
-      assert Json.generate_string(%{nil => 1}) == nil
+    test "keyword names are used verbatim — no tool-boundary hyphen normalization" do
+      # KeyNormalizer.normalize_key/1 would emit "max_turns"; renaming a key
+      # behind the caller's back is the trap #1165 is about, not the fix.
+      assert Json.generate_string(%{:"max-turns" => 3}) == ~S|{"max-turns":3}|
     end
 
-    test "returns nil for float-keyed maps" do
-      assert Json.generate_string(%{1.5 => "a"}) == nil
+    test "a novel struct-backed keyword key encodes the same way" do
+      assert Json.generate_string(%{LispKeyword.new("novel-key") => 1}) == ~S|{"novel-key":1}|
     end
 
-    test "returns nil for tuple values" do
-      assert Json.generate_string({:ok, 1}) == nil
-      assert Json.generate_string([{:a, 1}]) == nil
+    test "an invalid keyword struct is refused rather than encoded" do
+      msg = refusal(%{%LispKeyword{name: "not a keyword"} => 1})
+      assert msg =~ "as a JSON object key"
     end
 
-    test "returns nil for PID values" do
-      pid = self()
-      assert Json.generate_string(pid) == nil
-      assert Json.generate_string(%{"pid" => pid}) == nil
+    test "keys that collide after encoding are refused, not silently merged" do
+      keyword_vs_string = refusal(%{:a => 1, "a" => 2})
+      assert keyword_vs_string =~ ~s|both encode to the JSON key "a"|
+
+      # Pre-existing hazard: Jason stringifies integer keys, so {1 "a"} and
+      # {"1" "b"} would have produced a duplicate JSON key.
+      integer_vs_string = refusal(%{1 => "a", "1" => "b"})
+      assert integer_vs_string =~ ~s|both encode to the JSON key "1"|
+    end
+  end
+
+  describe "generate_string/1 — refusals raise a named type_error (never nil)" do
+    test "a keyword value names the position and how to convert it" do
+      # The module raises the message; `Eval.Apply` is what classifies it as a
+      # `type_error` (asserted through the evaluator below).
+      msg = refusal(%{"server" => :fs})
+      assert msg =~ "json/generate-string"
+      assert msg =~ "cannot encode a keyword as a JSON value"
+      assert msg =~ ~s|at ["server"]|
+      assert msg =~ "(name x)"
     end
 
-    test "returns nil for function values" do
-      f = fn x -> x end
-      assert Json.generate_string(f) == nil
-      assert Json.generate_string([f]) == nil
+    test "a top-level keyword value says so instead of naming a path" do
+      assert refusal(:fs) =~ "at the top level"
     end
 
-    test "returns nil for special-float carve-out (§4.3)" do
-      # Special numeric literals resolve to bounded signal atoms.
-      assert Json.generate_string(:infinity) == nil
-      assert Json.generate_string(:negative_infinity) == nil
-      assert Json.generate_string(:nan) == nil
+    test "a novel struct-backed keyword value is refused like an atom one" do
+      assert refusal(%{"server" => LispKeyword.new("fs")}) =~
+               "cannot encode a keyword as a JSON value"
     end
 
-    test "rejects non-encodable atom even when nested deep" do
-      assert Json.generate_string([%{"k" => [1, 2, [3, :bad]]}]) == nil
+    test "the path names every step down to the offending value" do
+      msg = refusal(%{"config" => [%{:port => :auto}]})
+      assert msg =~ ~s|at ["config" 0 :port]|
     end
 
-    test "does not raise" do
-      # Reference values are not encodable — must not blow the sandbox.
-      ref = make_ref()
-      assert Json.generate_string(ref) == nil
+    test "booleans and nil are refused in key position" do
+      for key <- [true, false, nil] do
+        assert refusal(%{key => 1}) =~ "as a JSON object key"
+      end
+    end
+
+    test "a float key is refused and says keys must be strings" do
+      msg = refusal(%{1.5 => "a"})
+      assert msg =~ "cannot encode a number as a JSON object key"
+      assert msg =~ "must be strings"
+    end
+
+    test "tuples are refused" do
+      assert refusal({:ok, 1}) =~ "cannot encode a tuple as a JSON value"
+      assert refusal([{:a, 1}]) =~ "at [0]"
+    end
+
+    test "a set is refused and points at (vec s)" do
+      msg = refusal(MapSet.new([1, 2]))
+      assert msg =~ "cannot encode a set as a JSON value"
+      assert msg =~ "(vec x)"
+    end
+
+    test "a PTC-Lisp closure is named a function, not the tuple it is built from" do
+      msg = eval_error(~S<(json/generate-string {"subject" (fn [] 1)})>)
+
+      assert msg =~ "cannot encode a function as a JSON value"
+      assert msg =~ ~s|at ["subject"]|
+    end
+
+    test "PIDs, references and functions are refused" do
+      assert refusal(self()) =~ "cannot encode"
+      assert refusal(make_ref()) =~ "cannot encode"
+      assert refusal(fn x -> x end) =~ "cannot encode"
+    end
+
+    test "special float atoms say JSON has no infinity or NaN" do
+      for special <- [:infinity, :negative_infinity, :nan] do
+        msg = refusal(special)
+        assert msg =~ "infinity"
+        assert msg =~ "NaN"
+      end
+    end
+
+    test "a special float in key position is refused, not stringified" do
+      # ##Inf is a number carried as a bounded atom; encoding it as the key
+      # "infinity" would turn a number into a word behind the caller's back.
+      for special <- [:infinity, :negative_infinity, :nan] do
+        msg = refusal(%{special => 1})
+        assert msg =~ "as a JSON object key"
+        assert msg =~ "JSON has no infinity or NaN literal"
+      end
+
+      assert eval_error("(json/generate-string {##Inf 1})") =~
+               "cannot encode ##Inf as a JSON object key"
+    end
+
+    test "a refusal nested deep still reports its path" do
+      assert refusal([%{"k" => [1, 2, [3, :bad]]}]) =~ ~s|at [0 "k" 2 1]|
+    end
+
+    test "a deep path is truncated rather than rendered in full" do
+      deep = Enum.reduce(1..40, :bad, fn i, acc -> %{"k#{i}" => acc} end)
+      msg = refusal(deep)
+      assert msg =~ "…"
+      assert String.length(msg) < 500
+    end
+
+    test "an oversized key is truncated in the path" do
+      long_key = String.duplicate("x", 500)
+      msg = refusal(%{long_key => :bad})
+      refute msg =~ long_key
+      assert msg =~ "…"
+    end
+
+    test "a key of combining marks is bounded by bytes, not graphemes" do
+      # "a" plus 20k combining acute accents is ONE grapheme but ~40KB. A
+      # grapheme cap would pass it through whole and put all of it in the
+      # message; eight such steps made a 65KB error.
+      combining = "a" <> String.duplicate("́", 20_000)
+      nested = Enum.reduce(1..10, :bad, fn _, acc -> %{combining => acc} end)
+
+      msg = refusal(nested)
+
+      assert byte_size(msg) < 1_000
+      assert String.valid?(msg)
+    end
+
+    test "a bignum key is clipped like every other path step" do
+      big = String.to_integer(String.duplicate("9", 20_000))
+      msg = refusal(%{big => :bad})
+
+      assert byte_size(msg) < 1_000
+      assert msg =~ "…"
+    end
+
+    test "invalid UTF-8 is refused with its position, not left to Jason" do
+      value_msg = refusal(%{"outer" => <<255>>})
+      assert value_msg =~ "invalid UTF-8 as a JSON value"
+      assert value_msg =~ ~s|at ["outer"]|
+
+      key_msg = refusal(%{<<255>> => 1})
+      assert key_msg =~ "invalid UTF-8 as a JSON object key"
+    end
+
+    test "an improper list is refused rather than crashing the walk" do
+      msg = refusal(%{"rows" => [1 | 2]})
+
+      assert msg =~ "cannot encode an improper list"
+      assert msg =~ ~s|at ["rows"]|
+      assert msg =~ "the tail at index 1 is a number"
+    end
+
+    test "a term with no JSON encoding is still named and positioned" do
+      # Nothing may reach the refusal path unclassified: an unnamed host term
+      # used to raise FunctionClauseError and lose the message entirely.
+      bitstring = <<1::1>>
+
+      assert refusal(%{"bits" => bitstring}) =~
+               ~s|cannot encode a bitstring as a JSON value at ["bits"]|
+
+      port = :erlang.list_to_port(~c"#Port<0.0>")
+      assert refusal(%{"port" => port}) =~ ~s|cannot encode a port as a JSON value at ["port"]|
     end
   end
 
@@ -205,6 +350,53 @@ defmodule PtcRunner.Lisp.Runtime.JsonTest do
     test "integer-keyed maps DO NOT round-trip — keys come back as strings" do
       # Carve-out per §4.3.
       assert Json.parse_string(Json.generate_string(%{1 => "a"})) == %{"1" => "a"}
+    end
+
+    test "keyword-keyed maps DO NOT round-trip — keys come back as strings" do
+      assert Json.parse_string(Json.generate_string(%{:a => 1})) == %{"a" => 1}
+    end
+  end
+
+  # The reported failure: `describe` emits keyword keys, so encoding its
+  # output produced `nil`, and `str` turned that into an empty string — a
+  # prompt section that silently went out blank.
+  describe "through the evaluator (#1165)" do
+    test "describe output encodes instead of vanishing" do
+      {:ok, %{return: encoded}} =
+        Lisp.run(~S<(json/generate-string (describe [{"a" 1} {"a" 2}]))>)
+
+      assert is_binary(encoded)
+      assert %{"type" => "vector", "count" => 2} = Json.parse_string(encoded)
+    end
+
+    test "describing keyword data refuses with a path into the summary" do
+      # The composition is only as encodable as the described values:
+      # `:examples` and `:sample` hold them verbatim. Coercing them would
+      # contradict the `:types` field the same summary reports, so the
+      # boundary is a positioned refusal rather than a silent conversion.
+      msg = eval_error(~S<(json/generate-string (describe [{"status" :active}]))>)
+
+      assert msg =~ "cannot encode a keyword as a JSON value"
+      assert msg =~ ~s|at [:keys "status" :examples 0]|
+
+      assert eval_error("(json/generate-string (describe ##Inf))") =~
+               "cannot encode ##Inf as a JSON value at [:examples 0]"
+    end
+
+    test "a keyword value fails loudly with a named type_error" do
+      msg = eval_error(~S<(json/generate-string {"server" :fs})>)
+
+      assert msg =~ "type_error"
+      assert msg =~ "cannot encode a keyword as a JSON value"
+      assert msg =~ ~s|at ["server"]|
+    end
+
+    test "str no longer silently swallows a failed encode" do
+      # (str "shape: " (json/generate-string ...)) was the shape of the bug:
+      # a refusal has to reach the caller, not become "".
+      msg = eval_error(~S<(str "shape: " (json/generate-string {:a :b}))>)
+
+      assert msg =~ "type_error"
     end
   end
 end

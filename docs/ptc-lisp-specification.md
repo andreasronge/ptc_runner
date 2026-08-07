@@ -391,7 +391,7 @@ Key-value associations:
 - **Tool-call arguments:** keys are recursively normalized to strings (e.g.
   `1` → `"1"`, `[:a :b]` → its inspected form). A projection collision or an
   invalid native Java value is rejected rather than silently losing data.
-- **`json/generate-string`:** integer keys are stringified (`{1 "a"}` → `{"1":"a"}`), but vector/float keys (and even keyword keys) return `nil`.
+- **`json/generate-string`:** keyword keys encode as their name verbatim (`{:max-turns 3}` → `{"max-turns":3}`) and integer keys are stringified (`{1 "a"}` → `{"1":"a"}`); vector and float keys, and any two keys that would encode to the same JSON key, are refused with a `type_error` naming the position (DIV-24).
 - **`json/parse-lines`:** line-delimited JSON helper; skips blank lines and parses each remaining line with `json/parse-string`.
 
 ```clojure
