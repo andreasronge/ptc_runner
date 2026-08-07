@@ -206,9 +206,18 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
           declaration
         )
 
+      # A scope the session refuses past the operation deadline is the budget
+      # running out, not a defect, so it keeps the operation-class code the
+      # validator itself would have reported.
       {:error, _reason} ->
-        {:error, internal_diagnostic(true)}
+        {:error, selection_setup_diagnostic(session, declaration)}
     end
+  end
+
+  defp selection_setup_diagnostic(session, declaration) do
+    if session |> ProviderSession.run_deadline() |> Deadline.expired?(),
+      do: selection_diagnostic(declaration, :selection_validation_timeout),
+      else: internal_diagnostic(true)
   end
 
   defp validate_in_scope(registrar, session, prepared, catalog, declaration) do

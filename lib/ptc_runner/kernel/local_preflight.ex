@@ -330,17 +330,25 @@ defmodule PtcRunner.Kernel.LocalPreflight do
       {:ok, :timed_out}
     else
       case ProviderSession.open_registrar(step.session) do
-        {:ok, registrar} -> run_in_scope(registrar, step, prepared, occurrence, run)
-        {:error, _reason} -> {:error, internal_diagnostic(step.activity)}
+        {:ok, registrar} -> run_in_scope(registrar, step, prepared, occurrence, deadline, run)
+        {:error, _reason} -> {:ok, setup_failure(deadline)}
       end
     end
   end
 
-  defp run_in_scope(registrar, step, prepared, occurrence, run) do
+  # The session refuses scope work past the operation deadline, so a setup that
+  # was live at the precheck and expired while waiting on a busy session comes
+  # back as an unavailable handle. That is the budget running out, not a defect,
+  # and the module contract says an exhausted budget reports the timeout.
+  defp setup_failure(deadline) do
+    if Deadline.expired?(deadline), do: :timed_out, else: {:error, :internal}
+  end
+
+  defp run_in_scope(registrar, step, prepared, occurrence, deadline, run) do
     result =
       case ResourceRegistrar.activate(registrar) do
         :ok -> {:ok, run.(context(prepared, occurrence, step, registrar))}
-        {:error, _reason} -> {:error, internal_diagnostic(step.activity)}
+        {:error, _reason} -> {:ok, setup_failure(deadline)}
       end
 
     case ResourceRegistrar.abort(registrar) do

@@ -1116,6 +1116,17 @@ commits in one Checkpoint C PR:
   - the **terminal cleanup deadline**, anchored once when the session enters its
     final episode and shared across the whole LIFO stack, is untouched.
 
+  Two residuals are covered by reasoning rather than by tests. The fence is
+  rechecked after `ProviderScopeOwner.start/2`, because startup can itself
+  outlast the caller and a scope inserted past that point has no handle anywhere
+  to abort it; forcing that branch needs startup to straddle the deadline, which
+  no deterministic mechanism here can arrange, so an expired scope is torn down
+  in its own abort episode and the branch stays uncovered. The same is true of a
+  setup call that is live at its precheck and expires while waiting: it is
+  classified as the operation-class timeout rather than an internal error in all
+  three callers — local checks, selection validation, and acquisition — but only
+  the already-expired case is reachable on demand.
+
   Late execution is fenced rather than raced. `open` and `commit` carry the same
   absolute instant the caller stops waiting on, and the handler refuses to
   mutate past it, so a reply nobody is waiting for cannot leave a scope with no

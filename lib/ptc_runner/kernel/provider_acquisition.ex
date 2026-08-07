@@ -321,8 +321,11 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
             max_heap_words
           )
 
+        # Past the operation deadline the session refuses to open a scope. That
+        # is the run budget running out rather than a session defect, so it
+        # keeps the operation-class diagnostic instead of a bare reason.
         {:error, _reason} ->
-          {:halt, {:error, :provider_session_unavailable}}
+          {:halt, {:error, prepare_setup_reason(session)}}
       end
     end)
     |> reverse_success()
@@ -682,6 +685,18 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       subject: subject,
       provider_activity: true
     )
+  end
+
+  defp prepare_setup_reason(session) do
+    case ProviderSession.execution_deadline(session) do
+      {:ok, deadline} when not is_nil(deadline) ->
+        if Deadline.expired?(deadline),
+          do: run_timeout_diagnostic(),
+          else: :provider_session_unavailable
+
+      _other ->
+        :provider_session_unavailable
+    end
   end
 
   defp run_timeout_diagnostic,

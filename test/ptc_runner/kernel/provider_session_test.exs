@@ -55,6 +55,34 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert order == []
   end
 
+  test "an invalid registrar handle is refused rather than raising" do
+    # The budgets are read from the handle, so a tampered one must be proved
+    # before either field is touched: an invalid deadline would otherwise raise
+    # in `Deadline.remaining/1` and a nonpositive cleanup budget in
+    # `Deadline.new/1`, crashing the caller instead of failing closed.
+    {:ok, session} = ProviderSession.start(limits())
+    on_exit(fn -> ProviderSession.close(session) end)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+
+    # A well-formed but widened deadline is only rejected; a malformed one is
+    # what proves the ordering, because reading it at all raises.
+    garbled = %{registrar | operation_deadline: :not_a_deadline}
+    refute ResourceRegistrar.valid?(garbled)
+
+    assert {:error, :resource_registrar_unavailable} = ResourceRegistrar.activate(garbled)
+    assert {:error, :resource_registrar_unavailable} = ResourceRegistrar.commit(garbled, nil)
+
+    widened = %{registrar | operation_deadline: Deadline.new(600_000)}
+    refute ResourceRegistrar.valid?(widened)
+    assert {:error, :resource_registrar_unavailable} = ResourceRegistrar.activate(widened)
+
+    # `Deadline.new/1` refuses a nonpositive budget, so abort reads it only
+    # after the handle is proved.
+    zeroed = %{registrar | cleanup_timeout_ms: 0}
+    refute ResourceRegistrar.valid?(zeroed)
+    assert {:error, :provider_cleanup_failed} = ResourceRegistrar.abort(zeroed)
+  end
+
   test "an abort spends its own cleanup budget, not the operation's" do
     # Abort commonly begins because the operation deadline expired. Spending
     # that deadline would hand cleanup a zero remainder and skip cooperative

@@ -593,6 +593,14 @@ defmodule PtcRunner.Kernel.ProviderSession do
   # replayed against a longer one.
   @doc false
   def activate_registrar(%ResourceRegistrar{} = registrar) do
+    if ResourceRegistrar.valid?(registrar) do
+      activate_valid_registrar(registrar)
+    else
+      {:error, :resource_registrar_unavailable}
+    end
+  end
+
+  defp activate_valid_registrar(registrar) do
     deadline = ResourceRegistrar.operation_deadline(registrar)
 
     registrar_call(
@@ -606,6 +614,16 @@ defmodule PtcRunner.Kernel.ProviderSession do
   @doc false
   def commit_registrar(%ResourceRegistrar{} = registrar, close)
       when is_function(close, 0) or is_nil(close) do
+    if ResourceRegistrar.valid?(registrar) do
+      commit_valid_registrar(registrar, close)
+    else
+      {:error, :resource_registrar_unavailable}
+    end
+  end
+
+  def commit_registrar(_registrar, _close), do: {:error, :resource_registrar_unavailable}
+
+  defp commit_valid_registrar(registrar, close) do
     deadline = ResourceRegistrar.operation_deadline(registrar)
 
     registrar_call(
@@ -616,14 +634,23 @@ defmodule PtcRunner.Kernel.ProviderSession do
     )
   end
 
-  def commit_registrar(_registrar, _close), do: {:error, :resource_registrar_unavailable}
-
   # One freshly anchored cleanup budget per abort episode, anchored here where
   # the episode begins so the session cannot hand back a cutoff measured from
   # its own dequeue. It is neither the operation deadline nor the session's
   # terminal one: see `abort_scope/3`.
   @doc false
   def abort_registrar(%ResourceRegistrar{} = registrar) do
+    if ResourceRegistrar.valid?(registrar) do
+      abort_valid_registrar(registrar)
+    else
+      {:error, :provider_cleanup_failed}
+    end
+  end
+
+  # The sealed budgets are read only after the handle is proved, so a tampered
+  # deadline or a nonpositive cleanup budget still returns its classified error
+  # instead of raising in the caller.
+  defp abort_valid_registrar(registrar) do
     deadline = Deadline.new(ResourceRegistrar.cleanup_timeout_ms(registrar))
 
     registrar_call(
@@ -780,7 +807,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
     if operation_expired?(deadline) do
       {:reply, {:error, :provider_session_unavailable}, state}
     else
-      open_scope(scope, state)
+      open_scope(scope, deadline, state)
     end
   end
 
@@ -1070,7 +1097,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
     state
   end
 
-  defp open_scope(scope, state) do
+  defp open_scope(scope, deadline, state) do
     case ProviderScopeOwner.start(self(), state.cleanup_timeout_ms) do
       {:ok, {scope_controller, root_owner, scope_reaper}} ->
         entry = %{
@@ -1082,15 +1109,28 @@ defmodule PtcRunner.Kernel.ProviderSession do
           scope_reaper: scope_reaper
         }
 
-        {:reply, {:ok, scope, scope_controller, root_owner, scope_reaper},
-         %{
-           state
-           | scopes: Map.put(state.scopes, scope, entry),
-             scope_order: [scope | state.scope_order]
-         }}
+        insert_scope(scope, entry, deadline, state)
 
       {:error, :provider_scope_unavailable} ->
         {:reply, {:error, :provider_session_unavailable}, state}
+    end
+  end
+
+  # Starting the owners is itself work and can outlast the caller, so the fence
+  # is rechecked after it rather than only before. A scope inserted past that
+  # point has no handle anywhere to abort it, so it is torn down here instead —
+  # its own abort episode, for a scope that was never publicly opened.
+  defp insert_scope(scope, entry, deadline, state) do
+    if operation_expired?(deadline) do
+      _ = close_roots(entry, Deadline.new(state.cleanup_timeout_ms))
+      {:reply, {:error, :provider_session_unavailable}, state}
+    else
+      {:reply, {:ok, scope, entry.scope_controller, entry.root_owner, entry.scope_reaper},
+       %{
+         state
+         | scopes: Map.put(state.scopes, scope, entry),
+           scope_order: [scope | state.scope_order]
+       }}
     end
   end
 
