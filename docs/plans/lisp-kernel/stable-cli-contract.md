@@ -1084,10 +1084,18 @@ fine; temporarily reachable and unsafe is not.
    row nothing reached. Connectivity has no provider-free
    form, because it answers for selected occurrences. Only `:none` is
    implemented; `:probe` and `:acquisition` fail closed;
-2. implement `:none`, `:probe`, and `:acquisition` behaviour through the
-   existing session, registry, activity marker, operation deadline, and LIFO
-   cleanup stack. Three corrections come first, because all of them get more
-   expensive once `DoctorPlan` consumes the result:
+2. (complete) implement `:none`, `:probe`, and `:acquisition` behaviour through
+   the existing session, registry, activity marker, operation deadline, and LIFO
+   cleanup stack. `ConnectivityProbe` is the probe half and follows
+   `LocalPreflight`'s shape — derived applicability, one anchored deadline every
+   occurrence spends, a bounded worker cancelled with its caller, and a closed
+   translation table. It hands the operation deadline to the callback as
+   `:doctor_occurrence_deadline_ms`, which is how a shipped probe intersects its
+   intrinsic budget with the operation's. The acquisition half calls
+   `ProviderAcquisition.acquire_targets/6` with the `:acquisition` occurrences
+   as targets and a no-op artifact preflight, because connectivity publishes
+   nothing. Three corrections came first, because all of them get more expensive
+   once `DoctorPlan` consumes the result:
 
    - (complete, repaired under review) the acquisition subset primitive.
      `ProviderAcquisition.acquire_subset/6` narrows which providers are

@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.ConnectivityProbe
   alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
@@ -14,6 +15,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderAcquisition
   alias PtcRunner.Kernel.ProviderActiveSession
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
@@ -329,7 +331,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # connectivity decides per occurrence what its declaration asks for, so
   # building one here would acquire providers a `:none` occurrence never wanted.
   defp complete(prepared, _authority, _opened_sinks, registry, session, execution, :connect),
-    do: complete_connectivity(prepared, execution.catalog, registry, session)
+    do: complete_connectivity(prepared, execution, registry, session)
 
   defp build_and_complete(prepared, authority, opened_sinks, registry, session, operation) do
     with {:ok, built} <-
@@ -345,19 +347,32 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   end
 
   # Applicability comes from the sealed descriptor of each selected occurrence,
-  # in declaration order, so no caller can narrow the work or reorder it. The
-  # deadline the session claimed bounds the whole operation; `:none` occurrences
-  # spend none of it, because a declaration that asks for no connectivity is
-  # answered without a credential, a callback, or a provider.
+  # so no caller can narrow the work or reorder it. The deadline the session
+  # claimed bounds the whole operation; `:none` occurrences spend none of it,
+  # because a declaration that asks for no connectivity is answered without a
+  # credential, a callback, or a provider.
   #
-  # `:probe` and `:acquisition` are not implemented yet and fail closed rather
-  # than reporting an occurrence nothing reached. This operation has no CLI
-  # dispatch, so that branch is unreachable outside its own regressions.
-  defp complete_connectivity(prepared, catalog, registry, session) do
+  # Execution order is pinned and is deliberately not the reporting order.
+  # Acquisition targets go first, through the shared dependency-order barrier,
+  # because only that barrier can make a target's prerequisites available to it
+  # and a probe must not spend the budget a closure still needs. Probes follow
+  # in declaration order. The first execution failure returns its own
+  # diagnostic, naming the occurrence that actually failed rather than the
+  # earliest declared one.
+  #
+  # The entries are the canonical success projection. They are derived inertly
+  # from sealed declarations, and are sealed into a result only once every
+  # execution step above has succeeded, so no entry can report an occurrence
+  # nothing reached.
+  defp complete_connectivity(prepared, execution, registry, session) do
+    catalog = execution.catalog
+
     with true <- ProviderRegistry.valid?(registry),
          true <- ProviderSession.alive?(session),
          deadline when not is_nil(deadline) <- ProviderSession.run_deadline(session),
          {:ok, entries} <- connectivity_entries(prepared, catalog),
+         :ok <- acquire_connectivity_targets(prepared, catalog, registry, session, entries),
+         :ok <- ConnectivityProbe.run(prepared, catalog, execution.services, deadline),
          {:ok, result} <- ConnectivityResult.new(prepared, catalog, entries),
          false <- Deadline.expired?(deadline) do
       {:ok, result}
@@ -367,6 +382,49 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       _invalid -> {:error, internal_diagnostic()}
     end
   end
+
+  # The targets are the `:acquisition` occurrences themselves.
+  # `ProviderAcquisition` closes over their sealed dependencies and acquires
+  # only that closure, so a provider pulled in as a prerequisite is acquired and
+  # cleaned up like any other while never becoming a connectivity entry of its
+  # own. Connectivity publishes nothing, so its artifact preflight has nothing
+  # to authorize, and the acquired closure stays on the session's LIFO stack for
+  # the ordinary close rather than unwinding through a path of its own.
+  defp acquire_connectivity_targets(prepared, catalog, registry, session, entries) do
+    case Enum.filter(entries, &(&1.mode == :acquisition)) do
+      [] ->
+        :ok
+
+      targets ->
+        with {:ok, plan} <- ProviderAcquisition.plan(prepared, catalog) do
+          prepared.request.package
+          |> ProviderAcquisition.acquire_targets(
+            registry,
+            session,
+            Enum.map(targets, &Map.take(&1, [:destination, :index])),
+            fn _effective_class -> :ok end,
+            plan
+          )
+          |> acquisition_result(session)
+        end
+    end
+  end
+
+  defp acquisition_result({:ok, _acquired}, _session), do: :ok
+  defp acquisition_result({:error, %CommandDiagnostic{}} = error, _session), do: error
+
+  # A closer the session could not adopt has no owner, so it is run with the
+  # session rather than dropped. Reaching here means ownership transfer broke
+  # rather than a provider answering, and the bare reason carries no occurrence
+  # to attribute it to, so it fails closed instead of borrowing a subject.
+  defp acquisition_result({:unregistered_provider_close, _reason, close}, session) do
+    case ProviderSession.close_with_unregistered(session, close) do
+      :ok -> {:error, internal_diagnostic()}
+      {:error, _reason} -> {:error, cleanup_diagnostic()}
+    end
+  end
+
+  defp acquisition_result({:error, _reason}, _session), do: {:error, internal_diagnostic()}
 
   # Evidence that arrives after the operation's own cutoff is not evidence the
   # operation may report. Registry setup can finish near the connectivity
@@ -390,14 +448,15 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end)
   end
 
-  defp connectivity_entry(declaration, %{connectivity_mode: :none}) do
+  defp connectivity_entry(declaration, %{connectivity_mode: mode})
+       when mode in [:none, :probe, :acquisition] do
     {:ok,
      %{
        name: declaration.name,
        destination: declaration.destination,
        index: declaration.index,
-       mode: :none,
-       outcome: :skipped
+       mode: mode,
+       outcome: if(mode == :none, do: :skipped, else: :reachable)
      }}
   end
 

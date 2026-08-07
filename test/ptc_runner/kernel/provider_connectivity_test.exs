@@ -65,7 +65,9 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     # so the diagnostic is the observation, and it is also the contract-visible
     # one. Phase 7 failing false is asserted in the local-preflight regressions.
     %{prepared: prepared, execution: execution} =
-      fixture(%{"reachable" => [destination: :workflow, connectivity_mode: :probe]})
+      fixture(%{
+        "reachable" => [destination: :workflow, connectivity_mode: :probe, probe: :unavailable]
+      })
 
     assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
     assert diagnostic.provider_activity
@@ -202,20 +204,185 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     assert Enum.all?(entries, &(&1.outcome == :skipped))
   end
 
-  test "an unimplemented connectivity mode fails closed without reaching a callback" do
-    # `:probe` and `:acquisition` arrive in the next commit. Until then they must
-    # refuse rather than report an occurrence nothing reached, and no declared
-    # callback may become reachable by accident.
-    for mode <- [:probe, :acquisition] do
-      %{prepared: prepared, execution: execution} =
-        fixture(%{"reachable" => [destination: :workflow, connectivity_mode: mode]})
+  test "a selection needing no connectivity still settles its active selection row" do
+    # `connectivity_mode` governs the connectivity row and nothing else. The
+    # closed contract admits a connect success only when every provider row
+    # passes, and a `:none` occurrence declaring active selection validation
+    # still renders a selection row that only a real validator run can move off
+    # `active_check_required`. Filtering validators by connectivity mode would
+    # therefore leave a row unsettled and build a second, weaker pipeline.
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "inert" => [destination: :workflow, selection_validation: :active, validator: :fast]
+      })
 
-      assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error}} =
-               connect(prepared, execution)
+    assert {:ok, result} = connect(prepared, execution)
+    assert [%{mode: :none, outcome: :skipped}] = ConnectivityResult.entries(result)
 
-      refute_received {:probe_invoked, _name}
-      refute_received {:builder_invoked, _name}
-    end
+    assert_received {:validated, "inert"}
+    refute_received {:builder_invoked, _name}
+    refute_received {:probe_invoked, _name}
+  end
+
+  test "a probe reaches its sealed callback and never the builder" do
+    # A probe answers reachability without building anything, so the registry
+    # path that a run takes must stay untouched.
+    %{prepared: prepared, execution: execution} =
+      fixture(%{"probed" => [destination: :workflow, connectivity_mode: :probe]})
+
+    assert {:ok, result} = connect(prepared, execution)
+
+    assert ConnectivityResult.entries(result) == [
+             %{
+               name: "probed",
+               destination: :workflow,
+               index: 0,
+               mode: :probe,
+               outcome: :reachable
+             }
+           ]
+
+    assert_received {:probe_invoked, "probed"}
+    refute_received {:builder_invoked, _name}
+  end
+
+  test "an acquisition mode builds through the registry and never probes" do
+    %{prepared: prepared, execution: execution} =
+      fixture(%{"built" => [destination: :workflow, connectivity_mode: :acquisition]})
+
+    assert {:ok, result} = connect(prepared, execution)
+
+    assert ConnectivityResult.entries(result) == [
+             %{
+               name: "built",
+               destination: :workflow,
+               index: 0,
+               mode: :acquisition,
+               outcome: :reachable
+             }
+           ]
+
+    assert_received {:builder_invoked, "built"}
+    assert_received {:acquired, "built"}
+    refute_received {:probe_invoked, _name}
+  end
+
+  test "acquisition runs before any probe, whatever the manifest order" do
+    # Reporting order is the manifest's and execution order is not. The barrier
+    # goes first because only it can order dependencies, and a probe must not
+    # spend a budget a closure still needs.
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "a.probe" => [destination: :workflow, connectivity_mode: :probe],
+        "z.acquire" => [destination: :workflow, connectivity_mode: :acquisition]
+      })
+
+    assert {:ok, result} = connect(prepared, execution)
+
+    # Declared probe-first...
+    assert Enum.map(ConnectivityResult.entries(result), & &1.name) == ["a.probe", "z.acquire"]
+
+    # ...and executed acquisition-first.
+    assert [
+             {:builder_invoked, "z.acquire"},
+             {:acquired, "z.acquire"},
+             {:probe_invoked, "a.probe"} | _closes
+           ] = drained()
+  end
+
+  test "a dependency is acquired as support work and never becomes a row" do
+    # `support` declares no connectivity of its own, so it can only ever be a
+    # skipped row; but `client` cannot be acquired without it, so it is acquired
+    # anyway, and in dependency order. Whether a provider is worked on and
+    # whether it is a successful connectivity row are different questions.
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "client" => [
+          destination: :workflow,
+          connectivity_mode: :acquisition,
+          requires: [:support_service]
+        ],
+        "support" => [destination: :workflow, provides: [:support_service]]
+      })
+
+    assert {:ok, result} = connect(prepared, execution)
+
+    assert ConnectivityResult.entries(result) == [
+             %{
+               name: "client",
+               destination: :workflow,
+               index: 0,
+               mode: :acquisition,
+               outcome: :reachable
+             },
+             %{
+               name: "support",
+               destination: :workflow,
+               index: 1,
+               mode: :none,
+               outcome: :skipped
+             }
+           ]
+
+    assert acquisitions(drained()) == ["support", "client"]
+  end
+
+  test "an unrelated selection is never prepared for someone else's acquisition" do
+    # Preparation is provider work, not a lookup, so a declaration outside the
+    # sealed closure must reach no callback at all.
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "built" => [destination: :workflow, connectivity_mode: :acquisition],
+        "unrelated" => [destination: :workflow]
+      })
+
+    assert {:ok, _result} = connect(prepared, execution)
+
+    assert_received {:builder_invoked, "built"}
+    refute_received {:builder_invoked, "unrelated"}
+  end
+
+  test "a probe failure names the occurrence that actually failed" do
+    # The contract promises no manifest-first failure precedence: the healthy
+    # occurrence is declared first and the diagnostic still names the sick one.
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "healthy" => [destination: :workflow, connectivity_mode: :probe],
+        "sick" => [destination: :workflow, connectivity_mode: :probe, probe: :unavailable]
+      })
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+    assert diagnostic.phase == :active_preflight
+    assert diagnostic.code == :connectivity_unavailable
+    assert diagnostic.provider_activity
+    assert diagnostic.subject.name == "sick"
+    assert diagnostic.subject.operation == :connectivity
+    assert diagnostic.subject.occurrence == %{destination: :workflow, index: 1}
+
+    assert CommandContract.diagnostic_allowed?(
+             {:doctor, :connect},
+             :active_preflight,
+             :connectivity_unavailable
+           )
+  end
+
+  test "a probe cannot outrun the connectivity budget" do
+    # The probe burns 250ms against a 100ms installed connectivity budget. The
+    # timeout belongs to the operation rather than to the occurrence, so it
+    # carries no subject.
+    {:ok, installed} = Limits.installed(%{doctor_connectivity_timeout_ms: 100})
+
+    %{prepared: prepared, execution: execution} =
+      fixture(
+        %{"slow" => [destination: :workflow, connectivity_mode: :probe, probe: :slow]},
+        installed_limits: installed
+      )
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+    assert diagnostic.phase == :active_preflight
+    assert diagnostic.code == :connectivity_timeout
+    assert diagnostic.subject == nil
+    assert diagnostic.provider_activity
   end
 
   test "connectivity refuses an execution that asked for authorization" do
@@ -376,8 +543,8 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
             authorization_mode: Keyword.get(options, :authorization_mode, :none),
             data_class: :normal,
             accepts_data: [:normal],
-            requires: [],
-            provides: [],
+            requires: Keyword.get(options, :requires, []),
+            provides: Keyword.get(options, :provides, []),
             destinations: destinations(Keyword.fetch!(options, :destination)),
             workflow_llm?: false,
             connectivity_mode: mode,
@@ -444,12 +611,31 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   end
 
   defp implementation(parent, name, options, mode) do
+    requires = Keyword.get(options, :requires, [])
+    provides = Keyword.get(options, :provides, [])
+
     {:ok, capability} =
       Capability.new(
-        name: "fixture",
+        name: name,
         input_schema: %{"type" => "object", "additionalProperties" => false},
         callback: fn _arguments -> {:ok, %{}} end
       )
+
+    build = fn ->
+      send(parent, {:acquired, name})
+
+      {:ok,
+       %{
+         capabilities: [capability],
+         close: fn -> send(parent, {:closed, name}) && :ok end,
+         exports: Map.new(provides, &{&1, name})
+       }}
+    end
+
+    acquire =
+      if requires == [],
+        do: fn _credentials -> build.() end,
+        else: fn _credentials, _services -> build.() end
 
     builder = fn _selection, _context ->
       send(parent, {:builder_invoked, name})
@@ -457,7 +643,9 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
       {:ok,
        %{
          credential_names: [],
-         preflight: fn -> {:ok, fn %{} -> {:ok, capability} end} end
+         requires: requires,
+         provides: provides,
+         preflight: fn -> {:ok, acquire} end
        }}
     end
 
@@ -474,22 +662,53 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     implementation =
       if Keyword.get(options, :selection_validation, :declarative) == :active do
         Map.put(implementation, :selection_validator, fn _selection, _context ->
-          burn_until(System.monotonic_time(:millisecond) + 250)
-          :ok
+          send(parent, {:validated, name})
+
+          case Keyword.get(options, :validator, :slow) do
+            :slow -> burn_until(System.monotonic_time(:millisecond) + 250)
+            :fast -> :ok
+          end
         end)
       else
         implementation
       end
 
     if mode == :probe do
-      Map.put(implementation, :connectivity_probe, fn _selection, _context, _services ->
-        send(parent, {:probe_invoked, name})
-        :ok
-      end)
+      Map.put(
+        implementation,
+        :connectivity_probe,
+        probe(parent, name, Keyword.get(options, :probe, :ok))
+      )
     else
       implementation
     end
   end
+
+  defp probe(parent, name, behaviour) do
+    fn _selection, _context, _services ->
+      send(parent, {:probe_invoked, name})
+
+      case behaviour do
+        :ok -> :ok
+        :unavailable -> {:error, :llm_connectivity_unavailable}
+        :slow -> burn_until(System.monotonic_time(:millisecond) + 250)
+      end
+    end
+  end
+
+  # Everything the fixture sent, in the order it was sent. Ordering is the
+  # subject of several tests here and `assert_received` cannot show it: it
+  # matches anywhere in the mailbox.
+  defp drained(accumulated \\ []) do
+    receive do
+      message -> drained([message | accumulated])
+    after
+      0 -> Enum.reverse(accumulated)
+    end
+  end
+
+  defp acquisitions(messages),
+    do: for({:acquired, name} <- messages, do: name)
 
   defp prepared(catalog, specifications, limit_overrides, installed) do
     manifest = %{
