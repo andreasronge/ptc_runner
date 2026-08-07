@@ -224,7 +224,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     result =
       case ResourceRegistrar.activate(registrar) do
         :ok -> run_validator(registrar, session, prepared, catalog, declaration)
-        {:error, _reason} -> {:error, internal_diagnostic(true)}
+        {:error, _reason} -> {:error, selection_setup_diagnostic(session, declaration)}
       end
 
     case ResourceRegistrar.abort(registrar) do

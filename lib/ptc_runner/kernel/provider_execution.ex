@@ -416,17 +416,23 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   defp acquisition_result({:error, %CommandDiagnostic{}} = error, _session), do: error
 
   # A closer the session could not adopt has no owner, so it is run with the
-  # session rather than dropped. Reaching here means ownership transfer broke
-  # rather than a provider answering, and the bare reason carries no occurrence
-  # to attribute it to, so it fails closed instead of borrowing a subject.
-  defp acquisition_result({:unregistered_provider_close, _reason, close}, session) do
+  # session rather than dropped. The reason travelling with it is sometimes a
+  # catalogued diagnostic — an expired acquisition preserves the one that
+  # described the failure — and discarding that in favour of an internal error
+  # would throw away the only accurate account of what went wrong. A bare
+  # reason carries no occurrence to attribute it to, so that case still fails
+  # closed. A cleanup failure outranks either, because it is the newer fact.
+  defp acquisition_result({:unregistered_provider_close, reason, close}, session) do
     case ProviderSession.close_with_unregistered(session, close) do
-      :ok -> {:error, internal_diagnostic()}
+      :ok -> {:error, unregistered_diagnostic(reason)}
       {:error, _reason} -> {:error, cleanup_diagnostic()}
     end
   end
 
   defp acquisition_result({:error, _reason}, _session), do: {:error, internal_diagnostic()}
+
+  defp unregistered_diagnostic(%CommandDiagnostic{} = diagnostic), do: diagnostic
+  defp unregistered_diagnostic(_reason), do: internal_diagnostic()
 
   # Evidence that arrives after the operation's own cutoff is not evidence the
   # operation may report. Registry setup can finish near the connectivity

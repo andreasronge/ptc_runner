@@ -325,7 +325,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
         # is the run budget running out rather than a session defect, so it
         # keeps the operation-class diagnostic instead of a bare reason.
         {:error, _reason} ->
-          {:halt, {:error, prepare_setup_reason(session)}}
+          {:halt, {:error, setup_reason(session, :provider_session_unavailable)}}
       end
     end)
     |> reverse_success()
@@ -481,7 +481,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   end
 
   defp acquire_provider(provider, credentials, services, session, max_heap_words) do
-    with :ok <- ResourceRegistrar.activate(provider.registrar) do
+    with :ok <- activate_for_acquisition(provider, session) do
       case ProviderCallbackBoundary.invoke(session, max_heap_words, provider, fn ->
              ProviderRegistry.acquire_unreleased(provider.preflighted, credentials, services)
            end) do
@@ -494,6 +494,15 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
         {:error, _reason} = error ->
           error
       end
+    end
+  end
+
+  # Activation is bounded by the operation deadline now, so its failure can mean
+  # the budget ran out rather than the scope being unusable.
+  defp activate_for_acquisition(provider, session) do
+    case ResourceRegistrar.activate(provider.registrar) do
+      :ok -> :ok
+      {:error, reason} -> {:error, setup_reason(session, reason)}
     end
   end
 
@@ -696,17 +705,26 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     )
   end
 
-  defp prepare_setup_reason(session) do
+  # An expired operation deadline during scope setup is that operation's own
+  # timeout, and the operations do not share a code: the connect contract
+  # admits no execution-phase diagnostic at all, so reporting a run timeout
+  # there would fail outcome construction rather than describe the failure.
+  defp setup_reason(session, fallback) do
     case ProviderSession.execution_deadline(session) do
       {:ok, deadline} when not is_nil(deadline) ->
         if Deadline.expired?(deadline),
-          do: run_timeout_diagnostic(),
-          else: :provider_session_unavailable
+          do: setup_timeout_diagnostic(ProviderSession.begun_operation(session)),
+          else: fallback
 
       _other ->
-        :provider_session_unavailable
+        fallback
     end
   end
+
+  defp setup_timeout_diagnostic(:connect),
+    do: CommandDiagnostic.new!(:active_preflight, :connectivity_timeout, provider_activity: true)
+
+  defp setup_timeout_diagnostic(_operation), do: run_timeout_diagnostic()
 
   defp run_timeout_diagnostic,
     do: CommandDiagnostic.new!(:execution, :run_timeout, provider_activity: true)

@@ -283,6 +283,14 @@ defmodule PtcRunner.Kernel.ProviderSession do
   defp sealed_duration(session, _operation), do: session.run_duration_ms
 
   @doc false
+  @spec begun_operation(term()) :: :run | :check | :connect | nil
+  def begun_operation(%__MODULE__{} = session) do
+    if valid?(session), do: session.begun_operation
+  end
+
+  def begun_operation(_session), do: nil
+
+  @doc false
   @spec run_deadline(term()) :: Deadline.t() | nil
   def run_deadline(%__MODULE__{} = session) do
     if valid?(session), do: session.run_deadline
