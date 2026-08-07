@@ -6,8 +6,8 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   `InstallationCatalog` pair — already consumed by the execution-session owner
   that opens the sinks — and monotonically marks provider activity. It then opens the command's `ProviderSession` and
   admits selected optional provider applications according to the sealed
-  runtime services before invoking active selection validators in declaration
-  order. `open_consumed_setup/5` and `begin_owned_operation/4` expose that boundary in
+  runtime services before running the post-marker `:unverified` local checks and
+  then the active selection validators, both in declaration order. `open_consumed_setup/5` and `begin_owned_operation/5` expose that boundary in
   two steps for the Mix-only explicit OAuth interaction: setup admission occurs
   first, while the ordinary run clock and active validators begin only after
   interaction. Both halves belong to the execution-session owner, which owns the
@@ -166,12 +166,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   # other's result.
   defp validate_open_session(session, prepared, catalog, services) do
     with :ok <-
-           LocalPreflight.run_unverified(
-             prepared,
-             catalog,
-             services,
-             ProviderSession.run_deadline(session)
-           ),
+           LocalPreflight.run_unverified(prepared, catalog, services, session),
          :ok <- validate_active_selections(session, prepared, catalog) do
       {:ok, session}
     else

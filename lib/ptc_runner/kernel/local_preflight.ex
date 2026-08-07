@@ -121,6 +121,8 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderRuntimeServices
+  alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.ResourceRegistrar
 
   @environment_reasons [
     :invalid_compatibility_environment,
@@ -156,7 +158,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
          true <- Deadline.valid?(deadline),
          occurrences = applicable(catalog, prepared, :audited_local),
          true <- trusted?(catalog, occurrences) do
-      check_each(occurrences, prepared, catalog, services, deadline, false)
+      check_each(occurrences, prepared, catalog, services, deadline, audited_step())
     else
       _invalid -> {:error, internal_diagnostic(false)}
     end
@@ -184,14 +186,16 @@ defmodule PtcRunner.Kernel.LocalPreflight do
           PreparedRun.t(),
           InstallationCatalog.t(),
           ProviderRuntimeServices.t(),
-          Deadline.t()
+          ProviderSession.t()
         ) :: :ok | {:error, CommandDiagnostic.t()}
-  def run_unverified(prepared, catalog, services, deadline) do
+  def run_unverified(prepared, catalog, services, session) do
+    deadline = ProviderSession.run_deadline(session)
+
     with true <- bound?(prepared, catalog, services, :active),
          true <- Deadline.valid?(deadline) do
       catalog
       |> applicable(prepared, :unverified)
-      |> check_each(prepared, catalog, services, deadline, true)
+      |> check_each(prepared, catalog, services, deadline, active_step(prepared, session))
     else
       _invalid -> {:error, internal_diagnostic(true)}
     end
@@ -200,6 +204,20 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   catch
     _kind, _reason -> {:error, internal_diagnostic(true)}
   end
+
+  # Phase 7 needs no scope — its callbacks may not start anything — and spends a
+  # fixed ceiling, because the code it runs is shipped and the step precedes the
+  # limits an application can narrow. A post-marker callback is unrestricted
+  # active work, so it gets the session that can own what it starts and the
+  # sealed `provider_heap_words` the rest of the operation is held to.
+  defp audited_step, do: %{activity: false, session: nil, max_heap_words: @max_heap_words}
+
+  defp active_step(prepared, session),
+    do: %{
+      activity: true,
+      session: session,
+      max_heap_words: prepared.request.package.limits.provider_heap_words
+    }
 
   # One trio, one catalog. This mirrors `ProviderExecution.bound_to_prepared?/2`
   # and its runtime-services binding, so a preparation cannot be reported or
@@ -242,31 +260,77 @@ defmodule PtcRunner.Kernel.LocalPreflight do
 
   defp trusted?(_catalog, _occurrences), do: false
 
-  defp check_each([], _prepared, _catalog, _services, _deadline, _activity), do: :ok
+  defp check_each([], _prepared, _catalog, _services, _deadline, _step), do: :ok
 
-  defp check_each(occurrences, prepared, catalog, services, deadline, activity) do
+  defp check_each(occurrences, prepared, catalog, services, deadline, step) do
     Enum.reduce_while(occurrences, :ok, fn occurrence, :ok ->
-      case check(occurrence, prepared, catalog, services, deadline, activity) do
+      case check(occurrence, prepared, catalog, services, deadline, step) do
         :ok -> {:cont, :ok}
         {:error, _diagnostic} = error -> {:halt, error}
       end
     end)
   end
 
-  defp check(occurrence, prepared, catalog, services, deadline, activity) do
-    context = %{
-      destination: occurrence.destination,
-      limits: prepared.request.package.limits
-    }
-
-    with {:ok, callback} <- callback(catalog, occurrence.name, activity),
-         {:ok, timeout_ms} <- remaining(deadline, occurrence, activity) do
-      case invoke(callback, occurrence.config, context, services, timeout_ms) do
-        :ok -> settled(deadline, occurrence, activity)
-        :timed_out -> {:error, local_diagnostic(:local_check_timeout, occurrence, activity)}
-        {:error, reason} -> {:error, diagnostic(reason, occurrence, activity)}
+  defp check(occurrence, prepared, catalog, services, deadline, step) do
+    with {:ok, callback} <- callback(catalog, occurrence.name, step.activity),
+         {:ok, timeout_ms} <- remaining(deadline, occurrence, step.activity),
+         {:ok, result} <-
+           scoped(step, prepared, occurrence, fn context ->
+             invoke(
+               callback,
+               occurrence.config,
+               context,
+               services,
+               timeout_ms,
+               step.max_heap_words
+             )
+           end) do
+      case result do
+        :ok -> settled(deadline, occurrence, step.activity)
+        :timed_out -> {:error, local_diagnostic(:local_check_timeout, occurrence, step.activity)}
+        {:error, reason} -> {:error, diagnostic(reason, occurrence, step.activity)}
       end
     end
+  end
+
+  # An active callback receives the session's scoped registrar and its signal
+  # owner, and the scope is aborted afterwards, so a process or port it starts
+  # cannot outlive the check: killing the bounded worker alone would leave an
+  # unlinked root that `ProviderSession.close/1` never learned about. This
+  # mirrors what active selection validation does with its own validators.
+  #
+  # Phase 7 opens no scope because it has no session to open one from and its
+  # callbacks may not start anything in the first place.
+  defp scoped(%{session: nil} = step, prepared, occurrence, run),
+    do: {:ok, run.(context(prepared, occurrence, step, nil))}
+
+  defp scoped(step, prepared, occurrence, run) do
+    case ProviderSession.open_registrar(step.session) do
+      {:ok, registrar} -> run_in_scope(registrar, step, prepared, occurrence, run)
+      {:error, _reason} -> {:error, internal_diagnostic(step.activity)}
+    end
+  end
+
+  defp run_in_scope(registrar, step, prepared, occurrence, run) do
+    result =
+      case ResourceRegistrar.activate(registrar) do
+        :ok -> {:ok, run.(context(prepared, occurrence, step, registrar))}
+        {:error, _reason} -> {:error, internal_diagnostic(step.activity)}
+      end
+
+    case ResourceRegistrar.abort(registrar) do
+      :ok -> result
+      {:error, _reason} -> {:error, cleanup_diagnostic()}
+    end
+  end
+
+  defp context(prepared, occurrence, _step, nil),
+    do: %{destination: occurrence.destination, limits: prepared.request.package.limits}
+
+  defp context(prepared, occurrence, step, registrar) do
+    prepared
+    |> context(occurrence, step, nil)
+    |> Map.merge(%{owner: ResourceRegistrar.owner(registrar), resource_registrar: registrar})
   end
 
   # The worker's bound is relative and starts after this process computed what
@@ -299,11 +363,11 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     end
   end
 
-  defp invoke(callback, selection, context, services, timeout_ms) do
+  defp invoke(callback, selection, context, services, timeout_ms, max_heap_words) do
     result =
       BoundedWorker.run(fn -> callback.(selection, context, services) end,
         timeout_ms: timeout_ms,
-        max_heap_words: @max_heap_words,
+        max_heap_words: max_heap_words,
         cancel_with_caller: true
       )
 
@@ -373,4 +437,9 @@ defmodule PtcRunner.Kernel.LocalPreflight do
 
   defp internal_diagnostic(activity),
     do: CommandDiagnostic.new!(:internal, :internal_error, provider_activity: activity)
+
+  # Only the post-marker step opens a scope, so an abort failure always reports
+  # activity: there is no pre-marker path that can reach this.
+  defp cleanup_diagnostic,
+    do: CommandDiagnostic.new!(:result_cleanup, :provider_cleanup_failed, provider_activity: true)
 end

@@ -1210,7 +1210,7 @@ fine; temporarily reachable and unsafe is not.
    - (complete) the operation clock. Connectivity entered through
      `begin_owned_run/3` and inherited `run_duration_ms`, which is the wrong
      budget and one the shared-boundary language concealed. That entry point is
-     replaced by `ProviderActiveSession.begin_owned_operation/4` over
+     replaced by `ProviderActiveSession.begin_owned_operation/5` over
      `ProviderSession.begin_operation/2`: the duration is supplied by the
      operation rather than read from the session, so `:connect` anchors
      `doctor_connectivity_timeout_ms`. The old names are deleted rather than
@@ -1343,7 +1343,7 @@ every active row the sealed declarations produce:
 
 - every `selection_validation: :active` validator, which run, `--check`, and
   connect already share through
-  `ProviderActiveSession.begin_owned_operation/4` — connect needs no selection
+  `ProviderActiveSession.begin_owned_operation/5` — connect needs no selection
   path of its own, and giving it one is the defect to avoid;
 - every `local_preflight: :audited_local` check in phase 7, and every
   `local_preflight: :unverified` check after the phase-8 marker;

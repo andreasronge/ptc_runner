@@ -11,6 +11,8 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderRuntimeServices
+  alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.TestSupport.HostBoundFixture
@@ -245,13 +247,13 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     prepared = prepared(catalog, ["custom"])
 
     assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error} = refusal} =
-             LocalPreflight.run_unverified(prepared, catalog, services(), deadline())
+             LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
 
     assert refusal.provider_activity
     refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
 
     assert :ok = ProviderActivity.mark(prepared.provider_activity)
-    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), deadline())
+    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
     assert_received {:audited_local, _step, "custom", :workflow, %{}, true}
   end
 
@@ -267,7 +269,7 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     prepared = prepared(catalog, ["audited"], ["custom"])
     assert :ok = ProviderActivity.mark(prepared.provider_activity)
 
-    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), deadline())
+    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
     assert_received {:audited_local, _step, "custom", :mission, %{}, true}
     refute_received {:audited_local, _step, "audited", _destination, _selection, _limits}
   end
@@ -305,6 +307,58 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     # activity — which is exactly why the cases above pin their codes.
     assert %CommandDiagnostic{phase: :internal, code: :internal_error} =
              refuse_unverified(:something_new)
+  end
+
+  test "an unverified callback gets a scope its resources are owned by" do
+    # Unrestricted active work needs somewhere to put a process root. Without a
+    # registrar the callback has nowhere to register one, killing the bounded
+    # worker would not reach it, and `ProviderSession.close/1` would never learn
+    # it existed. Phase 7 gets neither, because its callbacks may start nothing.
+    catalog =
+      catalog(%{
+        "audited" => [destination: :workflow],
+        "custom" => [destination: :mission, source: :custom, local_preflight: :unverified]
+      })
+
+    prepared = prepared(catalog, ["audited"], ["custom"])
+
+    assert :ok = LocalPreflight.run(prepared, catalog, services(), deadline())
+    assert_received {:scope, "audited", nil, nil}
+
+    assert :ok = ProviderActivity.mark(prepared.provider_activity)
+    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
+    assert_received {:scope, "custom", owner, registrar}
+
+    assert is_pid(owner)
+    assert ResourceRegistrar.valid?(registrar)
+  end
+
+  test "a root a callback registers does not outlive its check" do
+    # The scope is aborted after every occurrence, so a root registered inside
+    # it is gone by the time the step returns rather than waiting for session
+    # close — which is what makes an unlinked process safe to allow at all.
+    catalog = catalog(%{"custom" => [source: :custom, local_preflight: :unverified, root: true]})
+    prepared = prepared(catalog, ["custom"])
+    assert :ok = ProviderActivity.mark(prepared.provider_activity)
+
+    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
+    assert_received {:root, root}
+
+    ref = Process.monitor(root)
+    assert_receive {:DOWN, ^ref, :process, ^root, _reason}, 5_000
+  end
+
+  test "an unverified callback spends the sealed provider heap, not the audited cap" do
+    # Phase 7 holds shipped code to a fixed 200k words. An unverified callback is
+    # held to the `provider_heap_words` the operation itself is held to, so a
+    # custom check between the two is valid work rather than an internal error.
+    catalog = catalog(%{"custom" => [source: :custom, local_preflight: :unverified, heap: true]})
+    prepared = prepared(catalog, ["custom"])
+    assert prepared.request.package.limits.provider_heap_words > 1_000_000
+    assert :ok = ProviderActivity.mark(prepared.provider_activity)
+
+    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
+    assert_received {:allocated, words} when words > 200_000
   end
 
   test "a declaration reason keeps its own phase before the marker and not after" do
@@ -368,12 +422,54 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert :ok = ProviderActivity.mark(prepared.provider_activity)
 
     assert {:error, %CommandDiagnostic{} = diagnostic} =
-             LocalPreflight.run_unverified(prepared, catalog, services(), deadline())
+             LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
 
     diagnostic
   end
 
   defp deadline, do: Deadline.new(@deadline_ms)
+
+  # A root registers itself from inside the callback's scope, which is the
+  # protocol a real adapter follows, so aborting that scope is what must end it.
+  defp register_root(parent, context) do
+    registrar = Map.fetch!(context, :resource_registrar)
+    owner = Map.fetch!(context, :owner)
+    caller = self()
+
+    root =
+      spawn(fn ->
+        reference = Process.monitor(owner)
+        :ok = ResourceRegistrar.register_root(registrar)
+        send(caller, :registered)
+        receive do: ({:DOWN, ^reference, :process, _pid, _reason} -> :ok)
+      end)
+
+    # Registration has to be observed before the callback returns, or the scope
+    # could abort before the root joined it and the test would prove nothing.
+    receive do
+      :registered -> send(parent, {:root, root})
+    after
+      5_000 -> send(parent, {:root, :never_registered})
+    end
+  end
+
+  # Comfortably past the fixed audited-local ceiling and far below the sealed
+  # provider heap, so only the wrong ceiling can kill it.
+  defp allocate(parent) do
+    words = length(Enum.to_list(1..400_000)) * 2
+    send(parent, {:allocated, words})
+  end
+
+  # The post-marker step takes the session rather than a bare deadline, because
+  # an unverified callback is active work that needs a scope its resources can
+  # be owned by. Building a real one is the point: a fake would not abort.
+  defp session(prepared) do
+    limits = prepared.request.package.limits
+    {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
+    on_exit(fn -> ProviderSession.close(session) end)
+    {:ok, session} = ProviderSession.begin_operation(session, :run)
+    session
+  end
 
   # Each occurrence runs in its own bounded worker, so their messages have no
   # inter-sender ordering. A shared counter makes the executor's sequential
@@ -397,6 +493,14 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
         {:audited_local, step(sequence), name, context.destination, selection,
          Map.has_key?(context, :limits)}
       )
+
+      send(
+        parent,
+        {:scope, name, Map.get(context, :owner), Map.get(context, :resource_registrar)}
+      )
+
+      if Keyword.get(options, :root), do: register_root(parent, context)
+      if Keyword.get(options, :heap), do: allocate(parent)
 
       case failing do
         nil -> :ok
