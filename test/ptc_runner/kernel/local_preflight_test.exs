@@ -361,6 +361,46 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert_received {:allocated, words} when words > 200_000
   end
 
+  test "a blocked callback dies with the session that owns it" do
+    # The bounded worker is linked to its caller, and the executor can outlive
+    # the session. Without a cancel target a callback blocked in network or
+    # process work would keep running after the session that owns it is gone,
+    # until a run deadline that may be minutes away.
+    #
+    # The session is opened inside the runner because a session belongs to the
+    # process that created it: opening it here and using it there would be
+    # refused by the very binding check this module makes.
+    catalog =
+      catalog(%{"custom" => [source: :custom, local_preflight: :unverified, failing: :block]})
+
+    prepared = prepared(catalog, ["custom"])
+    assert :ok = ProviderActivity.mark(prepared.provider_activity)
+    parent = self()
+    limits = prepared.request.package.limits
+    services = services()
+
+    runner =
+      spawn(fn ->
+        {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
+        {:ok, session} = ProviderSession.begin_operation(session, :run)
+        send(parent, {:session, ProviderSession.worker_cancel_target(session)})
+
+        send(
+          parent,
+          {:result, LocalPreflight.run_unverified(prepared, catalog, services, session)}
+        )
+      end)
+
+    on_exit(fn -> Process.exit(runner, :kill) end)
+
+    assert_receive {:session, session_pid}, 5_000
+    assert_receive {:worker, worker}, 5_000
+    reference = Process.monitor(worker)
+
+    Process.exit(session_pid, :kill)
+    assert_receive {:DOWN, ^reference, :process, ^worker, _reason}, 5_000
+  end
+
   test "a session from another preparation cannot supply the scope or the clock" do
     # The session is a fourth thing that must belong to this operation. One
     # opened for a different preparation would otherwise hand over the deadline
@@ -564,11 +604,21 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
       if Keyword.get(options, :heap), do: allocate(parent)
 
       case failing do
-        nil -> :ok
-        :raise -> raise "the audited-local check refused"
-        :block -> receive do: (:never -> :ok)
-        {:ok, _value} = unrecognised -> unrecognised
-        reason -> {:error, reason}
+        nil ->
+          :ok
+
+        :block ->
+          send(parent, {:worker, self()})
+          receive do: (:never -> :ok)
+
+        :raise ->
+          raise "the audited-local check refused"
+
+        {:ok, _value} = unrecognised ->
+          unrecognised
+
+        reason ->
+          {:error, reason}
       end
     end
   end

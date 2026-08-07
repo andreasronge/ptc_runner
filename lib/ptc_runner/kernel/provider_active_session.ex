@@ -200,7 +200,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
       {:ok, registrar} ->
         validate_in_scope(
           registrar,
-          ProviderSession.run_deadline(session),
+          session,
           prepared,
           catalog,
           declaration
@@ -211,10 +211,10 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  defp validate_in_scope(registrar, run_deadline, prepared, catalog, declaration) do
+  defp validate_in_scope(registrar, session, prepared, catalog, declaration) do
     result =
       case ResourceRegistrar.activate(registrar) do
-        :ok -> run_validator(registrar, run_deadline, prepared, catalog, declaration)
+        :ok -> run_validator(registrar, session, prepared, catalog, declaration)
         {:error, _reason} -> {:error, internal_diagnostic(true)}
       end
 
@@ -224,10 +224,10 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  defp run_validator(registrar, run_deadline, prepared, catalog, declaration) do
+  defp run_validator(registrar, session, prepared, catalog, declaration) do
     deadline =
       Deadline.earliest(
-        run_deadline,
+        ProviderSession.run_deadline(session),
         Deadline.new(prepared.request.package.limits.selection_validation_timeout_ms)
       )
 
@@ -252,7 +252,11 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
           BoundedWorker.run(fn -> callback.(declaration.config, context) end,
             timeout_ms: timeout_ms,
             max_heap_words: prepared.request.package.limits.provider_heap_words,
-            cancel_with_caller: true
+            cancel_with_caller: true,
+            # A validator may reach a provider, and the executor can outlive the
+            # session, so the caller link alone would leave blocked work running
+            # after the session that owns it is gone.
+            cancel_with: ProviderSession.worker_cancel_target(session)
           )
       end
 

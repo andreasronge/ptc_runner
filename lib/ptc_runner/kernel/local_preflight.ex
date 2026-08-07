@@ -300,14 +300,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
                  :timed_out
 
                timeout_ms ->
-                 invoke(
-                   callback,
-                   occurrence.config,
-                   context,
-                   services,
-                   timeout_ms,
-                   step.max_heap_words
-                 )
+                 invoke(callback, occurrence.config, context, services, timeout_ms, step)
              end
            end) do
       case result do
@@ -377,12 +370,18 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     end
   end
 
-  defp invoke(callback, selection, context, services, timeout_ms, max_heap_words) do
+  defp invoke(callback, selection, context, services, timeout_ms, step) do
     result =
       BoundedWorker.run(fn -> callback.(selection, context, services) end,
         timeout_ms: timeout_ms,
-        max_heap_words: max_heap_words,
-        cancel_with_caller: true
+        max_heap_words: step.max_heap_words,
+        cancel_with_caller: true,
+        # Linking to the caller alone is not enough for active work. The
+        # executor can outlive the session, so a callback blocked in network or
+        # process work would keep running until the deadline even though the
+        # session that owns it is gone. Phase 7 has no session and supplies no
+        # target, which is what `nil` means here.
+        cancel_with: ProviderSession.worker_cancel_target(step.session)
       )
 
     # The exhausted budget is reported as a bare atom rather than through the
