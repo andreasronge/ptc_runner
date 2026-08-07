@@ -12,7 +12,7 @@ git log --oneline origin/main..HEAD -- lib/ | head -1  # last commit carrying co
 
 A handover that names its own head is stale the moment it is committed, and this
 one was already wrong twice from trying.
-Gates: `mix precommit` green (5750 root, 72 viewer, 36 launcher); docs gate
+Gates: `mix precommit` green (5765 root, 72 viewer, 36 launcher); docs gate
 green; `mix dialyzer` and `MIX_ENV=test mix dialyzer` both at 0 errors
 PR: not opened
 CLI safety: `doctor --connect` is still unreachable from `CommandEngine`, which
@@ -23,8 +23,10 @@ file is disposable and only describes where the work stands.
 
 ## Start here
 
-1. Read the connect-settlement gaps in `stable-cli-contract.md`. That is the
-   contract; this file only says how far along it is.
+1. Read the MCP receive-cap requirement at the end of the slice-7 section in
+   `stable-cli-contract.md`, and "Connect build order" steps 4–6. That is the
+   contract; this file only says how far along it is. The connect-settlement
+   gaps above them are all closed.
 2. Read "Settled decisions" at the bottom of this file before designing
    anything. Two of the three were re-derived the hard way by someone who had
    not read them.
@@ -157,30 +159,45 @@ should mint. Two drafts were needed to honour "translations are added with their
 producers", so the table now has a test pinning every branch against the catalog
 and the contract.
 
+**Up-front OAuth refusal** (`8b7546ed`). The first half of slice #3.
+`ProviderExecution` refuses the first selected alias, in manifest order, that
+declares `authorization_mode: :oauth` and is not an explicit `--authorize-mcp`
+target. Run, `--check`, and connect share it. It sits before both execution
+branches, so the interactive one never opens a browser round trip for one alias
+before discovering another can never be served, and the ordinary one never
+spends a selection validator or an unverified check on a selection already
+refused — the same argument the validator/unverified ordering rests on. It is
+still past the phase-8 marker, which `active_preflight` pins.
+
+It does not collide with `AcquisitionReason`'s mid-acquisition variant of the
+same code: attribution here is per alias with no occurrence, because a grant, an
+authority, and a store are all per alias, and reaching acquisition at all means
+this refusal found nothing. One cold review, no P1; its P2 was that the
+manifest-order tie-break was unpinned, so the regression now separates manifest
+order from alphabetical order *and* from a minimum over the names.
+
+**Connect-mode `DoctorPlan`** (`f4a59c82`). The second half. `new/4` takes the
+mode with no default; `settle_connect/4` settles from `ConnectivityResult`.
+
+The acceptance check from the previous handover is discharged.
+`ConnectivityResult.bound_to?/3` and `entries/1` now have their production
+consumer, and `valid?/1` follows through `bound_to?/3`. `outcomes/0` had no
+consumer even after this and is deleted. `DoctorPlan.pending/1` is private, and
+the three test assertions that used it were redundant with `checks/1` refusing
+before settlement and succeeding after.
+
+Two cold rounds plus one resumed verification. The first found a *partial*
+cross-mode refusal — a deferred credentials row has no connectivity row to be
+caught by, so it settled into a list that failed only at the closed result
+contract — and an untested `:audited_local`-under-connect mapping, which needed
+the test fixture to learn that a host-bound catalog registers `:host_runtime`
+rather than an inline authority. The second found a false uniqueness claim in a
+test comment about which shipped sources admit an audited-local declaration
+without connectivity. Neither round's finding was reachable from any gate.
+
 ## Remaining, in order
 
-1. **#3 connect-mode `DoctorPlan` settlement.** `DoctorPlan.new/3` gains the
-   mode; connect leaves pending what default doctor settles as
-   `requires_connect` / `active_check_required`. Also closes the OAuth gap: a
-   selected OAuth occurrence currently walks into acquisition against an empty
-   store, and connect must refuse it before any provider work, with `run`
-   getting the same refusal. Note that `active_preflight/authorization_required`
-   *is* now constructed — `AcquisitionReason` mints it for an authorization
-   failure discovered mid-acquisition. #3 owns the different question of
-   refusing a selected OAuth occurrence up front; the two must not collide.
-
-   **An acceptance check #3 already has.** Five functions have real tests and
-   zero production callers: `ConnectivityResult.bound_to?/3`, `entries/1`,
-   `outcomes/1`, `valid?/1`, and `DoctorPlan.pending/1`. They are not dead —
-   they were built ahead of their consumer, and that consumer is #3. The plan
-   says `bound_to?/3` exists so `DoctorPlan` never has to trust entries alone.
-   So if #3 lands without calling `bound_to?/3` and consuming `entries/1`,
-   either #3 is wrong or those functions are dead and should go. `pending/1` is
-   the weaker case — `settle_pending/1` uses it internally and only tests reach
-   it directly, so it may want to be private once #3 has decided whether connect
-   mode needs it.
-
-2. **#4 MCP transport receive cap.** The plan says *prove* the bound first: the
+1. **#4 MCP transport receive cap.** The plan says *prove* the bound first: the
    current active-mode Mint loop applies cumulative limits only after a socket
    message has already reached the command process. Either an authoritative
    per-message maximum via socket-buffer configuration, or Mint passive receive
@@ -189,14 +206,23 @@ and the contract.
    the slices above transfers to it — it is a different subsystem and a natural
    place to start with a fresh context.
 
-3. **#5 enable `doctor --connect` in `CommandEngine`**, then integration review,
+2. **#5 enable `doctor --connect` in `CommandEngine`**, then integration review,
    gates, cumulative `origin/main` review, PR.
+
+   The shape #5 has to write is already pinned by
+   `test "a completed connect operation settles every row the contract demands"`
+   in `ProviderConnectivityTest`: derive the plan with `:connect` *before* the
+   operation, because `DoctorPlan.new/4` requires a preparation that is still
+   claimed; run `RunCoordinator.connect/3`; settle with `settle_connect/4`,
+   which works on the consumed preparation because it checks the seal; then
+   project with `checks/1`. Anything failing renders one catalogued diagnostic
+   and no rows at all.
 
 ## Distance to a PR
 
-Two slices (#3, #4) plus the CLI enable. #4 is the large one and needs a proof
-before an implementation; #3 is moderate. Do not shorten the order: #4 gates #5
-for a real safety reason, which is why the CLI has stayed off this long.
+One slice (#4) plus the CLI enable. #4 is the large one and needs a proof before
+an implementation. Do not shorten the order: #4 gates #5 for a real safety
+reason, which is why the CLI has stayed off this long.
 
 ## Review discipline that has been working
 
@@ -215,9 +241,16 @@ for a real safety reason, which is why the CLI has stayed off this long.
   slice rather than treating it as optional.
 - Codex found three [P1]s on the unverified-check slice that Fable did not, and
   Fable found substantive findings on the registrar slice, slice #8, the type
-  contract, and slice #7; they find different classes. Everything from
-  `238a112a` onward has had Fable only, because codex credits were exhausted.
-  Worth one codex pass over `500e5523..4a011766` before the PR.
+  contract, slice #7, and both halves of #3; they find different classes.
+  Everything from `238a112a` onward has had Fable only, because codex credits
+  were exhausted — `codex review` was attempted for #3 and refused with a usage
+  limit resetting 2026-08-08 05:32. Worth one codex pass over
+  `500e5523..<head>` before the PR.
+- A review's own claims need checking too. The round that verified #3's fix
+  batch retracted a sentence it had let through cold the first time, and the
+  fresh round after it found a factual claim about the shipped recipes that both
+  earlier passes had accepted. Verify a reviewer's premise before acting on it,
+  the same way you would the author's.
 - Neither review round on the registrar slice ran Dialyzer, which is how a
   16-error regression reached `origin`. A reviewer reads a diff; it will not
   notice a type contract that silently deleted three branches from the checker's
@@ -256,6 +289,21 @@ All are in `stable-cli-contract.md` with reasoning:
   `ConnectivityProbe` are per-occurrence tight. Closing it means giving the
   ordinary path sealed per-occurrence declarations, which is the
   `acquire/6`–`acquire_targets/7` unification rather than a third check.
+- `settle_connect/4` trusts that its rows came from `DoctorPlan.new/4` with the
+  same trio, because a plan carries no seal of its own — the same assumption
+  `settle_pending/1` already makes. It checks the result's binding, the alias
+  set, the connectivity cover, and every row's outcome vocabulary, so a plan
+  from another application, catalog, or mode is refused; what it cannot see is a
+  plan whose aliases and connectivity modes coincide while some other
+  declaration differs. Sealing the plan would close it. Recorded rather than
+  built, because the only caller is `CommandEngine`, which holds one catalog and
+  one preparation.
+- The up-front OAuth refusal makes `execute_ordinary`'s memory-runtime branch
+  unreachable in practice: with `authorizations == []`, any selected OAuth alias
+  is now refused first, so `oauth_authorities/2` always answers `%{}` on that
+  branch. Harmless as defense in depth, and left alone under one-mechanism-per-
+  change, but it is a candidate for the next simplification pass rather than
+  something to discover as a surprise.
 
 ## Settled decisions — do not relitigate
 
