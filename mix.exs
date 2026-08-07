@@ -147,6 +147,7 @@ defmodule PtcRunner.MixProject do
   defp docs do
     [
       main: "readme",
+      assets: %{"docs/guides/assets" => "assets"},
       groups_for_modules: [
         Kernel: [
           PtcRunner.Kernel,

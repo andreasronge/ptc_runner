@@ -17,6 +17,53 @@ storage/query semantics live in the
 [TraceLog contract](../trace-log-contract.md); the admitted Java surface is
 generated in [Java interop](../java-interop.md).
 
+## Architecture at a glance
+
+![PtcRunner execution architecture: seven layers from frontend entry down to
+artifact publication, separated by the path-free boundary and the
+ExecutionSessionOwner lifetime](assets/architecture.png)
+
+The diagram orients new maintainers; the sections below are authoritative. It
+carries two structural invariants worth stating on their own.
+
+**Filesystem paths stop at one line.** Frontends resolve every path — the
+application, host configuration, input, and destinations — into sealed values
+before execution begins. `PtcRunner.Kernel.RunCoordinator.prepare/2` accepts
+only a sealed `RunRequest` and an inert `InstallationCatalog`, so no layer
+below it can reopen a file, widen a destination, or leak a path into a
+diagnostic. Preparation is also pure: it compiles bundles, resolves the
+dependency graph, normalizes provider selections, narrows limits, and derives
+identity without resolving a credential, starting a process, or touching the
+network.
+
+**Every effectful resource has one owner.** `ExecutionSessionOwner` holds the
+canonical `EventSink`, the optional `InspectionSink`, and — only for
+provider-bearing runs — one provider session, which is the sole owner of
+active provider work. Acquired resources register their close operation on one
+LIFO stack through `PtcRunner.Kernel.ResourceRegistrar` as they are created.
+Normal close, timeout, and caller death all converge on the same bounded
+reverse-order cleanup under a single absolute deadline, so no path can orphan
+a provider process or finalize a sink twice. A REPL takes the same owner handle
+and runs repeated evaluations against it rather than opening a session per
+evaluation.
+
+Reading the layers top to bottom: frontends enter through a shared command
+surface (1) and seal their inputs (2); `RunCoordinator` splits pure preparation
+from effectful execution (3); the session owner bounds all provider lifetime
+(4); a run-bound registry exposes only selected provider aliases as
+capabilities plus an idempotent close (5); the Kernel core evaluates PTC-Lisp
+against separately assembled workflow and mission environments (6); and
+authorized artifacts are published last, after provider cleanup (7). Two
+contracts cut across every layer: one absolute-monotonic `Deadline` that nested
+work may narrow but never reset, and a closed diagnostic catalog whose
+envelopes carry no path, credential, or arbitrary term.
+
+Two elements are planned rather than implemented. The standalone `ptc`
+executable does not exist yet; `mix ptc.run` and `mix ptc.repl` are the shipped
+frontends, and `PtcRunner.Kernel.CommandEngine` currently serves the Mix
+adapter alone. Private-result recovery is likewise planned and marked as such
+in [its own section](#private-result-recovery-planned).
+
 ## Responsibility boundary
 
 The Kernel is a bounded runtime, not an agent framework.
