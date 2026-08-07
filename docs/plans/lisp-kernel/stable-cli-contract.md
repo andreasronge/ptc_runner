@@ -1093,9 +1093,26 @@ commits in one Checkpoint C PR:
   `local_check_timeout` losing wording that named only the audited step. No pair
   is added or removed.
 
-  Ordering against active selection validation is deliberately free — a local
-  check contacts nothing, so running it first is the cheaper order, not a
-  contract;
+  **Residual (registrar scope is not deadline-bounded):** every scope in the
+  runtime is opened with `ProviderSession.open_registrar/1`, whose call timeout
+  is a fixed five seconds, and activated, committed, and aborted through
+  `registrar_call/3`, which waits `:infinity`. Under a short
+  `doctor_connectivity_timeout_ms` a slow or stalled session can therefore
+  overrun the operation budget during setup, or hang, rather than returning the
+  timeout the operation promises. This is a property of the shared primitive
+  rather than of any one caller — `ProviderAcquisition`, active selection
+  validation, and the unverified check all use it identically — so closing it
+  means bounding open and activation by the operation deadline and abort by the
+  cleanup budget inside `ProviderSession`, which changes the run path. It is
+  therefore its own reviewed slice rather than a fix at one call site.
+
+  **Ordering (decided, first answer wrong):** active selection validation runs
+  first and the unverified check follows. The first attempt reversed them on the
+  grounds that a local check contacts nothing — true of an audited-local check
+  in phase 7, and precisely untrue of an unverified one, whose whole definition
+  is that nothing bounds what it may do. Running unrestricted work before the
+  selection is accepted spends cost and causes side effects for a selection the
+  validator then rejects, so the order is a contract rather than a preference;
 - keep `MCPHTTPAdapter` as the single shipped HTTP boundary while adding an
   authoritative cap at or before the transport receive boundary; and
 - (complete) add shipped live-model probes with retries and redirects disabled.

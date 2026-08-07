@@ -6,8 +6,8 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   `InstallationCatalog` pair — already consumed by the execution-session owner
   that opens the sinks — and monotonically marks provider activity. It then opens the command's `ProviderSession` and
   admits selected optional provider applications according to the sealed
-  runtime services before running the post-marker `:unverified` local checks and
-  then the active selection validators, both in declaration order. `open_consumed_setup/5` and `begin_owned_operation/5` expose that boundary in
+  runtime services before running the active selection validators and then the
+  post-marker `:unverified` local checks, both in declaration order. `open_consumed_setup/5` and `begin_owned_operation/5` expose that boundary in
   two steps for the Mix-only explicit OAuth interaction: setup admission occurs
   first, while the ordinary run clock and active validators begin only after
   interaction. Both halves belong to the execution-session owner, which owns the
@@ -159,15 +159,18 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   end
 
   # Both post-marker declaration checks spend the operation clock this call just
-  # anchored. The unverified local check goes first because it contacts nothing:
-  # a selection validator may reach a provider, so paying for it before a purely
-  # local check has ruled the occurrence out would spend the budget in the wrong
-  # order. That is a cost argument, not a contract — neither step depends on the
-  # other's result.
+  # anchored, and the order between them is a contract rather than a preference.
+  #
+  # Active selection validation goes first because it decides whether the
+  # selection is acceptable at all, while an unverified check is unrestricted
+  # active work that may start processes or ports and contact a provider.
+  # Running that first would spend the cost, and cause the side effects, of a
+  # selection the validator then rejects. The earlier ordering justified itself
+  # with "a local check contacts nothing" — true of an audited-local check in
+  # phase 7, and precisely untrue of this one.
   defp validate_open_session(session, prepared, catalog, services) do
-    with :ok <-
-           LocalPreflight.run_unverified(prepared, catalog, services, session),
-         :ok <- validate_active_selections(session, prepared, catalog) do
+    with :ok <- validate_active_selections(session, prepared, catalog),
+         :ok <- LocalPreflight.run_unverified(prepared, catalog, services, session) do
       {:ok, session}
     else
       {:error, %CommandDiagnostic{} = diagnostic} -> fail_with_session(session, diagnostic)

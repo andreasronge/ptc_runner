@@ -237,6 +237,29 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     end
   end
 
+  test "a rejected selection is never charged for an unverified check" do
+    # An unverified callback is unrestricted active work, so running it before
+    # the selection is accepted would spend that cost — and cause its side
+    # effects — for a selection the validator is about to reject.
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "custom" => [
+          destination: :workflow,
+          local_preflight: :unverified,
+          selection_validation: :active,
+          validator: :fast,
+          selection_rejecting: true
+        ]
+      })
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+    assert diagnostic.phase == :active_preflight
+    assert diagnostic.code == :selection_validation_failed
+
+    assert_received {:validated, "custom"}
+    refute_received {:local_checked, _name}
+  end
+
   test "an unverified failure reports its closed code with activity true" do
     # `local_preflight` spans the marker: the phase keeps its codes and the
     # activity flag carries which side of the marker the check ran on.
@@ -710,6 +733,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
       if Keyword.get(options, :selection_validation, :declarative) == :active do
         Map.put(implementation, :selection_validator, fn _selection, _context ->
           send(parent, {:validated, name})
+          if Keyword.get(options, :selection_rejecting), do: throw(:reject)
 
           case Keyword.get(options, :validator, :slow) do
             :slow -> burn_until(System.monotonic_time(:millisecond) + 250)
