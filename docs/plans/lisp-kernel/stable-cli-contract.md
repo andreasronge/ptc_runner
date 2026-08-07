@@ -1207,7 +1207,36 @@ fine; temporarily reachable and unsafe is not.
    reasoning, while the deterministic regressions prove the connectivity clock
    is the one that bounds work inside the operation;
 3. add connect-mode planning to `DoctorPlan`, with frontend dispatch still
-   disabled;
+   disabled. Review of the connectivity modes found three gaps the operation
+   cannot close on its own. None is a regression — `authorization_required` is
+   constructed nowhere in the tree, and a bare acquisition reason is what an
+   ordinary run already propagates — but each becomes a wrong public answer the
+   moment the command is reachable, so all three close before step 5:
+
+   - **credentials for a `:none` occurrence.** The credentials row exists
+     whenever `credential_names` is non-empty, independent of connectivity mode,
+     and connect must settle it `pass/available`. Acquisition resolves the union
+     for its closure and a shipped probe resolves its own, so the unsettled case
+     is exactly a `:none` occurrence that declares a credential: nothing asks
+     for it, and a connect success would claim a credential nobody resolved.
+     This is settlement work rather than connectivity work — it is a row the
+     connectivity operation never answers for;
+   - **a selected OAuth occurrence.** The contract returns
+     `active_preflight/authorization_required` after the marker and without
+     opening an interaction. Nothing constructs that code today, so an OAuth
+     selection walks into acquisition against an empty store and fails later
+     with whatever that path produces. Connect must refuse it before any
+     provider work, and `run` needs the same refusal; and
+   - **raw acquisition reasons.** A builder, preflight, or acquire callback
+     returning `{:error, reason}` propagates as a bare term through
+     `ProviderAcquisition`, and the connectivity boundary cannot classify it: a
+     `provider_acquisition` code requires a subject bearing an occurrence and
+     the bare reason carries none, so it fails closed as `internal_error` and
+     reports an unreachable provider as an implementation defect. The fix
+     belongs where the occurrence is still in scope — `prepare_provider/7` and
+     its preflight and acquire neighbours — and it changes the shared run path,
+     so it is its own reviewed commit rather than a translation invented at the
+     connectivity boundary;
 4. prove and implement the MCP receive-boundary response cap;
 5. only then enable `doctor --connect` in `CommandEngine`; and
 6. integration review, acceptance gates, then the cumulative PR review.
