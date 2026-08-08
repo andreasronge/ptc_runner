@@ -77,7 +77,7 @@ defmodule PtcRunner.TestSupport.LifecycleSoak do
       family that ledgers its run state and stops there is missing a process
       per cycle.
     * **A capped family has no byte-slope backstop.** Byte gating applies only
-      at #{@min_cycles_for_byte_gate} cycles a batch or more, so in a family
+      at `@min_cycles_for_byte_gate` cycles a batch or more, so in a family
       capped below that an unledgered resource is invisible to *every* gate at
       *every* iteration count — not merely to the exact ones.
 
