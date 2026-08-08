@@ -1,0 +1,118 @@
+defmodule PtcRunner.Kernel.PublicationHandleOwner do
+  @moduledoc false
+
+  use GenServer
+
+  alias PtcRunner.Kernel.PublicationHandle
+
+  @spec start(pid()) :: {:ok, pid()} | {:error, term()}
+  def start(controller) when is_pid(controller),
+    do: GenServer.start(__MODULE__, controller)
+
+  @spec reserve(pid(), binary(), PublicationHandle.kind(), non_neg_integer()) ::
+          {:ok, PublicationHandle.t()} | {:error, atom()}
+  def reserve(owner, path, kind, mode),
+    do: GenServer.call(owner, {:reserve, path, kind, mode}, :infinity)
+
+  @spec reserve_visible(pid(), binary(), PublicationHandle.kind(), non_neg_integer()) ::
+          {:ok, PublicationHandle.t()} | {:error, atom()}
+  def reserve_visible(owner, path, kind, mode),
+    do: GenServer.call(owner, {:reserve_visible, path, kind, mode}, :infinity)
+
+  @spec call(pid(), term()) :: term()
+  def call(owner, operation), do: GenServer.call(owner, {:operation, operation}, :infinity)
+
+  @impl GenServer
+  def init(controller) do
+    {:ok,
+     %{controller_ref: Process.monitor(controller), handle: nil, preserve_on_cleanup?: false}}
+  end
+
+  @impl GenServer
+  def handle_call({:reserve, path, kind, mode}, _from, %{handle: nil} = state) do
+    case PublicationHandle.reserve_direct(path, kind, mode, self()) do
+      {:ok, handle} -> {:reply, {:ok, handle}, %{state | handle: handle}}
+      {:error, _reason} = error -> {:stop, :normal, error, state}
+    end
+  end
+
+  def handle_call({:reserve, _path, _kind, _mode}, _from, state),
+    do: {:reply, {:error, :destination_unavailable}, state}
+
+  def handle_call({:reserve_visible, path, kind, mode}, _from, %{handle: nil} = state) do
+    case PublicationHandle.reserve_visible_direct(path, kind, mode, self()) do
+      {:ok, handle} -> {:reply, {:ok, handle}, %{state | handle: handle}}
+      {:error, _reason} = error -> {:stop, :normal, error, state}
+    end
+  end
+
+  def handle_call({:reserve_visible, _path, _kind, _mode}, _from, state),
+    do: {:reply, {:error, :destination_unavailable}, state}
+
+  def handle_call({:operation, operation}, _from, %{handle: handle} = state) do
+    case {operation, handle} do
+      {:sync_and_retain, %PublicationHandle{kind: :recovery}} ->
+        case PublicationHandle.owner_execute(handle, :sync_and_retain) do
+          :ok ->
+            {:reply, :ok, %{state | preserve_on_cleanup?: true}}
+
+          {:preserve, {:error, _reason} = error} ->
+            {:reply, error, %{state | preserve_on_cleanup?: true}}
+
+          result ->
+            {:reply, result, state}
+        end
+
+      {:sync_and_retain, _handle} ->
+        {:reply, {:error, :invalid_destination}, state}
+
+      {:release, _handle} ->
+        case PublicationHandle.owner_execute(handle, :release) do
+          :ok -> {:stop, :normal, :ok, %{state | handle: nil}}
+          {:error, _reason} = error -> {:stop, :normal, error, %{state | handle: nil}}
+        end
+
+      {:discard, _handle} when state.preserve_on_cleanup? ->
+        _ = PublicationHandle.owner_execute(handle, :close)
+        {:reply, :ok, %{state | handle: nil}}
+
+      {:discard, _handle} ->
+        result = PublicationHandle.owner_execute(handle, :remove)
+        _ = PublicationHandle.owner_execute(handle, :close)
+        {:reply, result, %{state | handle: nil}}
+
+      _operation ->
+        case PublicationHandle.owner_execute(handle, operation) do
+          :close -> {:stop, :normal, :ok, %{state | handle: nil}}
+          result -> {:reply, result, state}
+        end
+    end
+  rescue
+    _exception -> {:reply, {:error, :publication_failed}, state}
+  end
+
+  def handle_call({:operation, _operation}, _from, state),
+    do: {:reply, {:error, :publication_cleanup_failed}, state}
+
+  @impl GenServer
+  def handle_info({:DOWN, ref, :process, _controller, _reason}, %{controller_ref: ref} = state) do
+    _ = cleanup(state.handle, state.preserve_on_cleanup?)
+    {:stop, :normal, %{state | handle: nil}}
+  end
+
+  def handle_info(_message, state), do: {:noreply, state}
+
+  @impl GenServer
+  def terminate(_reason, %{handle: handle, preserve_on_cleanup?: preserve?}),
+    do: cleanup(handle, preserve?)
+
+  defp cleanup(nil, _preserve?), do: :ok
+
+  defp cleanup(handle, preserve?) do
+    unless preserve?, do: _ = PublicationHandle.owner_execute(handle, :remove)
+    _ = PublicationHandle.owner_execute(handle, :close)
+    :ok
+  rescue
+    _exception -> :ok
+  end
+end
