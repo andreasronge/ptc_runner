@@ -46,6 +46,7 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.MCPBase64Format
   alias PtcRunner.Kernel.StrictJSON
+  alias PtcRunner.Utf8
 
   @input_request_schema_path Path.expand(
                                "../../../priv/schemas/mcp-input-request-2026-07-28.schema.json",
@@ -658,20 +659,12 @@ defmodule PtcRunner.Kernel.MCPProtocol do
       {:ok, texts} ->
         case texts |> Enum.reverse() |> Enum.join("\n") do
           "" -> {:ok, nil}
-          feedback -> {:ok, feedback |> sanitize_feedback() |> truncate_utf8(1_024)}
+          feedback -> {:ok, feedback |> sanitize_feedback() |> Utf8.truncate(1_024)}
         end
 
       error ->
         error
     end
-  end
-
-  defp truncate_utf8(value, max_bytes) when byte_size(value) <= max_bytes, do: value
-
-  defp truncate_utf8(value, max_bytes) do
-    value
-    |> binary_part(0, max_bytes)
-    |> valid_utf8_prefix()
   end
 
   defp valid_content_block?(block, allowed) do
@@ -727,14 +720,6 @@ defmodule PtcRunner.Kernel.MCPProtocol do
 
   defp sanitize_feedback(feedback) do
     String.replace(feedback, ~r/[\x00-\x1F\x7F-\x{9F}]/u, "�")
-  end
-
-  defp valid_utf8_prefix(value) do
-    if String.valid?(value) do
-      value
-    else
-      valid_utf8_prefix(binary_part(value, 0, byte_size(value) - 1))
-    end
   end
 
   defp classify_result(%{"resultType" => "complete"} = result, method) do

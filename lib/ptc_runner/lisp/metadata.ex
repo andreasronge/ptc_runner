@@ -1,6 +1,8 @@
 defmodule PtcRunner.Lisp.Metadata do
   @moduledoc false
 
+  alias PtcRunner.Utf8
+
   @default_bytes 8 * 1024
   @public_keys ~w(reason parent_version parent_checksum source_session_id created_by
                   requires_preludes prelude_deps)
@@ -78,14 +80,5 @@ defmodule PtcRunner.Lisp.Metadata do
   defp normalize_key(key) when is_atom(key), do: Atom.to_string(key)
   defp normalize_key(key), do: inspect(key)
 
-  defp truncate(value, max_bytes) do
-    prefix = binary_part(value, 0, min(byte_size(value), max_bytes))
-    valid_prefix(prefix)
-  end
-
-  defp valid_prefix(value) do
-    if String.valid?(value),
-      do: value,
-      else: valid_prefix(binary_part(value, 0, byte_size(value) - 1))
-  end
+  defp truncate(value, max_bytes), do: Utf8.truncate_valid(value, max_bytes)
 end

@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.SourceCheck do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Lisp
+  alias PtcRunner.Utf8
 
   @diagnostic_bytes 4_096
 
@@ -119,26 +120,10 @@ defmodule PtcRunner.Kernel.SourceCheck do
     end
   end
 
-  defp truncate_utf8(message, max_bytes)
-       when is_binary(message) and byte_size(message) <= max_bytes,
-       do: message
-
-  defp truncate_utf8(message, max_bytes) when is_binary(message) do
-    message
-    |> binary_part(0, max_bytes)
-    |> valid_utf8_prefix()
-    |> :binary.copy()
-  end
+  defp truncate_utf8(message, max_bytes) when is_binary(message),
+    do: Utf8.truncate(message, max_bytes)
 
   defp truncate_utf8(_message, _max_bytes), do: "Compilation failed"
-
-  defp valid_utf8_prefix(message) do
-    if String.valid?(message) do
-      message
-    else
-      valid_utf8_prefix(binary_part(message, 0, byte_size(message) - 1))
-    end
-  end
 
   defp fingerprint(source) do
     "sha256:" <> Base.encode16(:crypto.hash(:sha256, source), case: :lower)
