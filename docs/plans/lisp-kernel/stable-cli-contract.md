@@ -1697,14 +1697,24 @@ fine; temporarily reachable and unsafe is not.
    the exact inversion the acquisition subset was designed to avoid, and it was
    weaker than the guarantee this document states.
 
-   The plan is now sealed the way `ConnectivityResult` was repaired under
-   review: over its own contents *and* the preparation and catalog attestations,
-   so it is bound to the pair phase 5 validated together rather than to an
-   application digest two catalogs can share. What the seal still cannot tell
-   apart is two plans `plan/2` itself minted for the same preparation and
-   catalog, which are identical by construction. Recorded first and fixed only
-   when a second independent pass named it again — the cheap check was the whole
-   fix, and deferring it to the unification was the wrong call.
+   The plan is now sealed over its own contents together with the preparation
+   and catalog attestations, and `validate_plan/2` verifies that seal before the
+   closure is computed. That closes the half the review described: an
+   `occurrences` list edited to add a dependency no longer validates, so no
+   callback runs for a provider the selection never reached.
+
+   It does **not** close the other half, and the first draft of this paragraph
+   claimed otherwise. Sealing the two attestations proves they were not
+   tampered with; it does not compare them against the preparation and catalog
+   the acquisition is actually running under, because `acquire_targets/7`
+   receives neither. A plan `plan/2` legitimately minted for a *different*
+   preparation and catalog sharing this application's digest therefore still
+   validates, and its closure can invoke callbacks before
+   `declarations_honored/3` rejects it. Completing it means passing the expected
+   identities into validation and comparing them there, plus a regression over
+   two same-digest catalogs with different dependency graphs. Left for the
+   `acquire/6`–`acquire_targets/7` unification, which has to touch this
+   signature anyway, and stated exactly rather than rounded up.
 
 Step 2 carries a constraint the phrase "a probe calls the catalog
 implementation directly" must not be read as weakening. Direct means selecting

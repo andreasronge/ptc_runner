@@ -258,11 +258,14 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   # makes the authority to invoke a callback depend on invoking callbacks, the
   # exact inversion this module's design rejects.
   #
-  # The seal covers the preparation and catalog attestations too, so a plan is
-  # bound to the pair phase 5 validated together and not merely to an
-  # application digest two catalogs can share. What it still cannot tell apart
-  # is two plans `plan/2` itself minted for the same preparation and catalog,
-  # which are identical by construction.
+  # The seal covers the preparation and catalog attestations too, which stops
+  # them being edited — but it does not compare them against the pair this
+  # acquisition is running under, because this function receives neither. A plan
+  # `plan/2` legitimately minted for another preparation and catalog sharing
+  # this application's digest therefore still validates, and only
+  # `declarations_honored/3` rejects it, after its closure has run callbacks.
+  # Closing that needs the expected identities passed in here, which is part of
+  # the `acquire/6`-`acquire_targets/7` unification.
   defp validate_plan(%{attestation: attestation} = plan, package)
        when is_binary(attestation) do
     with true <- Map.has_key?(plan, :package_digest),
