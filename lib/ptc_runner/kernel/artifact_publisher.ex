@@ -76,11 +76,8 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
 
   defp do_publish(%{terminal_batch: {:error, _reason}} = evidence, authority, report, hooks) do
     with {:ok, report} <- maybe_cleanup_recovery(evidence, authority, report),
-         {:ok, report} <- publish_unrecoverable_observations(evidence, authority, report, hooks),
-         {:ok, report} <- result_execution(evidence, report) do
-      {:ok, report}
-    else
-      {:error, report} -> {:error, report}
+         {:ok, report} <- publish_unrecoverable_observations(evidence, authority, report, hooks) do
+      result_execution(evidence, report)
     end
   end
 
@@ -88,8 +85,6 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
     with {:ok, report} <- maybe_cleanup_recovery(evidence, authority, report),
          {:ok, report} <- publish_observations(evidence, authority, report, hooks) do
       {:error, Map.put(report, :error, evidence.result_contract)}
-    else
-      {:error, report} -> {:error, report}
     end
   end
 
@@ -102,11 +97,8 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
 
   defp do_publish(evidence, authority, report, hooks) do
     with {:ok, report} <- maybe_cleanup_recovery(evidence, authority, report),
-         {:ok, report} <- publish_observations(evidence, authority, report, hooks),
-         {:ok, report} <- result_execution(evidence, report) do
-      {:ok, report}
-    else
-      {:error, report} -> {:error, report}
+         {:ok, report} <- publish_observations(evidence, authority, report, hooks) do
+      result_execution(evidence, report)
     end
   end
 
@@ -118,8 +110,6 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
              {:ok, report} <- publish_normal_result(authority, report, encoded, hooks),
              {:ok, report} <- result_execution(evidence, report) do
           {:ok, Map.put(report, :result, evidence.result)}
-        else
-          {:error, report} -> {:error, report}
         end
 
       recovery ->
@@ -129,8 +119,6 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
              {:ok, report} <- finalize_recovery(recovery, authority, report),
              {:ok, report} <- result_execution(evidence, report) do
           {:ok, Map.put(report, :result, evidence.result)}
-        else
-          {:error, report} -> {:error, report}
         end
     end
   end
@@ -155,8 +143,6 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
              {:ok, report} <- finalize_recovery(recovery, authority, report),
              {:ok, report} <- result_execution(evidence, report) do
           {:ok, Map.put(report, :result, evidence.result)}
-        else
-          {:error, report} -> {:error, report}
         end
     end
   end

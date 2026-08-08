@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "e30a317e81a7c5dd5bcfbf125faa56187e33518b19950cd7fdee06adeeaba379",
+  "source_closure_hash": "3a91eef8cbcfd8ce517a969a1194519ed4860e5bd88afb5a011fe3b1d8f4c5d1",
   "sources": [
     {
       "bytes": 870,
@@ -207,9 +207,9 @@
       "sha256": "fde1b236cb1a2fa5f0ffd4ca0cb3140a295ec44b7bb03d50c40c0610657f2523"
     },
     {
-      "bytes": 19764,
+      "bytes": 19346,
       "path": "lib/ptc_runner/kernel/artifact_publisher.ex",
-      "sha256": "0e0b63dd947695279dc07cf301b931f658659b559283ea842807ec44efa1cc65"
+      "sha256": "f22f4456f93cbf469abdaf357230ebdc401826fadc451318ed93c3f76eced556"
     },
     {
       "bytes": 1466,
@@ -637,9 +637,9 @@
       "sha256": "cd985ef98f663faa5d57ced1d5c23415966377a9f3cb2a6176acde50623f8718"
     },
     {
-      "bytes": 70186,
+      "bytes": 70074,
       "path": "lib/ptc_runner/kernel/mcp_source.ex",
-      "sha256": "eec36b4867463360616dff02952e514fa2d5a43a90104a6335c5ff240de3677d"
+      "sha256": "c6d68fbd8b521ac63cd71a68149a00c28ed107701e373368502ae9f48bbee5f0"
     },
     {
       "bytes": 30557,
@@ -942,9 +942,9 @@
       "sha256": "8dd1747495e98ca92a00c9a18ad938ff810da35ec610e55686188ff3e42d038f"
     },
     {
-      "bytes": 104270,
+      "bytes": 104158,
       "path": "lib/ptc_runner/lisp.ex",
-      "sha256": "d03a3307f4a333ae52dc2bb12dda8a7b8d19f1fccf41d65ee42c0ea275521a74"
+      "sha256": "79208203b1b8800cca85eaff29dd0228236632f33f2b4ab4a7d8e42293e7902a"
     },
     {
       "bytes": 85,
@@ -1057,9 +1057,9 @@
       "sha256": "cfcd00a7a7f4c60334e07475a19a38cb32bee18602fbf63bb84c6aa70b3dae6d"
     },
     {
-      "bytes": 58332,
+      "bytes": 57225,
       "path": "lib/ptc_runner/lisp/eval/apply.ex",
-      "sha256": "0c67b07936449406b4f0178e356077f329e85be7e74923512b45c0a6728dbccc"
+      "sha256": "346833625d785676772ccbe599d057225747553ca23f6280246d988e5aeb374c"
     },
     {
       "bytes": 161,
@@ -1107,9 +1107,9 @@
       "sha256": "8782867519a395dffe30ccdae51f5265f81e9912bedec7931f186f6c2a642bc4"
     },
     {
-      "bytes": 37973,
+      "bytes": 37911,
       "path": "lib/ptc_runner/lisp/eval/parallel_runner.ex",
-      "sha256": "0e457c3eb50b9d6b84da0361485dc20fc4890b18f8c0fa45a7c5fc60b8367e73"
+      "sha256": "8ef1a27d17dd8b2a0bcb52afd3aa43e97891898ec8027abccb34ecc71ceff540"
     },
     {
       "bytes": 1669,
@@ -1162,9 +1162,9 @@
       "sha256": "f87cc21847884234c5f6e24dbc0f14d16a779eb826175d4cb22b8deba781a3d7"
     },
     {
-      "bytes": 23053,
+      "bytes": 23021,
       "path": "lib/ptc_runner/lisp/java/dispatch.ex",
-      "sha256": "4fd86627c5614df1a2abc7d2c8f6aa031cd3c3c5a0ff760e15bc0f4dec2ea8b4"
+      "sha256": "0697d244140b4b838311540273b329692c5426228aa1424a0a5b05fe5449e6db"
     },
     {
       "bytes": 3899,
@@ -1262,9 +1262,9 @@
       "sha256": "46fd6567bcf427e97f251217a9af02e225c8958328ec8867f82968748ad42f2b"
     },
     {
-      "bytes": 12386,
+      "bytes": 12300,
       "path": "lib/ptc_runner/lisp/java/surface.ex",
-      "sha256": "60ee29c3d11572855100e5b39951046507767b907748bfacf6e07dbe3d495b94"
+      "sha256": "3d1247c289a55378ed80aead3c7c32763e5774c61dc6877c5d814fd398b08ff7"
     },
     {
       "bytes": 66479,
@@ -1332,9 +1332,9 @@
       "sha256": "f0f99fec41466a6e7580e3ba2a8b8c4dd9dc5dcad2e2c60912415a361408483e"
     },
     {
-      "bytes": 63755,
+      "bytes": 63742,
       "path": "lib/ptc_runner/lisp/prelude/compiler.ex",
-      "sha256": "35bf94324ba03c94da080fa91de1a805bbfe4c4a035930bd1612104fcafc5b41"
+      "sha256": "da8f756476ce9d619dd645f3f9c1b7235d225fca308752ee0ef2f7ba88099c89"
     },
     {
       "bytes": 3235,
@@ -1372,9 +1372,9 @@
       "sha256": "8ec0e86f26321839394ffa30dbbfdffc8112177c714eff6a4b3bc9d74ebf17aa"
     },
     {
-      "bytes": 10403,
+      "bytes": 10317,
       "path": "lib/ptc_runner/lisp/registry.ex",
-      "sha256": "9ee4f51a7de14ee1c6bdd35cd13ef99d2611045740537eae8bf9786da372822e"
+      "sha256": "09e04f311deae0ba7268d8109ba98622c8d5478059705f46056faffea9bb6822"
     },
     {
       "bytes": 2630,
@@ -1542,9 +1542,9 @@
       "sha256": "7b35d3c1e13031636c7d9a4379e05fa12560e2dfeb8c4e700f7342cb313fb2b4"
     },
     {
-      "bytes": 21483,
+      "bytes": 21384,
       "path": "lib/ptc_runner/lisp/spec_validator/parser.ex",
-      "sha256": "77116051761a064a9c6796463bbdd182f8deb48d59f5cfd07b93e52c819b2f29"
+      "sha256": "f4e299f153c9309c85fe8e6516766e02786d66bc4163c476ffda4a0874523ef4"
     },
     {
       "bytes": 5270,
@@ -1607,9 +1607,9 @@
       "sha256": "956cf2feb4d5f543e35892b47c9048fbca23181cbe2fe86e89c6e7c10603dd2b"
     },
     {
-      "bytes": 13955,
+      "bytes": 14270,
       "path": "mix.exs",
-      "sha256": "31bbc2a658da09367a83b5b55ec5f348837c0236bea61f3d6c6db0c65210c086"
+      "sha256": "89f301957ef1acdb8f5927eabee33f08cdee0eac8126c1703551fb9202c21dc3"
     },
     {
       "bytes": 117541,
