@@ -4,8 +4,8 @@
 active work, and the remaining work continues through follow-up PRs.
 **Revised:** 2026-08-08 after Checkpoint C merged, to record it as delivered and
 make destination preflight and publication the active work. Checkpoint C's
-recorded residuals are follow-up slices that do not block D; the largest is the
-`acquire/6`–`acquire_targets/7` unification described in slice 7.
+recorded residuals do not block D. The `acquire/6`–`acquire_targets/7`
+unification described in slice 7 is now an active parallel follow-up.
 
 This plan delivers a stable command-line contract and a path-free execution
 core without designing infrastructure for a future hosted service. Exact
@@ -1986,6 +1986,17 @@ certificate store alone and no loopback server it can reach speaks TLS. Making
 that trust injectable was rejected: a test-only trust knob on the single shipped
 HTTP boundary is a worse thing to ship than a narrow seam.
 
+### Checkpoint C parallel follow-up: acquisition unification
+
+Unifying `ProviderAcquisition.acquire/6` and `acquire_targets/7` is active in a
+separate branch and does not block Checkpoint D. This closes two known
+differences: ordinary acquisition currently lacks the sealed per-occurrence
+declarations used by `declarations_honored/2`, and its credential bound is the
+selection's union rather than the occurrence's. The work remains a separately
+reviewed simplification because `acquire/6` derives whole-application
+judgements from preparations while `acquire_targets/7` relies on the phase-5
+sealed plan. Record its result here when that follow-up merges.
+
 ### Slice 8: destination preflight and publication
 
 - complete exclusive destination handles and trace-directory naming;
@@ -2157,18 +2168,6 @@ conformance tests:
 The following are out of scope until a concrete adapter or deployment requires
 them:
 
-- unifying `ProviderAcquisition.acquire/6` and `acquire_targets/7`. This is the
-  one deferral with a *known* cost rather than a speculative one, and it buys
-  two fixes at once. The ordinary run path has no sealed per-occurrence
-  declarations to compare a preparation against, so it cannot run
-  `declarations_honored/2` and its credential bound is the selection's union
-  rather than the occurrence's — a preparation can report a credential another
-  selected provider declared and be handed it. Both close by giving `acquire/6`
-  the plan `acquire_targets/7` already takes. It is deferred rather than done
-  because the two entries differ in more than the plan: `acquire/6` derives the
-  whole-application judgements from its preparations, while `acquire_targets/7`
-  relies on phase 5 having sealed them, so merging them is a simplification
-  slice with its own review rather than a parameter change;
 - remote OAuth stores, cross-clock deadline translation, possibly-dispatched
   mutation algebra, generated replay catalogs, and store-local identity;
 - durable cleanup journals, reservation generations, restart reconstruction,
