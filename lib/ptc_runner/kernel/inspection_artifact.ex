@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   alias Jason.OrderedObject
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.PublicationHandle
 
   @max_bytes 16_000_000
   @max_record_bytes 2_000_000
@@ -58,13 +59,18 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   preflight does not promise the destination stays creatable.
   """
   def preflight_destination(path) when is_binary(path) do
-    with :ok <- valid_path(path),
+    with :ok <- validate_destination_path(path),
          {:ok, path} <- anchor_path(path, :invalid_inspection_path) do
       preflight_anchored(path)
     end
   end
 
   def preflight_destination(_path), do: {:error, :invalid_inspection_path}
+
+  @doc false
+  @spec validate_destination_path(term()) :: :ok | {:error, :invalid_inspection_path}
+  def validate_destination_path(path) when is_binary(path), do: valid_path(path)
+  def validate_destination_path(_path), do: {:error, :invalid_inspection_path}
 
   @spec persist(binary(), [map()], [map()]) :: :ok | {:error, atom()}
   @doc "Validates and atomically persists one previously absent artifact."
@@ -99,6 +105,40 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   end
 
   def persist(_path, _records, _events, _fault_hook),
+    do: {:error, :invalid_inspection_artifact}
+
+  @doc false
+  @spec persist_handle(
+          PublicationHandle.t(),
+          [map()],
+          [map()],
+          nil | (atom() -> term())
+        ) :: :ok | {:error, atom()}
+  def persist_handle(handle, records, canonical_events, fault_hook \\ nil)
+
+  def persist_handle(%PublicationHandle{} = handle, records, canonical_events, fault_hook)
+      when is_list(records) and is_list(canonical_events) and
+             (is_nil(fault_hook) or is_function(fault_hook, 1)) do
+    with true <- PublicationHandle.valid?(handle),
+         :ok <- validate_records(records),
+         :ok <- validate_correlations(records, canonical_events),
+         {:ok, encoded} <- encode(records),
+         true <- byte_size(encoded) <= @max_bytes,
+         :ok <- persistence_fault(fault_hook, :before_write),
+         :ok <- PublicationHandle.write(handle, encoded),
+         :ok <- persistence_fault(fault_hook, :after_write),
+         :ok <- PublicationHandle.sync(handle),
+         :ok <- persistence_fault(fault_hook, :after_sync),
+         :ok <- PublicationHandle.publish(handle) do
+      :ok
+    else
+      false -> {:error, :invalid_inspection_artifact}
+      {:error, _reason} = error -> error
+      _other -> {:error, :inspection_persistence_failed}
+    end
+  end
+
+  def persist_handle(_handle, _records, _events, _fault_hook),
     do: {:error, :invalid_inspection_artifact}
 
   defp anchor_path(path, error) do

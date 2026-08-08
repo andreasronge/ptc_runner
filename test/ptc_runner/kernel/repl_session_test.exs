@@ -300,8 +300,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         input: %{},
         limits: limits,
         event_sink: local_sink,
-        inspection_sink: foreign_inspection,
-        inspection_path: "foreign.inspection.jsonl"
+        inspection_sink: foreign_inspection
       )
 
     assert {:error, :session_owner_mismatch} = ReplSession.new(config: mixed_config)
@@ -374,7 +373,6 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
             limits: limits,
             event_sink: event_sink,
             inspection_sink: inspection_sink,
-            inspection_path: "mixed-dead-wedged.inspection.jsonl",
             provider_session:
               ProviderSessionFixture.start(
                 [
@@ -418,7 +416,6 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
             limits: limits,
             event_sink: event_sink,
             inspection_sink: inspection_sink,
-            inspection_path: "wedged-dead-mixed.inspection.jsonl",
             provider_session:
               ProviderSessionFixture.start(
                 [

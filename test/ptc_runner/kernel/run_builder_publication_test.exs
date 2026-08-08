@@ -42,6 +42,20 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
     event_sink_pid = built.config.event_sink.pid
     inspection_sink_pid = built.config.inspection_sink.pid
 
+    assert {:error, :invalid_execution_outcome} =
+             RunBuilder.execute_built_claimed(built, {self(), make_ref()})
+
+    assert Process.alive?(event_sink_pid)
+    assert Process.alive?(inspection_sink_pid)
+
+    tampered_config = %{built.config | input: %{"tampered" => true}}
+
+    assert {:error, :invalid_execution_outcome} =
+             RunBuilder.execute_built(%{built | config: tampered_config})
+
+    assert Process.alive?(event_sink_pid)
+    assert Process.alive?(inspection_sink_pid)
+
     Code.ensure_loaded!(EventSink)
     assert :erlang.trace_pattern({EventSink, :policy, 1}, true, [:local]) == 1
     test = self()
@@ -50,6 +64,7 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
 
     try do
       assert {:ok, outcome} = RunBuilder.execute_built(built)
+      assert {:error, :invalid_execution_outcome} = RunBuilder.execute_built(built)
       refute Process.alive?(event_sink_pid)
       refute Process.alive?(inspection_sink_pid)
       File.cd!(changed_cwd)
@@ -119,15 +134,19 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
     {:ok, registry} = ProviderRegistry.new()
     assert {:ok, built} = RunBuilder.load_and_build(manifest_path, registry)
 
-    assert {:ok, outcome} =
-             built
-             |> Map.put(:result_contract, nil)
-             |> RunBuilder.execute_built()
+    tampered_config = %{built.config | result_contract: nil}
+
+    assert {:error, :invalid_execution_outcome} =
+             RunBuilder.execute_built(%{built | config: tampered_config})
+
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
 
     assert {:error, {:result_contract_failed, details}} =
              RunBuilder.publish_execution(outcome, built.publication_authority)
 
     assert is_map(details)
+    assert :ok = RunBuilder.close(built)
+    assert :ok = ProviderRegistry.close(registry)
   end
 
   defp policy_trace_loop(test, count) do

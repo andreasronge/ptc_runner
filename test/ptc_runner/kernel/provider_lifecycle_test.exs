@@ -656,7 +656,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert {:error, {:trace_preflight_failed, :normal_trace_requires_normal_suffix}} =
              RunBuilder.run(manifest, registry, trace: Path.join(dir, "wrong.private.jsonl"))
 
-    assert_receive :trace_provider_prepared
+    refute_receive :trace_provider_prepared
     refute_receive :trace_provider_preflighted
     refute_receive :trace_provider_acquired
   end
@@ -774,7 +774,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
 
   @tag :tmp_dir
   test "invalid split execution builds close every live resource and preserve cleanup failure", %{
-    tmp_dir: directory
+    tmp_dir: _directory
   } do
     parent = self()
 
@@ -812,12 +812,13 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
           limits: limits,
           event_sink: sink,
           inspection_sink: inspection,
-          inspection_path: Path.join(directory, "invalid-#{index}.inspection.jsonl"),
           provider_session: session
         )
 
-      assert {:error, :provider_cleanup_failed} =
+      assert {:error, :invalid_execution_outcome} =
                config |> invalid_build.() |> RunBuilder.execute_built()
+
+      assert {:error, :provider_cleanup_failed} = RunBuilder.close(config)
 
       assert_receive {:invalid_built_resource_closed, ^index}
       refute Process.alive?(session.pid)

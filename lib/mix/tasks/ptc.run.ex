@@ -125,8 +125,12 @@ defmodule Mix.Tasks.Ptc.Run do
          {:ok, prepared} <- RunCoordinator.prepare(request, runtime.catalog) do
       try do
         with :ok <- validate_authorization_targets(prepared, runtime),
-             {:ok, run_opts} <- RunBuilder.preflight_prepared(prepared, run_options(opts)) do
-          execute_prepared(prepared, run_opts, opts, runtime)
+             {:ok, authority} <- RunBuilder.preflight_prepared(prepared, run_options(opts)) do
+          try do
+            execute_prepared(prepared, authority, opts, runtime)
+          after
+            PublicationAuthority.close(authority)
+          end
         end
       after
         PreparedRun.close(prepared)
@@ -136,16 +140,21 @@ defmodule Mix.Tasks.Ptc.Run do
 
   defp execute_prepared(
          prepared,
-         run_opts,
+         authority,
          opts,
          runtime
        ) do
-    with :ok <- load_environment_credentials(prepared, runtime) do
-      if Keyword.get(opts, :check, false) do
-        execute_check(prepared, run_opts, runtime)
-      else
-        execute_one_shot(prepared, run_opts, opts, runtime)
-      end
+    case load_environment_credentials(prepared, runtime) do
+      :ok ->
+        if Keyword.get(opts, :check, false) do
+          execute_check(prepared, authority, runtime)
+        else
+          execute_one_shot(prepared, authority, opts, runtime)
+        end
+
+      {:error, _reason} = error ->
+        _ = PublicationAuthority.abort(authority)
+        error
     end
   end
 
@@ -153,10 +162,14 @@ defmodule Mix.Tasks.Ptc.Run do
   # both open the same session, registry, credentials, OAuth, acquisition, and
   # cleanup ownership. `--check` rejects every artifact option, so its authority
   # carries no destination and nothing is published.
-  defp execute_check(prepared, run_opts, runtime) do
-    with {:ok, authority} <- PublicationAuthority.new(run_opts),
-         {:ok, snapshots} <- check_owned(prepared, authority, runtime) do
-      report_check(resolved_view(snapshots, runtime.host))
+  defp execute_check(prepared, authority, runtime) do
+    case check_owned(prepared, authority, runtime) do
+      {:ok, snapshots} ->
+        report_check(resolved_view(snapshots, runtime.host))
+
+      {:error, _reason} = error ->
+        _ = PublicationAuthority.abort(authority)
+        error
     end
   end
 
@@ -167,11 +180,16 @@ defmodule Mix.Tasks.Ptc.Run do
     RunCoordinator.check(prepared, authority, runtime.execution, &notify_authorization_url/1)
   end
 
-  defp execute_one_shot(prepared, run_opts, opts, runtime) do
-    with {:ok, authority} <- PublicationAuthority.new(run_opts),
-         {:ok, outcome} <- execute_owned(prepared, authority, runtime),
-         {:ok, value, class} <- RunBuilder.publish_execution(outcome, authority) do
-      report(value, class, opts)
+  defp execute_one_shot(prepared, authority, opts, runtime) do
+    case execute_owned(prepared, authority, runtime) do
+      {:ok, outcome} ->
+        with {:ok, value, class} <- RunBuilder.publish_execution(outcome, authority) do
+          report(value, class, opts)
+        end
+
+      {:error, _reason} = error ->
+        _ = PublicationAuthority.abort(authority)
+        error
     end
   end
 
@@ -472,6 +490,9 @@ defmodule Mix.Tasks.Ptc.Run do
       "internal_error"
     end
   end
+
+  def failure_message(:private_result_requires_private_destination),
+    do: "a private run requires --private-output; its value is not published"
 
   def failure_message(error) do
     case error |> failure_codes(0) |> Enum.uniq() |> Enum.take(@max_failure_codes) do

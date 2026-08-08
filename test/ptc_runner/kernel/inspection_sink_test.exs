@@ -609,7 +609,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
        } do
     File.write!(
       Path.join(dir, "workflow.clj"),
-      ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"kind" :source "source" (get input "program")})))|
+      ~S|(ns app) (defn run [input] (do (tool/kernel-eval {"kind" :source "source" (get input "program")}) "done"))|
     )
 
     program = ~S|(return (tool/native-read {"query" "inspect me"}))|
@@ -630,6 +630,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     manifest_path = Path.join(dir, "ptc.json")
     trace_path = Path.join(dir, "run.private.jsonl")
     inspection_path = Path.join(dir, "run.inspection.jsonl")
+    result_path = Path.join(dir, "run.result.json")
     File.write!(manifest_path, Jason.encode!(manifest))
 
     builder = fn %{}, _context ->
@@ -655,7 +656,9 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert {:ok, _result} =
              RunBuilder.run(manifest_path, registry,
                trace: trace_path,
-               inspect: inspection_path
+               inspect: inspection_path,
+               private_output: result_path,
+               result_projection: :json
              )
 
     assert {:ok, [prelude, source, input, output] = records} =

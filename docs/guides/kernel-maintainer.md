@@ -58,11 +58,11 @@ contracts cut across every layer: one absolute-monotonic `Deadline` that nested
 work may narrow but never reset, and a closed diagnostic catalog whose
 envelopes carry no path, credential, or arbitrary term.
 
-Two elements are planned rather than implemented. The standalone `ptc`
-executable does not exist yet; `mix ptc.run` and `mix ptc.repl` are the shipped
-frontends, and `PtcRunner.Kernel.CommandEngine` currently serves the Mix
-adapter alone. Private-result recovery is likewise planned and marked as such
-in [its own section](#private-result-recovery-planned).
+The standalone `ptc` executable does not exist yet; `mix ptc.run` and
+`mix ptc.repl` are the shipped frontends. The command engine's phase-6
+boundary and the Mix run path use the same retained publication authority.
+Private-result recovery is implemented by that authority and the compact
+`ArtifactPublisher` state machine described below.
 
 ## Responsibility boundary
 
@@ -565,27 +565,37 @@ inspection-sink, or publication category.
 Commands that stop before compound work require `secondary_errors: []` in both
 their sealed outcome constructor and generated envelope branch.
 
-### Private-result recovery (planned)
+### Private-result recovery
 
-This section records the slice-8 stable-command contract; the current Mix
-publisher has not implemented it yet. The planned `--private-output` path will
-use one small recovery state machine, not a general artifact transaction.
+The `--private-output` path uses one small recovery state machine, not a
+general artifact transaction. `PublicationAuthority.authorize/4` reserves
+destinations before provider activity; `PublicationHandle` retains the
+exclusive file descriptors and captured identities, and `ArtifactPublisher`
+owns the publication ordering.
 During destination preflight it exclusively
 creates an owner-only (`0600`) file named
 `.ptc-private-result-<run_ref>.json` in the already-authorized output directory.
-The invocation retains an open handle and captured file identity. Reservation
-failure is `destination/recovery_reservation_failed` before provider activity,
-and the file remains empty while execution is in progress.
+The authority's owner process retains the handle and captured file identity;
+each handle's raw descriptor remains in its own owner process, which is
+controlled by that authority owner rather than by the phase-6 caller. A
+single-use claim transfers the claimant monitor to the same owner, so caller
+death before the claim is harmless while claimant death cleans every
+provisional reservation. Reservation failure is
+`destination/recovery_reservation_failed` before provider activity, and the
+file remains empty while execution is in progress.
 
 After a valid result and successful provider cleanup, the publisher writes the
 already-bounded bytes through that handle, syncs the file, and syncs its
-containing directory. Only completion of both syncs establishes
-`recovery_written`. A write or file-sync failure removes an invocation-owned
-partial file and reports `failed`. A directory-sync failure leaves the complete
-recovery name for inspection but also reports `failed`, because durability was
-not proven. Failure before a valid result, including provider cleanup failure,
-never materializes result bytes and removes the empty reservation only after
-verifying its captured identity.
+containing directory. Only completion of both syncs, followed by an identity
+check of the recovery name, establishes `recovery_written`. A write or
+file-sync failure removes an invocation-owned partial file and reports
+`failed`. A directory-sync failure leaves the complete recovery name for
+inspection but also reports `failed`, because durability was not proven.
+Failures after the sync boundary retain the complete recovery value; if the
+recovery name cannot be proven reachable, the state is
+`finalization_uncertain`. Failure before a valid result, including provider
+cleanup failure, never materializes result bytes and removes the empty
+reservation only after verifying its captured identity.
 
 If identity verification or unlinking fails while removing an empty or partial
 reservation, the publisher leaves the name untouched, reports result state
@@ -601,7 +611,8 @@ either fails, the durable recovery file remains and result state is
 `recovery_written`. Otherwise finalization exclusively hard-links the recovery
 inode to the requested result name, syncs the directory, unlinks the recovery
 name, and syncs the directory again. Only then is result state `written`. A
-late name collision leaves the recovery name and reports `recovery_written`.
+late name collision leaves the recovery name and reports `recovery_written`;
+failure to prove that name remains reachable is `finalization_uncertain`.
 
 The failure states carry these exact proofs:
 

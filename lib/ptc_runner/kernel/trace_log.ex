@@ -32,6 +32,8 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.PublicationHandle
+  alias PtcRunner.Kernel.TracePublication
 
   @default_source_bytes 8_000_000
   @default_result_bytes 1_000_000
@@ -284,8 +286,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       when is_binary(path) and is_boolean(private?) do
     with :ok <- validate_append_path(path, private?),
          {:ok, path} <- PrivateDirectory.anchor(path),
-         :ok <- preflight_trace_destination(path, private?),
-         :ok <- preflight_append_lock() do
+         :ok <- preflight_trace_destination(path, private?) do
       :ok
     else
       {:error, reason} when is_atom(reason) -> {:error, reason}
@@ -302,6 +303,52 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   def append_lock_identity(_path), do: {:error, :source_unavailable}
+
+  @doc false
+  @spec append_reservation_path(binary()) :: {:ok, binary()} | {:error, :source_unavailable}
+  def append_reservation_path(path) when is_binary(path) do
+    with {:ok, path} <- PrivateDirectory.anchor(path),
+         {:ok, scope} <- append_path_lock_scope(path),
+         {:ok, lock_root} <- append_lock_root() do
+      {:ok, Path.join(lock_root, "reservation-" <> append_lock_name(scope))}
+    else
+      _ -> {:error, :source_unavailable}
+    end
+  end
+
+  def append_reservation_path(_path), do: {:error, :source_unavailable}
+
+  @doc false
+  @spec with_append_authority_lock(binary(), (-> result)) :: result when result: term()
+  def with_append_authority_lock(path, callback)
+      when is_binary(path) and is_function(callback, 0) do
+    case PrivateDirectory.anchor(path) do
+      {:ok, path} ->
+        :global.trans({{__MODULE__, {:append, path}}, self()}, fn ->
+          with_append_authority_lock_at(path, callback)
+        end)
+
+      _other ->
+        {:error, :source_unavailable}
+    end
+  end
+
+  def with_append_authority_lock(_path, _callback), do: {:error, :source_unavailable}
+
+  defp with_append_authority_lock_at(path, callback) do
+    with_append_lock(path, fn ->
+      case File.lstat(path, time: :posix) do
+        {:ok, %File.Stat{type: :regular}} ->
+          with_inode_append_lock(path, fn _locked_stat -> callback.() end)
+
+        {:error, :enoent} ->
+          callback.()
+
+        _other ->
+          {:error, :source_unavailable}
+      end
+    end)
+  end
 
   defp with_append_lock(path, callback, attempts \\ 3)
 
@@ -372,13 +419,6 @@ defmodule PtcRunner.Kernel.TraceLog do
 
       nil ->
         {:error, :source_unavailable}
-    end
-  end
-
-  defp preflight_append_lock do
-    with {:ok, _root} <- append_lock_root(),
-         {:ok, _shell, _lock_kind, _lock_executable} <- append_lock_executables() do
-      :ok
     end
   end
 
@@ -1718,6 +1758,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   defp same_stat_identity(identity, identity), do: :ok
   defp same_stat_identity(_expected, _current), do: {:error, :source_changed}
 
+  # ex_dna:disable-for-next-line — TraceLog keeps its source identity contract independent from inspection snapshots.
   defp stat_identity(%File.Stat{} = stat) do
     %{
       major_device: stat.major_device,
@@ -1731,6 +1772,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     }
   end
 
+  # ex_dna:disable-for-next-line — TraceLog keeps its capture-hook contract independent from inspection snapshots.
   defp run_capture_hook(nil), do: :ok
 
   defp run_capture_hook(capture_hook) do
@@ -2136,6 +2178,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
+  # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
   defp page_options(arguments, source_id, operation) do
     limit = Map.get(arguments, "limit", @default_limit)
     query_id = digest({operation, Map.drop(arguments, ["cursor", "limit"])})
@@ -2149,6 +2192,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
+  # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
   defp cursor_offset(nil, _source_id, _query_id), do: {:ok, 0}
 
   defp cursor_offset(cursor, source_id, query_id)
@@ -2182,6 +2226,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     fit_page(selected, items, offset, source_id, query_id, max_result_bytes)
   end
 
+  # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
   defp fit_page(selected, all_items, offset, source_id, query_id, max_result_bytes) do
     result = page_result(selected, all_items, offset, source_id, query_id)
 
@@ -2205,6 +2250,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
+  # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
   defp fit_page_prefix(_selected, _context, lower, upper, best)
        when lower > upper do
     if best, do: {:ok, best}, else: {:error, :result_limit_exceeded}
@@ -2239,6 +2285,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
+  # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
   defp page_result(selected, all_items, offset, source_id, query_id) do
     next_offset = offset + length(selected)
     more? = next_offset < length(all_items)
@@ -2343,4 +2390,38 @@ defmodule PtcRunner.Kernel.TraceLog do
   defp private_path?(path), do: String.ends_with?(path, ".private.jsonl")
   defp inspection_path?(path), do: String.ends_with?(path, ".inspection.jsonl")
   defp reserved_path?(path), do: private_path?(path) or inspection_path?(path)
+
+  @doc false
+  @spec publish_handle(
+          PtcRunner.Kernel.PublicationHandle.t(),
+          [map()],
+          boolean(),
+          nil | (atom() -> term())
+        ) :: :ok | {:error, atom()}
+  def publish_handle(handle, events, private?, fault_hook \\ nil) do
+    TracePublication.publish(
+      handle,
+      events,
+      private?,
+      fault_hook,
+      %{
+        normalize: &normalize/1,
+        validate: &validate_loaded(&1, @default_source_bytes),
+        encode: &encode_jsonl(&1, @default_source_bytes),
+        read: &PublicationHandle.read/2,
+        decode: &decode_jsonl/1,
+        within_limit: &within_append_limit/2,
+        lock: &with_append_authority_lock/2,
+        validate_path: &validate_append_path/2,
+        fault: &publication_fault/2
+      }
+    )
+  end
+
+  defp within_append_limit(existing_source, encoded)
+       when is_binary(existing_source) and is_binary(encoded) do
+    if byte_size(existing_source) + byte_size(encoded) <= @default_source_bytes,
+      do: :ok,
+      else: {:error, :source_limit_exceeded}
+  end
 end
