@@ -67,4 +67,4 @@ repo-analyst/private/
 .claude/settings.local.json
 
 # ExDNA clone-detection parse cache (large, machine-local)
-.ex_dna_cache
+.ex_dna_cache*

@@ -302,6 +302,44 @@ jobs:
       - name: Check unused dependencies
         run: mix deps.unlock --check-unused
 
+  ex-dna-candidate:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    name: ExDNA candidate compatibility
+    env:
+      MIX_ENV: test
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout PtcRunner
+        uses: actions/checkout@v6
+
+      - name: Checkout pinned ExDNA candidate
+        uses: actions/checkout@v6
+        with:
+          repository: andreasronge/ex_dna
+          ref: 8fe513647329bff792a3a3d2d20c3810f9e30269
+          path: .candidate/ex_dna
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+        with:
+          cache-plt: 'false'
+          install-babashka: 'false'
+
+      - name: Verify cold and warm duplication gates
+        env:
+          PTC_EX_DNA_PATH: ${{ github.workspace }}/.candidate/ex_dna
+        run: |
+          test "$(git -C "$PTC_EX_DNA_PATH" rev-parse HEAD)" = \
+            "8fe513647329bff792a3a3d2d20c3810f9e30269"
+          mix deps.compile ex_dna --force
+          scripts/duplication_gate.sh check
+          sha256sum .ex_dna_cache .ex_dna_cache.fingerprints > "$RUNNER_TEMP/ex-dna-cache.before"
+          scripts/duplication_gate.sh check
+          sha256sum --check "$RUNNER_TEMP/ex-dna-cache.before"
+
   java-interop-conformance:
     needs: changes
     if: needs.changes.outputs.java == 'true'
