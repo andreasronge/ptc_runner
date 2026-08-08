@@ -12,6 +12,7 @@ defmodule PtcRunner.Soak.AnalysisSessionSoakTest do
   |---|---|---|---|---|
   | `AnalysisSession` process | `AnalysisSessionBuilder.start/4` | itself | the holder of `{pid, token}` | `close/1`, `abort/2`, `stop/1`, or its own lifecycle timer |
   | `SessionTrace` process | the builder | itself | the session | session close, or `stop/1` |
+  | `TraceSnapshot` process | the builder | itself, ownership transferred to the session | the session | the session's `:DOWN`, or session close |
   | `RunState` and `EventSink` processes | the builder | themselves | the session | session close |
   | lifecycle timer | `init/1` | the session | nobody | fires on expiry and terminates the session |
 
@@ -177,7 +178,21 @@ defmodule PtcRunner.Soak.AnalysisSessionSoakTest do
   defp owned_processes(session) do
     state = :sys.get_state(session.pid)
 
-    [session.pid, state.session_trace.pid, state.run_state.pid, state.config.event_sink.pid]
+    # `snapshot` is the `TraceSnapshot` owner, whose ownership the builder
+    # transfers to the session. Omitting it made this family unable to detect
+    # its own leak: the cap of #{@max_cycles} cycles keeps the byte slope below
+    # the harness's gating threshold, so with the snapshot absent from the
+    # ledger *no* gate — exact or byte — could fire on a leaked snapshot
+    # process, and all four variants would pass a regression in
+    # `TraceSnapshot`'s DOWN-triggered cleanup. That is the false "flat" this
+    # harness exists to prevent.
+    [
+      session.pid,
+      state.session_trace.pid,
+      state.snapshot.pid,
+      state.run_state.pid,
+      state.config.event_sink.pid
+    ]
     |> Enum.filter(&is_pid/1)
     |> Enum.uniq()
   end

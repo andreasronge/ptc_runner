@@ -44,6 +44,7 @@ defmodule PtcRunner.Soak.ProviderSessionSoakTest do
   alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.TestSupport.LifecycleSoak
+  alias PtcRunner.TestSupport.MemorySoak
 
   @threshold_bytes_per_cycle 2_048
 
@@ -151,10 +152,28 @@ defmodule PtcRunner.Soak.ProviderSessionSoakTest do
       LifecycleSoak.soak!(
         [
           name: "provider session (deadline expiry)",
-          threshold_bytes_per_cycle: @threshold_bytes_per_cycle
+          threshold_bytes_per_cycle: @threshold_bytes_per_cycle,
+          # `burn_past/1` spins to the deadline, so each cycle costs its whole
+          # budget. Capped so the wider budget above cannot turn a 3000-cycle
+          # CI run into a 10-minute spin. The harness prints the count it ran.
+          cycles: min(MemorySoak.iteration_count(), 25)
         ],
         fn _cycle ->
-          {:ok, limits} = Limits.installed(%{run_duration_ms: 1})
+          # 1 ms is not a usable budget here, and using it made this the one
+          # reproducibly flaky test in the suite. `begin_operation/2` mints the
+          # deadline client-side, and the server re-checks `Deadline.live?/1`
+          # when it *dequeues* the call (`provider_session.ex:887`), so the
+          # whole round trip — plus the `open_registrar`/`activate`/`commit`
+          # chain, which must also beat it — has to fit inside the budget. One
+          # descheduling and the cycle dies with
+          # `{:error, :provider_session_unavailable}`, which is a
+          # test-construction failure, not a leak. At CI's 3000 iterations that
+          # is near-certain, and it would have kept the very workflow slice 1
+          # exists to restore permanently red.
+          #
+          # 50 ms survives scheduling while still expiring far inside the 5 s
+          # cleanup allowance, so the variant still tests what it claims.
+          {:ok, limits} = Limits.installed(%{run_duration_ms: 50})
           {:ok, session} = ProviderSession.start_active(limits, unique_operation())
           {:ok, session} = ProviderSession.begin_operation(session, :run)
 

@@ -51,5 +51,7 @@ path; the scripts re-add them so `:tprof` / `:msacc` load.
   meaningless; re-record on the target machine instead of reading the delta.
 - Repeated-churn memory growth is the soak suite's job, not `bench.check`'s. Run
   it with `mix soak` (`test/soak/`); the scheduled `Soak` workflow runs it weekly
-  at `PTC_SOAK_ITERATIONS=3000`. It currently covers `Lisp.run/2` and
-  `Prelude.Compiler.compile/1` — not the long-lived owner lifecycles.
+  at `PTC_SOAK_ITERATIONS=3000`. It covers `Lisp.run/2` and
+  `Prelude.Compiler.compile/1`, and — via `test/soak/lifecycle/` — the
+  long-lived owner families: credential lease, REPL, provider, analysis/trace,
+  and the `LocalFences` characterization.
