@@ -5,6 +5,7 @@ defmodule Mix.Tasks.Bench.Check do
 
       mix bench.check
       mix bench.check --write-baseline
+      mix bench.check --skip-heap
 
   This task gates `eval_reductions` collected from the sandbox child process.
   Child `memory_bytes` and wall-clock duration are reported as informational
@@ -12,10 +13,19 @@ defmodule Mix.Tasks.Bench.Check do
   `memory_bytes` sample cannot separate a leak from one-shot warmup. Repeated
   churn growth is the soak suite's job — `mix soak`, run weekly by the scheduled
   `Soak` workflow.
+
+  It then prints the `mix bench.heap` table against `bench/baselines/heap.json`,
+  **informationally**. Heap figures are whole-VM measurements with real noise,
+  and a byte gate on a per-commit path invites the reflexive re-baseline that
+  the reductions baseline has already seen once. `mix bench.heap` is the gating
+  entry point for anyone who wants the check to fail, and the soak suite is
+  where repeated-churn growth is hard-asserted.
   """
 
   use Mix.Task
 
+  alias Mix.Tasks.Bench.Heap
+  alias PtcRunner.Bench.Baseline
   alias PtcRunner.Lisp
 
   @default_baseline Path.join(["bench", "baselines", "lisp_eval.json"])
@@ -68,6 +78,10 @@ defmodule Mix.Tasks.Bench.Check do
 
     results = measure_all(samples, warmup)
 
+    # The heap table runs before the reductions gate can raise, so a reductions
+    # regression does not hide the heap numbers a reader would want next to it.
+    unless opts[:skip_heap], do: Heap.report()
+
     if opts[:write_baseline] do
       write_baseline!(baseline_path, threshold, samples, warmup, results)
     else
@@ -83,7 +97,8 @@ defmodule Mix.Tasks.Bench.Check do
           threshold: :float,
           samples: :integer,
           warmup: :integer,
-          write_baseline: :boolean
+          write_baseline: :boolean,
+          skip_heap: :boolean
         ],
         aliases: [b: :baseline]
       )
@@ -97,7 +112,8 @@ defmodule Mix.Tasks.Bench.Check do
       threshold: Keyword.get(opts, :threshold, @default_threshold),
       samples: Keyword.get(opts, :samples, @default_samples),
       warmup: Keyword.get(opts, :warmup, @default_warmup),
-      write_baseline: Keyword.get(opts, :write_baseline, false)
+      write_baseline: Keyword.get(opts, :write_baseline, false),
+      skip_heap: Keyword.get(opts, :skip_heap, false)
     ]
     |> validate_opts!()
   end
@@ -137,9 +153,9 @@ defmodule Mix.Tasks.Bench.Check do
         name: scenario.name,
         program: scenario.program,
         samples: samples,
-        eval_reductions: median(Enum.map(measurements, & &1.eval_reductions)),
+        eval_reductions: Baseline.median(Enum.map(measurements, & &1.eval_reductions)),
         memory_bytes: Enum.max(Enum.map(measurements, & &1.memory_bytes)),
-        duration_ms: median(Enum.map(measurements, & &1.duration_ms))
+        duration_ms: Baseline.median(Enum.map(measurements, & &1.duration_ms))
       }
     end)
   end
@@ -166,24 +182,23 @@ defmodule Mix.Tasks.Bench.Check do
   end
 
   defp write_baseline!(path, threshold, samples, warmup, results) do
-    File.mkdir_p!(Path.dirname(path))
-
-    baseline = %{
+    Baseline.write!(path, %{
       "version" => 1,
       "threshold" => threshold,
       "samples" => samples,
       "warmup" => warmup,
+      # This baseline keeps its original `elixir`/`otp` keys rather than moving
+      # to the richer `provenance` block `bench.heap` writes. Reformatting it
+      # would mean rewriting the committed reduction numbers, and those are only
+      # ever bumped with a written cause.
       "elixir" => System.version(),
       "otp" => System.otp_release(),
       "scenarios" => Enum.map(results, &encode_result/1)
-    }
-
-    File.write!(path, Jason.encode!(baseline, pretty: true) <> "\n")
-    Mix.shell().info("Wrote #{path}")
+    })
   end
 
   defp check_baseline!(path, threshold, results) do
-    baseline = read_baseline!(path)
+    baseline = Baseline.read!(path)
     baseline_by_name = Map.new(baseline["scenarios"], &{&1["name"], &1})
 
     failures =
@@ -200,19 +215,6 @@ defmodule Mix.Tasks.Bench.Check do
     end
 
     Mix.shell().info("Performance check passed.")
-  end
-
-  defp read_baseline!(path) do
-    case File.read(path) do
-      {:ok, json} ->
-        Jason.decode!(json)
-
-      {:error, :enoent} ->
-        Mix.raise("missing baseline #{path}; run mix bench.check --write-baseline")
-
-      {:error, reason} ->
-        Mix.raise("could not read baseline #{path}: #{inspect(reason)}")
-    end
   end
 
   defp check_result(result, expected, threshold) do
@@ -261,10 +263,5 @@ defmodule Mix.Tasks.Bench.Check do
       "memory_bytes" => result.memory_bytes,
       "duration_ms" => result.duration_ms
     }
-  end
-
-  defp median(values) do
-    sorted = Enum.sort(values)
-    Enum.at(sorted, div(length(sorted), 2))
   end
 end
