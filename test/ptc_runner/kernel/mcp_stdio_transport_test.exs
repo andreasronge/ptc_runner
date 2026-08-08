@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   use ExUnit.Case, async: false
 
+  import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+
   alias PtcRunner.Kernel.MCPStdioTransport
 
   @fixture Path.expand("../../support/mcp_stdio_fixture.exs", __DIR__)
@@ -727,24 +729,4 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   catch
     :exit, _reason -> nil
   end
-
-  # 10 ms polls, so this is a ceiling on patience rather than a cost: a healthy
-  # machine satisfies these predicates in milliseconds and the budget is never
-  # spent. It has to cover the worst scheduling case instead of the median,
-  # because a saturated runner can starve a transport well past three seconds
-  # and the only symptom is an unreproducible failure.
-  defp assert_eventually(predicate, attempts \\ 1_500)
-
-  defp assert_eventually(predicate, attempts) when attempts > 0 do
-    if predicate.() do
-      :ok
-    else
-      receive do
-      after
-        10 -> assert_eventually(predicate, attempts - 1)
-      end
-    end
-  end
-
-  defp assert_eventually(_predicate, 0), do: flunk("condition did not become true")
 end

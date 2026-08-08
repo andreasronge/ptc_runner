@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   use ExUnit.Case, async: false
 
+  import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandDiagnostic
@@ -553,14 +555,6 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   end
 
   defp run_started?(sink), do: Enum.any?(EventSink.events(sink), &(&1.type == "run-started"))
-
-  defp assert_eventually(callback, attempts \\ 1_000)
-
-  defp assert_eventually(callback, attempts) when attempts > 0 do
-    if callback.(), do: :ok, else: assert_eventually(callback, attempts - 1)
-  end
-
-  defp assert_eventually(_callback, 0), do: flunk("condition did not become true")
 
   defp stop_trace(pid) do
     :erlang.trace(pid, false, [:call])
