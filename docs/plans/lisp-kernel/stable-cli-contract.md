@@ -3,9 +3,10 @@
 **Status:** accepted; Checkpoints A, B, and C are complete, Checkpoint D is the
 active work, and the remaining work continues through follow-up PRs.
 **Revised:** 2026-08-08 after Checkpoint C merged, to record it as delivered and
-make destination preflight and publication the active work. Checkpoint C's
-recorded residuals do not block D. The `acquire/6`–`acquire_targets/7`
-unification described in slice 7 is now an active parallel follow-up.
+make destination preflight and publication the active work, then again the same
+day to record the `acquire/6`–`acquire_targets/7` unification — the largest of
+Checkpoint C's recorded residuals, run as a parallel follow-up — as delivered.
+The residuals that remain do not block D.
 
 This plan delivers a stable command-line contract and a path-free execution
 core without designing infrastructure for a future hosted service. Exact
@@ -1037,7 +1038,7 @@ commits in one Checkpoint C PR:
     session, resolves OAuth authorities, anchors the operation deadline, and
     opens the runtime registry, and only `complete_operation/2` differs by
     operation. Connectivity becomes the third completion, and unlike run and
-    check it does not go through `RunBuilder.build_active_owned/6` — it needs
+    check it does not go through `RunBuilder.build_active_owned/7` — it needs
     the registry and the sealed services, not a Kernel run config;
   - the two modes reach different places. An `:acquisition` occurrence goes
     through the registry it shares with a run — `prepare`, preflight, `acquire`
@@ -1228,21 +1229,22 @@ fine; temporarily reachable and unsafe is not.
    translation table. It hands the operation deadline to the callback as
    `:doctor_occurrence_deadline_ms`, which is how a shipped probe intersects its
    intrinsic budget with the operation's. The acquisition half calls
-   `ProviderAcquisition.acquire_targets/7` with the `:acquisition` occurrences
-   as targets and a no-op artifact preflight, because connectivity publishes
-   nothing. Three corrections came first, because all of them get more expensive
-   once `DoctorPlan` consumes the result:
+   `ProviderAcquisition` with the `:acquisition` occurrences as targets. Three
+   corrections came first, because all of them get more expensive once
+   `DoctorPlan` consumes the result:
 
-   - (complete, repaired under review) the acquisition subset primitive.
-     `ProviderAcquisition.acquire_targets/7` narrows which providers are
-     acquired without narrowing any judgement about the application, while
-     `acquire/6` keeps the whole-selection path, so an ordinary run and check
-     take the path they always took. (Both arities grew by one when phase-8
+   - (complete, repaired under review, later unified) the acquisition subset
+     primitive. `ProviderAcquisition.acquire_targets/7` narrowed which providers
+     are acquired without narrowing any judgement about the application, while
+     `acquire/6` kept the whole-selection path, so an ordinary run and check
+     took the path they always took. (Both arities grew by one when phase-8
      credential resolution began supplying the resolved map; an earlier
-     `acquire_subset/6` was the rejected first attempt and no longer exists.) Every whole-application judgement stays
-     whole-application — all selected providers are prepared, and dependency
-     validity, the single-workflow-LLM rule, the effective data class, and the
-     providers' acceptance of it are decided over the complete set — because
+     `acquire_subset/6` was the rejected first attempt and no longer exists. The
+     two entries have since merged into one `acquire/6` taking `:all` or a
+     target list — see the unification slice below.) Every whole-application
+     judgement stays whole-application — dependency validity, the
+     single-workflow-LLM rule, the effective data class, and the providers'
+     acceptance of it are decided over the complete set — because
      narrowing them is exactly how a subset becomes a second, weaker pipeline.
      The first attempt prepared every selected provider to learn
      `requires`/`provides` and narrowed only the later steps. Review rejected
@@ -1254,12 +1256,11 @@ fine; temporarily reachable and unsafe is not.
      invoke a callback depend on invoking callbacks, and lets executable code
      redirect which executable code runs.
 
-     `acquire_targets/7` therefore plans from sealed evidence.
-     `ProviderAcquisition.plan/2` projects the graph from `PreparedRun`'s
-     declarations and the exact catalog they were validated against, the closure
-     is computed from those sealed `requires`/`provides` before any builder
-     runs, and only that closure is prepared, preflighted, credentialed, and
-     acquired. Targets are `{destination, index}` — the identity the sealed
+     Acquisition therefore plans from sealed evidence. The graph is projected
+     from `PreparedRun`'s declarations and the exact catalog they were validated
+     against, the closure is computed from those sealed `requires`/`provides`
+     before any builder runs, and only that closure is prepared, preflighted,
+     credentialed, and acquired. Targets are `{destination, index}` — the identity the sealed
      declarations and `ConnectivityResult` already use, not a global counter —
      and are checked before preparation, so an unknown or empty target set costs
      no callback. Inside the closure each preparation is compared with its
@@ -1271,8 +1272,7 @@ fine; temporarily reachable and unsafe is not.
      effective class, and acceptance inertly in phase 5, and seals the result.
      An application whose classes disagree never becomes a preparation at all,
      which is a stronger guarantee than re-checking it here would have been.
-     `acquire/6` keeps the complete preparation path unchanged for ordinary runs
-     and embedding. Providers pulled in only as dependencies are support work:
+     Providers pulled in only as dependencies are support work:
      acquired and cleaned up like any other, and never a successful connectivity
      row. Cleanup stays the session's, so a failure mid-closure leaves the
      acquired prefix on its stack rather than unwinding through a path of its
@@ -1446,25 +1446,22 @@ fine; temporarily reachable and unsafe is not.
      acquisition refuses with `provider_declaration_mismatch` before preflight
      rather than resolving it.
 
-     That bound is the union, not the occurrence, and an independent review was
-     right to say so. Within one selection, a preparation can still report a
+     That bound was the union, not the occurrence, and an independent review was
+     right to say so. Within one selection, a preparation could report a
      credential a *different* selected provider declared and be served it,
-     because `acquire/6` has no sealed per-occurrence declarations to compare
-     against. Only `acquire_targets/7`, which is handed a plan, and
-     `ConnectivityProbe`, which subsets from the sealed descriptor, are
-     per-occurrence tight. This is left open deliberately: the fix is to give
-     the ordinary path the same sealed declarations, which is the
-     `acquire/6`–`acquire_targets/7` unification and its own simplification
-     slice, not a third check bolted on here. The exposure is bounded by a trust
-     boundary this plan already records, but two independent reviewers have now
-     named it, the second as a credential *disclosure* rather than a bookkeeping
-     gap: provider B reporting a name provider A declared is served A's value.
-     That framing is right, and it moves the unification from a tidy-up to the
-     highest-value remaining item on this path. The exposure is bounded by a
-     trust boundary this plan already records — manifest input selects installed
-     aliases and never registers an implementation, so reaching it requires an
-     in-process embedder-assembled catalog with a custom builder, the same case
-     the audited-local trust rules record as accepted.
+     because `acquire/6` had no sealed per-occurrence declarations to compare
+     against; only `acquire_targets/7`, which was handed a plan, and
+     `ConnectivityProbe`, which subsets from the sealed descriptor, were
+     per-occurrence tight. Two independent reviewers named it, the second as a
+     credential *disclosure* rather than a bookkeeping gap: provider B reporting
+     a name provider A declared is served A's value. That framing was right, and
+     it moved the unification from a tidy-up to the highest-value remaining item
+     on this path. It is now closed by that unification, recorded below. The
+     exposure while it was open was bounded by a trust boundary this plan
+     already records — manifest input selects installed aliases and never
+     registers an implementation, so reaching it required an in-process
+     embedder-assembled catalog with a custom builder, the same case the
+     audited-local trust rules record as accepted.
 
      Direct embedding keeps resolving inside acquisition, and that is not a
      second pipeline. It has no sealed declarations to derive a union from
@@ -1706,18 +1703,16 @@ fine; temporarily reachable and unsafe is not.
    `occurrences` list edited to add a dependency no longer validates, so no
    callback runs for a provider the selection never reached.
 
-   It does **not** close the other half, and the first draft of this paragraph
-   claimed otherwise. Sealing the two attestations proves they were not
-   tampered with; it does not compare them against the preparation and catalog
+   It did **not** close the other half, and the first draft of this paragraph
+   claimed otherwise. Sealing the two attestations proved they were not
+   tampered with; it did not compare them against the preparation and catalog
    the acquisition is actually running under, because `acquire_targets/7`
-   receives neither. A plan `plan/2` legitimately minted for a *different*
+   received neither. A plan `plan/2` legitimately minted for a *different*
    preparation and catalog sharing this application's digest therefore still
-   validates, and its closure can invoke callbacks before
-   `declarations_honored/3` rejects it. Completing it means passing the expected
-   identities into validation and comparing them there, plus a regression over
-   two same-digest catalogs with different dependency graphs. Left for the
-   `acquire/6`–`acquire_targets/7` unification, which has to touch this
-   signature anyway, and stated exactly rather than rounded up.
+   validated, and its closure could invoke callbacks before
+   `declarations_honored/3` rejected it. That half is closed by the unification
+   recorded below, which removed the plan parameter rather than authenticating
+   it harder.
 
 Step 2 carries a constraint the phrase "a probe calls the catalog
 implementation directly" must not be read as weakening. Direct means selecting
@@ -1988,14 +1983,72 @@ HTTP boundary is a worse thing to ship than a narrow seam.
 
 ### Checkpoint C parallel follow-up: acquisition unification
 
-Unifying `ProviderAcquisition.acquire/6` and `acquire_targets/7` is active in a
-separate branch and does not block Checkpoint D. This closes two known
-differences: ordinary acquisition currently lacks the sealed per-occurrence
-declarations used by `declarations_honored/2`, and its credential bound is the
-selection's union rather than the occurrence's. The work remains a separately
-reviewed simplification because `acquire/6` derives whole-application
-judgements from preparations while `acquire_targets/7` relies on the phase-5
-sealed plan. Record its result here when that follow-up merges.
+(complete) The largest of slice 7's recorded residuals, run in a separate branch
+alongside Checkpoint D and closing both defects named above. The two entries are
+now one `acquire/6`, and it takes the sealed evidence rather than a plan:
+
+```
+acquire(prepared, catalog, registry, session, targets, credentials)
+```
+
+`targets` is `:all` for a run and a check and the `{destination, index}` list
+for connectivity, so the whole-selection path and the subset path are the same
+path with a different target set. Three consequences, each deliberate.
+
+**The disclosure is closed by construction, not by a third check.** The run path
+now runs `declarations_honored/3` like every other target, so a preparation
+reporting a credential a *different* selected provider declared is refused
+before preflight and long before `Map.take/2` consults the resolved map. The
+union bound that stood in for this is still there and still worth keeping, but
+its job shrank to what it can actually answer: that the *supplied map* covers
+every declared name, which is a claim about the caller's resolution rather than
+about the callback. Two regressions pin it, both mutation-checked: each provider
+receives exactly its own credential on the ordinary run path, and a provider
+declaring none that reports another's name is refused with no acquire callback
+reached.
+
+**The plan is no longer a parameter, so it cannot be substituted.** Passing the
+expected identities in beside the plan would have made the comparison vacuous
+for the only caller that mints one — the same pair produces both sides. The plan
+is instead projected inside `acquire/6` from `prepared` and `catalog`, and what
+is checked is the evidence: that the preparation is active and sealed, that the
+catalog is the one it was validated against, and that the session is the one
+opened for that preparation. The plan's own attestation, `validate_plan/2`, and
+the public `plan/2` are deleted; a value that never crosses a caller boundary
+does not need a seal to cross it safely. The regression uses two applications
+with the same package digest whose catalogs seal different dependency graphs:
+neither a mismatched pair nor another operation's legitimately sealed pair
+reaches a single prepare callback, and both mutation-check.
+
+**The whole-application judgements moved from callbacks to phase 5 on the run
+path too.** `validate_provider_dependencies/1`, `validate_single_workflow_llm/1`,
+`effective_data_class/2`, and `providers_accept/2` are now reached only by the
+embedding entry, which has no phase 5 to have decided them. The observable
+consequence is one improvement, pinned by an updated test: a run whose
+preparation invents a dependency its sealed declaration does not have used to
+fail late and unclassified with a bare `:provider_dependency_unavailable`, and
+now fails as `provider_policy_changed` naming the occurrence that drifted.
+`:provider_dependency_unavailable` stays reachable on both paths, because a
+provider's *exports* are still callback-reported and unchecked.
+
+`acquire_embedded/5` is what remains of the derivation path, named for the one
+caller that needs it. It is not a transitional shim: an embedding never crossed
+phases 4 and 5, so it has no sealed declaration to compare a preparation
+against, no catalog to project a graph from, and no operation deadline to bound
+a resolution with. Its artifact preflight stayed with it for the same reason —
+every active caller passed a no-op, because an active command preflights its
+destinations when its publication authority opens the sinks.
+
+Naming that entry for its one caller exposed a gap the old shared entry had
+hidden, and review found it: the fence that refuses an active command on this
+path lived at credential resolution, after every prepare and preflight callback
+had already run. It is a pure read of the caller's sealed handle, so asking it
+once before the first callback is the same answer earlier, and it makes
+`provider_credentials/3` unconditional. A mutation-checked regression pins that
+an active session reaches no callback here. No shipped caller could reach it —
+`RunBuilder` opens a plain session for its embedding path — so this was a
+boundary check rather than a live defect, on the same terms as the sealed
+entry's own binding.
 
 ### Slice 8: destination preflight and publication
 
@@ -2012,7 +2065,7 @@ exactly `<run_ref>.jsonl` and `<run_ref>.private.jsonl`, respectively.
 ### Slice 9: commands and REPL parity
 
 Checkpoint B left three transitional execution paths, not two: one-shot runs
-through `ExecutionSessionOwner` and `build_active_owned/6`, `--check` opening
+through `ExecutionSessionOwner` and `build_active_owned/7`, `--check` opening
 its own session and calling `build_active/4`, and the REPL opening no active
 session at all and calling `load_and_build/3` with an empty registry.
 Behavioural drift between them has already produced one reachable privacy

@@ -279,20 +279,18 @@ reads it. Because the union is whole-selection rather than whole-closure,
 `connectivity_mode: :none`: nothing acquires or probes it, but its credentials
 row still exists and a connect success requires it to pass.
 
-Consumers receive that map and take a subset of it; neither resolves again, and
-a preparation asking for a name the union does not contain is drift that fails
-closed with `provider_declaration_mismatch`. How tight the subset is differs by
-path, and the difference is what each path can compare against.
-`ConnectivityProbe` subsets per occurrence from the sealed descriptor, so a
-probe sees only its own credential. `ProviderAcquisition.acquire_targets/7`
-requires each preparation to report exactly its sealed declaration, so a target
-does too. `acquire/6` has no plan to compare against and enforces only the union
-bound: within a selection, a preparation can still name a credential another
-selected provider declared. Closing that means carrying sealed per-occurrence
-declarations down the ordinary path, which is the `acquire/6`–`acquire_targets/7`
-unification rather than another check. What holds everywhere today is that no
-credential outside the selection's own sealed union is resolved or handed to
-anything.
+Consumers receive that map and take a subset of it, and neither resolves again.
+Every subset is per occurrence, and what makes it so is that each consumer has a
+sealed declaration to compare against. `ConnectivityProbe` subsets straight from
+the sealed descriptor, so a probe sees only its own credential.
+`ProviderAcquisition.acquire/6` requires each preparation to report exactly its
+sealed declaration before preflight, so a preparation that reports a name a
+*different* selected provider declared is refused rather than served that
+provider's value — and it is refused before the map is consulted at all. What
+remains for the map itself is that it covers every declared name, which is a
+claim about the resolution rather than about a callback; a preparation naming
+something outside the sealed union is drift that fails closed with
+`provider_declaration_mismatch`.
 
 Failure attribution is per alias and never per occurrence:
 `subject_occurrence_policy/3` forbids an occurrence on
@@ -368,8 +366,9 @@ rejects them; the execution-session owner consumes one when it opens its
 sinks, `ProviderActiveSession` then marks activity and opens the session, and
 the runtime registry, active value, and that same session are passed to
 `RunBuilder`. A run and a `--check` both do that inside the execution-session
-owner's subordinate worker, which calls `build_active_owned/6` with the
-owner-opened sinks and the phase-8 step-5 credentials, then completes through
+owner's subordinate worker, which calls `build_active_owned/7` with the
+owner-opened sinks, the catalog acquisition plans from, and the phase-8 step-5
+credentials, then completes through
 `execute_built/1` or `check_built/1`. The REPL remains transitional and opens no active session: it
 calls `load_and_build/3` with an empty registry, keeping its current shape
 until the parity cutover. After application admission, that session

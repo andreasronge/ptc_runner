@@ -20,14 +20,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
   A provider-bearing prepared run is preflighted the same way, and its active
   session is passed here for runtime assembly. One-shot runs and `--check` both
   open that session inside the execution-session owner and call
-  `build_active_owned/6` with the owner's sinks, then complete through
+  `build_active_owned/7` with the owner's sinks, then complete through
   `execute_built/1` or `check_built/1`. The REPL remains transitional: it calls
   `load_and_build/3` with an empty registry and opens no active session at
   all.
   `PtcRunner.Kernel.ProviderAcquisition` then runs the selected providers'
-  shared preparation and dependency-ordered acquisition barrier, against the
-  credentials phase-8 step 5 already resolved and `build_active_owned/6`
-  supplies. Active preparation, preflight, and acquisition are owner-linked and
+  shared preparation and dependency-ordered acquisition barrier. It plans that
+  barrier from the preparation and the catalog it was validated against, which
+  is why `build_active_owned/7` takes the catalog beside the prepared run, and
+  it acquires against the credentials phase-8 step 5 already resolved. Active preparation, preflight, and acquisition are owner-linked and
   bounded by the session's run deadline; preflight releases share the
   provider-cleanup budget. Registry builders no longer open a second
   provider-session owner.
@@ -320,6 +321,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   @doc false
   @spec build_active_owned(
           PreparedRun.t(),
+          InstallationCatalog.t(),
           ProviderRegistry.t(),
           ProviderSession.t(),
           PublicationAuthority.t(),
@@ -328,6 +330,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
         ) :: {:ok, map()} | {:error, term()}
   def build_active_owned(
         %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
         %ProviderRegistry{} = registry,
         session,
         authority,
@@ -359,6 +362,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
            ) do
       build_active_preflighted_owned(
         prepared,
+        catalog,
         registry,
         session,
         authority,
@@ -383,8 +387,16 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  def build_active_owned(_prepared, _registry, _session, _authority, _opened_sinks, _credentials),
-    do: {:error, :invalid_active_run}
+  def build_active_owned(
+        _prepared,
+        _catalog,
+        _registry,
+        _session,
+        _authority,
+        _opened_sinks,
+        _credentials
+      ),
+      do: {:error, :invalid_active_run}
 
   defp validate_registry(registry) do
     if ProviderRegistry.valid?(registry),
@@ -531,7 +543,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
              registry,
              provider_input_class(prepared.request.input.authority),
              opts,
-             nil,
              nil
            ) do
       build_with_opened_sinks(
@@ -547,6 +558,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp build_active_preflighted_owned(
          prepared,
+         catalog,
          registry,
          session,
          authority,
@@ -559,8 +571,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
              registry,
              provider_input_class(prepared.request.input.authority),
              PublicationAuthority.options(authority),
-             session,
-             credentials
+             {prepared, catalog, session, credentials}
            ) do
       build_with_opened_sinks(
         prepared.request,
@@ -598,7 +609,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
              registry,
              provider_input_class(request.input.authority),
              opts,
-             nil,
              nil
            ) do
       build_with_providers(request, bundles, entry_source, providers, opts, failure_mode)
@@ -913,10 +923,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end)
   end
 
-  # `credentials` is the active command's phase-8 step-5 result and is `nil` only
-  # for a direct embedding build, which opens its own unbounded session and lets
-  # the registry resolve synchronously.
-  defp providers(manifest, registry, input_class, opts, session, credentials)
+  # `acquisition` is `nil` for a direct embedding build, which opens its own
+  # unbounded session and lets the registry resolve credentials synchronously.
+  # An active command supplies the sealed pair acquisition plans from, the
+  # session it claimed, and the credentials phase-8 step 5 resolved.
+  defp providers(manifest, registry, input_class, opts, acquisition)
        when input_class in [:normal, :private_inspection] do
     if provider_free?(manifest.providers) do
       with :ok <- preflight_trace(manifest.events.policy, input_class, opts),
@@ -924,69 +935,57 @@ defmodule PtcRunner.Kernel.RunBuilder do
         {:ok, empty_providers(input_class)}
       end
     else
-      open_provider_session(manifest, registry, input_class, opts, session, credentials)
+      acquire_providers(manifest, registry, input_class, opts, acquisition)
     end
   end
 
-  defp open_provider_session(manifest, registry, input_class, opts, nil, credentials) do
+  defp acquire_providers(manifest, registry, input_class, opts, nil) do
     with {:ok, session} <- ProviderSession.start(manifest.limits) do
-      finish_provider_session(manifest, registry, session, input_class, opts, true, credentials)
-    end
-  end
-
-  defp open_provider_session(
-         manifest,
-         registry,
-         input_class,
-         opts,
-         session,
-         credentials
-       ) do
-    finish_provider_session(manifest, registry, session, input_class, opts, false, credentials)
-  end
-
-  defp finish_provider_session(
-         manifest,
-         registry,
-         session,
-         input_class,
-         opts,
-         preflight?,
-         credentials
-       ) do
-    result =
-      ProviderAcquisition.acquire(
-        manifest,
+      manifest
+      |> ProviderAcquisition.acquire_embedded(
         registry,
         session,
         input_class,
         fn effective_class ->
-          preflight_provider_artifacts(preflight?, manifest, effective_class, opts)
-        end,
-        credentials
+          preflight_provider_artifacts(manifest, effective_class, opts)
+        end
       )
-
-    case result do
-      {:ok, _providers} = success ->
-        success
-
-      {:unregistered_provider_close, reason, close} ->
-        prefer_cleanup_error(
-          {:error, reason},
-          ProviderSession.close_with_unregistered(session, close)
-        )
-
-      {:error, _reason} = error ->
-        prefer_cleanup_error(error, ProviderSession.close(session))
+      |> close_failed_acquisition(session)
     end
   end
 
-  defp preflight_provider_artifacts(true, manifest, effective_class, opts) do
+  # An active command preflighted its artifact destinations when its publication
+  # authority opened the sinks, before any provider work began, so acquisition
+  # has nothing left to authorize here. A run and a check acquire the whole
+  # selection; only connectivity narrows the targets.
+  defp acquire_providers(
+         _manifest,
+         registry,
+         _input_class,
+         _opts,
+         {prepared, catalog, session, credentials}
+       ) do
+    prepared
+    |> ProviderAcquisition.acquire(catalog, registry, session, :all, credentials)
+    |> close_failed_acquisition(session)
+  end
+
+  defp close_failed_acquisition({:ok, _providers} = success, _session), do: success
+
+  defp close_failed_acquisition({:unregistered_provider_close, reason, close}, session) do
+    prefer_cleanup_error(
+      {:error, reason},
+      ProviderSession.close_with_unregistered(session, close)
+    )
+  end
+
+  defp close_failed_acquisition({:error, _reason} = error, session),
+    do: prefer_cleanup_error(error, ProviderSession.close(session))
+
+  defp preflight_provider_artifacts(manifest, effective_class, opts) do
     with :ok <- preflight_trace(manifest.events.policy, effective_class, opts),
          do: preflight_result(manifest.events.policy, effective_class, opts)
   end
-
-  defp preflight_provider_artifacts(false, _manifest, _effective_class, _opts), do: :ok
 
   @spec close(%{config: RunConfig.t()} | RunConfig.t()) ::
           :ok | {:error, :provider_cleanup_failed}
