@@ -587,8 +587,14 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # operation may report. Registry setup can finish near the connectivity
   # deadline and this process can resume past it, so success is confirmed
   # against the deadline rather than assumed from having reached the end.
+  # The operation-wide code, not the per-occurrence one. An exhausted budget is
+  # not a provider being temporarily unreachable: `connectivity_unavailable` is
+  # retriable and carries the occurrence that failed, while an exhausted budget
+  # is non-retriable and belongs to the operation, so it carries no subject.
+  # `ConnectivityProbe` already reports a spent budget this way, and the two
+  # paths must not disagree about what the same condition means.
   defp connectivity_timeout_diagnostic do
-    CommandDiagnostic.new!(:active_preflight, :connectivity_unavailable, provider_activity: true)
+    CommandDiagnostic.new!(:active_preflight, :connectivity_timeout, provider_activity: true)
   end
 
   # A sealed declaration carries an inert projection, not its descriptor, so the

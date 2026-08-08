@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DoctorEnvironment
@@ -265,22 +266,40 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     assert diagnostic.provider_activity
   end
 
-  test "an exhausted connectivity budget reports a catalogued operation-wide timeout" do
-    # The budget belongs to the operation: it can be spent before any occurrence
-    # is reached, so the diagnostic carries no subject. Constructing it must not
-    # raise — an active-preflight code that required a subject would be turned
-    # into `internal_error` by the outer rescue and the real outcome lost.
-    diagnostic =
+  test "an exhausted connectivity budget is not a provider being unavailable" do
+    # The two codes are not interchangeable, and a cumulative review found the
+    # registry-deadline path emitting the wrong one. An exhausted budget belongs
+    # to the operation — it can be spent before any occurrence is reached, so it
+    # carries no subject — and it is *not* retriable, because retrying spends the
+    # same budget again. A provider that is temporarily unreachable is the
+    # opposite on both counts.
+    #
+    # What this pins is the distinction, not every emission of it. The probe
+    # timeout above exercises the real path; the two branches in
+    # `ProviderExecution` — registry setup expiring, and a success arriving after
+    # its own cutoff — cannot be forced, because an active validator is itself
+    # killed at the operation deadline and reports first.
+    timeout =
       CommandDiagnostic.new!(:active_preflight, :connectivity_timeout, provider_activity: true)
 
-    assert diagnostic.subject == nil
-    assert diagnostic.provider_activity
+    assert timeout.subject == nil
+    assert timeout.provider_activity
+    refute timeout.retryable
 
-    assert CommandContract.diagnostic_allowed?(
-             {:doctor, :connect},
-             :active_preflight,
-             :connectivity_timeout
-           )
+    {:ok, subject} =
+      CommandSubject.provider("sick", :connectivity, %{destination: :workflow, index: 0})
+
+    unavailable =
+      CommandDiagnostic.new!(:active_preflight, :connectivity_unavailable,
+        subject: subject,
+        provider_activity: true
+      )
+
+    assert unavailable.retryable
+
+    for code <- [:connectivity_timeout, :connectivity_unavailable] do
+      assert CommandContract.diagnostic_allowed?({:doctor, :connect}, :active_preflight, code)
+    end
   end
 
   test "a connect session cannot be claimed for a run or a check" do

@@ -1622,7 +1622,34 @@ fine; temporarily reachable and unsafe is not.
    discrimination itself — a pre-marker failure reports no activity, a
    post-marker one reports activity — which is the property both reviews were
    about; and
-6. integration review, acceptance gates, then the cumulative PR review.
+6. (complete) integration review, acceptance gates, then the cumulative
+   `origin/main..HEAD` review. No [P1]. Two [P2]s, both in earlier slices rather
+   than in the CLI enable, which is what a cumulative pass is for.
+
+   **Fixed: an exhausted connectivity budget reported the wrong code.**
+   `ProviderExecution.connectivity_timeout_diagnostic/0` — named for the code it
+   did not emit — answered `connectivity_unavailable`, which is *retriable* and
+   per-occurrence, for a condition that is neither: retrying spends the same
+   budget again, and the budget belongs to the operation. `ConnectivityProbe`
+   already reported a spent budget as `connectivity_timeout`, so the two paths
+   disagreed about what one condition meant. The two sites that emit it are the
+   pair this document already records as unforceable — registry setup expiring,
+   and a success arriving after its own cutoff — so the regression pins the
+   distinction the choice rests on rather than the emission.
+
+   **Recorded, not fixed: `acquire_targets/7` trusts its plan.**
+   `validate_plan/2` compares only the package digest, so a plan carrying the
+   right digest with edited `occurrences` would steer `sealed_closure/2`, which
+   decides which provider callbacks run — and drift is only caught after those
+   callbacks execute. That is weaker than the guarantee this document states for
+   the acquisition subset. It is the same shape as the `settle_connect/4`
+   residual below, and it is bounded the same way: the plan has one production
+   caller, `ProviderExecution`, which builds it from `plan/2` and consumes it in
+   the same function, so forging one needs in-process code. The fix is to seal
+   the plan over the prepared and catalog attestations exactly as
+   `ConnectivityResult` was repaired under review, which belongs with the
+   `acquire/6`–`acquire_targets/7` unification rather than bolted onto this
+   branch's tail.
 
 Step 2 carries a constraint the phrase "a probe calls the catalog
 implementation directly" must not be read as weakening. Direct means selecting

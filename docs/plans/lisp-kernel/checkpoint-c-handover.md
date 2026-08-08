@@ -282,14 +282,19 @@ ceiling the first round rejected.
 
 ## Remaining, in order
 
-1. **The cumulative `codex review` over `origin/main..HEAD`**, then the PR.
-   Everything else in the build order has landed. Note that per-slice reviews
-   have covered each change as it went in; the cumulative pass is for what only
-   shows up across them.
+1. **Open the PR.** Every build-order step is complete, the branch is rebased
+   onto `origin/main` and 0 behind it, and every gate is green.
+
+   The cumulative review is done: no [P1], two [P2]s, both in earlier slices.
+   One is fixed (an exhausted connectivity budget reported the retriable
+   per-occurrence code instead of the operation-wide one); the other is recorded
+   in the plan — `acquire_targets/7` validates only its plan's package digest,
+   which is the same shape as the `settle_connect/4` residual and belongs with
+   the `acquire/6`–`acquire_targets/7` unification.
 
 ## Distance to a PR
 
-The cumulative review. Every slice is done and every gate is green.
+Nothing but opening it.
 
 ## Review discipline that has been working
 
