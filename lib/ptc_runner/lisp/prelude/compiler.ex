@@ -300,7 +300,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
       else
         case Enum.reduce(spec.body_form, [], &collect_dep_refs(&1, dep_set, &2)) do
           [] -> nil
-          refs -> {spec, refs |> Enum.sort() |> hd()}
+          refs -> {spec, Enum.min(refs)}
         end
       end
     end)

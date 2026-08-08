@@ -411,12 +411,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   # `:no_budget` — no budget object; nothing to acquire or release.
   defp acquire_slot(nil), do: :no_budget
 
-  defp acquire_slot(%ParallelBudget{} = budget) do
-    case ParallelBudget.try_acquire(budget) do
-      :ok -> :ok
-      :full -> :full
-    end
-  end
+  defp acquire_slot(%ParallelBudget{} = budget), do: ParallelBudget.try_acquire(budget)
 
   defp release_slot(_budget, false), do: :ok
   defp release_slot(nil, true), do: :ok

@@ -88,13 +88,64 @@
           {Credo.Check.Warning.UnusedRegexOperation, []},
           {Credo.Check.Warning.UnusedStringOperation, []},
           {Credo.Check.Warning.UnusedTupleOperation, []},
-          {Credo.Check.Warning.UnsafeExec, []}
+          {Credo.Check.Warning.UnsafeExec, []},
+
+          # ExSlop — checks for patterns LLMs overproduce. Listed explicitly
+          # rather than via `ExSlop.recommended_checks/0` so that upgrading
+          # the dependency cannot add a failing check to CI unreviewed.
+          # Three of the 31 recommended checks are omitted; see `disabled:`.
+          {ExSlop.Check.Readability.BoilerplateDocParams, []},
+          {ExSlop.Check.Readability.NarratorComment, []},
+          {ExSlop.Check.Readability.NarratorDoc, []},
+          {ExSlop.Check.Refactor.ExplicitSumReduce, []},
+          {ExSlop.Check.Refactor.FilterNil, []},
+          {ExSlop.Check.Refactor.FlatMapFilter, []},
+          {ExSlop.Check.Refactor.GraphemesLength, []},
+          {ExSlop.Check.Refactor.IdentityMap, []},
+          {ExSlop.Check.Refactor.IdentityPassthrough, []},
+          {ExSlop.Check.Refactor.ManualStringReverse, []},
+          {ExSlop.Check.Refactor.MapIntoLiteral, []},
+          {ExSlop.Check.Refactor.ReduceAsMap, []},
+          {ExSlop.Check.Refactor.ReduceMapPut, []},
+          {ExSlop.Check.Refactor.RedundantBooleanIf, []},
+          {ExSlop.Check.Refactor.RedundantEnumJoinSeparator, []},
+          {ExSlop.Check.Refactor.RejectNil, []},
+          {ExSlop.Check.Refactor.SortForTopK, []},
+          {ExSlop.Check.Refactor.SortThenAt, []},
+          {ExSlop.Check.Refactor.SortThenReverse, []},
+          {ExSlop.Check.Refactor.StringConcatInReduce, []},
+          {ExSlop.Check.Refactor.TryRescueWithSafeAlternative, []},
+          {ExSlop.Check.Refactor.WithIdentityDo, []},
+          {ExSlop.Check.Refactor.WithIdentityElse, []},
+          {ExSlop.Check.Warning.BlanketRescue, []},
+          {ExSlop.Check.Warning.GenserverAsKvStore, []},
+          {ExSlop.Check.Warning.QueryInEnumMap, []},
+          {ExSlop.Check.Warning.RepoAllThenFilter, []},
+          {ExSlop.Check.Warning.RescueWithoutReraise, []}
         ],
         disabled: [
           # Disabled because we allow TODOs during development
           # {Credo.Check.Design.TagTODO, []},
           # Disabled false positives on NaN self-comparison (f == f filters out NaN)
-          {Credo.Check.Warning.OperationOnSameValues, []}
+          {Credo.Check.Warning.OperationOnSameValues, []},
+
+          # ExSlop checks omitted from the recommended set.
+          #
+          # Fires on `length/1` against a literal in any context. Every hit here
+          # is either an ExUnit `assert length(result) == 2` or a guard on a
+          # short, bounded list (`when length(bindings) != 2`). The suggested
+          # `Enum.count_until/2` rewrite is less readable at those sizes.
+          {ExSlop.Check.Refactor.LengthComparison, []},
+          # Cannot distinguish a compile-time `@attr Path.expand(..., __DIR__)`
+          # paired with `@external_resource` from a runtime priv lookup.
+          # `Application.app_dir/2` is wrong for the former, and every hit here
+          # is the compile-time form (see `PtcRunner.Kernel.Library`).
+          {ExSlop.Check.Warning.PathExpandPriv, []},
+          # PTC-Lisp maps are flex-keyed by design, so accepting either key kind
+          # is the contract rather than an oversight. See `Runtime.sort_by/2`
+          # and `test/ptc_runner/lisp/runtime_flex_access_test.exs`; the
+          # remaining hits normalize JSON payloads at LLM and bundle boundaries.
+          {ExSlop.Check.Warning.DualKeyAccess, []}
         ]
       }
     }

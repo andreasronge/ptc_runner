@@ -112,6 +112,7 @@ defmodule PtcRunner.MixProject do
       {:telemetry, "~> 1.0"},
       {:stream_data, "~> 1.1", only: [:test, :dev]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
       ex_dna_dep(),
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
@@ -183,6 +184,10 @@ defmodule PtcRunner.MixProject do
       # an artifact the author never had a chance to regenerate. They cost a few
       # seconds inside a run that already spends minutes.
       prepush: [
+        # Credo is repeated here for the same reason as the staleness checks
+        # below: the hook runs this alias, not `precommit`, so without it a
+        # lint the CI Credo step rejects only surfaces after the push.
+        "credo --strict",
         "ptc.gen_semantic_revision --check",
         "ptc.gen_docs --check",
         "ptc.conformance_report --check-inventory",

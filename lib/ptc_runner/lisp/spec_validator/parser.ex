@@ -109,7 +109,7 @@ defmodule PtcRunner.Lisp.SpecValidator.Parser do
     content
     |> String.split(~r/^## /m, include_captures: false)
     |> Enum.drop(1)
-    |> Enum.map(fn section ->
+    |> Map.new(fn section ->
       # Get section header from first line
       [header | rest] = String.split(section, "\n", parts: 2)
       section_content = Enum.join(rest, "\n")
@@ -118,7 +118,6 @@ defmodule PtcRunner.Lisp.SpecValidator.Parser do
       hash = :crypto.hash(:sha256, section_content) |> Base.encode16()
       {"## #{header}", hash}
     end)
-    |> Enum.into(%{})
   end
 
   # ============================================================
@@ -678,10 +677,7 @@ defmodule PtcRunner.Lisp.SpecValidator.Parser do
       # Handles only keyword keys and simple values
       tokens = String.split(inner, ~r/\s+/)
 
-      case parse_map_tokens(tokens, %{}) do
-        {:ok, map} -> {:ok, map}
-        :error -> :error
-      end
+      parse_map_tokens(tokens, %{})
     end
   end
 

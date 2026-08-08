@@ -1295,10 +1295,7 @@ defmodule PtcRunner.Lisp do
       |> apply_memory_contract(float_precision, eval_ctx, preserve_runtime_callables)
       |> Map.put(:usage, metrics)
 
-    case validate_return_value(parsed_signature, sig, step) do
-      {:ok, validated_step} -> {:ok, validated_step}
-      {:error, reason} -> {:error, reason}
-    end
+    validate_return_value(parsed_signature, sig, step)
   end
 
   defp handle_execute_result(

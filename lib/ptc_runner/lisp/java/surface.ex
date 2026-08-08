@@ -119,12 +119,8 @@ defmodule PtcRunner.Lisp.Java.Surface do
 
   @doc "Resolves a plain constructor source spelling to its admitted reference."
   @spec resolve_plain_reference(atom() | String.t()) :: {:ok, map()} | :error
-  def resolve_plain_reference(spelling) do
-    case Map.fetch(@plain_reference_table, to_string(spelling)) do
-      {:ok, reference} -> {:ok, reference}
-      :error -> :error
-    end
-  end
+  def resolve_plain_reference(spelling),
+    do: Map.fetch(@plain_reference_table, to_string(spelling))
 
   @doc "Resolves a direct-dot source spelling to its finite instance member family."
   @spec resolve_member_family(atom() | String.t()) :: {:ok, atom()} | :error

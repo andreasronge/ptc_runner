@@ -363,8 +363,6 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
     with {:ok, coerced_receiver, receiver_score} <- coerce(receiver_profile, receiver),
          {:ok, coerced_arguments, arguments_score} <- coerce_arguments(profiles, arguments) do
       {:ok, [coerced_receiver | coerced_arguments], receiver_score + arguments_score}
-    else
-      :error -> :error
     end
   end
 
