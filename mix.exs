@@ -112,6 +112,7 @@ defmodule PtcRunner.MixProject do
       {:telemetry, "~> 1.0"},
       {:stream_data, "~> 1.1", only: [:test, :dev]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:req_llm, "~> 1.8", optional: true, runtime: false},
@@ -143,6 +144,7 @@ defmodule PtcRunner.MixProject do
         "compile --warnings-as-errors",
         "xref graph --format cycles --label compile-connected --fail-above 0",
         "credo --strict",
+        "cmd bash scripts/duplication_gate.sh check",
         "ptc.validate_spec",
         "ptc.gen_docs --check",
         "ptc.gen_semantic_revision --check",
@@ -303,11 +305,13 @@ defmodule PtcRunner.MixProject do
           "docs/guides/components-and-preludes.md",
           "docs/guides/embedding-in-elixir.md",
           "docs/guides/coding-agent-review-workflow.md",
+          "docs/guides/duplication-gate.md",
           "docs/guides/documentation-guidelines.md",
           "docs/guides/kernel-maintainer.md"
         ] ++ Path.wildcard("docs/conformance/*-audit.md"),
       groups_for_extras: [
-        Maintainers: ~r/docs\/guides\/(coding-agent-review-workflow|kernel-maintainer)\.md/,
+        Maintainers:
+          ~r/docs\/guides\/(coding-agent-review-workflow|duplication-gate|kernel-maintainer)\.md/,
         Contracts: ~r/docs\/trace-log-contract\.md/,
         Guides: ~r/docs\/guides\/.+\.md/,
         Reference: ~r/docs\/(ptc-lisp|clojure|function-reference|java-|signature-).+\.md/,

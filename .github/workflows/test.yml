@@ -279,6 +279,9 @@ jobs:
       - name: Run Credo
         run: mix credo --strict
 
+      - name: Check for new code duplication
+        run: scripts/duplication_gate.sh check
+
       - name: Validate the PTC-Lisp specification
         run: mix ptc.validate_spec
 
