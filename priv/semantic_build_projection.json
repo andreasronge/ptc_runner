@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "4058632dee36c238c9ac85bb74ce802b26cf043d2aa95b4cdb611e3b8d61f39a",
+  "source_closure_hash": "1c6047112a6feddf17138fe606670697e750f9040ef38b366cd7abe2d2ec3b7e",
   "sources": [
     {
       "bytes": 870,
@@ -1022,9 +1022,9 @@
       "sha256": "13cfe1ed75d5299b1b23f8bc6b2e1a85e8743e99f0d2b52fda52087988130d30"
     },
     {
-      "bytes": 72864,
+      "bytes": 71884,
       "path": "lib/ptc_runner/lisp/eval.ex",
-      "sha256": "61fa7bdcb9d43af335f0d6750d4cc14095263832b07761e007db7312642bf754"
+      "sha256": "014c654af20a8465057ac81a07e844f48b6b531022a5fc4e63cd7e135e0b3bf6"
     },
     {
       "bytes": 1057,
@@ -1032,9 +1032,9 @@
       "sha256": "cfcd00a7a7f4c60334e07475a19a38cb32bee18602fbf63bb84c6aa70b3dae6d"
     },
     {
-      "bytes": 59621,
+      "bytes": 58332,
       "path": "lib/ptc_runner/lisp/eval/apply.ex",
-      "sha256": "db851eed11b480461f9225d6d2bb38f3c7638758e5e9a34a94278b404569d80d"
+      "sha256": "0c67b07936449406b4f0178e356077f329e85be7e74923512b45c0a6728dbccc"
     },
     {
       "bytes": 161,
@@ -1322,9 +1322,9 @@
       "sha256": "a8fb38d62efeec2313833ee59cb867a009695132ea52632f9e7697b958f2384f"
     },
     {
-      "bytes": 28705,
+      "bytes": 29289,
       "path": "lib/ptc_runner/lisp/prelude/form_scanner.ex",
-      "sha256": "bede56a4d1339b482dcd6ef12cad4daf6fc85fb7eb3b841b70842af33f41bc9f"
+      "sha256": "c287985fd91979a3fd90ea7f831c9d1ca0ef410f6904dd96fc25119381ab1e2c"
     },
     {
       "bytes": 1611,
@@ -1335,6 +1335,11 @@
       "bytes": 2532,
       "path": "lib/ptc_runner/lisp/prelude/validation_error.ex",
       "sha256": "06c671616ef2a493c5c362a2277a0124273dfddd2891a2875e12900196cbad96"
+    },
+    {
+      "bytes": 1486,
+      "path": "lib/ptc_runner/lisp/prelude_closure.ex",
+      "sha256": "1cf373b744d425a4120c8e932f5cd1596b0e1e1b5fe11654c4fd1f0ab4cafaa3"
     },
     {
       "bytes": 2600,

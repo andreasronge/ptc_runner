@@ -71,6 +71,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Metadata
+  alias PtcRunner.Lisp.PreludeClosure
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.UntrustedRenderer
 
@@ -815,21 +816,6 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp put_prelude_contract(meta, _export), do: meta
 
-  defp tag_prelude_ns(
-         {:closure, params, body, captured_env, turn_history, %{prelude_internal: true} = meta},
-         ns_name
-       )
-       when is_binary(ns_name) do
-    meta =
-      meta
-      |> Map.delete(:prelude_internal)
-      |> Map.put(:prelude_ns, ns_name)
-
-    {:closure, params, body, captured_env, turn_history, meta}
-  end
-
-  defp tag_prelude_ns(value, _ns_name), do: value
-
   # Invoke a captured prelude export closure against its OWN namespace's private
   # env.
   #
@@ -848,7 +834,7 @@ defmodule PtcRunner.Lisp.Eval do
 
     export_ctx =
       caller_ctx
-      |> Map.put(:user_ns, tag_prelude_ns_env(ns_env, ns_name))
+      |> Map.put(:user_ns, PreludeClosure.tag_internal_environment(ns_env, ns_name))
       |> EvalContext.push_prelude_caller_user_ns(caller_ctx.user_ns)
       |> EvalContext.push_prelude_origin(export)
 
@@ -859,7 +845,8 @@ defmodule PtcRunner.Lisp.Eval do
           # x)))`), tag it with the prelude namespace name so its private-helper
           # references still resolve when the caller applies it later. Non-closure
           # results pass through unchanged.
-          {:ok, tag_prelude_ns(result, ns_name), merge_export_effects(caller_ctx, final_ctx)}
+          {:ok, PreludeClosure.tag_namespace(result, ns_name),
+           merge_export_effects(caller_ctx, final_ctx)}
 
         {:error, reason} ->
           {:error, Helpers.sanitize_private_error(reason)}
@@ -870,7 +857,7 @@ defmodule PtcRunner.Lisp.Eval do
           {:control, :return, value, %EvalContext{} = abort_ctx} ->
             Abort.control!(
               :return,
-              tag_prelude_ns(value, ns_name),
+              PreludeClosure.tag_namespace(value, ns_name),
               merge_export_effects(caller_ctx, abort_ctx)
             )
 
@@ -1865,25 +1852,6 @@ defmodule PtcRunner.Lisp.Eval do
           reraise error, __STACKTRACE__
       end
   end
-
-  defp tag_prelude_ns_env(env, ns) when is_map(env) do
-    Map.new(env, fn {name, value} -> {name, tag_prelude_internal(value, ns)} end)
-  end
-
-  # Tag private namespace entries as internal prelude code. Internal helpers keep
-  # the active export's origin while resolving sibling helpers, but escaped
-  # namespace-only closures intentionally do not.
-  defp tag_prelude_internal({:closure, params, body, env, turn_history, meta}, ns)
-       when is_binary(ns) do
-    meta =
-      meta
-      |> Map.put(:prelude_ns, ns)
-      |> Map.put(:prelude_internal, true)
-
-    {:closure, params, body, env, turn_history, meta}
-  end
-
-  defp tag_prelude_internal(value, _ns), do: value
 
   defp maybe_mark_prelude_internal(meta, %EvalContext{} = eval_ctx) do
     case EvalContext.current_origin(eval_ctx) do

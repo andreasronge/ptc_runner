@@ -29,6 +29,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Prelude.Contract
+  alias PtcRunner.Lisp.PreludeClosure
   alias PtcRunner.Lisp.Runtime.Args
   alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.Lisp.Runtime.Predicates
@@ -1013,7 +1014,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           Contract.validate_output!(metadata, result, contract_ctx)
           # Tag a returned closure so its private-helper references still resolve
           # when the HOF result is applied later.
-          tag_prelude_ns(result, prelude_ns)
+          PreludeClosure.tag_namespace(result, prelude_ns)
 
         {:error, reason} ->
           raise_closure_error(maybe_sanitize_private_error(reason, prelude_ns))
@@ -1050,7 +1051,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       |> restore_hof_caller(caller_baseline)
       |> Capture.materialize_context()
 
-    value = tag_prelude_ns(value, prelude_ns)
+    value = PreludeClosure.tag_namespace(value, prelude_ns)
 
     if prelude_ns do
       Contract.validate_output!(metadata, value, restored_ctx)
@@ -1294,11 +1295,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp prelude_ns_env(prelude, ns) do
     prelude.private_env
     |> Map.get(ns, %{})
-    |> tag_prelude_ns_env(ns)
-  end
-
-  defp tag_prelude_ns_env(env, ns) do
-    Map.new(env, fn {name, value} -> {name, tag_prelude_internal(value, ns)} end)
+    |> PreludeClosure.tag_internal_environment(ns)
   end
 
   # The prelude namespace name a closure was tagged with (value-position export),
@@ -1335,40 +1332,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp maybe_push_prelude_origin(%EvalContext{} = context, _meta, _caller_ctx) do
     EvalContext.push_user_origin(context)
   end
-
-  # Tag private namespace entries as internal prelude code. Internal helpers keep
-  # the active export's origin while resolving sibling helpers, but escaped
-  # namespace-only closures intentionally do not.
-  defp tag_prelude_internal({:closure, params, body, env, th, meta}, ns)
-       when is_binary(ns) do
-    meta =
-      meta
-      |> Map.put(:prelude_ns, ns)
-      |> Map.put(:prelude_internal, true)
-
-    {:closure, params, body, env, th, meta}
-  end
-
-  defp tag_prelude_internal(value, _ns), do: value
-
-  # Tag a value RETURNED by a value-position export with its originating prelude
-  # namespace, so a returned closure (e.g. `(defn make [] (fn [x] (helper x)))`)
-  # still resolves its private sibling helpers when the caller applies it later.
-  # Non-closure values and the non-prelude (`nil`) case pass through unchanged,
-  # mirroring `Eval.bind_prelude_ref/2` on the direct `(crm/export …)` path.
-  defp tag_prelude_ns(value, nil), do: value
-
-  defp tag_prelude_ns({:closure, params, body, env, th, %{prelude_internal: true} = meta}, ns)
-       when is_binary(ns) do
-    meta =
-      meta
-      |> Map.delete(:prelude_internal)
-      |> Map.put(:prelude_ns, ns)
-
-    {:closure, params, body, env, th, meta}
-  end
-
-  defp tag_prelude_ns(value, _ns), do: value
 
   # Restore caller lexical, namespace, and authority scope on every expected
   # direct closure exit. Successful ordinary calls retain their namespace
@@ -1416,7 +1379,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         Abort.control!(signal, value, restored_ctx)
 
       ns ->
-        tagged = if signal == :return, do: tag_prelude_ns(value, ns), else: value
+        tagged = if signal == :return, do: PreludeClosure.tag_namespace(value, ns), else: value
 
         if signal == :return do
           Contract.validate_output!(meta, tagged, restored_ctx)
@@ -1495,7 +1458,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
             # restore the caller's user_ns (discarding any `(def ...)` the export
             # made), keeping the namespace isolated, and tag a returned closure so
             # its private-helper references still resolve when applied later.
-            {:ok, tag_prelude_ns(result, prelude_ns_tag(meta)),
+            {:ok, PreludeClosure.tag_namespace(result, prelude_ns_tag(meta)),
              %{
                final_ctx
                | env: caller_ctx.env,
