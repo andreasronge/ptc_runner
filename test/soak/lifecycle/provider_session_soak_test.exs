@@ -59,11 +59,11 @@ defmodule PtcRunner.Soak.ProviderSessionSoakTest do
           {:ok, session} = ProviderSession.start_active(limits(), unique_operation())
           {:ok, session} = ProviderSession.begin_operation(session, :run)
 
-          closed = commit_scopes(session, 2)
+          {closed, scopes} = commit_scopes(session, 2)
           assert :ok = ProviderSession.close(session)
           assert_closed_once(closed, 2)
 
-          LifecycleSoak.ledger(processes: [session.pid])
+          LifecycleSoak.ledger(processes: [session.pid | scopes])
         end
       )
     end
@@ -79,11 +79,20 @@ defmodule PtcRunner.Soak.ProviderSessionSoakTest do
           {:ok, session} = ProviderSession.begin_operation(session, :run)
 
           {:ok, registrar} = ProviderSession.open_registrar(session)
-          assert :ok = ResourceRegistrar.abort(registrar)
 
+          scopes =
+            Enum.filter(
+              [registrar.scope_controller, registrar.root_owner, registrar.cleanup_owner],
+              &is_pid/1
+            )
+
+          assert :ok = ResourceRegistrar.abort(registrar)
           assert :ok = ProviderSession.close(session)
 
-          LifecycleSoak.ledger(processes: [session.pid])
+          # An aborted scope must reap its own processes, not leave them for
+          # session close — otherwise abort and commit would be
+          # indistinguishable here.
+          LifecycleSoak.ledger(processes: [session.pid | scopes])
         end
       )
     end
@@ -110,7 +119,7 @@ defmodule PtcRunner.Soak.ProviderSessionSoakTest do
 
           assert_receive {:handed_off, ^session}
           {:ok, session} = ProviderSession.begin_operation(session, :run)
-          closed = commit_scopes(session, 2)
+          {closed, scopes} = commit_scopes(session, 2)
 
           # No `close/1`. The lifecycle owner's `:DOWN` is the only thing that
           # can reap this session, which is the path where nothing the caller
@@ -119,7 +128,7 @@ defmodule PtcRunner.Soak.ProviderSessionSoakTest do
           await_dead(session.pid)
           assert_closed_once(closed, 2)
 
-          LifecycleSoak.ledger(processes: [session.pid, owner])
+          LifecycleSoak.ledger(processes: [session.pid, owner | scopes])
         end
       )
     end
@@ -177,7 +186,7 @@ defmodule PtcRunner.Soak.ProviderSessionSoakTest do
           {:ok, session} = ProviderSession.start_active(limits, unique_operation())
           {:ok, session} = ProviderSession.begin_operation(session, :run)
 
-          closed = commit_scopes(session, 1)
+          {closed, scopes} = commit_scopes(session, 1)
           burn_past(ProviderSession.run_deadline(session))
           assert Deadline.expired?(ProviderSession.run_deadline(session))
 
@@ -205,32 +214,51 @@ defmodule PtcRunner.Soak.ProviderSessionSoakTest do
           assert report in [:ok, {:error, :provider_cleanup_failed}],
                  "unexpected close report after deadline expiry: #{inspect(report)}"
 
-          LifecycleSoak.ledger(processes: [session.pid])
+          # The scope processes matter most in this variant. Its cycle cap puts
+          # it below the harness's byte-gate floor, so this exact list is the
+          # only thing standing between a leaked controller, root owner or
+          # reaper and a green run.
+          LifecycleSoak.ledger(processes: [session.pid | scopes])
         end
       )
     end
   end
 
   # Each committed scope reports its own close, so the assertion can tell a
-  # leaked scope from one closed twice.
+  # leaked scope from one closed twice — and returns the three processes the
+  # scope actually owns, so the ledger can gate them exactly.
+  #
+  # Listing only `session.pid` was a false-flat waiting to happen: a scope's
+  # controller, root owner and reaper are per-cycle processes, and in the
+  # deadline-expiry variant — capped below the harness's 100-cycle byte-gate
+  # floor — *no* gate would have covered them at any iteration count. That is
+  # the path where `terminate/2` never runs, which the plan names as the most
+  # likely leak site. Collecting them here also upgrades the other variants
+  # from "caught by the byte slope at 3000 cycles" to exact at every count.
   defp commit_scopes(session, count) do
     parent = self()
     token = make_ref()
 
-    Enum.each(1..count, fn index ->
-      {:ok, registrar} = ProviderSession.open_registrar(session)
-      assert :ok = ResourceRegistrar.activate(registrar)
-      # The closer must return `:ok`; anything else is reported as
-      # `:provider_cleanup_failed`, so `send/2`'s return value cannot be the
-      # last expression here.
-      assert :ok =
-               ResourceRegistrar.commit(registrar, fn ->
-                 send(parent, {token, index})
-                 :ok
-               end)
-    end)
+    scope_pids =
+      Enum.flat_map(1..count, fn index ->
+        {:ok, registrar} = ProviderSession.open_registrar(session)
+        assert :ok = ResourceRegistrar.activate(registrar)
+        # The closer must return `:ok`; anything else is reported as
+        # `:provider_cleanup_failed`, so `send/2`'s return value cannot be the
+        # last expression here.
+        assert :ok =
+                 ResourceRegistrar.commit(registrar, fn ->
+                   send(parent, {token, index})
+                   :ok
+                 end)
 
-    token
+        Enum.filter(
+          [registrar.scope_controller, registrar.root_owner, registrar.cleanup_owner],
+          &is_pid/1
+        )
+      end)
+
+    {token, scope_pids}
   end
 
   defp assert_closed_once(token, count) do
