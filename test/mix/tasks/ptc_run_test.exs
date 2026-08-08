@@ -315,7 +315,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
     trace_calls(
       [
         {{Dotenv, :load, 0}, [{:_, [], [{:return_trace}]}]},
-        {{ProviderSession, :begin_run, 1}, true}
+        {{ProviderSession, :begin_operation, 2}, true}
       ],
       fn -> run_in(dir, [manifest_path, "--host-config", host_path]) end
     )
@@ -325,8 +325,8 @@ defmodule Mix.Tasks.Ptc.RunTest do
     # the load's return rather than its call so a blocked loader cannot pass.
     assert_receive {:trace_ts, loader, :return_from, {Dotenv, :load, 0}, :ok, loaded_at}, 5_000
 
-    assert_receive {:trace_ts, _worker, :call, {ProviderSession, :begin_run, [_session]},
-                    run_clock_started_at},
+    assert_receive {:trace_ts, _worker, :call,
+                    {ProviderSession, :begin_operation, [_session, _ms]}, run_clock_started_at},
                    5_000
 
     assert loader == self()

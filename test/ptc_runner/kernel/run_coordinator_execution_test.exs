@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionSessionOwner
@@ -17,6 +18,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.SelectionRules
+  alias PtcRunner.TestSupport.HostBoundFixture
 
   test "provider-free execution returns sealed path-free publication evidence" do
     {prepared, catalog} = prepared_run("(return {\"answer\" 42})")
@@ -49,6 +51,28 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
              RunBuilder.publish_execution(outcome, authority)
 
     assert :ok = PreparedRun.close(prepared)
+    assert :ok = InstallationCatalog.close(catalog)
+  end
+
+  test "a run crosses phase 7 before provider activity is marked" do
+    # Doctor is not the only caller of the shared step. A run whose audited-local
+    # check fails must report the local diagnostic with activity still false, and
+    # must never reach the builder behind the marker.
+    {prepared, catalog, services} = audited_local_prepared_run(:invalid_llm_model)
+    assert {:ok, execution} = ProviderExecution.new(catalog, services, [])
+    assert {:ok, authority} = PublicationAuthority.new([])
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             RunCoordinator.execute(prepared, authority, execution, fn _url ->
+               flunk("phase 7 must not reach the authorization subphase")
+             end)
+
+    assert diagnostic.phase == :local_preflight
+    assert diagnostic.code == :adapter_unavailable
+    refute diagnostic.provider_activity
+    assert_received {:audited_local, "model"}
+    refute_received {:builder_invoked, "model"}
+
     assert :ok = InstallationCatalog.close(catalog)
   end
 
@@ -395,6 +419,95 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       "input" => %{"value" => %{}},
       "providers" => %{
         "workflow" => [%{"name" => "selected", "config" => %{}}],
+        "mission" => []
+      }
+    }
+
+    documents = %{
+      "ptc.json" => Jason.encode!(manifest),
+      "main.clj" => "(ns app) (defn run [_input] (return {\"answer\" 42}))"
+    }
+
+    assert {:ok, request} =
+             ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+
+    assert {:ok, prepared} = RunCoordinator.prepare(request, catalog)
+    {prepared, catalog, services}
+  end
+
+  # A host-bound catalog over a shipped source, because nothing else may declare
+  # an audited-local check. The callback reports itself so a test can prove both
+  # that phase 7 ran and where it stopped.
+  defp audited_local_prepared_run(failing) do
+    parent = self()
+    services = HostBoundFixture.runtime_services()
+    {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
+
+    {:ok, descriptor} =
+      ProviderDescriptor.new(
+        source: :llm,
+        installation_revision: "model-v1",
+        credential_names: [],
+        authorization_mode: :none,
+        data_class: :normal,
+        accepts_data: [:normal],
+        requires: [],
+        provides: [],
+        destinations: [:workflow],
+        workflow_llm?: true,
+        connectivity_mode: :probe,
+        probe_effect: :metadata,
+        selection_validation: :declarative,
+        selection_rules: rules,
+        authority_fingerprint: nil,
+        local_preflight: :audited_local
+      )
+
+    {:ok, capability} =
+      Capability.new(
+        name: "fixture",
+        input_schema: %{"type" => "object", "additionalProperties" => false},
+        callback: fn _arguments -> {:ok, %{}} end
+      )
+
+    # A host-bound catalog routes its builders through the real host
+    # installation, so this one exists to satisfy registration parity and to
+    # prove, by never being called, that a failed phase 7 stops before it.
+    staged = fn _selection, _context ->
+      send(parent, {:builder_invoked, "model"})
+
+      {:ok,
+       %{
+         credential_names: [],
+         preflight: fn -> {:ok, fn %{} -> {:ok, capability} end} end
+       }}
+    end
+
+    implementation = %{
+      builder: staged,
+      connectivity_probe: fn _selection, _context, _services -> :ok end,
+      local_preflight: fn _selection, _context, _services ->
+        send(parent, {:audited_local, "model"})
+        if failing, do: {:error, failing}, else: :ok
+      end
+    }
+
+    registration = %{descriptor: descriptor, implementation: implementation, authority: nil}
+
+    assert {:ok, catalog} =
+             InstallationCatalog.new(%{"model" => registration},
+               runtime_binding: services.runtime_binding
+             )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "app", "path" => "main.clj"}],
+        "entry" => "app/run"
+      },
+      "input" => %{"value" => %{}},
+      "providers" => %{
+        "workflow" => [%{"name" => "model", "config" => %{}}],
         "mission" => []
       }
     }

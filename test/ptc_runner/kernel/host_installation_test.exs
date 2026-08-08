@@ -124,7 +124,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     expired = Deadline.from_expires_at(System.monotonic_time(:millisecond) - 1)
 
     assert {:error, :operation_deadline_expired} =
-             InstallationCatalog.runtime_registry(catalog, services, ["remote"], expired)
+             InstallationCatalog.runtime_registry(catalog, services, ["remote"], expired, self())
 
     refute_received :activated
     assert host_installation_owners() == owners_before
@@ -153,7 +153,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     services = replace_activation(services, delayed)
 
     assert {:error, :operation_deadline_expired} =
-             InstallationCatalog.runtime_registry(catalog, services, ["remote"], deadline)
+             InstallationCatalog.runtime_registry(catalog, services, ["remote"], deadline, self())
 
     assert_received {:activated, {:ok, authority}}
     refute Process.alive?(authority.pid)
@@ -205,7 +205,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     limits = %{Limits.installed_defaults() | run_duration_ms: 500}
     assert {:ok, session} = ProviderSession.start_active(limits, "installed-deadline-boundary")
-    assert {:ok, session} = ProviderSession.begin_run(session)
+    assert {:ok, session} = ProviderSession.begin_operation(session, :run)
     deadline = ProviderSession.run_deadline(session)
 
     active_context =
@@ -268,7 +268,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   test "nested active callback heap failures remain closed diagnostics" do
     limits = Limits.installed_defaults()
     assert {:ok, session} = ProviderSession.start_active(limits, "nested-heap-boundary")
-    assert {:ok, session} = ProviderSession.begin_run(session)
+    assert {:ok, session} = ProviderSession.begin_operation(session, :run)
 
     occurrence = %{provider: "remote", destination: :mission, index: 0}
 
@@ -473,6 +473,57 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert_receive {:DOWN, ^lease_ref, :process, _, :normal}
     assert :undefined = :ets.info(lease_table)
     refute_receive {:creator_death_credential_result, _result}
+  end
+
+  @tag :tmp_dir
+  test "a registry opened for another owner outlives the process that opened it", %{tmp_dir: dir} do
+    # Activation runs in a disposable worker while the registry it produces is
+    # tracked and closed by a longer-lived lifecycle owner. Binding the
+    # authority to the worker would revoke it the moment that worker is
+    # terminated, before the resources acquired through it can be closed.
+    parent = self()
+    host = load_host(dir, http_config())
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, services} = HostInstallation.runtime_services(host)
+
+    services =
+      replace_credential_resolver(services, fn ["token"] -> {:ok, %{"token" => "test-secret"}} end)
+
+    lifecycle_owner = spawn(fn -> receive do: (:never -> :ok) end)
+
+    on_exit(fn ->
+      if Process.alive?(lifecycle_owner), do: Process.exit(lifecycle_owner, :kill)
+    end)
+
+    worker =
+      spawn(fn ->
+        result =
+          InstallationCatalog.runtime_registry(
+            catalog,
+            services,
+            ["remote"],
+            Deadline.new(5_000),
+            lifecycle_owner
+          )
+
+        send(parent, {:worker_registry, result})
+        receive do: (:never -> :ok)
+      end)
+
+    worker_ref = Process.monitor(worker)
+    assert_receive {:worker_registry, {:ok, registry}}
+    authority_ref = Process.monitor(registry.authority_owner.pid)
+
+    Process.exit(worker, :kill)
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}
+
+    # The authority survives its opener, so the registry still works...
+    assert {:ok, %{"token" => "test-secret"}} =
+             ProviderRegistry.resolve_credentials(registry, ["token"])
+
+    # ...and it is the lifecycle owner it now follows.
+    Process.exit(lifecycle_owner, :kill)
+    assert_receive {:DOWN, ^authority_ref, :process, _pid, :normal}, 5_000
   end
 
   @tag :tmp_dir
@@ -904,11 +955,17 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     descriptor = catalog.descriptors["live"]
     implementation = catalog.implementations["live"]
 
+    # Deliberately not the host document's literal. Phase-8 step 5 resolves the
+    # credential once and hands it down, so the value the probe actually uses is
+    # the supplied one; a probe that resolved its own would reach for the host
+    # document and produce "probe-secret" instead.
     probe_context =
       dir
       |> context(:workflow)
       |> update_in([:limits], &Map.put(&1, :provider_heap_words, 20_000))
+      |> Map.put(:credentials, %{"key" => "pre-resolved-secret"})
 
+    assert is_binary(catalog.runtime_binding)
     assert descriptor.local_preflight == :audited_local
     assert descriptor.connectivity_mode == :probe
     assert descriptor.probe_effect == :completion
@@ -927,7 +984,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash", request}
     request_pid = Map.fetch!(request, :probe_pid)
     refute warmup_pid == request_pid
-    assert request.api_key == "probe-secret"
+    assert request.api_key == "pre-resolved-secret"
     assert request.cache == false
     assert request.max_tokens == 1
     assert request.max_retries == 0
@@ -941,6 +998,20 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
              implementation.connectivity_probe.(selection, probe_context, runtime_services)
 
     assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash", _request}
+    refute_receive {:host_llm_request, _, _}
+
+    # No fallback: the credential this installation declares is resolvable from
+    # the host document, so a probe that still resolved its own would succeed
+    # here rather than refuse. It refuses, and reaches no adapter at all.
+    Application.put_env(:ptc_runner, :host_llm_test_result, nil)
+
+    assert {:error, :llm_connectivity_unavailable} =
+             implementation.connectivity_probe.(
+               selection,
+               Map.put(probe_context, :credentials, %{}),
+               runtime_services
+             )
+
     refute_receive {:host_llm_request, _, _}
     assert :ok = InstallationCatalog.close(catalog)
   end
@@ -1446,6 +1517,10 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     provider_context = context(host.directory, destination)
     assert {:ok, runtime_services} = HostInstallation.runtime_services(host)
 
+    # An audited-local declaration cannot be sealed into an unbound catalog, so
+    # a host recipe that stopped binding its catalog would fail construction
+    # rather than quietly install a check phase 7 refuses to run.
+    assert is_binary(catalog.runtime_binding)
     assert descriptor.local_preflight == :audited_local
     assert is_function(implementation.local_preflight, 3)
 

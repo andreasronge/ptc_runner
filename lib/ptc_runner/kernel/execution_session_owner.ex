@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   use GenServer
 
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
@@ -37,7 +38,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           pid(),
           ProviderExecution.t() | nil,
           (binary() -> term()) | nil,
-          :run | :check
+          :run | :check | :connect
         ) ::
           {:ok, t()}
           | {:error,
@@ -48,7 +49,26 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   def start(prepared, authority, caller, provider_execution, notifier, operation \\ :run)
 
   def start(prepared, authority, caller, provider_execution, notifier, operation)
-      when is_pid(caller) and operation in [:run, :check] do
+      when is_pid(caller) and operation in [:run, :check, :connect] do
+    with :ok <- admissible(prepared, authority, provider_execution, notifier, operation) do
+      token = make_ref()
+
+      case GenServer.start(
+             __MODULE__,
+             {prepared, authority, caller, token, provider_execution, notifier, operation}
+           ) do
+        {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
+        {:error, _reason} -> {:error, :invalid_prepared_run}
+      end
+    end
+  end
+
+  def start(_prepared, _authority, _caller, _provider_execution, _notifier, _operation),
+    do: {:error, :invalid_prepared_run}
+
+  # Every refusal here is decided before `init/1` consumes the prepared run, so
+  # a rejected start leaves that preparation reusable.
+  defp admissible(prepared, authority, provider_execution, notifier, operation) do
     cond do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
@@ -56,40 +76,50 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       not PublicationAuthority.valid?(authority) ->
         {:error, :invalid_publication_authority}
 
-      prepared.provider_declarations != [] and
-          not (ProviderExecution.valid?(provider_execution) and is_function(notifier, 1)) ->
+      prepared.provider_declarations == [] ->
+        provider_free_admissible(provider_execution, operation)
+
+      not (ProviderExecution.valid?(provider_execution) and
+               notifier_matches_operation?(notifier, operation)) ->
         {:error, :provider_session_required}
 
-      prepared.provider_declarations == [] and not is_nil(provider_execution) ->
+      not ProviderExecution.bound_to_prepared?(provider_execution, prepared) ->
         {:error, :invalid_provider_execution}
 
-      # Decided before `init/1` consumes the prepared run, so an execution from
-      # another catalog leaves that preparation reusable.
-      prepared.provider_declarations != [] and
-          not ProviderExecution.bound_to_prepared?(provider_execution, prepared) ->
+      # Decided here, before `init/1` consumes the preparation, so a connect
+      # that asked for authorization leaves its preparation reusable rather
+      # than being spent on a check that would have skipped it.
+      operation == :connect and not ProviderExecution.non_interactive?(provider_execution) ->
         {:error, :invalid_provider_execution}
 
       true ->
-        token = make_ref()
-
-        case GenServer.start(
-               __MODULE__,
-               {prepared, authority, caller, token, provider_execution, notifier, operation}
-             ) do
-          {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
-          {:error, _reason} -> {:error, :invalid_prepared_run}
-        end
+        :ok
     end
   end
 
-  def start(_prepared, _authority, _caller, _provider_execution, _notifier, _operation),
-    do: {:error, :invalid_prepared_run}
+  # Connectivity never notifies or opens an interaction, so it carries no
+  # authorization notifier at all.
+  defp notifier_matches_operation?(notifier, :connect), do: is_nil(notifier)
+  defp notifier_matches_operation?(notifier, _operation), do: is_function(notifier, 1)
 
-  # A check completes with the acquisition's safe connector snapshots where a
-  # run completes with a sealed execution outcome.
+  # Connectivity answers for selected occurrences, so it has nothing to do
+  # without any. Refusing keeps `:connect` off the provider-free completion,
+  # which builds the run config connectivity never wants.
+  defp provider_free_admissible(_provider_execution, :connect),
+    do: {:error, :provider_session_required}
+
+  defp provider_free_admissible(nil, _operation), do: :ok
+
+  defp provider_free_admissible(_provider_execution, _operation),
+    do: {:error, :invalid_provider_execution}
+
+  # Each operation completes with its own evidence: a run with a sealed
+  # execution outcome, a check with the acquisition's safe connector snapshots,
+  # and connectivity with the sealed per-occurrence result.
   @doc false
   @spec await(t()) ::
-          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | [map()]} | {:error, term()}
+          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | [map()] | ConnectivityResult.t()}
+          | {:error, term()}
   def await(%__MODULE__{pid: pid, token: token}) do
     GenServer.call(pid, {token, :await}, :infinity)
   catch
@@ -437,21 +467,22 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     %{state | prepared: nil}
   end
 
-  # The worker acquires session, then OAuth memory, then registry, then
-  # listener, so aborting unwinds that order exactly: listener, registry,
-  # memory, session. Closing the registry before its backing store keeps
-  # terminal OAuth persistence available, and closing the session last keeps
-  # its scoped process and port roots alive until every resource that may have
-  # registered one is already closed.
+  # The session closes first because its committed closers belong to the
+  # runtime that acquired them: one may still release an admission, persist a
+  # token response, or reach the authority the registry holds. Only once that
+  # cleanup has settled do the resources it depended on unwind, in the reverse
+  # of the order the worker opened them: listener, registry, then the OAuth
+  # store. Closing the registry before its backing store keeps terminal OAuth
+  # persistence available for that last step.
   defp close_runtime_resources(state) do
-    if state.oauth_listener, do: LoopbackListener.close(state.oauth_listener)
-    close_registry(state.registry)
-    if state.oauth_memory, do: Memory.close(state.oauth_memory)
-
     cleanup =
       if state.provider_session && ProviderSession.alive?(state.provider_session),
         do: ProviderSession.close(state.provider_session),
         else: :ok
+
+    if state.oauth_listener, do: LoopbackListener.close(state.oauth_listener)
+    close_registry(state.registry)
+    if state.oauth_memory, do: Memory.close(state.oauth_memory)
 
     %{
       state

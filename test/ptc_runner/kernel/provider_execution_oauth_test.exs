@@ -67,7 +67,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   test "loopback authorization fixture completes a real code exchange" do
     server = start_server()
     authority = authority(server.base)
-    {:ok, memory} = Memory.start_link(owner: self())
+    {:ok, memory} = Memory.start(owner: self())
     on_exit(fn -> Memory.close(memory) end)
     {:ok, store} = Memory.store(memory)
     deadline = Deadline.new(5_000)
@@ -137,10 +137,28 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
     # While the token exchange is still in flight the ordinary run clock must
     # not have started, so authorization never spends the run budget.
     assert_receive {:token_pending, exchange}, 5_000
-    refute_received {:trace, _pid, :call, {ProviderActiveSession, :begin_owned_run, _arguments}}
+
+    refute_received {:trace, _pid, :call,
+                     {ProviderActiveSession, :begin_owned_operation, _arguments}}
 
     send(exchange, :release_token)
-    assert {:error, :invalid_mcp_transport} = ExecutionSessionOwner.await(owner)
+
+    assert {:error, %CommandDiagnostic{} = transport_stop} =
+             ExecutionSessionOwner.await(owner)
+
+    # The HTTPS-only transport rule is where an in-process OAuth run stops, and
+    # that stop is now classified: the provider could not be acquired, named by
+    # occurrence. Reaching it is still the evidence that authorization settled
+    # and the run got as far as acquisition.
+    assert transport_stop.phase == :provider_acquisition
+    assert transport_stop.code == :provider_unavailable
+
+    # `provider_unavailable` also covers a plain connection failure, so naming
+    # the occurrence is what keeps this pinned to the builder-validation stop
+    # rather than to any transport fault that happened to occur.
+    assert transport_stop.subject.name == "fixture"
+    assert transport_stop.subject.operation == :acquisition
+    assert transport_stop.subject.occurrence == %{destination: :mission, index: 0}
     assert [:token_exchange, :run_started] == [next_event(), next_event()]
 
     # The run reuses that grant instead of authorizing a second time.
@@ -169,7 +187,22 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
         :check
       )
 
-    assert {:error, :invalid_mcp_transport} = ExecutionSessionOwner.await(owner)
+    assert {:error, %CommandDiagnostic{} = transport_stop} =
+             ExecutionSessionOwner.await(owner)
+
+    # The HTTPS-only transport rule is where an in-process OAuth run stops, and
+    # that stop is now classified: the provider could not be acquired, named by
+    # occurrence. Reaching it is still the evidence that authorization settled
+    # and the run got as far as acquisition.
+    assert transport_stop.phase == :provider_acquisition
+    assert transport_stop.code == :provider_unavailable
+
+    # `provider_unavailable` also covers a plain connection failure, so naming
+    # the occurrence is what keeps this pinned to the builder-validation stop
+    # rather than to any transport fault that happened to occur.
+    assert transport_stop.subject.name == "fixture"
+    assert transport_stop.subject.operation == :acquisition
+    assert transport_stop.subject.occurrence == %{destination: :mission, index: 0}
     assert [:token_exchange, :run_started] == [next_event(), next_event()]
     assert_received {:authorization_notice, _url}
     refute_received {:authorization_notice, _other}
@@ -191,15 +224,30 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
         &visit_authorization_url(parent, &1)
       )
 
-    assert {:error, :invalid_mcp_transport} = ExecutionSessionOwner.await(owner)
+    assert {:error, %CommandDiagnostic{} = transport_stop} =
+             ExecutionSessionOwner.await(owner)
+
+    # The HTTPS-only transport rule is where an in-process OAuth run stops, and
+    # that stop is now classified: the provider could not be acquired, named by
+    # occurrence. Reaching it is still the evidence that authorization settled
+    # and the run got as far as acquisition.
+    assert transport_stop.phase == :provider_acquisition
+    assert transport_stop.code == :provider_unavailable
+
+    # `provider_unavailable` also covers a plain connection failure, so naming
+    # the occurrence is what keeps this pinned to the builder-validation stop
+    # rather than to any transport fault that happened to occur.
+    assert transport_stop.subject.name == "fixture"
+    assert transport_stop.subject.operation == :acquisition
+    assert transport_stop.subject.occurrence == %{destination: :mission, index: 0}
 
     # Each selected authority interacts on its own anchor...
     assert_receive {:authorization_notice, _first}, 5_000
     assert_receive {:authorization_notice, _second}, 5_000
 
     # ...but the execution opens exactly one store to back their shared context.
-    assert_receive {:trace, _pid, :call, {Memory, :start_link, _arguments}}, 5_000
-    refute_received {:trace, _pid, :call, {Memory, :start_link, _other}}
+    assert_receive {:trace, _pid, :call, {Memory, :start, _arguments}}, 5_000
+    refute_received {:trace, _pid, :call, {Memory, :start, _other}}
   end
 
   test "caller death during the OAuth interaction unwinds every tracked resource in order" do
@@ -247,23 +295,29 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
       owner_pid,
       state.worker_pid,
       state.provider_session.pid,
-      state.oauth_memory.pid,
       state.registry.authority_owner.pid,
       state.opened_sinks.event_sink.pid,
       fixture.prepared.provider_activity.owner
     ]
 
     references = Enum.map(watched, &{&1, Process.monitor(&1)})
+    store_reference = Process.monitor(state.oauth_memory.pid)
     trace_resource_closes(owner_pid)
 
     try do
-      # The store and the loopback socket are bound to the worker and die with
-      # it; the registry authority and the session outlive it, so their relative
-      # close order is the one this unwind has to get right.
+      # The session closes first because its committed closers still belong to
+      # this runtime; the listener, registry, and store it depended on unwind
+      # only once that cleanup has settled.
       Process.exit(caller, :kill)
 
-      assert [LoopbackListener, ProviderRegistry, Memory, ProviderSession] ==
+      assert [ProviderSession, LoopbackListener, ProviderRegistry, Memory] ==
                [next_close(), next_close(), next_close(), next_close()]
+
+      # `:normal` rather than `:killed` is the point: the store is owned by the
+      # lifecycle owner, so killing the blocked worker no longer destroys the
+      # store a session closer would still need.
+      store_pid = state.oauth_memory.pid
+      assert_receive {:DOWN, ^store_reference, :process, ^store_pid, :normal}, 5_000
 
       Enum.each(references, fn {pid, reference} ->
         assert_receive {:DOWN, ^reference, :process, ^pid, _reason}, 5_000
@@ -321,6 +375,62 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
     assert diagnostic.subject.name == "fixture"
     assert diagnostic.subject.operation == :authorization
     refute_received {:oauth_request, "POST", "/token"}
+  end
+
+  test "a selected OAuth provider nobody authorized is refused before the interaction" do
+    # Standalone V1 disables OAuth execution, so a selection nobody named with
+    # `--authorize-mcp` has no grant and no store to find one in. Without the
+    # up-front refusal this run reaches acquisition against an empty store and
+    # stops at the HTTPS-only transport rule as `provider_acquisition` /
+    # `provider_unavailable` — an accurate description of the wrong thing, since
+    # the transport is not what is missing.
+    server = start_server()
+    fixture = provider_fixture(server, ["fixture"], authorize: [])
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             RunCoordinator.execute(
+               fixture.prepared,
+               fixture.authority,
+               fixture.execution,
+               fn _url -> flunk("a refused selection must never open an interaction") end
+             )
+
+    assert diagnostic.phase == :active_preflight
+    assert diagnostic.code == :authorization_required
+    assert diagnostic.provider_activity
+    assert diagnostic.subject.name == "fixture"
+    assert diagnostic.subject.operation == :authorization
+    assert diagnostic.subject.occurrence == nil
+
+    # The refusal is past the marker rather than one of the pre-session ones:
+    # the preparation was consumed and is no longer reusable, unlike the
+    # unselected-target refusal below. That is what lets it report activity at
+    # all. It nevertheless reaches no OAuth endpoint — no discovery, no
+    # authorization URL, no token exchange.
+    refute PreparedRun.valid?(fixture.prepared)
+    refute_received {:oauth_request, _method, _path}
+  end
+
+  test "one unauthorized selection refuses before another one's interaction opens" do
+    # Both are selected and OAuth-capable, and only "fixture" was named. The
+    # refusal precedes the interactive branch entirely, so the operator is never
+    # walked through a browser round trip for a command that cannot succeed.
+    server = start_server()
+
+    fixture =
+      provider_fixture(server, ["fixture", "second"], authorize: ["fixture"])
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             RunCoordinator.execute(
+               fixture.prepared,
+               fixture.authority,
+               fixture.execution,
+               fn _url -> flunk("a refused selection must never open an interaction") end
+             )
+
+    assert diagnostic.code == :authorization_required
+    assert diagnostic.subject.name == "second"
+    refute_received {:oauth_request, _method, _path}
   end
 
   test "authorizing a provider the run never selected leaves the prepared run reusable" do
@@ -412,26 +522,28 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
 
   defp trace_oauth_stores do
     Code.ensure_loaded!(Memory)
-    assert :erlang.trace_pattern({Memory, :start_link, 1}, true, [:local]) == 1
+    assert :erlang.trace_pattern({Memory, :start, 1}, true, [:local]) == 1
     assert :erlang.trace(:new_processes, true, [:call]) >= 0
 
     on_exit(fn ->
       :erlang.trace(:new_processes, false, [:call])
-      :erlang.trace_pattern({Memory, :start_link, 1}, false, [:local])
+      :erlang.trace_pattern({Memory, :start, 1}, false, [:local])
     end)
   end
 
   defp trace_run_start do
     Code.ensure_loaded!(ProviderActiveSession)
 
-    assert :erlang.trace_pattern({ProviderActiveSession, :begin_owned_run, 3}, true, [:local]) ==
+    assert :erlang.trace_pattern({ProviderActiveSession, :begin_owned_operation, 5}, true, [
+             :local
+           ]) ==
              1
 
     assert :erlang.trace(:new_processes, true, [:call]) >= 0
 
     on_exit(fn ->
       :erlang.trace(:new_processes, false, [:call])
-      :erlang.trace_pattern({ProviderActiveSession, :begin_owned_run, 3}, false, [:local])
+      :erlang.trace_pattern({ProviderActiveSession, :begin_owned_operation, 5}, false, [:local])
     end)
   end
 
@@ -439,10 +551,17 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   # the next event of interest rather than from two independent matches.
   defp next_event do
     receive do
-      {:oauth_request, "POST", "/token"} -> :token_exchange
-      {:trace, _pid, :call, {ProviderActiveSession, :begin_owned_run, _arguments}} -> :run_started
-      {:oauth_request, _method, _path} -> next_event()
-      {:trace, _pid, :call, _mfa} -> next_event()
+      {:oauth_request, "POST", "/token"} ->
+        :token_exchange
+
+      {:trace, _pid, :call, {ProviderActiveSession, :begin_owned_operation, _arguments}} ->
+        :run_started
+
+      {:oauth_request, _method, _path} ->
+        next_event()
+
+      {:trace, _pid, :call, _mfa} ->
+        next_event()
     after
       5_000 -> flunk("no authorization or run event arrived")
     end

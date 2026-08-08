@@ -8,6 +8,243 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
   alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Kernel.ResourceRegistrar
 
+  test "a wedged session cannot outrun the operation deadline" do
+    # `:sys.suspend/1` wedges the session deterministically, with no timing
+    # margin: the call cannot be served at all until it is resumed. Before this
+    # slice `open_registrar/1` waited a fixed five seconds and activate, commit,
+    # and abort waited `:infinity`, so a short operation budget bought nothing.
+    {:ok, limits} = Limits.installed(%{run_duration_ms: 200})
+    {:ok, session} = ProviderSession.start_active(limits, "wedged-operation")
+    on_exit(fn -> Process.exit(session.pid, :kill) end)
+    {:ok, session} = ProviderSession.begin_operation(session, :run)
+
+    assert :ok = :sys.suspend(session.pid)
+
+    started_at_ms = System.monotonic_time(:millisecond)
+    assert {:error, :provider_session_unavailable} = ProviderSession.open_registrar(session)
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at_ms
+
+    assert Deadline.expired?(ProviderSession.run_deadline(session))
+
+    # The error alone proves nothing — a fixed timeout returns the same value,
+    # just later. The bound is the claim, so the elapsed time is the assertion.
+    # 200ms of budget against the 5s this used to wait leaves no ambiguity.
+    assert elapsed_ms < 1_000
+
+    assert :ok = :sys.resume(session.pid)
+  end
+
+  test "a scope refused after its deadline leaves nothing behind" do
+    # The caller gave up, so the reply is worthless — but the handler would
+    # still have created a controller, a root owner, and a reaper, and put the
+    # scope in `scope_order` where only session close would ever reap it. Both
+    # sides fence on the same absolute instant instead.
+    {:ok, limits} = Limits.installed(%{run_duration_ms: 200})
+    {:ok, session} = ProviderSession.start_active(limits, "fenced-operation")
+    on_exit(fn -> ProviderSession.close(session) end)
+    {:ok, session} = ProviderSession.begin_operation(session, :run)
+
+    assert :ok = :sys.suspend(session.pid)
+    assert {:error, :provider_session_unavailable} = ProviderSession.open_registrar(session)
+    assert :ok = :sys.resume(session.pid)
+
+    # The request is still queued and is served now, after the deadline. It must
+    # not become a scope nothing holds a handle to.
+    assert %{scopes: scopes, scope_order: order} = :sys.get_state(session.pid)
+    assert scopes == %{}
+    assert order == []
+  end
+
+  test "a stale pre-operation handle cannot open an unbounded scope" do
+    # `begin_operation/2` returns a new sealed handle and the pre-begin one
+    # stays valid with `run_deadline: nil`. If the fence trusted the caller's
+    # copy of the deadline, that stale handle would send `nil` and open a scope
+    # with no bound at all, after the operation had already expired.
+    {:ok, limits} = Limits.installed(%{run_duration_ms: 200})
+    {:ok, stale} = ProviderSession.start_active(limits, "stale-handle")
+    on_exit(fn -> ProviderSession.close(stale) end)
+    {:ok, begun} = ProviderSession.begin_operation(stale, :run)
+
+    assert ProviderSession.run_deadline(stale) == nil
+    assert Deadline.valid?(ProviderSession.run_deadline(begun))
+
+    burn_until(Deadline.expires_at(ProviderSession.run_deadline(begun)) + 5)
+
+    assert {:error, :provider_session_unavailable} = ProviderSession.open_registrar(stale)
+    assert %{scopes: %{}, scope_order: []} = :sys.get_state(stale.pid)
+  end
+
+  test "an active session hands out no scope before its operation starts" do
+    # Between `start_active/2` and `begin_operation/2` the session has an
+    # identity but no anchored budget. Sealing that would have the server itself
+    # mint the unbounded handle the sealed-budget rule exists to prevent, so the
+    # scope is refused until the operation it belongs to has started.
+    {:ok, limits} = Limits.installed(%{run_duration_ms: 2_000})
+    {:ok, session} = ProviderSession.start_active(limits, "pre-begin")
+    on_exit(fn -> ProviderSession.close(session) end)
+
+    assert ProviderSession.run_deadline(session) == nil
+    assert {:error, :provider_session_unavailable} = ProviderSession.open_registrar(session)
+    assert %{scopes: %{}, scope_order: []} = :sys.get_state(session.pid)
+
+    # Once the operation is anchored the same session opens scopes normally.
+    {:ok, begun} = ProviderSession.begin_operation(session, :run)
+    assert {:ok, _registrar} = ProviderSession.open_registrar(begun)
+  end
+
+  test "an embedding session without an operation still opens scopes" do
+    # A session with no identity at all is a direct embedding, which keeps the
+    # synchronous semantics it has always had. The refusal above must not catch
+    # it, or every embedded acquisition breaks.
+    {:ok, session} = ProviderSession.start(limits())
+    on_exit(fn -> ProviderSession.close(session) end)
+
+    assert ProviderSession.run_deadline(session) == nil
+    assert {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    assert :ok = ResourceRegistrar.abort(registrar)
+  end
+
+  test "a stale handle cannot mint a registrar with no budget" do
+    # The fence being server-authoritative is not enough on its own. During a
+    # live operation the pre-begin handle passes that fence, so if the budget
+    # sealed into the registrar came from the caller's copy it would be `nil` —
+    # a legitimately attested handle whose activate and commit wait forever.
+    # The sealed budget therefore comes back from the session too.
+    {:ok, limits} = Limits.installed(%{run_duration_ms: 2_000})
+    {:ok, stale} = ProviderSession.start_active(limits, "stale-budget")
+    on_exit(fn -> Process.exit(stale.pid, :kill) end)
+    {:ok, begun} = ProviderSession.begin_operation(stale, :run)
+
+    assert ProviderSession.run_deadline(stale) == nil
+    assert Deadline.valid?(ProviderSession.run_deadline(begun))
+
+    # The operation is live, so opening through the stale handle succeeds.
+    assert {:ok, registrar} = ProviderSession.open_registrar(stale)
+
+    # ...and the handle it produced still carries the operation's budget, so a
+    # wedged session cannot make its activate wait forever.
+    assert :ok = :sys.suspend(stale.pid)
+    started_at_ms = System.monotonic_time(:millisecond)
+    assert {:error, :resource_registrar_unavailable} = ResourceRegistrar.activate(registrar)
+    # Wide on purpose. The bound only has to separate "spends the 2s budget"
+    # from "waits forever", and the unsealed-budget mutation never returns at
+    # all, so a tight margin buys nothing and flakes under load.
+    assert System.monotonic_time(:millisecond) - started_at_ms < 10_000
+  end
+
+  test "an invalid registrar handle is refused rather than raising" do
+    # The budgets are read from the handle, so a tampered one must be proved
+    # before either field is touched: an invalid deadline would otherwise raise
+    # in `Deadline.remaining/1` and a nonpositive cleanup budget in
+    # `Deadline.new/1`, crashing the caller instead of failing closed.
+    {:ok, session} = ProviderSession.start(limits())
+    on_exit(fn -> ProviderSession.close(session) end)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+
+    # A well-formed but widened deadline is only rejected; a malformed one is
+    # what proves the ordering, because reading it at all raises.
+    garbled = %{registrar | operation_deadline: :not_a_deadline}
+    refute ResourceRegistrar.valid?(garbled)
+
+    assert {:error, :resource_registrar_unavailable} = ResourceRegistrar.activate(garbled)
+    assert {:error, :resource_registrar_unavailable} = ResourceRegistrar.commit(garbled, nil)
+
+    widened = %{registrar | operation_deadline: Deadline.new(600_000)}
+    refute ResourceRegistrar.valid?(widened)
+    assert {:error, :resource_registrar_unavailable} = ResourceRegistrar.activate(widened)
+
+    # `Deadline.new/1` refuses a nonpositive budget, so abort reads it only
+    # after the handle is proved.
+    zeroed = %{registrar | cleanup_timeout_ms: 0}
+    refute ResourceRegistrar.valid?(zeroed)
+    assert {:error, :provider_cleanup_failed} = ResourceRegistrar.abort(zeroed)
+  end
+
+  test "an abort spends its own cleanup budget, not the operation's" do
+    # Abort commonly begins because the operation deadline expired. Spending
+    # that deadline would hand cleanup a zero remainder and skip cooperative
+    # release, so each abort episode anchors one fresh cleanup budget.
+    #
+    # This guards the invariant rather than evidencing a change: the session
+    # already anchored a fresh budget per abort before the deadline classes
+    # existed, so it passes at the base commit too.
+    {:ok, limits} = Limits.installed(%{run_duration_ms: 200, provider_cleanup_timeout_ms: 5_000})
+    {:ok, session} = ProviderSession.start_active(limits, "abort-budget")
+    on_exit(fn -> ProviderSession.close(session) end)
+    {:ok, session} = ProviderSession.begin_operation(session, :run)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    burn_until(Deadline.expires_at(ProviderSession.run_deadline(session)) + 5)
+    assert Deadline.expired?(ProviderSession.run_deadline(session))
+
+    # The operation budget is gone and the abort still settles cooperatively.
+    assert :ok = ResourceRegistrar.abort(registrar)
+    assert %{scopes: %{}, scope_order: []} = :sys.get_state(session.pid)
+  end
+
+  test "a wedged session cannot leave a committed closer ambiguously owned" do
+    # A session that never answers is the case a reply grace cannot decide. The
+    # commit keeps its request alive, spends one cleanup budget waiting for the
+    # truth, and then settles the question with an event rather than a duration:
+    # the session is killed, and a brutal kill runs no terminate callback, so a
+    # session that never replied has never run and never will run this closer.
+    # Ownership therefore falls to the caller, provably once.
+    {:ok, closed} = Agent.start_link(fn -> 0 end)
+
+    {:ok, limits} =
+      Limits.installed(%{run_duration_ms: 200, provider_cleanup_timeout_ms: 300})
+
+    {:ok, session} = ProviderSession.start_active(limits, "wedged-commit")
+    {:ok, session} = ProviderSession.begin_operation(session, :run)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    parent = self()
+    close = fn -> Agent.update(closed, &(&1 + 1)) && :ok end
+    reference = Process.monitor(session.pid)
+
+    # Suspended and never resumed: the commit can never be served.
+    assert :ok = :sys.suspend(session.pid)
+    spawn(fn -> send(parent, {:commit, ResourceRegistrar.commit(registrar, close)}) end)
+
+    # The caller is told it owns the closer, rather than being left to guess.
+    assert_receive {:commit, {:error, :resource_registrar_unavailable}}, 5_000
+
+    # And it was told so by an event: the wedged session was killed, so nothing
+    # else can ever run this closer.
+    assert_receive {:DOWN, ^reference, :process, _pid, _reason}, 5_000
+    assert Agent.get(closed, & &1) == 0
+  end
+
+  test "a commit refused after its deadline leaves the closer with its caller" do
+    # A commit that landed after its caller gave up would be owned twice: the
+    # session would close it, and the caller's unregistered-closer recovery
+    # would run it as well. The session refuses ownership past the same instant
+    # the caller stops waiting, so the closer stays with exactly one owner.
+    {:ok, closed} = Agent.start_link(fn -> 0 end)
+    {:ok, limits} = Limits.installed(%{run_duration_ms: 200})
+    {:ok, session} = ProviderSession.start_active(limits, "commit-fence")
+    on_exit(fn -> ProviderSession.close(session) end)
+    {:ok, session} = ProviderSession.begin_operation(session, :run)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    burn_until(Deadline.expires_at(ProviderSession.run_deadline(session)) + 5)
+
+    close = fn -> Agent.update(closed, &(&1 + 1)) && :ok end
+    assert {:error, :resource_registrar_unavailable} = ResourceRegistrar.commit(registrar, close)
+
+    # The session took no ownership, so closing it runs nothing...
+    assert :ok = ProviderSession.close(session)
+    assert Agent.get(closed, & &1) == 0
+
+    # ...and the caller still holds the only copy.
+    assert :ok = close.()
+    assert Agent.get(closed, & &1) == 1
+  end
+
   test "committed scopes close once in reverse commit order" do
     {:ok, order} = Agent.start_link(fn -> [] end)
     {:ok, session} = ProviderSession.start(limits())
@@ -54,7 +291,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
     assert_receive {:session_handed_off, ^session}
     assert ProviderSession.lifecycle_owner(session) == lifecycle_owner
-    assert {:ok, session} = ProviderSession.begin_run(session)
+    assert {:ok, session} = ProviderSession.begin_operation(session, :run)
     assert {:ok, registrar} = ProviderSession.open_registrar(session)
     assert :ok = ResourceRegistrar.abort(registrar)
 
@@ -112,7 +349,9 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert_receive :session_suspended
     Process.send_after(suspender, :resume, 5_250)
 
-    assert {:error, :provider_session_unavailable} = ProviderSession.begin_run(session)
+    assert {:error, :provider_session_unavailable} =
+             ProviderSession.begin_operation(session, :run)
+
     assert_receive {:DOWN, ^monitor, :process, _, :normal}, 1_000
     refute ProviderSession.alive?(session)
   end
@@ -121,7 +360,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     identity = "prepared-operation"
     limits = limits()
     {:ok, session} = ProviderSession.start_active(limits, identity)
-    {:ok, session} = ProviderSession.begin_run(session)
+    {:ok, session} = ProviderSession.begin_operation(session, :run)
     assert :ok = ProviderSession.claim_operation(session, limits, identity)
 
     lifecycle_owner = spawn(fn -> receive do: (:stop -> :ok) end)
@@ -1028,6 +1267,12 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
   end
 
   defp limits, do: Limits.defaults()
+
+  # The subject here is a deadline, so the fixture consumes real time without a
+  # timer the suite forbids.
+  defp burn_until(target_ms) do
+    if System.monotonic_time(:millisecond) < target_ms, do: burn_until(target_ms), else: :ok
+  end
 
   defp task_tracker(run_state) do
     {:ok, tracker} = ProviderTaskTracker.start(run_state)

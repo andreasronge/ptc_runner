@@ -35,7 +35,7 @@ defmodule PtcRunner.Kernel.MCPOAuthRemoteE2ETest do
     endpoint = System.fetch_env!("PTC_TEST_MCP_2026_ENDPOINT")
     authority = authority(endpoint)
 
-    {:ok, memory} = Memory.start_link(owner: self())
+    {:ok, memory} = Memory.start(owner: self())
     {:ok, store} = Memory.store(memory)
 
     {:ok, context} =

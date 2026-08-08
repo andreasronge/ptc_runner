@@ -111,11 +111,23 @@ defmodule PtcRunner.Kernel.HostInstallationAuthority do
         self()
       )
 
-  @spec transfer_to_registry(t() | nil) ::
-          {:ok, t() | nil} | {:error, :invalid_host_installation_authority}
-  def transfer_to_registry(nil), do: {:ok, nil}
+  @doc """
+  Reparents a catalog authority to the process that will own the registry.
 
-  def transfer_to_registry(%__MODULE__{role: :catalog} = authority) do
+  The new owner is explicit rather than `self()` because activation runs in a
+  disposable worker while the registry it produces is tracked and closed by a
+  longer-lived lifecycle owner. Monitoring the worker would revoke the authority
+  the moment that worker is terminated, before the resources acquired through it
+  have been closed.
+  """
+  @spec transfer_to_registry(t() | nil, pid()) ::
+          {:ok, t() | nil} | {:error, :invalid_host_installation_authority}
+  def transfer_to_registry(authority, new_owner)
+
+  def transfer_to_registry(nil, new_owner) when is_pid(new_owner), do: {:ok, nil}
+
+  def transfer_to_registry(%__MODULE__{role: :catalog} = authority, new_owner)
+      when is_pid(new_owner) do
     with true <- valid?(authority),
          {:ok, registry_authority} <-
            build(
@@ -135,7 +147,7 @@ defmodule PtcRunner.Kernel.HostInstallationAuthority do
           authority.token,
           :catalog,
           :registry,
-          self(),
+          new_owner,
           transition
         )
 
@@ -148,7 +160,8 @@ defmodule PtcRunner.Kernel.HostInstallationAuthority do
     end
   end
 
-  def transfer_to_registry(_authority), do: {:error, :invalid_host_installation_authority}
+  def transfer_to_registry(_authority, _new_owner),
+    do: {:error, :invalid_host_installation_authority}
 
   @spec close(t() | nil) :: :ok
   def close(%__MODULE__{} = authority) do

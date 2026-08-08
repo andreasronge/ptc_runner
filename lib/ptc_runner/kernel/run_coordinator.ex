@@ -20,14 +20,18 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.ConnectivityResult
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LocalPreflight
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderPlan
+  alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
@@ -73,6 +77,51 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   def prepare(_request, _registry),
     do: {:error, diagnostic(:internal, :internal_error)}
+
+  @doc """
+  Runs the audited-local phase-7 step for one sealed preparation.
+
+  This is the only entry to that step. Applicability is derived from the sealed
+  trio rather than supplied, so no caller can narrow the work, and the result is
+  only success or one catalogued diagnostic — never a per-occurrence report a
+  caller could turn into a passing row. The coordinator anchors the single
+  deadline the whole step spends.
+
+  Every active command crosses it before provider activity is marked: run,
+  `--check`, and `doctor --connect` through `ProviderExecution`, and default
+  doctor by calling this directly, because it opens no provider session at all.
+
+  The REPL does not, and saying so is not an omission to fix here. It builds
+  providers through the direct-embedding registry rather than through an
+  execution owner, so it crosses neither this step nor the activity marker.
+  Routing it through the shared boundary is its own slice.
+  """
+  @spec local_checks(
+          PreparedRun.t() | nil,
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t()
+        ) :: :ok | {:error, CommandDiagnostic.t()}
+  def local_checks(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services
+      ) do
+    LocalPreflight.run(prepared, catalog, services, local_deadline(prepared))
+  end
+
+  # A command that prepared no application selected no occurrence, so there is
+  # nothing to derive a check from. This clause exists so the decision stays
+  # here rather than in a frontend choosing whether to call the step at all.
+  def local_checks(nil, %InstallationCatalog{} = catalog, %ProviderRuntimeServices{}),
+    do: if(InstallationCatalog.valid?(catalog), do: :ok, else: internal_error())
+
+  def local_checks(_prepared, _catalog, _services), do: internal_error()
+
+  defp internal_error, do: {:error, diagnostic(:internal, :internal_error)}
+
+  defp local_deadline(prepared) do
+    Deadline.new(prepared.request.package.limits.local_preflight_timeout_ms)
+  end
 
   @doc false
   @spec execute(PreparedRun.t(), PublicationAuthority.t()) ::
@@ -154,6 +203,31 @@ defmodule PtcRunner.Kernel.RunCoordinator do
       do: open_active(prepared, authority, provider_execution, notifier, :check)
 
   def check(_prepared, _authority, _provider_execution, _notifier),
+    do: {:error, :invalid_prepared_run}
+
+  # Internal only, like its `execute/4` and `check/4` neighbours.
+  # `PtcRunner.Kernel.CommandEngine` dispatches `doctor --connect` through it.
+  # Connectivity answers for selected occurrences, so unlike a run it has no
+  # provider-free form: a preparation selecting no provider is refused here, and
+  # the command answers for it without opening an operation at all.
+  #
+  # It takes no authorization notifier and refuses an execution carrying
+  # authorization targets, because a health check must never open an interactive
+  # authorization or ask a human for anything. The refusal is deliberate rather
+  # than a silent downgrade to the non-interactive path: a caller that asked for
+  # authorization and got a check that skipped it would be told the wrong thing.
+  @doc false
+  @spec connect(PreparedRun.t(), PublicationAuthority.t(), ProviderExecution.t()) ::
+          {:ok, ConnectivityResult.t()}
+          | {:error,
+             :invalid_prepared_run
+             | :invalid_publication_authority
+             | :invalid_provider_execution
+             | term()}
+  def connect(%PreparedRun{} = prepared, authority, provider_execution),
+    do: open_active(prepared, authority, provider_execution, nil, :connect)
+
+  def connect(_prepared, _authority, _provider_execution),
     do: {:error, :invalid_prepared_run}
 
   defp open_active(prepared, authority, provider_execution, notifier, operation) do

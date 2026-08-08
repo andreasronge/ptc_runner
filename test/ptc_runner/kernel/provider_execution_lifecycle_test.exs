@@ -52,7 +52,61 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     refute_received {:execution_result, _result}
   end
 
-  test "caller death while acquisition blocks closes the registry before the session" do
+  test "caller death runs a committed closer before the runtime that produced it closes" do
+    # A committed provider closer belongs to the runtime that acquired it: it
+    # may still release an admission, persist a token response, or reach the
+    # authority the registry holds. Aborting must therefore close the session
+    # first and leave that runtime standing until the closer has settled.
+    parent = self()
+
+    fixture =
+      provider_fixture(
+        body: "(loop [] (recur))",
+        acquire: fn context ->
+          scoped_root(parent, context)
+          {:ok, capability} = fixture_capability()
+
+          {:ok,
+           %{
+             capabilities: [capability],
+             close: fn ->
+               send(parent, {:provider_closing, self()})
+               receive do: (:release -> :ok)
+             end
+           }}
+        end
+      )
+
+    started = start_owned_execution(fixture)
+    state = await_state(started.owner_pid, & &1.registry)
+
+    # Killing on the acquire callback would race `ResourceRegistrar.commit/2`,
+    # so wait until the session actually holds the committed closer.
+    assert_eventually(fn -> :sys.get_state(state.provider_session.pid).committed != [] end)
+
+    trace_closes(started.owner_pid)
+
+    try do
+      Process.exit(started.caller, :kill)
+
+      # The session is the first thing the abort closes...
+      assert ProviderSession == next_close()
+      assert_receive {:provider_closing, closer}, 5_000
+
+      # ...and the owner is blocked inside that close while the committed closer
+      # runs, so nothing can have unwound the registry underneath it yet.
+      refute_received {:trace, _owner, :call, {ProviderRegistry, :close, _arguments}}
+
+      send(closer, :release)
+      assert ProviderRegistry == next_close()
+    after
+      stop_trace_closes(started.owner_pid)
+    end
+
+    refute_received {:execution_result, _result}
+  end
+
+  test "caller death while acquisition blocks closes the session before the registry" do
     parent = self()
 
     fixture =
@@ -87,7 +141,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     try do
       Process.exit(started.caller, :kill)
 
-      assert [ProviderRegistry, ProviderSession] == [next_close(), next_close()]
+      assert [ProviderSession, ProviderRegistry] == [next_close(), next_close()]
       assert_all_down(watched)
     after
       stop_trace_closes(started.owner_pid)
@@ -234,6 +288,69 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert diagnostic.code == :provider_cleanup_failed
   end
 
+  test "an unresolvable credential fails a run before any provider callback" do
+    # Phase-8 step 5 is what moved: a run used to prepare and preflight every
+    # selected provider and only then discover its credential was unavailable,
+    # paying for callbacks against a command that could never complete. The
+    # union now comes from the sealed declarations, so it can be — and is —
+    # resolved while every provider is still inert.
+    parent = self()
+
+    fixture =
+      provider_fixture(
+        credential_names: ["fixture-key"],
+        credential_resolver: fn names ->
+          send(parent, {:resolved_credentials, names})
+          {:error, :credential_unavailable}
+        end
+      )
+
+    _started = start_owned_execution(fixture)
+
+    assert_receive {:execution_result, {:error, %CommandDiagnostic{} = diagnostic}}, 5_000
+    assert diagnostic.phase == :active_preflight
+    assert diagnostic.code == :credential_unavailable
+    assert diagnostic.provider_activity
+
+    # Attribution is per alias, not per occurrence: the catalogue forbids an
+    # occurrence on this pair, and the resolver answers for the whole batch
+    # rather than naming which credential failed.
+    assert diagnostic.subject.name == "selected"
+    assert diagnostic.subject.operation == :credentials
+    assert diagnostic.subject.occurrence == nil
+
+    assert_received {:resolved_credentials, ["fixture-key"]}
+    refute_received {:provider_phase, :prepare}
+    refute_received {:provider_phase, :preflight}
+    refute_received {:provider_phase, :acquire}
+    refute_received {:provider_root, _root, _registration}
+  end
+
+  test "a run refuses a builder asking for a credential its declaration omits" do
+    # The sealed declaration decides what may be read, so a builder cannot widen
+    # it at run time. Connectivity gets this from `declarations_honored/2`, which
+    # compares against a plan; an ordinary run has no plan, and the supplied
+    # union is the guard in its place — a name the declarations never required
+    # cannot appear in it, and acquisition refuses rather than resolving again.
+    fixture = provider_fixture(credential_names: [], builder_credential_names: ["smuggled"])
+
+    _started = start_owned_execution(fixture)
+
+    assert_receive {:execution_result, {:error, %CommandDiagnostic{} = diagnostic}}, 5_000
+    assert diagnostic.phase == :provider_acquisition
+    assert diagnostic.code == :provider_policy_changed
+    assert diagnostic.subject.name == "selected"
+    assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
+
+    # Nothing declared a credential, so step 5 asked the resolver for nothing,
+    # and the smuggled name reached it by no other route either.
+    refute_received {:resolved_credentials, _names}
+    assert_received {:provider_phase, :prepare}
+    refute_received {:provider_phase, :preflight}
+    refute_received {:provider_phase, :acquire}
+    refute_received {:provider_root, _root, _registration}
+  end
+
   test "a staged preparation stricter than its sealed declaration is refused" do
     # Preparation, phase-5 identity, and the sinks the owner opened before any
     # provider ran all come from the sealed descriptor. A builder preparing as
@@ -316,56 +433,17 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     # produced its resources are still alive. A check that left the close to the
     # execution owner would unwind that runtime first and run connector closers
     # against a store and managers that are already gone.
-    parent = self()
+    assert_session_closes_before_registry(provider_fixture(closing_acquire()), :check)
+  end
 
-    fixture =
-      provider_fixture(
-        acquire: fn context ->
-          scoped_root(parent, context)
-          {:ok, capability} = fixture_capability()
-
-          {:ok,
-           %{
-             capabilities: [capability],
-             snapshot: nil,
-             close: fn ->
-               send(parent, :provider_closed)
-               :ok
-             end
-           }}
-        end
-      )
-
-    caller =
-      spawn(fn ->
-        receive do: (:go -> :ok)
-
-        {:ok, owner} =
-          ExecutionSessionOwner.start(
-            fixture.prepared,
-            fixture.authority,
-            self(),
-            fixture.execution,
-            &never_notify/1,
-            :check
-          )
-
-        send(parent, {:execution_result, ExecutionSessionOwner.await(owner)})
-      end)
-
-    # Tracing the caller before it starts anything makes the owner and its
-    # worker inherit the flag, so the order below is the order the run actually
-    # closed in rather than a snapshot taken after the fact.
-    trace_closes(caller, [:call, :set_on_spawn])
-
-    try do
-      send(caller, :go)
-      assert_receive {:execution_result, {:ok, _snapshots}}, 5_000
-      assert [ProviderSession, ProviderRegistry] == [next_close(), next_close()]
-      assert_received :provider_closed
-    after
-      stop_trace_closes(caller)
-    end
+  test "connectivity closes its provider session inside the runtime that acquired it" do
+    # The same invariant as the check above, on the operation that used to break
+    # it. A connectivity acquisition commits real closers to the session, so
+    # unwinding the registry first would run them against a runtime that is
+    # already gone. An independent review found the inversion; this is what
+    # would have caught it.
+    fixture = provider_fixture([connectivity_mode: :acquisition] ++ closing_acquire())
+    assert_session_closes_before_registry(fixture, :connect)
   end
 
   test "an execution from another catalog leaves the prepared run reusable" do
@@ -485,6 +563,67 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     end)
   end
 
+  defp closing_acquire do
+    parent = self()
+
+    [
+      acquire: fn context ->
+        scoped_root(parent, context)
+        {:ok, capability} = fixture_capability()
+
+        {:ok,
+         %{
+           capabilities: [capability],
+           snapshot: nil,
+           close: fn ->
+             send(parent, :provider_closed)
+             :ok
+           end
+         }}
+      end
+    ]
+  end
+
+  # One invariant, asserted for each operation that owns a provider session:
+  # the session closes while the runtime that produced its resources is still
+  # alive. Connectivity takes no notifier at all, which is itself part of its
+  # contract.
+  defp assert_session_closes_before_registry(fixture, operation) do
+    parent = self()
+    notifier = if operation == :connect, do: nil, else: &never_notify/1
+
+    caller =
+      spawn(fn ->
+        receive do: (:go -> :ok)
+
+        {:ok, owner} =
+          ExecutionSessionOwner.start(
+            fixture.prepared,
+            fixture.authority,
+            self(),
+            fixture.execution,
+            notifier,
+            operation
+          )
+
+        send(parent, {:execution_result, ExecutionSessionOwner.await(owner)})
+      end)
+
+    # Tracing the caller before it starts anything makes the owner and its
+    # worker inherit the flag, so the order below is the order the operation
+    # actually closed in rather than a snapshot taken after the fact.
+    trace_closes(caller, [:call, :set_on_spawn])
+
+    try do
+      send(caller, :go)
+      assert_receive {:execution_result, {:ok, _evidence}}, 5_000
+      assert [ProviderSession, ProviderRegistry] == [next_close(), next_close()]
+      assert_received :provider_closed
+    after
+      stop_trace_closes(caller)
+    end
+  end
+
   defp trace_closes(owner_pid, flags \\ [:call]) do
     Enum.each([ProviderRegistry, ProviderSession], &Code.ensure_loaded!/1)
     assert :erlang.trace_pattern({ProviderRegistry, :close, 1}, true, [:local]) == 1
@@ -505,14 +644,32 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     :error, :badarg -> false
   end
 
-  # Every refused declaration must be refused for the same reason and while the
-  # provider is still inert: no credential resolution, no preflight, no
-  # acquisition, and no registered resource root.
+  # Every refused declaration must be refused for the same reason and before the
+  # provider builds anything: no preflight, no acquisition, and no registered
+  # resource root.
+  #
+  # Credentials are the deliberate exception, and asserting they were read is
+  # what pins the ordering here. Phase-8 step 5 resolves them from the sealed
+  # declarations before any provider callback runs, so a mismatch found during
+  # preparation is necessarily found after resolution. Moving resolution back
+  # behind preparation would leave this resolver untouched, because preparation
+  # is what fails.
   defp assert_declaration_refused(fixture) do
     _started = start_owned_execution(fixture)
 
-    assert_receive {:execution_result, {:error, :provider_declaration_mismatch}}, 5_000
-    refute_received {:resolved_credentials, _names}
+    # Past the phase-8 marker the reason is classified where the occurrence is
+    # still in scope, so the refusal arrives as the closed acquisition code for
+    # a preparation that contradicted its declaration, naming the occurrence
+    # that did it rather than as a bare atom the command boundary would have
+    # collapsed to `internal_error`.
+    assert_receive {:execution_result, {:error, %CommandDiagnostic{} = diagnostic}}, 5_000
+    assert diagnostic.phase == :provider_acquisition
+    assert diagnostic.code == :provider_policy_changed
+    assert diagnostic.provider_activity
+    assert diagnostic.subject.name == "selected"
+    assert diagnostic.subject.operation == :acquisition
+    assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
+    assert_received {:resolved_credentials, ["fixture-key"]}
     refute_received {:provider_phase, :preflight}
     refute_received {:provider_phase, :acquire}
     refute_received {:provider_root, _root, _registration}
@@ -554,7 +711,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
         provides: [],
         destinations: [:workflow],
         workflow_llm?: false,
-        connectivity_mode: :none,
+        connectivity_mode: Keyword.get(opts, :connectivity_mode, :none),
         probe_effect: nil,
         selection_validation: selection_validation,
         selection_rules: rules,
@@ -563,8 +720,10 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
       )
 
     builder = fn _selection, context ->
+      send(parent, {:provider_phase, :prepare})
+
       staged = %{
-        credential_names: credential_names,
+        credential_names: Keyword.get(opts, :builder_credential_names, credential_names),
         preflight: fn ->
           send(parent, {:provider_phase, :preflight})
 
@@ -590,12 +749,14 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     {:ok, catalog} =
       InstallationCatalog.new(%{"selected" => registration})
 
+    default_resolver = fn names ->
+      send(parent, {:resolved_credentials, names})
+      {:ok, Map.new(names, &{&1, "fixture-credential"})}
+    end
+
     {:ok, services} =
       ProviderRuntimeServices.new(
-        credential_resolver: fn names ->
-          send(parent, {:resolved_credentials, names})
-          {:ok, Map.new(names, &{&1, "fixture-credential"})}
-        end
+        credential_resolver: Keyword.get(opts, :credential_resolver, default_resolver)
       )
 
     {:ok, execution} = ProviderExecution.new(catalog, services, [])

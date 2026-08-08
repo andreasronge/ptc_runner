@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "1b1acec11e3ab22beea955dd152e0d1ff2ad837d46b8eab42eced61c61a7b1a3",
+  "source_closure_hash": "e50babe0c93a6ca61476a0c49cde6a5683dd693e3f4dbd53458a6b4329c2eabb",
   "sources": [
     {
       "bytes": 870,
@@ -150,6 +150,11 @@
       "bytes": 2809,
       "path": "lib/ptc_runner/kernel.ex",
       "sha256": "f079a92f763aa40b191b38f00f015e91ac49672f7f1ae8af96b097b90eee5146"
+    },
+    {
+      "bytes": 9511,
+      "path": "lib/ptc_runner/kernel/acquisition_reason.ex",
+      "sha256": "1a24eea154a88fd7c93471e6232712b2eb16ed81b794fe491dc9ea580feaca19"
     },
     {
       "bytes": 1765,
@@ -207,9 +212,9 @@
       "sha256": "f39cc0a3d34b82d5731792b5b05de7d05f4ae3405baf46e9c2ce5ebcbbeeb11f"
     },
     {
-      "bytes": 5564,
+      "bytes": 6574,
       "path": "lib/ptc_runner/kernel/bounded_worker.ex",
-      "sha256": "0aff56e62daf81a551a4be27a87fe1da6c514fa74f89e933ab1eb7442c155a48"
+      "sha256": "ad645aeb5df3ddf1ce2d30999c60816a21ab4d50eb8a5d252567bc9230ff8112"
     },
     {
       "bytes": 10959,
@@ -247,6 +252,16 @@
       "sha256": "2e352d254afdc26086197a800a898d7d5eec653e5be6c3f9440f2ad1fa71acfc"
     },
     {
+      "bytes": 8715,
+      "path": "lib/ptc_runner/kernel/connectivity_probe.ex",
+      "sha256": "7fd958bae36aeee9a0672ec16302cca003152ace0055b3c63c3f4ddecd8cfd4d"
+    },
+    {
+      "bytes": 7835,
+      "path": "lib/ptc_runner/kernel/connectivity_result.ex",
+      "sha256": "5f9515a7f0ad232549ac5441d65310115321e583e403e8e826c64ad084e2a2e5"
+    },
+    {
       "bytes": 2711,
       "path": "lib/ptc_runner/kernel/deadline.ex",
       "sha256": "29feacab46c7ea01f1281736fb83aeb5f53116dc868bbadd2ea6d238e97b8418"
@@ -260,6 +275,16 @@
       "bytes": 17179,
       "path": "lib/ptc_runner/kernel/dispatcher.ex",
       "sha256": "755aa22d949754e510f7e4b567b68ea072784a1645ec369f6089374cb8aeae70"
+    },
+    {
+      "bytes": 1493,
+      "path": "lib/ptc_runner/kernel/doctor_environment.ex",
+      "sha256": "1b9b24860c8f206074faedb2b98ec0de8e8d07619915fd802200ed5efc63d5f5"
+    },
+    {
+      "bytes": 18149,
+      "path": "lib/ptc_runner/kernel/doctor_plan.ex",
+      "sha256": "a25c3ec1419bb83a16bcbfeb5183750f116314a3a46a0bfa20b04d4a7921f926"
     },
     {
       "bytes": 4193,
@@ -312,9 +337,9 @@
       "sha256": "045af7e3f517de1320be1daf25a9f18a020502dd9ad0c9d3a9fc62aa2296f5f7"
     },
     {
-      "bytes": 16267,
+      "bytes": 17772,
       "path": "lib/ptc_runner/kernel/execution_session_owner.ex",
-      "sha256": "9c103b9a7ee924ee7001564591dc7f21998bc915865a8d68c6b6ee62e64d1a2b"
+      "sha256": "a0d6d8f47b1db760bb9fc8bcbf0f1215254926f0d90a150247ae98d3886d15e5"
     },
     {
       "bytes": 4437,
@@ -332,14 +357,14 @@
       "sha256": "6a600b4f98f392bef91974018fb5fb6a4c07feda43369064d839ae65c746841a"
     },
     {
-      "bytes": 56064,
+      "bytes": 56248,
       "path": "lib/ptc_runner/kernel/host_installation.ex",
-      "sha256": "e35512725e370766e3c626a2ac6b0ec9bb384f75c420fe8084caeec368935c39"
+      "sha256": "24c8387a305bbae39c90178e8b29217ef489f6eeb2ad5464e51f55c9e7590534"
     },
     {
-      "bytes": 7423,
+      "bytes": 8004,
       "path": "lib/ptc_runner/kernel/host_installation_authority.ex",
-      "sha256": "0d6bc3f611d1848e2fd41b4dcde1c29d0ad0f4575c81ce387320559641ad6268"
+      "sha256": "a112ee38141574b5c408a80dc4b676c96c41b2edaa7b530942e4790b7a947e84"
     },
     {
       "bytes": 15267,
@@ -382,9 +407,9 @@
       "sha256": "102e7c52d89d15c23660358e88a78c23acdf89a1f58e665ee595640bc068f39f"
     },
     {
-      "bytes": 22373,
+      "bytes": 24316,
       "path": "lib/ptc_runner/kernel/installation_catalog.ex",
-      "sha256": "aca55551b5b86a1eff39ff08e7ff4ba0dc3b3ce4f1461274d8d01b5a31cef09d"
+      "sha256": "b63c10818f117e860292c08df116536b710e35f93289d2f7073a6cc8fac1bfed"
     },
     {
       "bytes": 11019,
@@ -407,14 +432,14 @@
       "sha256": "66a75b91d3f11fd3c53d6940cbf526e19e2a12ea020adf4d26fe884e544ed49a"
     },
     {
-      "bytes": 6882,
+      "bytes": 6930,
       "path": "lib/ptc_runner/kernel/limit_catalog.ex",
-      "sha256": "466c8a06e155f364590e6edb81a40ed619b1fbb85095cb09014e3ab86f7e545c"
+      "sha256": "46f2eec19e375a9593d54f39c233113a4f273cbae817a571e8668d23f1402404"
     },
     {
-      "bytes": 6919,
+      "bytes": 7136,
       "path": "lib/ptc_runner/kernel/limits.ex",
-      "sha256": "332e7a78bbca2f3ec29db51e141f243d96430f66cbf3785a49c310584145cd56"
+      "sha256": "6b030cf67ee17336df4af8828ea3762d20ae6a53e73dd8c3005c41ca8d49c8d5"
     },
     {
       "bytes": 4799,
@@ -432,6 +457,11 @@
       "sha256": "0c5aa66c084d3c4bfab77976b8aee02fd97c0850b85c83206e2620f2cf00f312"
     },
     {
+      "bytes": 22411,
+      "path": "lib/ptc_runner/kernel/local_preflight.ex",
+      "sha256": "78f45476a75fcc40ccd3d7517231f65579d6e2d2ae21456dae53ad5f71f03016"
+    },
+    {
       "bytes": 5154,
       "path": "lib/ptc_runner/kernel/log_analysis_profile.ex",
       "sha256": "2ebb42469958e9903652796d4f82445c93ef0873b87786bccd54b1347c841d6a"
@@ -447,9 +477,9 @@
       "sha256": "d052e673997fd6c6612b48be795ef646534e336a6f141abc8a61acc2135e39df"
     },
     {
-      "bytes": 21760,
+      "bytes": 31878,
       "path": "lib/ptc_runner/kernel/mcp_http_adapter.ex",
-      "sha256": "a8ccbb629ed80d73f6d6ba0bc5a32f1788f55f35439ac9de9e57ae4fb7322ffc"
+      "sha256": "6cf3f95250baaab3df5bd5c4a4ab42ffb7cd0f4ccdab69837e8fe1a00ad16f70"
     },
     {
       "bytes": 3434,
@@ -567,9 +597,9 @@
       "sha256": "da025436e6c2910b4ef91adb1f3e2aafaff3d6d524c6e24ee396b9eff28f87ac"
     },
     {
-      "bytes": 45528,
+      "bytes": 48255,
       "path": "lib/ptc_runner/kernel/mcp_oauth/store/memory.ex",
-      "sha256": "d9aeeb120149854e6adfaabd80356c9a07da72c4dc6cf8a0e45f25285e32c865"
+      "sha256": "81c52a6ce3d73cfcf3b0e6a700994b8ce18d8a1fc1d1f8fa06941a152311ca05"
     },
     {
       "bytes": 11642,
@@ -627,9 +657,9 @@
       "sha256": "02ff9e58838861347d0ef49572ce2c54bda1ad65d0e5e99f2ec1e2a5ae25dd27"
     },
     {
-      "bytes": 19339,
+      "bytes": 20581,
       "path": "lib/ptc_runner/kernel/prepared_run.ex",
-      "sha256": "bb0fcefa410bbf2202a85aacea3d54bb9b330bd357ad6655253554df0316f8c0"
+      "sha256": "212d2cdc68cb5274ac6aff4a95d9215a0f5061f0e9bc5d1a105b5836ce152207"
     },
     {
       "bytes": 3709,
@@ -657,14 +687,14 @@
       "sha256": "9fac3c24ebc445320c2a9b3e2e8855098cd79e5abbfee7c2e752332038ab19c0"
     },
     {
-      "bytes": 17200,
+      "bytes": 34488,
       "path": "lib/ptc_runner/kernel/provider_acquisition.ex",
-      "sha256": "a9a4a86d2d0d9d81f79575b0f83de33558ab6d6a518a35a7eba26983b5d908c2"
+      "sha256": "2c799c161b0bcd2cd1b229b8355bd55a36dabd8890b72d4be835311ba5f57823"
     },
     {
-      "bytes": 10548,
+      "bytes": 13103,
       "path": "lib/ptc_runner/kernel/provider_active_session.ex",
-      "sha256": "e32f83bb1d139a645ad86b577d2fd1638c04c2b8d2d71423237ee1bae0959541"
+      "sha256": "40ba7420fcdf8c87a7a7a0f57b24f753995d563cc75d9d629cec105959b1e731"
     },
     {
       "bytes": 12055,
@@ -682,9 +712,14 @@
       "sha256": "b0022b75ddec3890dd30bb54f95faaed5ed87312b3f0b3a8c3459ed642c01723"
     },
     {
-      "bytes": 10577,
+      "bytes": 6970,
+      "path": "lib/ptc_runner/kernel/provider_credentials.ex",
+      "sha256": "b0753b633c74f05d0040a0488eb70ca397ec41bc0412fcb7c5bfac2f203dabbb"
+    },
+    {
+      "bytes": 11587,
       "path": "lib/ptc_runner/kernel/provider_descriptor.ex",
-      "sha256": "e0bf64330fcb0508b880222f0323cd7a6c6bf5f7d899124c74a176ba8d56d500"
+      "sha256": "032703f48ee1073b328b18b905c516c5da334d4782c633483a67f03101ca4f82"
     },
     {
       "bytes": 4309,
@@ -692,9 +727,9 @@
       "sha256": "798cc0516ef8c18f54aff21bbb1cbd914c89fab948316640608d9103ccc31646"
     },
     {
-      "bytes": 23298,
+      "bytes": 40743,
       "path": "lib/ptc_runner/kernel/provider_execution.ex",
-      "sha256": "a155dce0d123bdbfbb946f6433b7bf671f332aaf481960fe06ecb3b32dfc1dec"
+      "sha256": "ad161ceef6ae2036771833162f4e0db5aa8c16fc9084372609652f84759db568"
     },
     {
       "bytes": 6850,
@@ -702,9 +737,9 @@
       "sha256": "fb2f499428f1a1f40adfab16edae03d5469668aab3aef8cc61175ccce3778ee5"
     },
     {
-      "bytes": 29620,
+      "bytes": 30030,
       "path": "lib/ptc_runner/kernel/provider_registry.ex",
-      "sha256": "c78f22317de270847d01b549445e9b5a0536773c5ea41e356692e71d1030d1d2"
+      "sha256": "1927bce249fdef13ca266016fdbbbbff573e55ee48b9b564d19b2fc1f33174cb"
     },
     {
       "bytes": 13767,
@@ -717,9 +752,9 @@
       "sha256": "3c966d49402041ed52aed30efaa47391e3ca6fd4283de2a4c6476db9f497cf82"
     },
     {
-      "bytes": 47179,
+      "bytes": 61866,
       "path": "lib/ptc_runner/kernel/provider_session.ex",
-      "sha256": "8c4150f3c6a964512d8d88429f7253cd2eea18264986c5aa1a26e55f7eadbc47"
+      "sha256": "b5cf2664e8b4bde5713f16bd642f93a555942a720ad7aa891cf9cc3c2d6362fa"
     },
     {
       "bytes": 2983,
@@ -747,9 +782,9 @@
       "sha256": "decb580740dc26d136b2fc4db8af7aa365e82a5ebf9538a2334e6def013fee8b"
     },
     {
-      "bytes": 4464,
+      "bytes": 7861,
       "path": "lib/ptc_runner/kernel/resource_registrar.ex",
-      "sha256": "ab7c4bca02b9f8e6b786381d36cd2e403a49523dfaa3f02792c1312171eaa793"
+      "sha256": "2b32ca1b7ee3b1d983c5cbda45b49b4617f440b1cd09da6542a1e0c2db9856cb"
     },
     {
       "bytes": 886,
@@ -762,9 +797,9 @@
       "sha256": "db45d9d38563d9e1828bc40007aca20fa764e0d7aea4ae87761d3526b2302124"
     },
     {
-      "bytes": 53072,
+      "bytes": 53748,
       "path": "lib/ptc_runner/kernel/run_builder.ex",
-      "sha256": "4dda43ffadb1c9dc643ae8466af4ffb42cefb3004742ccaabab5f5b22577f989"
+      "sha256": "2706e6cdfe4d7962864b2d1527e90bb81c0024be09451954e114830c37ee2798"
     },
     {
       "bytes": 16719,
@@ -772,9 +807,9 @@
       "sha256": "abccceabb73cec6b5b71804049984daba65fad089391b86cd49188eb82c6b27c"
     },
     {
-      "bytes": 16295,
+      "bytes": 19832,
       "path": "lib/ptc_runner/kernel/run_coordinator.ex",
-      "sha256": "d5a464c3d94965ec38fc4c80fccbc1ba7d8da55058186fe5d754740b0795e023"
+      "sha256": "8ebde0445b3180b8de2a38117a3ac52c005f70e051e1a927f861c3c1e99659c2"
     },
     {
       "bytes": 3105,

@@ -201,14 +201,134 @@ unique-list types, defaults, finite sets, ranges, and the closed cross-rules
 validation records `active_required`; `validate` reports
 `provider_declaration/selection_unverifiable` without running it.
 
+`RunCoordinator.local_checks/3` is the only entry to phase 7 and the only place
+an `audited_local` callback runs. Every active command crosses it before
+provider activity is marked: run, `--check`, and `doctor --connect` from
+`ProviderExecution` immediately before the session opens, and default doctor
+directly, because it opens no session. The REPL does not, and that is a stated
+limit rather than an omission: it builds providers through the direct-embedding
+registry rather than an execution owner, so it crosses neither this step nor the
+activity marker. Applicability is derived from the sealed
+prepared/catalog/services trio rather than supplied, the coordinator anchors one
+`local_preflight_timeout_ms` deadline that every applicable occurrence spends,
+and the result is only `:ok` or one catalogued diagnostic. There is no
+per-occurrence report, because the closed result contract has no failing
+provider row: a failed check fails the whole command, and doctor settles its
+audited-local rows only after the step as a whole succeeded.
+
+`unverified` callbacks are the other half and never run there.
+`LocalPreflight.run_unverified/4` is their only entry, reached from the shared
+operation prefix after the phase-8 marker and bounded by the operation deadline
+rather than by `local_preflight_timeout_ms`. Run, `--check`, and
+`doctor --connect` all cross it; default doctor does not, and reports
+`active_check_required` instead. The two steps derive applicability separately,
+so neither can reach the other's declarations, and they share the reason
+translation with one deliberate difference: after the marker,
+`provider_declaration` is unreachable — it is a pre-classification phase pinned
+to `provider_activity: false` — so a declaration-class reason reports
+`active_preflight/selection_rejected`, keeping its `:selection` subject and
+occurrence.
+
+### Acquisition reasons
+
+A provider's prepare, preflight, or acquire callback answers `{:error, reason}`
+with an atom and nothing else. Every `provider_acquisition` code requires a
+subject bearing an occurrence, so once that reason leaves the loop that knows
+which occurrence produced it there is nothing to attribute it to, and the
+command boundary fails closed as `internal_error` — reporting an unreachable MCP
+server as a defect in this program. `AcquisitionReason` therefore classifies at
+the three sites in `ProviderAcquisition` that still hold the occurrence.
+
+Only an active command is classified. Direct embedding keeps the bare reason: it
+has no envelope to render a diagnostic into, and its vocabulary — the MCP source
+alone distinguishes a timeout from an authentication failure from an oversized
+catalog — is far richer than three closed codes can carry. The two are told
+apart by whether the session carries an operation deadline, the same question
+phase-8 credential resolution asks.
+
+Acquisition's own codes follow one rule rather than a judgement per reason:
+`provider_unavailable` when the provider could not be reached or started,
+`provider_protocol_error` when it answered and the answer was unusable, and
+`provider_policy_changed` when a preparation contradicted its sealed
+declaration. Three groups keep a phase of their own instead, because what they
+describe is not acquisition failing — a rejected credential, a declaration or
+selection reason, and a local-environment reason each report the phase they
+belong to, reusing phase 7's groupings so one condition is not named two ways
+depending on which step observed it.
+
+Anything else fails closed as an internal error, and translations are added with
+their producers: a reason nothing can currently return has no branch. That rule
+is load-bearing rather than decorative — the first draft of this table carried
+six reasons the stdio and discovery paths normalize away before a builder can
+return them, and omitted one that a snapshot-identity build genuinely produces.
+
+### Credential resolution
+
+Every active command resolves its ordinary credentials once, at phase-8 step 5,
+through `ProviderCredentials`. The step runs after the registry
+and OAuth context exist and before any provider callback below it, so a missing
+credential fails while every provider is still inert instead of partway through
+a preparation or an acquisition.
+
+The required set is the union of `credential_names` over the sealed descriptor
+of *every* selected declaration — never what a prepare callback reported, on the
+same rule that decides the acquisition closure. Deriving it from callback reports
+would make the authority to read a credential depend on invoking the code that
+reads it. Because the union is whole-selection rather than whole-closure,
+`doctor --connect` can answer for an occurrence that declares
+`connectivity_mode: :none`: nothing acquires or probes it, but its credentials
+row still exists and a connect success requires it to pass.
+
+Consumers receive that map and take a subset of it; neither resolves again, and
+a preparation asking for a name the union does not contain is drift that fails
+closed with `provider_declaration_mismatch`. How tight the subset is differs by
+path, and the difference is what each path can compare against.
+`ConnectivityProbe` subsets per occurrence from the sealed descriptor, so a
+probe sees only its own credential. `ProviderAcquisition.acquire_targets/7`
+requires each preparation to report exactly its sealed declaration, so a target
+does too. `acquire/6` has no plan to compare against and enforces only the union
+bound: within a selection, a preparation can still name a credential another
+selected provider declared. Closing that means carrying sealed per-occurrence
+declarations down the ordinary path, which is the `acquire/6`–`acquire_targets/7`
+unification rather than another check. What holds everywhere today is that no
+credential outside the selection's own sealed union is resolved or handed to
+anything.
+
+Failure attribution is per alias and never per occurrence:
+`subject_occurrence_policy/3` forbids an occurrence on
+`active_preflight`/`credential_unavailable`, and the resolver answers for the
+whole batch rather than naming which credential failed. The alias reported is
+the first in manifest order that declares a credential — deterministic, and
+independent of both resolver behaviour and the order providers are prepared in.
+
+Direct embedding is the one caller that still resolves inside acquisition. It
+has no sealed declarations to derive a union from before preparation and no
+operation deadline to bound one, so it keeps the registry's synchronous
+semantics; an active command reaching that branch is refused rather than served,
+which is what stops a second credential pipeline from re-growing.
+
 Shipped live-LLM and stdio MCP descriptors declare `audited_local` callbacks.
 Those callbacks use the same model/adapter and executable/launcher checks as
 runtime provider preflight, without resolving credentials or contacting a
-provider. A live-LLM descriptor also supplies a bounded completion probe for
-the active `doctor --connect` path. It resolves the declared credential only
-after local checks, disables adapter and HTTP retries and redirects, forces a
-one-token response ceiling, and makes exactly one request under the sealed
-doctor timeout and provider heap limit.
+provider. `audited_local` is a trust declaration rather than a capability flag,
+and two constructors bound who may make it: `ProviderDescriptor` refuses it from
+a `:custom` source, and `InstallationCatalog` refuses it from a catalog without
+a host runtime binding. A custom local check declares `unverified` and runs as
+active work after the phase-8 marker.
+
+Those rules bound what may be *declared*. They do not attest that an admitted
+callback came from a shipped recipe: whoever assembles a catalog in-process
+supplies its implementations, and an embedder holding sealed host services can
+bind one it assembled itself. That code is already trusted — hostile same-VM
+containment is an explicit non-goal — and the guarantee that matters holds
+regardless: manifest input selects installed aliases and never registers an
+implementation, so nothing an application declares can introduce a callback
+into phase 7. A live-LLM descriptor also supplies a bounded completion probe for
+the active `doctor --connect` path. It consumes the credential the command
+resolved at phase-8 step 5 rather than resolving one of its own, disables
+adapter and HTTP retries and redirects, forces a one-token response ceiling, and
+makes exactly one request under the sealed doctor timeout and provider heap
+limit.
 
 After every selection is normalized, the coordinator derives aggregate data
 class, flow, and event privacy, then builds
@@ -248,9 +368,9 @@ rejects them; the execution-session owner consumes one when it opens its
 sinks, `ProviderActiveSession` then marks activity and opens the session, and
 the runtime registry, active value, and that same session are passed to
 `RunBuilder`. A run and a `--check` both do that inside the execution-session
-owner's subordinate worker, which calls `build_active_owned/5` with the
-owner-opened sinks and then completes through `execute_built/1` or
-`check_built/1`. The REPL remains transitional and opens no active session: it
+owner's subordinate worker, which calls `build_active_owned/6` with the
+owner-opened sinks and the phase-8 step-5 credentials, then completes through
+`execute_built/1` or `check_built/1`. The REPL remains transitional and opens no active session: it
 calls `load_and_build/3` with an empty registry, keeping its current shape
 until the parity cutover. After application admission, that session
 anchors one absolute run deadline shared by active selection, construction,
@@ -292,9 +412,20 @@ host configuration or the authorization-URL notifier. The owner remains the
 fixed lifecycle owner for the provider session, registry, OAuth store,
 loopback listener, prepared run, and sinks, while an authorized subordinate
 worker performs provider setup, authorization, and Kernel work and reuses the
-owner's already-opened sealed sinks. Aborting unwinds in the exact reverse of
-that acquisition order — listener, registry, store, session — and a failed
-session close outranks the result it would otherwise hide. The owner rejects an
+owner's already-opened sealed sinks. Aborting closes the provider session
+first, because its committed closers still belong to the runtime that acquired
+them, and only then unwinds that runtime in reverse acquisition order —
+listener, registry, store. Ownership matches that guarantee: the OAuth store
+and the host-bound registry authority both belong to the lifecycle owner rather
+than to the worker, so terminating a worker blocked in provider work does not
+destroy the store or revoke the authority that a session closer still needs.
+Tearing those two down is bounded by its own outer-runtime bound rather than by
+the session's anchored cleanup deadline: that deadline belongs to the registered
+closers on the session's stack and is meant to be spendable in full, so
+inheriting its remainder would force-kill the store immediately whenever a
+session used its whole budget, skipping the cooperative stop that terminates its
+registered managers. A failed session close outranks the result it would
+otherwise hide. The owner rejects an
 execution that is not bound to its exact preparation before consuming that
 preparation, so a mismatched catalog or an authorization target the run never
 selected leaves the prepared run reusable.
@@ -305,9 +436,23 @@ adapters, and projects failures into `PtcRunner.Kernel.CommandOutcome`. It is
 not yet the public Mix or standalone adapter. After frontend integration, only
 an outer standalone wrapper may turn the outcome's status into a process exit.
 Successful `validate` is terminal: it projects the five-field digest result,
-closes its prepared run, and returns a sealed `CommandOutcome`. Successful
-`run` preparation returns a sealed `PtcRunner.Kernel.CommandPreparation`, not a
-bare `PreparedRun`. That wrapper retains the original command reference, inert
+closes its prepared run, and returns a sealed `CommandOutcome`. Both doctor
+modes are terminal too, and `doctor --connect` is the one command the engine
+completes that performs provider work: it derives the connect-mode plan while
+the preparation is still claimed, runs one `RunCoordinator.connect/3`
+operation, settles the plan from that operation's result, and projects the
+closed check list. A selection naming no provider has no operation to run —
+connectivity answers for selected occurrences — so the engine projects the
+derived plan directly and reports no activity, which is the only case where a
+connect answer skips the coordinator. Anything that fails renders one
+catalogued diagnostic and no rows at all. The engine still performs no frontend
+VM setup: it neither loads a `.env` nor starts an optional provider
+application, because it cannot prove it owns the VM it was called in, so a
+connect against a stopped optional application reports
+`active_preflight/provider_application_unavailable` rather than starting one.
+Successful `run` preparation returns a sealed
+`PtcRunner.Kernel.CommandPreparation`, not a bare `PreparedRun`. That wrapper
+retains the original command reference, inert
 catalog, and only the artifact destinations needed by phase 6 alongside the
 separately sealed path-free prepared run. Host-backed catalogs retain only an
 opaque path-free per-alias implementation recipe in the wrapper; they retain
@@ -370,8 +515,11 @@ The catalog also owns the phase/code-specific source kinds, provider-subject
 operations, operation-specific occurrence policy, and activity policy used by
 both constructors and the generated schema. Provider diagnostics cannot carry
 document provenance and non-provider diagnostics cannot carry provider
-subjects. Activity is fixed false through local preflight and fixed true for
-active preflight and provider acquisition. Provider execution and provider
+subjects. Activity is fixed false through the phases that precede the marker,
+fixed true for active preflight and provider acquisition, and a plain boolean
+for local preflight alone, because that phase spans the marker: the
+audited-local step reports false and the post-marker `unverified` step reports
+true. Provider execution and provider
 cleanup codes also require true, while other later codes admit the marker's
 actual monotonic value. Occurrence indices use the manifest's closed `0..31`
 bound in both the typed subject constructor and the generated envelope schema.
@@ -923,7 +1071,37 @@ Streamable HTTP and MCP OAuth use the shared direct-Mint
 `MCPHTTPAdapter` HTTP/1 boundary. Each request owns one non-pooled connection,
 enforces cumulative response-header and body ceilings, and carries one absolute
 deadline across bounded DNS resolution, peer pinning, connection, and response
-streaming. Returning `:halt` after a complete SSE response, response-size
+streaming.
+
+Two further ceilings bound what a peer may *deliver*, as opposed to what is
+kept, and both are enforced before Mint parses anything.
+
+`:max_receive_bytes` is applied as the socket's `buffer` and caps one socket
+message. Because Mint raises `buffer` to `max(buffer, sndbuf, recbuf)` whenever
+it initiates a connection, the adapter connects in `:passive` mode, applies the
+ceiling to the still-unarmed socket, and activates afterwards. Over TLS the
+ceiling bounds the ciphertext read, so one TLS record of already-decrypted
+carry-over may be delivered with it. The receive loop additionally refuses any
+single message over that declared maximum, because the socket option makes the
+bound true rather than enforcing it: Mint's raise happens at the end of its
+connect, and over TLS the `ssl` process accumulates under the raised value if
+the worker is descheduled before the ceiling is reapplied.
+
+A derived pending ceiling — `max_header_bytes` plus one whole delivered message
+(`max_receive_bytes` plus one TLS record), so that a single delivered message can
+never breach it alone — caps
+what Mint may hold *unparsed*, and resets whenever Mint returns any response. A
+peer that never completes a status line, a chunk-size line, or a chunk extension
+yields no response, so no ceiling on a parsed value can see it and Mint buffers
+the remainder without one of its own. The reset is what keeps the ceiling
+independent of the transfer encoding: chunked framing costs bytes per chunk, so
+a cumulative wire ceiling would refuse a legitimate finely chunked body.
+Resident bytes are bounded by the accumulated body and headers, the pending
+ceiling, and two delivered messages — a reset zeroes the counter while Mint's
+leftover survives it, and that leftover is at most one message. Total bytes
+*read* is not bounded: bare `1xx` informational responses reset the counter and
+advance no ceiling, so a peer can spend bandwidth until the deadline without
+accumulating anything. Returning `:halt` after a complete SSE response, response-size
 rejection, or SSE parser rejection closes the response stream. Killing the
 request task on deadline expiry, caller death, provider close, or source-owner
 death closes it as well. HTTP cancellation never sends

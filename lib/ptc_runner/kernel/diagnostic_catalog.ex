@@ -65,6 +65,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "a required provider adapter is unavailable"},
     {:local_preflight, :launcher_unavailable, 4, false,
      "a required provider launcher is unavailable"},
+    {:local_preflight, :local_check_timeout, 4, false, "a local provider check timed out"},
     {:active_preflight, :provider_application_unavailable, 4, false,
      "a required provider application is unavailable"},
     {:active_preflight, :selection_rejected, 4, false,
@@ -89,6 +90,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the provider does not implement the declared connectivity check"},
     {:active_preflight, :connectivity_outcome_unknown, 4, false,
      "the connectivity outcome could not be committed safely"},
+    {:active_preflight, :connectivity_timeout, 4, false,
+     "the connectivity operation exceeded its budget"},
     {:active_preflight, :authorization_unavailable, 4, true,
      "the authorization service is temporarily unavailable"},
     {:active_preflight, :connectivity_unavailable, 4, true,
@@ -246,6 +249,12 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   @spec subject_policy(phase(), atom()) :: :required | :optional | :forbidden
   def subject_policy(:host, :installation_revision_missing), do: :required
 
+  # The one active-preflight outcome that belongs to the operation rather than
+  # to an occurrence. A budget spent before or between occurrences cannot be
+  # attributed to any of them, and naming an arbitrary one would report a
+  # provider as unreachable when nothing had reached it yet.
+  def subject_policy(:active_preflight, :connectivity_timeout), do: :forbidden
+
   def subject_policy(phase, code) do
     cond do
       phase in [:provider_declaration, :local_preflight, :active_preflight, :provider_acquisition] ->
@@ -378,10 +387,17 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
              :application,
              :bundle,
              :provider_declaration,
-             :destination,
-             :local_preflight
+             :destination
            ],
       do: false
+
+  # `local_preflight` spans the marker, so the phase cannot assert either value.
+  # The audited-local step runs before activity and reports false; the
+  # `:unverified` step runs after it and reports true. They describe the same
+  # conditions through the same codes and differ only here, which is what the
+  # flag is for — pinning the phase would force one of the two steps to borrow
+  # another phase's codes and, with them, an operation name that did not fail.
+  def provider_activity_policy(:local_preflight, _code), do: :boolean
 
   def provider_activity_policy(phase, _code)
       when phase in [:active_preflight, :provider_acquisition],

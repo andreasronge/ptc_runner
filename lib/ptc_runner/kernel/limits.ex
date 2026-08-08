@@ -27,6 +27,9 @@ defmodule PtcRunner.Kernel.Limits do
   - `event_payload_bytes`, `normal_event_count`, and `normal_event_bytes` bound
     canonical event collection.
   - `provider_cleanup_timeout_ms` is sealed for bounded provider cleanup;
+  - `local_preflight_timeout_ms` is sealed for the whole audited-local phase-7
+    step, which spends one anchored deadline across every applicable
+    occurrence;
   - `selection_validation_timeout_ms` is sealed for active selection
     validation;
   - `doctor_connectivity_timeout_ms` is sealed for `doctor --connect` health
@@ -79,6 +82,7 @@ defmodule PtcRunner.Kernel.Limits do
           normal_event_count: pos_integer(),
           normal_event_bytes: pos_integer(),
           provider_cleanup_timeout_ms: pos_integer(),
+          local_preflight_timeout_ms: pos_integer(),
           selection_validation_timeout_ms: pos_integer(),
           doctor_connectivity_timeout_ms: pos_integer()
         }

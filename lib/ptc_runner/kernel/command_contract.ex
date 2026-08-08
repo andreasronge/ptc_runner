@@ -550,6 +550,11 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp diagnostic_pair_allowed?(:models, :provider_declaration, :dependency_invalid), do: true
 
+  # A run needs no clause here. `local_preflight` is a classified phase, so a
+  # post-marker failure renders through the classified branch, which admits
+  # every non-preclassification row. Adding it to `:run_unclassified` instead
+  # would admit an envelope that cannot exist: that branch pins
+  # `provider_activity` to false and reports execution as not started.
   defp diagnostic_pair_allowed?(mode, :local_preflight, code)
        when mode in [:doctor, {:doctor, :connect}] and code in @local_preflight_codes,
        do: true

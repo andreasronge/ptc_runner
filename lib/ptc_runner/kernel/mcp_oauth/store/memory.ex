@@ -6,8 +6,12 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   compound behavior operations execute in one serialized GenServer callback, so
   grant CAS, lease transitions, requirement updates, authority claims, and
   retirement fences are atomic. Registered managers are monitored and removed
-  from lifecycle tracking when they stop. Owner death destroys the complete
-  store.
+  from lifecycle tracking when they stop.
+
+  A store is bound to its owner by a monitor rather than a link, so it belongs
+  to the process responsible for closing it and not to whichever process
+  happened to start it. Owner death destroys the complete store; the death of a
+  bounded worker that merely used it does not.
   """
 
   use GenServer
@@ -20,17 +24,19 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
 
   @behaviour Store
 
+  @close_timeout_ms 1_000
+
   @enforce_keys [:pid]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{pid: pid()}
 
-  @spec start_link(keyword()) :: {:ok, t()}
-  def start_link(opts) when is_list(opts) do
+  @spec start(keyword()) :: {:ok, t()} | {:error, :invalid_owner}
+  def start(opts) when is_list(opts) do
     owner = Keyword.fetch!(opts, :owner)
 
     with true <- is_pid(owner),
-         {:ok, pid} <- GenServer.start_link(__MODULE__, owner) do
+         {:ok, pid} <- GenServer.start(__MODULE__, owner) do
       {:ok, %__MODULE__{pid: pid}}
     else
       _invalid -> {:error, :invalid_owner}
@@ -41,13 +47,68 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   def store(%__MODULE__{} = memory),
     do: Store.new(__MODULE__, memory)
 
+  # A detached store outlives the worker that used it, so closing it is a
+  # terminal action on the abort path and must not wait indefinitely. A store
+  # that answers stops cooperatively and terminates its registered managers; one
+  # that will not answer is terminated instead, which is the only stop that
+  # cannot run that cleanup.
   @doc false
   @spec close(t()) :: :ok
   def close(%__MODULE__{pid: pid}) do
-    GenServer.call(pid, :close, :infinity)
-  catch
-    :exit, _reason -> :ok
+    # Checked before anything is sent, not just before the process is
+    # terminated: `:close` is a plausible message for an unrelated GenServer, so
+    # a handle naming the wrong pid must not stop or mutate one.
+    #
+    # This is a misdirection guard against a stale or reused pid, not an
+    # authentication boundary. `$initial_call` is process-local metadata that
+    # in-VM code can set for itself, and hostile same-VM containment is an
+    # explicit non-goal. It reliably distinguishes an unrelated process that
+    # happens to hold this pid, which is the failure this close can actually
+    # cause.
+    if store_process?(pid) do
+      reference = Process.monitor(pid)
+
+      _replied =
+        try do
+          GenServer.call(pid, :close, @close_timeout_ms)
+        catch
+          :exit, _reason -> :ok
+        end
+
+      await_close(pid, reference)
+    else
+      :ok
+    end
   end
+
+  defp await_close(pid, reference) do
+    receive do
+      {:DOWN, ^reference, :process, ^pid, _reason} ->
+        :ok
+    after
+      @close_timeout_ms ->
+        terminate_store(pid, reference)
+    end
+  end
+
+  # A wedged store cannot answer a call, so identity comes from its start MFA
+  # rather than from a reply it will never send. Re-checked here because the
+  # process could have died and its pid been reused between the call and the
+  # cutoff.
+  defp terminate_store(pid, reference) do
+    if store_process?(pid) do
+      Process.exit(pid, :kill)
+
+      receive do
+        {:DOWN, ^reference, :process, ^pid, _reason} -> :ok
+      end
+    else
+      Process.demonitor(reference, [:flush])
+      :ok
+    end
+  end
+
+  defp store_process?(pid), do: :proc_lib.translate_initial_call(pid) == {__MODULE__, :init, 1}
 
   @impl Store
   def transact(%__MODULE__{pid: pid}, operation, deadline) do
@@ -130,13 +191,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
     end
   end
 
-  def handle_call(:close, _from, state) do
-    Enum.each(Map.keys(state.managers), fn manager ->
-      if Process.alive?(manager), do: Process.exit(manager, :kill)
-    end)
-
-    {:stop, :normal, :ok, state}
-  end
+  def handle_call(:close, _from, state), do: {:stop, :normal, :ok, state}
 
   @impl GenServer
   def handle_call({:claim_principal, tenant_id, principal_id}, _from, state) do
@@ -617,6 +672,22 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  # Retry ownership must never outlive the backing store, so manager cleanup
+  # belongs to every cooperative stop rather than to the explicit close alone.
+  # Owner death stops the store too, and a manager left running against a
+  # destroyed store could only fail. The one stop this cannot cover is a store
+  # terminated because it stopped answering at all.
+  @impl GenServer
+  def terminate(_reason, %{managers: managers}) do
+    Enum.each(Map.keys(managers), fn manager ->
+      if Process.alive?(manager), do: Process.exit(manager, :kill)
+    end)
+
+    :ok
+  end
+
+  def terminate(_reason, _state), do: :ok
 
   if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
     @impl GenServer

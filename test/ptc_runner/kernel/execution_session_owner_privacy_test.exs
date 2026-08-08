@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwnerPrivacyTest do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.ProviderDescriptor
@@ -73,9 +74,18 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwnerPrivacyTest do
     log =
       capture_log(fn ->
         # The raised message interpolates the resolved credential; the caller
-        # must receive the stable acquisition signal instead of that text.
-        assert {:error, reason} = ExecutionSessionOwner.await(owner)
-        assert reason == :provider_acquisition_failed
+        # must receive the closed acquisition diagnostic instead of that text.
+        # A raise is the provider failing to be acquired, so it classifies as
+        # `provider_unavailable` and names the occurrence that raised — the
+        # bounded projection is the whole point, and nothing of the payload
+        # travels with it.
+        assert {:error, %CommandDiagnostic{} = reason} = ExecutionSessionOwner.await(owner)
+        assert reason.phase == :provider_acquisition
+        assert reason.code == :provider_unavailable
+        assert reason.provider_activity
+        assert reason.subject.name == "selected"
+        assert reason.subject.operation == :acquisition
+        assert reason.subject.occurrence == %{destination: :workflow, index: 0}
         refute leaks?(reason)
       end)
 

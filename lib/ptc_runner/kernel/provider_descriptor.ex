@@ -6,6 +6,16 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
   command, path, OAuth authority, store/context, grant, token manager, or principal. Phase
   5 may therefore normalize selections and compute identity without consulting
   an implementation or crossing the provider-activity boundary.
+
+  `local_preflight` is a trust declaration rather than a capability flag. Only a
+  shipped source may declare `:audited_local`, because that value permits phase
+  7 to run the callback behind it before provider activity is marked. A
+  `:custom` registration declares `:unverified` instead, and its check becomes
+  active work after the phase-8 marker.
+  `PtcRunner.Kernel.InstallationCatalog` completes the rule: an
+  `:audited_local` declaration also requires a host runtime binding. Both rules
+  bound what may be declared; neither attests where an admitted implementation
+  came from.
   """
 
   alias PtcRunner.Kernel.Attestation
@@ -222,7 +232,13 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
 
   defp valid_authority_fingerprint?(_mode, _fingerprint), do: false
 
-  defp shipped_consistent?(%{source: :custom}), do: true
+  # `:audited_local` is a claim that the callback behind it is shipped,
+  # code-owned code that phase 7 may run before provider activity is marked. A
+  # custom registration cannot make that claim about itself, so it declares
+  # `:unverified` and its check runs after the phase-8 marker instead. The
+  # remaining clauses constrain the shipped sources that may.
+  defp shipped_consistent?(%{source: :custom} = descriptor),
+    do: descriptor.local_preflight != :audited_local
 
   defp shipped_consistent?(%{source: :mcp} = descriptor),
     do:

@@ -5,6 +5,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.ConnectivityProbe
+  alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.MCPOAuth.Authority
@@ -13,12 +15,15 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderAcquisition
   alias PtcRunner.Kernel.ProviderActiveSession
+  alias PtcRunner.Kernel.ProviderCredentials
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunCoordinator
 
   @enforce_keys [:catalog, :services, :authorizations]
   defstruct @enforce_keys ++ [attestation: nil]
@@ -69,6 +74,17 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   def valid?(_execution), do: false
 
   @doc """
+  Checks that this execution requests no explicit authorization.
+
+  `doctor --connect` must never notify or open an interaction, so it refuses an
+  execution carrying authorization targets rather than quietly running the
+  non-interactive path and reporting a check that skipped what was asked for.
+  """
+  @spec non_interactive?(term()) :: boolean()
+  def non_interactive?(%__MODULE__{authorizations: []} = execution), do: valid?(execution)
+  def non_interactive?(_execution), do: false
+
+  @doc """
   Checks that this execution belongs to the exact preparation it will run.
 
   Callers must decide this before the owner consumes the prepared run, so an
@@ -89,12 +105,13 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           PublicationAuthority.t(),
           map(),
           t(),
-          (binary() -> term()),
+          (binary() -> term()) | nil,
           tracker(),
           pid(),
-          :run | :check
+          :run | :check | :connect
         ) ::
-          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | [map()]} | {:error, term()}
+          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | [map()] | ConnectivityResult.t()}
+          | {:error, term()}
   def execute(
         %PreparedRun{} = prepared,
         authority,
@@ -105,12 +122,15 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         lifecycle_owner,
         operation
       )
-      when is_function(notifier, 1) and is_function(tracker, 3) and is_pid(lifecycle_owner) and
-             operation in [:run, :check] do
-    with true <- valid?(execution),
+      when is_function(tracker, 3) and is_pid(lifecycle_owner) and
+             operation in [:run, :check, :connect] do
+    with true <- notifier_matches_operation?(notifier, operation),
+         true <- valid?(execution),
+         true <- operation != :connect or non_interactive?(execution),
          true <- PreparedRun.consumed_valid?(prepared),
          true <- PublicationAuthority.valid?(authority),
          true <- bound_to_prepared?(execution, prepared),
+         :ok <- RunCoordinator.local_checks(prepared, execution.catalog, execution.services),
          {:ok, session} <-
            ProviderActiveSession.open_consumed_setup(
              prepared,
@@ -151,6 +171,12 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       ),
       do: {:error, :invalid_provider_execution}
 
+  # Connectivity carries no notifier at all, so the interactive branch below is
+  # unreachable for it by construction rather than by the branch happening not
+  # to be taken.
+  defp notifier_matches_operation?(notifier, :connect), do: is_nil(notifier)
+  defp notifier_matches_operation?(notifier, _operation), do: is_function(notifier, 1)
+
   defp execute_with_session(
          prepared,
          authority,
@@ -162,30 +188,106 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          operation
        ) do
     result =
-      if execution.authorizations == [] do
-        execute_ordinary(
-          prepared,
-          authority,
-          opened_sinks,
-          execution,
-          tracker,
-          session,
-          operation
-        )
-      else
-        execute_after_authorization(
-          prepared,
-          authority,
-          opened_sinks,
-          execution,
-          notifier,
-          tracker,
-          session,
-          operation
-        )
+      case unauthorized_oauth_alias(prepared, execution) do
+        nil ->
+          execute_authorized(
+            prepared,
+            authority,
+            opened_sinks,
+            execution,
+            notifier,
+            tracker,
+            session,
+            operation
+          )
+
+        name ->
+          {:error, authorization_required_diagnostic(name)}
       end
 
-    close_owned_session(result, session, tracker)
+    result
+    |> classify_marked_failure()
+    |> close_owned_session(session, tracker)
+  end
+
+  # Everything reachable from here has crossed the activity marker, so nothing
+  # from here may answer with a bare reason: a consumer cannot tell one that was
+  # produced before the marker from one produced after it, and the difference is
+  # a public claim about whether the command incurred provider cost.
+  #
+  # Most of this region already answers with a diagnostic. Registry setup is the
+  # exception — `registry_result/4` forwards a reason it has no classification
+  # for — and an independent review found it by reading, not by any test, which
+  # is why the invariant is enforced here rather than asserted in a comment.
+  defp classify_marked_failure({:error, %CommandDiagnostic{}} = error), do: error
+  defp classify_marked_failure({:error, _reason}), do: {:error, internal_diagnostic()}
+  defp classify_marked_failure(result), do: result
+
+  defp execute_authorized(
+         prepared,
+         authority,
+         opened_sinks,
+         execution,
+         notifier,
+         tracker,
+         session,
+         operation
+       ) do
+    if execution.authorizations == [] do
+      execute_ordinary(
+        prepared,
+        authority,
+        opened_sinks,
+        execution,
+        tracker,
+        session,
+        operation
+      )
+    else
+      execute_after_authorization(
+        prepared,
+        authority,
+        opened_sinks,
+        execution,
+        notifier,
+        tracker,
+        session,
+        operation
+      )
+    end
+  end
+
+  # Standalone V1 disables OAuth execution: `mix ptc.run --authorize-mcp NAME` is
+  # the only shipped path to a grant, so a selected OAuth occurrence nobody named
+  # has no store to draw one from. It used to walk into acquisition against an
+  # empty one and fail with whatever that path produced.
+  #
+  # The refusal sits here, before either branch, because both are cost this
+  # command cannot use. The interactive branch would open a browser interaction
+  # for one alias before discovering another can never be served, and the
+  # ordinary branch would run active selection validators and unverified local
+  # checks — unrestricted active work — for a selection that is already refused.
+  # That is the same rule the validator/unverified ordering rests on.
+  #
+  # It is nevertheless past the phase-8 marker, which `active_preflight` requires
+  # and the OAuth contract states: the session is open, so a refusal here reports
+  # activity honestly rather than claiming a command that never started.
+  #
+  # `PtcRunner.Kernel.AcquisitionReason` mints this same code for the different
+  # question of an authorization failing underneath an alias that *was*
+  # authorized — a revoked grant, a failed refresh — discovered mid-acquisition.
+  # The two cannot both answer for one alias: reaching acquisition at all means
+  # this refusal did not fire. They are told apart by their subject, because
+  # authorization is per alias while a mid-acquisition failure knows the exact
+  # occurrence that hit it.
+  defp unauthorized_oauth_alias(prepared, execution) do
+    authorized = MapSet.new(execution.authorizations)
+
+    Enum.find_value(prepared.provider_declarations, fn %{name: name} ->
+      if not MapSet.member?(authorized, name) and
+           match?(%{authorization_mode: :oauth}, execution.catalog.descriptors[name]),
+         do: name
+    end)
   end
 
   # A failed session close outranks the result it would otherwise hide, matching
@@ -206,7 +308,13 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     selected_names = selected_provider_names(prepared)
 
     with {:ok, session} <-
-           ProviderActiveSession.begin_owned_run(session, prepared, execution.catalog),
+           ProviderActiveSession.begin_owned_operation(
+             session,
+             prepared,
+             execution.catalog,
+             execution.services,
+             operation
+           ),
          {:ok, authorities} <- oauth_authorities(execution, selected_names),
          deadline <-
            oauth_operation_deadline(
@@ -217,13 +325,14 @@ defmodule PtcRunner.Kernel.ProviderExecution do
            ) do
       with_runtime_registry(
         execution,
+        ProviderSession.lifecycle_owner(session),
         selected_names,
         authorities,
         deadline,
         tracker,
-        :run,
+        operation,
         fn registry ->
-          build_and_complete(prepared, authority, opened_sinks, registry, session, operation)
+          complete(prepared, authority, opened_sinks, registry, session, execution, operation)
         end
       )
     end
@@ -251,6 +360,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
            ) do
       with_runtime_registry(
         execution,
+        ProviderSession.lifecycle_owner(session),
         selected_names,
         authorities,
         deadline,
@@ -270,8 +380,14 @@ defmodule PtcRunner.Kernel.ProviderExecution do
                  )
                  |> authorization_result(selected_names, execution.catalog),
                {:ok, session} <-
-                 ProviderActiveSession.begin_owned_run(session, prepared, execution.catalog) do
-            build_and_complete(prepared, authority, opened_sinks, registry, session, operation)
+                 ProviderActiveSession.begin_owned_operation(
+                   session,
+                   prepared,
+                   execution.catalog,
+                   execution.services,
+                   operation
+                 ) do
+            complete(prepared, authority, opened_sinks, registry, session, execution, operation)
           end
         end
       )
@@ -281,22 +397,258 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
-  # Every step above this one is shared by a run and a check: the same activity
-  # marker, session, registry, credentials, OAuth, acquisition, and cleanup
-  # ownership. Only the completion differs, so a check cannot drift into its own
-  # provider lifecycle.
-  defp build_and_complete(prepared, authority, opened_sinks, registry, session, operation) do
+  # Phase-8 step 5, and the one place any active command resolves an ordinary
+  # credential. It sits here rather than inside either branch because the branch
+  # is exactly what must not decide it: acquisition answers for the closure it
+  # acquires, and a `:none` occurrence declaring a credential is inside no
+  # closure, so a connectivity-local remainder pass would be a second credential
+  # pipeline with a different derivation rule.
+  #
+  # Reached from both the ordinary and the post-authorization branch, so the
+  # registry and the OAuth context already exist and no provider callback below
+  # this line has run yet.
+  defp complete(prepared, authority, opened_sinks, registry, session, execution, operation) do
+    with {:ok, credentials} <-
+           ProviderCredentials.resolve(prepared, execution.catalog, registry, session) do
+      complete(
+        prepared,
+        authority,
+        opened_sinks,
+        registry,
+        session,
+        execution,
+        operation,
+        credentials
+      )
+    end
+  end
+
+  # Every step above this one is shared by a run, a check, and connectivity: the
+  # same activity marker, session, registry, credentials, OAuth, and cleanup
+  # ownership. Only the completion differs, so none of them can drift into its
+  # own provider lifecycle.
+  defp complete(
+         prepared,
+         authority,
+         opened_sinks,
+         registry,
+         session,
+         _execution,
+         operation,
+         credentials
+       )
+       when operation in [:run, :check],
+       do:
+         build_and_complete(
+           prepared,
+           authority,
+           opened_sinks,
+           registry,
+           session,
+           operation,
+           credentials
+         )
+
+  # Connectivity is the one completion that does not build a run config. A run
+  # and a check both acquire every selected provider to reach their result;
+  # connectivity decides per occurrence what its declaration asks for, so
+  # building one here would acquire providers a `:none` occurrence never wanted.
+  defp complete(
+         prepared,
+         _authority,
+         _opened_sinks,
+         registry,
+         session,
+         execution,
+         :connect,
+         credentials
+       ),
+       do: complete_connectivity(prepared, execution, registry, session, credentials)
+
+  defp build_and_complete(
+         prepared,
+         authority,
+         opened_sinks,
+         registry,
+         session,
+         operation,
+         credentials
+       ) do
     with {:ok, built} <-
            RunBuilder.build_active_owned(
              prepared,
              registry,
              session,
              authority,
-             opened_sinks
+             opened_sinks,
+             credentials
            ) do
       complete_operation(built, operation)
     end
   end
+
+  # Applicability comes from the sealed descriptor of each selected occurrence,
+  # so no caller can narrow the work or reorder it. The deadline the session
+  # claimed bounds the whole operation; `:none` occurrences spend none of it,
+  # because a declaration that asks for no connectivity is answered without a
+  # credential, a callback, or a provider.
+  #
+  # Execution order is pinned and is deliberately not the reporting order.
+  # Acquisition targets go first, through the shared dependency-order barrier,
+  # because only that barrier can make a target's prerequisites available to it
+  # and a probe must not spend the budget a closure still needs. Probes follow
+  # in declaration order. The first execution failure returns its own
+  # diagnostic, naming the occurrence that actually failed rather than the
+  # earliest declared one.
+  #
+  # The entries are the canonical success projection. They are derived inertly
+  # from sealed declarations, and are sealed into a result only once every
+  # execution step above has succeeded, so no entry can report an occurrence
+  # nothing reached.
+  defp complete_connectivity(prepared, execution, registry, session, credentials) do
+    prepared
+    |> connectivity_result(execution, registry, session, credentials)
+    |> close_connectivity_session(session)
+  end
+
+  # The session closes here, inside the registry callback, exactly where a run
+  # and a check close theirs. Its committed closers belong to the runtime that
+  # acquired them — a connectivity acquisition commits real ones — so unwinding
+  # the registry first would leave a closer reaching for authority that is
+  # already gone. That is the owner's session-before-runtime ordering, and
+  # connectivity was the one completion that inverted it.
+  #
+  # A cleanup failure outranks the result it would otherwise hide, matching
+  # `close_owned_session/3`, which then finds the session already closed and
+  # drops only its tracker entry.
+  defp close_connectivity_session(result, session) do
+    cleanup = if ProviderSession.alive?(session), do: ProviderSession.close(session), else: :ok
+
+    case cleanup do
+      :ok -> result
+      {:error, _reason} -> {:error, cleanup_diagnostic()}
+    end
+  end
+
+  defp connectivity_result(prepared, execution, registry, session, credentials) do
+    catalog = execution.catalog
+
+    with true <- ProviderRegistry.valid?(registry),
+         true <- ProviderSession.alive?(session),
+         deadline when not is_nil(deadline) <- ProviderSession.run_deadline(session),
+         {:ok, entries} <- connectivity_entries(prepared, catalog),
+         :ok <-
+           acquire_connectivity_targets(
+             prepared,
+             catalog,
+             registry,
+             session,
+             entries,
+             credentials
+           ),
+         :ok <-
+           ConnectivityProbe.run(prepared, catalog, execution.services, deadline, credentials),
+         {:ok, result} <- ConnectivityResult.new(prepared, catalog, entries),
+         false <- Deadline.expired?(deadline) do
+      {:ok, result}
+    else
+      true -> {:error, connectivity_timeout_diagnostic()}
+      {:error, %CommandDiagnostic{}} = error -> error
+      _invalid -> {:error, internal_diagnostic()}
+    end
+  end
+
+  # The targets are the `:acquisition` occurrences themselves.
+  # `ProviderAcquisition` closes over their sealed dependencies and acquires
+  # only that closure, so a provider pulled in as a prerequisite is acquired and
+  # cleaned up like any other while never becoming a connectivity entry of its
+  # own. Connectivity publishes nothing, so its artifact preflight has nothing
+  # to authorize, and the acquired closure stays on the session's LIFO stack for
+  # the ordinary close rather than unwinding through a path of its own.
+  defp acquire_connectivity_targets(prepared, catalog, registry, session, entries, credentials) do
+    case Enum.filter(entries, &(&1.mode == :acquisition)) do
+      [] ->
+        :ok
+
+      targets ->
+        with {:ok, plan} <- ProviderAcquisition.plan(prepared, catalog) do
+          prepared.request.package
+          |> ProviderAcquisition.acquire_targets(
+            registry,
+            session,
+            Enum.map(targets, &Map.take(&1, [:destination, :index])),
+            fn _effective_class -> :ok end,
+            plan,
+            credentials
+          )
+          |> acquisition_result(session)
+        end
+    end
+  end
+
+  defp acquisition_result({:ok, _acquired}, _session), do: :ok
+  defp acquisition_result({:error, %CommandDiagnostic{}} = error, _session), do: error
+
+  # A closer the session could not adopt has no owner, so it is run with the
+  # session rather than dropped. The reason travelling with it is sometimes a
+  # catalogued diagnostic — an expired acquisition preserves the one that
+  # described the failure — and discarding that in favour of an internal error
+  # would throw away the only accurate account of what went wrong. A bare
+  # reason carries no occurrence to attribute it to, so that case still fails
+  # closed. A cleanup failure outranks either, because it is the newer fact.
+  defp acquisition_result({:unregistered_provider_close, reason, close}, session) do
+    case ProviderSession.close_with_unregistered(session, close) do
+      :ok -> {:error, unregistered_diagnostic(reason)}
+      {:error, _reason} -> {:error, cleanup_diagnostic()}
+    end
+  end
+
+  defp acquisition_result({:error, _reason}, _session), do: {:error, internal_diagnostic()}
+
+  defp unregistered_diagnostic(%CommandDiagnostic{} = diagnostic), do: diagnostic
+  defp unregistered_diagnostic(_reason), do: internal_diagnostic()
+
+  # Evidence that arrives after the operation's own cutoff is not evidence the
+  # operation may report. Registry setup can finish near the connectivity
+  # deadline and this process can resume past it, so success is confirmed
+  # against the deadline rather than assumed from having reached the end.
+  # The operation-wide code, not the per-occurrence one. An exhausted budget is
+  # not a provider being temporarily unreachable: `connectivity_unavailable` is
+  # retriable and carries the occurrence that failed, while an exhausted budget
+  # is non-retriable and belongs to the operation, so it carries no subject.
+  # `ConnectivityProbe` already reports a spent budget this way, and the two
+  # paths must not disagree about what the same condition means.
+  defp connectivity_timeout_diagnostic do
+    CommandDiagnostic.new!(:active_preflight, :connectivity_timeout, provider_activity: true)
+  end
+
+  # A sealed declaration carries an inert projection, not its descriptor, so the
+  # declared mode is read from the catalog the preparation was validated
+  # against. `ConnectivityResult.new/3` re-derives every mode from that same
+  # catalog and refuses a result whose entries disagree, because alias names are
+  # not identity.
+  defp connectivity_entries(prepared, catalog) do
+    Enum.reduce_while(prepared.provider_declarations, {:ok, []}, fn declaration, {:ok, entries} ->
+      case connectivity_entry(declaration, catalog.descriptors[declaration.name]) do
+        {:ok, entry} -> {:cont, {:ok, entries ++ [entry]}}
+        {:error, _diagnostic} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp connectivity_entry(declaration, %{connectivity_mode: mode})
+       when mode in [:none, :probe, :acquisition] do
+    {:ok,
+     %{
+       name: declaration.name,
+       destination: declaration.destination,
+       index: declaration.index,
+       mode: mode,
+       outcome: if(mode == :none, do: :skipped, else: :reachable)
+     }}
+  end
+
+  defp connectivity_entry(_declaration, _descriptor), do: {:error, internal_diagnostic()}
 
   defp complete_operation(built, :run), do: RunBuilder.execute_built(built)
 
@@ -312,6 +664,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
   defp with_runtime_registry(
          execution,
+         lifecycle_owner,
          selected_names,
          authorities,
          deadline,
@@ -323,16 +676,17 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       with_registry(
         execution.catalog,
         execution.services,
+        lifecycle_owner,
         selected_names,
         deadline,
         tracker,
         operation,
-        callback,
-        nil
+        callback
       )
     else
       with_memory_runtime(
         execution,
+        lifecycle_owner,
         selected_names,
         deadline,
         tracker,
@@ -342,16 +696,20 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
+  # The store belongs to the lifecycle owner, not to this bounded worker.
+  # Terminating a worker blocked in provider work must not destroy the store a
+  # committed provider closer still needs while the session closes.
   defp with_memory_runtime(
          execution,
+         lifecycle_owner,
          selected_names,
          deadline,
          tracker,
          operation,
          callback
        ) do
-    with {:ok, memory} <- Memory.start_link(owner: self()),
-         :ok <- tracker.(:put, :memory, memory) do
+    with {:ok, memory} <- Memory.start(owner: lifecycle_owner),
+         :ok <- tracked_memory(tracker, memory) do
       try do
         with {:ok, store} <- Memory.store(memory),
              {:ok, context} <-
@@ -370,12 +728,12 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           with_registry(
             execution.catalog,
             services,
+            lifecycle_owner,
             selected_names,
             deadline,
             tracker,
             operation,
-            callback,
-            context
+            registry_callback(callback, context)
           )
         end
       after
@@ -387,24 +745,56 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
+  # The authorization branch's callback also needs the shared OAuth context.
+  # Binding it here keeps one registry-opening shape rather than teaching that
+  # step which branch supplied its callback.
+  defp registry_callback(callback, context) when is_function(callback, 2),
+    do: fn registry -> callback.(registry, context) end
+
+  defp registry_callback(callback, _context) when is_function(callback, 1), do: callback
+
+  # An untracked store has no owner that would close it, and it is no longer
+  # linked to this worker, so a refused registration closes it here instead of
+  # leaving it to the lifecycle owner's own death.
+  defp tracked_memory(tracker, memory) do
+    case tracker.(:put, :memory, memory) do
+      :ok ->
+        :ok
+
+      {:error, _reason} = error ->
+        Memory.close(memory)
+        error
+    end
+  end
+
+  # The registry is opened for the lifecycle owner, not for this worker: a
+  # host-bound authority is revoked when its owner dies, and the owner must be
+  # able to close resources acquired through the registry after terminating a
+  # worker that is blocked in provider work.
   defp with_registry(
          catalog,
          services,
+         lifecycle_owner,
          selected_names,
          deadline,
          tracker,
          operation,
-         callback,
-         context
+         callback
        ) do
     result =
-      InstallationCatalog.runtime_registry(catalog, services, selected_names, deadline)
+      InstallationCatalog.runtime_registry(
+        catalog,
+        services,
+        selected_names,
+        deadline,
+        lifecycle_owner
+      )
       |> registry_result(operation, selected_names, catalog)
 
     with {:ok, registry} <- result,
          :ok <- tracker.(:put, :registry, registry) do
       try do
-        if is_nil(context), do: callback.(registry), else: callback.(registry, context)
+        callback.(registry)
       after
         ProviderRegistry.close(registry)
         _ = tracker.(:drop, :registry, registry)
@@ -419,11 +809,24 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
   defp registry_result(
          {:error, :operation_deadline_expired},
-         :run,
+         operation,
+         _selected_names,
+         _catalog
+       )
+       when operation in [:run, :check],
+       do: {:error, CommandDiagnostic.new!(:execution, :run_timeout, provider_activity: true)}
+
+  # Connectivity spends a different budget, so exhausting it is not a run
+  # timeout. `execution/run_timeout` also names a phase the connect contract
+  # does not admit, which would turn a spent connectivity budget into an
+  # unrenderable outcome.
+  defp registry_result(
+         {:error, :operation_deadline_expired},
+         :connect,
          _selected_names,
          _catalog
        ),
-       do: {:error, CommandDiagnostic.new!(:execution, :run_timeout, provider_activity: true)}
+       do: {:error, connectivity_timeout_diagnostic()}
 
   defp registry_result(
          {:error, reason},
@@ -742,6 +1145,20 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     {:ok, subject} = CommandSubject.provider(name, :authorization)
 
     CommandDiagnostic.new!(:active_preflight, :authorization_unavailable,
+      provider_activity: true,
+      subject: subject
+    )
+  end
+
+  # Attribution is per alias and carries no occurrence, because a grant, an
+  # authority, and a store are all per alias: every occurrence of one alias
+  # shares the single authorization that is missing, so naming one of them would
+  # be arbitrary. The alias reported is the first in manifest order, the same
+  # deterministic rule credential attribution uses.
+  defp authorization_required_diagnostic(name) do
+    {:ok, subject} = CommandSubject.provider(name, :authorization)
+
+    CommandDiagnostic.new!(:active_preflight, :authorization_required,
       provider_activity: true,
       subject: subject
     )

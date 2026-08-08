@@ -10,8 +10,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
   cannot fall back to implicit built-ins.
 
   Later runtime phases preflight local executable and launcher identity without
-  reading credentials, then render once-resolved credentials while acquiring
-  the provider. Live LLM model resolution likewise precedes credential access.
+  reading credentials, then render credentials the command already resolved
+  while acquiring the provider. An active command reads each declared credential
+  exactly once, at phase-8 step 5; acquisition and the live connectivity probe
+  both consume that value rather than resolving one of their own. Live LLM model
+  resolution likewise precedes credential access.
   Native trace acquisition
   exports its opaque frozen handle only to a selected inspection source, so
   private artifacts validate against the exact already-captured canonical
@@ -296,13 +299,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   def owner_call(%HostConfig{} = host, {:connectivity_probe, name, selection, context}) do
     case Map.fetch(host.install, name) do
       {:ok, %{source: :llm} = installation} ->
-        prepare_llm_connectivity_probe(
-          host,
-          installation,
-          selection,
-          context,
-          &resolve_credentials(host, &1)
-        )
+        prepare_llm_connectivity_probe(host, installation, selection, context)
 
       _missing_or_wrong_source ->
         {:error, :invalid_host_installation}
@@ -821,18 +818,16 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp prepare_llm_connectivity_probe(
-         _host,
-         installation,
-         selection,
-         context,
-         credential_resolver
-       ) do
+  # The credential arrives already resolved: phase-8 step 5 reads it once per
+  # command from the sealed declarations, before any probe or provider callback
+  # runs, so a probe that resolved its own would be a second read outside that
+  # step's budget and attribution.
+  defp prepare_llm_connectivity_probe(_host, installation, selection, context) do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- llm_selection(installation, selection, context),
          {:ok, model, adapter} <- preflight_llm(installation.model),
-         {:ok, credentials} <- credential_resolver.([installation.credential]),
-         {:ok, credential} <- Map.fetch(credentials, installation.credential),
+         {:ok, credential} <-
+           Map.fetch(Map.get(context, :credentials, %{}), installation.credential),
          {:ok, timeout_ms, max_heap_words} <- connectivity_probe_bounds(context) do
       {:ok,
        %{
@@ -1591,8 +1586,6 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   def resolve_runtime_credentials(_host, _names), do: {:error, :credential_unavailable}
-
-  defp resolve_credentials(host, names), do: resolve_runtime_credentials(host, names)
 
   defp resolve_credential(_directory, %{source: :env, name: name}),
     do: System.fetch_env(name)

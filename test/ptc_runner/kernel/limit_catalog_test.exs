@@ -40,6 +40,12 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
       installed_default: 10_000,
       identity: false
     },
+    "local_preflight_timeout_ms" => %{
+      field: :local_preflight_timeout_ms,
+      compiled_default: 5_000,
+      installed_default: 5_000,
+      identity: true
+    },
     "provider_cleanup_timeout_ms" => %{
       field: :provider_cleanup_timeout_ms,
       compiled_default: 5_000,

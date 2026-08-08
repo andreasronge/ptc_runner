@@ -424,9 +424,13 @@ PtcRunner does not verify signed metadata and therefore refuses to consume
 unsigned fields beside it. Authorization-server or client metadata requiring
 PAR or DPoP is likewise unsupported.
 
-Normal execution never opens an authorization interaction. An absent,
-rejected, expired-without-refresh, or indeterminate grant returns
-`mcp_authorization_required`. A `401` rejects only the bearer generation
+Normal execution never opens an authorization interaction. A command refuses a
+selected OAuth installation that no `--authorize-mcp` named before any provider
+work, reporting `active_preflight` / `authorization_required` for that alias.
+Beyond that point an absent, rejected, expired-without-refresh, or
+indeterminate grant returns `mcp_authorization_required`, which a command
+reports as that same closed code against the occurrence that hit it. A `401`
+rejects only the bearer generation
 actually sent. A valid `403 insufficient_scope` challenge stores a private
 scope requirement for the next explicit authorization in the same store
 lifetime. That server response overrides the sent generation's nominal token
@@ -563,21 +567,26 @@ more turns, model calls, and trace events than they allow:
 ```
 
 Every cataloged limit name is accepted. Existing application limits accept
-positive integers through 2,592,000,000. Three operational timeouts instead
+positive integers through 2,592,000,000. Four operational timeouts instead
 have narrow, installed-only contracts:
 
 | Limit | Installed default | Accepted range | Identity metadata |
 | --- | ---: | ---: | --- |
 | `provider_cleanup_timeout_ms` | 5,000 | 100–30,000 | Included |
+| `local_preflight_timeout_ms` | 5,000 | 100–30,000 | Included |
 | `selection_validation_timeout_ms` | 5,000 | 100–30,000 | Included |
 | `doctor_connectivity_timeout_ms` | 10,000 | 100–30,000 | Excluded; doctor-only |
 
-Applications cannot declare or narrow those three names. The first two are
+Applications cannot declare or narrow those four names. The first three are
 copied into sealed execution limits and marked as effective-identity
-participants; the doctor-only value is excluded. This slice seals that policy
-before the later provider-lifecycle and doctor implementations consume the
-timeouts—it does not yet impose those deadlines. Any omitted name keeps its
-cataloged installed default.
+participants; the doctor-only value is excluded. `local_preflight_timeout_ms`
+bounds the whole audited-local step rather than one check: every applicable
+occurrence spends what remains of one anchored deadline, so a selection with
+many local checks cannot multiply it. All four are now imposed rather than only
+sealed: `RunCoordinator.local_checks/3` anchors the audited-local deadline, and
+a provider session seals the selection-validation and connectivity budgets from
+its own limits, so naming an operation cannot widen either. Any omitted name
+keeps its cataloged installed default.
 
 Raising a ceiling here does not by itself lengthen any run. The manifest rule is
 unchanged for manifest-narrowable limits: an application may still only request

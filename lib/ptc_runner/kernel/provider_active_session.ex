@@ -6,8 +6,8 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   `InstallationCatalog` pair — already consumed by the execution-session owner
   that opens the sinks — and monotonically marks provider activity. It then opens the command's `ProviderSession` and
   admits selected optional provider applications according to the sealed
-  runtime services before invoking active selection validators in declaration
-  order. `open_consumed_setup/5` and `begin_owned_run/3` expose that boundary in
+  runtime services before running the active selection validators and then the
+  post-marker `:unverified` local checks, both in declaration order. `open_consumed_setup/5` and `begin_owned_operation/5` expose that boundary in
   two steps for the Mix-only explicit OAuth interaction: setup admission occurs
   first, while the ordinary run clock and active validators begin only after
   interaction. Both halves belong to the execution-session owner, which owns the
@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LocalPreflight
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderApplicationGate
@@ -74,20 +75,42 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
       ),
       do: {:error, internal_diagnostic(false)}
 
-  @doc false
-  @spec begin_owned_run(ProviderSession.t(), PreparedRun.t(), InstallationCatalog.t()) ::
-          {:ok, ProviderSession.t()} | {:error, CommandDiagnostic.t()}
-  def begin_owned_run(session, %PreparedRun{} = prepared, %InstallationCatalog{} = catalog) do
+  @doc """
+  Anchors the operation clock this operation is entitled to and validates
+  selections behind it.
+
+  The operation names its own clock rather than inheriting one: a run spends
+  `run_duration_ms`, while `doctor --connect` spends the much shorter
+  `doctor_connectivity_timeout_ms`. Both budgets are sealed into the session
+  from its limits, so naming the operation cannot widen either.
+  """
+  @spec begin_owned_operation(
+          ProviderSession.t(),
+          PreparedRun.t(),
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t(),
+          :run | :check | :connect
+        ) :: {:ok, ProviderSession.t()} | {:error, CommandDiagnostic.t()}
+  def begin_owned_operation(
+        session,
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services,
+        operation
+      )
+      when operation in [:run, :check, :connect] do
     if PreparedRun.active_valid?(prepared) and InstallationCatalog.valid?(catalog) and
          prepared.catalog_attestation == catalog.attestation and
+         ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding) and
          ProviderSession.bound_to_operation?(session, prepared.attestation) do
-      do_begin_run(session, prepared, catalog)
+      do_begin_run(session, prepared, catalog, services, operation)
     else
       reject_begin_run(session, prepared)
     end
   end
 
-  def begin_owned_run(_session, _prepared, _catalog), do: {:error, internal_diagnostic(false)}
+  def begin_owned_operation(_session, _prepared, _catalog, _services, _operation),
+    do: {:error, internal_diagnostic(false)}
 
   defp open_consumed(prepared, catalog, services, ownership) do
     case ProviderActivity.mark(prepared.provider_activity) do
@@ -122,12 +145,12 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  defp do_begin_run(session, prepared, catalog) do
-    case ProviderSession.begin_run(session) do
+  defp do_begin_run(session, prepared, catalog, services, operation) do
+    case ProviderSession.begin_operation(session, operation) do
       {:ok, session} ->
-        validate_open_session(session, prepared, catalog)
+        validate_open_session(session, prepared, catalog, services)
 
-      # `ProviderSession.begin_run/1` queues token-authenticated cleanup when its
+      # `ProviderSession.begin_operation/2` queues token-authenticated cleanup when its
       # bounded call becomes unavailable. Do not follow that timeout with an
       # unbounded synchronous close against the same unavailable process.
       {:error, _reason} ->
@@ -135,13 +158,23 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  defp validate_open_session(session, prepared, catalog) do
-    case validate_active_selections(session, prepared, catalog) do
-      :ok ->
-        {:ok, session}
-
-      {:error, %CommandDiagnostic{} = diagnostic} ->
-        fail_with_session(session, diagnostic)
+  # Both post-marker declaration checks spend the operation clock this call just
+  # anchored, and the order between them is a contract rather than a preference.
+  #
+  # Active selection validation goes first because it decides whether the
+  # selection is acceptable at all, while an unverified check is unrestricted
+  # active work that may start processes or ports and contact a provider.
+  # Running that first would spend the cost, and cause the side effects, of a
+  # selection the validator then rejects. The earlier ordering justified itself
+  # with "a local check contacts nothing" — true of an audited-local check in
+  # phase 7, and precisely untrue of this one.
+  defp validate_open_session(session, prepared, catalog, services) do
+    with :ok <- validate_active_selections(session, prepared, catalog),
+         :ok <- LocalPreflight.run_unverified(prepared, catalog, services, session) do
+      {:ok, session}
+    else
+      {:error, %CommandDiagnostic{} = diagnostic} -> fail_with_session(session, diagnostic)
+      _invalid -> fail_with_session(session, internal_diagnostic(true))
     end
   rescue
     _exception -> fail_with_session(session, internal_diagnostic(true))
@@ -167,22 +200,31 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
       {:ok, registrar} ->
         validate_in_scope(
           registrar,
-          ProviderSession.run_deadline(session),
+          session,
           prepared,
           catalog,
           declaration
         )
 
+      # A scope the session refuses past the operation deadline is the budget
+      # running out, not a defect, so it keeps the operation-class code the
+      # validator itself would have reported.
       {:error, _reason} ->
-        {:error, internal_diagnostic(true)}
+        {:error, selection_setup_diagnostic(session, declaration)}
     end
   end
 
-  defp validate_in_scope(registrar, run_deadline, prepared, catalog, declaration) do
+  defp selection_setup_diagnostic(session, declaration) do
+    if session |> ProviderSession.run_deadline() |> Deadline.expired?(),
+      do: selection_diagnostic(declaration, :selection_validation_timeout),
+      else: internal_diagnostic(true)
+  end
+
+  defp validate_in_scope(registrar, session, prepared, catalog, declaration) do
     result =
       case ResourceRegistrar.activate(registrar) do
-        :ok -> run_validator(registrar, run_deadline, prepared, catalog, declaration)
-        {:error, _reason} -> {:error, internal_diagnostic(true)}
+        :ok -> run_validator(registrar, session, prepared, catalog, declaration)
+        {:error, _reason} -> {:error, selection_setup_diagnostic(session, declaration)}
       end
 
     case ResourceRegistrar.abort(registrar) do
@@ -191,10 +233,10 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  defp run_validator(registrar, run_deadline, prepared, catalog, declaration) do
+  defp run_validator(registrar, session, prepared, catalog, declaration) do
     deadline =
       Deadline.earliest(
-        run_deadline,
+        ProviderSession.run_deadline(session),
         Deadline.new(prepared.request.package.limits.selection_validation_timeout_ms)
       )
 
@@ -219,7 +261,11 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
           BoundedWorker.run(fn -> callback.(declaration.config, context) end,
             timeout_ms: timeout_ms,
             max_heap_words: prepared.request.package.limits.provider_heap_words,
-            cancel_with_caller: true
+            cancel_with_caller: true,
+            # A validator may reach a provider, and the executor can outlive the
+            # session, so the caller link alone would leave blocked work running
+            # after the session that owns it is gone.
+            cancel_with: ProviderSession.worker_cancel_target(session)
           )
       end
 
