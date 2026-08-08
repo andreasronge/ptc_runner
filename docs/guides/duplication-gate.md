@@ -94,3 +94,32 @@ mix ex_dna.explain 3 lib/ test/      # extraction breakdown for one clone
 Detection takes roughly fifteen seconds over `lib/` and `test/`. Configuration
 lives in `.ex_dna.exs`; `.ex_dna_cache` is a machine-local artefact and is
 ignored.
+
+## Testing an unreleased ExDNA checkout
+
+Normal development and package builds resolve ExDNA from Hex. To test an
+unreleased checkout without changing `mix.lock`, point the complete build at
+that checkout:
+
+```bash
+mix deps.get
+export PTC_EX_DNA_PATH=/absolute/path/to/ex_dna
+mix deps.compile ex_dna --force
+scripts/duplication_gate.sh check
+```
+
+The override also enables ExDNA's opt-in result cache for the duplication gate.
+Fetch the locked dependency graph before setting the variable; running
+`mix deps.get` with the override active may legitimately re-resolve the
+candidate's transitive development dependencies. Keep the variable set for
+every subsequent Mix command in that build. Unset it and recompile to return to
+the locked Hex dependency:
+
+```bash
+unset PTC_EX_DNA_PATH
+mix deps.compile ex_dna --force
+```
+
+CI has a separate compatibility job pinned to the candidate commit. It runs the
+gate once cold and once warm and verifies that the warm run does not rewrite
+either cache artifact. Ordinary validation and release jobs remain on Hex.

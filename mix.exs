@@ -112,7 +112,7 @@ defmodule PtcRunner.MixProject do
       {:telemetry, "~> 1.0"},
       {:stream_data, "~> 1.1", only: [:test, :dev]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false},
+      ex_dna_dep(),
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:req_llm, "~> 1.19", optional: true, runtime: false},
@@ -122,6 +122,22 @@ defmodule PtcRunner.MixProject do
       {:recon, "~> 2.5", only: [:dev, :test], runtime: false},
       {:benchee, "~> 1.3", only: [:dev, :test], runtime: false}
     ]
+  end
+
+  # Keep published and ordinary development builds on Hex while allowing an
+  # unreleased ExDNA checkout to be exercised by an isolated compatibility
+  # build. The caller must keep this environment variable set for every Mix
+  # command in that build so dependency resolution stays consistent.
+  defp ex_dna_dep do
+    options = [only: [:dev, :test], runtime: false]
+
+    case {Mix.env(), System.get_env("PTC_EX_DNA_PATH")} do
+      {env, path} when env in [:dev, :test] and is_binary(path) and path != "" ->
+        {:ex_dna, Keyword.put(options, :path, Path.expand(path))}
+
+      {_env, _path} ->
+        {:ex_dna, "~> 1.5", options}
+    end
   end
 
   # Local development exercises the companion from this checkout. Published
