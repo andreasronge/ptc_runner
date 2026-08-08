@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
   use ExUnit.Case, async: false
 
+  import PtcRunner.TestSupport.TestHelpers, only: [long_running_body: 0]
+
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InspectionSink
@@ -166,7 +168,9 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
 
     documents = %{
       "ptc.json" => Jason.encode!(manifest),
-      "main.clj" => "(ns app) (defn run [_input] (loop [] (recur)))"
+      # The owner must still be running when the tests below call it and read
+      # its OTP status; `long_running_body/1` keeps it there for real.
+      "main.clj" => "(ns app) (defn run [_input] #{long_running_body()})"
     }
 
     {:ok, request} =

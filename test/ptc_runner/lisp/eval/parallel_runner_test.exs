@@ -496,8 +496,28 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
 
     test "timeout retains a successful envelope from a still-live sibling" do
       counter = :atomics.new(1, [])
-      runner = self()
       effects = Effects.empty() |> Effects.record_print("retained")
+
+      # A monitor-based rendezvous instead of a wall-clock margin: the
+      # :blocked worker waits for `gate` to go down (the :success worker
+      # stops it right after `worker.()` -- and so its `:worker_result` --
+      # has been sent) before it starts genuinely blocking.
+      # `Process.monitor/1` delivers an immediate `:DOWN` for an
+      # already-dead process, so this is race-free regardless of
+      # scheduling. Both waits happen inside the SPAWNED processes, not in
+      # `spawn_fun` itself, so neither can block `fill_window/1` and eat
+      # into the shared deadline the way the old message-based handshake
+      # did.
+      #
+      # `spawn_fun` (not `fun`) is what keeps the :success worker alive
+      # after sending its result via `wait_for_go/0` -- required so its
+      # entry is still in `state.live`, tagged with a completed result, when
+      # the shared deadline fires for the :blocked sibling. That is the
+      # "still-live sibling" this test is named for: without it, the
+      # :success worker would exit immediately, its result would already be
+      # in `state.results` by the time of the timeout, and this would stop
+      # covering the code path it claims to.
+      {:ok, gate} = Agent.start_link(fn -> :ok end)
 
       spawn_fun = fn worker, opts ->
         case :atomics.add_get(counter, 1, 1) - 1 do
@@ -505,18 +525,25 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
             Process.spawn(
               fn ->
                 worker.()
-                send(runner, :success_sent)
+                Agent.stop(gate)
                 wait_for_go()
               end,
               opts
             )
 
           1 ->
-            receive do
-              :success_sent -> :ok
-            end
+            Process.spawn(
+              fn ->
+                gate_ref = Process.monitor(gate)
 
-            Process.spawn(fn -> worker.() end, opts)
+                receive do
+                  {:DOWN, ^gate_ref, :process, ^gate, _reason} -> :ok
+                end
+
+                worker.()
+              end,
+              opts
+            )
         end
       end
 
@@ -532,7 +559,13 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
           wait_for_go()
       end
 
-      deadline = System.monotonic_time(:millisecond) + 50
+      # The monitor rendezvous above removes the unbounded-handshake race,
+      # but item :success still has to get its (trivial) work scheduled
+      # before this deadline fires -- a pure scheduler stall could still
+      # lose that race with a tight budget. Since item :blocked always
+      # blocks until the deadline regardless of its value, a generous
+      # deadline costs nothing here; it isn't racing anything but a stall.
+      deadline = System.monotonic_time(:millisecond) + 2_000
 
       assert {:error,
               [

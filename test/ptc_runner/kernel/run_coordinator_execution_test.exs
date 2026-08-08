@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+  import PtcRunner.TestSupport.TestHelpers, only: [long_running_body: 0]
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
@@ -406,8 +407,31 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   test "caller death aborts the worker and stops both owner-backed sinks", %{
     tmp_dir: directory
   } do
-    {prepared, catalog} =
-      prepared_run("(loop [] (recur))", inspection_capture: true)
+    # This test's premise -- that the run is still in flight when
+    # `Process.exit(caller, :kill)` fires below -- used to rest on
+    # `(loop [] (recur))`, which is not the infinite loop it looks like (see
+    # `long_running_body/1`). It was really racing that loop's natural
+    # completion, and could lose even outside full-suite load (reproduced
+    # failing >50% of runs combined with just 3 other test files).
+    #
+    # `repeats: 1` (~6s) is deliberately the smallest useful margin rather
+    # than something larger: `Runner.execute_workflow/4` calls
+    # `Lisp.run_native/2` without `link: true`, so `Process.exit(worker_pid,
+    # :kill)` below (via the ExecutionSessionOwner abort path) does not
+    # itself terminate the underlying sandbox process -- it only monitors
+    # it. On any test failure before that point, this loop's sandbox keeps
+    # running, unlinked, until its own deadline. That is a real gap
+    # (arguably the workflow path should link like `repl_session.ex` does),
+    # but fixing it is a production change beyond what a flaky-test fix
+    # warrants -- keeping this loop short bounds the cost of the gap
+    # instead. 6s still dwarfs any plausible harness-setup delay between
+    # here and the `Process.alive?` check below, so a real regression is a
+    # far likelier explanation for a failure than hardware variance.
+    #
+    # `evaluation_timeout_ms` does not apply here: that governs subordinate
+    # mission evaluations, not this top-level workflow call, which uses
+    # `workflow_timeout_ms` (a 30s default, unrelated to this loop's budget).
+    {prepared, catalog} = prepared_run(long_running_body(), inspection_capture: true)
 
     inspection_path = Path.join(directory, "run.inspection.jsonl")
 
@@ -428,6 +452,13 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
         send(parent, {:execution_result, ExecutionSessionOwner.await(owner)})
       end)
 
+    # Registered immediately, before any assertion below can fail: caller
+    # death is exactly this test's own mechanism for aborting the run, so
+    # this is a safe no-op on the pass path (caller is already dead by
+    # then) and, on any earlier failure, stops the ~6s CPU-heavy loop
+    # instead of leaving it running unlinked until its own deadline.
+    on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
+
     caller_ref = Process.monitor(caller)
     assert_receive {:execution_owner, owner}, 5_000
     owner_pid = ExecutionSessionOwner.pid(owner)
@@ -441,7 +472,15 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
 
     Code.ensure_loaded!(EventSink)
     assert :erlang.trace_pattern({EventSink, :finalize_and_events, 2}, true, [:local]) == 1
-    assert :erlang.trace(owner_pid, true, [:call]) == 1
+
+    # Registered immediately: this is a VM-global trace pattern, so ANY
+    # later failure in this test -- including the five `Process.monitor/1`
+    # calls right below, before the `try` -- must not leave it enabled and
+    # contaminating every later test in the suite. `on_exit` always runs,
+    # unlike the `try/after` below which only protects its own block.
+    on_exit(fn ->
+      :erlang.trace_pattern({EventSink, :finalize_and_events, 2}, false, [:local])
+    end)
 
     owner_ref = Process.monitor(owner_pid)
     worker_ref = Process.monitor(state.worker_pid)
@@ -450,6 +489,21 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     activity_ref = Process.monitor(prepared.provider_activity.owner)
 
     try do
+      # `owner_pid` is running a loop built to take ~6s to reach its
+      # 1_000-iteration cap (see the comment above this test's
+      # `prepared_run/2` call), so it must still be alive here. If it is
+      # not, something ended the run far earlier than that -- fail with
+      # that distinction instead of the opaque ArgumentError
+      # `:erlang.trace/3` raises on a dead pid. Both checks stay inside this
+      # `try` so a failure here still runs the `after` cleanup below --
+      # otherwise the global `:erlang.trace_pattern/3` enabled above would
+      # leak into every later test in the suite.
+      assert Process.alive?(owner_pid),
+             "owner #{inspect(owner_pid)} exited before tracing could start; " <>
+               "the run ended far earlier than its ~6s natural completion"
+
+      assert :erlang.trace(owner_pid, true, [:call]) == 1
+
       Process.exit(caller, :kill)
 
       assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
@@ -465,9 +519,17 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       assert_receive {:DOWN, ^activity_ref, :process, _pid, :normal}, 5_000
       assert_receive {:DOWN, ^owner_ref, :process, ^owner_pid, :normal}, 5_000
       refute_received {:execution_result, _result}
+    rescue
+      e in ArgumentError ->
+        flunk(
+          "owner #{inspect(owner_pid)} exited between the liveness check and " <>
+            ":erlang.trace/3 (#{Exception.message(e)}); treat as a real early-abort " <>
+            "signal, not scheduler delay"
+        )
     after
+      # The global trace_pattern's disable is handled by the `on_exit`
+      # above, unconditionally -- no need to duplicate it here.
       stop_trace(owner_pid)
-      :erlang.trace_pattern({EventSink, :finalize_and_events, 2}, false, [:local])
     end
 
     assert :ok = PublicationAuthority.abort(authority)
@@ -541,13 +603,13 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       "input" => %{"value" => %{}}
     }
 
-    {limit_opts, request_opts} = Keyword.split(opts, [:normal_event_bytes])
+    {limit_opts, request_opts} =
+      Keyword.split(opts, [:normal_event_bytes, :evaluation_timeout_ms])
 
-    manifest =
-      case Keyword.fetch(limit_opts, :normal_event_bytes) do
-        {:ok, bytes} -> Map.put(manifest, "limits", %{"normal_event_bytes" => bytes})
-        :error -> manifest
-      end
+    limits =
+      Map.new(limit_opts, fn {name, value} -> {Atom.to_string(name), value} end)
+
+    manifest = if limits == %{}, do: manifest, else: Map.put(manifest, "limits", limits)
 
     documents = %{
       "ptc.json" => Jason.encode!(manifest),

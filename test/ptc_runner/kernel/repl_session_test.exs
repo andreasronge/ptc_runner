@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.ReplSessionTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.TestHelpers, only: [long_running_body: 1]
+
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
@@ -511,9 +513,28 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         send(parent, {:owner_exit_evaluation_ready, self()})
 
         receive do
-          :evaluate -> ReplSession.eval(session, "(loop [x 0] (recur (inc x)))")
+          :evaluate ->
+            # A trivial `(loop [x 0] (recur (inc x)))` would race this test's
+            # own setup regardless of load -- see `long_running_body/1` for
+            # why it is not the infinite loop it looks like. The heavier
+            # `repeats: 5` (~30s to reach the cap on its own) is safe here,
+            # unlike in RunCoordinatorExecutionTest:
+            # `Evaluation.evaluate_with_lease/6` passes `link: true`, so the
+            # underlying sandbox process is genuinely torn down when this
+            # evaluation's caller dies -- no orphaned-process risk to bound.
+            # This still finishes fast, since the test interrupts the
+            # evaluation long before that natural completion.
+            ReplSession.eval(session, long_running_body(5))
         end
       end)
+
+    # Registered immediately, before any assertion below can fail: killing
+    # `creator` is exactly this test's own mechanism for cancelling the
+    # evaluation, so this is a safe no-op on the pass path (creator is
+    # already dead by then) and, on any earlier failure, stops the ~30s
+    # CPU-heavy loop instead of leaving it running unlinked until its own
+    # deadline.
+    on_exit(fn -> if Process.alive?(creator), do: Process.exit(creator, :kill) end)
 
     assert_receive {:owner_exit_evaluation_ready, ^creator}, 2_000
     assert {:trap_exit, false} = Process.info(creator, :trap_exit)
@@ -527,7 +548,6 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert_receive {:trace, ^creator, :spawn, evaluation_worker, _mfa}, 2_000
     evaluation_ref = Process.monitor(evaluation_worker)
     assert Process.alive?(evaluation_worker)
-    assert {:trap_exit, false} = Process.info(creator, :trap_exit)
 
     on_exit(fn ->
       if Process.alive?(evaluation_worker), do: Process.exit(evaluation_worker, :kill)
