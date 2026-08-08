@@ -1495,10 +1495,7 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
 
     on_data = fn response, data ->
-      case accumulate_response(response, data, payload["id"], max_bytes) do
-        {:cont, response} -> {:cont, response}
-        {:halt, response} -> {:halt, response}
-      end
+      accumulate_response(response, data, payload["id"], max_bytes)
     end
 
     with {:ok, body} <- Jason.encode(payload),

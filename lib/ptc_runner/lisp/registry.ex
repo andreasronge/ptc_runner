@@ -287,12 +287,7 @@ defmodule PtcRunner.Lisp.Registry do
     end
   end
 
-  defp doc_namespace(ns) do
-    case Map.fetch(@doc_namespaces, ns) do
-      {:ok, ns_atom} -> {:ok, ns_atom}
-      :error -> :error
-    end
-  end
+  defp doc_namespace(ns), do: Map.fetch(@doc_namespaces, ns)
 
   defp namespace_member?(ns, func) do
     ns

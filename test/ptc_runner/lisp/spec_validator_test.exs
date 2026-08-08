@@ -695,10 +695,7 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
   defp assert_valid_clojure_syntax_result(source) do
     alias PtcRunner.Lisp.ClojureValidator
 
-    case ClojureValidator.validate_syntax(source) do
-      :ok -> :ok
-      {:error, msg} -> {:error, msg}
-    end
+    ClojureValidator.validate_syntax(source)
   end
 
   # Helper that returns result instead of asserting

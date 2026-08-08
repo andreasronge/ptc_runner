@@ -680,35 +680,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           raise RuntimeError, "closures with more than 3 parameters not supported (got #{n})"
       end
     else
-      # Variadic closures - we don't know what arity the HOF wants,
-      # but we can check the call-time arity.
-      # Wait, HOFs like Enum.map expect a function of SPECIFIC arity.
-      # We can't return "any" arity. We'll return a 1-arity function by default
-      # if it's compatible, as it's the most common for HOFs.
-      # If they need 2 (reduce) or 3, it gets tricky.
-
-      # Let's try to return a 1-arity function if min_arity <= 1.
-      # If min_arity > 1, we might need a 2-arity or 3-arity.
-      # For now, we'll support the same 0-3 arity range, but the USER
-      # must choose the right one? No, we have to return one function.
-
-      # Actually, since we don't know, we'll return a 1-arity one if possible.
-      # If they need 2-arity, this will fail.
-      # A better approach might be to have builtins that use closure_to_fun
-      # specify the arity they need. But closure_to_fun is also used in other places.
-
-      # Clojure's variadic functions are actually multi-arity functions.
-      # For now, let's assume 1-arity is what's wanted if it's variadic and min_arity <= 1.
-      # If it's used in reduce, it needs 2.
-
-      # Let's check how builtins use it. reduce uses 2. map uses 1.
-      # We could return a function that supports multiple arities IF we use def
-      # but we are returning an anonymous function.
-
-      # Wait, I can't return multiple arities.
-      # I'll default to 1-arity for now, and maybe 2-arity if min_arity is 2.
-      # This is a limitation of converting to Erlang functions.
-      # Variadic closures
+      # Variadic closures have no fixed arity, but an Erlang anonymous function
+      # does, and the receiving HOF calls it at one specific arity. Since a
+      # single anonymous function cannot cover several arities, we commit to the
+      # narrowest one the closure accepts: 1 covers `map`-shaped callers, 2
+      # covers `reduce`-shaped ones. A closure needing 3 or more has no
+      # representation here and raises rather than silently mis-dispatching.
       cond do
         min_arity <= 1 ->
           fn arg1 ->
@@ -832,7 +809,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # Detect char lists (result of `(take n string)`) and join them for readable output
   defp format_for_println(list) when is_list(list) do
     if char_list?(list) do
-      Enum.join(list, "")
+      Enum.join(list)
     else
       Format.to_clojure(list) |> elem(0)
     end
