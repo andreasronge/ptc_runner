@@ -16,8 +16,8 @@ defmodule PtcRunner.Kernel.ToolGrant do
   modest environment to eat the program's whole heap budget through the
   measured baseline. `PtcRunner.Sandbox` documents how that baseline is billed.
 
-  Size a grant with `PtcRunner.Lisp.RetainedSize.bytes/1`; it counts flat heap
-  words plus referenced binaries, which is what the sandbox bills.
+  Size a grant with `:erts_debug.flat_size` (plus referenced binaries for byte
+  units); that is what the sandbox's own baseline measurement bills.
   """
 
   alias PtcRunner.Kernel.Dispatcher
