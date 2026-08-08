@@ -170,6 +170,10 @@ projection; its memory is not the authoritative continuation and must not be
 threaded back into the session. Preflight errors preserve the committed public
 memory view, and projection is validated before continuation commit.
 
+If the internal owner terminates before or during teardown, `close/1` reports
+`{:error, :session_closed}` and `abort/2` returns `:ok`; both paths also remove
+the creator-side lookup entry for the dead session.
+
 If provider cleanup fails after terminal finalization, `close/1` and `abort/2`
 return `{:error, :provider_cleanup_failed, events}` so the host can persist the
 frozen batch before reporting the error. The Mix frontend does this for normal
