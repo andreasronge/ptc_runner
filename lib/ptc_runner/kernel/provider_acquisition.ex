@@ -42,6 +42,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
 
   alias PtcRunner.Kernel.AcquisitionReason
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
@@ -58,7 +59,10 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   @type plan :: %{
           effective_class: input_class(),
           occurrences: [map()],
-          package_digest: binary()
+          package_digest: binary(),
+          prepared_attestation: binary(),
+          catalog_attestation: binary(),
+          attestation: binary()
         }
 
   @doc false
@@ -223,12 +227,15 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
           }
         end)
 
-      {:ok,
-       %{
-         effective_class: prepared.effective_data_class,
-         occurrences: occurrences,
-         package_digest: prepared.request.package.application_content_digest
-       }}
+      fields = %{
+        effective_class: prepared.effective_data_class,
+        occurrences: occurrences,
+        package_digest: prepared.request.package.application_content_digest,
+        prepared_attestation: prepared.attestation,
+        catalog_attestation: catalog.attestation
+      }
+
+      {:ok, Map.put(fields, :attestation, Attestation.attest(__MODULE__, payload(fields)))}
     else
       {:error, :invalid_provider_acquisition}
     end
@@ -238,10 +245,35 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
 
   def plan(_prepared, _catalog), do: {:error, :invalid_provider_acquisition}
 
-  defp validate_plan(%{package_digest: digest}, package) do
-    if digest == package.application_content_digest,
-      do: :ok,
-      else: {:error, :invalid_provider_acquisition}
+  defp payload(fields),
+    do:
+      {fields.package_digest, fields.prepared_attestation, fields.catalog_attestation,
+       fields.effective_class, fields.occurrences}
+
+  # The plan decides which provider callbacks run, so it is checked before any
+  # of them do rather than trusted because its caller built it. Comparing the
+  # package digest alone was not enough: an edited `occurrences` list keeps the
+  # digest and steers `sealed_closure/2` into preparing providers the selection
+  # never reached, and `declarations_honored/3` only notices afterwards — which
+  # makes the authority to invoke a callback depend on invoking callbacks, the
+  # exact inversion this module's design rejects.
+  #
+  # The seal covers the preparation and catalog attestations too, so a plan is
+  # bound to the pair phase 5 validated together and not merely to an
+  # application digest two catalogs can share. What it still cannot tell apart
+  # is two plans `plan/2` itself minted for the same preparation and catalog,
+  # which are identical by construction.
+  defp validate_plan(%{attestation: attestation} = plan, package)
+       when is_binary(attestation) do
+    with true <- Map.has_key?(plan, :package_digest),
+         true <- plan.package_digest == package.application_content_digest,
+         true <- Attestation.valid?(__MODULE__, payload(plan), attestation) do
+      :ok
+    else
+      _invalid -> {:error, :invalid_provider_acquisition}
+    end
+  rescue
+    _exception -> {:error, :invalid_provider_acquisition}
   end
 
   defp validate_plan(_plan, _package), do: {:error, :invalid_provider_acquisition}

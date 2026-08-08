@@ -1657,9 +1657,13 @@ fine; temporarily reachable and unsafe is not.
    the result, `with_registry/8` unwound the registry, and only then did
    `close_owned_session/3` run the closers a connectivity *acquisition* had
    committed. It is latent rather than currently broken, because no closer
-   reachable from a shipped connectivity recipe needs registry authority, and
-   that is also why no new regression pins it: the rendered outcome is identical
-   either way. The ordering is the invariant; the fix restores it.
+   reachable from a shipped connectivity recipe needs registry authority. The
+   first repair claimed no regression could pin it, on the grounds that the
+   rendered outcome is identical either way; the review's follow-up corrected
+   that by naming the existing check-lifecycle test, which traces the
+   `ProviderSession` and `ProviderRegistry` closes and asserts their order. The
+   connectivity case now sits beside it, sharing one assertion so the two cannot
+   drift, and it fails against the inversion.
 
    **Fixed: two documentation contradictions.** The maintainer guide said the
    REPL crosses phase 7 and omitted `doctor --connect`, which is exactly
@@ -1685,19 +1689,22 @@ fine; temporarily reachable and unsafe is not.
    Giving `:connect` a consume-without-sinks path is the fix and is a new
    owner-side branch, so it is recorded here with its cause named.
 
-   **Recorded, not fixed: `acquire_targets/7` trusts its plan.**
-   `validate_plan/2` compares only the package digest, so a plan carrying the
-   right digest with edited `occurrences` would steer `sealed_closure/2`, which
-   decides which provider callbacks run — and drift is only caught after those
-   callbacks execute. That is weaker than the guarantee this document states for
-   the acquisition subset. It is the same shape as the `settle_connect/4`
-   residual below, and it is bounded the same way: the plan has one production
-   caller, `ProviderExecution`, which builds it from `plan/2` and consumes it in
-   the same function, so forging one needs in-process code. The fix is to seal
-   the plan over the prepared and catalog attestations exactly as
-   `ConnectivityResult` was repaired under review, which belongs with the
-   `acquire/6`–`acquire_targets/7` unification rather than bolted onto this
-   branch's tail.
+   **Fixed: `acquire_targets/7` trusted its plan.** `validate_plan/2` compared
+   only the package digest, so a plan carrying the right digest with edited
+   `occurrences` steered `sealed_closure/2` — which decides which provider
+   callbacks run — and the drift was only caught after those callbacks executed.
+   That made the authority to invoke a callback depend on invoking callbacks,
+   the exact inversion the acquisition subset was designed to avoid, and it was
+   weaker than the guarantee this document states.
+
+   The plan is now sealed the way `ConnectivityResult` was repaired under
+   review: over its own contents *and* the preparation and catalog attestations,
+   so it is bound to the pair phase 5 validated together rather than to an
+   application digest two catalogs can share. What the seal still cannot tell
+   apart is two plans `plan/2` itself minted for the same preparation and
+   catalog, which are identical by construction. Recorded first and fixed only
+   when a second independent pass named it again — the cheap check was the whole
+   fix, and deferring it to the unification was the wrong call.
 
 Step 2 carries a constraint the phrase "a probe calls the catalog
 implementation directly" must not be read as weakening. Direct means selecting

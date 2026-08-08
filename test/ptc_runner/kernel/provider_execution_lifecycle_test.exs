@@ -433,56 +433,17 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     # produced its resources are still alive. A check that left the close to the
     # execution owner would unwind that runtime first and run connector closers
     # against a store and managers that are already gone.
-    parent = self()
+    assert_session_closes_before_registry(provider_fixture(closing_acquire()), :check)
+  end
 
-    fixture =
-      provider_fixture(
-        acquire: fn context ->
-          scoped_root(parent, context)
-          {:ok, capability} = fixture_capability()
-
-          {:ok,
-           %{
-             capabilities: [capability],
-             snapshot: nil,
-             close: fn ->
-               send(parent, :provider_closed)
-               :ok
-             end
-           }}
-        end
-      )
-
-    caller =
-      spawn(fn ->
-        receive do: (:go -> :ok)
-
-        {:ok, owner} =
-          ExecutionSessionOwner.start(
-            fixture.prepared,
-            fixture.authority,
-            self(),
-            fixture.execution,
-            &never_notify/1,
-            :check
-          )
-
-        send(parent, {:execution_result, ExecutionSessionOwner.await(owner)})
-      end)
-
-    # Tracing the caller before it starts anything makes the owner and its
-    # worker inherit the flag, so the order below is the order the run actually
-    # closed in rather than a snapshot taken after the fact.
-    trace_closes(caller, [:call, :set_on_spawn])
-
-    try do
-      send(caller, :go)
-      assert_receive {:execution_result, {:ok, _snapshots}}, 5_000
-      assert [ProviderSession, ProviderRegistry] == [next_close(), next_close()]
-      assert_received :provider_closed
-    after
-      stop_trace_closes(caller)
-    end
+  test "connectivity closes its provider session inside the runtime that acquired it" do
+    # The same invariant as the check above, on the operation that used to break
+    # it. A connectivity acquisition commits real closers to the session, so
+    # unwinding the registry first would run them against a runtime that is
+    # already gone. An independent review found the inversion; this is what
+    # would have caught it.
+    fixture = provider_fixture([connectivity_mode: :acquisition] ++ closing_acquire())
+    assert_session_closes_before_registry(fixture, :connect)
   end
 
   test "an execution from another catalog leaves the prepared run reusable" do
@@ -602,6 +563,67 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     end)
   end
 
+  defp closing_acquire do
+    parent = self()
+
+    [
+      acquire: fn context ->
+        scoped_root(parent, context)
+        {:ok, capability} = fixture_capability()
+
+        {:ok,
+         %{
+           capabilities: [capability],
+           snapshot: nil,
+           close: fn ->
+             send(parent, :provider_closed)
+             :ok
+           end
+         }}
+      end
+    ]
+  end
+
+  # One invariant, asserted for each operation that owns a provider session:
+  # the session closes while the runtime that produced its resources is still
+  # alive. Connectivity takes no notifier at all, which is itself part of its
+  # contract.
+  defp assert_session_closes_before_registry(fixture, operation) do
+    parent = self()
+    notifier = if operation == :connect, do: nil, else: &never_notify/1
+
+    caller =
+      spawn(fn ->
+        receive do: (:go -> :ok)
+
+        {:ok, owner} =
+          ExecutionSessionOwner.start(
+            fixture.prepared,
+            fixture.authority,
+            self(),
+            fixture.execution,
+            notifier,
+            operation
+          )
+
+        send(parent, {:execution_result, ExecutionSessionOwner.await(owner)})
+      end)
+
+    # Tracing the caller before it starts anything makes the owner and its
+    # worker inherit the flag, so the order below is the order the operation
+    # actually closed in rather than a snapshot taken after the fact.
+    trace_closes(caller, [:call, :set_on_spawn])
+
+    try do
+      send(caller, :go)
+      assert_receive {:execution_result, {:ok, _evidence}}, 5_000
+      assert [ProviderSession, ProviderRegistry] == [next_close(), next_close()]
+      assert_received :provider_closed
+    after
+      stop_trace_closes(caller)
+    end
+  end
+
   defp trace_closes(owner_pid, flags \\ [:call]) do
     Enum.each([ProviderRegistry, ProviderSession], &Code.ensure_loaded!/1)
     assert :erlang.trace_pattern({ProviderRegistry, :close, 1}, true, [:local]) == 1
@@ -689,7 +711,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
         provides: [],
         destinations: [:workflow],
         workflow_llm?: false,
-        connectivity_mode: :none,
+        connectivity_mode: Keyword.get(opts, :connectivity_mode, :none),
         probe_effect: nil,
         selection_validation: selection_validation,
         selection_rules: rules,

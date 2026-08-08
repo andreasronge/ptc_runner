@@ -67,6 +67,32 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
     assert_received {:acquired, "leaf"}
   end
 
+  test "a tampered plan reaches no callback even with the right package digest" do
+    # The plan decides which callbacks run, so it is authenticated rather than
+    # trusted. Comparing the package digest alone let an edited `occurrences`
+    # list keep the digest and steer the closure into preparing a provider the
+    # selection never reached, with the mismatch only caught after those
+    # callbacks had run — which is the inversion this module exists to avoid.
+    context = fixture()
+
+    widened =
+      Map.update!(context.plan, :occurrences, fn occurrences ->
+        Enum.map(occurrences, fn occurrence ->
+          if occurrence.name == "alpha",
+            do: %{occurrence | requires: [:leaf_service]},
+            else: occurrence
+        end)
+      end)
+
+    assert widened.package_digest == context.plan.package_digest
+
+    assert {:error, :invalid_provider_acquisition} =
+             acquire(%{context | plan: widened}, [workflow(0)])
+
+    refute_received {:prepared, _name}
+    refute_received {:acquired, _name}
+  end
+
   test "the resolved union covers every selection, not only the acquired closure" do
     # The closure here is beta and leaf; alpha is outside it and stays
     # callback-inert. Its credential is resolved anyway, because the union comes
