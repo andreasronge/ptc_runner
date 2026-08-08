@@ -416,20 +416,32 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     # combined with just 3 other test files).
     #
     # Give each of the 1_000 iterations real work so reaching the cap on its
-    # own takes roughly 30s on this machine (measured: 5 chained 20k-element
-    # reduces per iteration); the test still finishes fast because it
-    # interrupts the run long before that. This is still a calibrated
-    # duration, not a deterministic guarantee -- a sufficiently slower or
-    # more loaded machine could still lose the race -- but 30s is a large
-    # multiple of any plausible harness-setup delay between here and the
-    # `Process.alive?` check below, so a real regression is far more likely
-    # to explain a failure than hardware variance. `evaluation_timeout_ms`
-    # doesn't apply here (that governs subordinate mission evaluations, not
-    # this top-level workflow call, which uses `workflow_timeout_ms` --
-    # already a 30s default, unrelated to this loop's own budget).
+    # own takes roughly 6s on this machine (measured); the test still
+    # finishes fast because it interrupts the run long before that. This is
+    # still a calibrated duration, not a deterministic guarantee -- a
+    # sufficiently slower or more loaded machine could still lose the race
+    # -- but 6s is a large multiple of any plausible harness-setup delay
+    # between here and the `Process.alive?` check below, so a real
+    # regression is far more likely to explain a failure than hardware
+    # variance. `evaluation_timeout_ms` doesn't apply here (that governs
+    # subordinate mission evaluations, not this top-level workflow call,
+    # which uses `workflow_timeout_ms` -- already a 30s default, unrelated
+    # to this loop's own budget).
+    #
+    # Kept deliberately short rather than pushed higher for more margin:
+    # `Runner.execute_workflow/3` calls `Lisp.run_native/2` without
+    # `link: true`, so `Process.exit(worker_pid, :kill)` below (via the
+    # ExecutionSessionOwner abort path) does not itself terminate the
+    # underlying sandbox process -- only monitors it. On any test failure
+    # before that point, this loop's sandbox process keeps running,
+    # unlinked, until its own `workflow_timeout_ms` deadline. That's a real
+    # gap (arguably the workflow path should link like
+    # `ReplSession`/`repl_session.ex` does), but fixing it is a production
+    # change beyond what a flaky-test fix warrants -- keeping this loop's
+    # duration short bounds the cost of that gap instead.
     {prepared, catalog} =
       prepared_run(
-        "(loop [i 0 acc 0] (if (< i 1000) (recur (inc i) (+ acc (reduce + 0 (range 20000)) (reduce + 0 (range 20000)) (reduce + 0 (range 20000)) (reduce + 0 (range 20000)) (reduce + 0 (range 20000)))) acc))",
+        "(loop [i 0 acc 0] (if (< i 1000) (recur (inc i) (+ acc (reduce + 0 (range 20000)))) acc))",
         inspection_capture: true
       )
 
@@ -455,7 +467,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     # Registered immediately, before any assertion below can fail: caller
     # death is exactly this test's own mechanism for aborting the run, so
     # this is a safe no-op on the pass path (caller is already dead by
-    # then) and, on any earlier failure, stops the ~30s CPU-heavy loop
+    # then) and, on any earlier failure, stops the ~6s CPU-heavy loop
     # instead of leaving it running unlinked until its own deadline.
     on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
 
@@ -489,7 +501,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     activity_ref = Process.monitor(prepared.provider_activity.owner)
 
     try do
-      # `owner_pid` is running a loop built to take ~30s to reach its
+      # `owner_pid` is running a loop built to take ~6s to reach its
       # 1_000-iteration cap (see the comment above this test's
       # `prepared_run/2` call), so it must still be alive here. If it is
       # not, something ended the run far earlier than that -- fail with
@@ -500,7 +512,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       # leak into every later test in the suite.
       assert Process.alive?(owner_pid),
              "owner #{inspect(owner_pid)} exited before tracing could start; " <>
-               "the run ended far earlier than its ~30s natural completion"
+               "the run ended far earlier than its ~6s natural completion"
 
       assert :erlang.trace(owner_pid, true, [:call]) == 1
 

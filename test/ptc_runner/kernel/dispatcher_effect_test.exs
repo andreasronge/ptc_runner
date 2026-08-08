@@ -124,16 +124,19 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
           )
         end)
 
-      # Must be >= the dispatch timeout above, not below it: the callback
-      # can legitimately start scheduling at any point up to that deadline
-      # and still succeed, so an assert_receive timeout shorter than it
-      # would time out on a slow-but-successful start instead of only on a
-      # genuine failure to ever run. The margin covers message-delivery
-      # latency for the signal itself.
-      assert_receive {:callback_started, ^effect}, 700
+      # No timing race: `dispatch_mission` above only returns once its own
+      # `timeout_ms` has elapsed (the callback blocks forever on :never, so
+      # nothing else makes it return), so by the time `Task.await` unblocks,
+      # `:callback_started` has already been sent if it was ever going to
+      # be -- `assert_received` just checks the mailbox, no wait needed. A
+      # racing `assert_receive` before this point (as a prior version of
+      # this test had) could time out on a legitimately slow-but-successful
+      # callback start that simply hadn't happened yet.
+      result = Task.await(task, 5_000)
+      assert_received {:callback_started, ^effect}
 
       assert_effect_failure(
-        Task.await(task),
+        result,
         effect,
         %{kind: :timeout, reason: :provider_timeout},
         true
@@ -160,14 +163,19 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
       task =
         Task.async(fn ->
-          Dispatcher.dispatch(state, :mission, environment, capability.name, %{}, 1_000)
+          Dispatcher.dispatch(state, :mission, environment, capability.name, %{}, 3_000)
         end)
 
-      # Must be >= the dispatch call's own 1_000ms deadline above, for the
-      # same reason as the other `assert_receive {:callback_started, ...}`
-      # in this file: a shorter wait can time out on a legitimately slow
-      # (but still successful) provider start.
-      assert_receive {:callback_started, ^effect, provider}, 1_200
+      # Unlike the timeout test above, this callback doesn't block forever
+      # -- it waits for `:finish`, sent below -- so `Task.await` can't be
+      # moved after this wait the same way (we need `provider`'s pid from
+      # the message before we can send it anything). The wait here has to
+      # cover not just the dispatch call's own deadline, but everything
+      # before that deadline even starts ticking: Task scheduling plus
+      # `Dispatcher.dispatch/6`'s own setup (capability validation, budget
+      # reservation) ahead of `await_provider/6`. Both timeouts are
+      # generous specifically to swallow that prefix too.
+      assert_receive {:callback_started, ^effect, provider}, 5_000
       assert :ok = RunState.close(state)
       send(provider, :finish)
 

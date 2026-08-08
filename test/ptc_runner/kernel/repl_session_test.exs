@@ -520,7 +520,11 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
             # real work (5 chained 20k-element reduces, measured ~30s to reach
             # the cap on its own) so this test's setup has a large margin;
             # this still finishes fast since it interrupts the evaluation
-            # long before that natural completion.
+            # long before that natural completion. Unlike the equivalent fix
+            # in RunCoordinatorExecutionTest, a long duration here is safe:
+            # `Evaluation.evaluate_with_lease/6` passes `link: true`, so the
+            # underlying sandbox process is genuinely torn down when this
+            # evaluation's caller dies -- no orphaned-process risk to bound.
             ReplSession.eval(
               session,
               "(loop [i 0 acc 0] (if (< i 1000) (recur (inc i) (+ acc (reduce + 0 (range 20000)) (reduce + 0 (range 20000)) (reduce + 0 (range 20000)) (reduce + 0 (range 20000)) (reduce + 0 (range 20000)))) acc))"
