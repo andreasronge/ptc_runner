@@ -111,7 +111,9 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     # sealed into the registrar came from the caller's copy it would be `nil` —
     # a legitimately attested handle whose activate and commit wait forever.
     # The sealed budget therefore comes back from the session too.
-    {:ok, limits} = Limits.installed(%{run_duration_ms: 2_000})
+    # The budget only has to be finite and observable; the test spends it in
+    # full, so its size is pure wall clock.
+    {:ok, limits} = Limits.installed(%{run_duration_ms: 300})
     {:ok, stale} = ProviderSession.start_active(limits, "stale-budget")
     on_exit(fn -> Process.exit(stale.pid, :kill) end)
     {:ok, begun} = ProviderSession.begin_operation(stale, :run)
@@ -127,9 +129,9 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert :ok = :sys.suspend(stale.pid)
     started_at_ms = System.monotonic_time(:millisecond)
     assert {:error, :resource_registrar_unavailable} = ResourceRegistrar.activate(registrar)
-    # Wide on purpose. The bound only has to separate "spends the 2s budget"
-    # from "waits forever", and the unsealed-budget mutation never returns at
-    # all, so a tight margin buys nothing and flakes under load.
+    # Wide on purpose. The bound only has to separate "spends the sealed
+    # budget" from "waits forever", and the unsealed-budget mutation never
+    # returns at all, so a tight margin buys nothing and flakes under load.
     assert System.monotonic_time(:millisecond) - started_at_ms < 10_000
   end
 
