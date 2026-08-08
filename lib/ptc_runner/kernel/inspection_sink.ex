@@ -99,6 +99,10 @@ defmodule PtcRunner.Kernel.InspectionSink do
           {:ok, %{run_id: binary(), trace_id: binary()}} | {:error, :inspection_sink_error}
   def identity(sink), do: call(sink, :identity)
 
+  @doc false
+  @spec stop_timeout_ms() :: pos_integer()
+  def stop_timeout_ms, do: @stop_timeout_ms
+
   @spec stop(t()) :: :ok
   @doc "Stops the sink; repeated or owner-driven stops are harmless."
   def stop(sink), do: stop(sink, @stop_timeout_ms)

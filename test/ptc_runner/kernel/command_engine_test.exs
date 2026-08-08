@@ -3575,7 +3575,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert :ok = :sys.suspend(activity.owner)
 
     consumer =
-      Task.async(fn -> ProviderActivity.consume(activity) end)
+      Task.async(fn -> ProviderActivity.consume(activity, 200) end)
 
     assert Task.yield(consumer, 5_250) ==
              {:ok, {:error, :provider_activity_unavailable}}
@@ -3678,7 +3678,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert :ok = :sys.suspend(activity.owner)
 
     assert {:error, :provider_activity_unavailable} =
-             ProviderActivity.stop(activity)
+             ProviderActivity.stop(activity, 200)
 
     assert :ok = :sys.resume(activity.owner)
     assert Process.alive?(activity.owner)

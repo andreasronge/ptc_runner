@@ -128,6 +128,16 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
 
   def register_root(_registrar), do: {:error, :resource_registrar_unavailable}
 
+  @doc false
+  @spec register_root(t() | nil, timeout()) ::
+          :ok | {:error, :resource_registrar_unavailable}
+  def register_root(nil, _timeout), do: :ok
+
+  def register_root(%__MODULE__{} = registrar, timeout),
+    do: ProviderSession.register_root(registrar, timeout)
+
+  def register_root(_registrar, _timeout), do: {:error, :resource_registrar_unavailable}
+
   @doc "Removes an adopted terminalization root from scope cleanup."
   @spec handoff_root(t() | nil, pid()) :: :ok | {:error, :resource_registrar_unavailable}
   def handoff_root(nil, _root), do: :ok
