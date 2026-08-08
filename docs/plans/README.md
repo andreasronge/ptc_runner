@@ -25,6 +25,10 @@ belongs in guides or retained specifications.
 - [`lisp-kernel/real-flow-e2e-hardening.md`](lisp-kernel/real-flow-e2e-hardening.md)
   tracks the unfinished private-sink, overflow, real-pagination, and
   cache-usage journeys.
+- [`lisp-kernel/private-analysis-agent-access.md`](lisp-kernel/private-analysis-agent-access.md)
+  fixes the capability-memory bug blocking `inspection-analysis-v2`
+  evaluation and adds `--private-unattended` so a coding agent can use it
+  non-interactively.
 - [`mcp-oauth.md`](mcp-oauth.md) plans principal-scoped OAuth authorization for
   remote Streamable HTTP MCP servers without weakening host authority or tool
   replay safety.
