@@ -495,54 +495,41 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
     end
 
     test "timeout retains a successful envelope from a still-live sibling" do
-      counter = :atomics.new(1, [])
-      runner = self()
       effects = Effects.empty() |> Effects.record_print("retained")
 
-      spawn_fun = fn worker, opts ->
-        case :atomics.add_get(counter, 1, 1) - 1 do
-          0 ->
-            Process.spawn(
-              fn ->
-                worker.()
-                send(runner, :success_sent)
-                wait_for_go()
-              end,
-              opts
-            )
-
-          1 ->
-            receive do
-              :success_sent -> :ok
-            end
-
-            Process.spawn(fn -> worker.() end, opts)
-        end
-      end
+      # A monitor-based rendezvous instead of a wall-clock margin: item
+      # :blocked waits for `gate` to go down (item :success stops it right
+      # after producing its result) before it starts genuinely blocking.
+      # `Process.monitor/1` delivers an immediate `:DOWN` for an
+      # already-dead process, so this is race-free regardless of which
+      # item's worker the coordinator happens to schedule first -- no
+      # deadline margin has to cover the handshake, only the trivial
+      # `:success` work itself.
+      {:ok, gate} = Agent.start_link(fn -> :ok end)
 
       fun = fn
         :success ->
-          Envelope.success(:done,
-            effects: effects,
-            child_trace_id: "retained-child",
-            child_step: %{id: "retained-step"}
-          )
+          envelope =
+            Envelope.success(:done,
+              effects: effects,
+              child_trace_id: "retained-child",
+              child_step: %{id: "retained-step"}
+            )
+
+          Agent.stop(gate)
+          envelope
 
         :blocked ->
+          gate_ref = Process.monitor(gate)
+
+          receive do
+            {:DOWN, ^gate_ref, :process, ^gate, _reason} -> :ok
+          end
+
           wait_for_go()
       end
 
-      # Wide margin: unlike the other deadline tests, this one blocks the
-      # coordinator itself on an UNBOUNDED cross-process handshake (the
-      # `receive` at line 515, no timeout) before the second item can even
-      # be spawned. Under full suite load that handshake alone can eat
-      # hundreds of ms, so a tight budget here (originally 50ms) flakes on
-      # scheduler contention that has nothing to do with the behaviour
-      # under test. This margin is still not a guarantee -- the handshake
-      # has no upper bound -- just a large enough window to make the
-      # failure rare in practice; a controllable clock/barrier would be a
-      # real fix but is a larger change than this test is worth.
-      deadline = System.monotonic_time(:millisecond) + 1_000
+      deadline = System.monotonic_time(:millisecond) + 250
 
       assert {:error,
               [
@@ -558,7 +545,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
                ParallelRunner.run(
                  [:success, :blocked],
                  fun,
-                 base_opts(max_concurrency: 2, deadline_mono: deadline, spawn_fun: spawn_fun)
+                 base_opts(max_concurrency: 2, deadline_mono: deadline)
                )
     end
 

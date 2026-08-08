@@ -413,15 +413,23 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     # premise -- that the run is still in flight when `Process.exit(caller,
     # :kill)` fires below -- was racing that natural completion, and could
     # lose even outside full-suite load (reproduced failing >50% of runs
-    # combined with just 3 other test files). Give each of the 1_000
-    # iterations real work so reaching the cap on its own takes several
-    # seconds; the test still finishes fast because it interrupts the run
-    # long before that. `evaluation_timeout_ms` doesn't apply here (that
-    # governs subordinate mission evaluations, not this top-level workflow
-    # call, which uses `workflow_timeout_ms` -- already a 30s default).
+    # combined with just 3 other test files).
+    #
+    # Give each of the 1_000 iterations real work so reaching the cap on its
+    # own takes roughly 30s on this machine (measured: 5 chained 20k-element
+    # reduces per iteration); the test still finishes fast because it
+    # interrupts the run long before that. This is still a calibrated
+    # duration, not a deterministic guarantee -- a sufficiently slower or
+    # more loaded machine could still lose the race -- but 30s is a large
+    # multiple of any plausible harness-setup delay between here and the
+    # `Process.alive?` check below, so a real regression is far more likely
+    # to explain a failure than hardware variance. `evaluation_timeout_ms`
+    # doesn't apply here (that governs subordinate mission evaluations, not
+    # this top-level workflow call, which uses `workflow_timeout_ms` --
+    # already a 30s default, unrelated to this loop's own budget).
     {prepared, catalog} =
       prepared_run(
-        "(loop [i 0 acc 0] (if (< i 1000) (recur (inc i) (+ acc (reduce + 0 (range 20000)))) acc))",
+        "(loop [i 0 acc 0] (if (< i 1000) (recur (inc i) (+ acc (reduce + 0 (range 20000)) (reduce + 0 (range 20000)) (reduce + 0 (range 20000)) (reduce + 0 (range 20000)) (reduce + 0 (range 20000)))) acc))",
         inspection_capture: true
       )
 
@@ -465,19 +473,18 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     activity_ref = Process.monitor(prepared.provider_activity.owner)
 
     try do
-      # `owner_pid` is running a loop built to take several seconds to reach
-      # its 1_000-iteration cap (see the comment above this test's
-      # `prepared_run/2` call), so it must still be alive here. If it is not,
-      # something ended the run
-      # far earlier than that -- fail with that distinction instead of the
-      # opaque ArgumentError `:erlang.trace/3` raises on a dead pid. Both
-      # checks stay inside this `try` so a failure here still runs the
-      # `after` cleanup below -- otherwise the global
-      # `:erlang.trace_pattern/3` enabled above would leak into every later
-      # test in the suite.
+      # `owner_pid` is running a loop built to take ~30s to reach its
+      # 1_000-iteration cap (see the comment above this test's
+      # `prepared_run/2` call), so it must still be alive here. If it is
+      # not, something ended the run far earlier than that -- fail with
+      # that distinction instead of the opaque ArgumentError
+      # `:erlang.trace/3` raises on a dead pid. Both checks stay inside this
+      # `try` so a failure here still runs the `after` cleanup below --
+      # otherwise the global `:erlang.trace_pattern/3` enabled above would
+      # leak into every later test in the suite.
       assert Process.alive?(owner_pid),
              "owner #{inspect(owner_pid)} exited before tracing could start; " <>
-               "the run ended far earlier than its ~6s natural completion"
+               "the run ended far earlier than its ~30s natural completion"
 
       assert :erlang.trace(owner_pid, true, [:call]) == 1
 

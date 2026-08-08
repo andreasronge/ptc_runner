@@ -511,7 +511,20 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         send(parent, {:owner_exit_evaluation_ready, self()})
 
         receive do
-          :evaluate -> ReplSession.eval(session, "(loop [x 0] (recur (inc x)))")
+          :evaluate ->
+            # `(loop [x 0] (recur (inc x)))` is NOT actually infinite: PTC-Lisp
+            # hard-caps loop/recur at exactly 1_000 jumps (see
+            # `eval_loop_test.exs`'s "custom loop limit" test), and this trivial
+            # body blows through that cap in well under a second -- racing this
+            # test's own setup below regardless of load. Give each iteration
+            # real work (5 chained 20k-element reduces, measured ~30s to reach
+            # the cap on its own) so this test's setup has a large margin;
+            # this still finishes fast since it interrupts the evaluation
+            # long before that natural completion.
+            ReplSession.eval(
+              session,
+              "(loop [i 0 acc 0] (if (< i 1000) (recur (inc i) (+ acc (reduce + 0 (range 20000)) (reduce + 0 (range 20000)) (reduce + 0 (range 20000)) (reduce + 0 (range 20000)) (reduce + 0 (range 20000)))) acc))"
+            )
         end
       end)
 
