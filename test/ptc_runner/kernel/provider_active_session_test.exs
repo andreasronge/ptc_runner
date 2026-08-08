@@ -170,6 +170,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
                {:ok, built} <-
                  RunBuilder.build_active_owned(
                    prepared,
+                   catalog,
                    registry,
                    session,
                    authority,
@@ -214,7 +215,13 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert :ok = PreparedRun.close(prepared)
   end
 
-  test "active build preserves provider dependency failures during session cleanup" do
+  test "active build preserves a provider declaration failure during session cleanup" do
+    # The preparation invents a dependency its sealed declaration does not have.
+    # The run path plans from that declaration, so it refuses the drift itself
+    # rather than discovering the unsatisfiable graph the invented dependency
+    # would have produced — and it names the occurrence that drifted, because an
+    # active session classifies. The failure still survives session cleanup,
+    # which is what this test is here to pin.
     {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
     assert {:ok, session} = open_owned(prepared, catalog, services())
 
@@ -230,8 +237,12 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert {:ok, registry} =
              ProviderRegistry.new(%{"selected" => ProviderRegistry.staged(staged)})
 
-    assert {:error, :provider_dependency_unavailable} =
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
              build_owned(prepared, catalog, registry, session, [])
+
+    assert diagnostic.phase == :provider_acquisition
+    assert diagnostic.code == :provider_policy_changed
+    assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
 
     refute ProviderSession.alive?(session)
     assert :ok = PreparedRun.close(prepared)
@@ -1251,7 +1262,15 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   defp build_owned(prepared, catalog, registry, session, opts) do
     case ProviderCredentials.resolve(prepared, catalog, registry, session) do
       {:ok, credentials} ->
-        build_owned(owned_inputs!(prepared), prepared, registry, session, credentials, opts)
+        build_owned(
+          owned_inputs!(prepared),
+          prepared,
+          catalog,
+          registry,
+          session,
+          credentials,
+          opts
+        )
 
       {:error, _diagnostic} = error ->
         if ProviderSession.alive?(session), do: ProviderSession.close(session)
@@ -1259,8 +1278,16 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     end
   end
 
-  defp build_owned({authority, sinks}, prepared, registry, session, credentials, _opts) do
-    RunBuilder.build_active_owned(prepared, registry, session, authority, sinks, credentials)
+  defp build_owned({authority, sinks}, prepared, catalog, registry, session, credentials, _opts) do
+    RunBuilder.build_active_owned(
+      prepared,
+      catalog,
+      registry,
+      session,
+      authority,
+      sinks,
+      credentials
+    )
   end
 
   defp services(mode \\ :host_owned) do

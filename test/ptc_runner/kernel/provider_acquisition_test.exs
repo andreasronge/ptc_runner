@@ -1,4 +1,4 @@
-defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
+defmodule PtcRunner.Kernel.ProviderAcquisitionTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.ApplicationPackage
@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderAcquisition
+  alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderCredentials
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderRuntimeServices
@@ -28,6 +29,77 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
     assert_received {:prepared, "leaf"}
     refute_received {:prepared, "alpha"}
     refute_received {:acquired, "alpha"}
+  end
+
+  test "a run acquires the whole selection and each provider only its own credential" do
+    # `:all` is the run and check target set. It takes the same sealed path a
+    # narrowed connectivity target set takes, so the credential each provider
+    # receives is decided by its own sealed declaration rather than by what its
+    # preparation reported.
+    context = fixture()
+
+    assert {:ok, acquired} = acquire(context, :all)
+    assert acquired_names(acquired) == ["alpha", "beta", "leaf"]
+
+    assert_received {:credentials, "alpha", ["alpha-key"]}
+    assert_received {:credentials, "beta", ["beta-key"]}
+    assert_received {:credentials, "leaf", ["leaf-key"]}
+  end
+
+  test "a preparation is never served a credential another provider declared" do
+    # "beta" declares no credential and reports one belonging to "alpha". That
+    # name is inside the selection's resolved union, so a check bounded by the
+    # union alone would hand alpha's secret to beta. The comparison is against
+    # beta's own sealed declaration instead, and it runs before preflight — so
+    # the disclosure is refused before the map is consulted at all.
+    context = fixture(credential_names: %{"beta" => []}, drifting: %{"beta" => ["alpha-key"]})
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = acquire(context, :all)
+    assert diagnostic.phase == :provider_acquisition
+    assert diagnostic.code == :provider_policy_changed
+    assert diagnostic.subject.name == "beta"
+    assert diagnostic.subject.operation == :acquisition
+
+    assert_received {:resolved, ["alpha-key", "leaf-key"]}
+    refute_received {:credentials, _name, _names}
+    refute_received {:acquired, _name}
+  end
+
+  test "a sealed pair from another operation reaches no callback" do
+    # Both applications have the same package digest — same manifest, same
+    # documents — and differ only in the dependency graph their catalogs
+    # describe. A plan projected from one pair therefore satisfies every
+    # digest-shaped check while steering the other operation's closure, so the
+    # binding that refuses it is the pairing itself and the session identity.
+    context = fixture()
+    other = fixture(graph: :independent)
+
+    assert other.prepared.request.package.application_content_digest ==
+             context.prepared.request.package.application_content_digest
+
+    # A preparation and a catalog that were never validated together.
+    assert {:error, :invalid_provider_acquisition} =
+             ProviderAcquisition.acquire(
+               context.prepared,
+               other.catalog,
+               context.registry,
+               context.session,
+               :all,
+               %{}
+             )
+
+    # Another operation's legitimately sealed pair, run under this session.
+    assert {:error, :invalid_provider_acquisition} =
+             ProviderAcquisition.acquire(
+               other.prepared,
+               other.catalog,
+               context.registry,
+               context.session,
+               :all,
+               %{}
+             )
+
+    refute_received {:prepared, _name}
   end
 
   test "an unrelated provider's sealed class still decides the application" do
@@ -55,42 +127,16 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
   test "the closure follows sealed requires rather than callback reports" do
     # "beta" requires the service "leaf" provides. Deriving that from what the
     # builders report would mean invoking the very callbacks the plan decides
-    # whether to invoke, so the graph is read from the sealed descriptors.
-    context = fixture()
+    # whether to invoke, so the graph is read from the sealed descriptors. The
+    # same manifest over a catalog that seals no edge acquires beta alone,
+    # which is what proves the descriptors decided the closure.
+    assert {:ok, acquired} = acquire(fixture(graph: :independent), [workflow(1)])
+    assert acquired_names(acquired) == ["beta"]
+    refute_received {:prepared, "leaf"}
 
-    assert {:ok, plan} = ProviderAcquisition.plan(context.prepared, context.catalog)
-    assert Enum.map(plan.occurrences, & &1.name) == ["alpha", "beta", "leaf"]
-    assert Enum.find(plan.occurrences, &(&1.name == "beta")).requires == [:leaf_service]
-    assert Enum.find(plan.occurrences, &(&1.name == "leaf")).provides == [:leaf_service]
-
-    assert {:ok, _acquired} = acquire(context, [workflow(1)])
+    assert {:ok, acquired} = acquire(fixture(), [workflow(1)])
+    assert acquired_names(acquired) == ["beta", "leaf"]
     assert_received {:acquired, "leaf"}
-  end
-
-  test "a tampered plan reaches no callback even with the right package digest" do
-    # The plan decides which callbacks run, so it is authenticated rather than
-    # trusted. Comparing the package digest alone let an edited `occurrences`
-    # list keep the digest and steer the closure into preparing a provider the
-    # selection never reached, with the mismatch only caught after those
-    # callbacks had run — which is the inversion this module exists to avoid.
-    context = fixture()
-
-    widened =
-      Map.update!(context.plan, :occurrences, fn occurrences ->
-        Enum.map(occurrences, fn occurrence ->
-          if occurrence.name == "alpha",
-            do: %{occurrence | requires: [:leaf_service]},
-            else: occurrence
-        end)
-      end)
-
-    assert widened.package_digest == context.plan.package_digest
-
-    assert {:error, :invalid_provider_acquisition} =
-             acquire(%{context | plan: widened}, [workflow(0)])
-
-    refute_received {:prepared, _name}
-    refute_received {:acquired, _name}
   end
 
   test "the resolved union covers every selection, not only the acquired closure" do
@@ -155,16 +201,6 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
     refute_received {:prepared, "alpha"}
   end
 
-  test "a plan from another application is refused before preparation" do
-    context = fixture()
-    other = fixture(entry: "app/other")
-
-    assert {:error, :invalid_provider_acquisition} =
-             acquire(%{context | plan: other.plan}, [workflow(1)])
-
-    refute_received {:prepared, _name}
-  end
-
   test "a failure inside the closure leaves cleanup to the session that owns it" do
     context = fixture(failing: "beta")
 
@@ -174,29 +210,6 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
 
     assert :ok = ProviderSession.close(context.session)
     assert_receive {:closed, "leaf"}, 5_000
-  end
-
-  # Credentials are resolved the way phase-8 step 5 resolves them, from the same
-  # sealed pair, so these targets are acquired against the real union rather
-  # than a map this file invented.
-  defp acquire(context, targets) do
-    with {:ok, credentials} <-
-           ProviderCredentials.resolve(
-             context.prepared,
-             context.catalog,
-             context.registry,
-             context.session
-           ) do
-      ProviderAcquisition.acquire_targets(
-        context.package,
-        context.registry,
-        context.session,
-        targets,
-        fn _effective_class -> :ok end,
-        context.plan,
-        credentials
-      )
-    end
   end
 
   test "an embedding keeps the bare reason a command has classified" do
@@ -215,20 +228,53 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
     assert diagnostic.subject.name == "leaf"
 
     embedded = fixture(failing: "leaf", failing_reason: :mcp_timeout, embedding: true)
-    assert {:error, :mcp_timeout} = acquire_embedded(embedded, [workflow(1)])
+    assert {:error, :mcp_timeout} = acquire_embedded(embedded)
   end
 
-  # The embedding entry: no phase-8 step 5 ran, so no map is supplied and the
-  # registry resolves synchronously, exactly as `RunBuilder`'s embedding path does.
-  defp acquire_embedded(context, targets) do
-    ProviderAcquisition.acquire_targets(
+  test "an active session cannot take the embedding entry at all" do
+    # The embedding entry is told apart from `acquire/6` by its session carrying
+    # no operation deadline, and it must ask before any callback. An active
+    # command reaching it would otherwise prepare and preflight every selected
+    # provider — outside the sealed binding `acquire/6` checks and against its
+    # own budget — and only be refused when it reached credential resolution.
+    context = fixture()
+
+    assert {:error, :invalid_provider_acquisition} = acquire_embedded(context)
+    refute_received {:prepared, _name}
+  end
+
+  # Credentials are resolved the way phase-8 step 5 resolves them, from the same
+  # sealed pair, so these targets are acquired against the real union rather
+  # than a map this file invented.
+  defp acquire(context, targets) do
+    with {:ok, credentials} <-
+           ProviderCredentials.resolve(
+             context.prepared,
+             context.catalog,
+             context.registry,
+             context.session
+           ) do
+      ProviderAcquisition.acquire(
+        context.prepared,
+        context.catalog,
+        context.registry,
+        context.session,
+        targets,
+        credentials
+      )
+    end
+  end
+
+  # The embedding entry: no preparation, no catalog, and no phase-8 step 5, so
+  # the registry resolves synchronously, exactly as `RunBuilder`'s embedding
+  # path does.
+  defp acquire_embedded(context) do
+    ProviderAcquisition.acquire_embedded(
       context.package,
       context.registry,
       context.session,
-      targets,
-      fn _effective_class -> :ok end,
-      context.plan,
-      nil
+      :normal,
+      fn _effective_class -> :ok end
     )
   end
 
@@ -245,14 +291,13 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
   # manifest order is alpha, beta, leaf, so a closure is never simply a prefix.
   defp fixture(options \\ []) do
     {:ok, prepared, catalog, package} = prepare(options)
-    {:ok, plan} = ProviderAcquisition.plan(prepared, catalog)
     parent = self()
 
     {:ok, services} =
       ProviderRuntimeServices.new(
         credential_resolver: fn names ->
           send(parent, {:resolved, Enum.sort(names)})
-          {:ok, Map.new(names, &{&1, "secret"})}
+          {:ok, Map.new(names, &{&1, "secret-#{&1}"})}
         end
       )
 
@@ -271,6 +316,9 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
         ProviderSession.close(session)
         ProviderSession.start(limits)
       else
+        # The activity marker an active command sets before any provider work,
+        # which is half of what binds this session to this preparation.
+        :ok = ProviderActivity.mark(prepared.provider_activity)
         ProviderSession.begin_operation(session, :run)
       end
 
@@ -284,7 +332,6 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
       package: package,
       registry: registry,
       session: session,
-      plan: plan,
       prepared: prepared,
       catalog: catalog
     }
@@ -331,14 +378,22 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
 
   defp selections(names), do: Enum.map(names, &%{"name" => &1, "config" => %{}})
 
+  # `:independent` describes the same three aliases with no dependency edge at
+  # all. The manifest is byte-identical either way, so the two applications
+  # share a package digest and differ only in what their catalogs sealed.
+  defp graph(:independent), do: [{"alpha", [], []}, {"beta", [], []}, {"leaf", [], []}]
+
+  defp graph(_default),
+    do: [{"alpha", [], []}, {"beta", [:leaf_service], []}, {"leaf", [], [:leaf_service]}]
+
   defp catalog(parent, options) do
     registrations =
-      Map.new(
-        [{"alpha", [], []}, {"beta", [:leaf_service], []}, {"leaf", [], [:leaf_service]}],
-        fn {name, requires, provides} ->
-          {name, registration(parent, name, requires, provides, options)}
-        end
-      )
+      options
+      |> Keyword.get(:graph)
+      |> graph()
+      |> Map.new(fn {name, requires, provides} ->
+        {name, registration(parent, name, requires, provides, options)}
+      end)
 
     {:ok, catalog} = InstallationCatalog.new(registrations)
     catalog
@@ -349,11 +404,14 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
     data_class = options |> Keyword.get(:data_class, %{}) |> Map.get(name, :normal)
     mission = Keyword.get(options, :mission, [])
 
+    declared_credentials =
+      options |> Keyword.get(:credential_names, %{}) |> Map.get(name, ["#{name}-key"])
+
     {:ok, descriptor} =
       ProviderDescriptor.new(
         source: :custom,
-        installation_revision: "subset-v1",
-        credential_names: ["#{name}-key"],
+        installation_revision: "acquisition-v1",
+        credential_names: declared_credentials,
         authorization_mode: :none,
         data_class: data_class,
         accepts_data: [:normal],
@@ -369,7 +427,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
         local_preflight: :none
       )
 
-    credentials = options |> Keyword.get(:drifting, %{}) |> Map.get(name, ["#{name}-key"])
+    credentials = options |> Keyword.get(:drifting, %{}) |> Map.get(name, declared_credentials)
 
     implementation = %{
       builder:
@@ -408,7 +466,14 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionSubsetTest do
          accepts_data: [:normal],
          preflight: fn ->
            {:ok,
-            fn _credentials, _services ->
+            fn acquired_credentials, _services ->
+              # What this provider was actually handed, which is the only way a
+              # test can tell a refused disclosure from an unrelated failure.
+              send(
+                parent,
+                {:credentials, name, acquired_credentials |> Map.keys() |> Enum.sort()}
+              )
+
               if name == failing do
                 {:error, reason}
               else

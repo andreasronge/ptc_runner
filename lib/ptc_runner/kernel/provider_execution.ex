@@ -433,7 +433,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          opened_sinks,
          registry,
          session,
-         _execution,
+         execution,
          operation,
          credentials
        )
@@ -445,6 +445,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
            opened_sinks,
            registry,
            session,
+           execution.catalog,
            operation,
            credentials
          )
@@ -471,12 +472,14 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          opened_sinks,
          registry,
          session,
+         catalog,
          operation,
          credentials
        ) do
     with {:ok, built} <-
            RunBuilder.build_active_owned(
              prepared,
+             catalog,
              registry,
              session,
              authority,
@@ -562,27 +565,24 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # `ProviderAcquisition` closes over their sealed dependencies and acquires
   # only that closure, so a provider pulled in as a prerequisite is acquired and
   # cleaned up like any other while never becoming a connectivity entry of its
-  # own. Connectivity publishes nothing, so its artifact preflight has nothing
-  # to authorize, and the acquired closure stays on the session's LIFO stack for
-  # the ordinary close rather than unwinding through a path of its own.
+  # own. Connectivity publishes nothing, so it authorizes no artifact, and the
+  # acquired closure stays on the session's LIFO stack for the ordinary close
+  # rather than unwinding through a path of its own.
   defp acquire_connectivity_targets(prepared, catalog, registry, session, entries, credentials) do
     case Enum.filter(entries, &(&1.mode == :acquisition)) do
       [] ->
         :ok
 
       targets ->
-        with {:ok, plan} <- ProviderAcquisition.plan(prepared, catalog) do
-          prepared.request.package
-          |> ProviderAcquisition.acquire_targets(
-            registry,
-            session,
-            Enum.map(targets, &Map.take(&1, [:destination, :index])),
-            fn _effective_class -> :ok end,
-            plan,
-            credentials
-          )
-          |> acquisition_result(session)
-        end
+        prepared
+        |> ProviderAcquisition.acquire(
+          catalog,
+          registry,
+          session,
+          Enum.map(targets, &Map.take(&1, [:destination, :index])),
+          credentials
+        )
+        |> acquisition_result(session)
     end
   end
 
