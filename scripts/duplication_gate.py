@@ -13,32 +13,45 @@ existing backlog never blocks a build while newly introduced duplication does.
 import hashlib
 import json
 import os
-import re
 import sys
+from collections import Counter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
-def normalize(snippet):
-    """Collapse whitespace so reformatting alone does not churn a fingerprint."""
-    return re.sub(r"\s+", " ", snippet).strip()
 
 
 def relpath(path):
     return os.path.relpath(path, ROOT) if os.path.isabs(path) else path
 
 
+def snippet_fingerprint(snippet):
+    """Hash ExDNA's AST-rendered snippet without changing literal contents."""
+    return hashlib.sha256(snippet.encode()).hexdigest()
+
+
+def occurrences_of(clone):
+    return sorted(
+        [
+            {
+                "file": relpath(fragment["file"]),
+                "snippet": snippet_fingerprint(snippet),
+            }
+            for fragment, snippet in zip(clone["fragments"], clone["snippets"])
+        ],
+        key=lambda occurrence: (occurrence["file"], occurrence["snippet"]),
+    )
+
+
 def fingerprint(clone):
-    """Content+location key, deliberately excluding line numbers.
+    """AST-content+location key, deliberately excluding line numbers.
 
     Keeping lines out means unrelated edits above a clone do not re-key it.
     """
-    parts = sorted(
-        (relpath(fragment["file"]), normalize(snippet))
-        for fragment, snippet in zip(clone["fragments"], clone["snippets"])
+    canonical = json.dumps(
+        {"type": clone["type"], "occurrences": occurrences_of(clone)},
+        sort_keys=True,
+        separators=(",", ":"),
     )
-    canonical = "\n\0".join(f"{path}\0{snippet}" for path, snippet in parts)
-    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def describe(clone):
@@ -58,20 +71,56 @@ def entry_of(clone):
         "describe": describe(clone),
         "files": list(files_of(clone)),
         "mass": clone["mass"],
+        "occurrences": occurrences_of(clone),
+        "type": clone["type"],
     }
 
 
-def is_remnant(entry, resolved):
-    """True when this clone is a smaller leftover of one that just disappeared.
+def occurrence_counts(entry):
+    return Counter((item["file"], item["snippet"]) for item in entry["occurrences"])
 
-    Editing one copy of duplicated code re-keys it. That is a real change, but
-    it is not *new* duplication as long as it spans the same files and did not
-    grow, so it must not fail the build.
-    """
-    return any(
-        other["files"] == entry["files"] and entry["mass"] <= other["mass"]
-        for other in resolved.values()
-    )
+
+def type_rank(clone_type):
+    return {"type_i": 0, "type_ii": 1}.get(clone_type)
+
+
+def remnant_score(current, previous):
+    """Return an overlap score when current is provably decaying previous debt."""
+    current_rank = type_rank(current.get("type"))
+    previous_rank = type_rank(previous.get("type"))
+
+    if current_rank is None or previous_rank is None or current_rank < previous_rank:
+        return None
+    if current["mass"] > previous["mass"]:
+        return None
+    if len(current["occurrences"]) > len(previous["occurrences"]):
+        return None
+    if not set(current["files"]).issubset(previous["files"]):
+        return None
+
+    overlap = sum((occurrence_counts(current) & occurrence_counts(previous)).values())
+    return overlap if overlap > 0 else None
+
+
+def match_remnants(added, resolved):
+    """Conservatively pair changed clones one-to-one with their prior debt."""
+    candidates = []
+
+    for current_key, current in added.items():
+        for previous_key, previous in resolved.items():
+            score = remnant_score(current, previous)
+            if score is not None:
+                candidates.append((score, current_key, previous_key))
+
+    matches = {}
+    used_previous = set()
+
+    for _score, current_key, previous_key in sorted(candidates, reverse=True):
+        if current_key not in matches and previous_key not in used_previous:
+            matches[current_key] = previous_key
+            used_previous.add(previous_key)
+
+    return matches
 
 
 def load(path):
@@ -84,7 +133,13 @@ def main():
         sys.exit(__doc__)
     mode, report_path, baseline_path = sys.argv[1:]
 
-    current = {fingerprint(c): entry_of(c) for c in load(report_path)["clones"]}
+    current = {}
+
+    for clone in load(report_path)["clones"]:
+        key = fingerprint(clone)
+        if key in current:
+            raise ValueError(f"duplicate clone fingerprint in report: {key}")
+        current[key] = entry_of(clone)
 
     if mode == "bless":
         with open(baseline_path, "w") as handle:
@@ -97,13 +152,15 @@ def main():
 
     resolved = {k: v for k, v in baseline.items() if k not in current}
     added = {k: v for k, v in current.items() if k not in baseline}
-    remnants = {k: v for k, v in added.items() if is_remnant(v, resolved)}
+    remnant_matches = match_remnants(added, resolved)
+    remnants = {k: v for k, v in added.items() if k in remnant_matches}
     added = {k: v for k, v in added.items() if k not in remnants}
+    resolved = {k: v for k, v in resolved.items() if k not in remnant_matches.values()}
 
     for key, entry in sorted(resolved.items()):
         print(f"resolved  {key}  {entry['describe']}")
     for key, entry in sorted(remnants.items()):
-        print(f"shrunk    {key}  {entry['describe']}")
+        print(f"shrunk    {key}  from={remnant_matches[key]}  {entry['describe']}")
     for key, entry in sorted(added.items()):
         print(f"NEW       {key}  {entry['describe']}")
 

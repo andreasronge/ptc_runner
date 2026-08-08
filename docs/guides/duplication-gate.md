@@ -11,10 +11,12 @@ entering unnoticed.
 
 ## What it detects
 
-Exact copies and copies with renamed variables (clone types I and II), over
-`lib/` and `test/`, for fragments of at least 30 AST nodes. Consecutive clauses
-of the same function are analysed as one unit, so a duplicated multi-clause
-function is reported once rather than as several forgettable fragments.
+Exact copies and copies with renamed variables (clone types I and II), over the
+root project's `lib/` and `test/`, for fragments of at least 30 AST nodes.
+Viewer and launcher code are outside this baseline and are not covered by this
+gate. Consecutive clauses of the same function are analysed as one unit, so a
+duplicated multi-clause function is reported once rather than as several
+forgettable fragments.
 
 It does **not** detect code that does the same thing written a different way.
 Two implementations that diverged during editing will fall out of the report.
@@ -68,15 +70,16 @@ Re-blessing is also how you lock in an improvement. Removing duplication prints
 
 ## Fingerprints and churn
 
-A clone is keyed by its file paths and normalised body text, never by line
-numbers, so edits elsewhere in a file do not re-key it. Comments are invisible —
-the detector works on the AST.
+A clone is keyed by its type, file paths, and exact AST-rendered bodies, never by
+line numbers, so edits elsewhere in a file do not re-key it. Comments are
+invisible because the detector works on the AST; whitespace inside strings and
+sigils remains significant.
 
-Editing inside a known clone re-keys it. When the result spans the same files
-and did not grow, the gate reports `shrunk` and passes, on the grounds that
-duplication decaying is not duplication being introduced. One consequence worth
-knowing: diverging a known clone *and* adding new duplication between the same
-two files in a single commit reads as a shrink and passes.
+Editing inside a known clone re-keys it. The gate reports `shrunk` only when it
+can pair the result one-to-one with prior debt, at least one exact occurrence
+remains, and the clone added no occurrence or file, gained no AST mass, and did
+not become more exact. Ambiguous changes fail as new duplication and require an
+explicit decision; this is intentionally conservative.
 
 ## Running it directly
 

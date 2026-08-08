@@ -23,9 +23,9 @@ trap 'rm -f "$REPORT" "$RAW"' EXIT
 # Compile first, on its own, so build output cannot land in the JSON stream.
 mix compile >&2
 
-# ExDNA exits non-zero whenever it finds any clone at all; the ratchet decides
-# pass/fail, so its exit status is deliberately ignored here.
-mix ex_dna lib/ test/ --format json >"$RAW" || true
+# Give ExDNA a deliberately unreachable budget so clones still produce JSON and
+# an actual detector failure cannot be mistaken for a successful partial report.
+mix ex_dna lib/ test/ --format json --max-clones 1000000 >"$RAW"
 
 # Anything Mix still emits (stale-dep recompiles, deprecation notices) precedes
 # the report on stdout, so keep only from the opening brace onwards.
