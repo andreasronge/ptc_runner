@@ -23,24 +23,53 @@ echo "Installing git hooks..."
 # configured core.hooksPath use the same location Git itself will execute.
 HOOKS_DIR=$(git rev-parse --git-path hooks)
 
-# Create hooks directory if it doesn't exist
-mkdir -p "$HOOKS_DIR"
+# A clone that disables hooks by pointing core.hooksPath at a non-directory
+# resolves to a path no hook can occupy. Every copy below would fail one line
+# at a time while the script still reported success, so establish that the
+# destination is usable before claiming anything about it.
+if ! mkdir -p "$HOOKS_DIR" 2>/dev/null || [ ! -d "$HOOKS_DIR" ]; then
+  echo "❌ Cannot install hooks: $HOOKS_DIR is not a usable directory"
+
+  CONFIGURED_HOOKS_PATH=$(git config --get core.hooksPath)
+  if [ -n "$CONFIGURED_HOOKS_PATH" ]; then
+    echo "   core.hooksPath is set to: $CONFIGURED_HOOKS_PATH"
+    echo "   Clear it to restore hooks: git config --unset core.hooksPath"
+  fi
+
+  echo "   The merge driver above is registered regardless."
+  exit 1
+fi
 
 # Install a stable wrapper; the implementation remains tracked in .githooks/.
+# Failing to copy or mark a hook executable leaves the clone ungated, so treat
+# either as fatal rather than printing a checkmark over a failed command.
+install_hook() {
+  source_path=$1
+  hook_name=$2
+  destination="$HOOKS_DIR/$hook_name"
+
+  if ! cp "$source_path" "$destination"; then
+    echo "❌ Failed to copy $source_path to $destination"
+    exit 1
+  fi
+
+  if ! chmod +x "$destination"; then
+    echo "❌ Failed to make $destination executable"
+    exit 1
+  fi
+
+  echo "✅ ${hook_name} hook installed at $destination"
+}
+
 if [ -f scripts/pre-commit.template ]; then
-  cp scripts/pre-commit.template "$HOOKS_DIR/pre-commit"
-  chmod +x "$HOOKS_DIR/pre-commit"
-  echo "✅ Pre-commit hook installed at $HOOKS_DIR/pre-commit"
+  install_hook scripts/pre-commit.template pre-commit
 else
   echo "❌ Template not found: scripts/pre-commit.template"
   exit 1
 fi
 
-# Install a stable wrapper; the implementation remains tracked in .githooks/.
 if [ -f scripts/pre-push ]; then
-  cp scripts/pre-push "$HOOKS_DIR/pre-push"
-  chmod +x "$HOOKS_DIR/pre-push"
-  echo "✅ Pre-push hook installed at $HOOKS_DIR/pre-push"
+  install_hook scripts/pre-push pre-push
 else
   echo "⚠️  Pre-push hook not found: scripts/pre-push (skipping)"
 fi
