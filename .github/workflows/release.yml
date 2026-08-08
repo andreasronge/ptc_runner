@@ -34,5 +34,11 @@ jobs:
       - uses: ./.github/actions/setup-elixir
       - run: mix precommit
       - run: mix prepush
+      # Ordinary branches do not regenerate the semantic build projection, so
+      # this is the one gate that enforces it. A failure here means the tagged
+      # tree ships a build identity that does not describe its own sources:
+      # run `mix regen` on main, then re-tag. See `.gitattributes`.
+      - name: Check the semantic build projection is current
+        run: mix ptc.gen_semantic_revision --check
       - run: MIX_ENV=dev mix deps.get && MIX_ENV=dev mix docs --warnings-as-errors
       - run: MIX_ENV=prod mix hex.build

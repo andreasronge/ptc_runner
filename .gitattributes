@@ -7,10 +7,23 @@
 #
 # The file is derived entirely from other tracked inputs, so a textual merge of
 # those hashes is meaningless -- regenerating is the only correct resolution.
-# The `ptc-generated` driver therefore keeps one side verbatim so the merge or
-# rebase does not stop, and `mix precommit` catches the staleness through
-# `ptc.gen_semantic_revision --check`. Regenerate once at the end with
-# `mix ptc.regen`.
+#
+# The primary defence is therefore not to merge it at all: ordinary branches do
+# not regenerate it, because `ptc.gen_semantic_revision --check` runs only in
+# the release gate (`.github/workflows/release.yml`), never in `precommit`,
+# `prepush`, or PR CI. A branch that never rewrites these hashes cannot collide
+# on them. Run `mix regen` on main before tagging a release.
+#
+# This matters because the driver below cannot help everywhere. A merge driver's
+# definition lives in local config and is uncommittable, so GitHub's server-side
+# merge does not have it: it sees `merge=ptc-generated`, finds no such driver,
+# and silently falls back to a plain 3-way text merge that conflicts on every
+# hash line. No local configuration can fix a conflict reported on a pull
+# request -- only not touching the file can.
+#
+# The `ptc-generated` driver still keeps one side verbatim so that a local merge
+# or rebase does not stop on the residual cases (a release commit, or a branch
+# predating this policy).
 #
 # Deliberately NOT applied to `.duplication-baseline.json`: regenerating that
 # file blesses whatever duplication the merged tree contains, which is a review

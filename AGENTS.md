@@ -81,9 +81,10 @@ mix compile
 
 Run `./scripts/install-hooks.sh` once per clone. Linked worktrees share the
 clone's installed hook wrappers, so they do not need to reinstall them. It also
-registers the merge driver that keeps `priv/semantic_build_projection.json`
-from conflicting on every rebase; after one, run `mix regen` to regenerate and
-stage it. Never hand-merge its hashes — `.gitattributes` explains why.
+registers the merge driver for `priv/semantic_build_projection.json`. Never
+regenerate that projection on a feature branch and never hand-merge its hashes;
+only the release gate checks it, so run `mix regen` on main before tagging.
+`.gitattributes` explains why.
 Outside CI, the Dialyzer core PLT lives under `~/.cache/ptc_runner/` and is
 shared across every worktree, so only the very first Dialyzer run on a
 machine builds it from scratch; each worktree still keeps its own

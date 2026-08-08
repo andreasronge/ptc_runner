@@ -820,10 +820,18 @@ execution-semantics closure. `RunCoordinator`,
 in execution preparation and ownership. A frontend wording or argv-only change
 therefore does not invalidate application identity, while a coordinator change
 does.
-Regenerate with
-`mix ptc.gen_semantic_revision`; `mix precommit` runs the `--check` form and
-fails on dependency inventory drift, missing classified paths, changed
-semantic bytes, or a stale projection. This revision is conservative:
+Regenerate with `mix regen` (or `mix ptc.gen_semantic_revision`) on main before
+tagging a release. The release gate runs the `--check` form and fails on
+dependency inventory drift, missing classified paths, changed semantic bytes,
+or a stale projection. It runs there and nowhere else: the projection's hashes
+cover the whole source closure, so regenerating it per branch made every pair
+of concurrent branches conflict. Between releases the committed projection may
+therefore lag the tree. That is safe for the checks that consume it —
+`ApplicationPackage.valid?/1` compares a package's recorded revision against
+`SemanticRevision.current()`, and both read the same compiled constant, so the
+comparison stays self-consistent regardless of the file's age. What lags is the
+accuracy of the identity as a description of the source, which is precisely
+what the release gate re-establishes. This revision is conservative:
 comments, refactors, dependency changes, or runtime patch changes may produce a
 new value even when observed behavior is unchanged.
 

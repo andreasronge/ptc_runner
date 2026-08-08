@@ -9,8 +9,12 @@
 # `true` leaves Git's staged side in place rather than writing conflict markers
 # into a generated file whose hashes cannot be merged textually. Regenerating
 # here instead would recompile the project once per conflicting commit during a
-# rebase; `mix precommit` already runs `ptc.gen_semantic_revision --check`, so
-# staleness is caught regardless. Finish with `mix regen`.
+# rebase.
+#
+# This is only a fallback now: ordinary branches no longer regenerate the
+# projection, so they no longer collide on it. Staleness is caught by the
+# release gate, which is also the only place it matters. Finish with
+# `mix regen` on main before tagging.
 git config merge.ptc-generated.name \
   "keep one side of a generated projection; regenerate with mix regen"
 git config merge.ptc-generated.driver true

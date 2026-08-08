@@ -164,7 +164,6 @@ defmodule PtcRunner.MixProject do
         "cmd bash scripts/duplication_gate.sh check",
         "ptc.validate_spec",
         "ptc.gen_docs --check",
-        "ptc.gen_semantic_revision --check",
         "ptc.conformance_report --check-inventory",
         "test --warnings-as-errors",
         "cmd --cd ptc_viewer mix test --color",
@@ -175,7 +174,7 @@ defmodule PtcRunner.MixProject do
       # PR CI runs these as individual steps. The upstream audit attests all
       # exact Java descriptors when Java 11 or newer is available.
       #
-      # The three staleness checks are also in `precommit`, and are repeated
+      # The two staleness checks are also in `precommit`, and are repeated
       # here on purpose. A generated artifact goes stale from an ordinary edit
       # to the sources it projects, `AGENTS.md` tells you not to run `precommit`
       # before an ordinary push because the hook already gates it, and the hook
@@ -183,12 +182,14 @@ defmodule PtcRunner.MixProject do
       # push that touches `lib/` clears every local gate and still fails CI on
       # an artifact the author never had a chance to regenerate. They cost a few
       # seconds inside a run that already spends minutes.
+      #
+      # `ptc.gen_semantic_revision --check` is deliberately absent from both:
+      # it is a release gate, not a per-commit one. See `.gitattributes`.
       prepush: [
         # Credo is repeated here for the same reason as the staleness checks
         # below: the hook runs this alias, not `precommit`, so without it a
         # lint the CI Credo step rejects only surfaces after the push.
         "credo --strict",
-        "ptc.gen_semantic_revision --check",
         "ptc.gen_docs --check",
         "ptc.conformance_report --check-inventory",
         "ptc.audit_upstream",
@@ -198,8 +199,11 @@ defmodule PtcRunner.MixProject do
       coverage: [
         "test --cover"
       ],
-      # Regenerates the derived projection after a merge or rebase kept one
-      # side of it. See `.gitattributes` for why the hashes cannot be merged.
+      # Regenerates the derived projection. Run this once before tagging a
+      # release -- the release gate rejects a stale projection, and ordinary
+      # branches no longer regenerate it at all. Also the correct fix when a
+      # merge or rebase kept one side of it. See `.gitattributes` for why the
+      # hashes cannot be merged.
       regen: [
         "ptc.gen_semantic_revision",
         "cmd git add priv/semantic_build_projection.json"
