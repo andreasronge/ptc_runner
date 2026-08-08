@@ -118,17 +118,19 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
             # `await_provider/6` in the dispatcher uses this single value both
             # as the deadline it reports as `:provider_timeout` AND as the
             # window the provider process has to be scheduled at all -- past
-            # it, the dispatcher kills the provider outright, so a value too
-            # close to the default assert_receive timeout below risks the
-            # provider being killed before it ever ran, meaning
-            # `:callback_started` would never arrive no matter how long this
-            # test waited for it. 500ms gives the provider a comfortable
-            # scheduling window under full-suite contention.
+            # it, the dispatcher kills the provider outright, so 500ms gives
+            # it a comfortable scheduling window under full-suite contention.
             timeout_ms: 500
           )
         end)
 
-      assert_receive {:callback_started, ^effect}, 400
+      # Must be >= the dispatch timeout above, not below it: the callback
+      # can legitimately start scheduling at any point up to that deadline
+      # and still succeed, so an assert_receive timeout shorter than it
+      # would time out on a slow-but-successful start instead of only on a
+      # genuine failure to ever run. The margin covers message-delivery
+      # latency for the signal itself.
+      assert_receive {:callback_started, ^effect}, 700
 
       assert_effect_failure(
         Task.await(task),
@@ -161,10 +163,11 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
           Dispatcher.dispatch(state, :mission, environment, capability.name, %{}, 1_000)
         end)
 
-      # Kept below the dispatch call's own 1_000ms deadline above -- an equal
-      # value would race the provider's scheduling delay against dispatch's
-      # own timeout instead of leaving it room to win.
-      assert_receive {:callback_started, ^effect, provider}, 500
+      # Must be >= the dispatch call's own 1_000ms deadline above, for the
+      # same reason as the other `assert_receive {:callback_started, ...}`
+      # in this file: a shorter wait can time out on a legitimately slow
+      # (but still successful) provider start.
+      assert_receive {:callback_started, ^effect, provider}, 1_200
       assert :ok = RunState.close(state)
       send(provider, :finish)
 

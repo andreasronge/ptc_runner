@@ -559,7 +559,13 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
           wait_for_go()
       end
 
-      deadline = System.monotonic_time(:millisecond) + 250
+      # The monitor rendezvous above removes the unbounded-handshake race,
+      # but item :success still has to get its (trivial) work scheduled
+      # before this deadline fires -- a pure scheduler stall could still
+      # lose that race with a tight budget. Since item :blocked always
+      # blocks until the deadline regardless of its value, a generous
+      # deadline costs nothing here; it isn't racing anything but a stall.
+      deadline = System.monotonic_time(:millisecond) + 2_000
 
       assert {:error,
               [

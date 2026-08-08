@@ -528,6 +528,14 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         end
       end)
 
+    # Registered immediately, before any assertion below can fail: killing
+    # `creator` is exactly this test's own mechanism for cancelling the
+    # evaluation, so this is a safe no-op on the pass path (creator is
+    # already dead by then) and, on any earlier failure, stops the ~30s
+    # CPU-heavy loop instead of leaving it running unlinked until its own
+    # deadline.
+    on_exit(fn -> if Process.alive?(creator), do: Process.exit(creator, :kill) end)
+
     assert_receive {:owner_exit_evaluation_ready, ^creator}, 2_000
     assert {:trap_exit, false} = Process.info(creator, :trap_exit)
     assert 1 = :erlang.trace(creator, true, [:procs])

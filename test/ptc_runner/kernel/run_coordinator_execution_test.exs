@@ -452,6 +452,13 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
         send(parent, {:execution_result, ExecutionSessionOwner.await(owner)})
       end)
 
+    # Registered immediately, before any assertion below can fail: caller
+    # death is exactly this test's own mechanism for aborting the run, so
+    # this is a safe no-op on the pass path (caller is already dead by
+    # then) and, on any earlier failure, stops the ~30s CPU-heavy loop
+    # instead of leaving it running unlinked until its own deadline.
+    on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
+
     caller_ref = Process.monitor(caller)
     assert_receive {:execution_owner, owner}, 5_000
     owner_pid = ExecutionSessionOwner.pid(owner)
@@ -465,6 +472,15 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
 
     Code.ensure_loaded!(EventSink)
     assert :erlang.trace_pattern({EventSink, :finalize_and_events, 2}, true, [:local]) == 1
+
+    # Registered immediately: this is a VM-global trace pattern, so ANY
+    # later failure in this test -- including the five `Process.monitor/1`
+    # calls right below, before the `try` -- must not leave it enabled and
+    # contaminating every later test in the suite. `on_exit` always runs,
+    # unlike the `try/after` below which only protects its own block.
+    on_exit(fn ->
+      :erlang.trace_pattern({EventSink, :finalize_and_events, 2}, false, [:local])
+    end)
 
     owner_ref = Process.monitor(owner_pid)
     worker_ref = Process.monitor(state.worker_pid)
@@ -511,8 +527,9 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
             "signal, not scheduler delay"
         )
     after
+      # The global trace_pattern's disable is handled by the `on_exit`
+      # above, unconditionally -- no need to duplicate it here.
       stop_trace(owner_pid)
-      :erlang.trace_pattern({EventSink, :finalize_and_events, 2}, false, [:local])
     end
 
     assert :ok = PublicationAuthority.abort(authority)
