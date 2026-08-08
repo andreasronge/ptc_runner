@@ -152,7 +152,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
 
-      not PublicationAuthority.valid?(authority) ->
+      not PublicationAuthority.authorized?(authority) ->
         {:error, :invalid_publication_authority}
 
       prepared.provider_declarations != [] ->
@@ -235,7 +235,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
 
-      not PublicationAuthority.valid?(authority) ->
+      not PublicationAuthority.authorized?(authority) ->
         {:error, :invalid_publication_authority}
 
       prepared.provider_declarations == [] ->

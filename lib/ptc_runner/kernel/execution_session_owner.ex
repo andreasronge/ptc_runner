@@ -50,15 +50,20 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   def start(prepared, authority, caller, provider_execution, notifier, operation)
       when is_pid(caller) and operation in [:run, :check, :connect] do
-    with :ok <- admissible(prepared, authority, provider_execution, notifier, operation) do
+    with :ok <- admissible(prepared, authority, provider_execution, notifier, operation),
+         {:ok, lease} <- PublicationAuthority.claim(authority) do
       token = make_ref()
 
       case GenServer.start(
              __MODULE__,
-             {prepared, authority, caller, token, provider_execution, notifier, operation}
+             {prepared, authority, caller, token, lease, provider_execution, notifier, operation}
            ) do
-        {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
-        {:error, _reason} -> {:error, :invalid_prepared_run}
+        {:ok, pid} ->
+          {:ok, %__MODULE__{pid: pid, token: token}}
+
+        {:error, _reason} ->
+          _ = PublicationAuthority.abort(authority)
+          {:error, :invalid_prepared_run}
       end
     end
   end
@@ -73,7 +78,10 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
 
-      not PublicationAuthority.valid?(authority) ->
+      not PublicationAuthority.authorized?(authority) ->
+        {:error, :invalid_publication_authority}
+
+      not PublicationAuthority.matches_prepared?(authority, prepared) ->
         {:error, :invalid_publication_authority}
 
       prepared.provider_declarations == [] ->
@@ -121,7 +129,9 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | [map()] | ConnectivityResult.t()}
           | {:error, term()}
   def await(%__MODULE__{pid: pid, token: token}) do
-    GenServer.call(pid, {token, :await}, :infinity)
+    result = GenServer.call(pid, {token, :await}, :infinity)
+    send(pid, {token, :handoff_ack})
+    result
   catch
     :exit, _reason -> {:error, :execution_session_unavailable}
   end
@@ -131,13 +141,15 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   def pid(%__MODULE__{pid: pid}), do: pid
 
   @impl GenServer
-  def init({prepared, authority, caller, token, provider_execution, notifier, operation}) do
+  def init({prepared, authority, caller, token, lease, provider_execution, notifier, operation}) do
     caller_ref = Process.monitor(caller)
 
     initial = %{
       token: token,
       caller: caller,
       caller_ref: caller_ref,
+      authority: authority,
+      lease: lease,
       prepared: prepared,
       registry: nil,
       provider_session: nil,
@@ -149,7 +161,9 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       worker_pid: nil,
       worker_ref: nil,
       waiter: nil,
-      result: nil
+      result: nil,
+      authority_handed_off?: false,
+      handoff_waiting?: false
     }
 
     case RunBuilder.open_prepared_sinks(prepared, authority, self()) do
@@ -173,12 +187,14 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           |> Map.put(:opened_sinks, opened_sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
+          |> abort_authority()
           |> put_result({:error, reason})
 
         {:ok, next}
 
       {:error, reason} ->
         close_prepared(prepared)
+        _ = PublicationAuthority.abort(authority)
         {:ok, %{initial | prepared: nil, result: {:error, reason}}}
     end
   end
@@ -197,7 +213,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         %{token: token, caller: caller, result: result} = state
       )
       when not is_nil(result),
-      do: {:stop, :normal, result, state}
+      do: finish_result(state, result)
 
   def handle_call(
         {token, {:resource, action, kind, resource}},
@@ -233,6 +249,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       |> Map.put(:worker_ref, nil)
       |> maybe_finalize_failed_execution(result)
       |> close_owned_inputs()
+      |> maybe_abort_authority(result)
       |> put_result(result)
 
     finish_or_wait(next)
@@ -257,6 +274,13 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       |> put_result({:error, :execution_session_unavailable})
 
     finish_or_wait(next)
+  end
+
+  def handle_info(
+        {token, :handoff_ack},
+        %{token: token, handoff_waiting?: true} = state
+      ) do
+    {:stop, :normal, %{state | authority_handed_off?: true, handoff_waiting?: false}}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -286,7 +310,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
                installed_limits: prepared.request.package.installed_limits
              ) do
         case RunBuilder.build_prepared_owned(prepared, registry, authority, opened_sinks) do
-          {:ok, built} -> {:ok, registry, built}
+          {:ok, built} -> {:ok, registry, Map.put(built, :publication_lease, initial.lease)}
           {:error, reason} -> {:error, reason, registry}
         end
       end
@@ -319,6 +343,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           |> Map.put(:opened_sinks, opened_sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
+          |> abort_authority()
           |> put_result({:error, reason})
 
         {:ok, next}
@@ -329,6 +354,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           |> Map.put(:opened_sinks, opened_sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
+          |> abort_authority()
           |> put_result({:error, reason})
 
         {:ok, next}
@@ -361,7 +387,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
             execution_result =
               ProviderExecution.execute(
                 initial.prepared,
-                authority,
+                {authority, initial.lease},
                 opened_sinks,
                 provider_execution,
                 notifier,
@@ -398,20 +424,28 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           |> Map.put(:opened_sinks, opened_sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
+          |> abort_authority()
           |> put_result({:error, :invalid_prepared_run})
 
         {:ok, next}
     end
   end
 
-  defp complete_operation(built, :run), do: RunBuilder.execute_built(built)
-  defp complete_operation(built, :check), do: RunBuilder.check_built(built)
+  defp complete_operation(%{publication_lease: lease} = built, :run),
+    do: RunBuilder.execute_built_claimed(built, lease)
+
+  defp complete_operation(%{publication_lease: lease} = built, :check),
+    do: RunBuilder.check_built_claimed(built, lease)
 
   defp finish_or_wait(%{waiter: nil} = state), do: {:noreply, state}
 
   defp finish_or_wait(%{waiter: waiter, result: result} = state) do
     GenServer.reply(waiter, result)
-    {:stop, :normal, state}
+    {:noreply, %{state | waiter: nil, handoff_waiting?: true}}
+  end
+
+  defp finish_result(state, result) do
+    {:reply, result, %{state | handoff_waiting?: true}}
   end
 
   defp abort(state) do
@@ -420,6 +454,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     |> close_runtime_resources()
     |> finalize_aborted_sinks()
     |> close_owned_inputs()
+    |> abort_authority()
   end
 
   defp stop_worker(%{worker_pid: nil} = state), do: state
@@ -465,6 +500,17 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     state = close_runtime_resources(state)
     close_prepared(state.prepared)
     %{state | prepared: nil}
+  end
+
+  defp maybe_abort_authority(state, {:ok, _result}), do: state
+  defp maybe_abort_authority(state, _result), do: abort_authority(state)
+
+  defp abort_authority(%{authority_handed_off?: true, result: {:ok, _result}} = state),
+    do: state
+
+  defp abort_authority(%{authority: authority} = state) do
+    _ = PublicationAuthority.abort(authority)
+    state
   end
 
   # The session closes first because its committed closers belong to the
@@ -566,7 +612,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   defp redact_status(status) do
     Map.new(status, fn
-      {key, _value} when key in [:state, :message, :reason] -> {key, :redacted}
+      {key, _value} when key in [:authority, :state, :message, :reason] -> {key, :redacted}
       {:log, _value} -> {:log, []}
       key_value -> key_value
     end)

@@ -142,6 +142,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcome do
   defp fields_valid?(outcome) do
     Enum.sort(Map.keys(outcome)) == @field_keys and
       result_valid?(outcome.result) and
+      result_terminal_coherent?(outcome.result, outcome.terminal_batch) and
       outcome.result_class in [:normal, :private] and
       result_contract_valid?(outcome.result_contract) and
       terminal_batch_valid?(outcome.terminal_batch) and
@@ -158,6 +159,9 @@ defmodule PtcRunner.Kernel.ExecutionOutcome do
        do: is_atom(kind) and is_atom(reason) and is_map(details) and is_map(usage)
 
   defp result_valid?(_result), do: false
+
+  defp result_terminal_coherent?({:ok, _result}, {:error, _reason}), do: false
+  defp result_terminal_coherent?(_result, _terminal_batch), do: true
 
   defp result_contract_valid?(:ok), do: true
 

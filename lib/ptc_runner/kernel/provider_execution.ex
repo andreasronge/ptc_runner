@@ -102,7 +102,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   @doc false
   @spec execute(
           PreparedRun.t(),
-          PublicationAuthority.t(),
+          {PublicationAuthority.t(), PublicationAuthority.lease()},
           map(),
           t(),
           (binary() -> term()) | nil,
@@ -114,7 +114,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           | {:error, term()}
   def execute(
         %PreparedRun{} = prepared,
-        authority,
+        {authority, lease},
         opened_sinks,
         %__MODULE__{} = execution,
         notifier,
@@ -124,11 +124,14 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       )
       when is_function(tracker, 3) and is_pid(lifecycle_owner) and
              operation in [:run, :check, :connect] do
+    Process.put({__MODULE__, :publication_lease}, lease)
+
     with true <- notifier_matches_operation?(notifier, operation),
          true <- valid?(execution),
          true <- operation != :connect or non_interactive?(execution),
          true <- PreparedRun.consumed_valid?(prepared),
-         true <- PublicationAuthority.valid?(authority),
+         true <- PublicationAuthority.authorized?(authority),
+         true <- PublicationAuthority.lease_valid?(authority, lease),
          true <- bound_to_prepared?(execution, prepared),
          :ok <- RunCoordinator.local_checks(prepared, execution.catalog, execution.services),
          {:ok, session} <-
@@ -161,7 +164,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
   def execute(
         _prepared,
-        _authority,
+        _publication,
         _opened_sinks,
         _execution,
         _notifier,
@@ -486,7 +489,10 @@ defmodule PtcRunner.Kernel.ProviderExecution do
              opened_sinks,
              credentials
            ) do
-      complete_operation(built, operation)
+      complete_operation(
+        Map.put(built, :publication_lease, Process.get({__MODULE__, :publication_lease})),
+        operation
+      )
     end
   end
 
@@ -650,13 +656,14 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
   defp connectivity_entry(_declaration, _descriptor), do: {:error, internal_diagnostic()}
 
-  defp complete_operation(built, :run), do: RunBuilder.execute_built(built)
+  defp complete_operation(%{publication_lease: lease} = built, :run),
+    do: RunBuilder.execute_built_claimed(built, lease)
 
   # A check closes its own provider session inside this runtime, exactly where a
   # run closes its own, so its cleanup failure is classified here rather than
   # reaching the owner as a bare reason after the session is already gone.
-  defp complete_operation(built, :check) do
-    case RunBuilder.check_built(built) do
+  defp complete_operation(%{publication_lease: lease} = built, :check) do
+    case RunBuilder.check_built_claimed(built, lease) do
       {:error, :provider_cleanup_failed} -> {:error, cleanup_diagnostic()}
       result -> result
     end

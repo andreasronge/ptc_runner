@@ -35,6 +35,7 @@ defmodule PtcRunner.Kernel.ResultArtifact do
 
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.PublicationHandle
 
   @type class :: :normal | :private
 
@@ -42,9 +43,14 @@ defmodule PtcRunner.Kernel.ResultArtifact do
           :result_destination_exists
           | :result_persistence_failed
           | :result_destination_unsafe
+          | :file_sync_failed
+          | :directory_sync_failed
+          | :publication_collision
           | {:result_not_json_encodable, atom()}
           | :invalid_result_destination
           | :private_result_requires_private_destination
+          | {:recovery_written, term()}
+          | {:finalization_uncertain, term()}
 
   @doc """
   Writes `value` to `path` as JSON.
@@ -79,6 +85,92 @@ defmodule PtcRunner.Kernel.ResultArtifact do
   end
 
   def persist(_path, _value, _class, _destination, _fault_hook),
+    do: {:error, :invalid_result_destination}
+
+  @doc false
+  @spec prepare(term(), class(), class()) :: {:ok, binary()} | {:error, error()}
+  def prepare(value, class, destination)
+      when class in [:normal, :private] and destination in [:normal, :private] do
+    with :ok <- compatible(class, destination) do
+      encode(value)
+    end
+  end
+
+  def prepare(_value, _class, _destination),
+    do: {:error, :invalid_result_destination}
+
+  @doc false
+  @spec persist_handle(PublicationHandle.t(), term(), class(), class(), nil | (atom() -> term())) ::
+          :ok | {:error, error()}
+  def persist_handle(handle, value, class, destination, fault_hook \\ nil)
+
+  def persist_handle(%PublicationHandle{} = handle, value, class, destination, fault_hook)
+      when class in [:normal, :private] and destination in [:normal, :private] and
+             (is_nil(fault_hook) or is_function(fault_hook, 1)) do
+    with true <- PublicationHandle.valid?(handle),
+         :ok <- compatible(class, destination),
+         {:ok, encoded} <- prepare(value, class, destination),
+         :ok <- persistence_fault(fault_hook, :before_write),
+         :ok <- PublicationHandle.write(handle, encoded),
+         :ok <- persistence_fault(fault_hook, :after_write),
+         :ok <- sync_after_write(handle, destination, fault_hook),
+         result <- publish_after_sync(handle, fault_hook) do
+      result
+    else
+      false ->
+        {:error, :invalid_result_destination}
+
+      {:error, {:result_not_json_encodable, _kind} = error} ->
+        error
+
+      {:error, :private_result_requires_private_destination} = error ->
+        error
+
+      {:error, reason}
+      when reason in [:file_sync_failed, :directory_sync_failed, :publication_collision] ->
+        {:error, reason}
+
+      {:error, _reason} ->
+        {:error, :result_persistence_failed}
+    end
+  end
+
+  def persist_handle(_handle, _value, _class, _destination, _fault_hook),
+    do: {:error, :invalid_result_destination}
+
+  @doc false
+  @spec persist_prepared_handle(
+          PublicationHandle.t(),
+          binary(),
+          class(),
+          nil | (atom() -> term())
+        ) :: :ok | {:error, error()}
+  def persist_prepared_handle(handle, encoded, destination, fault_hook \\ nil)
+
+  def persist_prepared_handle(%PublicationHandle{} = handle, encoded, destination, fault_hook)
+      when is_binary(encoded) and destination in [:normal, :private] and
+             (is_nil(fault_hook) or is_function(fault_hook, 1)) do
+    with true <- PublicationHandle.valid?(handle),
+         :ok <- persistence_fault(fault_hook, :before_write),
+         :ok <- PublicationHandle.write(handle, encoded),
+         :ok <- persistence_fault(fault_hook, :after_write),
+         :ok <- sync_after_write(handle, destination, fault_hook),
+         result <- publish_after_sync(handle, fault_hook) do
+      result
+    else
+      false ->
+        {:error, :invalid_result_destination}
+
+      {:error, reason}
+      when reason in [:file_sync_failed, :directory_sync_failed, :publication_collision] ->
+        {:error, reason}
+
+      {:error, _reason} ->
+        {:error, :result_persistence_failed}
+    end
+  end
+
+  def persist_prepared_handle(_handle, _encoded, _destination, _fault_hook),
     do: {:error, :invalid_result_destination}
 
   @doc "Read-only validation of a result destination before run execution."
@@ -211,11 +303,38 @@ defmodule PtcRunner.Kernel.ResultArtifact do
   defp restrict(temporary, :private), do: File.chmod(temporary, 0o600)
   defp restrict(_temporary, :normal), do: :ok
 
+  defp publish_handle(%PublicationHandle{kind: :recovery}), do: :ok
+  defp publish_handle(%PublicationHandle{} = handle), do: PublicationHandle.publish(handle)
+
+  defp publish_after_sync(handle, fault_hook) do
+    case persistence_fault(fault_hook, :after_sync) do
+      :ok -> publish_handle(handle)
+      {:error, reason} -> persisted_failure(handle, reason)
+    end
+  end
+
+  defp sync_after_write(%PublicationHandle{kind: :recovery} = handle, :private, fault_hook),
+    do: PublicationHandle.sync_and_retain(handle, fault_hook)
+
+  defp sync_after_write(handle, _destination, _fault_hook), do: PublicationHandle.sync(handle)
+
+  defp persisted_failure(%PublicationHandle{kind: :recovery} = handle, reason) do
+    state =
+      if PublicationHandle.recovery_reachable?(handle),
+        do: :recovery_written,
+        else: :finalization_uncertain
+
+    {:error, {state, reason}}
+  end
+
+  defp persisted_failure(_handle, reason), do: {:error, reason}
+
   defp persistence_fault(nil, _stage), do: :ok
 
   defp persistence_fault(fault_hook, stage) do
     case fault_hook.(stage) do
       :ok -> :ok
+      {:error, reason} when is_atom(reason) -> {:error, reason}
       _failure -> {:error, :result_persistence_failed}
     end
   rescue

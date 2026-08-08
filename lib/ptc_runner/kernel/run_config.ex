@@ -93,7 +93,6 @@ defmodule PtcRunner.Kernel.RunConfig do
     result_projection: :native,
     inspection_sink: nil,
     inspection_sink_owner: nil,
-    inspection_path: nil,
     provider_session: nil,
     connector_snapshots: [],
     session_profile: nil,
@@ -115,7 +114,6 @@ defmodule PtcRunner.Kernel.RunConfig do
           result_projection: :native | :json,
           inspection_sink: InspectionSink.t() | nil,
           inspection_sink_owner: pid() | nil,
-          inspection_path: binary() | nil,
           provider_session: ProviderSession.t() | nil,
           connector_snapshots: [map()],
           session_profile: map() | nil,
@@ -142,7 +140,6 @@ defmodule PtcRunner.Kernel.RunConfig do
                :result_contract,
                :result_projection,
                :inspection_sink,
-               :inspection_path,
                :provider_session,
                :connector_snapshots,
                :session_profile,
@@ -159,8 +156,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          true <- result_contract?(Keyword.get(opts, :result_contract)),
          true <- result_projection?(Keyword.get(opts, :result_projection, :native)),
          {:ok, event_sink_owner} <- EventSink.owner(sink),
-         true <-
-           inspection?(Keyword.get(opts, :inspection_sink), Keyword.get(opts, :inspection_path)),
+         true <- inspection?(Keyword.get(opts, :inspection_sink)),
          {:ok, inspection_sink_owner} <-
            inspection_owner(Keyword.get(opts, :inspection_sink)),
          provider_session = Keyword.get(opts, :provider_session),
@@ -205,7 +201,6 @@ defmodule PtcRunner.Kernel.RunConfig do
          result_projection: Keyword.get(opts, :result_projection, :native),
          inspection_sink: Keyword.get(opts, :inspection_sink),
          inspection_sink_owner: inspection_sink_owner,
-         inspection_path: Keyword.get(opts, :inspection_path),
          provider_session: provider_session,
          connector_snapshots: Keyword.get(opts, :connector_snapshots, []),
          session_profile: session_profile,
@@ -424,12 +419,10 @@ defmodule PtcRunner.Kernel.RunConfig do
   defp maybe_put_session_profile(payload, profile),
     do: Map.put(payload, :session_profile, profile)
 
-  defp inspection?(nil, nil), do: true
+  defp inspection?(nil), do: true
+  defp inspection?(%InspectionSink{}), do: true
 
-  defp inspection?(%InspectionSink{}, path),
-    do: is_binary(path) and String.ends_with?(path, ".inspection.jsonl")
-
-  defp inspection?(_sink, _path), do: false
+  defp inspection?(_sink), do: false
 
   defp inspection_owner(nil), do: {:ok, nil}
   defp inspection_owner(%InspectionSink{} = sink), do: InspectionSink.owner(sink)

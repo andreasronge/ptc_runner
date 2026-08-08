@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderRegistry
@@ -91,6 +92,100 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     assert :ok = InstallationCatalog.close(catalog)
   end
 
+  @tag :tmp_dir
+  test "an unreserved destination authority is rejected before execution", %{tmp_dir: dir} do
+    {prepared, catalog} = prepared_run("(return 42)")
+
+    assert {:ok, authority} =
+             PublicationAuthority.new(inspect: Path.join(dir, "unreserved.inspection.jsonl"))
+
+    assert {:error, :invalid_publication_authority} =
+             RunCoordinator.execute(prepared, authority)
+
+    assert {:error, :invalid_publication_authority} =
+             PublicationAuthority.new(trace_dir: Path.join(dir, "traces"))
+
+    assert ProviderActivity.value(prepared.provider_activity) == false
+    assert PreparedRun.valid?(prepared)
+    assert :ok = PreparedRun.close(prepared)
+    assert :ok = InstallationCatalog.close(catalog)
+  end
+
+  @tag :tmp_dir
+  test "a terminal publication authority cannot be reused", %{tmp_dir: dir} do
+    for terminal <- [:close, :abort] do
+      {prepared, catalog} = prepared_run("(return 42)")
+
+      assert {:ok, authority} =
+               PublicationAuthority.authorize(
+                 "terminal-#{terminal}",
+                 [trace: Path.join(dir, "#{terminal}.jsonl")],
+                 :normal,
+                 :normal
+               )
+
+      assert :ok = apply(PublicationAuthority, terminal, [authority])
+
+      assert {:error, :invalid_publication_authority} =
+               RunCoordinator.execute(prepared, authority)
+
+      refute ProviderActivity.value(prepared.provider_activity)
+
+      assert :ok = PreparedRun.close(prepared)
+      assert :ok = InstallationCatalog.close(catalog)
+    end
+  end
+
+  test "a claimed publication authority cannot execute a second preparation" do
+    {first, first_catalog} = prepared_run("(return 1)")
+    {second, second_catalog} = prepared_run("(return 2)")
+    assert {:ok, authority} = PublicationAuthority.new([])
+
+    assert {:ok, _outcome} = RunCoordinator.execute(first, authority)
+    assert {:error, :invalid_publication_authority} = RunCoordinator.execute(second, authority)
+    refute ProviderActivity.value(second.provider_activity)
+
+    assert :ok = PublicationAuthority.abort(authority)
+    assert :ok = InstallationCatalog.close(first_catalog)
+    assert :ok = PreparedRun.close(second)
+    assert :ok = InstallationCatalog.close(second_catalog)
+  end
+
+  test "coordinator completion claims an authority before a direct build can reuse it" do
+    {first, first_catalog} = prepared_run("(return 1)")
+    {second, second_catalog} = prepared_run("(return 2)")
+    assert {:ok, authority} = PublicationAuthority.new([])
+    assert {:ok, opened_sinks} = RunBuilder.open_prepared_sinks(second, authority, self())
+    assert {:ok, registry} = ProviderRegistry.new()
+
+    assert {:ok, built} =
+             RunBuilder.build_prepared_owned(second, registry, authority, opened_sinks)
+
+    assert {:ok, _outcome} = RunCoordinator.execute(first, authority)
+    assert {:error, :invalid_execution_outcome} = RunBuilder.execute_built(built)
+
+    assert :ok = RunBuilder.close(built.config)
+    assert :ok = PublicationAuthority.abort(authority)
+    assert :ok = PreparedRun.close(first)
+    assert :ok = InstallationCatalog.close(first_catalog)
+    assert :ok = PreparedRun.close(second)
+    assert :ok = ProviderRegistry.close(registry)
+    assert :ok = InstallationCatalog.close(second_catalog)
+  end
+
+  test "authority disclosure policy must match the prepared run" do
+    {prepared, catalog} = prepared_run("(return 42)", input_authority: :private)
+
+    assert {:ok, authority} =
+             PublicationAuthority.authorize("policy-mismatch", [], :normal, :normal)
+
+    assert {:error, :invalid_publication_authority} = RunCoordinator.execute(prepared, authority)
+    refute ProviderActivity.value(prepared.provider_activity)
+
+    assert :ok = PreparedRun.close(prepared)
+    assert :ok = InstallationCatalog.close(catalog)
+  end
+
   test "owned sinks cannot be rebound to another prepared run" do
     {first, first_catalog} = prepared_run("(return 1)")
     {second, second_catalog} = prepared_run("(return 2)")
@@ -117,10 +212,23 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   test "owned sink authority and inspection path cannot be replaced", %{tmp_dir: directory} do
     original_path = Path.join(directory, "original.inspection.jsonl")
     replacement_path = Path.join(directory, "occupied.inspection.jsonl")
-    File.write!(replacement_path, "occupied")
     {prepared, catalog} = prepared_run("(return 1)", inspection_capture: true)
-    assert {:ok, original_authority} = PublicationAuthority.new(inspect: original_path)
-    assert {:ok, replacement_authority} = PublicationAuthority.new(inspect: replacement_path)
+
+    assert {:ok, original_authority} =
+             PublicationAuthority.authorize(
+               "original-sink",
+               [inspect: original_path],
+               :normal,
+               :normal
+             )
+
+    assert {:ok, replacement_authority} =
+             PublicationAuthority.authorize(
+               "replacement-sink",
+               [inspect: replacement_path],
+               :normal,
+               :normal
+             )
 
     assert {:ok, opened_sinks} =
              RunBuilder.open_prepared_sinks(prepared, original_authority, self())
@@ -142,6 +250,8 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
 
     InspectionSink.stop(opened_sinks.inspection_sink)
     EventSink.stop(opened_sinks.event_sink)
+    assert :ok = PublicationAuthority.abort(original_authority)
+    assert :ok = PublicationAuthority.abort(replacement_authority)
     assert :ok = PreparedRun.close(prepared)
     assert :ok = ProviderRegistry.close(registry)
     assert :ok = InstallationCatalog.close(catalog)
@@ -203,20 +313,32 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     occupied = Path.join(directory, "occupied.inspection.jsonl")
     File.write!(occupied, "occupied")
     {prepared, catalog} = prepared_run("(return 1)", inspection_capture: true)
-    assert {:ok, authority} = PublicationAuthority.new(inspect: occupied)
 
-    assert {:error, {:inspection_preflight_failed, :inspection_destination_exists}} =
-             RunCoordinator.execute(prepared, authority)
+    assert {:error, :destination_exists} =
+             PublicationAuthority.authorize(
+               "run-collision",
+               [inspect: occupied],
+               :normal,
+               :normal
+             )
 
+    assert ProviderActivity.value(prepared.provider_activity) == false
+    assert :ok = PreparedRun.close(prepared)
     assert :ok = InstallationCatalog.close(catalog)
 
     shared = Path.join(directory, "shared.inspection.jsonl")
     {prepared, catalog} = prepared_run("(return 1)", inspection_capture: true)
-    assert {:ok, authority} = PublicationAuthority.new(inspect: shared, output: shared)
 
-    assert {:error, {:artifact_preflight_failed, :conflicting_destinations}} =
-             RunCoordinator.execute(prepared, authority)
+    assert {:error, :conflicting_destinations} =
+             PublicationAuthority.authorize(
+               "run-conflict",
+               [inspect: shared, output: shared],
+               :normal,
+               :normal
+             )
 
+    assert ProviderActivity.value(prepared.provider_activity) == false
+    assert :ok = PreparedRun.close(prepared)
     assert :ok = InstallationCatalog.close(catalog)
   end
 
@@ -226,7 +348,14 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   } do
     {prepared, catalog} = oversized_metadata_prepared_run()
     inspection_path = Path.join(directory, "failed.inspection.jsonl")
-    assert {:ok, authority} = PublicationAuthority.new(inspect: inspection_path)
+
+    assert {:ok, authority} =
+             PublicationAuthority.authorize(
+               "failed-opening",
+               [inspect: inspection_path],
+               :normal,
+               :normal
+             )
 
     trace_calls([
       {EventSink, :start, 3},
@@ -269,6 +398,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       ])
     end
 
+    assert :ok = PublicationAuthority.abort(authority)
     assert :ok = InstallationCatalog.close(catalog)
   end
 
@@ -280,7 +410,15 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       prepared_run("(loop [] (recur))", inspection_capture: true)
 
     inspection_path = Path.join(directory, "run.inspection.jsonl")
-    assert {:ok, authority} = PublicationAuthority.new(inspect: inspection_path)
+
+    assert {:ok, authority} =
+             PublicationAuthority.authorize(
+               "caller-death",
+               [inspect: inspection_path],
+               :normal,
+               :normal
+             )
+
     parent = self()
 
     caller =
@@ -332,6 +470,64 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       :erlang.trace_pattern({EventSink, :finalize_and_events, 2}, false, [:local])
     end
 
+    assert :ok = PublicationAuthority.abort(authority)
+    assert :ok = InstallationCatalog.close(catalog)
+  end
+
+  @tag :tmp_dir
+  test "caller death after a stored success aborts unretrieved publication authority", %{
+    tmp_dir: directory
+  } do
+    {prepared, catalog} = prepared_run("(return 42)")
+    trace_path = Path.join(directory, "stored-success.jsonl")
+
+    assert {:ok, authority} =
+             PublicationAuthority.authorize(
+               "stored-success",
+               [trace: trace_path],
+               :normal,
+               :normal
+             )
+
+    parent = self()
+
+    caller =
+      spawn(fn ->
+        assert {:ok, owner} = ExecutionSessionOwner.start(prepared, authority, self())
+        send(parent, {:stored_success_owner, owner})
+
+        receive do
+          {:await_raw, token} ->
+            send(
+              parent,
+              {:raw_result, GenServer.call(ExecutionSessionOwner.pid(owner), {token, :await})}
+            )
+
+            receive do: (:hold -> :ok)
+        end
+      end)
+
+    caller_ref = Process.monitor(caller)
+    assert_receive {:stored_success_owner, owner}, 5_000
+    owner_pid = ExecutionSessionOwner.pid(owner)
+    owner_ref = Process.monitor(owner_pid)
+
+    assert_eventually(fn ->
+      case :sys.get_state(owner_pid) do
+        %{result: {:ok, _outcome}} -> true
+        _state -> false
+      end
+    end)
+
+    send(caller, {:await_raw, :sys.get_state(owner_pid).token})
+    assert_receive {:raw_result, {:ok, _outcome}}, 5_000
+
+    Process.exit(caller, :kill)
+    assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}, 5_000
+    assert_receive {:DOWN, ^owner_ref, :process, ^owner_pid, :normal}, 5_000
+
+    refute PublicationAuthority.authorized?(authority)
+    refute File.exists?(trace_path)
     assert :ok = InstallationCatalog.close(catalog)
   end
 

@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.InspectionSink
@@ -38,7 +39,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
 
     assert {:ok, outcome} =
              ExecutionOutcome.capture(
-               result(),
+               error_result(),
                {:error, :event_sink_error},
                sink,
                nil,
@@ -47,6 +48,25 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
              )
 
     assert open!(outcome, authority).result_class == :private
+  end
+
+  test "rejects a successful result with a failed terminal event batch", %{
+    limits: limits,
+    authority: authority
+  } do
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    assert {:error, :invalid_execution_outcome} =
+             ExecutionOutcome.capture(
+               result(),
+               {:error, :event_sink_error},
+               sink,
+               nil,
+               nil,
+               authority
+             )
+
+    assert :ok = EventSink.stop(sink)
   end
 
   test "freezes inspection records while their sink is live", %{
@@ -204,5 +224,9 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
 
   defp result(value \\ %{"answer" => 42}) do
     {:ok, %Result{value: value, usage: %{}, evaluation_memory: %{}}}
+  end
+
+  defp error_result do
+    {:error, %Error{kind: :event_sink_error, reason: :event_sink_error, details: %{}, usage: %{}}}
   end
 end

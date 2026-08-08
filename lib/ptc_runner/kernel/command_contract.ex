@@ -45,6 +45,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     :application,
     :bundle,
     :provider_declaration,
+    :destination,
     :internal
   ]
   @preclassification_only_phases @unclassified_run_phases -- [:internal]
@@ -56,6 +57,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   @static_application_codes @application_codes -- [:override_invalid, :event_identity_conflict]
   @bundle_codes Map.fetch!(@codes_by_phase, :bundle)
   @provider_declaration_codes Map.fetch!(@codes_by_phase, :provider_declaration)
+  @destination_codes Map.fetch!(@codes_by_phase, :destination)
   @local_preflight_codes Map.fetch!(@codes_by_phase, :local_preflight)
   @active_preflight_codes Map.fetch!(@codes_by_phase, :active_preflight)
   @provider_acquisition_codes Map.fetch!(@codes_by_phase, :provider_acquisition)
@@ -536,6 +538,10 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp diagnostic_pair_allowed?(:run_unclassified, :application, code)
        when code in @application_codes,
+       do: true
+
+  defp diagnostic_pair_allowed?(:run_unclassified, :destination, code)
+       when code in @destination_codes,
        do: true
 
   defp diagnostic_pair_allowed?(mode, :bundle, code)

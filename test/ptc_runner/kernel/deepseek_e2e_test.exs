@@ -68,7 +68,7 @@ defmodule PtcRunner.Kernel.DeepSeekE2ETest do
 
   @tag :tmp_dir
   test "DeepSeek writes parameterized source that is checked before mission execution", %{
-    tmp_dir: dir
+    tmp_dir: _dir
   } do
     {:ok, limits} =
       Limits.new(
@@ -130,8 +130,7 @@ defmodule PtcRunner.Kernel.DeepSeekE2ETest do
         input: %{"prefix" => prefix, "number" => number},
         limits: limits,
         event_sink: sink,
-        inspection_sink: inspection_sink,
-        inspection_path: Path.join(dir, "generated-source.inspection.jsonl")
+        inspection_sink: inspection_sink
       )
 
     source = ~S"""
