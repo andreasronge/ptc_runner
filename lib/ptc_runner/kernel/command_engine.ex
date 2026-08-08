@@ -51,6 +51,34 @@ defmodule PtcRunner.Kernel.CommandEngine do
     end
   end
 
+  @doc "Authorizes a prepared run's destinations at the phase-6 boundary."
+  @spec preflight(CommandPreparation.t()) ::
+          {:ok, PublicationAuthority.t()} | {:error, CommandOutcome.t()}
+  def preflight(%CommandPreparation{} = preparation) do
+    if CommandPreparation.valid?(preparation) do
+      case preparation.artifact_destination_failures do
+        [] ->
+          authorize_prepared(preparation)
+
+        _failures ->
+          destination_failure(preparation, :invalid_destination)
+      end
+    else
+      {:error, outcome(:run, safe_run_ref(preparation), :internal, :internal_error)}
+    end
+  rescue
+    _exception ->
+      {:error, outcome(:run, safe_run_ref(preparation), :internal, :internal_error)}
+  end
+
+  def preflight(_preparation),
+    do: {:error, outcome(:run, generated_or_safe_ref(), :internal, :internal_error)}
+
+  @doc false
+  @spec authorize(CommandPreparation.t()) ::
+          {:ok, PublicationAuthority.t()} | {:error, CommandOutcome.t()}
+  def authorize(%CommandPreparation{} = preparation), do: preflight(preparation)
+
   @doc false
   @spec request(binary(), InstallationCatalog.t(), keyword()) ::
           {:ok, RunRequest.t()} | {:error, term()}
@@ -357,7 +385,14 @@ defmodule PtcRunner.Kernel.CommandEngine do
   defp connect_operation(host, catalog, prepared, rows) do
     with {:ok, services} <- doctor_services(host),
          {:ok, execution} <- ProviderExecution.new(catalog, services, []),
-         {:ok, authority} <- PublicationAuthority.new([]) do
+         {:ok, run_ref} <- CommandRunRef.generate(),
+         {:ok, authority} <-
+           PublicationAuthority.authorize(
+             run_ref,
+             [],
+             prepared.effective_event_policy,
+             prepared.effective_data_class
+           ) do
       connect_settlement(rows, prepared, catalog, execution, authority)
     else
       {:error, _reason} -> {:error, diagnostic(:internal, :internal_error)}
@@ -374,7 +409,10 @@ defmodule PtcRunner.Kernel.CommandEngine do
   # `false` hides a cost that was really incurred, `true` invents one that was
   # not — so it is classified rather than defaulted.
   defp connect_settlement(rows, prepared, catalog, execution, authority) do
-    case RunCoordinator.connect(prepared, authority, execution) do
+    result = RunCoordinator.connect(prepared, authority, execution)
+    _ = PublicationAuthority.close(authority)
+
+    case result do
       {:ok, result} ->
         case DoctorPlan.settle_connect(rows, result, prepared, catalog) do
           {:ok, settled} -> connect_projection(settled, true)
@@ -461,6 +499,48 @@ defmodule PtcRunner.Kernel.CommandEngine do
       InstallationCatalog.close(catalog)
       :erlang.raise(kind, reason, __STACKTRACE__)
   end
+
+  defp authorize_prepared(preparation) do
+    options = preparation.artifact_destinations
+
+    case PublicationAuthority.authorize(
+           preparation.run_ref,
+           Map.to_list(options),
+           preparation.prepared_run.effective_event_policy,
+           preparation.prepared_run.effective_data_class
+         ) do
+      {:ok, authority} -> {:ok, authority}
+      {:error, reason} -> destination_failure(preparation, destination_code(reason, options))
+    end
+  end
+
+  defp destination_failure(preparation, code) do
+    CommandPreparation.close(preparation)
+
+    options =
+      Map.merge(
+        preparation.artifact_destinations,
+        Map.new(preparation.artifact_destination_failures, &{&1, true})
+      )
+
+    diagnostic = diagnostic(:destination, code)
+
+    {:error,
+     CommandOutcome.run_error(preparation.run_ref, diagnostic, requested_artifact_state(options))}
+  end
+
+  defp destination_code(:destination_exists, _options), do: :destination_exists
+
+  defp destination_code(:private_destination_required, _options),
+    do: :private_destination_required
+
+  defp destination_code(:recovery_reservation_failed, _options), do: :recovery_reservation_failed
+  defp destination_code(:destination_collision, _options), do: :destination_exists
+
+  defp destination_code(_reason, _options), do: :invalid_destination
+
+  defp safe_run_ref(%CommandPreparation{run_ref: run_ref}), do: run_ref
+  defp generated_or_safe_ref, do: CommandRunRef.generate() |> elem(1)
 
   defp validation_outcome(arguments, run_ref, prepared) do
     case RunCoordinator.validation_result(prepared) do

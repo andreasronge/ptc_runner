@@ -32,6 +32,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.TracePublication
 
   @default_source_bytes 8_000_000
   @default_result_bytes 1_000_000
@@ -1718,6 +1719,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   defp same_stat_identity(identity, identity), do: :ok
   defp same_stat_identity(_expected, _current), do: {:error, :source_changed}
 
+  # ex_dna:disable-for-next-line — TraceLog keeps its source identity contract independent from inspection snapshots.
   defp stat_identity(%File.Stat{} = stat) do
     %{
       major_device: stat.major_device,
@@ -1731,6 +1733,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     }
   end
 
+  # ex_dna:disable-for-next-line — TraceLog keeps its capture-hook contract independent from inspection snapshots.
   defp run_capture_hook(nil), do: :ok
 
   defp run_capture_hook(capture_hook) do
@@ -2136,6 +2139,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
+  # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
   defp page_options(arguments, source_id, operation) do
     limit = Map.get(arguments, "limit", @default_limit)
     query_id = digest({operation, Map.drop(arguments, ["cursor", "limit"])})
@@ -2149,6 +2153,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
+  # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
   defp cursor_offset(nil, _source_id, _query_id), do: {:ok, 0}
 
   defp cursor_offset(cursor, source_id, query_id)
@@ -2182,6 +2187,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     fit_page(selected, items, offset, source_id, query_id, max_result_bytes)
   end
 
+  # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
   defp fit_page(selected, all_items, offset, source_id, query_id, max_result_bytes) do
     result = page_result(selected, all_items, offset, source_id, query_id)
 
@@ -2205,6 +2211,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
+  # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
   defp fit_page_prefix(_selected, _context, lower, upper, best)
        when lower > upper do
     if best, do: {:ok, best}, else: {:error, :result_limit_exceeded}
@@ -2239,6 +2246,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
+  # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
   defp page_result(selected, all_items, offset, source_id, query_id) do
     next_offset = offset + length(selected)
     more? = next_offset < length(all_items)
@@ -2343,4 +2351,27 @@ defmodule PtcRunner.Kernel.TraceLog do
   defp private_path?(path), do: String.ends_with?(path, ".private.jsonl")
   defp inspection_path?(path), do: String.ends_with?(path, ".inspection.jsonl")
   defp reserved_path?(path), do: private_path?(path) or inspection_path?(path)
+
+  @doc false
+  @spec publish_handle(
+          PtcRunner.Kernel.PublicationHandle.t(),
+          [map()],
+          boolean(),
+          nil | (atom() -> term())
+        ) :: :ok | {:error, atom()}
+  def publish_handle(handle, events, private?, fault_hook \\ nil) do
+    TracePublication.publish(
+      handle,
+      events,
+      private?,
+      fault_hook,
+      %{
+        normalize: &normalize/1,
+        validate: &validate_loaded(&1, @default_source_bytes),
+        encode: &encode_jsonl(&1, @default_source_bytes),
+        validate_path: &validate_append_path/2,
+        fault: &publication_fault/2
+      }
+    )
+  end
 end

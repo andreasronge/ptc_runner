@@ -774,7 +774,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   @tag :tmp_dir
   test "agent.core bounds the complete encoded request at the exact character ceiling", %{
-    tmp_dir: dir
+    tmp_dir: _dir
   } do
     response = %{
       content: nil,
@@ -819,8 +819,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
         prompt_source: prompt_source,
         input: %{"task" => task},
         provider_closers: [close_counter(self(), :transcript_rejected)],
-        inspection_sink: inspection_sink,
-        inspection_path: Path.join(dir, "transcript-rejected.inspection.jsonl")
+        inspection_sink: inspection_sink
       )
 
     assert {:error, %{kind: :workflow_failed}} =
@@ -851,7 +850,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   end
 
   @tag :tmp_dir
-  test "agent.core rejects an unencodable request before provider dispatch", %{tmp_dir: dir} do
+  test "agent.core rejects an unencodable request before provider dispatch", %{tmp_dir: _dir} do
     response = %{
       content: nil,
       tool_calls: [
@@ -866,8 +865,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       agent_config([response], [],
         prompt_source: tiny_prompt_source(),
         provider_closers: [close_counter(self(), :encoding_rejected)],
-        inspection_sink: inspection_sink,
-        inspection_path: Path.join(dir, "encoding-rejected.inspection.jsonl")
+        inspection_sink: inspection_sink
       )
 
     assert {:error, %{kind: :workflow_failed, usage: usage}} =
@@ -1865,8 +1863,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       limits: limits,
       event_sink: sink,
       provider_session: provider_session(Keyword.get(opts, :provider_closers, []), limits),
-      inspection_sink: Keyword.get(opts, :inspection_sink),
-      inspection_path: Keyword.get(opts, :inspection_path)
+      inspection_sink: Keyword.get(opts, :inspection_sink)
     ]
 
     config_opts =
