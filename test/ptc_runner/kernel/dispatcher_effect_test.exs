@@ -115,14 +115,20 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
                 :never -> {:ok, nil}
               end
             end,
-            timeout_ms: 50
+            # `await_provider/6` in the dispatcher uses this single value both
+            # as the deadline it reports as `:provider_timeout` AND as the
+            # window the provider process has to be scheduled at all -- past
+            # it, the dispatcher kills the provider outright, so a value too
+            # close to the default assert_receive timeout below risks the
+            # provider being killed before it ever ran, meaning
+            # `:callback_started` would never arrive no matter how long this
+            # test waited for it. 500ms gives the provider a comfortable
+            # scheduling window under full-suite contention.
+            timeout_ms: 500
           )
         end)
 
-      # Default assert_receive timeout is 100ms; under full-suite scheduler
-      # contention the Task.async'd callback can take longer than that just
-      # to get scheduled, unrelated to the timeout behaviour under test.
-      assert_receive {:callback_started, ^effect}, 1_000
+      assert_receive {:callback_started, ^effect}, 400
 
       assert_effect_failure(
         Task.await(task),
@@ -155,9 +161,10 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
           Dispatcher.dispatch(state, :mission, environment, capability.name, %{}, 1_000)
         end)
 
-      # See the timeout note on the other `assert_receive {:callback_started, ...}`
-      # above -- same race against scheduler contention in the full suite.
-      assert_receive {:callback_started, ^effect, provider}, 1_000
+      # Kept below the dispatch call's own 1_000ms deadline above -- an equal
+      # value would race the provider's scheduling delay against dispatch's
+      # own timeout instead of leaving it room to win.
+      assert_receive {:callback_started, ^effect, provider}, 500
       assert :ok = RunState.close(state)
       send(provider, :finish)
 

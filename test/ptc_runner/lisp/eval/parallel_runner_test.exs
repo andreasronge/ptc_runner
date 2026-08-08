@@ -533,12 +533,16 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
       end
 
       # Wide margin: unlike the other deadline tests, this one blocks the
-      # coordinator itself on a cross-process handshake (the `receive` at
-      # line 515) before the second item can even be spawned. Under full
-      # suite load that handshake alone can eat tens of ms, so a tight
-      # budget here (previously 50ms) flakes on scheduler contention that
-      # has nothing to do with the behaviour under test.
-      deadline = System.monotonic_time(:millisecond) + 250
+      # coordinator itself on an UNBOUNDED cross-process handshake (the
+      # `receive` at line 515, no timeout) before the second item can even
+      # be spawned. Under full suite load that handshake alone can eat
+      # hundreds of ms, so a tight budget here (originally 50ms) flakes on
+      # scheduler contention that has nothing to do with the behaviour
+      # under test. This margin is still not a guarantee -- the handshake
+      # has no upper bound -- just a large enough window to make the
+      # failure rare in practice; a controllable clock/barrier would be a
+      # real fix but is a larger change than this test is worth.
+      deadline = System.monotonic_time(:millisecond) + 1_000
 
       assert {:error,
               [

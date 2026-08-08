@@ -406,8 +406,24 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   test "caller death aborts the worker and stops both owner-backed sinks", %{
     tmp_dir: directory
   } do
+    # `(loop [] (recur))` is NOT actually infinite: PTC-Lisp hard-caps
+    # loop/recur at exactly 1_000 jumps (`PtcRunner.Lisp.Eval.Context`'s
+    # `loop_limit`, not configurable via manifest limits), and an empty body
+    # blows through that cap in well under a second. This test's whole
+    # premise -- that the run is still in flight when `Process.exit(caller,
+    # :kill)` fires below -- was racing that natural completion, and could
+    # lose even outside full-suite load (reproduced failing >50% of runs
+    # combined with just 3 other test files). Give each of the 1_000
+    # iterations real work so reaching the cap on its own takes several
+    # seconds; the test still finishes fast because it interrupts the run
+    # long before that. `evaluation_timeout_ms` doesn't apply here (that
+    # governs subordinate mission evaluations, not this top-level workflow
+    # call, which uses `workflow_timeout_ms` -- already a 30s default).
     {prepared, catalog} =
-      prepared_run("(loop [] (recur))", inspection_capture: true)
+      prepared_run(
+        "(loop [i 0 acc 0] (if (< i 1000) (recur (inc i) (+ acc (reduce + 0 (range 20000)))) acc))",
+        inspection_capture: true
+      )
 
     inspection_path = Path.join(directory, "run.inspection.jsonl")
 
@@ -442,17 +458,6 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     Code.ensure_loaded!(EventSink)
     assert :erlang.trace_pattern({EventSink, :finalize_and_events, 2}, true, [:local]) == 1
 
-    # `owner_pid` runs an infinite `(loop [] (recur))`, so it must still be
-    # alive here. If it is not, the run aborted early (a real bug) rather
-    # than this check merely losing a race with scheduler delay -- fail with
-    # that distinction instead of the opaque ArgumentError `:erlang.trace/3`
-    # raises on a dead pid.
-    assert Process.alive?(owner_pid),
-           "owner #{inspect(owner_pid)} exited before tracing could start; " <>
-             "the infinite-loop run ended early instead of merely running late"
-
-    assert :erlang.trace(owner_pid, true, [:call]) == 1
-
     owner_ref = Process.monitor(owner_pid)
     worker_ref = Process.monitor(state.worker_pid)
     event_sink_ref = Process.monitor(event_sink.pid)
@@ -460,6 +465,22 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     activity_ref = Process.monitor(prepared.provider_activity.owner)
 
     try do
+      # `owner_pid` is running a loop built to take several seconds to reach
+      # its 1_000-iteration cap (see the comment above this test's
+      # `prepared_run/2` call), so it must still be alive here. If it is not,
+      # something ended the run
+      # far earlier than that -- fail with that distinction instead of the
+      # opaque ArgumentError `:erlang.trace/3` raises on a dead pid. Both
+      # checks stay inside this `try` so a failure here still runs the
+      # `after` cleanup below -- otherwise the global
+      # `:erlang.trace_pattern/3` enabled above would leak into every later
+      # test in the suite.
+      assert Process.alive?(owner_pid),
+             "owner #{inspect(owner_pid)} exited before tracing could start; " <>
+               "the run ended far earlier than its ~6s natural completion"
+
+      assert :erlang.trace(owner_pid, true, [:call]) == 1
+
       Process.exit(caller, :kill)
 
       assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
@@ -475,6 +496,13 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       assert_receive {:DOWN, ^activity_ref, :process, _pid, :normal}, 5_000
       assert_receive {:DOWN, ^owner_ref, :process, ^owner_pid, :normal}, 5_000
       refute_received {:execution_result, _result}
+    rescue
+      e in ArgumentError ->
+        flunk(
+          "owner #{inspect(owner_pid)} exited between the liveness check and " <>
+            ":erlang.trace/3 (#{Exception.message(e)}); treat as a real early-abort " <>
+            "signal, not scheduler delay"
+        )
     after
       stop_trace(owner_pid)
       :erlang.trace_pattern({EventSink, :finalize_and_events, 2}, false, [:local])
@@ -551,13 +579,13 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       "input" => %{"value" => %{}}
     }
 
-    {limit_opts, request_opts} = Keyword.split(opts, [:normal_event_bytes])
+    {limit_opts, request_opts} =
+      Keyword.split(opts, [:normal_event_bytes, :evaluation_timeout_ms])
 
-    manifest =
-      case Keyword.fetch(limit_opts, :normal_event_bytes) do
-        {:ok, bytes} -> Map.put(manifest, "limits", %{"normal_event_bytes" => bytes})
-        :error -> manifest
-      end
+    limits =
+      Map.new(limit_opts, fn {name, value} -> {Atom.to_string(name), value} end)
+
+    manifest = if limits == %{}, do: manifest, else: Map.put(manifest, "limits", limits)
 
     documents = %{
       "ptc.json" => Jason.encode!(manifest),
