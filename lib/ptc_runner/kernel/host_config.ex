@@ -42,6 +42,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPOAuth.Authority
+  alias PtcRunner.Kernel.SchemaPath
   alias PtcRunner.Kernel.StrictJSON
 
   @max_config_bytes 1_000_000
@@ -444,40 +445,7 @@ defmodule PtcRunner.Kernel.HostConfig do
     end
   end
 
-  defp safe_host_path(path), do: safe_schema_path(path, schema(), [])
-
-  defp safe_schema_path([], _schema, retained), do: Enum.reverse(retained)
-
-  defp safe_schema_path([segment | rest], schema, retained) do
-    case next_schema(schema, segment) do
-      {:ok, child} when is_binary(segment) ->
-        safe_schema_path(rest, child, [{:property, segment} | retained])
-
-      {:ok, child} when is_integer(segment) and segment >= 0 ->
-        safe_schema_path(rest, child, [{:index, segment} | retained])
-
-      :error ->
-        Enum.reverse(retained)
-    end
-  end
-
-  defp next_schema(%{"properties" => properties}, segment)
-       when is_map(properties) and is_binary(segment),
-       do: Map.fetch(properties, segment)
-
-  defp next_schema(%{"items" => items}, segment) when is_integer(segment) and segment >= 0,
-    do: {:ok, items}
-
-  defp next_schema(%{"oneOf" => branches}, segment) when is_list(branches) do
-    Enum.find_value(branches, :error, fn branch ->
-      case next_schema(branch, segment) do
-        {:ok, _child} = found -> found
-        :error -> false
-      end
-    end)
-  end
-
-  defp next_schema(_schema, _segment), do: :error
+  defp safe_host_path(path), do: SchemaPath.explained_prefix(path, schema())
 
   defp command_limits(value) when is_map(value) do
     if Map.keys(value) -- Limits.names() == [] do
