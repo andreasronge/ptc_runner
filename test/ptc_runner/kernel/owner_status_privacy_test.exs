@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPRequestContext
   alias PtcRunner.Kernel.PublicationAuthority
+  alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunState
 
@@ -33,9 +34,12 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
     :ok
   end
 
-  test "owner callback fallbacks reject unexpected messages without logging private data" do
+  @tag :tmp_dir
+  test "owner callback fallbacks reject unexpected messages without logging private data", %{
+    tmp_dir: directory
+  } do
     marker = "PRIVATE_FALLBACK_MARKER"
-    owners = start_owners(marker)
+    owners = start_owners(marker, directory)
 
     assert {:error, :closed} = GenServer.call(owners.store, {:unexpected, marker})
     assert {:error, :inspection_sink_error} = GenServer.call(owners.sink.pid, marker)
@@ -45,6 +49,12 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
     assert {:error, :execution_session_unavailable} =
              GenServer.call(owners.execution, {:unexpected, marker})
 
+    assert {:error, :publication_failed} =
+             GenServer.call(owners.publication_handle, {:unexpected, marker})
+
+    assert {:error, :terminal} =
+             GenServer.call(owners.publication_claim, {:unexpected, marker})
+
     Enum.each(owner_pids(owners), &GenServer.cast(&1, {:unexpected, marker}))
     Enum.each(owner_pids(owners), &:sys.get_status/1)
 
@@ -53,17 +63,20 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
     refute_receive {:logger_probe, _event}
   end
 
-  test "OTP status and every crash Logger event redact private owner state" do
+  @tag :tmp_dir
+  test "OTP status and every crash Logger event redact private owner state", %{tmp_dir: directory} do
     markers = %{
       store: "PRIVATE_INSPECTION_STORE_MARKER",
       sink: "PRIVATE_INSPECTION_RECORD_MARKER",
       run_state: "PRIVATE_EVALUATION_MEMORY_MARKER",
       endpoint: "PRIVATE_MCP_ENDPOINT_MARKER",
       header: "PRIVATE_MCP_HEADER_MARKER",
-      execution: "PRIVATE_EXECUTION_INPUT_MARKER"
+      execution: "PRIVATE_EXECUTION_INPUT_MARKER",
+      publication_handle: "PRIVATE_PUBLICATION_HANDLE_PATH_MARKER",
+      publication_claim: "PRIVATE_PUBLICATION_CLAIM_PATH_MARKER"
     }
 
-    owners = start_owners(markers)
+    owners = start_owners(markers, directory)
 
     Enum.each(owner_pids(owners), fn pid ->
       status = :sys.get_status(pid)
@@ -92,18 +105,23 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
     end)
   end
 
-  defp start_owners(marker) when is_binary(marker) do
-    start_owners(%{
-      store: marker,
-      sink: marker,
-      run_state: marker,
-      endpoint: marker,
-      header: marker,
-      execution: marker
-    })
+  defp start_owners(marker, directory) when is_binary(marker) do
+    start_owners(
+      %{
+        store: marker,
+        sink: marker,
+        run_state: marker,
+        endpoint: marker,
+        header: marker,
+        execution: marker,
+        publication_handle: marker,
+        publication_claim: marker
+      },
+      directory
+    )
   end
 
-  defp start_owners(markers) do
+  defp start_owners(markers, directory) do
     {:ok, store} = PtcViewer.InspectionStore.start({:pinned, markers.store})
     {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
 
@@ -136,13 +154,30 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
 
     {execution, execution_catalog} = start_execution_owner(markers.execution)
 
+    {:ok, publication_handle} =
+      PublicationHandle.reserve(
+        Path.join(directory, markers.publication_handle <> ".jsonl"),
+        :trace,
+        0o644
+      )
+
+    {:ok, publication_authority} =
+      PublicationAuthority.authorize(
+        "owner-status-privacy",
+        [trace: Path.join(directory, markers.publication_claim <> ".jsonl")],
+        :normal,
+        :normal
+      )
+
     owners = %{
       store: store,
       sink: sink,
       run_state: run_state,
       mcp: mcp,
       execution: execution,
-      execution_catalog: execution_catalog
+      execution_catalog: execution_catalog,
+      publication_handle: publication_handle.owner,
+      publication_claim: publication_authority.claim_owner
     }
 
     on_exit(fn ->
@@ -154,7 +189,15 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
   end
 
   defp owner_pids(owners),
-    do: [owners.store, owners.sink.pid, owners.run_state.pid, owners.mcp.pid, owners.execution]
+    do: [
+      owners.store,
+      owners.sink.pid,
+      owners.run_state.pid,
+      owners.mcp.pid,
+      owners.execution,
+      owners.publication_handle,
+      owners.publication_claim
+    ]
 
   defp start_execution_owner(marker) do
     manifest = %{

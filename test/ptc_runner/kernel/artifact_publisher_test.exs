@@ -48,6 +48,54 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   end
 
   @tag :tmp_dir
+  test "result-contract failure remains primary when trace publication also fails", %{
+    tmp_dir: dir
+  } do
+    trace = Path.join(dir, "contract-failure.jsonl")
+
+    {built, registry} =
+      build!(
+        dir,
+        "contract-and-publication-failure",
+        :normal,
+        trace,
+        nil,
+        nil,
+        :policy,
+        body: ~S|{"answer" "wrong"}|,
+        result_schema: %{
+          "type" => "object",
+          "required" => ["answer"],
+          "properties" => %{"answer" => %{"type" => "integer"}}
+        }
+      )
+
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+
+    fault = fn
+      :after_validation -> {:error, :partial_write}
+      _stage -> :ok
+    end
+
+    assert {:error, report} =
+             RunBuilder.publish_execution_report(
+               outcome,
+               built.publication_authority,
+               %{trace: fault}
+             )
+
+    assert {:error, {:result_contract_failed, _details}} = report.error
+    assert report.secondary_errors == [{:trace, :partial_write}]
+    assert report.failed == [:trace]
+    assert Enum.sort(report.withheld) == [:inspection, :result]
+    refute Map.has_key?(report, :result)
+    refute inspect(report) =~ dir
+
+    assert :ok = PublicationAuthority.abort(built.publication_authority)
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
   test "explicit normal and private trace destinations append across runs", %{tmp_dir: dir} do
     for {policy, suffix} <- [{:normal, ".jsonl"}, {:private, ".private.jsonl"}] do
       trace = Path.join(dir, "append#{suffix}")
@@ -696,22 +744,29 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
          inspection,
          output,
          result_destination \\ :policy,
-         body \\ nil
+         fixture \\ nil
        ) do
     root = Path.join(dir, name)
     File.mkdir!(root)
+    {body, result_schema} = fixture_parts(fixture)
     expression = body || "\"#{name}\""
     File.write!(Path.join(root, "main.clj"), "(ns main) (defn run [_] (return #{expression}))")
 
-    manifest = %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [%{"id" => "main", "path" => "main.clj"}],
-        "entry" => "main/run"
-      },
-      "input" => %{"value" => %{}},
-      "events" => %{"policy" => Atom.to_string(policy), "run_id" => name}
-    }
+    if result_schema do
+      File.write!(Path.join(root, "result.schema.json"), Jason.encode!(result_schema))
+    end
+
+    manifest =
+      %{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "main", "path" => "main.clj"}],
+          "entry" => "main/run"
+        },
+        "input" => %{"value" => %{}},
+        "events" => %{"policy" => Atom.to_string(policy), "run_id" => name}
+      }
+      |> maybe_put_result_contract(result_schema)
 
     manifest_path = Path.join(root, "ptc.json")
     File.write!(manifest_path, Jason.encode!(manifest))
@@ -733,6 +788,19 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
   defp maybe_put(opts, _key, _value, false), do: opts
   defp maybe_put(opts, key, value, true), do: Keyword.put(opts, key, value)
+
+  defp maybe_put_result_contract(manifest, nil), do: manifest
+
+  defp maybe_put_result_contract(manifest, _schema) do
+    Map.put(manifest, "contracts", %{
+      "result_schema" => %{"path" => "result.schema.json"}
+    })
+  end
+
+  defp fixture_parts(fixture) when is_list(fixture),
+    do: {Keyword.get(fixture, :body), Keyword.get(fixture, :result_schema)}
+
+  defp fixture_parts(body), do: {body, nil}
 
   defp trace_event(run_id, sequence, type) do
     %{

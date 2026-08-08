@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.PublicationClaimOwner do
   @moduledoc false
 
   use GenServer
+  use PtcRunner.Kernel.OwnerStatusRedaction
 
   @type lease :: {pid(), reference()}
 
@@ -102,6 +103,11 @@ defmodule PtcRunner.Kernel.PublicationClaimOwner do
     result = cleanup_handles(state.handles)
     {:stop, :normal, result, %{state | handles: %{}}}
   end
+
+  def handle_call(_request, _from, state), do: {:reply, {:error, :terminal}, state}
+
+  @impl GenServer
+  def handle_cast(_message, state), do: {:noreply, state}
 
   @impl GenServer
   def handle_info({:DOWN, ref, :process, _claimant, _reason}, %{claimant_ref: ref} = state) do
