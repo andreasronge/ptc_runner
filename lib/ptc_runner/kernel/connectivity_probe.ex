@@ -183,12 +183,7 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
         cancel_with_caller: true
       )
 
-    case result do
-      {:ok, :ok} -> :ok
-      {:ok, {:error, reason}} when is_atom(reason) -> {:error, reason}
-      {:error, :timeout} -> :timed_out
-      _unrecognised -> {:error, :internal}
-    end
+    BoundedWorker.classify_callback(result)
   end
 
   defp diagnostic(reason, occurrence) when reason in @unavailable_reasons do

@@ -10,6 +10,24 @@ defmodule PtcRunner.Kernel.BoundedWorker do
   its termination cancels the worker without coupling the two owners.
   """
 
+  @doc """
+  Classifies the result of a bounded provider callback that answers `:ok`.
+
+  Both callers of this — the audited-local and unverified phase-7 steps, and the
+  connectivity probe — must translate a callback's outcome the same way, and the
+  rule is load-bearing rather than cosmetic: an exhausted budget is reported as
+  the bare `:timed_out` atom rather than through the `{:error, reason}`
+  translation, so a callback returning the timeout reason itself cannot forge
+  the code its caller mints for a real timeout. Anything unrecognised fails
+  closed. Drift between two copies of that would be a defect in the one that
+  drifted, so there is one copy.
+  """
+  @spec classify_callback(term()) :: :ok | :timed_out | {:error, atom()}
+  def classify_callback({:ok, :ok}), do: :ok
+  def classify_callback({:ok, {:error, reason}}) when is_atom(reason), do: {:error, reason}
+  def classify_callback({:error, :timeout}), do: :timed_out
+  def classify_callback(_unrecognised), do: {:error, :internal}
+
   @doc "Runs a zero-arity function in a monitored process under explicit limits."
   @spec run((-> term()), keyword()) ::
           {:ok, term()} | {:error, :timeout | :cancelled | :heap_exceeded | :worker_failed}

@@ -399,15 +399,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
         cancel_with: ProviderSession.worker_cancel_target(step.session)
       )
 
-    # The exhausted budget is reported as a bare atom rather than through the
-    # `{:error, reason}` translation, so a callback returning the timeout reason
-    # itself cannot forge the code: an unrecognised result still fails closed.
-    case result do
-      {:ok, :ok} -> :ok
-      {:ok, {:error, reason}} when is_atom(reason) -> {:error, reason}
-      {:error, :timeout} -> :timed_out
-      _unrecognised -> {:error, :internal}
-    end
+    BoundedWorker.classify_callback(result)
   end
 
   defp diagnostic(reason, occurrence, activity) when reason in @environment_reasons,
