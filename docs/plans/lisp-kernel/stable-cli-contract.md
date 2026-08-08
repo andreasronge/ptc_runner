@@ -1,12 +1,11 @@
 # Stable CLI and transport-neutral application plan
 
-**Status:** accepted; Checkpoints A, B, and C are complete, Checkpoint D is the
-active work, and the remaining work continues through follow-up PRs.
-**Revised:** 2026-08-08 after Checkpoint C merged, to record it as delivered and
-make destination preflight and publication the active work, then again the same
-day to record the `acquire/6`–`acquire_targets/7` unification — the largest of
-Checkpoint C's recorded residuals, run as a parallel follow-up — as delivered.
-The residuals that remain do not block D.
+**Status:** accepted; Checkpoints A, B, C, and D are complete, with Checkpoint E
+next. Checkpoints F and G remain planned.
+**Revised:** 2026-08-08 after Checkpoint D implementation, to record
+destination preflight and publication as delivered. The `acquire/6`–
+`acquire_targets/7` unification and schema-walker consolidation remain active
+parallel follow-ups and are not absorbed here.
 
 This plan delivers a stable command-line contract and a path-free execution
 core without designing infrastructure for a future hosted service. Exact
@@ -568,7 +567,7 @@ Keep the existing publication requirements:
   classes without exposing their paths.
 
 Implement the compact recovery state machine retained in
-[the Kernel maintainer guide](../../guides/kernel-maintainer.md#private-result-recovery-planned).
+[the Kernel maintainer guide](../../guides/kernel-maintainer.md#private-result-recovery).
 Do not generalize it into a transactional artifact store.
 
 `init` renders and validates the complete scaffold in memory before it creates
@@ -602,8 +601,8 @@ ever-growing branch:
   of adding a fourth execution path. Merged as PR #1188 at `20778764`. Its
   residuals are recorded in slice 7 and are follow-up slices rather than
   blockers.
-- **Checkpoint D (active):** slice 8, destination preflight and publication.
-- **Checkpoint E:** slice 9, shared commands and REPL parity.
+- **Checkpoint D (complete):** slice 8, destination preflight and publication.
+- **Checkpoint E (next):** slice 9, shared commands and REPL parity.
 - **Checkpoint F:** slice 10, standalone packaging.
 - **Checkpoint G:** slice 11, final acceptance and documentation.
 
@@ -2052,15 +2051,31 @@ entry's own binding.
 
 ### Slice 8: destination preflight and publication
 
-- complete exclusive destination handles and trace-directory naming;
-- implement normal/private result, trace, and inspection ordering;
-- implement the minimal private-result recovery protocol; and
-- preserve path-free execution and envelopes.
+Checkpoint D is complete. Phase 6 now authorizes anchored, exclusive
+destination handles before provider activity, including the exact normal and
+private trace-directory names. One `ArtifactPublisher` owns normal/private
+ordering, publishes after provider cleanup, updates artifact states after each
+publication, and reports written, failed, and withheld classes without paths.
+Private results use only the retained recovery state machine: an empty `0600`
+reservation is materialized and synced first, observations publish next, and
+the requested result name is finalized last. Authority-owned handle processes
+bind caller/claimant lifetime and fail closed on identity, collision, symlink,
+permission, and replacement races; execution configurations, outcomes, and
+public envelopes carry no destination paths.
 
 **Gate:** collision, symlink, permissions, partial failure, cleanup failure,
 and private no-discard tests pass without provider activity before destination
 authorization. Normal and private `--trace-dir` fixtures publish and discover
 exactly `<run_ref>.jsonl` and `<run_ref>.private.jsonl`, respectively.
+
+The D-specific focused gate passes, including destination ownership,
+publication ordering, recovery retention/uncertainty, path-free diagnostics,
+and provider cleanup ordering. The repository-wide `mix precommit` gate still
+has the pre-existing memory-sensitive failure in
+`inspection_analysis_profile_test.exs`; the same test fails on the clean
+Checkpoint C base and is not a D regression. Checkpoint E is the next planned
+slice; the parallel ProviderAcquisition and schema-walker follow-ups remain
+independent dependencies and are not absorbed here.
 
 ### Slice 9: commands and REPL parity
 
