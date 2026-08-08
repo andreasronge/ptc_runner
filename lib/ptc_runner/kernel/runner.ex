@@ -8,7 +8,6 @@ defmodule PtcRunner.Kernel.Runner do
   """
 
   alias PtcRunner.Kernel.DeterministicJSON
-  alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
@@ -19,6 +18,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.StrictJSON
+  alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.RetainedSize
 
@@ -278,26 +278,13 @@ defmodule PtcRunner.Kernel.Runner do
   end
 
   defp workflow_tools(config, state) do
-    tools =
-      Map.new(config.workflow_environment.capabilities, fn {name, _capability} ->
-        {name,
-         fn arguments ->
-           Dispatcher.dispatch(
-             state,
-             :workflow,
-             config.workflow_environment,
-             name,
-             arguments,
-             config.limits.workflow_timeout_ms,
-             config.event_sink,
-             config.inspection_sink
-           )
-         end}
-      end)
-
-    tools
-    |> Map.merge(
-      RuntimeTools.tools(state, config.workflow_environment, config.event_sink, :workflow)
+    state
+    |> ToolGrant.capability_callbacks(
+      :workflow,
+      config.workflow_environment,
+      config.limits.workflow_timeout_ms,
+      config.event_sink,
+      config.inspection_sink
     )
     |> Map.put(
       "kernel-eval",

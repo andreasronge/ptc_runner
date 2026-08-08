@@ -43,8 +43,14 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
   @doc "Builds the reserved runtime-tool map for one environment."
   def tools(state, environment, event_sink, kind) when kind in [:workflow, :mission] do
+    # cap-list/cap-describe are the discovery routes that legitimately need
+    # every capability; runtime-usage/runtime-remaining ignore this argument.
+    # Narrowing here (rather than per-route) keeps the whole environment from
+    # being captured even once per callback. See PtcRunner.Kernel.ToolGrant.
+    view = Environment.capability_view(environment)
+
     @mission_routes
-    |> Map.new(fn {name, route} -> {name, route_callback(route, state, environment)} end)
+    |> Map.new(fn {name, route} -> {name, route_callback(route, state, view)} end)
     |> maybe_put_annotation(state, event_sink, kind)
     |> Map.new(fn {name, callback} ->
       {name, instrument(state, event_sink, kind, name, callback)}
