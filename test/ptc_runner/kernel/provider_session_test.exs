@@ -347,10 +347,12 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
       end)
 
     assert_receive :session_suspended
-    Process.send_after(suspender, :resume, 5_250)
+    # Stay suspended past the claim budget below, so the begin request times
+    # out before the session can answer it.
+    Process.send_after(suspender, :resume, 250)
 
     assert {:error, :provider_session_unavailable} =
-             ProviderSession.begin_operation(session, :run)
+             ProviderSession.begin_operation(session, :run, 200)
 
     assert_receive {:DOWN, ^monitor, :process, _, :normal}, 1_000
     refute ProviderSession.alive?(session)
@@ -718,7 +720,10 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
     root =
       spawn(fn ->
-        send(parent, {:unresponsive_registration, ResourceRegistrar.register_root(registrar)})
+        send(
+          parent,
+          {:unresponsive_registration, ResourceRegistrar.register_root(registrar, 200)}
+        )
       end)
 
     root_monitor = Process.monitor(root)

@@ -1317,7 +1317,9 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     parent = self()
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
-    limits = limits()
+    # The deadline itself is what this asserts, so narrow it rather than
+    # waiting out the 5 s default.
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 200)
     {:ok, sink} = EventSink.start(:normal, limits)
 
     close = fn ->
@@ -1344,6 +1346,13 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   end
 
   test "default sink shutdown is finite and kills suspended sinks" do
+    # Two separate guarantees. That the shipped default is a finite bound is a
+    # property of the constant, so assert it directly instead of sleeping
+    # through it; the kill behaviour it protects is then exercised against a
+    # narrow deadline.
+    assert is_integer(EventSink.stop_timeout_ms())
+    assert is_integer(InspectionSink.stop_timeout_ms())
+
     {:ok, event_sink} = EventSink.start(:normal, limits())
 
     {:ok, inspection_sink} =
@@ -1354,8 +1363,8 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     event_ref = Process.monitor(event_sink.pid)
     inspection_ref = Process.monitor(inspection_sink.pid)
 
-    event_stop = Task.async(fn -> EventSink.stop(event_sink) end)
-    inspection_stop = Task.async(fn -> InspectionSink.stop(inspection_sink) end)
+    event_stop = Task.async(fn -> EventSink.stop(event_sink, 200) end)
+    inspection_stop = Task.async(fn -> InspectionSink.stop(inspection_sink, 200) end)
 
     assert :ok = Task.await(event_stop, 10_000)
     assert :ok = Task.await(inspection_stop, 10_000)

@@ -81,6 +81,13 @@ defmodule PtcRunner.Kernel.ProviderActivity do
   def consume(_activity), do: {:error, :provider_activity_unavailable}
 
   @doc false
+  @spec consume(t(), timeout()) :: :ok | {:error, :provider_activity_unavailable}
+  def consume(%__MODULE__{} = activity, timeout_ms),
+    do: call_if_valid(activity, :consume, {:error, :provider_activity_unavailable}, timeout_ms)
+
+  def consume(_activity, _timeout_ms), do: {:error, :provider_activity_unavailable}
+
+  @doc false
   @spec authorize_executor(t(), pid()) :: :ok | {:error, :provider_activity_unavailable}
   def authorize_executor(%__MODULE__{} = activity, executor) when is_pid(executor),
     do:
@@ -130,8 +137,13 @@ defmodule PtcRunner.Kernel.ProviderActivity do
 
   @spec stop(t()) ::
           :ok | {:error, :not_owner | :provider_activity_unavailable}
-  def stop(%__MODULE__{} = activity) do
-    case stop_call(activity) do
+  def stop(activity), do: stop(activity, @operation_timeout_ms)
+
+  @doc false
+  @spec stop(t(), timeout()) ::
+          :ok | {:error, :not_owner | :provider_activity_unavailable}
+  def stop(%__MODULE__{} = activity, timeout_ms) do
+    case stop_call(activity, timeout_ms) do
       :ok -> :ok
       {:error, :provider_activity_unavailable} -> {:error, :not_owner}
       :owner_gone -> :ok
@@ -139,7 +151,7 @@ defmodule PtcRunner.Kernel.ProviderActivity do
     end
   end
 
-  def stop(_activity), do: :ok
+  def stop(_activity, _timeout_ms), do: :ok
 
   @impl true
   def init(creator) when is_pid(creator) do
@@ -307,9 +319,9 @@ defmodule PtcRunner.Kernel.ProviderActivity do
       else: {:error, :provider_activity_unavailable}
   end
 
-  defp call_if_valid(activity, operation, fallback) do
+  defp call_if_valid(activity, operation, fallback, timeout_ms \\ @operation_timeout_ms) do
     if valid?(activity),
-      do: call(activity.owner, operation, fallback),
+      do: call(activity.owner, operation, fallback, timeout_ms),
       else: fallback
   end
 
@@ -330,17 +342,17 @@ defmodule PtcRunner.Kernel.ProviderActivity do
     }
   end
 
-  defp call(owner, operation, fallback) do
-    deadline = Deadline.new(@operation_timeout_ms)
+  defp call(owner, operation, fallback, timeout_ms \\ @operation_timeout_ms) do
+    deadline = Deadline.new(timeout_ms)
     reply_timeout_ms = Deadline.remaining(deadline) + @reply_grace_ms
     GenServer.call(owner, {:deadline, operation, deadline}, reply_timeout_ms)
   catch
     :exit, _reason -> fallback
   end
 
-  defp stop_call(activity) do
+  defp stop_call(activity, timeout_ms) do
     if valid?(activity) do
-      deadline = Deadline.new(@operation_timeout_ms)
+      deadline = Deadline.new(timeout_ms)
       reply_timeout_ms = Deadline.remaining(deadline) + @reply_grace_ms
       GenServer.call(activity.owner, {:deadline, :stop, deadline}, reply_timeout_ms)
     else

@@ -224,6 +224,10 @@ defmodule PtcRunner.Kernel.EventSink do
   @spec owner(t()) :: {:ok, pid()} | {:error, :event_sink_error}
   def owner(sink), do: call(sink, :owner)
 
+  @doc false
+  @spec stop_timeout_ms() :: pos_integer()
+  def stop_timeout_ms, do: @stop_timeout_ms
+
   @spec stop(t()) :: :ok
   @doc "Stops the sink. Calling it after owner-driven shutdown is harmless."
   def stop(sink), do: stop(sink, @stop_timeout_ms)

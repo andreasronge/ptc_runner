@@ -285,11 +285,20 @@ defmodule PtcRunner.Kernel.ProviderSession do
   @spec begin_operation(t(), :run | :check | :connect) ::
           {:ok, t()} | {:error, :provider_session_unavailable}
   def begin_operation(%__MODULE__{} = session, operation)
+      when operation in [:run, :check, :connect],
+      do: begin_operation(session, operation, @claim_timeout_ms)
+
+  def begin_operation(_session, _operation), do: {:error, :provider_session_unavailable}
+
+  @doc false
+  @spec begin_operation(t(), :run | :check | :connect, timeout()) ::
+          {:ok, t()} | {:error, :provider_session_unavailable}
+  def begin_operation(%__MODULE__{} = session, operation, claim_timeout_ms)
       when operation in [:run, :check, :connect] do
     if valid?(session) and session.creator == self() and
          is_binary(session.operation_identity) and is_nil(session.run_deadline) do
       run_deadline = Deadline.new(sealed_duration(session, operation))
-      operation_deadline = Deadline.new(@claim_timeout_ms)
+      operation_deadline = Deadline.new(claim_timeout_ms)
 
       result =
         call(
@@ -317,7 +326,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
     end
   end
 
-  def begin_operation(_session, _operation), do: {:error, :provider_session_unavailable}
+  def begin_operation(_session, _operation, _claim_timeout_ms),
+    do: {:error, :provider_session_unavailable}
 
   defp sealed_duration(session, :connect), do: session.connectivity_duration_ms
   defp sealed_duration(session, _operation), do: session.run_duration_ms
@@ -433,10 +443,21 @@ defmodule PtcRunner.Kernel.ProviderSession do
           :ok
           | {:error, :operation_claimed | :operation_mismatch | :provider_session_unavailable}
   def claim_operation(%__MODULE__{} = session, %Limits{} = limits, identity)
+      when is_binary(identity),
+      do: claim_operation(session, limits, identity, @claim_timeout_ms)
+
+  def claim_operation(_session, _limits, _identity),
+    do: {:error, :provider_session_unavailable}
+
+  @doc false
+  @spec claim_operation(t(), Limits.t(), binary(), timeout()) ::
+          :ok
+          | {:error, :operation_claimed | :operation_mismatch | :provider_session_unavailable}
+  def claim_operation(%__MODULE__{} = session, %Limits{} = limits, identity, claim_timeout_ms)
       when is_binary(identity) do
     if valid?(session) and Limits.valid?(limits) and Deadline.valid?(session.run_deadline) and
          claimable_operation?(session) do
-      deadline = Deadline.new(@claim_timeout_ms)
+      deadline = Deadline.new(claim_timeout_ms)
 
       result =
         try do
@@ -468,7 +489,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
     end
   end
 
-  def claim_operation(_session, _limits, _identity),
+  def claim_operation(_session, _limits, _identity, _claim_timeout_ms),
     do: {:error, :provider_session_unavailable}
 
   # The claim boundary validates identity and limits, not which clock this

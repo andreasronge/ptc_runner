@@ -3,6 +3,14 @@ defmodule Mix.Tasks.Ptc.RunDownstreamTest do
 
   @root Path.expand("../../..", __DIR__)
 
+  # The consumer project lives in a fresh tmp_dir each run, but its prod build
+  # is cached here instead. Pointing MIX_BUILD_PATH inside tmp_dir rebuilt
+  # PtcRunner from scratch under MIX_ENV=prod on every suite run, which cost
+  # ~40 s -- more than any other single test. PtcRunner enters the build as a
+  # path dependency on the stable @root, so Mix's own staleness checks still
+  # recompile it whenever the library sources change.
+  @build_path Path.join(@root, "_build/downstream_consumer")
+
   @tag :tmp_dir
   test "starts only the PtcRunner core when a downstream project depends on req_llm", %{
     tmp_dir: dir
@@ -19,7 +27,7 @@ defmodule Mix.Tasks.Ptc.RunDownstreamTest do
         env: [
           {"MIX_ENV", "prod"},
           {"MIX_DEPS_PATH", Path.join(@root, "deps")},
-          {"MIX_BUILD_PATH", Path.join(dir, "_build")}
+          {"MIX_BUILD_PATH", @build_path}
         ],
         stderr_to_stdout: true
       )
