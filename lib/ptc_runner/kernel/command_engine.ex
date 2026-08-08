@@ -6,6 +6,13 @@ defmodule PtcRunner.Kernel.CommandEngine do
   does not write streams, halt the VM, exit a process, or inspect arbitrary
   failures. Filesystem paths are consumed before the path-free
   `RunCoordinator.prepare/2` boundary.
+
+  Every command it completes in full is inert except one: `doctor --connect`
+  runs a real connectivity operation and may contact a provider and incur cost,
+  which is what the `doctor` help notice warns about. It still performs no
+  frontend VM setup of its own — it neither loads a `.env` nor starts an
+  optional provider application — because it cannot prove it owns the VM it was
+  called in.
   """
 
   alias PtcRunner.Kernel.ApplicationPackage
@@ -26,7 +33,9 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderRuntimeServices
+  alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
 
@@ -171,20 +180,17 @@ defmodule PtcRunner.Kernel.CommandEngine do
   defp prepare_arguments(%CommandArguments{command: :version}, run_ref, _destinations),
     do: {:ok, CommandOutcome.success(:version, run_ref, CommandContract.version_result())}
 
-  # Default doctor reaches the shared phase-7 boundary and renders what it
-  # returns. It selects the flow, assembles the sealed inputs, and projects the
-  # result: no callback is invoked here, no deadline computed, and no occurrence
-  # traversed. `doctor --connect` is a later slice.
+  # Both doctor modes hold the catalog for the whole command and release it on
+  # every exit, so the mode decides only what runs inside that lifetime.
   defp prepare_arguments(
          %CommandArguments{command: :doctor, options: options} = arguments,
          run_ref,
          _destinations
-       )
-       when not is_map_key(options, :connect) do
+       ) do
     case catalog(Map.get(options, :host_config)) do
       {:ok, host, catalog} ->
         try do
-          result = doctor_outcome(arguments, run_ref, host, catalog)
+          result = doctor_mode_outcome(arguments, run_ref, host, catalog)
           InstallationCatalog.close(catalog)
           result
         rescue
@@ -203,8 +209,27 @@ defmodule PtcRunner.Kernel.CommandEngine do
   end
 
   defp prepare_arguments(%CommandArguments{command: command} = arguments, run_ref, _destinations)
-       when command in [:init, :doctor, :models],
+       when command in [:init, :models],
        do: {:error, arguments_outcome(arguments, run_ref, :internal, :internal_error)}
+
+  # `doctor --connect` is the one command this module completes that performs
+  # provider work. The parser guarantees it both an application and a host
+  # document, so it never answers for a missing either, and it rejects
+  # `--no-connect` outright, so the key is present only when it is true.
+  defp doctor_mode_outcome(
+         %CommandArguments{options: %{connect: true}} = arguments,
+         run_ref,
+         host,
+         catalog
+       ),
+       do: connect_outcome(arguments, run_ref, host, catalog)
+
+  # Default doctor reaches the shared phase-7 boundary and renders what it
+  # returns. It selects the flow, assembles the sealed inputs, and projects the
+  # result: no callback is invoked here, no deadline computed, and no occurrence
+  # traversed.
+  defp doctor_mode_outcome(arguments, run_ref, host, catalog),
+    do: doctor_outcome(arguments, run_ref, host, catalog)
 
   defp doctor_outcome(arguments, run_ref, host, catalog) do
     case doctor_preparation(arguments, catalog, run_ref) do
@@ -260,6 +285,140 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   defp doctor_services(nil), do: ProviderRuntimeServices.new([])
   defp doctor_services(host), do: HostInstallation.runtime_services(host)
+
+  # The preparation is closed here rather than inside the branches because the
+  # connect operation consumes it: closing a consumed run releases a marker this
+  # process no longer owns, which is a no-op, while the provider-free branch
+  # below opens no operation at all and needs the release.
+  defp connect_outcome(arguments, run_ref, host, catalog) do
+    case doctor_preparation(arguments, catalog, run_ref) do
+      {:ok, prepared} ->
+        try do
+          connect_prepared(arguments, run_ref, host, catalog, prepared)
+        after
+          PreparedRun.close(prepared)
+        end
+
+      {:error, %CommandDiagnostic{} = diagnostic} ->
+        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+    end
+  end
+
+  # The plan is derived before the operation, because `DoctorPlan.new/4` needs a
+  # preparation that is still claimed and the operation consumes it. There is
+  # one settlement, because there is one operation: `settle_connect/4` settles
+  # every row from a result that exists at all, and anything that fails renders
+  # one catalogued diagnostic and no rows.
+  defp connect_prepared(arguments, run_ref, host, catalog, prepared) do
+    case connect_checks(host, catalog, prepared) do
+      {:ok, checks, provider_activity} ->
+        connect_success(arguments, run_ref, checks, provider_activity)
+
+      {:error, diagnostic} ->
+        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+    end
+  end
+
+  # `CommandOutcome.success/3` raises by contract when the closed result schema
+  # refuses what was projected, and by then the operation has already run.
+  # Letting that reach the engine-wide rescue would report no provider activity
+  # for a command that contacted a provider, so the value the projection already
+  # decided is reused rather than re-derived.
+  defp connect_success(arguments, run_ref, checks, provider_activity) do
+    {:ok,
+     CommandOutcome.success({:doctor, :connect}, run_ref, %{
+       "checks" => checks,
+       "provider_activity" => provider_activity
+     })}
+  rescue
+    _exception -> connect_interrupted(arguments, run_ref, provider_activity)
+  catch
+    _kind, _reason -> connect_interrupted(arguments, run_ref, provider_activity)
+  end
+
+  defp connect_interrupted(arguments, run_ref, provider_activity),
+    do: {:error, arguments_outcome(arguments, run_ref, projection_diagnostic(provider_activity))}
+
+  defp connect_checks(host, catalog, prepared) do
+    case DoctorPlan.new(catalog, prepared, DoctorEnvironment.facts(), :connect) do
+      {:ok, rows} -> connect_operation(host, catalog, prepared, rows)
+      {:error, _reason} -> {:error, diagnostic(:internal, :internal_error)}
+    end
+  end
+
+  # A selection naming no provider has no connectivity operation to run —
+  # connectivity answers for selected occurrences, and there are none — so this
+  # projects the derived plan directly. That is not a second settlement: such a
+  # plan holds no provider row at all, and every row it does hold was settled
+  # when it was derived.
+  defp connect_operation(_host, _catalog, %PreparedRun{provider_declarations: []}, rows),
+    do: connect_projection(rows, false)
+
+  defp connect_operation(host, catalog, prepared, rows) do
+    with {:ok, services} <- doctor_services(host),
+         {:ok, execution} <- ProviderExecution.new(catalog, services, []),
+         {:ok, authority} <- PublicationAuthority.new([]) do
+      connect_settlement(rows, prepared, catalog, execution, authority)
+    else
+      {:error, _reason} -> {:error, diagnostic(:internal, :internal_error)}
+    end
+  end
+
+  # Connectivity carries no authorization targets, so the execution is built
+  # without them and `RunCoordinator.connect/3` takes no notifier: a health
+  # check must never open an interaction.
+  #
+  # A result at all means the operation ran, so everything downstream of one
+  # reports activity. A bare reason instead of a diagnostic could have come from
+  # either side of the marker, and guessing is wrong in both directions —
+  # `false` hides a cost that was really incurred, `true` invents one that was
+  # not — so it is classified rather than defaulted.
+  defp connect_settlement(rows, prepared, catalog, execution, authority) do
+    case RunCoordinator.connect(prepared, authority, execution) do
+      {:ok, result} ->
+        case DoctorPlan.settle_connect(rows, result, prepared, catalog) do
+          {:ok, settled} -> connect_projection(settled, true)
+          {:error, _reason} -> {:error, active_diagnostic(:internal, :internal_error)}
+        end
+
+      {:error, %CommandDiagnostic{} = diagnostic} ->
+        {:error, diagnostic}
+
+      {:error, reason} ->
+        {:error, operation_diagnostic(reason)}
+    end
+  rescue
+    _exception -> {:error, active_diagnostic(:internal, :internal_error)}
+  catch
+    _kind, _reason -> {:error, active_diagnostic(:internal, :internal_error)}
+  end
+
+  # Which side of the marker a bare reason fell on cannot be asked of the marker
+  # itself: the execution owner closes the preparation it was handed on every
+  # exit, so by the time this sees the error the marker is already gone. It is
+  # read off the shape instead, and that only works because
+  # `ProviderExecution.classify_marked_failure/1` makes it true: once the marker
+  # is crossed, every answer is a diagnostic. A bare reason therefore comes from
+  # the owner's setup — input validity, sink opening, registry construction
+  # before the worker — or from the coordinator's own argument checks.
+  #
+  # An owner or worker that died is the one reason that says nothing about where
+  # it was, and it takes the conservative answer: a command that cannot prove it
+  # spent nothing must not claim it.
+  defp operation_diagnostic(:execution_session_unavailable),
+    do: active_diagnostic(:internal, :internal_error)
+
+  defp operation_diagnostic(_reason), do: diagnostic(:internal, :internal_error)
+
+  defp connect_projection(rows, provider_activity) do
+    case DoctorPlan.checks(rows) do
+      {:ok, checks} -> {:ok, checks, provider_activity}
+      {:error, _reason} -> {:error, projection_diagnostic(provider_activity)}
+    end
+  end
+
+  defp projection_diagnostic(false), do: diagnostic(:internal, :internal_error)
+  defp projection_diagnostic(true), do: active_diagnostic(:internal, :internal_error)
 
   defp command_preparation(
          arguments,
@@ -645,4 +804,11 @@ defmodule PtcRunner.Kernel.CommandEngine do
     source = if phase == :host, do: CommandSource.fixed(:host), else: nil
     CommandDiagnostic.new!(phase, code, source: source)
   end
+
+  # An operation that opened a session marked provider activity before it could
+  # fail this way, and nothing here can prove which side of that marker an
+  # unclassified failure fell on. Reporting activity is the answer that cannot
+  # understate what the command already spent.
+  defp active_diagnostic(phase, code),
+    do: CommandDiagnostic.new!(phase, code, provider_activity: true)
 end

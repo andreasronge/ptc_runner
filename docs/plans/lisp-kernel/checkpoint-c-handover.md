@@ -12,21 +12,20 @@ git log --oneline origin/main..HEAD -- lib/ | head -1  # last commit carrying co
 
 A handover that names its own head is stale the moment it is committed, and this
 one was already wrong twice from trying.
-Gates: `mix precommit` green (5774 root, 72 viewer, 36 launcher); docs gate
+Gates: `mix precommit` green (5780 root, 72 viewer, 36 launcher); docs gate
 green; `mix dialyzer` and `MIX_ENV=test mix dialyzer` both at 0 errors
 PR: not opened
-CLI safety: `doctor --connect` is still unreachable from `CommandEngine`.
-Slice #4 has landed, so enabling it is now the next step rather than a
-violation — see "Remaining" below.
+CLI safety: `doctor --connect` is reachable from `CommandEngine` as of slice
+#5. The whole connect build order is complete; what is left is step 6.
 
 The authoritative plan is `docs/plans/lisp-kernel/stable-cli-contract.md`. This
 file is disposable and only describes where the work stands.
 
 ## Start here
 
-1. Read "Connect build order" steps 5–6 in `stable-cli-contract.md`. That is the
-   contract; this file only says how far along it is. The connect-settlement
-   gaps and the receive cap above them are all closed.
+1. Read "Connect build order" step 6 in `stable-cli-contract.md`. That is the
+   contract; this file only says how far along it is. Steps 1–5 are all
+   complete, including the CLI enable.
 2. Read "Settled decisions" at the bottom of this file before designing
    anything. Two of the three were re-derived the hard way by someone who had
    not read them.
@@ -189,6 +188,32 @@ this refusal found nothing. One cold review, no P1; its P2 was that the
 manifest-order tie-break was unpinned, so the regression now separates manifest
 order from alphabetical order *and* from a minimum over the names.
 
+**`doctor --connect` in `CommandEngine`** (slice #5). The CLI enable. The
+engine derives the plan with `:connect` while the preparation is still claimed,
+runs one `RunCoordinator.connect/3`, settles with `settle_connect/4` against the
+seal, and projects with `checks/1`; anything failing renders one catalogued
+diagnostic and no rows. Three decisions the step did not name are recorded in
+the plan: a selection with no providers is answered without an operation,
+`provider_activity` follows whether the operation ran, and the engine performs
+no frontend VM setup because it cannot prove it owns the VM.
+
+Three cold codex rounds, each finding the same `provider_activity` question
+from a different side, and none reachable from a gate. Round one: a raise after
+the operation reported `false` for a command that had contacted a provider.
+Round two, against the fix: a bare reason from `connect/3` can arrive having
+contacted nothing, so treating every bare reason as post-marker invents a cost
+(reproduce with a manifest narrowing `normal_event_bytes` to 1, which fails sink
+opening in `ExecutionSessionOwner.init`). Round three: the invariant the fix
+rested on — post-marker answers are always diagnostics — was itself false,
+because `with_registry/8` runs after the marker and forwards an unclassified
+reason. `ProviderExecution.classify_marked_failure/1` now enforces it.
+
+Do not "simplify" the classification back to a default in either direction, and
+do not try to ask the marker: the execution owner closes the preparation it was
+handed on every exit, so `ProviderActivity.value/1` answers `:unknown` by the
+time the caller sees the error. That was the first fix attempted and it does not
+work.
+
 **Connect-mode `DoctorPlan`** (`f4a59c82`). The second half. `new/4` takes the
 mode with no default; `settle_connect/4` settles from `ConnectivityResult`.
 
@@ -257,22 +282,14 @@ ceiling the first round rejected.
 
 ## Remaining, in order
 
-1. **#5 enable `doctor --connect` in `CommandEngine`**, then integration review,
-   gates, cumulative `origin/main` review, PR. #4 has landed, so the safety
-   reason the CLI stayed off is discharged.
-
-   The shape #5 has to write is already pinned by
-   `test "a completed connect operation settles every row the contract demands"`
-   in `ProviderConnectivityTest`: derive the plan with `:connect` *before* the
-   operation, because `DoctorPlan.new/4` requires a preparation that is still
-   claimed; run `RunCoordinator.connect/3`; settle with `settle_connect/4`,
-   which works on the consumed preparation because it checks the seal; then
-   project with `checks/1`. Anything failing renders one catalogued diagnostic
-   and no rows at all.
+1. **The cumulative `codex review` over `origin/main..HEAD`**, then the PR.
+   Everything else in the build order has landed. Note that per-slice reviews
+   have covered each change as it went in; the cumulative pass is for what only
+   shows up across them.
 
 ## Distance to a PR
 
-The CLI enable, then the gates and the cumulative review. #4 is done.
+The cumulative review. Every slice is done and every gate is green.
 
 ## Review discipline that has been working
 
@@ -353,9 +370,9 @@ All are in `stable-cli-contract.md` with reasoning:
   from another application, catalog, or mode is refused; what it cannot see is a
   plan whose aliases and connectivity modes coincide while some other
   declaration differs. Sealing the plan would close it. Recorded rather than
-  built, because `settle_connect/4` has no production caller yet and its only
-  intended one is `CommandEngine`, which holds a single catalog and a single
-  preparation.
+  built: its only production caller is `CommandEngine`, which derives the plan
+  and settles it against one catalog and one preparation inside a single
+  command, so the gap needs a second caller to be reachable at all.
 - The up-front OAuth refusal makes `execute_ordinary`'s memory-runtime branch
   unreachable in practice: with `authorizations == []`, any selected OAuth alias
   is now refused first, so `oauth_authorities/2` always answers `%{}` on that

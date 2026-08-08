@@ -153,6 +153,25 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     assert diagnostic.provider_activity
   end
 
+  test "a bare failure after the marker is classified rather than forwarded" do
+    # Registry construction runs behind the marker and answers with a reason it
+    # has no classification for, so without a boundary that reason reaches the
+    # caller looking exactly like one produced before any provider work. A
+    # consumer cannot tell the two apart, and the difference is a public claim
+    # about whether the command incurred provider cost — `CommandEngine` reads a
+    # bare reason as pre-marker precisely because this boundary exists.
+    %{prepared: prepared, execution: execution} =
+      fixture(
+        %{"inert" => [destination: :workflow]},
+        activation: fn -> {:error, :activation_unavailable} end
+      )
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+    assert diagnostic.phase == :internal
+    assert diagnostic.code == :internal_error
+    assert diagnostic.provider_activity
+  end
+
   test "connectivity anchors its own clock instead of inheriting the run's" do
     # The manifest narrows the run to a second while the host keeps ten for
     # connectivity, so a connect that inherited the run clock would come out
@@ -914,7 +933,10 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   defp fixture(specifications, options \\ []) do
     parent = self()
     installed = Keyword.get(options, :installed_limits)
-    limit_overrides = Keyword.drop(options, [:installed_limits, :credential_resolver])
+
+    limit_overrides =
+      Keyword.drop(options, [:installed_limits, :credential_resolver, :activation])
+
     {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
 
     registrations =
@@ -959,7 +981,8 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
           Keyword.get(options, :credential_resolver, fn names ->
             send(parent, {:resolved_credentials, Enum.sort(names)})
             {:ok, Map.new(names, &{&1, "connect-secret"})}
-          end)
+          end),
+        activation: Keyword.get(options, :activation, fn -> {:ok, nil} end)
       )
 
     {:ok, execution} = ProviderExecution.new(catalog, services, [])

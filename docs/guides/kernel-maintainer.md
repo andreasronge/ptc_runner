@@ -433,9 +433,23 @@ adapters, and projects failures into `PtcRunner.Kernel.CommandOutcome`. It is
 not yet the public Mix or standalone adapter. After frontend integration, only
 an outer standalone wrapper may turn the outcome's status into a process exit.
 Successful `validate` is terminal: it projects the five-field digest result,
-closes its prepared run, and returns a sealed `CommandOutcome`. Successful
-`run` preparation returns a sealed `PtcRunner.Kernel.CommandPreparation`, not a
-bare `PreparedRun`. That wrapper retains the original command reference, inert
+closes its prepared run, and returns a sealed `CommandOutcome`. Both doctor
+modes are terminal too, and `doctor --connect` is the one command the engine
+completes that performs provider work: it derives the connect-mode plan while
+the preparation is still claimed, runs one `RunCoordinator.connect/3`
+operation, settles the plan from that operation's result, and projects the
+closed check list. A selection naming no provider has no operation to run —
+connectivity answers for selected occurrences — so the engine projects the
+derived plan directly and reports no activity, which is the only case where a
+connect answer skips the coordinator. Anything that fails renders one
+catalogued diagnostic and no rows at all. The engine still performs no frontend
+VM setup: it neither loads a `.env` nor starts an optional provider
+application, because it cannot prove it owns the VM it was called in, so a
+connect against a stopped optional application reports
+`active_preflight/provider_application_unavailable` rather than starting one.
+Successful `run` preparation returns a sealed
+`PtcRunner.Kernel.CommandPreparation`, not a bare `PreparedRun`. That wrapper
+retains the original command reference, inert
 catalog, and only the artifact destinations needed by phase 6 alongside the
 separately sealed path-free prepared run. Host-backed catalogs retain only an
 opaque path-free per-alias implementation recipe in the wrapper; they retain

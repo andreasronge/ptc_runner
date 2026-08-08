@@ -33,6 +33,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.ValueContractClassification
 
   @zero_entropy <<0::128>>
+  @stdio_root Path.expand("../../..", __DIR__)
+  @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
 
   test "run references use the fixed Crockford encoding" do
     assert CommandRunRef.encode(@zero_entropy) == "cmd-" <> String.duplicate("0", 26)
@@ -147,6 +149,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   test "parsed doctor connect commands retain their private outcome mode" do
+    # The mode is private: it decides which diagnostics the envelope admits and
+    # never appears in `command`. This case reaches the host document before any
+    # provider work, so it also proves the mode survives an ordinary classified
+    # failure rather than only the internal error the command answered with
+    # while `--connect` was unreachable.
     assert {:error, %CommandOutcome{} = outcome} =
              CommandEngine.prepare([
                "doctor",
@@ -158,7 +165,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert outcome.command_mode == {:doctor, :connect}
     assert outcome.envelope["command"] == "doctor"
-    assert outcome.envelope["error"]["code"] == "internal_error"
+    assert outcome.envelope["error"]["phase"] == "host"
+    assert outcome.envelope["error"]["code"] == "host_unavailable"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    assert_schema_valid(outcome.envelope)
   end
 
   @tag :tmp_dir
@@ -307,6 +317,282 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["error"]["subject"]["name"] == "model"
     assert outcome.envelope["error"]["subject"]["operation"] == "local"
     assert outcome.envelope["error"]["provider_activity"] == false
+    assert_schema_valid(outcome.envelope)
+  end
+
+  test "doctor --connect is refused without both an application and a host" do
+    # The connect branch reads this as a guarantee rather than checking it
+    # again: it derives a connect-mode plan, which requires a preparation, and
+    # opens an operation, which requires installed providers. Relaxing the rule
+    # would turn either omission into an internal error instead of the argument
+    # error it is.
+    for argv <- [
+          ["doctor", "--connect"],
+          ["doctor", "--connect", "--host-config", "host.json"],
+          ["doctor", "ptc.json", "--connect"]
+        ] do
+      assert {:error, %CommandOutcome{} = outcome} = CommandEngine.prepare(argv)
+
+      # The mode is not yet known when the arguments are refused, so these
+      # report as plain `doctor` rather than as the private connect mode.
+      assert outcome.command_mode == :doctor
+      assert outcome.envelope["error"]["phase"] == "arguments"
+      assert outcome.envelope["error"]["code"] == "invalid_arguments"
+      assert_schema_valid(outcome.envelope)
+    end
+  end
+
+  @tag :tmp_dir
+  test "doctor --connect settles the rows default doctor defers", %{tmp_dir: directory} do
+    # The whole command end to end, over a real MCP stdio server. The same host
+    # and application under default doctor leave the connectivity row deferred;
+    # `--connect` reaches the server and settles it. `CommandContract` is the
+    # judge rather than these assertions, because it admits a connect success
+    # only when *every* provider row is `pass`.
+    #
+    # This is also what pins the plan mode. A `:default` plan carries
+    # `skipped/requires_connect` on the connectivity row, and `settle_connect/4`
+    # refuses a plan whose connectivity rows are not all pending, so deriving
+    # the plan with the other mode fails the command rather than mislabelling a
+    # row.
+    marker = Path.join(directory, "connect-methods")
+    host_path = write_host_config(directory, "connect-stdio", connect_host_config(marker))
+
+    application =
+      doctor_application(directory, "selects-stdio-connect",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: %{"evaluation_timeout_ms" => 5_000}
+      )
+
+    assert {:ok, %CommandOutcome{} = deferred} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    assert %{"status" => "skipped", "code" => "requires_connect"} =
+             Enum.find(
+               deferred.envelope["result"]["checks"],
+               &(&1["name"] == "provider/workspace/connectivity")
+             )
+
+    assert deferred.envelope["result"]["provider_activity"] == false
+    refute File.exists?(marker)
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.command_mode == {:doctor, :connect}
+    assert outcome.exit_status == 0
+    assert outcome.envelope["command"] == "doctor"
+
+    checks = outcome.envelope["result"]["checks"]
+
+    assert Enum.map(checks, & &1["name"]) == [
+             "runtime",
+             "application",
+             "viewer",
+             "provider/workspace/local",
+             "provider/workspace/selection",
+             "provider/workspace/connectivity"
+           ]
+
+    assert %{"status" => "pass", "code" => "valid"} =
+             Enum.find(checks, &(&1["name"] == "application"))
+
+    # Both rows default doctor could not settle. The local one is the shared
+    # phase-7 audited-local step; the connectivity one comes from the
+    # operation's own result.
+    assert %{"status" => "pass", "code" => "available"} =
+             Enum.find(checks, &(&1["name"] == "provider/workspace/local"))
+
+    assert %{"status" => "pass", "code" => "available"} =
+             Enum.find(checks, &(&1["name"] == "provider/workspace/connectivity"))
+
+    assert outcome.envelope["result"]["provider_activity"] == true
+
+    # Independent of the rows: the server was really contacted and really
+    # served the acquisition handshake.
+    assert File.read!(marker) =~ "server/discover"
+    assert File.read!(marker) =~ "tools/list"
+
+    assert_schema_valid(outcome.envelope)
+    assert CommandContract.valid_success_result?(:doctor, outcome.envelope["result"])
+  end
+
+  @tag :tmp_dir
+  test "doctor --connect answers for a selection naming no provider", %{tmp_dir: directory} do
+    # Connectivity answers for selected occurrences, so a selection with none
+    # has no operation to run and `RunCoordinator.connect/3` refuses one. The
+    # command still has a complete answer: every row such a plan holds was
+    # settled when it was derived, and no provider activity happened. The
+    # installed alias is deliberately left unselected, so this also proves the
+    # plan reports the selection rather than the installed surface.
+    marker = Path.join(directory, "unselected-methods")
+    host_path = write_host_config(directory, "connect-unselected", connect_host_config(marker))
+    application = doctor_application(directory, "selects-nothing", [])
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.command_mode == {:doctor, :connect}
+    assert outcome.exit_status == 0
+
+    checks = outcome.envelope["result"]["checks"]
+    assert Enum.map(checks, & &1["name"]) == ["runtime", "application", "viewer"]
+
+    assert %{"status" => "pass", "code" => "valid"} =
+             Enum.find(checks, &(&1["name"] == "application"))
+
+    assert outcome.envelope["result"]["provider_activity"] == false
+    refute File.exists?(marker)
+    assert_schema_valid(outcome.envelope)
+    assert CommandContract.valid_success_result?(:doctor, outcome.envelope["result"])
+  end
+
+  @tag :tmp_dir
+  test "an internal failure before the marker reports no provider activity", %{
+    tmp_dir: directory
+  } do
+    # The mirror of the case below, and the reason the answer is asked rather
+    # than assumed. The execution owner opens its sinks before any provider
+    # work, and a manifest may narrow `normal_event_bytes` below the reserve
+    # that opening requires, so the operation can fail with a bare reason having
+    # contacted nothing. Reporting `provider_activity: true` for it would claim
+    # a cost the command never incurred.
+    marker = Path.join(directory, "pre-marker-methods")
+    host_path = write_host_config(directory, "connect-pre-marker", connect_host_config(marker))
+
+    application =
+      doctor_application(directory, "selects-pre-marker",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: %{"evaluation_timeout_ms" => 5_000, "normal_event_bytes" => 1}
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.command_mode == {:doctor, :connect}
+    assert outcome.envelope["error"]["phase"] == "internal"
+    assert outcome.envelope["error"]["code"] == "internal_error"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    refute File.exists?(marker)
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "an internal failure after the marker still reports provider activity", %{
+    tmp_dir: directory
+  } do
+    # The counterpart to the audited-local case below, on the other side of the
+    # marker. Sealing the operation's own result is made to raise, so the
+    # command fails after it has already contacted the server. Reporting
+    # `provider_activity: false` here would tell the caller nothing was spent
+    # when something was.
+    #
+    # The diagnostic itself is minted by `ProviderExecution`'s own boundary, so
+    # what this pins at the command boundary is narrower than it looks: that no
+    # answer the engine gives from the operation onward loses the flag. It fails
+    # if the engine mints its own activity-free internal error there, and it
+    # does not discriminate between rendering the operation's diagnostic and
+    # replacing it with an equivalent one — the case below does that.
+    marker = Path.join(directory, "post-marker-methods")
+    host_path = write_host_config(directory, "connect-post-marker", connect_host_config(marker))
+
+    application =
+      doctor_application(directory, "selects-post-marker",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: %{"evaluation_timeout_ms" => 5_000}
+      )
+
+    storage_key = {Attestation, PtcRunner.Kernel.ConnectivityResult}
+    previous_key = :persistent_term.get(storage_key, :missing)
+
+    on_exit(fn ->
+      case previous_key do
+        :missing -> :persistent_term.erase(storage_key)
+        key -> :persistent_term.put(storage_key, key)
+      end
+    end)
+
+    :persistent_term.put(storage_key, :invalid_hmac_key)
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.command_mode == {:doctor, :connect}
+    assert outcome.envelope["error"]["phase"] == "internal"
+    assert outcome.envelope["error"]["code"] == "internal_error"
+    assert outcome.envelope["error"]["provider_activity"] == true
+
+    # The failure is genuinely past the marker: the server was reached first.
+    assert File.read!(marker) =~ "tools/list"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a failing check under --connect renders one diagnostic and no rows", %{
+    tmp_dir: directory
+  } do
+    # The closed result contract has no failing provider row in either mode, so
+    # a connect that cannot settle every row reports its catalogued diagnostic
+    # and no `result` at all. This one fails in the shared phase-7 step, which
+    # the connect operation crosses through `ProviderExecution` before the
+    # activity marker — which is why it reports no provider activity even though
+    # the command asked for connectivity.
+    host_path =
+      write_host_config(directory, "connect-local-fail", %{
+        "credentials" => %{"key" => %{"literal" => "not-read"}},
+        "install" => %{
+          "model" => %{
+            "source" => "llm",
+            "installation_revision" => "model-v1",
+            "model" => "definitely-not-a-model",
+            "credential" => "key"
+          }
+        }
+      })
+
+    application = doctor_application(directory, "connect-selects-model", workflow: ["model"])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.command_mode == {:doctor, :connect}
+    assert outcome.envelope["command"] == "doctor"
+    refute Map.has_key?(outcome.envelope, "result")
+    assert outcome.envelope["error"]["phase"] == "local_preflight"
+    assert outcome.envelope["error"]["code"] == "adapter_unavailable"
+    assert outcome.envelope["error"]["subject"]["name"] == "model"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    assert outcome.envelope["secondary_errors"] == []
     assert_schema_valid(outcome.envelope)
   end
 
@@ -4153,6 +4439,37 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     }
   end
 
+  # A real MCP stdio server, offline and deterministic. It is the only shipped
+  # recipe whose descriptor carries both an audited-local check and
+  # `connectivity_mode: :acquisition`, which is what lets a connect at this
+  # boundary settle two rows that default doctor cannot settle at all. `marker`
+  # records the JSON-RPC methods the server actually served.
+  defp connect_host_config(marker) do
+    %{
+      "install" => %{
+        "workspace" => %{
+          "source" => "mcp",
+          "installation_revision" => "connect-stdio-v1",
+          "transport" => %{
+            "type" => "stdio",
+            "command" => System.find_executable("sh"),
+            "cwd" => @stdio_root,
+            "args" => [@stdio_fixture, marker],
+            "start_timeout_ms" => 5_000
+          },
+          "tools" => %{
+            "structured" => %{
+              "as" => "workspace.structured",
+              "effect" => "write",
+              "model_visible" => true
+            }
+          },
+          "ceilings" => %{"timeout_ms" => 5_000}
+        }
+      }
+    }
+  end
+
   defp stdio_host_config(command, launcher, cwd) do
     %{
       "runtime" => %{"stdio_launcher" => launcher},
@@ -4188,10 +4505,21 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       }
     }
 
+    manifest =
+      case Keyword.get(providers, :limits) do
+        nil -> manifest
+        limits -> Map.put(manifest, "limits", limits)
+      end
+
     write_application(directory, name, manifest)
   end
 
-  defp provider_entries(names), do: Enum.map(names, &%{"name" => &1, "config" => %{}})
+  defp provider_entries(names) do
+    Enum.map(names, fn
+      {name, config} -> %{"name" => name, "config" => config}
+      name -> %{"name" => name, "config" => %{}}
+    end)
+  end
 
   defp write_host_config(directory, name, bytes) when is_binary(bytes) do
     path = Path.join(directory, "#{name}.host.json")

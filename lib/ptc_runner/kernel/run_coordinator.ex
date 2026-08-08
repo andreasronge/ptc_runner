@@ -206,10 +206,10 @@ defmodule PtcRunner.Kernel.RunCoordinator do
     do: {:error, :invalid_prepared_run}
 
   # Internal only, like its `execute/4` and `check/4` neighbours.
-  # `doctor --connect` is not dispatched from `CommandEngine` yet, and must not
-  # be until the transport bounds every response the connectivity modes can pull
-  # in. Connectivity answers for selected occurrences, so unlike a run it has no
-  # provider-free form.
+  # `PtcRunner.Kernel.CommandEngine` dispatches `doctor --connect` through it.
+  # Connectivity answers for selected occurrences, so unlike a run it has no
+  # provider-free form: a preparation selecting no provider is refused here, and
+  # the command answers for it without opening an operation at all.
   #
   # It takes no authorization notifier and refuses an execution carrying
   # authorization targets, because a health check must never open an interactive

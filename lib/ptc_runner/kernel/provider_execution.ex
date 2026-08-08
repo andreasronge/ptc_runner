@@ -205,8 +205,23 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           {:error, authorization_required_diagnostic(name)}
       end
 
-    close_owned_session(result, session, tracker)
+    result
+    |> classify_marked_failure()
+    |> close_owned_session(session, tracker)
   end
+
+  # Everything reachable from here has crossed the activity marker, so nothing
+  # from here may answer with a bare reason: a consumer cannot tell one that was
+  # produced before the marker from one produced after it, and the difference is
+  # a public claim about whether the command incurred provider cost.
+  #
+  # Most of this region already answers with a diagnostic. Registry setup is the
+  # exception — `registry_result/4` forwards a reason it has no classification
+  # for — and an independent review found it by reading, not by any test, which
+  # is why the invariant is enforced here rather than asserted in a comment.
+  defp classify_marked_failure({:error, %CommandDiagnostic{}} = error), do: error
+  defp classify_marked_failure({:error, _reason}), do: {:error, internal_diagnostic()}
+  defp classify_marked_failure(result), do: result
 
   defp execute_authorized(
          prepared,

@@ -1521,7 +1521,107 @@ fine; temporarily reachable and unsafe is not.
      produces. Both were found by review, not by tests, which is why the table
      now has a test pinning every branch against the catalog and the contract;
 4. (complete) prove and implement the MCP receive-boundary response cap;
-5. only then enable `doctor --connect` in `CommandEngine`; and
+5. (complete) only then enable `doctor --connect` in `CommandEngine`. The
+   engine derives the plan with `:connect` while the preparation is still
+   claimed, runs one `RunCoordinator.connect/3`, settles with
+   `settle_connect/4` against the seal, and projects with `checks/1`. Anything
+   that fails renders one catalogued diagnostic and no rows, which is what the
+   closed contract already required of both modes.
+
+   Three decisions were forced by wiring it, and each is recorded because none
+   was visible from the step as written.
+
+   **A selection naming no provider needs an answer the operation cannot
+   give.** `connect/3` refuses a preparation with no declarations, because
+   connectivity answers for selected occurrences and this document already
+   pins that it has no provider-free form. That refusal is right for the
+   coordinator and wrong as a command answer: nothing is broken, and
+   `internal_error` would say something is. The engine therefore projects the
+   derived plan directly for that one case. It is not a second settlement —
+   such a plan holds no provider row at all, and every row it does hold was
+   settled when it was derived — and the closed contract already admitted the
+   result it produces, a three-row check list with `provider_activity: false`.
+
+   **`provider_activity` is decided by whether the operation ran, not by
+   reading the marker back.** The marker is consumed with the preparation, so
+   asking it afterwards answers `:unknown`. It does not need asking:
+   `ProviderActiveSession.open_consumed` marks activity before it opens the
+   session and refuses an empty declaration set, so "the operation ran" and
+   "activity was marked" are the same fact. An unclassified failure from an
+   operation that started reports activity `true`, because nothing at that
+   boundary can prove which side of the marker it fell on and the answer that
+   understates what the command spent is the worse one.
+
+   **The engine performs no frontend VM setup, and that is a fence rather than
+   an omission.** It neither loads a `.env` nor starts an optional provider
+   application, so a connect against a stopped one reports
+   `active_preflight/provider_application_unavailable`. `:command_vm` is valid
+   only when the frontend owns the VM lifetime, which this module cannot prove
+   — it is equally reachable from an embedding — so it keeps `:host_owned`,
+   the same services construction default doctor already used. Supplying the
+   ownership choice is the frontend's, once one exists.
+
+   Two cold codex reviews found the same defect from opposite sides, and
+   neither was reachable from any gate. Round one: a raise anywhere after the
+   operation fell through to the engine-wide rescue, which answers
+   `internal/internal_error` with `provider_activity: false` — a wrong public
+   claim about cost for a command that had already contacted a provider. Round
+   two, against the fix: `RunCoordinator.connect/3` can answer with a bare
+   reason having contacted nothing, and treating every bare reason as
+   post-marker invents a cost that was never incurred. Its reproduction is a
+   manifest narrowing `normal_event_bytes` below the reserve the execution
+   owner's sinks need, which fails in `init` before any provider work.
+
+   Both directions are wrong, so the value is derived rather than defaulted,
+   and the derivation is a fact about shapes rather than a list of reasons. The
+   marker cannot be asked — the execution owner closes the preparation it was
+   handed on every exit, so `ProviderActivity.value/1` answers `:unknown` by the
+   time the caller sees the error, which is why the first attempt at this fix
+   did not work. It is read off the answer instead: once the marker is crossed,
+   every answer is a diagnostic, so a bare reason comes from the owner's setup —
+   input validity, sink opening, registry construction before the worker — or
+   from the coordinator's own argument checks. The single exception is
+   `:execution_session_unavailable`, an owner or worker that died, which says
+   nothing about where it was and takes the conservative answer.
+
+   A third cold round showed that invariant was false as written, and it is now
+   enforced rather than assumed. `with_registry/8` runs *after* the marker, and
+   `registry_result/4` forwards a reason it has no classification for, so a bare
+   `:invalid_provider_registry` could reach the command boundary and be read as
+   pre-marker. `ProviderExecution.classify_marked_failure/1` closes the whole
+   post-marker region instead of patching that one producer: nothing reachable
+   from `execute_with_session/8` may answer with a bare reason, because a
+   consumer cannot tell one produced before the marker from one produced after
+   it. Every round found this by reading; none of the three was reachable from a
+   gate.
+
+   Exception boundaries are drawn twice and narrowly for the same reason: around
+   the post-marker region, and around `CommandOutcome.success/3`, which raises
+   by contract when the closed schema refuses a projection and is the one raise
+   in the path that is documented rather than hypothetical. An earlier draft
+   used a single boundary keyed on whether the selection names a provider, which
+   is precisely the assumption round two disproved.
+
+   Three residuals, all reasoned rather than tested, and named because each is a
+   mutation the suite does not catch. The `connect_settlement` rescue cannot be
+   triggered from the command surface: the only injectable raise in that region
+   is a corrupted attestation key, and every module whose key would do it is
+   sealed earlier in the command, so the failure arrives before the operation
+   instead. It is kept because it is the only cover for `settle_connect/4` and
+   `checks/1`, which sit outside `ProviderExecution`'s own rescue. The
+   `connect_success` rescue is likewise untriggerable, because it needs a
+   settled connect plan the closed contract refuses, and every row `DoctorPlan`
+   can settle under `:connect` is one the contract admits. And the
+   `:execution_session_unavailable` clause needs an owner that dies mid-command,
+   which nothing on this path can force.
+
+   The consequence worth stating plainly: flipping the engine's own
+   `provider_activity: true` to `false` leaves every test passing, because the
+   post-marker regression asserts a diagnostic `ProviderExecution` mints rather
+   than one this module does. What the two regressions do pin is the
+   discrimination itself — a pre-marker failure reports no activity, a
+   post-marker one reports activity — which is the property both reviews were
+   about; and
 6. integration review, acceptance gates, then the cumulative PR review.
 
 Step 2 carries a constraint the phrase "a probe calls the catalog
