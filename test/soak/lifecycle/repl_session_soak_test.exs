@@ -78,18 +78,12 @@ defmodule PtcRunner.Soak.ReplSessionSoakTest do
   end
 
   describe "owner death" do
-    # Currently failing, and correctly so: this variant found a real leak.
-    # `close/1` and `abort/2` only reach `close_access/1` after
-    # `owned_session/1` succeeds, and `owned_session/1` exits when the owner is
-    # already dead — so an abnormally terminated owner leaves its access entry
-    # in the creator's table permanently. Reproduced standalone at 5 sessions,
-    # 5 permanent entries with dead pids.
-    #
-    # Skipped rather than deleted: the reproduction is the valuable part, and
-    # the fix is a production behaviour change that belongs in its own PR.
-    # Remove this tag as part of fixing
-    # https://github.com/andreasronge/ptc_runner/issues/1201.
-    @tag :skip
+    # #1201 fixed the creator-side access entry this variant first caught.
+    # Removing that skip exposed a second leak the first had been masking: the
+    # owner monitors only its *creator* (`repl_session_owner.ex:60`) and nothing
+    # links or monitors the `RunState` it was handed, so abnormal owner death
+    # orphans both it and the `ProviderTaskTracker` every `RunState` starts.
+    # See https://github.com/andreasronge/ptc_runner/issues/1209.
     test "killing the ReplSessionOwner leaves no entry behind", context do
       LifecycleSoak.soak!(
         [
