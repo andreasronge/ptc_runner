@@ -495,37 +495,67 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
     end
 
     test "timeout retains a successful envelope from a still-live sibling" do
+      counter = :atomics.new(1, [])
       effects = Effects.empty() |> Effects.record_print("retained")
 
-      # A monitor-based rendezvous instead of a wall-clock margin: item
-      # :blocked waits for `gate` to go down (item :success stops it right
-      # after producing its result) before it starts genuinely blocking.
+      # A monitor-based rendezvous instead of a wall-clock margin: the
+      # :blocked worker waits for `gate` to go down (the :success worker
+      # stops it right after `worker.()` -- and so its `:worker_result` --
+      # has been sent) before it starts genuinely blocking.
       # `Process.monitor/1` delivers an immediate `:DOWN` for an
-      # already-dead process, so this is race-free regardless of which
-      # item's worker the coordinator happens to schedule first -- no
-      # deadline margin has to cover the handshake, only the trivial
-      # `:success` work itself.
+      # already-dead process, so this is race-free regardless of
+      # scheduling. Both waits happen inside the SPAWNED processes, not in
+      # `spawn_fun` itself, so neither can block `fill_window/1` and eat
+      # into the shared deadline the way the old message-based handshake
+      # did.
+      #
+      # `spawn_fun` (not `fun`) is what keeps the :success worker alive
+      # after sending its result via `wait_for_go/0` -- required so its
+      # entry is still in `state.live`, tagged with a completed result, when
+      # the shared deadline fires for the :blocked sibling. That is the
+      # "still-live sibling" this test is named for: without it, the
+      # :success worker would exit immediately, its result would already be
+      # in `state.results` by the time of the timeout, and this would stop
+      # covering the code path it claims to.
       {:ok, gate} = Agent.start_link(fn -> :ok end)
+
+      spawn_fun = fn worker, opts ->
+        case :atomics.add_get(counter, 1, 1) - 1 do
+          0 ->
+            Process.spawn(
+              fn ->
+                worker.()
+                Agent.stop(gate)
+                wait_for_go()
+              end,
+              opts
+            )
+
+          1 ->
+            Process.spawn(
+              fn ->
+                gate_ref = Process.monitor(gate)
+
+                receive do
+                  {:DOWN, ^gate_ref, :process, ^gate, _reason} -> :ok
+                end
+
+                worker.()
+              end,
+              opts
+            )
+        end
+      end
 
       fun = fn
         :success ->
-          envelope =
-            Envelope.success(:done,
-              effects: effects,
-              child_trace_id: "retained-child",
-              child_step: %{id: "retained-step"}
-            )
-
-          Agent.stop(gate)
-          envelope
+          Envelope.success(:done,
+            effects: effects,
+            child_trace_id: "retained-child",
+            child_step: %{id: "retained-step"}
+          )
 
         :blocked ->
-          gate_ref = Process.monitor(gate)
-
-          receive do
-            {:DOWN, ^gate_ref, :process, ^gate, _reason} -> :ok
-          end
-
           wait_for_go()
       end
 
@@ -545,7 +575,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
                ParallelRunner.run(
                  [:success, :blocked],
                  fun,
-                 base_opts(max_concurrency: 2, deadline_mono: deadline)
+                 base_opts(max_concurrency: 2, deadline_mono: deadline, spawn_fun: spawn_fun)
                )
     end
 
