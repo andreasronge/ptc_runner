@@ -119,7 +119,10 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
           )
         end)
 
-      assert_receive {:callback_started, ^effect}
+      # Default assert_receive timeout is 100ms; under full-suite scheduler
+      # contention the Task.async'd callback can take longer than that just
+      # to get scheduled, unrelated to the timeout behaviour under test.
+      assert_receive {:callback_started, ^effect}, 1_000
 
       assert_effect_failure(
         Task.await(task),
@@ -152,7 +155,9 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
           Dispatcher.dispatch(state, :mission, environment, capability.name, %{}, 1_000)
         end)
 
-      assert_receive {:callback_started, ^effect, provider}
+      # See the timeout note on the other `assert_receive {:callback_started, ...}`
+      # above -- same race against scheduler contention in the full suite.
+      assert_receive {:callback_started, ^effect, provider}, 1_000
       assert :ok = RunState.close(state)
       send(provider, :finish)
 

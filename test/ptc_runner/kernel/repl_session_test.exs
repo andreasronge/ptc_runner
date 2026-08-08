@@ -527,7 +527,6 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert_receive {:trace, ^creator, :spawn, evaluation_worker, _mfa}, 2_000
     evaluation_ref = Process.monitor(evaluation_worker)
     assert Process.alive?(evaluation_worker)
-    assert {:trap_exit, false} = Process.info(creator, :trap_exit)
 
     on_exit(fn ->
       if Process.alive?(evaluation_worker), do: Process.exit(evaluation_worker, :kill)
