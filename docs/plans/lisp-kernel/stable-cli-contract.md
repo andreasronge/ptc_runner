@@ -1,10 +1,11 @@
 # Stable CLI and transport-neutral application plan
 
-**Status:** accepted; Checkpoints A and B are complete, Checkpoint C's
-stabilization prefix is merged, and the remaining work continues through
-follow-up PRs.
-**Revised:** 2026-08-06 after the Checkpoint C stabilization prefix merged, to
-record that prefix as delivered and make doctor completion the active work.
+**Status:** accepted; Checkpoints A, B, and C are complete, Checkpoint D is the
+active work, and the remaining work continues through follow-up PRs.
+**Revised:** 2026-08-08 after Checkpoint C merged, to record it as delivered and
+make destination preflight and publication the active work. Checkpoint C's
+recorded residuals are follow-up slices that do not block D; the largest is the
+`acquire/6`–`acquire_targets/7` unification described in slice 7.
 
 This plan delivers a stable command-line contract and a path-free execution
 core without designing infrastructure for a future hosted service. Exact
@@ -594,11 +595,13 @@ ever-growing branch:
 - **Checkpoint B (complete):** 5d3 and slice 6, completing bounded credentials,
   process-local OAuth, acquisition, and one-shot execution composition. Merged
   as PR #1179 at `37f413de`.
-- **Checkpoint C:** the early parity/deadline stabilization prefix described
-  below, followed by slice 7 bounded connectivity and doctor. Stabilization
-  comes first so doctor reuses a corrected owner boundary instead of adding a
-  fourth execution path.
-- **Checkpoint D:** slice 8, destination preflight and publication.
+- **Checkpoint C (complete):** the early parity/deadline stabilization prefix
+  described below, followed by slice 7 bounded connectivity and doctor.
+  Stabilization came first so doctor reused a corrected owner boundary instead
+  of adding a fourth execution path. Merged as PR #1188 at `20778764`. Its
+  residuals are recorded in slice 7 and are follow-up slices rather than
+  blockers.
+- **Checkpoint D (active):** slice 8, destination preflight and publication.
 - **Checkpoint E:** slice 9, shared commands and REPL parity.
 - **Checkpoint F:** slice 10, standalone packaging.
 - **Checkpoint G:** slice 11, final acceptance and documentation.
