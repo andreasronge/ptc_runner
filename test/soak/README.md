@@ -7,11 +7,16 @@ default; opt in with `--only soak`.
 ## Run
 
 ```bash
-mix test --only soak
+mix soak
 
 # Crank iteration count for real soak runs
-PTC_SOAK_ITERATIONS=10000 mix test --only soak
+PTC_SOAK_ITERATIONS=10000 mix soak
 ```
+
+`mix soak` is an alias for `mix test --only soak`. The scheduled `Soak`
+workflow (`.github/workflows/soak.yml`) runs it weekly, and on manual dispatch,
+at `PTC_SOAK_ITERATIONS=3000`. It is deliberately not a per-PR gate: the suite
+is long-running and its signal is a trend across runs.
 
 ## Tests
 
@@ -20,6 +25,31 @@ PTC_SOAK_ITERATIONS=10000 mix test --only soak
 | `closure_capture_soak_test.exs` | Host-process accumulation across `Lisp.run/2` calls and refc-binary pinning by returned closures |
 | `atom_leak_soak_test.exs` | Parser atom interning on novel variable, keyword, and namespace-symbol names |
 | `prelude_compile_atom_leak_soak_test.exs` | Component compilation atom interning on novel namespaces, exports, helpers, and keywords |
+| `lifecycle/credential_lease_soak_test.exs` | `HostCredentialLease` owner, table and per-worker entry churn |
+| `lifecycle/repl_session_soak_test.exs` | `ReplSession` owner and creator-side access entry churn |
+| `lifecycle/provider_session_soak_test.exs` | Provider acquire/close: scopes, committed closers, `ProviderTaskTracker` |
+| `lifecycle/analysis_session_soak_test.exs` | `AnalysisSession` + `SessionTrace` owner pair |
+| `lifecycle/oauth_local_fences_soak_test.exs` | `LocalFences` growth characterization — **non-gating**, reports a slope |
+
+## Two harnesses
+
+`MemorySoak` soaks entry points that reap their sandbox process when the call
+returns, so per-call leakage there is bounded by construction.
+
+`LifecycleSoak` (`test/soak/lifecycle/`) is its sibling for the long-lived
+owners, where it is not. Each cycle returns a **ledger** of what it created —
+processes, tables, ETS entries, ports, `:persistent_term` keys — and every one
+must be gone before the next cycle. Those exact gates are what carry the
+verdict; byte metrics are a fitted slope over batches 2..K, and global counts,
+allocator carrier utilization and RSS are diagnostic only.
+
+Every family runs its termination variants: normal completion, owner death, and
+deadline expiry where the family has a deadline of its own. Owner death is the
+variant worth the setup — it is where `terminate/2` never runs.
+
+`test/support/lifecycle_soak_test.exs` runs in the **ordinary** suite and plants
+each leak the harness claims to catch. A harness that reports "flat" is
+indistinguishable from one that measures nothing.
 
 ## Tunables (env vars)
 

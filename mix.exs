@@ -81,7 +81,7 @@ defmodule PtcRunner.MixProject do
 
   def cli do
     [
-      preferred_envs: [precommit: :test, prepush: :test, coverage: :test]
+      preferred_envs: [precommit: :test, prepush: :test, coverage: :test, soak: :test]
     ]
   end
 
@@ -198,6 +198,13 @@ defmodule PtcRunner.MixProject do
       ],
       coverage: [
         "test --cover"
+      ],
+      # Memory-leak soak suite. Excluded from `mix test` by default
+      # (test/test_helper.exs) because it is long-running and its signal is a
+      # trend rather than a per-commit gate; the scheduled `Soak` workflow runs
+      # it at PTC_SOAK_ITERATIONS=3000.
+      soak: [
+        "test --only soak"
       ],
       # Regenerates the derived projection. Run this once before tagging a
       # release -- the release gate rejects a stale projection, and ordinary

@@ -23,6 +23,25 @@ defmodule PtcRunner.TestSupport.MemorySoak do
                         A non-trivial drop here on an otherwise quiet system
                         is the classic BEAM "small binary references pinning
                         big refc binaries" pattern.
+    * `:ets_tables`   — `length(:ets.all())`
+    * `:ets_entries`  — summed `:ets.info(t, :size)` across every live table.
+                        `ReplSession` allocates one `:private` table per
+                        *creator process*, not per session, so a leaked
+                        session shows up here and never in the table count.
+    * `:ports`        — `length(:erlang.ports())`
+    * `:persistent_terms` — `length(:persistent_term.get())`
+    * `:monitors`     — total monitors held across every live process
+    * `:carrier_utilization` — `:recon_alloc` allocated-vs-used ratio. This is
+                        the one sample that can see allocator fragmentation,
+                        the classic "flat `:erlang.memory` while RSS climbs"
+                        failure every other number here passes.
+    * `:rss_bytes`    — resident set size, or `nil` where it cannot be read.
+
+  Every sample in this snapshot is **global**, which makes all of them
+  diagnostic context rather than gates: a global count both flaps on a shared
+  VM and can hide a real leak when something unrelated exits and offsets it.
+  `PtcRunner.TestSupport.LifecycleSoak` is where counted resources are scoped
+  to the ones a test actually created and asserted exactly.
 
   ## Workflow
 
@@ -58,6 +77,13 @@ defmodule PtcRunner.TestSupport.MemorySoak do
           max_mailbox_messages: non_neg_integer(),
           top_memory: [{pid(), non_neg_integer(), term()}],
           bin_leak: integer(),
+          ets_tables: non_neg_integer(),
+          ets_entries: non_neg_integer(),
+          ports: non_neg_integer(),
+          persistent_terms: non_neg_integer(),
+          monitors: non_neg_integer(),
+          carrier_utilization: float() | nil,
+          rss_bytes: non_neg_integer() | nil,
           monotonic_ms: integer()
         }
 
@@ -76,6 +102,13 @@ defmodule PtcRunner.TestSupport.MemorySoak do
       max_mailbox_messages: process_totals.max_mailbox_messages,
       top_memory: top_by_memory(Keyword.get(opts, :top_n, top_n())),
       bin_leak: bin_leak(),
+      ets_tables: length(:ets.all()),
+      ets_entries: ets_entries(),
+      ports: length(:erlang.ports()),
+      persistent_terms: length(:persistent_term.get()),
+      monitors: process_totals.monitors,
+      carrier_utilization: carrier_utilization(),
+      rss_bytes: rss_bytes(),
       monotonic_ms: System.monotonic_time(:millisecond)
     }
   end
@@ -338,14 +371,19 @@ defmodule PtcRunner.TestSupport.MemorySoak do
   defp process_totals do
     Enum.reduce(
       Process.list(),
-      %{reductions: 0, mailbox_messages: 0, max_mailbox_messages: 0},
+      %{reductions: 0, mailbox_messages: 0, max_mailbox_messages: 0, monitors: 0},
       fn pid, acc ->
-        case Process.info(pid, [:reductions, :message_queue_len]) do
-          [{:reductions, reductions}, {:message_queue_len, mailbox_messages}] ->
+        case Process.info(pid, [:reductions, :message_queue_len, :monitors]) do
+          [
+            {:reductions, reductions},
+            {:message_queue_len, mailbox_messages},
+            {:monitors, monitors}
+          ] ->
             %{
               reductions: acc.reductions + reductions,
               mailbox_messages: acc.mailbox_messages + mailbox_messages,
-              max_mailbox_messages: max(acc.max_mailbox_messages, mailbox_messages)
+              max_mailbox_messages: max(acc.max_mailbox_messages, mailbox_messages),
+              monitors: acc.monitors + length(monitors)
             }
 
           _dead ->
@@ -353,6 +391,51 @@ defmodule PtcRunner.TestSupport.MemorySoak do
         end
       end
     )
+  end
+
+  # Tables come and go while this walks them, so a vanished table contributes
+  # zero rather than raising.
+  defp ets_entries do
+    Enum.reduce(:ets.all(), 0, fn table, total ->
+      case :ets.info(table, :size) do
+        size when is_integer(size) -> total + size
+        :undefined -> total
+      end
+    end)
+  end
+
+  # Allocated-versus-used across every allocator. `:erlang.memory/0` reports
+  # what the VM believes it is using; this is the only sample here that can see
+  # carriers held by the allocator after the blocks inside them were freed.
+  defp carrier_utilization do
+    if Code.ensure_loaded?(:recon_alloc) do
+      case :recon_alloc.memory(:usage) do
+        usage when is_float(usage) -> Float.round(usage, 4)
+        _other -> nil
+      end
+    end
+  rescue
+    # `:recon_alloc` reads emulator-specific allocator instrumentation that a
+    # differently built VM need not expose.
+    _exception -> nil
+  end
+
+  # Platform-specific by nature, which is exactly why it never gates. `ps` is
+  # present on both darwin and linux; anything else reports `nil` rather than
+  # branching the oracle on OS.
+  defp rss_bytes do
+    case System.cmd("ps", ["-o", "rss=", "-p", System.pid()], stderr_to_stdout: true) do
+      {output, 0} ->
+        case Integer.parse(String.trim(output)) do
+          {kilobytes, _rest} -> kilobytes * 1024
+          :error -> nil
+        end
+
+      _unavailable ->
+        nil
+    end
+  rescue
+    ErlangError -> nil
   end
 
   defp bin_leak do
@@ -369,7 +452,9 @@ defmodule PtcRunner.TestSupport.MemorySoak do
   end
 
   defp iterations, do: env_int("PTC_SOAK_ITERATIONS", 100)
-  defp warmup_count, do: env_int("PTC_SOAK_WARMUP", 10)
+
+  @doc "Warmup iteration count for soak loops (override via `PTC_SOAK_WARMUP`)."
+  def warmup_count, do: env_int("PTC_SOAK_WARMUP", 10)
   defp tolerance_pct, do: env_int("PTC_SOAK_TOLERANCE_PCT", 20)
   defp top_n, do: env_int("PTC_SOAK_TOP_N", 10)
 

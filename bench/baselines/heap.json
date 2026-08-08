@@ -1,0 +1,180 @@
+{
+  "batches": 3,
+  "provenance": {
+    "architecture": "aarch64-apple-darwin25.4.0",
+    "commit": "aac74f3f36197f3165e8d422d6ea3b5469efc75e",
+    "dirty_cpu_schedulers": 10,
+    "elixir": "1.20.2",
+    "emu_flavor": "jit",
+    "erts": "17.0.3",
+    "logical_processors": 10,
+    "otp": "29",
+    "schedulers_online": 10,
+    "wordsize_bytes": 8
+  },
+  "rows": [
+    {
+      "metrics": {
+        "atom_bytes": 548267,
+        "atom_count": 17993,
+        "code_bytes": 9870658,
+        "ets_bytes": 990280,
+        "loaded_modules": 235,
+        "mix_modules": 0,
+        "process_count": 121,
+        "processes_bytes": 14471912,
+        "ptc_modules": 3,
+        "total_bytes": 56846043
+      },
+      "name": "floor_no_mix_idle",
+      "note": "started :ptc_runner in a child `elixir` VM; Mix is not on the path"
+    },
+    {
+      "metrics": {
+        "atom_bytes": 592817,
+        "atom_count": 19572,
+        "code_bytes": 10874132,
+        "ets_bytes": 1061480,
+        "loaded_modules": 276,
+        "mix_modules": 0,
+        "process_count": 121,
+        "processes_bytes": 14987800,
+        "ptc_modules": 35,
+        "total_bytes": 59253997
+      },
+      "name": "floor_no_mix_warm",
+      "note": "the same child after one Lisp.run/2, so lazy module loading has happened"
+    },
+    {
+      "metrics": {
+        "batches": 3,
+        "iterations_per_batch": 200,
+        "residual_bytes_per_iter": 20.14,
+        "unit_bytes": 16776
+      },
+      "name": "lisp_trivial",
+      "note": "sandbox child heap at return; 200 iterations per batch"
+    },
+    {
+      "metrics": {
+        "batches": 3,
+        "iterations_per_batch": 200,
+        "residual_bytes_per_iter": 11.88,
+        "unit_bytes": 68280
+      },
+      "name": "lisp_collection_hofs",
+      "note": "sandbox child heap at return; 200 iterations per batch"
+    },
+    {
+      "metrics": {
+        "batches": 3,
+        "iterations_per_batch": 150,
+        "residual_bytes_per_iter": 22.773333333333333,
+        "unit_bytes": 1348512
+      },
+      "name": "lisp_large_binary",
+      "note": "sandbox child heap at return; 150 iterations per batch"
+    },
+    {
+      "metrics": {
+        "batches": 3,
+        "iterations_per_batch": 200,
+        "residual_bytes_per_iter": -38.3,
+        "retained_bytes": 8296,
+        "unit_bytes": 8744
+      },
+      "name": "compile_bundle_1",
+      "note": "1 component(s); 200 iterations per batch"
+    },
+    {
+      "metrics": {
+        "batches": 3,
+        "iterations_per_batch": 100,
+        "residual_bytes_per_iter": 2.4,
+        "retained_bytes": 152898,
+        "unit_bytes": 142696
+      },
+      "name": "compile_bundle_20",
+      "note": "20 component(s); 100 iterations per batch"
+    },
+    {
+      "metrics": {
+        "batches": 3,
+        "iterations_per_batch": 150,
+        "residual_bytes_per_iter": -49.06666666666667,
+        "retained_bytes": 552,
+        "unit_bytes": 67808
+      },
+      "name": "kernel_run",
+      "note": "driver heap at return, excluding the sandbox children Kernel.run spawns; 150 iterations per batch"
+    },
+    {
+      "metrics": {
+        "batches": 3,
+        "iterations_per_batch": 150,
+        "residual_bytes_per_iter": 52.85333333333333,
+        "retained_bytes": 648,
+        "unit_bytes": 75816
+      },
+      "name": "kernel_run_capabilities_events",
+      "note": "driver heap at return, excluding the sandbox children Kernel.run spawns; 150 iterations per batch"
+    },
+    {
+      "metrics": {
+        "peak_bytes_per_run": 968208,
+        "peak_total_bytes": 968208,
+        "samples_observed": 15,
+        "worker_heap_bytes_median": 67808,
+        "worker_heap_bytes_total": 67808
+      },
+      "name": "concurrency_1",
+      "note": "worker_* gate and are deterministic; peak_* are sampled diagnostics (median of 9 trials) and exclude nothing but resolve nothing either"
+    },
+    {
+      "metrics": {
+        "peak_bytes_per_run": 254700,
+        "peak_total_bytes": 2037600,
+        "samples_observed": 14,
+        "worker_heap_bytes_median": 67808,
+        "worker_heap_bytes_total": 542512
+      },
+      "name": "concurrency_8",
+      "note": "worker_* gate and are deterministic; peak_* are sampled diagnostics (median of 9 trials) and exclude nothing but resolve nothing either"
+    },
+    {
+      "metrics": {
+        "peak_bytes_per_run": 131901,
+        "peak_total_bytes": 4220848,
+        "samples_observed": 17,
+        "worker_heap_bytes_median": 67808,
+        "worker_heap_bytes_total": 2170160
+      },
+      "name": "concurrency_32",
+      "note": "worker_* gate and are deterministic; peak_* are sampled diagnostics (median of 9 trials) and exclude nothing but resolve nothing either"
+    },
+    {
+      "metrics": {
+        "peak_bytes_per_run": 86046,
+        "peak_total_bytes": 5506992,
+        "samples_observed": 23,
+        "worker_heap_bytes_median": 67808,
+        "worker_heap_bytes_total": 4340384
+      },
+      "name": "concurrency_64",
+      "note": "worker_* gate and are deterministic; peak_* are sampled diagnostics (median of 9 trials) and exclude nothing but resolve nothing either"
+    },
+    {
+      "metrics": {
+        "peak_bytes_per_run": 63313,
+        "peak_total_bytes": 8104128,
+        "samples_observed": 31,
+        "worker_heap_bytes_median": 67808,
+        "worker_heap_bytes_total": 8680200
+      },
+      "name": "concurrency_128",
+      "note": "worker_* gate and are deterministic; peak_* are sampled diagnostics (median of 9 trials) and exclude nothing but resolve nothing either"
+    }
+  ],
+  "threshold": 1.25,
+  "version": 1
+}
