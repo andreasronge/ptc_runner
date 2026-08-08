@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
   @moduledoc false
 
   use GenServer
+  use PtcRunner.Kernel.OwnerStatusRedaction
 
   alias PtcRunner.Kernel.PublicationHandle
 
@@ -73,6 +74,12 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
 
   def handle_call({:operation, _operation}, _from, state),
     do: {:reply, {:error, :publication_cleanup_failed}, state}
+
+  def handle_call(_request, _from, state),
+    do: {:reply, {:error, :publication_failed}, state}
+
+  @impl GenServer
+  def handle_cast(_message, state), do: {:noreply, state}
 
   defp operation_reply(:sync_and_retain, %PublicationHandle{kind: :recovery} = handle, state),
     do: sync_and_retain_reply(handle, state, :sync_and_retain)

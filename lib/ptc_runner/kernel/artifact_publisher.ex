@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
           required(:written) => [atom()],
           required(:failed) => [atom()],
           required(:withheld) => [atom()],
+          required(:secondary_errors) => [term()],
           optional(:result) => term(),
           optional(:error) => term()
         }
@@ -37,7 +38,8 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
       artifact_state: states,
       written: [],
       failed: [],
-      withheld: []
+      withheld: [],
+      secondary_errors: []
     }
 
     result =
@@ -71,6 +73,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
          written: [],
          failed: [],
          withheld: @artifact_names,
+         secondary_errors: [],
          error: :invalid_execution_outcome
        }}
 
@@ -85,6 +88,8 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
     with {:ok, report} <- maybe_cleanup_recovery(evidence, authority, report),
          {:ok, report} <- publish_observations(evidence, authority, report, hooks) do
       {:error, Map.put(report, :error, evidence.result_contract)}
+    else
+      {:error, report} -> {:error, preserve_primary_error(report, evidence.result_contract)}
     end
   end
 
@@ -527,6 +532,20 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
   end
 
   defp hook(hooks, key), do: Map.get(hooks, key)
+
+  defp preserve_primary_error(report, primary) do
+    secondary = Map.fetch!(report, :error)
+
+    report
+    |> Map.put(:error, primary)
+    |> Map.update!(:secondary_errors, &(&1 ++ [secondary]))
+  end
+
+  defp attach_failure_result(
+         %{error: {:error, {:result_contract_failed, _details}}} = report,
+         _evidence
+       ),
+       do: report
 
   defp attach_failure_result(report, evidence) do
     if failure_result_required?(report) do

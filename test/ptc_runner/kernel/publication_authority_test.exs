@@ -7,6 +7,9 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.PublicationHandle
+  alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.TraceLog
 
   @tag :tmp_dir
   test "phase six reserves exact normal trace names before provider activity", %{tmp_dir: dir} do
@@ -61,6 +64,46 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
     assert :ok = PublicationAuthority.abort(authority)
     assert :ok = CommandPreparation.close(preparation)
     refute File.exists?(PublicationHandle.path(recovery))
+  end
+
+  @tag :tmp_dir
+  test "trace-directory destinations publish and discover exact normal and private names", %{
+    tmp_dir: dir
+  } do
+    Enum.each([:normal, :private], fn policy ->
+      traces = Path.join(dir, "#{policy}-traces")
+      File.mkdir!(traces)
+
+      overrides =
+        if policy == :private,
+          do: %{"events" => %{"policy" => "private"}},
+          else: %{}
+
+      application = application!(dir, "#{policy}-discovery", overrides)
+
+      argv =
+        ["run", application, "--trace-dir", traces]
+        |> maybe_private_output(policy, Path.join(dir, "#{policy}-result.json"))
+
+      assert {:ok, preparation} = CommandEngine.prepare(argv)
+      assert {:ok, authority} = CommandEngine.preflight(preparation)
+      assert {:ok, outcome} = RunCoordinator.execute(preparation.prepared_run, authority)
+      assert {:ok, report} = RunBuilder.publish_execution_report(outcome, authority)
+      assert report.artifact_state["trace"] == "written"
+      assert :ok = PublicationAuthority.close(authority)
+
+      suffix = if policy == :private, do: ".private.jsonl", else: ".jsonl"
+      assert File.ls!(traces) == [preparation.run_ref <> suffix]
+
+      source = if policy == :private, do: {:private_directory, traces}, else: {:directory, traces}
+      assert {:ok, trace_log} = TraceLog.new(source: source)
+
+      assert {:ok, %{"items" => [%{"run_id" => run_ref}]}} =
+               TraceLog.query(trace_log, :list_runs, %{})
+
+      assert run_ref == preparation.run_ref
+      assert :ok = CommandPreparation.close(preparation)
+    end)
   end
 
   @tag :tmp_dir
@@ -423,6 +466,11 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
     File.write!(path, Jason.encode!(manifest))
     path
   end
+
+  defp maybe_private_output(argv, :normal, _output), do: argv
+
+  defp maybe_private_output(argv, :private, output),
+    do: argv ++ ["--private-output", output]
 
   defp authorize_after_creator_cleanup(target, attempts \\ 100)
 
