@@ -27,7 +27,6 @@ defmodule PtcRunner.Kernel.ReplSession do
   capacity.
   """
 
-  alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
@@ -37,6 +36,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Result, as: Native
@@ -517,33 +517,15 @@ defmodule PtcRunner.Kernel.ReplSession do
   end
 
   defp tools(session) do
-    environment = session.config.workflow_environment
     timeout_ms = session.config.limits.evaluation_timeout_ms
 
-    environment.capabilities
-    |> Map.new(fn {name, _capability} ->
-      callback = fn arguments ->
-        Dispatcher.dispatch(
-          session.state,
-          :workflow,
-          environment,
-          name,
-          arguments,
-          timeout_ms,
-          session.config.event_sink,
-          session.config.inspection_sink
-        )
-      end
-
-      {name, callback}
-    end)
-    |> Map.merge(
-      RuntimeTools.tools(
-        session.state,
-        environment,
-        session.config.event_sink,
-        :workflow
-      )
+    ToolGrant.capability_callbacks(
+      session.state,
+      :workflow,
+      session.config.workflow_environment,
+      timeout_ms,
+      session.config.event_sink,
+      session.config.inspection_sink
     )
     |> Map.put(
       "kernel-eval",

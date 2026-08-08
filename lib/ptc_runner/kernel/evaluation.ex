@@ -28,12 +28,12 @@ defmodule PtcRunner.Kernel.Evaluation do
   observation rather than returning JSON to workflow Lisp.
   """
 
-  alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.TrustedTool
 
@@ -669,23 +669,14 @@ defmodule PtcRunner.Kernel.Evaluation do
 
   @doc false
   def mission_tools(environment, state, timeout_ms, event_sink, inspection_sink) do
-    environment.capabilities
-    |> Map.new(fn {name, _capability} ->
-      {name,
-       fn arguments ->
-         Dispatcher.dispatch(
-           state,
-           :mission,
-           environment,
-           name,
-           arguments,
-           timeout_ms,
-           event_sink,
-           inspection_sink
-         )
-       end}
-    end)
-    |> Map.merge(RuntimeTools.tools(state, environment, event_sink, :mission))
+    state
+    |> ToolGrant.capability_callbacks(
+      :mission,
+      environment,
+      timeout_ms,
+      event_sink,
+      inspection_sink
+    )
     |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
   end
 
