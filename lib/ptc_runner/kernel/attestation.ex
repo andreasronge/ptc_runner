@@ -7,8 +7,6 @@ defmodule PtcRunner.Kernel.Attestation do
   running in the same VM.
   """
 
-  import Bitwise, only: [bor: 2, bxor: 2]
-
   @spec attest(module(), term()) :: binary()
   def attest(owner, payload) when is_atom(owner) do
     :crypto.mac(:hmac, :sha256, key(owner), :erlang.term_to_binary(payload, [:deterministic]))
@@ -20,15 +18,8 @@ defmodule PtcRunner.Kernel.Attestation do
 
   def valid?(_owner, _payload, _attestation), do: false
 
-  defp secure_compare(left, right) when byte_size(left) == byte_size(right) do
-    left
-    |> :binary.bin_to_list()
-    |> Enum.zip(:binary.bin_to_list(right))
-    |> Enum.reduce(0, fn {left_byte, right_byte}, difference ->
-      bor(difference, bxor(left_byte, right_byte))
-    end)
-    |> Kernel.==(0)
-  end
+  defp secure_compare(left, right) when byte_size(left) == byte_size(right),
+    do: :crypto.hash_equals(left, right)
 
   defp secure_compare(_left, _right), do: false
 

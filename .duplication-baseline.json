@@ -748,30 +748,6 @@
       ],
       "type": "type_ii"
     },
-    "72acfd4a21f912b242d3fe4523196f5980c42ebbc62f916475d0ce6f740fa18b": {
-      "describe": "type_i mass=37 lib/ptc_runner/kernel/analysis_assembly.ex:90 <-> lib/ptc_runner/kernel/attestation.ex:38 <-> lib/ptc_runner/kernel/frozen_bundle.ex:139",
-      "files": [
-        "lib/ptc_runner/kernel/analysis_assembly.ex",
-        "lib/ptc_runner/kernel/attestation.ex",
-        "lib/ptc_runner/kernel/frozen_bundle.ex"
-      ],
-      "mass": 37,
-      "occurrences": [
-        {
-          "file": "lib/ptc_runner/kernel/analysis_assembly.ex",
-          "snippet": "1b44748766f3d2678ac7869c1a0c28a7a26969e5d6d6d488904a38e7dfba0478"
-        },
-        {
-          "file": "lib/ptc_runner/kernel/attestation.ex",
-          "snippet": "1b44748766f3d2678ac7869c1a0c28a7a26969e5d6d6d488904a38e7dfba0478"
-        },
-        {
-          "file": "lib/ptc_runner/kernel/frozen_bundle.ex",
-          "snippet": "1b44748766f3d2678ac7869c1a0c28a7a26969e5d6d6d488904a38e7dfba0478"
-        }
-      ],
-      "type": "type_i"
-    },
     "763c8a9e4ef38af437133014657da3890afd363f089b1e1693f858ab67849dbe": {
       "describe": "type_i mass=57 lib/ptc_runner/kernel/inspection_snapshot.ex:129 <-> lib/ptc_runner/kernel/trace_snapshot.ex:94",
       "files": [
@@ -1157,49 +1133,6 @@
         {
           "file": "lib/ptc_runner/kernel/log_analysis_profile.ex",
           "snippet": "8904df8e784e787d66ba1bbe7c042dc40931e10333ae656dfdc4cc1515f53c6d"
-        }
-      ],
-      "type": "type_i"
-    },
-    "aa88592927623db563d245dc94d35db7d3af974f0d3d3d6f624cf4339f4a8524": {
-      "describe": "type_i mass=47 lib/ptc_runner/kernel/analysis_assembly.ex:87 <-> lib/ptc_runner/kernel/frozen_bundle.ex:136",
-      "files": [
-        "lib/ptc_runner/kernel/analysis_assembly.ex",
-        "lib/ptc_runner/kernel/frozen_bundle.ex"
-      ],
-      "mass": 47,
-      "occurrences": [
-        {
-          "file": "lib/ptc_runner/kernel/analysis_assembly.ex",
-          "snippet": "ddaea5da8f8bf301f92af18ce67c12430c86c3e3c360801366cd5dfbaa5260c5"
-        },
-        {
-          "file": "lib/ptc_runner/kernel/frozen_bundle.ex",
-          "snippet": "ddaea5da8f8bf301f92af18ce67c12430c86c3e3c360801366cd5dfbaa5260c5"
-        }
-      ],
-      "type": "type_i"
-    },
-    "aeffdb58d813f11b42cdbd9fdd3aec32f7aecaab0daeb54b087e981e5766ae30": {
-      "describe": "type_i mass=44 lib/ptc_runner/kernel/analysis_assembly.ex:75 <-> lib/ptc_runner/kernel/attestation.ex:23 <-> lib/ptc_runner/kernel/frozen_bundle.ex:113",
-      "files": [
-        "lib/ptc_runner/kernel/analysis_assembly.ex",
-        "lib/ptc_runner/kernel/attestation.ex",
-        "lib/ptc_runner/kernel/frozen_bundle.ex"
-      ],
-      "mass": 44,
-      "occurrences": [
-        {
-          "file": "lib/ptc_runner/kernel/analysis_assembly.ex",
-          "snippet": "26b2298314e5b828a1eb8c075d29b02de47815ba5be87ec7ee79067af7cbdd6d"
-        },
-        {
-          "file": "lib/ptc_runner/kernel/attestation.ex",
-          "snippet": "26b2298314e5b828a1eb8c075d29b02de47815ba5be87ec7ee79067af7cbdd6d"
-        },
-        {
-          "file": "lib/ptc_runner/kernel/frozen_bundle.ex",
-          "snippet": "26b2298314e5b828a1eb8c075d29b02de47815ba5be87ec7ee79067af7cbdd6d"
         }
       ],
       "type": "type_i"

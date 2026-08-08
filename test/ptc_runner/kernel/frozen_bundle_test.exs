@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.FrozenBundleTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.Library
@@ -70,7 +71,7 @@ defmodule PtcRunner.Kernel.FrozenBundleTest do
   end
 
   test "concurrent first seals share one attestation key" do
-    storage_key = {FrozenBundle, :attestation_key}
+    storage_key = {Attestation, FrozenBundle}
     :persistent_term.erase(storage_key)
     parent = self()
     component = Library.component("kernel") |> elem(1)

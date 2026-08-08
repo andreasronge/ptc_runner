@@ -32,7 +32,8 @@ defmodule PtcRunner.Kernel.FrozenBundle do
   Hosts obtain bundles through `PtcRunner.Kernel.compile_bundle/1`; `seal/1`
   and `valid?/1` support the Kernel's construction boundary.
   """
-  import Bitwise, only: [bor: 2, bxor: 2]
+  alias PtcRunner.Kernel.Attestation
+
   @enforce_keys [:components, :component_ids, :hash, :prelude]
   defstruct [:components, :component_ids, :hash, :prelude, :attestation]
   @field_keys Enum.sort([:__struct__, :components, :component_ids, :hash, :prelude, :attestation])
@@ -99,59 +100,18 @@ defmodule PtcRunner.Kernel.FrozenBundle do
 
   @spec seal(t()) :: t()
   @doc "Attests a newly compiled bundle for later environment validation."
-  def seal(%__MODULE__{} = bundle), do: %{bundle | attestation: attest(bundle)}
+  def seal(%__MODULE__{} = bundle),
+    do: %{bundle | attestation: Attestation.attest(__MODULE__, payload(bundle))}
 
   @spec valid?(t()) :: boolean()
   @doc "Checks that a bundle still matches its in-VM attestation."
   def valid?(%__MODULE__{attestation: attestation} = bundle) when is_binary(attestation),
     do:
       Enum.sort(Map.keys(bundle)) == @field_keys and
-        secure_compare(attestation, attest(bundle))
+        Attestation.valid?(__MODULE__, payload(bundle), attestation)
 
   def valid?(_bundle), do: false
 
-  defp secure_compare(left, right) when byte_size(left) == byte_size(right) do
-    left
-    |> :binary.bin_to_list()
-    |> Enum.zip(:binary.bin_to_list(right))
-    |> Enum.reduce(0, fn {left_byte, right_byte}, difference ->
-      bor(difference, bxor(left_byte, right_byte))
-    end)
-    |> Kernel.==(0)
-  end
-
-  defp secure_compare(_left, _right), do: false
-
-  defp attest(bundle) do
-    :crypto.mac(:hmac, :sha256, key(), canonical(bundle))
-  end
-
-  defp canonical(bundle) do
-    :erlang.term_to_binary(
-      {bundle.components, bundle.component_ids, bundle.hash, bundle.prelude},
-      [:deterministic]
-    )
-  end
-
-  defp key do
-    storage_key = {__MODULE__, :attestation_key}
-
-    case :persistent_term.get(storage_key, :missing) do
-      :missing ->
-        :global.trans({storage_key, self()}, fn ->
-          case :persistent_term.get(storage_key, :missing) do
-            :missing ->
-              secret = :crypto.strong_rand_bytes(32)
-              :persistent_term.put(storage_key, secret)
-              secret
-
-            secret ->
-              secret
-          end
-        end)
-
-      secret ->
-        secret
-    end
-  end
+  defp payload(bundle),
+    do: {bundle.components, bundle.component_ids, bundle.hash, bundle.prelude}
 end
