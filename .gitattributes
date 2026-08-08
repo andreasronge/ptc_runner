@@ -1,0 +1,21 @@
+# Generated whole-tree fingerprints.
+#
+# `priv/semantic_build_projection.json` embeds a `source_closure_hash` over the
+# entire semantic source and dependency closure, so every branch that touches
+# any input rewrites the same lines. Two branches changing unrelated files still
+# collide there, every time.
+#
+# The file is derived entirely from other tracked inputs, so a textual merge of
+# those hashes is meaningless -- regenerating is the only correct resolution.
+# The `ptc-generated` driver therefore keeps one side verbatim so the merge or
+# rebase does not stop, and `mix precommit` catches the staleness through
+# `ptc.gen_semantic_revision --check`. Regenerate once at the end with
+# `mix ptc.regen`.
+#
+# Deliberately NOT applied to `.duplication-baseline.json`: regenerating that
+# file blesses whatever duplication the merged tree contains, which is a review
+# decision rather than a derivation. Resolve it by hand.
+#
+# Registered per clone by `scripts/install-hooks.sh`, since Git merge drivers
+# live in local config and cannot be committed.
+priv/semantic_build_projection.json merge=ptc-generated

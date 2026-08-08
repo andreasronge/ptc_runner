@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "aec0f9e566af9e3d843760f6c4daefa87c924eb8c5897b02de37b861d1c2a078",
+  "source_closure_hash": "a351ad793ca7d1fcd28fd2be01f062978a9055e81b934b4f56e59f33570caaf5",
   "sources": [
     {
       "bytes": 870,
@@ -1577,9 +1577,9 @@
       "sha256": "956cf2feb4d5f543e35892b47c9048fbca23181cbe2fe86e89c6e7c10603dd2b"
     },
     {
-      "bytes": 12323,
+      "bytes": 12596,
       "path": "mix.exs",
-      "sha256": "ea65b9a6801cfa5d549c8152c3274b940e8f582ff40060505d70693dece4c8d3"
+      "sha256": "a6eca527638a156dbf2389812dc6149268ff38da3df7cb19832d006af9818e54"
     },
     {
       "bytes": 117541,
