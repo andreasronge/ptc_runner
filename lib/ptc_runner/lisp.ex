@@ -288,8 +288,19 @@ defmodule PtcRunner.Lisp do
     `monotonic_time`, `system_time`; metadata `caller`,
     `program_bytes`, `signature_supplied?`.
   - `[:ptc_runner, :lisp, :execute, :stop]` — measurements `duration`,
-    `monotonic_time`, `result_bytes`, `prints_count`; metadata `caller`,
-    `program_bytes`, `signature_supplied?`, and semantic `outcome`.
+    `monotonic_time`, `result_bytes`, `prints_count`, `memory_bytes`,
+    `eval_reductions`; metadata `caller`, `program_bytes`,
+    `signature_supplied?`, and semantic `outcome`.
+
+    `duration` is in the emitter's native time unit, `result_bytes` is the
+    external size of the returned value, and `prints_count` the number of
+    prints. `memory_bytes` and `eval_reductions` are the sandbox child's own
+    figures, the same pair `step.usage` carries: `memory_bytes` is
+    `Process.info(child, :memory)` read the instant the result was ready — a
+    heap reading at return, not a peak and not RSS — and `eval_reductions` is
+    that child's reduction count. Both are `0` when a run failed before the
+    child reported, which is not the same as a run that used nothing, so read
+    `outcome` before charting either.
   - `[:ptc_runner, :lisp, :execute, :exception]` — measurements `duration`,
     `monotonic_time`; metadata `caller`, `program_bytes`,
     `signature_supplied?`, and `exception_class`. Exception reasons,
@@ -467,7 +478,7 @@ defmodule PtcRunner.Lisp do
 
     try do
       result = do_run(source, inner_opts)
-      {result_bytes, prints_count} = telemetry_result_stats(result)
+      stats = telemetry_result_stats(result)
       stopped_at = System.monotonic_time()
 
       :telemetry.execute(
@@ -475,8 +486,10 @@ defmodule PtcRunner.Lisp do
         %{
           duration: stopped_at - started_at,
           monotonic_time: stopped_at,
-          result_bytes: result_bytes,
-          prints_count: prints_count
+          result_bytes: stats.result_bytes,
+          prints_count: stats.prints_count,
+          memory_bytes: stats.memory_bytes,
+          eval_reductions: stats.eval_reductions
         },
         Map.put(metadata, :outcome, telemetry_outcome(result))
       )
@@ -630,13 +643,34 @@ defmodule PtcRunner.Lisp do
   end
 
   # Compute telemetry stop measurements from the run result.
+  #
+  # `Sandbox` already measures `memory_bytes` and `eval_reductions` and puts
+  # them in `step.usage`, so surfacing them costs nothing here and is the only
+  # way a host attached to the stop event can chart per-run heap. A run that
+  # failed before its child reported has no usage at all; those cases report
+  # `0` rather than a guess, and `outcome` is what distinguishes them.
   defp telemetry_result_stats({tag, %Step{} = step}) when tag in [:ok, :error] do
-    bytes = safe_term_bytes(Map.get(step, :return))
-    prints = safe_length(Map.get(step, :prints))
-    {bytes, prints}
+    usage = Map.get(step, :usage)
+
+    %{
+      result_bytes: safe_term_bytes(Map.get(step, :return)),
+      prints_count: safe_length(Map.get(step, :prints)),
+      memory_bytes: safe_usage(usage, :memory_bytes),
+      eval_reductions: safe_usage(usage, :eval_reductions)
+    }
   end
 
-  defp telemetry_result_stats(_other), do: {0, 0}
+  defp telemetry_result_stats(_other),
+    do: %{result_bytes: 0, prints_count: 0, memory_bytes: 0, eval_reductions: 0}
+
+  defp safe_usage(usage, key) when is_map(usage) do
+    case Map.get(usage, key) do
+      value when is_integer(value) and value >= 0 -> value
+      _absent_or_invalid -> 0
+    end
+  end
+
+  defp safe_usage(_usage, _key), do: 0
 
   defp safe_term_bytes(nil), do: 0
 

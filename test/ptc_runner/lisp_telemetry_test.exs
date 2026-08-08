@@ -44,12 +44,49 @@ defmodule PtcRunner.LispTelemetryTest do
              }
 
       assert Map.keys(stop_meas) |> Enum.sort() ==
-               [:duration, :monotonic_time, :prints_count, :result_bytes]
+               [
+                 :duration,
+                 :eval_reductions,
+                 :memory_bytes,
+                 :monotonic_time,
+                 :prints_count,
+                 :result_bytes
+               ]
 
       assert is_integer(stop_meas.duration)
       assert stop_meas.result_bytes > 0
       assert stop_meas.prints_count == 0
       assert stop_meta == Map.put(start_meta, :outcome, :ok)
+    end
+
+    test "stop carries the sandbox child's own heap and reduction figures" do
+      assert {:ok, step} = Lisp.run("(reduce + 0 (map (fn [x] (* x x)) (range 0 200)))")
+
+      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :stop], stop_meas, _meta}
+
+      # The same pair `step.usage` carries, not a second measurement of the
+      # same thing: a host charting per-run heap off this event and a host
+      # reading `usage` must never disagree.
+      assert stop_meas.memory_bytes == step.usage.memory_bytes
+      assert stop_meas.eval_reductions == step.usage.eval_reductions
+
+      assert stop_meas.memory_bytes > 0
+      assert stop_meas.eval_reductions > 0
+    end
+
+    test "a run that fails before its child reports still emits both measurements" do
+      # A parse failure never reaches the sandbox, so there is no usage to
+      # surface. The measurements must still be present and numeric — a handler
+      # that pattern-matched the map would otherwise break on the error path —
+      # and `outcome` is what tells a reader that `0` means "never measured"
+      # rather than "used nothing".
+      assert {:error, _step} = Lisp.run("(+ 1")
+
+      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :stop], stop_meas, stop_meta}
+
+      assert stop_meas.memory_bytes == 0
+      assert stop_meas.eval_reductions == 0
+      assert stop_meta.outcome != :ok
     end
 
     test "accepts only the direct, kernel, and repl caller taxonomy" do
