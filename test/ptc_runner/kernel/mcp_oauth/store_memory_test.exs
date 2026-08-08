@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Context
@@ -864,14 +866,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
 
   defp replace_grant(store, key, access_token, scopes \\ MapSet.new(["read"])),
     do: seed_grant(store, key, access_token, scopes)
-
-  defp assert_eventually(callback, attempts \\ 100)
-
-  defp assert_eventually(callback, attempts) when attempts > 0 do
-    if callback.(), do: :ok, else: assert_eventually(callback, attempts - 1)
-  end
-
-  defp assert_eventually(_callback, 0), do: flunk("condition did not become true")
 
   defp manager_monitor_count(store_pid, manager) do
     {:monitors, monitors} = Process.info(store_pid, :monitors)

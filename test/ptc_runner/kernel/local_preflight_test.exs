@@ -430,7 +430,7 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     # during setup must stop the callback starting, not merely change how its
     # result is reported afterwards.
     catalog = catalog(%{"custom" => [source: :custom, local_preflight: :unverified]})
-    prepared = prepared(catalog, ["custom"], [], %{"run_duration_ms" => 1})
+    prepared = prepared(catalog, ["custom"], [], %{"run_duration_ms" => 100})
     assert :ok = ProviderActivity.mark(prepared.provider_activity)
 
     assert {:error, %CommandDiagnostic{} = diagnostic} =
@@ -517,17 +517,56 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
 
   # A session whose operation clock is already spent. The step must refuse to
   # start a callback under it rather than report the timeout after the fact.
-  defp expired_session(prepared) do
+  #
+  # Setting up that state is itself racy, and no budget removes the race. The
+  # operation budget has to outlast `begin_operation/2`: it seals the deadline
+  # before the call and the session re-checks it on arrival, so a budget the
+  # round-trip outruns is already expired when the server reads it and the
+  # session is refused as `:provider_session_unavailable`. But the budget is
+  # also what the caller then waits out, so raising it only trades wall clock
+  # for a wider margin -- 1ms lost that race often enough to fail CI, and 100ms
+  # would still lose it under a long enough stall.
+  #
+  # So the margin is sized from measurement and the residue is retried rather
+  # than hoped away: the round-trip is 6us at the median and ~1ms at its worst
+  # under scheduler pressure, 100ms clears that by two orders of magnitude, and
+  # a setup that loses anyway starts over instead of failing the test. Only
+  # setup retries; the assertion runs once, against a session whose clock is
+  # genuinely spent.
+  @setup_attempts 5
+
+  defp expired_session(prepared, attempt \\ 1) do
     limits = prepared.request.package.limits
     {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
     on_exit(fn -> ProviderSession.close(session) end)
-    {:ok, session} = ProviderSession.begin_operation(session, :run)
-    burn_until(Deadline.expires_at(ProviderSession.run_deadline(session)) + 5)
-    session
+
+    case ProviderSession.begin_operation(session, :run) do
+      {:ok, begun} ->
+        wait_until(Deadline.expires_at(ProviderSession.run_deadline(begun)) + 5)
+        begun
+
+      {:error, :provider_session_unavailable} when attempt < @setup_attempts ->
+        expired_session(prepared, attempt + 1)
+
+      {:error, reason} ->
+        flunk("could not open an operation in #{@setup_attempts} attempts: #{inspect(reason)}")
+    end
   end
 
-  defp burn_until(target_ms) do
-    if System.monotonic_time(:millisecond) < target_ms, do: burn_until(target_ms), else: :ok
+  # Yields rather than spinning. `max_cases` is capped at the scheduler count
+  # precisely because sandbox children starve under load, so burning a core to
+  # watch a clock steals runtime from the tests running beside this one.
+  defp wait_until(target_ms) do
+    remaining_ms = target_ms - System.monotonic_time(:millisecond)
+
+    if remaining_ms > 0 do
+      receive do
+      after
+        remaining_ms -> wait_until(target_ms)
+      end
+    else
+      :ok
+    end
   end
 
   # A root registers itself from inside the callback's scope, which is the

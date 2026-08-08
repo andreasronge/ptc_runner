@@ -6,8 +6,11 @@
 #      other documentation-only changes run the ExDoc warnings gate.
 #   2. Otherwise: classify the affected contracts, run documentation first,
 #      then run the relevant root, Viewer, and launcher gates. Root changes
-#      invoke the canonical `mix prepush` alias for the upstream audit,
-#      Dialyzer, and unused-dependency check.
+#      invoke the canonical `mix prepush` alias for generated-artifact
+#      staleness, the upstream audit, Dialyzer, and the unused-dependency
+#      check. The staleness checks are shared with `precommit`, which an
+#      ordinary push does not run, so this hook is where a stale generated
+#      artifact is caught before CI rather than by it.
 #
 # Override:
 #   FORCE_FULL_PRE_PUSH=1 git push  → always run the full gate, even if
