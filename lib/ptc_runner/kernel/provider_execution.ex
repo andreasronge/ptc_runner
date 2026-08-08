@@ -506,6 +506,31 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # execution step above has succeeded, so no entry can report an occurrence
   # nothing reached.
   defp complete_connectivity(prepared, execution, registry, session, credentials) do
+    prepared
+    |> connectivity_result(execution, registry, session, credentials)
+    |> close_connectivity_session(session)
+  end
+
+  # The session closes here, inside the registry callback, exactly where a run
+  # and a check close theirs. Its committed closers belong to the runtime that
+  # acquired them — a connectivity acquisition commits real ones — so unwinding
+  # the registry first would leave a closer reaching for authority that is
+  # already gone. That is the owner's session-before-runtime ordering, and
+  # connectivity was the one completion that inverted it.
+  #
+  # A cleanup failure outranks the result it would otherwise hide, matching
+  # `close_owned_session/3`, which then finds the session already closed and
+  # drops only its tracker entry.
+  defp close_connectivity_session(result, session) do
+    cleanup = if ProviderSession.alive?(session), do: ProviderSession.close(session), else: :ok
+
+    case cleanup do
+      :ok -> result
+      {:error, _reason} -> {:error, cleanup_diagnostic()}
+    end
+  end
+
+  defp connectivity_result(prepared, execution, registry, session, credentials) do
     catalog = execution.catalog
 
     with true <- ProviderRegistry.valid?(registry),

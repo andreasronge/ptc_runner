@@ -582,10 +582,11 @@ copied into sealed execution limits and marked as effective-identity
 participants; the doctor-only value is excluded. `local_preflight_timeout_ms`
 bounds the whole audited-local step rather than one check: every applicable
 occurrence spends what remains of one anchored deadline, so a selection with
-many local checks cannot multiply it. This slice seals that policy
-before the later provider-lifecycle and doctor implementations consume the
-timeouts—it does not yet impose those deadlines. Any omitted name keeps its
-cataloged installed default.
+many local checks cannot multiply it. All four are now imposed rather than only
+sealed: `RunCoordinator.local_checks/3` anchors the audited-local deadline, and
+a provider session seals the selection-validation and connectivity budgets from
+its own limits, so naming an operation cannot widen either. Any omitted name
+keeps its cataloged installed default.
 
 Raising a ceiling here does not by itself lengthen any run. The manifest rule is
 unchanged for manifest-narrowable limits: an application may still only request

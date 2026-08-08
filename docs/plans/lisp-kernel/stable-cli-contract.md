@@ -1453,7 +1453,12 @@ fine; temporarily reachable and unsafe is not.
      the ordinary path the same sealed declarations, which is the
      `acquire/6`–`acquire_targets/7` unification and its own simplification
      slice, not a third check bolted on here. The exposure is bounded by a trust
-     boundary this plan already records — manifest input selects installed
+     boundary this plan already records, but two independent reviewers have now
+     named it, the second as a credential *disclosure* rather than a bookkeeping
+     gap: provider B reporting a name provider A declared is served A's value.
+     That framing is right, and it moves the unification from a tidy-up to the
+     highest-value remaining item on this path. The exposure is bounded by a
+     trust boundary this plan already records — manifest input selects installed
      aliases and never registers an implementation, so reaching it requires an
      in-process embedder-assembled catalog with a custom builder, the same case
      the audited-local trust rules record as accepted.
@@ -1636,6 +1641,49 @@ fine; temporarily reachable and unsafe is not.
    pair this document already records as unforceable — registry setup expiring,
    and a success arriving after its own cutoff — so the regression pins the
    distinction the choice rests on rather than the emission.
+
+   A second, heavier independent pass — the repository's own
+   `codex-independent-review` at `xhigh` against `origin/main`, which is what
+   `coding-agent-review-workflow.md` prescribes at a PR boundary — found six
+   more, again with no [P1]. It found things the lighter passes did not, which
+   is the argument for using the prescribed tool rather than a bare
+   `codex review`.
+
+   **Fixed: connectivity closed the registry before the session.** A run and a
+   check close their provider session inside the registry callback, and the
+   execution owner's own comment says why: committed closers belong to the
+   runtime that acquired them, so the runtime must outlive them. Connectivity
+   was the one completion that inverted it — `complete_connectivity/5` returned
+   the result, `with_registry/8` unwound the registry, and only then did
+   `close_owned_session/3` run the closers a connectivity *acquisition* had
+   committed. It is latent rather than currently broken, because no closer
+   reachable from a shipped connectivity recipe needs registry authority, and
+   that is also why no new regression pins it: the rendered outcome is identical
+   either way. The ordering is the invariant; the fix restores it.
+
+   **Fixed: two documentation contradictions.** The maintainer guide said the
+   REPL crosses phase 7 and omitted `doctor --connect`, which is exactly
+   backwards from what `RunCoordinator.local_checks/3` documents. The
+   host-configuration guide still said the four operational timeouts were sealed
+   but not yet imposed, which stopped being true when the sessions began
+   anchoring them.
+
+   **Recorded, not fixed: the OAuth refusal runs after application admission.**
+   The refusal is documented as sparing a doomed selection the cost of active
+   work, but `open_consumed_setup/5` — which admits optional provider
+   applications, and under `:command_vm` persistently sets application
+   environment and calls a startup that has no timeout — runs before it. A mixed
+   OAuth/LLM selection can therefore start an application it will never use.
+   Moving the refusal between marking and admission is a change to the shared
+   session-open sequence for all three operations, so it is its own slice rather
+   than a repair bolted onto this one.
+
+   **Recorded, not fixed: connect depends on run event-sink capacity.**
+   `ExecutionSessionOwner.init/1` opens run sinks unconditionally, so a manifest
+   narrowing `normal_event_bytes` fails a connect that would never write an
+   event — the regression above pins that behaviour rather than endorsing it.
+   Giving `:connect` a consume-without-sinks path is the fix and is a new
+   owner-side branch, so it is recorded here with its cause named.
 
    **Recorded, not fixed: `acquire_targets/7` trusts its plan.**
    `validate_plan/2` compares only the package digest, so a plan carrying the

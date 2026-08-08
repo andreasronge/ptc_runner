@@ -202,10 +202,13 @@ validation records `active_required`; `validate` reports
 `provider_declaration/selection_unverifiable` without running it.
 
 `RunCoordinator.local_checks/3` is the only entry to phase 7 and the only place
-an `audited_local` callback runs. Every command crosses it before provider
-activity is marked: run, `--check`, and the REPL from `ProviderExecution`
-immediately before the session opens, and default doctor directly, because it
-opens no session. Applicability is derived from the sealed
+an `audited_local` callback runs. Every active command crosses it before
+provider activity is marked: run, `--check`, and `doctor --connect` from
+`ProviderExecution` immediately before the session opens, and default doctor
+directly, because it opens no session. The REPL does not, and that is a stated
+limit rather than an omission: it builds providers through the direct-embedding
+registry rather than an execution owner, so it crosses neither this step nor the
+activity marker. Applicability is derived from the sealed
 prepared/catalog/services trio rather than supplied, the coordinator anchors one
 `local_preflight_timeout_ms` deadline that every applicable occurrence spends,
 and the result is only `:ok` or one catalogued diagnostic. There is no
