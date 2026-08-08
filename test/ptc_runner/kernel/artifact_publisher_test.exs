@@ -4,7 +4,9 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.PublicationHandle
+  alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.TraceLog
 
   @tag :tmp_dir
   test "normal publication reports partial ordering and path-free failures", %{tmp_dir: dir} do
@@ -46,6 +48,296 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   end
 
   @tag :tmp_dir
+  test "explicit normal and private trace destinations append across runs", %{tmp_dir: dir} do
+    for {policy, suffix} <- [{:normal, ".jsonl"}, {:private, ".private.jsonl"}] do
+      trace = Path.join(dir, "append#{suffix}")
+
+      line_counts =
+        for index <- 1..2 do
+          output = if policy == :private, do: Path.join(dir, "result-#{index}.json"), else: nil
+
+          {built, registry} =
+            build!(dir, "append-#{policy}-#{index}", policy, trace, nil, output)
+
+          assert {:ok, outcome} = RunBuilder.execute_built(built)
+
+          assert {:ok, report} =
+                   RunBuilder.publish_execution_report(outcome, built.publication_authority)
+
+          assert report.artifact_state["trace"] == "written"
+          assert :ok = PublicationAuthority.close(built.publication_authority)
+          assert :ok = ProviderRegistry.close(registry)
+
+          trace |> File.read!() |> String.split("\n", trim: true) |> length()
+        end
+
+      assert Enum.at(line_counts, 0) > 0
+      assert Enum.at(line_counts, 1) == 2 * Enum.at(line_counts, 0)
+      assert {:ok, %{mode: mode}} = File.stat(trace)
+      if policy == :private, do: assert(Bitwise.band(mode, 0o777) == 0o600)
+    end
+  end
+
+  @tag :tmp_dir
+  test "explicit trace appends reject malformed and oversized existing sources", %{tmp_dir: dir} do
+    for {name, source, reason} <- [
+          {"malformed", "not-json\n", :malformed_source},
+          {"oversized", String.duplicate("x", 8_000_001), :source_limit_exceeded}
+        ] do
+      trace = Path.join(dir, "#{name}.jsonl")
+      File.write!(trace, source)
+      {built, registry} = build!(dir, "append-#{name}", :normal, trace, nil, nil)
+
+      assert {:ok, outcome} = RunBuilder.execute_built(built)
+
+      assert {:error, report} =
+               RunBuilder.publish_execution_report(outcome, built.publication_authority)
+
+      assert report.error == {:trace, reason}
+      assert File.read!(trace) == source
+
+      assert :ok = PublicationAuthority.abort(built.publication_authority)
+      assert :ok = ProviderRegistry.close(registry)
+    end
+  end
+
+  @tag :tmp_dir
+  test "existing normal and private traces append without parent create access", %{tmp_dir: dir} do
+    for policy <- [:normal, :private] do
+      parent = Path.join(dir, "append-parent-#{policy}")
+      File.mkdir!(parent)
+      trace = Path.join(parent, "trace#{if(policy == :private, do: ".private", else: "")}.jsonl")
+      File.write!(trace, "")
+      if policy == :private, do: File.chmod!(trace, 0o600)
+      File.chmod!(parent, 0o500)
+
+      try do
+        output = if policy == :private, do: Path.join(dir, "#{policy}-result.json"), else: nil
+        {built, registry} = build!(dir, "append-parent-#{policy}-run", policy, trace, nil, output)
+
+        assert {:ok, outcome} = RunBuilder.execute_built(built)
+
+        assert {:ok, report} =
+                 RunBuilder.publish_execution_report(outcome, built.publication_authority)
+
+        assert report.artifact_state["trace"] == "written"
+
+        assert :ok = PublicationAuthority.close(built.publication_authority)
+        assert :ok = ProviderRegistry.close(registry)
+      after
+        File.chmod!(parent, 0o700)
+      end
+    end
+  end
+
+  @tag :tmp_dir
+  test "existing trace append uses the file durability boundary", %{tmp_dir: dir} do
+    parent = Path.join(dir, "execute-only-parent")
+    File.mkdir!(parent)
+    trace = Path.join(parent, "trace.jsonl")
+    File.write!(trace, "")
+    File.chmod!(parent, 0o111)
+
+    try do
+      {built, registry} = build!(dir, "execute-only-append", :normal, trace, nil, nil)
+
+      assert {:ok, outcome} = RunBuilder.execute_built(built)
+
+      assert {:ok, report} =
+               RunBuilder.publish_execution_report(outcome, built.publication_authority)
+
+      assert report.artifact_state["trace"] == "written"
+      assert :ok = PublicationAuthority.close(built.publication_authority)
+      assert :ok = ProviderRegistry.close(registry)
+    after
+      File.chmod!(parent, 0o700)
+    end
+  end
+
+  @tag :tmp_dir
+  test "existing trace append reports a post-sync fault as committed", %{tmp_dir: dir} do
+    trace = Path.join(dir, "post-sync.jsonl")
+    File.write!(trace, "")
+    {built, registry} = build!(dir, "post-sync-trace", :normal, trace, nil, nil)
+
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+
+    assert {:error, report} =
+             RunBuilder.publish_execution_report(outcome, built.publication_authority, %{
+               trace: fn
+                 :after_sync -> {:error, :sync_observed}
+                 _stage -> :ok
+               end
+             })
+
+    assert report.artifact_state["trace"] == "written"
+    assert report.error == {:trace, :publication_committed}
+    assert File.stat!(trace).size > 0
+
+    assert :ok = PublicationAuthority.close(built.publication_authority)
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
+  test "trace append lock failures are classified without leaking paths", %{tmp_dir: dir} do
+    trace = Path.join(dir, "lock-failure.jsonl")
+    {built, registry} = build!(dir, "lock-failure", :normal, trace, nil, nil)
+
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+
+    assert {:error, report} =
+             RunBuilder.publish_execution_report(outcome, built.publication_authority, %{
+               trace: fn
+                 :before_lock -> {:error, :lock_observed}
+                 _stage -> :ok
+               end
+             })
+
+    assert report.artifact_state["trace"] == "failed"
+    assert report.error == {:trace, :trace_persistence_failed}
+    refute inspect(report) =~ dir
+    refute File.exists?(trace)
+
+    assert :ok = PublicationAuthority.abort(built.publication_authority)
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
+  test "same-inode trace changes after validation fail closed", %{tmp_dir: dir} do
+    trace = Path.join(dir, "same-inode.jsonl")
+    File.write!(trace, "")
+    {built, registry} = build!(dir, "same-inode", :normal, trace, nil, nil)
+
+    hook = fn
+      :after_validation ->
+        {:ok, device} = File.open(trace, [:append, :binary])
+        :ok = IO.binwrite(device, "not-json\n")
+        :ok = File.close(device)
+        :ok
+
+      _stage ->
+        :ok
+    end
+
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+
+    assert {:error, report} =
+             RunBuilder.publish_execution_report(outcome, built.publication_authority, %{
+               trace: hook
+             })
+
+    assert report.error == {:trace, :source_changed}
+    assert report.artifact_state["trace"] == "failed"
+    assert File.read!(trace) == "not-json\n"
+    refute inspect(report) =~ dir
+
+    assert :ok = PublicationAuthority.abort(built.publication_authority)
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
+  test "retained trace publication serializes the direct append writer", %{tmp_dir: dir} do
+    trace = Path.join(dir, "serialized.jsonl")
+    {built, registry} = build!(dir, "serialized", :normal, trace, nil, nil)
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+    test = self()
+
+    direct_event = trace_event("direct", 1, "run-started")
+
+    hook = fn
+      :after_validation ->
+        task =
+          Task.async(fn ->
+            send(test, :direct_append_started)
+            TraceLog.append_jsonl(trace, [direct_event])
+          end)
+
+        receive do
+          :direct_append_started ->
+            send(test, {:direct_append_task, task})
+            :ok
+        after
+          1_000 -> {:error, :direct_append_not_started}
+        end
+
+      _stage ->
+        :ok
+    end
+
+    assert {:ok, report} =
+             RunBuilder.publish_execution_report(outcome, built.publication_authority, %{
+               trace: hook
+             })
+
+    assert report.artifact_state["trace"] == "written"
+    assert_receive {:direct_append_task, task}, 1_000
+    assert :ok = Task.await(task)
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, trace})
+    assert {:ok, %{"items" => items}} = TraceLog.query(trace_log, :list_runs, %{})
+    assert Enum.map(items, & &1["run_id"]) |> Enum.sort() == ["direct", "serialized"]
+
+    assert :ok = PublicationAuthority.close(built.publication_authority)
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
+  test "normal observations publish before an unencodable result", %{tmp_dir: dir} do
+    trace = Path.join(dir, "unencodable.jsonl")
+    inspection = Path.join(dir, "unencodable.inspection.jsonl")
+    output = Path.join(dir, "unencodable.json")
+
+    {built, registry} =
+      build!(
+        dir,
+        "unencodable",
+        :normal,
+        trace,
+        inspection,
+        output,
+        :policy,
+        ~S|#{1 2}|
+      )
+
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+
+    assert {:error, report} =
+             RunBuilder.publish_execution_report(outcome, built.publication_authority)
+
+    assert match?({:result, {:result_not_json_encodable, _kind}}, report.error)
+
+    assert report.artifact_state == %{
+             "trace" => "written",
+             "inspection" => "written",
+             "result" => "failed"
+           }
+
+    assert File.regular?(trace)
+    assert File.regular?(inspection)
+    refute File.exists?(output)
+
+    assert :ok = PublicationAuthority.abort(built.publication_authority)
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
+  test "projected publication errors retain only safe completed-result context", %{tmp_dir: dir} do
+    output = Path.join(dir, "result.json")
+    {built, registry} = build!(dir, "safe-context", :normal, nil, nil, output)
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+
+    File.write!(output, "attacker")
+
+    assert {:error,
+            {:result_persistence_failed, :destination_collision,
+             {:ok, %Result{value: "safe-context"}}}} =
+             RunBuilder.publish_execution(outcome, built.publication_authority)
+
+    File.rm!(output)
+    assert :ok = PublicationAuthority.abort(built.publication_authority)
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
   test "private publication materializes recovery before final requested result", %{tmp_dir: dir} do
     trace = Path.join(dir, "private.private.jsonl")
     inspection = Path.join(dir, "private.inspection.jsonl")
@@ -82,6 +374,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
                :before_write,
                :after_write,
                :after_sync,
+               :before_lock,
                :directory_sync,
                :after_publish
              ]
@@ -205,6 +498,42 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
     refute inspect(report) =~ dir
 
     assert :ok = PublicationAuthority.close(built.publication_authority)
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
+  test "private recovery rejects same-inode contents added before its write", %{tmp_dir: dir} do
+    output = Path.join(dir, "private-result.json")
+    {built, registry} = build!(dir, "private-recovery-tamper", :private, nil, nil, output)
+    recovery = PublicationAuthority.handles(built.publication_authority) |> Map.fetch!(:recovery)
+    recovery_path = PublicationHandle.path(recovery)
+
+    hook = fn
+      :before_write ->
+        {:ok, device} = File.open(recovery_path, [:append, :binary])
+        :ok = IO.binwrite(device, "tampered")
+        :ok = File.close(device)
+        :ok
+
+      _stage ->
+        :ok
+    end
+
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+
+    assert {:error, report} =
+             RunBuilder.publish_execution_report(outcome, built.publication_authority, %{
+               result: hook
+             })
+
+    assert report.error == :recovery_cleanup_failed
+    assert report.artifact_state["result"] == "failed"
+    assert File.read!(recovery_path) == "tampered"
+    refute File.exists?(output)
+    refute inspect(report) =~ dir
+
+    assert :ok = PublicationAuthority.close(built.publication_authority)
+    File.rm!(recovery_path)
     assert :ok = ProviderRegistry.close(registry)
   end
 
@@ -359,10 +688,20 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
     assert :ok = ProviderRegistry.close(registry)
   end
 
-  defp build!(dir, name, policy, trace, inspection, output, result_destination \\ :policy) do
+  defp build!(
+         dir,
+         name,
+         policy,
+         trace,
+         inspection,
+         output,
+         result_destination \\ :policy,
+         body \\ nil
+       ) do
     root = Path.join(dir, name)
     File.mkdir!(root)
-    File.write!(Path.join(root, "main.clj"), "(ns main) (defn run [_] (return \"#{name}\"))")
+    expression = body || "\"#{name}\""
+    File.write!(Path.join(root, "main.clj"), "(ns main) (defn run [_] (return #{expression}))")
 
     manifest = %{
       "version" => 1,
@@ -394,6 +733,18 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
   defp maybe_put(opts, _key, _value, false), do: opts
   defp maybe_put(opts, key, value, true), do: Keyword.put(opts, key, value)
+
+  defp trace_event(run_id, sequence, type) do
+    %{
+      "schema_version" => 1,
+      "run_id" => run_id,
+      "trace_id" => "trace-#{run_id}",
+      "sequence" => sequence,
+      "timestamp" => "2026-07-12T12:00:00Z",
+      "type" => type,
+      "data" => %{}
+    }
+  end
 
   defp received_stages do
     receive do

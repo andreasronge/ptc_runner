@@ -32,6 +32,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.TracePublication
 
   @default_source_bytes 8_000_000
@@ -302,6 +303,52 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   def append_lock_identity(_path), do: {:error, :source_unavailable}
+
+  @doc false
+  @spec append_reservation_path(binary()) :: {:ok, binary()} | {:error, :source_unavailable}
+  def append_reservation_path(path) when is_binary(path) do
+    with {:ok, path} <- PrivateDirectory.anchor(path),
+         {:ok, scope} <- append_path_lock_scope(path),
+         {:ok, lock_root} <- append_lock_root() do
+      {:ok, Path.join(lock_root, "reservation-" <> append_lock_name(scope))}
+    else
+      _ -> {:error, :source_unavailable}
+    end
+  end
+
+  def append_reservation_path(_path), do: {:error, :source_unavailable}
+
+  @doc false
+  @spec with_append_authority_lock(binary(), (-> result)) :: result when result: term()
+  def with_append_authority_lock(path, callback)
+      when is_binary(path) and is_function(callback, 0) do
+    case PrivateDirectory.anchor(path) do
+      {:ok, path} ->
+        :global.trans({{__MODULE__, {:append, path}}, self()}, fn ->
+          with_append_authority_lock_at(path, callback)
+        end)
+
+      _other ->
+        {:error, :source_unavailable}
+    end
+  end
+
+  def with_append_authority_lock(_path, _callback), do: {:error, :source_unavailable}
+
+  defp with_append_authority_lock_at(path, callback) do
+    with_append_lock(path, fn ->
+      case File.lstat(path, time: :posix) do
+        {:ok, %File.Stat{type: :regular}} ->
+          with_inode_append_lock(path, fn _locked_stat -> callback.() end)
+
+        {:error, :enoent} ->
+          callback.()
+
+        _other ->
+          {:error, :source_unavailable}
+      end
+    end)
+  end
 
   defp with_append_lock(path, callback, attempts \\ 3)
 
@@ -2361,9 +2408,20 @@ defmodule PtcRunner.Kernel.TraceLog do
         normalize: &normalize/1,
         validate: &validate_loaded(&1, @default_source_bytes),
         encode: &encode_jsonl(&1, @default_source_bytes),
+        read: &PublicationHandle.read/2,
+        decode: &decode_jsonl/1,
+        within_limit: &within_append_limit/2,
+        lock: &with_append_authority_lock/2,
         validate_path: &validate_append_path/2,
         fault: &publication_fault/2
       }
     )
+  end
+
+  defp within_append_limit(existing_source, encoded)
+       when is_binary(existing_source) and is_binary(encoded) do
+    if byte_size(existing_source) + byte_size(encoded) <= @default_source_bytes,
+      do: :ok,
+      else: {:error, :source_limit_exceeded}
   end
 end

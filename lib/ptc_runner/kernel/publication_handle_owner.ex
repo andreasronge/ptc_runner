@@ -19,6 +19,12 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
   def reserve_visible(owner, path, kind, mode),
     do: GenServer.call(owner, {:reserve_visible, path, kind, mode}, :infinity)
 
+  @doc false
+  @spec reserve_append(pid(), binary(), :trace, non_neg_integer()) ::
+          {:ok, PublicationHandle.t()} | {:error, atom()}
+  def reserve_append(owner, path, kind, mode),
+    do: GenServer.call(owner, {:reserve_append, path, kind, mode}, :infinity)
+
   @spec call(pid(), term()) :: term()
   def call(owner, operation), do: GenServer.call(owner, {:operation, operation}, :infinity)
 
@@ -47,6 +53,16 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
   end
 
   def handle_call({:reserve_visible, _path, _kind, _mode}, _from, state),
+    do: {:reply, {:error, :destination_unavailable}, state}
+
+  def handle_call({:reserve_append, path, :trace, mode}, _from, %{handle: nil} = state) do
+    case PublicationHandle.reserve_append_direct(path, :trace, mode, self()) do
+      {:ok, handle} -> {:reply, {:ok, handle}, %{state | handle: handle}}
+      {:error, _reason} = error -> {:stop, :normal, error, state}
+    end
+  end
+
+  def handle_call({:reserve_append, _path, _kind, _mode}, _from, state),
     do: {:reply, {:error, :destination_unavailable}, state}
 
   def handle_call({:operation, operation}, _from, %{handle: handle} = state) do
@@ -92,8 +108,14 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
 
   defp operation_reply(operation, handle, state) do
     case PublicationHandle.owner_execute(handle, operation) do
-      :close -> {:stop, :normal, :ok, %{state | handle: nil}}
-      result -> {:reply, result, state}
+      {:updated, %PublicationHandle{} = updated_handle} ->
+        {:reply, :ok, %{state | handle: updated_handle}}
+
+      :close ->
+        {:stop, :normal, :ok, %{state | handle: nil}}
+
+      result ->
+        {:reply, result, state}
     end
   end
 

@@ -157,7 +157,7 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
       end)
 
     caller_ref = Process.monitor(caller)
-    assert_receive {:authority, authority}
+    assert_receive {:authority, authority}, 1_000
 
     assert {:ok, lease} = PublicationAuthority.claim(authority)
     send(caller, :release)
@@ -202,6 +202,72 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
              )
 
     assert :ok = PublicationAuthority.abort(second)
+  end
+
+  @tag :tmp_dir
+  test "trace reservations remain exclusive across target existence changes", %{tmp_dir: dir} do
+    target = Path.join(dir, "changing-trace.jsonl")
+
+    assert {:ok, missing_first} =
+             PublicationAuthority.authorize(
+               "missing-first",
+               [trace: target],
+               :normal,
+               :normal
+             )
+
+    File.write!(target, "")
+
+    assert {:error, :destination_exists} =
+             PublicationAuthority.authorize(
+               "missing-second",
+               [trace: target],
+               :normal,
+               :normal
+             )
+
+    File.rm!(target)
+    assert :ok = PublicationAuthority.abort(missing_first)
+
+    File.write!(target, "")
+
+    assert {:ok, existing_first} =
+             PublicationAuthority.authorize(
+               "existing-first",
+               [trace: target],
+               :normal,
+               :normal
+             )
+
+    File.rm!(target)
+
+    assert {:error, :destination_exists} =
+             PublicationAuthority.authorize(
+               "existing-second",
+               [trace: target],
+               :normal,
+               :normal
+             )
+
+    assert :ok = PublicationAuthority.abort(existing_first)
+  end
+
+  @tag :tmp_dir
+  test "failed append-handle initialization preserves an existing trace", %{tmp_dir: dir} do
+    target = Path.join(dir, "preserved-trace.jsonl")
+    source = "existing\n"
+    File.write!(target, source)
+
+    assert {:error, :forced_append_initialization} =
+             PublicationHandle.reserve_append_direct(
+               target,
+               :trace,
+               0,
+               self(),
+               fn :after_open -> {:error, :forced_append_initialization} end
+             )
+
+    assert File.read!(target) == source
   end
 
   @tag :tmp_dir
@@ -256,7 +322,7 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
       end)
 
     creator_ref = Process.monitor(creator)
-    assert_receive :authorized
+    assert_receive :authorized, 1_000
     assert_receive {:DOWN, ^creator_ref, :process, ^creator, :normal}
     refute File.exists?(target)
 

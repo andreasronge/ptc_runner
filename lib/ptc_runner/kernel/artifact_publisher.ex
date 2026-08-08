@@ -53,6 +53,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
 
     case result do
       {:error, report} ->
+        report = attach_failure_result(report, evidence)
         cleanup_unpublished(authority, report)
         {:error, report}
 
@@ -112,8 +113,8 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
   defp publish_normal(evidence, authority, report, hooks, value) do
     case recovery_handle(authority) do
       nil ->
-        with {:ok, encoded, report} <- prepare_result(authority, value, :normal, report),
-             {:ok, report} <- publish_observations(evidence, authority, report, hooks),
+        with {:ok, report} <- publish_observations(evidence, authority, report, hooks),
+             {:ok, encoded, report} <- prepare_result(authority, value, :normal, report),
              {:ok, report} <- publish_normal_result(authority, report, encoded, hooks),
              {:ok, report} <- result_execution(evidence, report) do
           {:ok, Map.put(report, :result, evidence.result)}
@@ -540,6 +541,28 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
   end
 
   defp hook(hooks, key), do: Map.get(hooks, key)
+
+  defp attach_failure_result(report, evidence) do
+    if failure_result_required?(report) do
+      Map.put(report, :result, safe_result(evidence.result, evidence.result_class))
+    else
+      report
+    end
+  end
+
+  defp failure_result_required?(%{failed: failed, artifact_state: states} = report) do
+    failed != [] or
+      Map.get(states, "result") in ["recovery_written", "finalization_uncertain"] or
+      publication_error?(Map.get(report, :error))
+  end
+
+  defp publication_error?({key, _reason}) when key in @artifact_names, do: true
+  defp publication_error?(_error), do: false
+
+  defp safe_result({:ok, %Result{} = result}, :private),
+    do: {:ok, %Result{result | value: :redacted}}
+
+  defp safe_result(result, _class), do: result
 
   defp cleanup_unpublished(authority, report) do
     handles = PublicationAuthority.handles(authority)

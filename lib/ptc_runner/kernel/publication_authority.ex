@@ -86,13 +86,14 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
     with true <- valid_run_ref?(run_ref, true),
          true <- Keyword.keyword?(opts),
          private? <- event_policy == :private or provider_class == :private_inspection,
+         trace_mode <- if(Keyword.has_key?(opts, :trace_dir), do: :exclusive, else: :append),
          :ok <- validate_option_keys(opts),
          {:ok, targets} <- targets(run_ref, opts, private?),
          :ok <- validate_result_class(private?, targets) do
       lifecycle = live_lifecycle()
       {:ok, claim_owner} = PublicationClaimOwner.start(lifecycle, self())
 
-      case reserve_targets(run_ref, targets, private?, claim_owner) do
+      case reserve_targets(run_ref, targets, private?, claim_owner, trace_mode) do
         {:ok, handles} ->
           authority = %__MODULE__{
             trace: handles[:trace],
@@ -601,17 +602,12 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
 
   defp validate_result_class(_private?, _targets), do: :ok
 
-  defp reserve_targets(run_ref, targets, private?, claim_owner) do
-    case reserve_optional(
-           targets.trace,
-           :trace,
-           if(private?, do: 0o600, else: 0o644),
-           claim_owner
-         ) do
+  defp reserve_targets(run_ref, targets, private?, claim_owner, trace_mode) do
+    case reserve_trace(targets.trace, private?, trace_mode, claim_owner) do
       {:ok, trace} ->
         case reserve_optional(targets.inspect, :inspection, 0o600, claim_owner) do
           {:ok, inspect} ->
-            reserve_result_targets(run_ref, targets, trace, inspect, claim_owner)
+            reserve_result_targets(run_ref, targets, trace, inspect, claim_owner, private?)
 
           {:error, reason} ->
             cleanup_reserved([trace])
@@ -623,8 +619,8 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
     end
   end
 
-  defp reserve_result_targets(run_ref, targets, trace, inspect, claim_owner) do
-    case reserve_optional(targets.output, :result, 0o644, claim_owner) do
+  defp reserve_result_targets(run_ref, targets, trace, inspect, claim_owner, private?) do
+    case reserve_optional(targets.output, :result, if(private?, do: 0o600, else: 0), claim_owner) do
       {:ok, output} ->
         case reserve_private_result(run_ref, targets.private_output, claim_owner) do
           {:ok, private_output} ->
@@ -650,6 +646,21 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
       {:error, :destination_exists} -> {:error, :destination_exists}
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp reserve_trace(nil, _private?, _trace_mode, _claim_owner), do: {:ok, nil}
+
+  defp reserve_trace(path, private?, :append, claim_owner) do
+    mode = if(private?, do: 0o600, else: 0)
+
+    case PublicationHandle.reserve_append_for(path, :trace, mode, claim_owner) do
+      {:ok, handle} -> register_handle(claim_owner, handle)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp reserve_trace(path, private?, :exclusive, claim_owner) do
+    reserve_optional(path, :trace, if(private?, do: 0o600, else: 0), claim_owner)
   end
 
   defp reserve_private_result(_run_ref, nil, _claim_owner), do: {:ok, nil}

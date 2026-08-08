@@ -1193,6 +1193,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def publish_execution(outcome, authority) do
     case publish_execution_report(outcome, authority) do
       {:ok, %{result: result, result_class: class}} -> execution_result(result, class)
+      {:error, %{error: error, result: result}} -> publication_error(error, result)
       {:error, %{error: error}} -> publication_error(error)
       {:error, _report} -> {:error, :invalid_execution_outcome}
     end
@@ -1218,6 +1219,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
     do: {:error, {persistence_failure(stage), reason}}
 
   defp publication_error(error), do: {:error, error}
+
+  defp publication_error({stage, reason}, result) when stage in [:trace, :inspection, :result],
+    do: {:error, {persistence_failure(stage), reason, result}}
+
+  defp publication_error(error, result), do: {:error, {error, result}}
 
   defp build_binding(config, authority, entry_source, result_projection) do
     with {:ok, event_identity} <- EventSink.identity(config.event_sink),

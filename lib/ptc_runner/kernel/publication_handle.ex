@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.PublicationHandleOwner
+  alias PtcRunner.Kernel.TraceLog
 
   @type identity :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
   @type kind :: :trace | :inspection | :result | :recovery
@@ -20,6 +21,9 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     :staging_directory,
     :staging_path,
     :visible?,
+    :append?,
+    :expected_size,
+    :expected_digest,
     :owner
   ]
   defstruct @enforce_keys
@@ -37,6 +41,9 @@ defmodule PtcRunner.Kernel.PublicationHandle do
           staging_directory: binary() | nil,
           staging_path: binary(),
           visible?: boolean(),
+          append?: boolean(),
+          expected_size: non_neg_integer() | nil,
+          expected_digest: binary() | nil,
           owner: pid()
         }
 
@@ -131,6 +138,68 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   def reserve_visible_direct(_path, _kind, _mode, _owner), do: {:error, :invalid_destination}
 
+  @doc false
+  @spec reserve_append_direct(binary(), :trace, non_neg_integer(), pid()) ::
+          {:ok, t()} | {:error, atom()}
+  def reserve_append_direct(path, :trace, mode, owner)
+      when is_binary(path) and is_integer(mode) and mode >= 0 and is_pid(owner) do
+    reserve_append_direct(path, :trace, mode, owner, nil)
+  end
+
+  def reserve_append_direct(_path, _kind, _mode, _owner), do: {:error, :invalid_destination}
+
+  @doc false
+  @spec reserve_append_direct(
+          binary(),
+          :trace,
+          non_neg_integer(),
+          pid(),
+          nil | (atom() -> term())
+        ) ::
+          {:ok, t()} | {:error, atom()}
+  def reserve_append_direct(path, :trace, mode, owner, fault_hook)
+      when is_binary(path) and is_integer(mode) and mode >= 0 and is_pid(owner) and
+             (is_nil(fault_hook) or is_function(fault_hook, 1)) do
+    with :ok <- valid_path(path),
+         {:ok, path} <- PrivateDirectory.anchor(path),
+         :ok <- preflight_append(path, mode),
+         {:ok, parent, parent_identity} <- parent_identity(path) do
+      case File.lstat(path) do
+        {:error, :enoent} ->
+          reserve_staged(path, :trace, mode, parent, parent_identity, owner, true)
+
+        {:ok, %File.Stat{type: :regular}} ->
+          reserve_append_file(path, :trace, mode, parent, parent_identity, owner, fault_hook)
+
+        {:ok, _stat} ->
+          {:error, :invalid_destination}
+
+        {:error, _reason} ->
+          {:error, :destination_unavailable}
+      end
+    else
+      {:error, _reason} = error -> normalize_error(error)
+    end
+  rescue
+    _exception -> {:error, :destination_unavailable}
+  end
+
+  def reserve_append_direct(_path, _kind, _mode, _owner, _fault_hook),
+    do: {:error, :invalid_destination}
+
+  @doc false
+  @spec reserve_append_for(binary(), kind(), non_neg_integer(), pid()) ::
+          {:ok, t()} | {:error, atom()}
+  def reserve_append_for(path, kind, mode, controller)
+      when is_binary(path) and kind == :trace and is_integer(mode) and mode >= 0 and
+             is_pid(controller) do
+    with {:ok, owner} <- PublicationHandleOwner.start(controller) do
+      PublicationHandleOwner.reserve_append(owner, path, kind, mode)
+    end
+  end
+
+  def reserve_append_for(_path, _kind, _mode, _controller), do: {:error, :invalid_destination}
+
   @spec valid?(term()) :: boolean()
   def valid?(%__MODULE__{} = handle) do
     handle.kind in [:trace, :inspection, :result, :recovery] and
@@ -141,7 +210,10 @@ defmodule PtcRunner.Kernel.PublicationHandle do
       valid_path(handle.reservation_path) == :ok and
       valid_identity?(handle.reservation_identity) and
       is_integer(handle.mode) and handle.mode >= 0 and
-      is_binary(handle.staging_path) and is_boolean(handle.visible?) and is_pid(handle.owner)
+      is_binary(handle.staging_path) and is_boolean(handle.visible?) and
+      is_boolean(handle.append?) and
+      valid_content_attestation?(handle.expected_size, handle.expected_digest) and
+      is_pid(handle.owner)
   end
 
   def valid?(_handle), do: false
@@ -156,12 +228,38 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   def write(%__MODULE__{} = handle, bytes), do: call_owner(handle, {:write, bytes})
 
   @doc false
+  @spec write_if_unchanged(t(), binary(), iodata()) :: :ok | {:error, atom()}
+  def write_if_unchanged(%__MODULE__{} = handle, expected_source, bytes)
+      when is_binary(expected_source),
+      do: call_owner(handle, {:write_if_unchanged, expected_source, bytes})
+
+  @doc false
+  @spec read(t(), pos_integer()) :: {:ok, binary()} | {:error, atom()}
+  def read(%__MODULE__{} = handle, max_bytes) when is_integer(max_bytes) and max_bytes > 0,
+    do: call_owner(handle, {:read, max_bytes})
+
+  def read(_handle, _max_bytes), do: {:error, :invalid_destination}
+
+  @doc false
+  @spec append?(t()) :: boolean()
+  def append?(%__MODULE__{append?: append?}), do: append?
+
+  @doc false
+  @spec visible?(t()) :: boolean()
+  def visible?(%__MODULE__{visible?: visible?}), do: visible?
+
+  @doc false
   def owner_execute(%__MODULE__{owner: owner} = handle, operation) when owner == self(),
     do: direct_execute(handle, operation)
 
   def owner_execute(_handle, _operation), do: {:error, :publication_collision}
 
   defp direct_execute(handle, {:write, bytes}), do: direct_write(handle, bytes)
+
+  defp direct_execute(handle, {:write_if_unchanged, expected_source, bytes}),
+    do: direct_write_if_unchanged(handle, expected_source, bytes)
+
+  defp direct_execute(handle, {:read, max_bytes}), do: direct_read(handle, max_bytes)
   defp direct_execute(handle, :sync), do: direct_sync(handle)
   defp direct_execute(handle, :sync_and_retain), do: direct_sync_and_retain(handle)
 
@@ -188,16 +286,131 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   end
 
   defp direct_write(%__MODULE__{} = handle, bytes) do
-    with :ok <- direct_verify(handle),
-         {:ok, 0} <- :file.position(handle.device, :bof),
+    with {:ok, bytes} <- binary_iodata(bytes),
+         :ok <- direct_verify(handle),
+         true <- not recovery_already_written?(handle),
+         {:ok, _position} <-
+           :file.position(handle.device, if(handle.append?, do: :eof, else: :bof)),
+         :ok <- truncate_recovery(handle),
          :ok <- :file.write(handle.device, bytes) do
-      :ok
+      write_result(handle, bytes)
     else
+      false -> {:error, :publication_collision}
       {:error, :publication_collision} = error -> error
       _other -> {:error, :publication_failed}
     end
   rescue
     _exception -> {:error, :publication_failed}
+  end
+
+  defp direct_write_if_unchanged(
+         %__MODULE__{append?: true} = handle,
+         expected_source,
+         bytes
+       )
+       when is_binary(expected_source) do
+    with {:ok, bytes} <- binary_iodata(bytes),
+         :ok <- direct_verify(handle),
+         :ok <- source_matches_device(handle, expected_source),
+         {:ok, _position} <- :file.position(handle.device, :eof),
+         :ok <- :file.write(handle.device, bytes) do
+      :ok
+    else
+      {:error, :publication_collision} = error -> error
+      {:error, :source_changed} = error -> error
+      _other -> {:error, :publication_failed}
+    end
+  rescue
+    _exception -> {:error, :publication_failed}
+  end
+
+  defp direct_write_if_unchanged(_handle, _expected_source, _bytes),
+    do: {:error, :invalid_destination}
+
+  defp write_result(%__MODULE__{kind: :recovery} = handle, bytes) do
+    {:updated,
+     %{
+       handle
+       | expected_size: byte_size(bytes),
+         expected_digest: :crypto.hash(:sha256, bytes)
+     }}
+  end
+
+  defp write_result(_handle, _bytes), do: :ok
+
+  defp binary_iodata(bytes) do
+    {:ok, IO.iodata_to_binary(bytes)}
+  rescue
+    _exception -> {:error, :publication_failed}
+  end
+
+  defp recovery_already_written?(%__MODULE__{kind: :recovery, expected_size: size}),
+    do: size != 0
+
+  defp recovery_already_written?(_handle), do: false
+
+  defp truncate_recovery(%__MODULE__{kind: :recovery, device: device}),
+    do: :file.truncate(device)
+
+  defp truncate_recovery(_handle), do: :ok
+
+  defp direct_read(%__MODULE__{visible?: false} = handle, _max_bytes) do
+    with :ok <- direct_verify(handle), do: {:ok, ""}
+  end
+
+  defp direct_read(%__MODULE__{} = handle, max_bytes) do
+    with :ok <- direct_verify(handle),
+         {:ok, 0} <- :file.position(handle.device, :bof),
+         result <- :file.read(handle.device, max_bytes + 1),
+         {:ok, source} <- bounded_read(result, max_bytes),
+         :ok <- direct_verify(handle) do
+      {:ok, source}
+    else
+      {:error, :publication_collision} = error -> error
+      {:error, :source_limit_exceeded} = error -> error
+      _other -> {:error, :source_unavailable}
+    end
+  rescue
+    _exception -> {:error, :source_unavailable}
+  end
+
+  defp bounded_read(:eof, _max_bytes), do: {:ok, ""}
+
+  defp bounded_read({:ok, source}, max_bytes) when byte_size(source) <= max_bytes,
+    do: {:ok, source}
+
+  defp bounded_read(_result, _max_bytes), do: {:error, :source_limit_exceeded}
+
+  defp source_matches_device(handle, expected_source) do
+    with {:ok, size} <- device_size(handle.device),
+         true <- size == byte_size(expected_source),
+         {:ok, 0} <- :file.position(handle.device, :bof),
+         {:ok, current_source} <- read_exact(handle.device, size),
+         true <- current_source == expected_source,
+         :ok <- direct_verify(handle),
+         {:ok, final_size} <- device_size(handle.device),
+         true <- final_size == byte_size(expected_source) do
+      :ok
+    else
+      false -> {:error, :source_changed}
+      _other -> {:error, :source_changed}
+    end
+  end
+
+  defp read_exact(_device, 0), do: {:ok, ""}
+
+  defp read_exact(device, size) when is_integer(size) and size > 0 do
+    case :file.read(device, size) do
+      {:ok, source} when byte_size(source) == size -> {:ok, source}
+      _other -> {:error, :source_changed}
+    end
+  end
+
+  defp device_size(device) do
+    case :file.read_file_info(device, time: :posix) do
+      {:ok, info} -> {:ok, File.Stat.from_record(info).size}
+      _other -> {:error, :source_changed}
+    end
   end
 
   @spec sync(t()) :: :ok | {:error, atom()}
@@ -235,7 +448,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     with :ok <- direct_verify(handle),
          :ok <- sync_device(handle.device),
          :ok <- direct_verify(handle),
-         result <- sync_directory(handle.parent, fault_hook),
+         result <- sync_directory_if_required(handle, fault_hook),
          :ok <- maybe_retain_directory_failure(result, retain_on_directory_failure?),
          :ok <- direct_verify(handle) do
       :ok
@@ -260,6 +473,12 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   defp maybe_retain_directory_failure(result, _retain?), do: result
 
+  defp sync_directory_if_required(%__MODULE__{append?: true, visible?: true}, _fault_hook),
+    do: :ok
+
+  defp sync_directory_if_required(%__MODULE__{parent: parent}, fault_hook),
+    do: sync_directory(parent, fault_hook)
+
   @spec verify(t()) :: :ok | {:error, atom()}
   def verify(%__MODULE__{} = handle), do: call_owner(handle, :verify)
 
@@ -273,7 +492,8 @@ defmodule PtcRunner.Kernel.PublicationHandle do
          :ok <- same_identity(current, handle.file_identity),
          {:ok, opened} <- device_identity(handle.device),
          true <- opened == handle.file_identity,
-         :ok <- target_state(handle) do
+         :ok <- target_state(handle),
+         :ok <- verify_attested_contents(handle) do
       :ok
     else
       _other -> {:error, :publication_collision}
@@ -281,6 +501,26 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   rescue
     _exception -> {:error, :publication_collision}
   end
+
+  defp verify_attested_contents(%__MODULE__{
+         kind: :recovery,
+         expected_size: expected_size,
+         expected_digest: expected_digest,
+         device: device
+       })
+       when is_integer(expected_size) and expected_size >= 0 and is_binary(expected_digest) do
+    with {:ok, size} <- device_size(device),
+         true <- size == expected_size,
+         {:ok, 0} <- :file.position(device, :bof),
+         {:ok, contents} <- read_exact(device, expected_size),
+         true <- :crypto.hash(:sha256, contents) == expected_digest do
+      :ok
+    else
+      _other -> {:error, :publication_collision}
+    end
+  end
+
+  defp verify_attested_contents(_handle), do: :ok
 
   @spec publish(t()) :: :ok | {:error, atom()}
   def publish(%__MODULE__{} = handle), do: call_owner(handle, :publish)
@@ -304,6 +544,9 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   @spec remove(t()) :: :ok | {:error, atom()}
   def remove(%__MODULE__{} = handle), do: call_owner(handle, :remove)
+
+  defp direct_remove(%__MODULE__{append?: true, visible?: true} = handle),
+    do: direct_release(handle)
 
   defp direct_remove(%__MODULE__{} = handle) do
     case File.lstat(handle.staging_path) do
@@ -405,6 +648,9 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   @doc false
   @spec release(t()) :: :ok | {:error, atom()}
   def release(%__MODULE__{} = handle), do: call_owner(handle, :release)
+
+  defp direct_unlink(%__MODULE__{append?: true, visible?: true} = handle),
+    do: direct_release(handle)
 
   defp direct_unlink(%__MODULE__{visible?: true} = handle) do
     with :ok <- direct_verify(handle),
@@ -509,8 +755,15 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   def recovery_reachable?(_handle), do: false
 
-  defp reserve_staged(path, kind, mode, parent, parent_identity, owner) do
-    with_reservation(path, parent_identity, fn reservation_path, reservation_identity ->
+  defp reserve_staged(path, kind, mode, parent, parent_identity, owner, append? \\ false) do
+    reservation =
+      if append? do
+        fn fun -> with_append_reservation(path, fun) end
+      else
+        fn fun -> with_reservation(path, parent_identity, fun) end
+      end
+
+    reservation.(fn reservation_path, reservation_identity ->
       {staging_directory, staging_path} = PrivateDirectory.temporary_sibling(path, "artifact")
 
       with :ok <- ensure_target_absent(path),
@@ -520,11 +773,11 @@ defmodule PtcRunner.Kernel.PublicationHandle do
                path,
                kind,
                mode,
-               parent,
-               parent_identity,
+               {parent, parent_identity},
                {reservation_path, reservation_identity},
                {staging_directory, staging_path, device},
-               owner
+               owner,
+               append?
              ) do
           {:ok, _handle} = success ->
             success
@@ -545,11 +798,11 @@ defmodule PtcRunner.Kernel.PublicationHandle do
          path,
          kind,
          mode,
-         parent,
-         parent_identity,
+         {parent, parent_identity},
          {reservation_path, reservation_identity},
          {staging_directory, staging_path, device},
-         owner
+         owner,
+         append?
        ) do
     with {:ok, file_identity} <- device_identity(device),
          :ok <- ensure_path_identity(staging_path, file_identity),
@@ -570,6 +823,9 @@ defmodule PtcRunner.Kernel.PublicationHandle do
          staging_directory: staging_directory,
          staging_path: staging_path,
          visible?: false,
+         append?: append?,
+         expected_size: nil,
+         expected_digest: nil,
          owner: owner
        }}
     else
@@ -635,6 +891,114 @@ defmodule PtcRunner.Kernel.PublicationHandle do
          staging_directory: nil,
          staging_path: path,
          visible?: true,
+         append?: false,
+         expected_size: recovery_expected_size(kind),
+         expected_digest: recovery_expected_digest(kind),
+         owner: owner
+       }}
+    else
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :destination_unavailable}
+    end
+  end
+
+  defp reserve_append_file(path, kind, mode, parent, parent_identity, owner, fault_hook) do
+    with_append_reservation(path, fn reservation_path, reservation_identity ->
+      case open_append(path) do
+        {:ok, device} ->
+          reserve_open_append(
+            device,
+            {path, kind, mode},
+            {parent, parent_identity},
+            {reservation_path, reservation_identity},
+            owner,
+            fault_hook
+          )
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end)
+  end
+
+  defp reserve_open_append(
+         device,
+         {path, kind, mode},
+         {parent, parent_identity},
+         {reservation_path, reservation_identity},
+         owner,
+         fault_hook
+       ) do
+    case append_initialization_fault(fault_hook) do
+      :ok ->
+        append_handle(
+          path,
+          kind,
+          mode,
+          parent,
+          parent_identity,
+          {reservation_path, reservation_identity},
+          device,
+          owner
+        )
+        |> keep_or_close_open_append(device)
+
+      {:error, _reason} = error ->
+        close_open_append(device, error)
+    end
+  end
+
+  defp keep_or_close_open_append({:ok, _handle} = success, _device), do: success
+
+  defp keep_or_close_open_append({:error, _reason} = error, device),
+    do: close_open_append(device, error)
+
+  defp close_open_append(device, error) do
+    close_open_visible(device)
+    error
+  end
+
+  defp append_initialization_fault(nil), do: :ok
+
+  defp append_initialization_fault(fault_hook) do
+    case fault_hook.(:after_open) do
+      :ok -> :ok
+      {:error, _reason} = error -> error
+      _other -> {:error, :destination_unavailable}
+    end
+  end
+
+  defp append_handle(
+         path,
+         kind,
+         mode,
+         parent,
+         parent_identity,
+         {reservation_path, reservation_identity},
+         device,
+         owner
+       ) do
+    with {:ok, file_identity} <- device_identity(device),
+         :ok <- ensure_path_identity(path, file_identity),
+         :ok <- restrict(path, mode),
+         :ok <- ensure_path_identity(path, file_identity) do
+      {:ok,
+       %__MODULE__{
+         kind: kind,
+         path: path,
+         parent: parent,
+         parent_identity: parent_identity,
+         file_identity: file_identity,
+         reservation_path: reservation_path,
+         reservation_identity: reservation_identity,
+         device: device,
+         mode: mode,
+         staging_directory: nil,
+         staging_path: path,
+         visible?: true,
+         append?: true,
+         expected_size: nil,
+         expected_digest: nil,
          owner: owner
        }}
     else
@@ -651,16 +1015,34 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   defp cleanup_open_visible(device, path), do: cleanup_open_file(device, path)
 
+  defp close_open_visible(device) do
+    _ = :file.close(device)
+    :ok
+  end
+
   defp with_reservation(path, parent_identity, fun) do
-    case create_reservation(path, parent_identity) do
+    with_reservation_path(reservation_path(path, parent_identity), Path.dirname(path), fun)
+  end
+
+  defp with_append_reservation(path, fun) do
+    case TraceLog.append_reservation_path(path) do
+      {:ok, reservation_path} ->
+        with_reservation_path(reservation_path, Path.dirname(reservation_path), fun)
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp with_reservation_path(reservation_path, sync_parent, fun) do
+    case create_reservation(reservation_path) do
       {:ok, reservation_path, reservation_identity} ->
         case fun.(reservation_path, reservation_identity) do
           {:ok, _handle} = success ->
             success
 
           {:error, _reason} = error ->
-            _ =
-              cleanup_open_reservation(reservation_path, reservation_identity, Path.dirname(path))
+            _ = cleanup_open_reservation(reservation_path, reservation_identity, sync_parent)
 
             error
         end
@@ -670,9 +1052,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     end
   end
 
-  defp create_reservation(path, parent_identity) do
-    reservation_path = reservation_path(path, parent_identity)
-
+  defp create_reservation(reservation_path) do
     case PrivateDirectory.create(reservation_path) do
       :ok ->
         with {:ok, stat} <- File.lstat(reservation_path, time: :posix),
@@ -692,6 +1072,37 @@ defmodule PtcRunner.Kernel.PublicationHandle do
         end
     end
   end
+
+  defp preflight_append(path, mode) when mode in [0, 0o600] do
+    case File.lstat(path) do
+      {:error, :enoent} ->
+        PrivateDirectory.preflight(path)
+
+      {:ok, %File.Stat{type: :regular}} when mode == 0 ->
+        PrivateDirectory.preflight_writable_file(path)
+
+      {:ok, %File.Stat{type: :regular, uid: owner, mode: file_mode}} ->
+        with {:ok, uid} <- PrivateDirectory.preflight_owner(path),
+             true <- owner in [0, uid] and Bitwise.band(file_mode, 0o777) == 0o600,
+             :ok <- PrivateDirectory.preflight_writable_file(path) do
+          :ok
+        else
+          false -> {:error, :destination_unavailable}
+          {:error, _reason} -> {:error, :destination_unavailable}
+        end
+
+      {:ok, _stat} ->
+        {:error, :invalid_destination}
+
+      {:error, _reason} ->
+        {:error, :destination_unavailable}
+    end
+  end
+
+  defp preflight_append(path, _mode), do: PrivateDirectory.preflight(path)
+
+  defp open_append(path),
+    do: :file.open(String.to_charlist(path), [:read, :append, :binary, :raw])
 
   defp reservation_path(path, parent_identity) do
     digest_key = {parent_identity, PrivateDirectory.casefold_name(Path.basename(path))}
@@ -751,7 +1162,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   end
 
   defp open_exclusive(path) do
-    case :file.open(String.to_charlist(path), [:write, :binary, :raw, :exclusive]) do
+    case :file.open(String.to_charlist(path), [:read, :write, :binary, :raw, :exclusive]) do
       {:ok, device} -> {:ok, device}
       {:error, :eexist} -> {:error, :destination_exists}
       {:error, _reason} -> {:error, :destination_unavailable}
@@ -806,6 +1217,20 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   defp valid_identity?(_identity), do: false
 
+  defp valid_content_attestation?(nil, nil), do: true
+
+  defp valid_content_attestation?(size, digest)
+       when is_integer(size) and size >= 0 and is_binary(digest),
+       do: byte_size(digest) == 32
+
+  defp valid_content_attestation?(_size, _digest), do: false
+
+  defp recovery_expected_size(:recovery), do: 0
+  defp recovery_expected_size(_kind), do: nil
+
+  defp recovery_expected_digest(:recovery), do: :crypto.hash(:sha256, "")
+  defp recovery_expected_digest(_kind), do: nil
+
   defp valid_path(path) do
     cond do
       not String.valid?(path) -> {:error, :invalid_destination}
@@ -816,9 +1241,13 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   end
 
   defp restrict(path, mode) do
-    case File.chmod(path, mode) do
-      :ok -> :ok
-      {:error, _reason} -> {:error, :destination_unavailable}
+    if mode == 0 do
+      :ok
+    else
+      case File.chmod(path, mode) do
+        :ok -> :ok
+        {:error, _reason} -> {:error, :destination_unavailable}
+      end
     end
   end
 
@@ -860,7 +1289,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
       {:ok, %{type: :directory} = stat} ->
         with :ok <- same_identity(stat, handle.reservation_identity),
              :ok <- File.rmdir(handle.reservation_path),
-             :ok <- sync_directory(handle.parent) do
+             :ok <- sync_directory(Path.dirname(handle.reservation_path)) do
           :ok
         else
           _other -> {:error, :publication_cleanup_failed}

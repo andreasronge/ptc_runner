@@ -58,6 +58,12 @@ These are design constraints, not aspirational metrics:
 10. Each checkpoint deletes the transitional path it replaces once all callers
     and tests use the replacement. Do not defer known-dead integration
     scaffolding to the final acceptance slice.
+11. Every entry point classified as transitional has an exact production-caller
+    inventory enforced by CI/Xref before its cutover begins. The gate fails if
+    the caller set grows. Migrating the final caller deletes the entry point,
+    its caller inventory, and superseded tests in the same commit. APIs retained
+    intentionally are recorded as retained and are not placed on this deletion
+    path.
 
 ## Existing foundation
 
@@ -2063,6 +2069,11 @@ bind caller/claimant lifetime and fail closed on identity, collision, symlink,
 permission, and replacement races; execution configurations, outcomes, and
 public envelopes carry no destination paths.
 
+`TraceLog.append_jsonl/3` remains the retained admin-selected JSONL append
+primitive and is not a transitional Checkpoint D publication shim. The REPL's
+current use of that primitive may change during its Checkpoint E cutover, but
+that caller migration does not by itself imply deletion of the retained API.
+
 **Gate:** collision, symlink, permissions, partial failure, cleanup failure,
 and private no-discard tests pass without provider activity before destination
 authorization. Normal and private `--trace-dir` fixtures publish and discover
@@ -2099,6 +2110,9 @@ runtime-activation bootstrap exception, `.env` ordering, listener expiry, and
 `--check` ownership parity forward from this slice. This section retains the broader
 command and REPL cutover after destination publication is complete:
 
+- add the CI/Xref caller inventory for every remaining transitional REPL entry
+  point before changing its callers, reject any caller-set growth, and delete
+  each inventory together with its entry point when the final caller migrates;
 - finish shared `help`, `version`, `validate`, `models`, `doctor`, `run`, and
   `init` rendering and dispatch, and prove `models` invokes no local callback
   once it has one — the slice-7 gate named it before it existed;
