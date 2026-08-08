@@ -43,15 +43,16 @@ all issues before proceeding:
 
 1. `mix precommit` - format, compile (warnings-as-errors), credo, schema, spec, tests
 2. `mix prepush` - dialyzer, unused-deps
-3. `mix release.smoke` - deterministic root release checks, root + MCP soak,
-   `mix hex.build` package-content verification, schema/spec/bench baselines,
-   `mix docs --warnings-as-errors`, and the sibling `mcp_server` release smoke
+3. `MIX_ENV=prod mix hex.build` - package-content verification
+4. `MIX_ENV=dev mix docs --warnings-as-errors` - documentation gate
+5. `mix bench.check` - deterministic eval-reduction baseline
+6. `PTC_SOAK_ITERATIONS=3000 mix soak` - memory-leak soak suite
 
-`mix release.smoke` publishes nothing and supersedes the standalone `mix docs` /
-`mix hex.build` steps (set `PTC_SOAK_ITERATIONS` to tune soak duration; default
-`3000`). After the release commit lands on `main`, run the `Release` workflow
-manually with `skip_llm: true` as a CI dry run before tagging - see
-`docs/RELEASING.md`.
+None of these publish anything. Step 6 is the same suite the scheduled `Soak`
+workflow runs; run it locally at release time because the schedule may not have
+fired since the last change. After the release commit lands on `main`, run the
+`Release` workflow manually with `skip_llm: true` as a CI dry run before tagging
+- see `docs/RELEASING.md`.
 
 ## Step 4: Version bump
 

@@ -7,11 +7,16 @@ default; opt in with `--only soak`.
 ## Run
 
 ```bash
-mix test --only soak
+mix soak
 
 # Crank iteration count for real soak runs
-PTC_SOAK_ITERATIONS=10000 mix test --only soak
+PTC_SOAK_ITERATIONS=10000 mix soak
 ```
+
+`mix soak` is an alias for `mix test --only soak`. The scheduled `Soak`
+workflow (`.github/workflows/soak.yml`) runs it weekly, and on manual dispatch,
+at `PTC_SOAK_ITERATIONS=3000`. It is deliberately not a per-PR gate: the suite
+is long-running and its signal is a trend across runs.
 
 ## Tests
 

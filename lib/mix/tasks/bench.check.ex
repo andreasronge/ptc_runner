@@ -8,7 +8,10 @@ defmodule Mix.Tasks.Bench.Check do
 
   This task gates `eval_reductions` collected from the sandbox child process.
   Child `memory_bytes` and wall-clock duration are reported as informational
-  metrics; memory regressions are covered by the release soak tests.
+  metrics: runner timing noise is too large for a gate, and a single per-call
+  `memory_bytes` sample cannot separate a leak from one-shot warmup. Repeated
+  churn growth is the soak suite's job — `mix soak`, run weekly by the scheduled
+  `Soak` workflow.
   """
 
   use Mix.Task

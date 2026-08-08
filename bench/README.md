@@ -35,5 +35,10 @@ path; the scripts re-add them so `:tprof` / `:msacc` load.
 - Each `Lisp.run/2` spawns its own sandbox process, so `:tprof` is run
   with `report: :total` to aggregate across them.
 - `mix bench.check` gates child-process eval reductions. Child memory and
-  wall-clock timings stay informational; memory regressions are covered by the
-  release soak tests, and hosted runner timing noise is too large for a gate.
+  wall-clock timings stay informational: hosted runner timing noise is too large
+  for a gate, and a single per-call `memory_bytes` sample cannot separate a leak
+  from one-shot warmup.
+- Repeated-churn memory growth is the soak suite's job, not `bench.check`'s. Run
+  it with `mix soak` (`test/soak/`); the scheduled `Soak` workflow runs it weekly
+  at `PTC_SOAK_ITERATIONS=3000`. It currently covers `Lisp.run/2` and
+  `Prelude.Compiler.compile/1` — not the long-lived owner lifecycles.
