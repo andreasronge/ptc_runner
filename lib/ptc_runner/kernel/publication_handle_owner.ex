@@ -50,49 +50,65 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
     do: {:reply, {:error, :destination_unavailable}, state}
 
   def handle_call({:operation, operation}, _from, %{handle: handle} = state) do
-    case {operation, handle} do
-      {:sync_and_retain, %PublicationHandle{kind: :recovery}} ->
-        case PublicationHandle.owner_execute(handle, :sync_and_retain) do
-          :ok ->
-            {:reply, :ok, %{state | preserve_on_cleanup?: true}}
-
-          {:preserve, {:error, _reason} = error} ->
-            {:reply, error, %{state | preserve_on_cleanup?: true}}
-
-          result ->
-            {:reply, result, state}
-        end
-
-      {:sync_and_retain, _handle} ->
-        {:reply, {:error, :invalid_destination}, state}
-
-      {:release, _handle} ->
-        case PublicationHandle.owner_execute(handle, :release) do
-          :ok -> {:stop, :normal, :ok, %{state | handle: nil}}
-          {:error, _reason} = error -> {:stop, :normal, error, %{state | handle: nil}}
-        end
-
-      {:discard, _handle} when state.preserve_on_cleanup? ->
-        _ = PublicationHandle.owner_execute(handle, :close)
-        {:reply, :ok, %{state | handle: nil}}
-
-      {:discard, _handle} ->
-        result = PublicationHandle.owner_execute(handle, :remove)
-        _ = PublicationHandle.owner_execute(handle, :close)
-        {:reply, result, %{state | handle: nil}}
-
-      _operation ->
-        case PublicationHandle.owner_execute(handle, operation) do
-          :close -> {:stop, :normal, :ok, %{state | handle: nil}}
-          result -> {:reply, result, state}
-        end
-    end
+    operation_reply(operation, handle, state)
   rescue
     _exception -> {:reply, {:error, :publication_failed}, state}
   end
 
   def handle_call({:operation, _operation}, _from, state),
     do: {:reply, {:error, :publication_cleanup_failed}, state}
+
+  defp operation_reply(:sync_and_retain, %PublicationHandle{kind: :recovery} = handle, state),
+    do: sync_and_retain_reply(handle, state, :sync_and_retain)
+
+  defp operation_reply(
+         {:sync_and_retain, fault_hook},
+         %PublicationHandle{kind: :recovery} = handle,
+         state
+       )
+       when is_nil(fault_hook) or is_function(fault_hook, 1),
+       do: sync_and_retain_reply(handle, state, {:sync_and_retain, fault_hook})
+
+  defp operation_reply(:sync_and_retain, _handle, state),
+    do: {:reply, {:error, :invalid_destination}, state}
+
+  defp operation_reply(:release, handle, state) do
+    case PublicationHandle.owner_execute(handle, :release) do
+      :ok -> {:stop, :normal, :ok, %{state | handle: nil}}
+      {:error, _reason} = error -> {:stop, :normal, error, %{state | handle: nil}}
+    end
+  end
+
+  defp operation_reply(:discard, handle, %{preserve_on_cleanup?: true} = state) do
+    _ = PublicationHandle.owner_execute(handle, :close)
+    {:reply, :ok, %{state | handle: nil}}
+  end
+
+  defp operation_reply(:discard, handle, state) do
+    result = PublicationHandle.owner_execute(handle, :remove)
+    _ = PublicationHandle.owner_execute(handle, :close)
+    {:reply, result, %{state | handle: nil}}
+  end
+
+  defp operation_reply(operation, handle, state) do
+    case PublicationHandle.owner_execute(handle, operation) do
+      :close -> {:stop, :normal, :ok, %{state | handle: nil}}
+      result -> {:reply, result, state}
+    end
+  end
+
+  defp sync_and_retain_reply(handle, state, operation) do
+    case PublicationHandle.owner_execute(handle, operation) do
+      :ok ->
+        {:reply, :ok, %{state | preserve_on_cleanup?: true}}
+
+      {:preserve, {:error, _reason} = error} ->
+        {:reply, error, %{state | preserve_on_cleanup?: true}}
+
+      result ->
+        {:reply, result, state}
+    end
+  end
 
   @impl GenServer
   def handle_info({:DOWN, ref, :process, _controller, _reason}, %{controller_ref: ref} = state) do

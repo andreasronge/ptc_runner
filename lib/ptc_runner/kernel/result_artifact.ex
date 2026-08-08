@@ -45,6 +45,7 @@ defmodule PtcRunner.Kernel.ResultArtifact do
           | :result_destination_unsafe
           | :file_sync_failed
           | :directory_sync_failed
+          | :publication_collision
           | {:result_not_json_encodable, atom()}
           | :invalid_result_destination
           | :private_result_requires_private_destination
@@ -112,7 +113,7 @@ defmodule PtcRunner.Kernel.ResultArtifact do
          :ok <- persistence_fault(fault_hook, :before_write),
          :ok <- PublicationHandle.write(handle, encoded),
          :ok <- persistence_fault(fault_hook, :after_write),
-         :ok <- sync_after_write(handle, destination),
+         :ok <- sync_after_write(handle, destination, fault_hook),
          result <- publish_after_sync(handle, fault_hook) do
       result
     else
@@ -125,7 +126,8 @@ defmodule PtcRunner.Kernel.ResultArtifact do
       {:error, :private_result_requires_private_destination} = error ->
         error
 
-      {:error, reason} when reason in [:file_sync_failed, :directory_sync_failed] ->
+      {:error, reason}
+      when reason in [:file_sync_failed, :directory_sync_failed, :publication_collision] ->
         {:error, reason}
 
       {:error, _reason} ->
@@ -152,14 +154,15 @@ defmodule PtcRunner.Kernel.ResultArtifact do
          :ok <- persistence_fault(fault_hook, :before_write),
          :ok <- PublicationHandle.write(handle, encoded),
          :ok <- persistence_fault(fault_hook, :after_write),
-         :ok <- sync_after_write(handle, destination),
+         :ok <- sync_after_write(handle, destination, fault_hook),
          result <- publish_after_sync(handle, fault_hook) do
       result
     else
       false ->
         {:error, :invalid_result_destination}
 
-      {:error, reason} when reason in [:file_sync_failed, :directory_sync_failed] ->
+      {:error, reason}
+      when reason in [:file_sync_failed, :directory_sync_failed, :publication_collision] ->
         {:error, reason}
 
       {:error, _reason} ->
@@ -310,10 +313,10 @@ defmodule PtcRunner.Kernel.ResultArtifact do
     end
   end
 
-  defp sync_after_write(%PublicationHandle{kind: :recovery} = handle, :private),
-    do: PublicationHandle.sync_and_retain(handle)
+  defp sync_after_write(%PublicationHandle{kind: :recovery} = handle, :private, fault_hook),
+    do: PublicationHandle.sync_and_retain(handle, fault_hook)
 
-  defp sync_after_write(handle, _destination), do: PublicationHandle.sync(handle)
+  defp sync_after_write(handle, _destination, _fault_hook), do: PublicationHandle.sync(handle)
 
   defp persisted_failure(%PublicationHandle{kind: :recovery} = handle, reason) do
     state =

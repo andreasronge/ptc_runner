@@ -285,8 +285,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       when is_binary(path) and is_boolean(private?) do
     with :ok <- validate_append_path(path, private?),
          {:ok, path} <- PrivateDirectory.anchor(path),
-         :ok <- preflight_trace_destination(path, private?),
-         :ok <- preflight_append_lock() do
+         :ok <- preflight_trace_destination(path, private?) do
       :ok
     else
       {:error, reason} when is_atom(reason) -> {:error, reason}
@@ -373,13 +372,6 @@ defmodule PtcRunner.Kernel.TraceLog do
 
       nil ->
         {:error, :source_unavailable}
-    end
-  end
-
-  defp preflight_append_lock do
-    with {:ok, _root} <- append_lock_root(),
-         {:ok, _shell, _lock_kind, _lock_executable} <- append_lock_executables() do
-      :ok
     end
   end
 

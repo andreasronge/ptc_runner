@@ -164,6 +164,10 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   defp direct_execute(handle, {:write, bytes}), do: direct_write(handle, bytes)
   defp direct_execute(handle, :sync), do: direct_sync(handle)
   defp direct_execute(handle, :sync_and_retain), do: direct_sync_and_retain(handle)
+
+  defp direct_execute(handle, {:sync_and_retain, fault_hook}),
+    do: direct_sync_and_retain(handle, fault_hook)
+
   defp direct_execute(handle, :release), do: direct_release(handle)
   defp direct_execute(handle, :verify), do: direct_verify(handle)
   defp direct_execute(handle, :publish), do: direct_publish(handle)
@@ -189,6 +193,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
          :ok <- :file.write(handle.device, bytes) do
       :ok
     else
+      {:error, :publication_collision} = error -> error
       _other -> {:error, :publication_failed}
     end
   rescue
@@ -206,24 +211,37 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   def sync_and_retain(_handle), do: {:error, :invalid_destination}
 
+  @doc false
+  @spec sync_and_retain(t(), nil | (atom() -> term())) :: :ok | {:error, atom()}
+  def sync_and_retain(%__MODULE__{kind: :recovery} = handle, fault_hook)
+      when is_nil(fault_hook) or is_function(fault_hook, 1),
+      do: call_owner(handle, {:sync_and_retain, fault_hook})
+
+  def sync_and_retain(_handle, _fault_hook), do: {:error, :invalid_destination}
+
   defp direct_sync(%__MODULE__{} = handle) do
-    direct_sync(handle, false)
+    direct_sync(handle, false, nil)
   end
 
   defp direct_sync_and_retain(%__MODULE__{} = handle) do
-    direct_sync(handle, true)
+    direct_sync(handle, true, nil)
   end
 
-  defp direct_sync(%__MODULE__{} = handle, retain_on_directory_failure?) do
+  defp direct_sync_and_retain(%__MODULE__{} = handle, fault_hook) do
+    direct_sync(handle, true, fault_hook)
+  end
+
+  defp direct_sync(%__MODULE__{} = handle, retain_on_directory_failure?, fault_hook) do
     with :ok <- direct_verify(handle),
          :ok <- sync_device(handle.device),
          :ok <- direct_verify(handle),
-         result <- sync_directory(handle.parent),
+         result <- sync_directory(handle.parent, fault_hook),
          :ok <- maybe_retain_directory_failure(result, retain_on_directory_failure?),
          :ok <- direct_verify(handle) do
       :ok
     else
       {:preserve, {:error, _reason} = error} -> {:preserve, error}
+      {:error, :publication_collision} = error -> error
       {:error, :file_sync_failed} = error -> error
       {:error, :directory_sync_failed} = error -> error
       _other -> {:error, :publication_failed}
@@ -277,6 +295,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     else
       {:ok, _stat} -> {:error, :publication_collision}
       {:error, :eexist} -> {:error, :publication_collision}
+      {:error, :publication_collision} = error -> error
       _other -> {:error, :publication_failed}
     end
   rescue
@@ -354,6 +373,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     else
       {:ok, _stat} -> {:error, :publication_collision}
       {:error, :eexist} -> {:error, :publication_collision}
+      {:error, :publication_collision} = error -> error
       _other -> {:error, :publication_failed}
     end
   rescue
@@ -891,7 +911,19 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     end
   end
 
-  defp sync_directory(directory) do
+  defp sync_directory(directory), do: sync_directory(directory, nil)
+
+  defp sync_directory(directory, fault_hook) when is_function(fault_hook, 1) do
+    case fault_hook.(:directory_sync) do
+      :ok -> sync_directory(directory, nil)
+      {:error, reason} when is_atom(reason) -> {:error, reason}
+      _other -> {:error, :directory_sync_failed}
+    end
+  rescue
+    _exception -> {:error, :directory_sync_failed}
+  end
+
+  defp sync_directory(directory, nil) do
     case :file.open(String.to_charlist(directory), [:directory, :read, :raw]) do
       {:ok, device} ->
         try do

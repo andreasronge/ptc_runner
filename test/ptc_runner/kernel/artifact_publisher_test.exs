@@ -82,6 +82,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
                :before_write,
                :after_write,
                :after_sync,
+               :directory_sync,
                :after_publish
              ]
              |> Enum.sort()
@@ -120,6 +121,53 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
 
     assert :ok = PublicationAuthority.abort(built.publication_authority)
     File.rm!(recovery_path)
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
+  test "late destination races report a path-free destination collision", %{tmp_dir: dir} do
+    trace = Path.join(dir, "late.jsonl")
+    {built, registry} = build!(dir, "late-trace-collision", :normal, trace, nil, nil)
+    File.write!(trace, "attacker")
+
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+
+    assert {:error, report} =
+             RunBuilder.publish_execution_report(outcome, built.publication_authority)
+
+    assert report.error == {:trace, :destination_collision}
+    assert report.artifact_state["trace"] == "failed"
+    refute inspect(report) =~ dir
+
+    File.rm!(trace)
+    assert :ok = PublicationAuthority.abort(built.publication_authority)
+    assert :ok = ProviderRegistry.close(registry)
+
+    output = Path.join(dir, "late-result.json")
+    {built, registry} = build!(dir, "late-result-collision", :normal, nil, nil, output)
+
+    hook = fn
+      :after_sync ->
+        File.write!(output, "attacker")
+        :ok
+
+      _stage ->
+        :ok
+    end
+
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+
+    assert {:error, report} =
+             RunBuilder.publish_execution_report(outcome, built.publication_authority, %{
+               result: hook
+             })
+
+    assert report.error == {:result, :destination_collision}
+    assert report.artifact_state["result"] == "failed"
+    refute inspect(report) =~ dir
+
+    File.rm!(output)
+    assert :ok = PublicationAuthority.abort(built.publication_authority)
     assert :ok = ProviderRegistry.close(registry)
   end
 
@@ -189,6 +237,38 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
 
     assert :ok = PublicationAuthority.close(built.publication_authority)
     assert File.regular?(recovery_path)
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
+  test "a directory-sync failure reports failed but retains complete recovery", %{tmp_dir: dir} do
+    output = Path.join(dir, "private-directory-sync.json")
+    {built, registry} = build!(dir, "private-directory-sync", :private, nil, nil, output)
+    recovery = PublicationAuthority.handles(built.publication_authority) |> Map.fetch!(:recovery)
+    recovery_path = PublicationHandle.path(recovery)
+
+    hook = fn
+      :directory_sync -> {:error, :directory_sync_failed}
+      _stage -> :ok
+    end
+
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+
+    assert {:error, report} =
+             RunBuilder.publish_execution_report(outcome, built.publication_authority, %{
+               result: hook
+             })
+
+    assert report.error == {:result, :directory_sync_failed}
+    assert report.artifact_state["result"] == "failed"
+    assert report.failed == [:result]
+    assert File.regular?(recovery_path)
+    refute File.exists?(output)
+    refute inspect(report) =~ dir
+
+    assert :ok = PublicationAuthority.abort(built.publication_authority)
+    assert File.regular?(recovery_path)
+    File.rm!(recovery_path)
     assert :ok = ProviderRegistry.close(registry)
   end
 

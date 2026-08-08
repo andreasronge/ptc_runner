@@ -645,11 +645,13 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
     end
 
     @tag :tmp_dir
-    test "rejects a trace destination when no append locking utility is available", %{
+    test "trace preflight does not require an append locking utility", %{
       tmp_dir: dir
     } do
       original_path = System.get_env("PATH")
       sh = System.find_executable("sh") || flunk("sh is required for this test")
+      id = System.find_executable("id") || flunk("id is required for this test")
+      mkdir = System.find_executable("mkdir") || flunk("mkdir is required for this test")
       fake_bin = Path.join(dir, "shell-only-bin")
 
       on_exit(fn ->
@@ -658,9 +660,11 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       File.mkdir!(fake_bin)
       File.ln_s!(sh, Path.join(fake_bin, "sh"))
+      File.ln_s!(id, Path.join(fake_bin, "id"))
+      File.ln_s!(mkdir, Path.join(fake_bin, "mkdir"))
       System.put_env("PATH", fake_bin)
 
-      assert {:error, :source_unavailable} =
+      assert :ok =
                TraceLog.preflight_destination(Path.join(dir, "run.jsonl"), false)
     end
 
@@ -676,7 +680,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.ln_s!(victim, legacy_root)
       File.ln_s!(victim, authority_root)
 
-      assert "{:error, :source_unavailable}" =
+      assert ":ok" =
                trace_preflight_in_fresh_runtime(dir, Path.join(dir, "run.jsonl"))
 
       assert Bitwise.band(File.stat!(victim).mode, 0o777) == 0o755

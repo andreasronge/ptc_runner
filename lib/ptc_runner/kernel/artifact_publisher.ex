@@ -263,6 +263,13 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
       {:error, {:finalization_uncertain, reason}} ->
         {:error, with_error(report, :finalization_uncertain, :result, reason)}
 
+      {:error, :directory_sync_failed} ->
+        # `sync_and_retain/1` has already marked the recovery owner to keep the
+        # complete value. Leave it available for inspection; authority cleanup
+        # will close the retained handle after the failed publication is
+        # reported.
+        {:error, publication_failure(report, :result, :directory_sync_failed)}
+
       {:error, reason} ->
         case PublicationHandle.unlink(recovery) do
           :ok ->
@@ -473,9 +480,9 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
   defp publication_failure(report, key, reason),
     do:
       report
-      |> with_error(:failed, key, reason)
+      |> with_error(:failed, key, publication_reason(reason))
       |> with_unwritten_withheld()
-      |> Map.put(:error, {key, reason})
+      |> Map.put(:error, {key, publication_reason(reason)})
 
   defp committed_failure(report, key),
     do:
@@ -490,6 +497,9 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
       |> with_error(:failed, key, reason)
       |> with_unwritten_withheld()
       |> Map.put(:error, :recovery_cleanup_failed)
+
+  defp publication_reason(:publication_collision), do: :destination_collision
+  defp publication_reason(reason), do: reason
 
   defp with_error(report, state, key, reason) when is_atom(state) do
     state = Atom.to_string(state)

@@ -40,6 +40,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.RunRequest
 
   @artifact_destination_keys [:trace_dir, :inspect, :output, :private_output]
+  @fallback_run_ref "cmd-00000000000000000000000000"
 
   @type prepared :: CommandPreparation.t() | CommandOutcome.t()
 
@@ -539,8 +540,16 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   defp destination_code(_reason, _options), do: :invalid_destination
 
-  defp safe_run_ref(%CommandPreparation{run_ref: run_ref}), do: run_ref
-  defp generated_or_safe_ref, do: CommandRunRef.generate() |> elem(1)
+  defp safe_run_ref(%CommandPreparation{run_ref: run_ref}) do
+    if CommandRunRef.valid?(run_ref), do: run_ref, else: @fallback_run_ref
+  end
+
+  defp generated_or_safe_ref do
+    case CommandRunRef.generate() do
+      {:ok, run_ref} -> run_ref
+      {:error, :entropy_unavailable} -> @fallback_run_ref
+    end
+  end
 
   defp validation_outcome(arguments, run_ref, prepared) do
     case RunCoordinator.validation_result(prepared) do

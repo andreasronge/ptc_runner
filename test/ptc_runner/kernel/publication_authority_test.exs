@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.CommandEngine
+  alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.PublicationAuthority
@@ -110,7 +111,7 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
     assert :ok = File.rename(parent, moved)
     File.mkdir!(parent)
 
-    assert {:error, :publication_failed} = PublicationHandle.write(handle, "[]\n")
+    assert {:error, :publication_collision} = PublicationHandle.write(handle, "[]\n")
     assert {:error, :publication_collision} = PublicationHandle.verify(handle)
     refute File.exists?(target)
 
@@ -325,6 +326,21 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
     assert outcome.envelope["error"]["code"] == "invalid_destination"
     assert outcome.envelope["error"]["provider_activity"] == false
     refute Jason.encode!(outcome.envelope) =~ dir
+  end
+
+  @tag :tmp_dir
+  test "invalid preparation references still return a valid path-free outcome", %{tmp_dir: dir} do
+    application = application!(dir, "invalid-reference")
+
+    assert {:ok, preparation} = CommandEngine.prepare(["run", application])
+    tampered = %{preparation | run_ref: "cmd-invalid"}
+
+    assert {:error, outcome} = CommandEngine.preflight(tampered)
+    assert CommandOutcome.valid?(outcome)
+    assert outcome.envelope["error"]["code"] == "internal_error"
+    refute Jason.encode!(outcome.envelope) =~ dir
+
+    assert :ok = CommandPreparation.close(preparation)
   end
 
   defp application!(dir, name, overrides \\ %{}) do

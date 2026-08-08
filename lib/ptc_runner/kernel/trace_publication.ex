@@ -70,6 +70,9 @@ defmodule PtcRunner.Kernel.TracePublication do
       {:error, :partial_write} = error ->
         error
 
+      {:error, :publication_collision} = error ->
+        error
+
       {:error, _reason} ->
         {:error, :trace_persistence_failed}
     end
