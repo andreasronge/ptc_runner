@@ -34,14 +34,14 @@
       "version": "1.4.5"
     },
     {
-      "content_identity": "e4bf104cab648065545730fe6e50efcc41bf4f2abb9a6cf6ff48a27807dc033f",
+      "content_identity": "074c0c3d3e362690b9610c4d78d89ab635ae5d4a541dcfbc5cfb6d919379745e",
       "name": "jsv",
-      "version": "0.21.2"
+      "version": "0.22.0"
     },
     {
-      "content_identity": "655e47bad92db8125408ed8cd4114b7b943c80906e4654c15fae9c1b4df22c15",
+      "content_identity": "6ab1c60d876084529323cfc1c0d8f86a19a72d6c21bf9c95129fef3387505fc2",
       "name": "llm_db",
-      "version": "2026.7.2"
+      "version": "2026.7.5"
     },
     {
       "content_identity": "619d54012e089bd04e1be4a41948344405bde3cf1188386f2880e02c0ae7d396",
@@ -79,9 +79,9 @@
       "version": "0.6.3"
     },
     {
-      "content_identity": "cc9a07fa1da15339bfcbcda7053ed8bfba7335ff85dae3660b5c4fb8f2d7555b",
+      "content_identity": "4609a9e1ce5a95b2afb12ef8108d909d237afdf0900c996f6a577203bb08c70c",
       "name": "req_llm",
-      "version": "1.17.1"
+      "version": "1.19.0"
     },
     {
       "content_identity": "3fbe1c705bbf0b5c680623063fa56a4b3ca0ccede3521dff3612ac273c879bca",
@@ -89,9 +89,9 @@
       "version": "1.1.0"
     },
     {
-      "content_identity": "2959d98170e7d885182b38361e52adbaf4da98ac865002c0eb0f7aa873e2c26d",
+      "content_identity": "da3201fd87bf1686d87d86702bef41c542b3a04a2d36591d0d2b15ca69c0fac5",
       "name": "splode",
-      "version": "0.3.1"
+      "version": "0.3.2"
     },
     {
       "content_identity": "05f67e9ee82addb8f0017ba050edeaab79c0478327aa6655ad93cd221e5cccfa",
@@ -99,9 +99,9 @@
       "version": "1.4.2"
     },
     {
-      "content_identity": "7ddfefa0869c0b3e12fdc17a97e043b2b337a71c096acb7569d8cd1bbd07e436",
+      "content_identity": "8459496eece2e8c24048f7583664356f1d7c3a32cc38a61cd05785a647f21a18",
       "name": "texture",
-      "version": "1.2.0"
+      "version": "1.2.1"
     },
     {
       "content_identity": "fc20f822f6da2887a6506950d4a9c97fe99b1858be2851f5b95dc4cc4708477f",
@@ -114,9 +114,9 @@
       "version": "0.5.1"
     },
     {
-      "content_identity": "9750fc4e45f8a27f77824f839ffb6b8d82034de0fb17962849ae7ceb6a7112c7",
+      "content_identity": "b124f65cc9edcfee026d41899cc7eae0c108b7709f3e8ae4cf0b23137f17fe15",
       "name": "zoi",
-      "version": "0.18.6"
+      "version": "0.18.7"
     }
   ],
   "runtime_dependency_roots": [
@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "7d2d8ef4327722de7a58d3d7f60060e2f77e54965e4554512ffff9734bd31be6",
+  "source_closure_hash": "48c787f349b2c15db3ee938c995b0477ae6c1cf5d572769f4508714747617377",
   "sources": [
     {
       "bytes": 870,
@@ -307,9 +307,9 @@
       "sha256": "e1d02690aa01e3711f989dcb53e488a654a322b30180f4dc020d20c38a4956ba"
     },
     {
-      "bytes": 12506,
+      "bytes": 12607,
       "path": "lib/ptc_runner/kernel/event_sink.ex",
-      "sha256": "a565d8becaf2175b89759067eebddc171ff90622df85eea25419e421e7ae0b27"
+      "sha256": "26ef0af1a718976a4d8e622f3f4b99941d3c0f0705fd132956794723878dc2c1"
     },
     {
       "bytes": 9852,
@@ -397,9 +397,9 @@
       "sha256": "80d6fd69345da98d57080187c326b7265f07cd336107127ded4ddf76f2d88462"
     },
     {
-      "bytes": 14065,
+      "bytes": 14166,
       "path": "lib/ptc_runner/kernel/inspection_sink.ex",
-      "sha256": "2c9607c6f9229f82b9be9da5695f7d609e4ea6aca96aa757d35c9e1eb7f05569"
+      "sha256": "05e32aed6e57c56b3a7e30a1ea30a1ac8d5486bf0216defaa07b3956dc1ba22d"
     },
     {
       "bytes": 19323,
@@ -697,9 +697,9 @@
       "sha256": "40ba7420fcdf8c87a7a7a0f57b24f753995d563cc75d9d629cec105959b1e731"
     },
     {
-      "bytes": 12055,
+      "bytes": 12678,
       "path": "lib/ptc_runner/kernel/provider_activity.ex",
-      "sha256": "6566c40edaf6d841a84523ab443c98c7f426c8b0583adf0a722b448a1e9e2eac"
+      "sha256": "d1a75087624a6e35c8a3149e27d92d49642d035bba2cfc0cde61917226cd68d3"
     },
     {
       "bytes": 4627,
@@ -752,9 +752,9 @@
       "sha256": "3c966d49402041ed52aed30efaa47391e3ca6fd4283de2a4c6476db9f497cf82"
     },
     {
-      "bytes": 61866,
+      "bytes": 62822,
       "path": "lib/ptc_runner/kernel/provider_session.ex",
-      "sha256": "b5cf2664e8b4bde5713f16bd642f93a555942a720ad7aa891cf9cc3c2d6362fa"
+      "sha256": "dde175867d5fa4a93020a7cc2b1e3812b4e74f881d54063160245d5c8329ba34"
     },
     {
       "bytes": 2983,
@@ -782,9 +782,9 @@
       "sha256": "decb580740dc26d136b2fc4db8af7aa365e82a5ebf9538a2334e6def013fee8b"
     },
     {
-      "bytes": 7861,
+      "bytes": 8230,
       "path": "lib/ptc_runner/kernel/resource_registrar.ex",
-      "sha256": "2b32ca1b7ee3b1d983c5cbda45b49b4617f440b1cd09da6542a1e0c2db9856cb"
+      "sha256": "04c0df48df237b91c53210dfd5445cda2a52989262def67092cd7604cfe7d867"
     },
     {
       "bytes": 886,
@@ -1577,9 +1577,9 @@
       "sha256": "956cf2feb4d5f543e35892b47c9048fbca23181cbe2fe86e89c6e7c10603dd2b"
     },
     {
-      "bytes": 12322,
+      "bytes": 12596,
       "path": "mix.exs",
-      "sha256": "db4b6a7b94c2c4c9740c96bfc4e8b3f4b17adb1100eeec7d13144fbafcabbbdc"
+      "sha256": "a6eca527638a156dbf2389812dc6149268ff38da3df7cb19832d006af9818e54"
     },
     {
       "bytes": 117541,
