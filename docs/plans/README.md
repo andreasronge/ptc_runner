@@ -29,6 +29,13 @@ belongs in guides or retained specifications.
   remote Streamable HTTP MCP servers without weakening host authority or tool
   replay safety.
 
+## Runtime quality
+
+- [`memory-observability.md`](memory-observability.md) restores the orphaned
+  soak gate, adds a committed per-use-case heap baseline, and extends leak
+  detection to the long-lived owner lifecycle the current soak tests never
+  reach.
+
 ## Future, trigger-gated
 
 - [`future/incident-evidence-compiler.md`](future/incident-evidence-compiler.md)
