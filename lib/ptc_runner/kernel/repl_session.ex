@@ -865,7 +865,7 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp owned_session(session) do
     with {:ok, pid, token} <- access_resources(session),
-         {:ok, config, state} <- ReplSessionOwner.resources(pid, token) do
+         {:ok, config, state} <- owner_resources(session, pid, token) do
       {:ok,
        Map.merge(Map.from_struct(session), %{
          owner_pid: pid,
@@ -878,6 +878,18 @@ defmodule PtcRunner.Kernel.ReplSession do
          errors: bounded_counter(session.errors)
        })}
     end
+  end
+
+  defp owner_resources(session, pid, token) do
+    ReplSessionOwner.resources(pid, token)
+  catch
+    :exit, reason ->
+      if Process.alive?(pid) do
+        exit(reason)
+      else
+        close_access(session)
+        {:error, :session_closed}
+      end
   end
 
   defp register_access(pid, token) do

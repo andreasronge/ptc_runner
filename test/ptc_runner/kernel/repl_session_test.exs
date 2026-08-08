@@ -626,6 +626,54 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert_receive {:DOWN, ^creator_ref, :process, ^creator, :normal}, 5_000
   end
 
+  test "closing after session-owner death removes the creator access entry" do
+    {:ok, close_session} = ReplSession.new()
+    [{close_id, {close_owner, close_token}}] = :ets.lookup(close_session.access, close_session.id)
+    assert is_reference(close_token)
+    close_ref = Process.monitor(close_owner)
+    Process.exit(close_owner, :kill)
+    assert_receive {:DOWN, ^close_ref, :process, ^close_owner, :killed}, 5_000
+
+    assert {:error, :session_closed} = ReplSession.close(close_session)
+    assert :ets.lookup(close_session.access, close_id) == []
+
+    {:ok, abort_session} = ReplSession.new()
+    [{abort_id, {abort_owner, abort_token}}] = :ets.lookup(abort_session.access, abort_session.id)
+    assert is_reference(abort_token)
+    abort_ref = Process.monitor(abort_owner)
+    Process.exit(abort_owner, :kill)
+    assert_receive {:DOWN, ^abort_ref, :process, ^abort_owner, :killed}, 5_000
+
+    assert :ok = ReplSession.abort(abort_session, :frontend_exit)
+    assert :ets.lookup(abort_session.access, abort_id) == []
+  end
+
+  test "owner death during resource lookup removes the creator access entry" do
+    {:ok, session} = ReplSession.new()
+    [{id, {owner, token}}] = :ets.lookup(session.access, session.id)
+    :ok = :sys.suspend(owner)
+    creator = self()
+
+    {tracer, tracer_ref} =
+      spawn_monitor(fn ->
+        receive do
+          {:trace, ^creator, :send, {:"$gen_call", _from, {^token, :resources}}, ^owner} ->
+            Process.exit(owner, :kill)
+        end
+      end)
+
+    assert 1 = :erlang.trace(creator, true, [:send, {:tracer, tracer}])
+
+    try do
+      assert {:error, :session_closed} = ReplSession.close(session)
+    after
+      assert 1 = :erlang.trace(creator, false, [:send])
+    end
+
+    assert_receive {:DOWN, ^tracer_ref, :process, ^tracer, :normal}, 5_000
+    assert :ets.lookup(session.access, id) == []
+  end
+
   test "session owner rejects a run state not bound to its configured sinks" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
