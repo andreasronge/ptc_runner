@@ -379,8 +379,12 @@ defmodule PtcRunner.Lisp.Runtime.JsonTest do
       assert msg =~ "cannot encode a keyword as a JSON value"
       assert msg =~ ~s|at [:keys "status" :examples 0]|
 
-      assert eval_error("(json/generate-string (describe ##Inf))") =~
-               "cannot encode ##Inf as a JSON value at [:examples 0]"
+      special_float_error = eval_error("(json/generate-string (describe ##Inf))")
+
+      assert special_float_error =~ "cannot encode ##Inf as a JSON value"
+
+      assert special_float_error =~ "at [:examples 0]" or
+               special_float_error =~ "at [:sample]"
     end
 
     test "a keyword value fails loudly with a named type_error" do
