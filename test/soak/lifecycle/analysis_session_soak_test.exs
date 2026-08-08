@@ -14,6 +14,7 @@ defmodule PtcRunner.Soak.AnalysisSessionSoakTest do
   | `SessionTrace` process | the builder | itself | the session | session close, or `stop/1` |
   | `TraceSnapshot` process | the builder | itself, ownership transferred to the session | the session | the session's `:DOWN`, or session close |
   | `RunState` and `EventSink` processes | the builder | themselves | the session | session close |
+  | `ProviderTaskTracker` process | `RunState.start_*` — **every** RunState starts one | itself | the run state | its `:DOWN` on the run state |
   | lifecycle timer | `init/1` | the session | nobody | fires on expiry and terminates the session |
 
   Behavior on termination:
@@ -191,6 +192,7 @@ defmodule PtcRunner.Soak.AnalysisSessionSoakTest do
       state.session_trace.pid,
       state.snapshot.pid,
       state.run_state.pid,
+      state.run_state.provider_tracker.pid,
       state.config.event_sink.pid
     ]
     |> Enum.filter(&is_pid/1)

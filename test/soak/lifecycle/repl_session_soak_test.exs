@@ -65,13 +65,13 @@ defmodule PtcRunner.Soak.ReplSessionSoakTest do
           threshold_bytes_per_cycle: @threshold_bytes_per_cycle
         ],
         fn _cycle ->
-          {session, owner, sink} = open(context)
+          {session, owner, sink, owned} = open(context)
           {:ok, _step, session} = ReplSession.eval(session, "(soak.repl/value 1)")
 
           assert {:ok, _events} = ReplSession.close(session)
           :ok = EventSink.stop(sink)
 
-          ledger(session, owner, sink)
+          ledger(session, owner, sink, owned)
         end
       )
     end
@@ -97,7 +97,7 @@ defmodule PtcRunner.Soak.ReplSessionSoakTest do
           threshold_bytes_per_cycle: @threshold_bytes_per_cycle
         ],
         fn _cycle ->
-          {session, owner, sink} = open(context)
+          {session, owner, sink, owned} = open(context)
 
           # The owner dies without `terminate/2` running, which is the variant
           # the happy path cannot reach. `close/1` must still be able to drop
@@ -106,7 +106,7 @@ defmodule PtcRunner.Soak.ReplSessionSoakTest do
           _closed = ReplSession.close(session)
           :ok = EventSink.stop(sink)
 
-          ledger(session, owner, sink)
+          ledger(session, owner, sink, owned)
         end
       )
     end
@@ -126,12 +126,12 @@ defmodule PtcRunner.Soak.ReplSessionSoakTest do
           threshold_bytes_per_cycle: @threshold_bytes_per_cycle
         ],
         fn _cycle ->
-          {session, owner, sink} = open(context)
+          {session, owner, sink, owned} = open(context)
           _evaluated = ReplSession.eval(session, "(soak.repl/value 1)")
           _aborted = ReplSession.abort(session, :deadline_expired)
           :ok = EventSink.stop(sink)
 
-          ledger(session, owner, sink)
+          ledger(session, owner, sink, owned)
         end
       )
     end
@@ -150,7 +150,8 @@ defmodule PtcRunner.Soak.ReplSessionSoakTest do
       )
 
     {:ok, session} = ReplSession.new(config: config)
-    {session, owner_pid!(session), sink}
+    owner = owner_pid!(session)
+    {session, owner, sink, owned_processes(owner)}
   end
 
   # `{id, {pid, token}}` — the owner is inside the entry. Reading it here, at
@@ -162,10 +163,24 @@ defmodule PtcRunner.Soak.ReplSessionSoakTest do
     pid
   end
 
-  defp ledger(%ReplSession{access: access, id: id}, owner, sink) do
+  defp ledger(%ReplSession{access: access, id: id}, owner, sink, owned) do
     # The access table is absent on purpose: it belongs to this test process
     # and legitimately outlives every session, so only the entry can leak.
-    LifecycleSoak.ledger(processes: [owner, sink.pid], ets_entries: [{access, id}])
+    LifecycleSoak.ledger(
+      processes: [owner, sink.pid | owned],
+      ets_entries: [{access, id}]
+    )
+  end
+
+  # A session also owns a `RunState`, and **every** `RunState` starts a
+  # `ProviderTaskTracker` alongside it (`run_state.ex:995`). Both are per-cycle
+  # processes and neither is reachable from the `%ReplSession{}` handle, so
+  # they have to be read out of the owner's state while it is still alive —
+  # which is also why they were missed at first. Read before any variant kills
+  # the owner.
+  defp owned_processes(owner) do
+    %{run_state: run_state} = :sys.get_state(owner)
+    [run_state.pid, run_state.provider_tracker.pid]
   end
 
   defp kill_and_await(pid) do

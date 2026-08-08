@@ -67,6 +67,24 @@ defmodule PtcRunner.TestSupport.LifecycleSoak do
   so a test can find it would put a test affordance in the runtime for no
   runtime benefit.
 
+  A ledger that omits a resource the cycle really created is the failure this
+  module exists to prevent, and it is easy to write: the omission is invisible
+  precisely because nothing then checks it. Two traps in this codebase have
+  each produced it more than once.
+
+    * **Every `RunState` starts a `ProviderTaskTracker` alongside it**
+      (`run_state.ex:995`), reachable as `run_state.provider_tracker.pid`. A
+      family that ledgers its run state and stops there is missing a process
+      per cycle.
+    * **A capped family has no byte-slope backstop.** Byte gating applies only
+      at #{@min_cycles_for_byte_gate} cycles a batch or more, so in a family
+      capped below that an unledgered resource is invisible to *every* gate at
+      *every* iteration count — not merely to the exact ones.
+
+  When adding a family, enumerate what each cycle causes to exist rather than
+  what its API returns, and read owned pids out of live state before any
+  variant kills the owner.
+
   Termination must be deterministic — monitors and explicit acknowledgement,
   never `Process.sleep/1`.
   """
