@@ -532,7 +532,13 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
           wait_for_go()
       end
 
-      deadline = System.monotonic_time(:millisecond) + 50
+      # Wide margin: unlike the other deadline tests, this one blocks the
+      # coordinator itself on a cross-process handshake (the `receive` at
+      # line 515) before the second item can even be spawned. Under full
+      # suite load that handshake alone can eat tens of ms, so a tight
+      # budget here (previously 50ms) flakes on scheduler contention that
+      # has nothing to do with the behaviour under test.
+      deadline = System.monotonic_time(:millisecond) + 250
 
       assert {:error,
               [

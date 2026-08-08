@@ -441,6 +441,16 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
 
     Code.ensure_loaded!(EventSink)
     assert :erlang.trace_pattern({EventSink, :finalize_and_events, 2}, true, [:local]) == 1
+
+    # `owner_pid` runs an infinite `(loop [] (recur))`, so it must still be
+    # alive here. If it is not, the run aborted early (a real bug) rather
+    # than this check merely losing a race with scheduler delay -- fail with
+    # that distinction instead of the opaque ArgumentError `:erlang.trace/3`
+    # raises on a dead pid.
+    assert Process.alive?(owner_pid),
+           "owner #{inspect(owner_pid)} exited before tracing could start; " <>
+             "the infinite-loop run ended early instead of merely running late"
+
     assert :erlang.trace(owner_pid, true, [:call]) == 1
 
     owner_ref = Process.monitor(owner_pid)
