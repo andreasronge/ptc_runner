@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "7c407df001b15a60f3f889812ca061bc5e1338a04d47d75107ccba8efa9f1c50",
+  "source_closure_hash": "1b1acec11e3ab22beea955dd152e0d1ff2ad837d46b8eab42eced61c61a7b1a3",
   "sources": [
     {
       "bytes": 870,
@@ -592,9 +592,9 @@
       "sha256": "7d27fd1c10131b8537c6cdbfae9c90c5a7149eb4268659d947ec1837f729542f"
     },
     {
-      "bytes": 36845,
+      "bytes": 36492,
       "path": "lib/ptc_runner/kernel/mcp_protocol.ex",
-      "sha256": "700072ca0b827558ba299bf603aa145402b74434d057e6f6ffaaa58995775e6c"
+      "sha256": "d3f591bbe2555dc73b93a4947733ba108890d632cc3fc45706abe0b97fa3341d"
     },
     {
       "bytes": 18170,
@@ -817,9 +817,9 @@
       "sha256": "3b2b6e0a4ed008519bcd9db4bc3b6f47d3e1176084b8ab3232dab0eeab0dd8db"
     },
     {
-      "bytes": 4693,
+      "bytes": 4346,
       "path": "lib/ptc_runner/kernel/source_check.ex",
-      "sha256": "99bd3a6c8b652770d041d6cd4bee713851db744c747b366da4136556b0804ee8"
+      "sha256": "5d9da0504c24abda8e1afdf6116f9bd375bda25c3be2e63e292990029e22fa79"
     },
     {
       "bytes": 7496,
@@ -1237,9 +1237,9 @@
       "sha256": "14a55d5942eb7dc080d49e0a5324eaaf1b3e6560a997d6ff352cf8394360e812"
     },
     {
-      "bytes": 2913,
+      "bytes": 2724,
       "path": "lib/ptc_runner/lisp/metadata.ex",
-      "sha256": "c0afd7bc0007673ddc31abc3410aaf3b69b1d52d0e02cdb3f156d45429d032b1"
+      "sha256": "7f6ca51f1546245b5c4d3182e4a9d42eaa48576ff223ca224158f6020f527e5f"
     },
     {
       "bytes": 3709,
@@ -1267,14 +1267,14 @@
       "sha256": "f0f99fec41466a6e7580e3ba2a8b8c4dd9dc5dcad2e2c60912415a361408483e"
     },
     {
-      "bytes": 64169,
+      "bytes": 63755,
       "path": "lib/ptc_runner/lisp/prelude/compiler.ex",
-      "sha256": "daac3491aa88d5b6a772d52e63835457190052e7308b367890b958b6db508175"
+      "sha256": "35bf94324ba03c94da080fa91de1a805bbfe4c4a035930bd1612104fcafc5b41"
     },
     {
-      "bytes": 3506,
+      "bytes": 3235,
       "path": "lib/ptc_runner/lisp/prelude/contract.ex",
-      "sha256": "ca7be4ad40102ecad2d1afe560b1570ab147bd7537fc1559af762061b3d1d629"
+      "sha256": "4fa549cd3734ee50dfe31755070dc5a2665cf63692550abe9762cb1c67114940"
     },
     {
       "bytes": 6272,
@@ -1530,6 +1530,11 @@
       "bytes": 22496,
       "path": "lib/ptc_runner/sandbox.ex",
       "sha256": "845e3cd3cc8240c96d758e14da41c41b5ffc7e5b79e6345db49b16954e89b329"
+    },
+    {
+      "bytes": 1724,
+      "path": "lib/ptc_runner/utf8.ex",
+      "sha256": "956cf2feb4d5f543e35892b47c9048fbca23181cbe2fe86e89c6e7c10603dd2b"
     },
     {
       "bytes": 12322,

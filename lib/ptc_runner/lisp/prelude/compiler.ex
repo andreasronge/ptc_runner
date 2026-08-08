@@ -42,6 +42,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   alias PtcRunner.Lisp.ProtectedNamespaces
   alias PtcRunner.Lisp.Signature
   alias PtcRunner.Sandbox
+  alias PtcRunner.Utf8
 
   @default_visibility :prompt
   @valid_effects [:read, :write, :unknown]
@@ -937,7 +938,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
         message =
           "constant `#{export.ref}` violates declared type #{export.type}: #{details}"
-          |> truncate_contract_diagnostic()
+          |> Utf8.truncate(@max_contract_diagnostic_bytes)
 
         {:error,
          ValidationError.new(
@@ -952,22 +953,6 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp format_contract_error(%{path: path, message: message}) do
     prefix = if path == [], do: "", else: Enum.join(path, ".") <> ": "
     prefix <> message
-  end
-
-  defp truncate_contract_diagnostic(message)
-       when byte_size(message) <= @max_contract_diagnostic_bytes,
-       do: message
-
-  defp truncate_contract_diagnostic(message) do
-    message
-    |> binary_part(0, @max_contract_diagnostic_bytes)
-    |> valid_utf8_prefix()
-  end
-
-  defp valid_utf8_prefix(message) do
-    if String.valid?(message),
-      do: message,
-      else: valid_utf8_prefix(binary_part(message, 0, byte_size(message) - 1))
   end
 
   # Constants have no params vector. Function params preserve source names for

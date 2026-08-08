@@ -4,6 +4,7 @@ defmodule PtcRunner.Lisp.Prelude.Contract do
   alias PtcRunner.Lisp.Eval.Abort
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Signature.Validator
+  alias PtcRunner.Utf8
 
   @max_errors 16
   @max_message_bytes 4_096
@@ -92,19 +93,5 @@ defmodule PtcRunner.Lisp.Prelude.Contract do
   defp public_path_segment(segment) when is_integer(segment), do: segment
   defp public_path_segment(segment), do: segment |> inspect(limit: 3) |> truncate(256)
 
-  defp truncate(value, max_bytes) when byte_size(value) <= max_bytes, do: value
-
-  defp truncate(value, max_bytes) do
-    value
-    |> binary_part(0, max_bytes)
-    |> valid_utf8_prefix()
-  end
-
-  defp valid_utf8_prefix(value) do
-    if String.valid?(value) do
-      value
-    else
-      valid_utf8_prefix(binary_part(value, 0, byte_size(value) - 1))
-    end
-  end
+  defp truncate(value, max_bytes), do: Utf8.truncate(value, max_bytes)
 end
