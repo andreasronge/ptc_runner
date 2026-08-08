@@ -99,13 +99,40 @@ defmodule PtcRunner.TestSupport.LifecycleSoak do
   @termination_timeout_ms 5_000
 
   # Measured envelope of how far a batch endpoint moves between batches on an
-  # unchanged workload: four batches of a clean `HostCredentialLease` churn put
-  # `:erlang.memory(:total)` inside a ~50 KB band with no leak present. That
-  # noise is an absolute quantity — it is the VM's drift between two GC points,
-  # not something each cycle contributes — so the per-cycle resolution it
-  # implies is `@endpoint_noise_bytes / cycles`. A byte budget tighter than
-  # that cannot be measured, only failed at random.
-  @endpoint_noise_bytes 50_000
+  # unchanged workload. This noise is an absolute quantity — the VM's drift
+  # between two GC points, not something each cycle contributes — so the
+  # per-cycle resolution it implies is `@endpoint_noise_bytes / cycles`. A byte
+  # budget tighter than that cannot be measured, only failed at random.
+  #
+  # Measured **under the condition the suite actually runs in**: every family in
+  # one VM, via `mix soak`, not one family on an idle one. That distinction cost
+  # a round of flakes. Isolated, a single family's endpoints sit inside a ~50 KB
+  # band; with the whole suite resident, repeated runs at 10 cycles a batch put
+  # fitted slopes anywhere in -9.5..+29.3 KB/cycle with no leak present, which
+  # is an endpoint excursion near 300 KB. 400 KB covers that with margin.
+  #
+  # The consequence is deliberate at both ends. A short local run (10 cycles)
+  # gets a 40 KB/cycle floor and effectively cannot gate on bytes — its verdict
+  # comes from the exact resource gates, which do not depend on cycle count at
+  # all. A `PTC_SOAK_ITERATIONS=3000` run gets a 133 B/cycle floor, well under
+  # every caller's budget, so there the caller's number governs and a real
+  # per-cycle leak of even 1 KB stands 3 MB above the noise.
+  @endpoint_noise_bytes 400_000
+
+  # Below this many cycles a batch, the byte slope is not gated at all — it is
+  # measured and printed, and the verdict comes from the exact resource gates,
+  # which do not depend on cycle count.
+  #
+  # This is the honest end of the resolution argument rather than a bigger
+  # constant. Endpoint drift is roughly fixed per batch, so at 10 cycles it is
+  # comparable to any budget worth setting: repeated clean runs of this suite
+  # produced fitted slopes from -9.5 to +41 KB/cycle with no leak present. No
+  # threshold separates signal from noise there, and one tuned until the flakes
+  # stop is not a gate, it is a number that happens not to fire yet.
+  #
+  # `PTC_SOAK_ITERATIONS=3000` — what the scheduled workflow runs — is two
+  # orders of magnitude above this, so CI always gates.
+  @min_cycles_for_byte_gate 100
 
   @gated_memory_keys [:total, :processes, :ets, :binary]
 
@@ -136,10 +163,12 @@ defmodule PtcRunner.TestSupport.LifecycleSoak do
     * `:warmup` — warmup cycles, default `PTC_SOAK_WARMUP`
     * `:threshold_bytes_per_cycle` — required; the byte-slope budget, chosen
       from the metric's observed batch-to-batch noise on this workload rather
-      than from a round number. The budget actually applied is the larger of
-      this and the resolution floor `#{@endpoint_noise_bytes} / cycles`, so a
-      short local run reports bytes without failing on noise while a
-      `PTC_SOAK_ITERATIONS=3000` run gates on the caller's number
+      than from a round number. Byte slopes are gated only at
+      `#{@min_cycles_for_byte_gate}` cycles a batch or more; below that they are
+      printed and the exact resource gates carry the verdict. When they are
+      gated, the budget applied is the larger of this and the resolution floor
+      `#{@endpoint_noise_bytes} / cycles`, so `PTC_SOAK_ITERATIONS=3000` gates on
+      the caller's number
     * `:atoms_per_cycle` — atom-slope budget, default `0.1`
     * `:termination_timeout_ms` — how long a cycle's owner may take to die
       before the exact gate fails, default #{@termination_timeout_ms}
@@ -171,7 +200,7 @@ defmodule PtcRunner.TestSupport.LifecycleSoak do
 
     IO.puts(format(report))
 
-    assert_slopes!(report, effective_threshold(threshold, cycles), atoms_per_cycle)
+    assert_slopes!(report, effective_threshold(threshold, cycles), atoms_per_cycle, cycles)
     report
   end
 
@@ -356,7 +385,23 @@ defmodule PtcRunner.TestSupport.LifecycleSoak do
 
   # ── slope assertions ─────────────────────────────────────────────────────
 
-  defp assert_slopes!(report, threshold, atoms_per_cycle) do
+  # The atom slope gates at every cycle count: atoms never GC, so the count is
+  # monotonic and no drift can offset it. Only the byte slopes need enough
+  # cycles to out-resolve the VM's own movement.
+  defp assert_slopes!(report, threshold, atoms_per_cycle, cycles)
+       when cycles < @min_cycles_for_byte_gate do
+    IO.puts(
+      "  byte slopes NOT gated: #{cycles} cycles per batch is below the " <>
+        "#{@min_cycles_for_byte_gate} needed to resolve them. The exact resource " <>
+        "gates above still carry this run's verdict."
+    )
+
+    assert_atom_slope!(report, atoms_per_cycle)
+    _unused = threshold
+    :ok
+  end
+
+  defp assert_slopes!(report, threshold, atoms_per_cycle, _cycles) do
     Enum.each(@gated_memory_keys, fn key ->
       fitted = memory_slope(report, key)
 
@@ -375,6 +420,10 @@ defmodule PtcRunner.TestSupport.LifecycleSoak do
       end
     end)
 
+    assert_atom_slope!(report, atoms_per_cycle)
+  end
+
+  defp assert_atom_slope!(report, atoms_per_cycle) do
     fitted_atoms = atom_slope(report)
 
     if fitted_atoms > atoms_per_cycle do

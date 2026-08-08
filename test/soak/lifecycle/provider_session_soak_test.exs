@@ -162,12 +162,29 @@ defmodule PtcRunner.Soak.ProviderSessionSoakTest do
           burn_past(ProviderSession.run_deadline(session))
           assert Deadline.expired?(ProviderSession.run_deadline(session))
 
-          # Close spends the *cleanup* budget, which `Limits.installed/1` keeps
-          # independent of `run_duration_ms` — a 1 ms operation still gets the
-          # full 5 s cleanup allowance. An expired operation must therefore
-          # still reap its scopes, not turn into an unreaped one.
-          assert :ok = ProviderSession.close(session)
+          # Two reports are legitimate here and which one appears is a race the
+          # machine's load decides, so the assertion is on the resource facts
+          # rather than on the report.
+          #
+          # `Limits.installed/1` keeps the cleanup budget independent of
+          # `run_duration_ms`, so a 1 ms operation still gets the full 5 s
+          # cleanup allowance — but the session keeps the *earliest* anchor, and
+          # when the already-expired run deadline wins that comparison the close
+          # call has no budget left and force-terminates instead of confirming a
+          # graceful close. It then reports `:provider_cleanup_failed`, which is
+          # deliberately fail-closed: "cleanup was not confirmed", not "cleanup
+          # did not happen". On an idle machine the graceful path usually wins;
+          # under full-suite load it usually does not.
+          #
+          # What must hold either way — and this is the variant where
+          # `terminate/2` never runs, so it is where a leak would survive — is
+          # that the scope is reaped exactly once and the session dies. The
+          # ledger asserts the second; `assert_closed_once/2` the first.
+          report = ProviderSession.close(session)
           assert_closed_once(closed, 1)
+
+          assert report in [:ok, {:error, :provider_cleanup_failed}],
+                 "unexpected close report after deadline expiry: #{inspect(report)}"
 
           LifecycleSoak.ledger(processes: [session.pid])
         end

@@ -143,19 +143,48 @@ defmodule PtcRunner.TestSupport.LifecycleSoakTest do
 
     test "a byte leak the ledger cannot see still fails the slope gate" do
       # Retained off-ledger, so the exact gates have nothing to say and only
-      # the fitted byte slope can catch it. Each cycle pins 64 KB, far above
-      # the resolution floor at this cycle count.
+      # the fitted byte slope can catch it.
+      #
+      # Both numbers are chosen against the harness's own rules rather than by
+      # feel: byte slopes are gated only at 100 cycles a batch or more, and at
+      # 100 cycles the resolution floor is ~4 KB/cycle, so 64 KB a cycle sits an
+      # order of magnitude above it. The assertion is about the gate firing, not
+      # about where the threshold happens to sit.
       table = :ets.new(:leak, [:set, :public])
       on_exit(fn -> safe_delete(table) end)
 
       assert_raise ExUnit.AssertionError, ~r/grows .* bytes per cycle/, fn ->
-        soak!(fn cycle ->
-          true =
-            :ets.insert(table, {{System.unique_integer(), cycle}, :binary.copy(<<0>>, 65_536)})
+        soak!(
+          fn cycle ->
+            true =
+              :ets.insert(table, {{System.unique_integer(), cycle}, :binary.copy(<<0>>, 65_536)})
 
-          LifecycleSoak.ledger()
-        end)
+            LifecycleSoak.ledger()
+          end,
+          cycles: 100
+        )
       end
+    end
+
+    test "below the resolvable cycle count the byte gate is skipped, not silently passed" do
+      # The same leak, at a cycle count where the slope cannot be resolved. It
+      # must not raise — but it must also say so, because a byte gate that
+      # quietly stops applying is indistinguishable from one that passed.
+      table = :ets.new(:leak, [:set, :public])
+      on_exit(fn -> safe_delete(table) end)
+
+      output =
+        ExUnit.CaptureIO.capture_io(fn ->
+          soak!(fn cycle ->
+            true =
+              :ets.insert(table, {{System.unique_integer(), cycle}, :binary.copy(<<0>>, 65_536)})
+
+            LifecycleSoak.ledger()
+          end)
+        end)
+
+      assert output =~ "byte slopes NOT gated"
+      assert output =~ "exact resource gates above still carry this run's verdict"
     end
 
     test "a clean cycle passes and returns its batch report" do
