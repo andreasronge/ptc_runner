@@ -33,11 +33,12 @@ defmodule Mix.Tasks.Bench.Heap do
     `lisp_*` rows this is `step.usage.memory_bytes`, the sandbox child's
     `Process.info(self(), :memory)` (`sandbox.ex`). For the `compile_*` and
     `kernel_*` rows it is the same reading taken in a dedicated driver process.
-    **`Kernel.run/2` spawns its own sandbox children, so the `kernel_*` driver
-    figure excludes them** — `concurrency_*` is the row that sees the whole
-    system.
-  * `retained_bytes` — `PtcRunner.Lisp.RetainedSize.bytes/1` of the durable
-    artifact the row produces, or `null` when the value is `:oversized`.
+    **`PtcRunner.Kernel.run/2` spawns its own sandbox children, so the
+    `kernel_*` driver figure excludes them** — `concurrency_*` is the row that
+    sees the whole system.
+  * `retained_bytes` — the retained size of the durable artifact the row
+    produces, from PtcRunner.Lisp.RetainedSize, or `null` when that module
+    answers `:oversized`.
   * `residual_bytes_per_iter` — repeated-batch residual. K equal batches of N
     iterations with a system-wide GC at each boundary; the reported rate is
     `(endpoint_K - endpoint_1) / ((K - 1) * N)` over `:erlang.memory(:total)`.
