@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+  import PtcRunner.TestSupport.TestHelpers, only: [long_running_body: 0]
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
@@ -63,7 +64,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
 
     fixture =
       provider_fixture(
-        body: "(loop [] (recur))",
+        body: long_running_body(),
         acquire: fn context ->
           scoped_root(parent, context)
           {:ok, capability} = fixture_capability()
@@ -157,7 +158,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
 
     fixture =
       provider_fixture(
-        body: "(loop [] (recur))",
+        body: long_running_body(),
         acquire: fn _context ->
           send(parent, {:acquired, self()})
           fixture_capability()
@@ -222,7 +223,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     # dies before it can reach normal Runner teardown.
     fixture =
       provider_fixture(
-        body: "(loop [] (recur))",
+        body: long_running_body(),
         acquire: fn _context ->
           {:ok, capability} = fixture_capability()
           {:ok, %{capabilities: [capability], close: fn -> :failed end}}
@@ -412,9 +413,12 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
   end
 
   test "a check assembles its providers without ever executing the workflow" do
-    # The entry never terminates, so a check that returns at all proves the
-    # Kernel was not run; only the acquisition's safe snapshots come back.
-    fixture = provider_fixture(body: "(loop [] (recur))")
+    # The entry occupies its worker for seconds, so a check that returns
+    # promptly proves the Kernel was not run; only the acquisition's safe
+    # snapshots come back. (The old body here was `(loop [] (recur))`, which
+    # only looks non-terminating -- see `long_running_body/1` for why that is
+    # not the same thing.)
+    fixture = provider_fixture(body: long_running_body())
 
     assert {:ok, owner} =
              ExecutionSessionOwner.start(

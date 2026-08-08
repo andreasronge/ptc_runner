@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.ReplSessionTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.TestHelpers, only: [long_running_body: 1]
+
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
@@ -512,23 +514,17 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
 
         receive do
           :evaluate ->
-            # `(loop [x 0] (recur (inc x)))` is NOT actually infinite: PTC-Lisp
-            # hard-caps loop/recur at exactly 1_000 jumps (see
-            # `eval_loop_test.exs`'s "custom loop limit" test), and this trivial
-            # body blows through that cap in well under a second -- racing this
-            # test's own setup below regardless of load. Give each iteration
-            # real work (5 chained 20k-element reduces, measured ~30s to reach
-            # the cap on its own) so this test's setup has a large margin;
-            # this still finishes fast since it interrupts the evaluation
-            # long before that natural completion. Unlike the equivalent fix
-            # in RunCoordinatorExecutionTest, a long duration here is safe:
+            # A trivial `(loop [x 0] (recur (inc x)))` would race this test's
+            # own setup regardless of load -- see `long_running_body/1` for
+            # why it is not the infinite loop it looks like. The heavier
+            # `repeats: 5` (~30s to reach the cap on its own) is safe here,
+            # unlike in RunCoordinatorExecutionTest:
             # `Evaluation.evaluate_with_lease/6` passes `link: true`, so the
             # underlying sandbox process is genuinely torn down when this
             # evaluation's caller dies -- no orphaned-process risk to bound.
-            ReplSession.eval(
-              session,
-              "(loop [i 0 acc 0] (if (< i 1000) (recur (inc i) (+ acc (reduce + 0 (range 20000)) (reduce + 0 (range 20000)) (reduce + 0 (range 20000)) (reduce + 0 (range 20000)) (reduce + 0 (range 20000)))) acc))"
-            )
+            # This still finishes fast, since the test interrupts the
+            # evaluation long before that natural completion.
+            ReplSession.eval(session, long_running_body(5))
         end
       end)
 

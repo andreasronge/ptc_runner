@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+  import PtcRunner.TestSupport.TestHelpers, only: [long_running_body: 0]
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
@@ -406,44 +407,31 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   test "caller death aborts the worker and stops both owner-backed sinks", %{
     tmp_dir: directory
   } do
-    # `(loop [] (recur))` is NOT actually infinite: PTC-Lisp hard-caps
-    # loop/recur at exactly 1_000 jumps (`PtcRunner.Lisp.Eval.Context`'s
-    # `loop_limit`, not configurable via manifest limits), and an empty body
-    # blows through that cap in well under a second. This test's whole
-    # premise -- that the run is still in flight when `Process.exit(caller,
-    # :kill)` fires below -- was racing that natural completion, and could
-    # lose even outside full-suite load (reproduced failing >50% of runs
-    # combined with just 3 other test files).
+    # This test's premise -- that the run is still in flight when
+    # `Process.exit(caller, :kill)` fires below -- used to rest on
+    # `(loop [] (recur))`, which is not the infinite loop it looks like (see
+    # `long_running_body/1`). It was really racing that loop's natural
+    # completion, and could lose even outside full-suite load (reproduced
+    # failing >50% of runs combined with just 3 other test files).
     #
-    # Give each of the 1_000 iterations real work so reaching the cap on its
-    # own takes roughly 6s on this machine (measured); the test still
-    # finishes fast because it interrupts the run long before that. This is
-    # still a calibrated duration, not a deterministic guarantee -- a
-    # sufficiently slower or more loaded machine could still lose the race
-    # -- but 6s is a large multiple of any plausible harness-setup delay
-    # between here and the `Process.alive?` check below, so a real
-    # regression is far more likely to explain a failure than hardware
-    # variance. `evaluation_timeout_ms` doesn't apply here (that governs
-    # subordinate mission evaluations, not this top-level workflow call,
-    # which uses `workflow_timeout_ms` -- already a 30s default, unrelated
-    # to this loop's own budget).
+    # `repeats: 1` (~6s) is deliberately the smallest useful margin rather
+    # than something larger: `Runner.execute_workflow/4` calls
+    # `Lisp.run_native/2` without `link: true`, so `Process.exit(worker_pid,
+    # :kill)` below (via the ExecutionSessionOwner abort path) does not
+    # itself terminate the underlying sandbox process -- it only monitors
+    # it. On any test failure before that point, this loop's sandbox keeps
+    # running, unlinked, until its own deadline. That is a real gap
+    # (arguably the workflow path should link like `repl_session.ex` does),
+    # but fixing it is a production change beyond what a flaky-test fix
+    # warrants -- keeping this loop short bounds the cost of the gap
+    # instead. 6s still dwarfs any plausible harness-setup delay between
+    # here and the `Process.alive?` check below, so a real regression is a
+    # far likelier explanation for a failure than hardware variance.
     #
-    # Kept deliberately short rather than pushed higher for more margin:
-    # `Runner.execute_workflow/3` calls `Lisp.run_native/2` without
-    # `link: true`, so `Process.exit(worker_pid, :kill)` below (via the
-    # ExecutionSessionOwner abort path) does not itself terminate the
-    # underlying sandbox process -- only monitors it. On any test failure
-    # before that point, this loop's sandbox process keeps running,
-    # unlinked, until its own `workflow_timeout_ms` deadline. That's a real
-    # gap (arguably the workflow path should link like
-    # `ReplSession`/`repl_session.ex` does), but fixing it is a production
-    # change beyond what a flaky-test fix warrants -- keeping this loop's
-    # duration short bounds the cost of that gap instead.
-    {prepared, catalog} =
-      prepared_run(
-        "(loop [i 0 acc 0] (if (< i 1000) (recur (inc i) (+ acc (reduce + 0 (range 20000)))) acc))",
-        inspection_capture: true
-      )
+    # `evaluation_timeout_ms` does not apply here: that governs subordinate
+    # mission evaluations, not this top-level workflow call, which uses
+    # `workflow_timeout_ms` (a 30s default, unrelated to this loop's budget).
+    {prepared, catalog} = prepared_run(long_running_body(), inspection_capture: true)
 
     inspection_path = Path.join(directory, "run.inspection.jsonl")
 
