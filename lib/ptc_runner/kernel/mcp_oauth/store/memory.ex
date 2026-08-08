@@ -54,7 +54,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   # cannot run that cleanup.
   @doc false
   @spec close(t()) :: :ok
-  def close(%__MODULE__{pid: pid}) do
+  def close(%__MODULE__{} = memory), do: close(memory, @close_timeout_ms)
+
+  @doc false
+  @spec close(t(), pos_integer()) :: :ok
+  def close(%__MODULE__{pid: pid}, timeout_ms) when is_integer(timeout_ms) and timeout_ms > 0 do
     # Checked before anything is sent, not just before the process is
     # terminated: `:close` is a plausible message for an unrelated GenServer, so
     # a handle naming the wrong pid must not stop or mutate one.
@@ -68,25 +72,33 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
     if store_process?(pid) do
       reference = Process.monitor(pid)
 
+      # One budget spans both phases. The cooperative call and the shutdown it
+      # asks for are two steps of a single close, so charging each the full
+      # timeout let a wedged store hold the abort path for twice the bound this
+      # module documents.
+      deadline = Deadline.new(timeout_ms)
+
       _replied =
         try do
-          GenServer.call(pid, :close, @close_timeout_ms)
+          GenServer.call(pid, :close, Deadline.remaining(deadline))
         catch
           :exit, _reason -> :ok
         end
 
-      await_close(pid, reference)
+      await_close(pid, reference, deadline)
     else
       :ok
     end
   end
 
-  defp await_close(pid, reference) do
+  defp await_close(pid, reference, deadline) do
     receive do
       {:DOWN, ^reference, :process, ^pid, _reason} ->
         :ok
     after
-      @close_timeout_ms ->
+      # `remaining/1` floors at zero, so an already-spent budget goes straight
+      # to termination rather than waiting again.
+      Deadline.remaining(deadline) ->
         terminate_store(pid, reference)
     end
   end

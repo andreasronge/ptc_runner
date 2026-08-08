@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
   use ExUnit.Case, async: false
 
+  import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandDiagnostic
@@ -537,19 +539,6 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
   end
 
   defp await_state(_owner_pid, _projection, 0), do: flunk("owner state never became ready")
-
-  defp assert_eventually(callback, attempts \\ 50_000)
-
-  defp assert_eventually(callback, attempts) when attempts > 0 do
-    if callback.() do
-      :ok
-    else
-      :erlang.yield()
-      assert_eventually(callback, attempts - 1)
-    end
-  end
-
-  defp assert_eventually(_callback, 0), do: flunk("condition did not become true")
 
   defp watch(processes) do
     Map.new(processes, fn {name, pid} -> {name, {pid, Process.monitor(pid)}} end)

@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.HostInstallationTest do
   use ExUnit.Case, async: false
 
+  import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.Deadline
@@ -1494,21 +1496,6 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       wait_until_expired(deadline)
     end
   end
-
-  defp assert_eventually(predicate, attempts \\ 10_000)
-
-  defp assert_eventually(predicate, attempts) when attempts > 0 do
-    if predicate.() do
-      :ok
-    else
-      receive do
-      after
-        0 -> assert_eventually(predicate, attempts - 1)
-      end
-    end
-  end
-
-  defp assert_eventually(_predicate, 0), do: flunk("condition did not become true")
 
   defp assert_local_preflight_parity(host, name, destination, expected) do
     assert {:ok, catalog} = HostInstallation.catalog(host)

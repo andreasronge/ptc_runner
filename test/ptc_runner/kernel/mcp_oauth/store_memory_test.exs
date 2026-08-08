@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Context
@@ -58,15 +60,43 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     # The store is detached from the worker that used it, so closing it is a
     # terminal action on the abort path. A wedged store must not hold that abort
     # open, and it must be gone when the close returns.
+    #
+    # The budget is named rather than waited out: what this proves is that a
+    # store which never answers is terminated at the bound, and the size of the
+    # bound is not part of that.
     {:ok, memory} = Memory.start(owner: self())
     reference = Process.monitor(memory.pid)
     assert :ok = :sys.suspend(memory.pid)
 
-    closer = Task.async(fn -> Memory.close(memory) end)
+    closer = Task.async(fn -> Memory.close(memory, 200) end)
 
     assert :ok = Task.await(closer, 10_000)
     assert_receive {:DOWN, ^reference, :process, _pid, _reason}, 5_000
     refute Process.alive?(memory.pid)
+  end
+
+  test "an unresponsive close spends one budget across both of its phases" do
+    # The cooperative call and the shutdown it asks for are two steps of a
+    # single close. Charging each the full timeout made the documented bound a
+    # floor of half the real one, so a wedged store held the abort path for
+    # twice as long as this module says it can.
+    {:ok, memory} = Memory.start(owner: self())
+    assert :ok = :sys.suspend(memory.pid)
+
+    # The clock starts before the closer is spawned. Timing from after the
+    # spawn would exclude whatever the task had already spent, which biases the
+    # measurement towards passing precisely when the two-budget behaviour is
+    # what is running. The task itself only exists so a close that never
+    # returns fails at `Task.await` rather than hanging to the case timeout.
+    budget_ms = 400
+    started_at_ms = System.monotonic_time(:millisecond)
+    closer = Task.async(fn -> Memory.close(memory, budget_ms) end)
+    assert :ok = Task.await(closer, 10_000)
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at_ms
+
+    # Halfway between one budget and two, so neither a slow scheduler nor an
+    # early spawn moves either behaviour across it.
+    assert elapsed_ms < 600
   end
 
   test "a store destroyed by its owner's death takes its registered managers with it" do
@@ -836,14 +866,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
 
   defp replace_grant(store, key, access_token, scopes \\ MapSet.new(["read"])),
     do: seed_grant(store, key, access_token, scopes)
-
-  defp assert_eventually(callback, attempts \\ 100)
-
-  defp assert_eventually(callback, attempts) when attempts > 0 do
-    if callback.(), do: :ok, else: assert_eventually(callback, attempts - 1)
-  end
-
-  defp assert_eventually(_callback, 0), do: flunk("condition did not become true")
 
   defp manager_monitor_count(store_pid, manager) do
     {:monitors, monitors} = Process.info(store_pid, :monitors)
