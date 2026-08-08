@@ -22,9 +22,13 @@ defmodule PtcRunner.Soak.CredentialLeaseSoakTest do
 
   This family has no deadline of its own to expire: `close/3` bounds itself
   with `@reply_timeout_ms` and escalates to `force_close/3`. Rather than
-  inventing a fake deadline variant, the third variant here is the forced
-  close that `close/3` falls back to when the owner cannot reply, which is the
-  code path a real expiry would take.
+  inventing a fake deadline variant, the third variant here is a worker dying
+  while it holds a lease — the other path on which the owner must reclaim
+  something without being told to.
+
+  `force_close/3` itself is **not** covered: reaching it means wedging the
+  owner so it cannot reply within its own budget, which is a single-cycle
+  behaviour rather than a churn property.
   """
 
   use ExUnit.Case, async: false
@@ -76,14 +80,21 @@ defmodule PtcRunner.Soak.CredentialLeaseSoakTest do
         fn _cycle ->
           authority = spawn_authority()
           {:ok, owner, fence, table} = HostCredentialLease.start(authority)
-          {:ok, _lease} = claim_from_worker(owner, fence, table)
+
+          # The lease is held, not released, across the authority's death.
+          # Releasing first would leave `state.leases` empty at `:DOWN`, so the
+          # drain this variant exists to exercise — `stop_workers/1` killing
+          # every leased worker, then `maybe_finish_close/1` waiting for their
+          # DOWNs before deleting the table — would never run, and the test
+          # would assert cleanup of nothing.
+          {worker, _lease} = claim_and_hold(owner, fence, table)
 
           # No close/3 at all. The lease owner has to notice on its own, which
           # is the path where `terminate/2` never runs and a leak is most
           # likely to survive.
           stop_authority(authority)
 
-          LifecycleSoak.ledger(processes: [owner, authority], tables: [table])
+          LifecycleSoak.ledger(processes: [owner, authority, worker], tables: [table])
         end
       )
     end

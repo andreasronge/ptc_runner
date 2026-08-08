@@ -28,9 +28,13 @@ defmodule PtcRunner.Soak.AnalysisSessionSoakTest do
       is the variant where `terminate/2` does not run on the caller's schedule,
       and it is the one the happy path cannot reach.
 
-  The trace destination is a temporary directory per cycle, so a leaked file
-  descriptor or a retained directory identity shows up as a port or an
-  unreclaimed process rather than being hidden by reuse.
+  Source and destination are the **same** directory, so each cycle's published
+  trace becomes input every later cycle re-snapshots. That is not steady state,
+  and it is safe here only because two caps bound it: this family's 25-cycle
+  cap and `TraceSnapshot`'s own 1,024-file / 4,096-entry limits. Lifting either
+  without giving each cycle its own destination would make the workload grow
+  under itself, poisoning the byte slope and eventually failing capture
+  outright.
   """
 
   use ExUnit.Case, async: false
