@@ -35,6 +35,7 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.ConfinedFile
+  alias PtcRunner.Kernel.SchemaPath
   alias PtcRunner.Kernel.StrictJSON
 
   @max_descriptor_bytes 65_536
@@ -363,19 +364,8 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   defp descriptor_violation(path),
     do: {:error, {:component_override_path, path, :invalid_override_descriptor}}
 
-  defp safe_descriptor_path(path), do: safe_schema_path(path, @descriptor_schema, [])
-
-  defp safe_schema_path([], _schema, retained), do: Enum.reverse(retained)
-
-  defp safe_schema_path([segment | rest], %{"properties" => properties}, retained)
-       when is_binary(segment) and is_map(properties) do
-    case Map.fetch(properties, segment) do
-      {:ok, child} -> safe_schema_path(rest, child, [{:property, segment} | retained])
-      :error -> Enum.reverse(retained)
-    end
-  end
-
-  defp safe_schema_path(_path, _schema, retained), do: Enum.reverse(retained)
+  defp safe_descriptor_path(path),
+    do: SchemaPath.explained_prefix(path, @descriptor_schema)
 
   # ConfinedFile rejects absolute paths, traversal segments, and symlinks that
   # leave the root, so a descriptor cannot point at source outside its own
