@@ -153,12 +153,14 @@ defmodule PtcRunner.Lisp.Prelude.FormScanner do
   @type ns_doc_location :: %{doc_span: byte_span() | nil, insert_at: non_neg_integer()}
 
   @naming_heads ["ns", "defn", "defn-", "def"]
+  @symbol_first_punctuation [?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%, ?., ?&]
 
   # Must be defined (as a guard-usable macro) before any function clause
-  # below uses it in a `when` guard.
+  # below uses it in a `when` guard. This scanner-local character set remains
+  # independent from FastParser so the cross-check can detect grammar drift.
   defguardp is_symbol_first(c)
             when c in ?a..?z or c in ?A..?Z or
-                   c in [?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%, ?., ?&]
+                   c in @symbol_first_punctuation
 
   @doc """
   Scans `source` and returns the byte-exact top-level form spans, or a
@@ -528,6 +530,7 @@ defmodule PtcRunner.Lisp.Prelude.FormScanner do
     if match_exponent?(cursor), do: take_exponent(cursor), else: cursor
   end
 
+  # ex_dna:disable-for-next-line — independent scanner grammar intentionally cross-checks the parser
   defp take_exponent({<<e, rest::binary>>, offset}) when e in [?e, ?E] do
     cursor = {rest, offset + 1}
 
@@ -580,6 +583,7 @@ defmodule PtcRunner.Lisp.Prelude.FormScanner do
     {value, {rest, offset + len}}
   end
 
+  # ex_dna:disable-for-next-line — independent scanner grammar intentionally cross-checks the parser
   defp take_while_length(<<c, rest::binary>>, predicate, len) when c < 128 do
     if predicate.(c), do: take_while_length(rest, predicate, len + 1), else: len
   end
@@ -592,11 +596,13 @@ defmodule PtcRunner.Lisp.Prelude.FormScanner do
   # copy honest if the reader grammar ever moves.
   # ============================================================
 
+  # ex_dna:disable-for-next-line — independent scanner grammar intentionally cross-checks the parser
   defp symbol_rest_char?(c),
     do:
       c in ?a..?z or c in ?A..?Z or c in ?0..?9 or
         c in [?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%, ?., ?&, ?']
 
+  # ex_dna:disable-for-next-line — independent scanner grammar intentionally cross-checks the parser
   defp keyword_char?(c),
     do: c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c in [?+, ?-, ?*, ?<, ?>, ?=, ??, ?!, ?_]
 
