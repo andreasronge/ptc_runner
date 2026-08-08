@@ -180,6 +180,12 @@ defmodule PtcRunner.MixProject do
       ],
       coverage: [
         "test --cover"
+      ],
+      # Regenerates the derived projection after a merge or rebase kept one
+      # side of it. See `.gitattributes` for why the hashes cannot be merged.
+      regen: [
+        "ptc.gen_semantic_revision",
+        "cmd git add priv/semantic_build_projection.json"
       ]
     ]
   end
