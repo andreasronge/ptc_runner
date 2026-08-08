@@ -47,12 +47,17 @@ how it was verified.
   run before every commit. This is intentionally much broader than the fast,
   staged-file Git pre-commit hook and can take a few minutes in a fresh worktree.
 - `MIX_ENV=dev mix docs --warnings-as-errors` — ExDoc reference and rendering
-  gate; run when changing user-facing documentation. Generated-doc consistency
-  is a separate check inside `mix precommit`.
+  gate; run when changing user-facing documentation. Generated-artifact
+  staleness is checked separately, by both `mix precommit` and `mix prepush`.
 - `git push` — the tracked pre-push hook classifies pushed and dirty paths and
   runs the relevant root, Viewer, launcher, or documentation gates. Root
-  changes run the root tests and `mix prepush` (upstream API audit, Dialyzer,
-  unused-deps). Do not run `mix prepush` immediately before an ordinary push;
+  changes run the root tests and `mix prepush` (generated-artifact staleness,
+  upstream API audit, Dialyzer, unused-deps). The staleness checks are also in
+  `precommit`, and are repeated here because an ordinary push does not run
+  `precommit` — without them a `lib/` edit can clear every local gate and still
+  fail CI on an artifact you were never prompted to regenerate. When one fires,
+  run `mix regen` and stage the result. Do not run `mix prepush` immediately
+  before an ordinary push;
   invoke it directly only for diagnosis or when hooks are unavailable. PR CI
   runs the same checks as individual steps. On a resource-constrained machine,
   `PTC_PRE_PUSH_MAX_CASES=2 git push` keeps every gate enabled while reducing
