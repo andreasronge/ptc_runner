@@ -15,11 +15,48 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
   @spec dispatch(CommandPreparation.t(), CommandRuntime.t()) ::
           {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
   def dispatch(%CommandPreparation{} = preparation, %CommandRuntime{} = runtime) do
-    case CommandDestination.preflight(preparation) do
-      {:ok, authority} -> execute_preflighted(preparation, runtime, authority)
-      {:error, %CommandOutcome{} = outcome} -> {:error, outcome}
+    case dispatch_after_preflight(CommandDestination.preflight(preparation), preparation, runtime) do
+      {status, outcome, _rejection} -> {status, outcome}
     end
   end
+
+  @doc false
+  @spec dispatch_frontend(
+          CommandPreparation.t(),
+          CommandRuntime.t(),
+          :standalone | :mix
+        ) ::
+          {:ok, CommandOutcome.t(), nil}
+          | {:error, CommandOutcome.t(), PtcRunner.Kernel.CommandRejection.t() | nil}
+  def dispatch_frontend(
+        %CommandPreparation{} = preparation,
+        %CommandRuntime{} = runtime,
+        frontend
+      )
+      when frontend in [:standalone, :mix] do
+    preparation
+    |> CommandDestination.preflight_frontend(frontend)
+    |> dispatch_after_preflight(preparation, runtime)
+  end
+
+  defp dispatch_after_preflight({:ok, authority}, preparation, runtime),
+    do: with_rejection(execute_preflighted(preparation, runtime, authority))
+
+  defp dispatch_after_preflight({:ok, authority, nil}, preparation, runtime),
+    do: with_rejection(execute_preflighted(preparation, runtime, authority))
+
+  defp dispatch_after_preflight({:error, %CommandOutcome{} = outcome}, _preparation, _runtime),
+    do: {:error, outcome, nil}
+
+  defp dispatch_after_preflight(
+         {:error, %CommandOutcome{} = outcome, rejection},
+         _preparation,
+         _runtime
+       ),
+       do: {:error, outcome, rejection}
+
+  defp with_rejection({status, %CommandOutcome{} = outcome}) when status in [:ok, :error],
+    do: {status, outcome, nil}
 
   defp execute_preflighted(preparation, runtime, authority) do
     with :ok <- maybe_setup_environment(preparation, runtime),

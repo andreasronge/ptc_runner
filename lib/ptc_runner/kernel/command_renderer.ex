@@ -98,6 +98,9 @@ defmodule PtcRunner.Kernel.CommandRenderer do
        }),
        do: "; two destinations name the same file: #{first} and #{second}"
 
+  defp rejection_suffix(%CommandRejection{kind: :private_output_recovery_collision}),
+    do: "; --private-output must not name its reserved recovery file"
+
   defp rejection_suffix(%CommandRejection{kind: :init_destination_collision}),
     do: "; --envelope must be outside the init directory"
 

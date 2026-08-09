@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.CommandContractAuthority
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandEngine
+  alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandParser
   alias PtcRunner.Kernel.CommandPath
@@ -3550,10 +3551,46 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:error, outcome} = CommandEngine.preflight(preparation)
     assert outcome.exit_status == 7
     assert outcome.envelope["error"]["phase"] == "destination"
-    assert outcome.envelope["error"]["code"] == "result_destination_unavailable"
+    assert outcome.envelope["error"]["code"] == "invalid_result_destination"
     assert outcome.envelope["artifact_state"]["trace"] == "not_written"
     assert outcome.envelope["artifact_state"]["result"] == "not_written"
     refute Jason.encode!(outcome.envelope) =~ directory
+  end
+
+  @tag :tmp_dir
+  test "entry still rejects captured envelope collisions when another destination cannot anchor",
+       %{
+         tmp_dir: directory
+       } do
+    invocation = Path.join(directory, "removed-entry-cwd")
+    collision = Path.join(directory, "shared.inspection.jsonl")
+    original = File.cwd!()
+    File.mkdir!(invocation)
+
+    on_exit(fn -> File.cd!(original) end)
+
+    File.cd!(invocation)
+    File.rmdir!(invocation)
+    assert {:error, :enoent} = File.cwd()
+
+    assert {:error, entry} =
+             CommandEntry.open_with_ref(
+               [
+                 "run",
+                 "ptc.json",
+                 "--output",
+                 "relative-result.json",
+                 "--inspect",
+                 collision,
+                 "--envelope",
+                 collision
+               ],
+               :standalone,
+               "cmd-00000000000000000000000001"
+             )
+
+    assert entry.rejection.kind == :destination_collision
+    assert entry.rejection.conflicts == ["--inspect", "--envelope"]
   end
 
   @tag :tmp_dir

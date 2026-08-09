@@ -144,73 +144,6 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   end
 
   @tag :tmp_dir
-  test "unavailable command destinations retain their closed artifact identity", %{tmp_dir: dir} do
-    application = application!(dir, "unavailable-destinations")
-    missing_parent = Path.join(dir, "missing")
-
-    for {argv, code, message, artifact} <- [
-          {
-            ["--trace-dir", missing_parent],
-            "trace_destination_unavailable",
-            "the trace destination is unavailable",
-            "trace"
-          },
-          {
-            ["--inspect", Path.join(missing_parent, "run.inspection.jsonl")],
-            "inspection_destination_unavailable",
-            "the inspection destination is unavailable",
-            "inspection"
-          },
-          {
-            ["--output", Path.join(missing_parent, "result.json")],
-            "result_destination_unavailable",
-            "the result destination is unavailable",
-            "result"
-          },
-          {
-            ["--private-output", Path.join(missing_parent, "private-result.json")],
-            "result_destination_unavailable",
-            "the result destination is unavailable",
-            "result"
-          }
-        ] do
-      assert {:ok, preparation} = CommandEngine.prepare(["run", application | argv])
-      assert {:error, outcome} = CommandEngine.preflight(preparation)
-
-      assert outcome.exit_status == 7
-      assert outcome.envelope["error"]["phase"] == "destination"
-      assert outcome.envelope["error"]["code"] == code
-      assert outcome.envelope["error"]["message"] == message
-      assert outcome.envelope["artifact_state"][artifact] == "not_written"
-      refute Jason.encode!(outcome.envelope) =~ dir
-    end
-  end
-
-  @tag :tmp_dir
-  test "artifact destination collisions are argument conflicts", %{tmp_dir: dir} do
-    application = application!(dir, "artifact-collision")
-    destination = Path.join(dir, "shared.inspection.jsonl")
-
-    assert {:ok, preparation} =
-             CommandEngine.prepare([
-               "run",
-               application,
-               "--output",
-               destination,
-               "--inspect",
-               destination
-             ])
-
-    assert {:error, outcome} = CommandEngine.preflight(preparation)
-    assert outcome.exit_status == 2
-    assert outcome.envelope["error"]["phase"] == "arguments"
-    assert outcome.envelope["error"]["code"] == "conflicting_arguments"
-    assert outcome.envelope["artifact_state"]["inspection"] == "not_written"
-    assert outcome.envelope["artifact_state"]["result"] == "not_written"
-    refute Jason.encode!(outcome.envelope) =~ dir
-  end
-
-  @tag :tmp_dir
   test "parent replacement after reservation fails closed", %{tmp_dir: dir} do
     parent = Path.join(dir, "destination")
     moved = Path.join(dir, "moved-destination")
@@ -495,7 +428,7 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
     trace = Path.join(dir, "run.jsonl")
     inspection = Path.join([dir, "missing", "run.inspection.jsonl"])
 
-    assert {:error, :inspection_destination_unavailable} =
+    assert {:error, {:private_directory_parent_unavailable, :inspection}} =
              PublicationAuthority.authorize(
                "reservation-target-rollback",
                [trace: trace, inspect: inspection],
@@ -606,7 +539,29 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
     assert outcome.envelope["error"]["message"] ==
              "choose only one option from the conflicting argument group"
 
+    assert outcome.envelope["artifact_state"] == %{
+             "trace" => "not_requested",
+             "inspection" => "not_written",
+             "result" => "not_written"
+           }
+
     refute Jason.encode!(outcome.envelope) =~ dir
+  end
+
+  @tag :tmp_dir
+  test "private result cannot name its derived recovery destination", %{tmp_dir: dir} do
+    run_ref = "cmd-00000000000000000000000001"
+    recovery = PublicationAuthority.recovery_path(run_ref, Path.join(dir, "requested.json"))
+
+    assert {:error, {:conflicting_destinations, [:private_output, :recovery]}} =
+             PublicationAuthority.authorize(
+               run_ref,
+               [private_output: recovery],
+               :private,
+               :normal
+             )
+
+    refute File.exists?(recovery)
   end
 
   @tag :tmp_dir

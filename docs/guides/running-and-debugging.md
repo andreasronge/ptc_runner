@@ -342,14 +342,16 @@ can interleave with it and an existing entry is never replaced.
 The switch is `--envelope PATH`, separate from `--output` and
 `--private-output`.
 
-When no destination is named the command writes no envelope. It writes a short
-human rendering of the same sealed outcome. A failure renders the primary phase,
-code, and catalog message on stderr. A successful normal `run` renders its
-result value on stdout; a successful private `run` renders only its completion
-and artifact class, because the private envelope omits the value and a private
-result still requires an authorized owner-only sink. That rendering is projected
-from the outcome, obeys the same privacy rules as the envelope, and is
-presentation rather than a contract: do not parse it.
+The command writes a short human rendering of the sealed outcome whether or not
+an envelope destination is named. Without `--envelope` it writes no envelope;
+with `--envelope` it additionally publishes the envelope file. A failure
+renders the primary phase, code, and catalog message on stderr. A successful
+normal `run` renders its result value on stdout; a successful private `run`
+renders only its completion and artifact class, because the private envelope
+omits the value and a private result still requires an authorized owner-only
+sink. That rendering is projected from the outcome, obeys the same privacy
+rules as the envelope, and is presentation rather than a contract: do not
+parse it.
 
 The destination names a file and only a file; there is no stdout spelling.
 **Standalone stdout is not a machine channel** — it is shared with the runtime,

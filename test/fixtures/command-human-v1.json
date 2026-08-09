@@ -30,6 +30,7 @@
     "retired_switch": "error: arguments/invalid_arguments: use the documented arguments for this command (run_ref: cmd-00000000000000000000000001); retired switch --trace; use --trace-dir\n",
     "invalid_destination": "error: arguments/invalid_arguments: use the documented arguments for this command (run_ref: cmd-00000000000000000000000001); invalid destination: --envelope\n",
     "destination_collision": "error: arguments/conflicting_arguments: choose only one option from the conflicting argument group (run_ref: cmd-00000000000000000000000001); two destinations name the same file: --output and --envelope\n",
+    "private_output_recovery_collision": "error: arguments/conflicting_arguments: choose only one option from the conflicting argument group (run_ref: cmd-00000000000000000000000001); --private-output must not name its reserved recovery file\n",
     "init_destination_collision": "error: arguments/conflicting_arguments: choose only one option from the conflicting argument group (run_ref: cmd-00000000000000000000000001); --envelope must be outside the init directory\n",
     "envelope_publication": "error: envelope/publication_failed: command envelope could not be published (run_ref: cmd-00000000000000000000000001)\n"
   }

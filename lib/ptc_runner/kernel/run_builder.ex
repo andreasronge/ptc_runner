@@ -1186,8 +1186,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp preflight_artifact_destinations(opts) do
     case opts |> publication_options() |> PublicationAuthority.validate_distinct_destinations() do
-      :ok -> :ok
-      {:error, reason} -> {:error, {:artifact_preflight_failed, reason}}
+      :ok ->
+        :ok
+
+      {:error, {:conflicting_destinations, _keys}} ->
+        {:error, {:artifact_preflight_failed, :conflicting_destinations}}
     end
   end
 

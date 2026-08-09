@@ -30,58 +30,64 @@ defmodule PtcRunner.Kernel.CommandFrontend do
   @spec present_entry(CommandEntry.t(), bootstrap()) :: CommandPresentation.t()
   def present_entry(%CommandEntry{rejection: %{} = _rejection} = entry, _bootstrap) do
     {:error, outcome} = CommandEngine.entry_failure(entry)
-    present(entry, outcome)
+    present(entry, outcome, entry.rejection)
   end
 
   def present_entry(%CommandEntry{arguments: %{command: :repl}} = entry, _bootstrap) do
     {:error, outcome} = CommandEngine.dispatch_entry(entry, CommandRuntime.standalone())
-    present(entry, outcome)
+    present(entry, outcome, nil)
   end
 
   def present_entry(%CommandEntry{} = entry, bootstrap) when is_function(bootstrap, 1) do
-    outcome = execute_entry(entry, bootstrap)
-    present(entry, outcome)
+    {outcome, rejection} = execute_entry(entry, bootstrap)
+    present(entry, outcome, rejection)
   end
 
   defp execute_entry(%CommandEntry{arguments: %{command: command}} = entry, _bootstrap)
        when command in [:help, :version] do
-    {_status, outcome} = CommandEngine.dispatch_entry(entry, CommandRuntime.standalone())
-    outcome
+    {_status, outcome, rejection} =
+      CommandEngine.dispatch_frontend_entry(entry, CommandRuntime.standalone())
+
+    {outcome, rejection}
   end
 
   defp execute_entry(%CommandEntry{} = entry, bootstrap) do
     case bootstrap.(entry.arguments) do
       {:ok, %CommandRuntime{} = runtime} ->
-        {_status, outcome} = CommandEngine.dispatch_entry(entry, runtime)
-        outcome
+        {_status, outcome, rejection} = CommandEngine.dispatch_frontend_entry(entry, runtime)
+        {outcome, rejection}
 
       _failure ->
         {:error, outcome} = CommandEngine.startup_failure(entry)
-        outcome
+        {outcome, nil}
     end
   rescue
     _exception ->
       {:error, outcome} = CommandEngine.startup_failure(entry)
-      outcome
+      {outcome, nil}
   catch
     _kind, _reason ->
       {:error, outcome} = CommandEngine.startup_failure(entry)
-      outcome
+      {outcome, nil}
   end
 
-  defp present(%CommandEntry{envelope_path: path} = entry, %CommandOutcome{} = outcome)
+  defp present(
+         %CommandEntry{envelope_path: path} = entry,
+         %CommandOutcome{} = outcome,
+         rejection
+       )
        when is_binary(path) do
     case CommandEnvelope.publish(outcome, path) do
       :ok ->
-        rendered_presentation(outcome, path, entry.rejection)
+        rendered_presentation(outcome, path, rejection)
 
       {:error, :envelope_publication_failed} ->
         presentation(outcome, nil, "", CommandRenderer.envelope_failure(entry.run_ref), 74)
     end
   end
 
-  defp present(%CommandEntry{} = entry, %CommandOutcome{} = outcome) do
-    rendered_presentation(outcome, nil, entry.rejection)
+  defp present(%CommandEntry{}, %CommandOutcome{} = outcome, rejection) do
+    rendered_presentation(outcome, nil, rejection)
   end
 
   defp rendered_presentation(outcome, envelope_path, rejection) do

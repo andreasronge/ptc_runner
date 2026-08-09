@@ -59,7 +59,10 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
 
   @type lease :: {pid(), reference()}
   @type artifact_destination :: :trace | :inspection | :result
-  @type authorization_error :: atom() | {atom(), artifact_destination()}
+  @type authorization_error ::
+          atom()
+          | {atom(), artifact_destination()}
+          | {:conflicting_destinations, [atom()]}
 
   @doc false
   @spec new(keyword()) :: {:ok, t()} | {:error, :invalid_publication_authority}
@@ -246,21 +249,22 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
   end
 
   @doc false
-  @spec validate_distinct_destinations(keyword()) :: :ok | {:error, :conflicting_destinations}
+  @spec validate_distinct_destinations(keyword()) ::
+          :ok | {:error, {:conflicting_destinations, [atom()]}}
   def validate_distinct_destinations(opts) when is_list(opts) do
-    identities =
-      opts
-      |> Keyword.take(@destination_keys)
-      |> Enum.map(fn {_key, path} -> path end)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.map(&DestinationIdentity.key/1)
-
-    if length(identities) == MapSet.size(MapSet.new(identities)),
-      do: :ok,
-      else: {:error, :conflicting_destinations}
+    opts
+    |> destination_candidates()
+    |> validate_distinct_candidates()
   end
 
-  def validate_distinct_destinations(_opts), do: {:error, :conflicting_destinations}
+  def validate_distinct_destinations(_opts),
+    do: {:error, {:conflicting_destinations, []}}
+
+  @doc false
+  @spec recovery_path(binary(), binary()) :: binary()
+  def recovery_path(run_ref, requested) when is_binary(run_ref) and is_binary(requested) do
+    Path.join(Path.dirname(requested), ".ptc-private-result-" <> run_ref <> ".json")
+  end
 
   @doc false
   @spec handles(t()) :: %{optional(atom()) => PublicationHandle.t()}
@@ -533,7 +537,14 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
                private_output: private_output
              },
              :ok <- validate_target_paths(targets, private?),
-             :ok <- validate_distinct_destinations(Map.to_list(targets)) do
+             :ok <-
+               validate_authorization_destinations(
+                 run_ref,
+                 trace: trace,
+                 inspect: inspect,
+                 output: output,
+                 private_output: private_output
+               ) do
           {:ok, targets}
         else
           {:error, _reason} = error -> error
@@ -591,6 +602,31 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
     do: {:error, :private_destination_required}
 
   defp validate_result_class(_private?, _targets), do: :ok
+
+  defp validate_authorization_destinations(run_ref, opts) do
+    candidates = destination_candidates(opts)
+
+    candidates =
+      case Keyword.fetch(candidates, :private_output) do
+        {:ok, requested} -> candidates ++ [recovery: recovery_path(run_ref, requested)]
+        :error -> candidates
+      end
+
+    validate_distinct_candidates(candidates)
+  end
+
+  defp destination_candidates(opts) do
+    opts
+    |> Keyword.take(@destination_keys)
+    |> Enum.reject(fn {_key, path} -> is_nil(path) end)
+  end
+
+  defp validate_distinct_candidates(candidates) do
+    case DestinationIdentity.first_collision(candidates) do
+      nil -> :ok
+      {first, second} -> {:error, {:conflicting_destinations, [first, second]}}
+    end
+  end
 
   defp reserve_targets(run_ref, targets, private?, claim_owner, trace_mode) do
     case reserve_trace(targets.trace, private?, trace_mode, claim_owner) do
@@ -668,7 +704,7 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
   defp reserve_private_result(_run_ref, nil, _claim_owner), do: {:ok, nil}
 
   defp reserve_private_result(run_ref, requested, claim_owner) do
-    recovery = Path.join(Path.dirname(requested), ".ptc-private-result-" <> run_ref <> ".json")
+    recovery = recovery_path(run_ref, requested)
 
     case reserve_optional(requested, :result, 0o600, claim_owner) do
       {:ok, requested_handle} ->

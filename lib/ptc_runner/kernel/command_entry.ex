@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.DestinationIdentity
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.PublicationAuthority
 
   @fallback_run_ref "cmd-00000000000000000000000000"
   @enforce_keys [:run_ref, :frontend, :arguments, :rejection, :envelope_path, :destinations]
@@ -118,12 +119,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
              )}
 
           {:error, {:destination_collision, key}} ->
-            {:error,
-             rejected(
-               run_ref,
-               frontend,
-               CommandRejection.destination_collision(arguments.command, key, frontend)
-             )}
+            destination_collision(arguments, run_ref, frontend, key, :envelope)
 
           {:error, :init_destination_collision} ->
             {:error,
@@ -136,11 +132,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
     end
   end
 
-  defp distinct?(%CommandArguments{command: :run}, {_destinations, failures}, _run_ref, _envelope)
-       when failures != [],
-       do: :ok
-
-  defp distinct?(%CommandArguments{command: :run}, {destinations, []}, run_ref, envelope) do
+  defp distinct?(%CommandArguments{command: :run}, {destinations, _failures}, run_ref, envelope) do
     candidates =
       [:output, :private_output, :inspect]
       |> Enum.flat_map(&destination_option_candidate(destinations, &1))
@@ -169,6 +161,15 @@ defmodule PtcRunner.Kernel.CommandEntry do
 
   defp distinct?(_arguments, _destinations, _run_ref, _envelope), do: :ok
 
+  defp destination_collision(arguments, run_ref, frontend, first, second) do
+    {:error,
+     rejected(
+       run_ref,
+       frontend,
+       CommandRejection.destination_collision(arguments.command, first, second, frontend)
+     )}
+  end
+
   defp derived_trace_paths(options, run_ref) do
     case Map.fetch(options, :trace_dir) do
       {:ok, directory} ->
@@ -191,10 +192,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
   defp derived_recovery_path(options, run_ref) do
     case destination_option(options, :private_output) do
       [requested] ->
-        [
-          {:private_output,
-           Path.join(Path.dirname(requested), ".ptc-private-result-" <> run_ref <> ".json")}
-        ]
+        [{:private_output, PublicationAuthority.recovery_path(run_ref, requested)}]
 
       [] ->
         []

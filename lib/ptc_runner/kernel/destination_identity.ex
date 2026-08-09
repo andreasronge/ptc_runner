@@ -39,6 +39,29 @@ defmodule PtcRunner.Kernel.DestinationIdentity do
 
   def within?(_candidate, _directory), do: false
 
+  @doc false
+  @spec first_collision([{atom(), binary()}]) :: {atom(), atom()} | nil
+  def first_collision(destinations) when is_list(destinations) do
+    Enum.reduce_while(destinations, %{}, fn {destination, path}, identities ->
+      identity = key(path)
+
+      case Map.fetch(identities, identity) do
+        {:ok, ^destination} ->
+          {:cont, identities}
+
+        {:ok, first} ->
+          {:halt, {first, destination}}
+
+        :error ->
+          {:cont, Map.put(identities, identity, destination)}
+      end
+    end)
+    |> case do
+      %{} -> nil
+      collision -> collision
+    end
+  end
+
   defp directory_key(path) do
     path = Path.expand(path)
 

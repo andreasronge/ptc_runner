@@ -11,8 +11,8 @@ defmodule Mix.Tasks.Ptc do
       mix ptc models --host-config ptc-host.json
 
   Use `mix ptc help COMMAND` to list every switch accepted by a command.
-  `--envelope PATH` atomically publishes the machine-readable V1 envelope;
-  without it, the task prints the shared human rendering.
+  The task always prints the shared human rendering. `--envelope PATH`
+  additionally publishes the machine-readable V1 envelope atomically.
   """
   use Mix.Task
 

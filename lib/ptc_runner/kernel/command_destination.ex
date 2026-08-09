@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.CommandDestination do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPreparation
+  alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.PublicationAuthority
@@ -32,19 +33,9 @@ defmodule PtcRunner.Kernel.CommandDestination do
   @spec preflight(CommandPreparation.t()) ::
           {:ok, PublicationAuthority.t()} | {:error, CommandOutcome.t()}
   def preflight(%CommandPreparation{} = preparation) do
-    if CommandPreparation.valid?(preparation) do
-      case preparation.artifact_destination_failures do
-        [] ->
-          authorize_prepared(preparation)
-
-        [failure | _rest] ->
-          destination_failure(
-            preparation,
-            destination_diagnostic({:invalid_destination, artifact_name(failure)})
-          )
-      end
-    else
-      {:error, internal_outcome(preparation)}
+    case preflight_with_context(preparation, nil) do
+      {:ok, authority, nil} -> {:ok, authority}
+      {:error, outcome, _rejection} -> {:error, outcome}
     end
   rescue
     _exception -> {:error, internal_outcome(preparation)}
@@ -61,6 +52,19 @@ defmodule PtcRunner.Kernel.CommandDestination do
          not_requested()
        )}
 
+  @doc false
+  @spec preflight_frontend(CommandPreparation.t(), :standalone | :mix) ::
+          {:ok, PublicationAuthority.t(), nil}
+          | {:error, CommandOutcome.t(), CommandRejection.t() | nil}
+  def preflight_frontend(%CommandPreparation{} = preparation, frontend)
+      when frontend in [:standalone, :mix] do
+    preflight_with_context(preparation, frontend)
+  rescue
+    _exception -> {:error, internal_outcome(preparation), nil}
+  catch
+    _kind, _reason -> {:error, internal_outcome(preparation), nil}
+  end
+
   @spec requested_artifact_state(map()) :: %{required(binary()) => binary()}
   def requested_artifact_state(options) when is_map(options) do
     %{
@@ -72,7 +76,27 @@ defmodule PtcRunner.Kernel.CommandDestination do
 
   def requested_artifact_state(_options), do: not_requested()
 
-  defp authorize_prepared(preparation) do
+  defp preflight_with_context(preparation, frontend) do
+    if CommandPreparation.valid?(preparation) do
+      case preparation.artifact_destination_failures do
+        [] ->
+          authorize_prepared(preparation, frontend)
+
+        [failure | _later] ->
+          {:error, outcome} =
+            destination_failure(
+              preparation,
+              destination_diagnostic({:invalid_destination, artifact_name(failure)})
+            )
+
+          {:error, outcome, nil}
+      end
+    else
+      {:error, internal_outcome(preparation), nil}
+    end
+  end
+
+  defp authorize_prepared(preparation, frontend) do
     options = preparation.artifact_destinations
 
     case PublicationAuthority.authorize(
@@ -81,8 +105,17 @@ defmodule PtcRunner.Kernel.CommandDestination do
            preparation.prepared_run.effective_event_policy,
            preparation.prepared_run.effective_data_class
          ) do
-      {:ok, authority} -> {:ok, authority}
-      {:error, reason} -> destination_failure(preparation, destination_diagnostic(reason))
+      {:ok, authority} ->
+        {:ok, authority, nil}
+
+      {:error, {:conflicting_destinations, [first, second]} = reason} ->
+        {:error, outcome} = destination_failure(preparation, destination_diagnostic(reason))
+        rejection = collision_rejection(frontend, first, second)
+        {:error, outcome, rejection}
+
+      {:error, reason} ->
+        {:error, outcome} = destination_failure(preparation, destination_diagnostic(reason))
+        {:error, outcome, nil}
     end
   end
 
@@ -103,7 +136,7 @@ defmodule PtcRunner.Kernel.CommandDestination do
      )}
   end
 
-  defp destination_diagnostic(:conflicting_destinations),
+  defp destination_diagnostic({:conflicting_destinations, _keys}),
     do: {:arguments, :conflicting_arguments}
 
   defp destination_diagnostic(:conflicting_trace_destinations),
@@ -185,6 +218,24 @@ defmodule PtcRunner.Kernel.CommandDestination do
   defp artifact_name(:trace_dir), do: :trace
   defp artifact_name(:inspect), do: :inspection
   defp artifact_name(key) when key in [:output, :private_output], do: :result
+
+  defp collision_rejection(nil, _first, _second), do: nil
+
+  defp collision_rejection(frontend, :private_output, :recovery),
+    do: CommandRejection.private_output_recovery_collision(frontend)
+
+  defp collision_rejection(frontend, first, second) do
+    first = if first == :trace, do: :trace_dir, else: first
+
+    second =
+      case second do
+        :trace -> :trace_dir
+        :recovery -> :private_output
+        destination -> destination
+      end
+
+    CommandRejection.destination_collision(:run, first, second, frontend)
+  end
 
   defp internal_outcome(%CommandPreparation{run_ref: run_ref}) do
     run_ref = if CommandRunRef.valid?(run_ref), do: run_ref, else: fallback_run_ref()

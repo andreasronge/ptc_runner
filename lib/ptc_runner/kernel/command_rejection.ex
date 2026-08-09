@@ -34,6 +34,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
             | :retired_switch
             | :invalid_destination
             | :destination_collision
+            | :private_output_recovery_collision
             | :init_destination_collision,
           accepted: [binary()],
           retired: binary() | nil,
@@ -118,12 +119,14 @@ defmodule PtcRunner.Kernel.CommandRejection do
   @spec destination_collision(
           CommandDeclaration.command(),
           atom(),
+          atom(),
           CommandDeclaration.frontend()
         ) :: t()
-  def destination_collision(command, key, frontend)
-      when command == :run and key in @destination_keys do
-    conflicting = CommandDeclaration.option_switch!(command, frontend, key)
-    envelope = CommandDeclaration.option_switch!(command, frontend, :envelope)
+  def destination_collision(command, first, second, frontend)
+      when command == :run and first in [:envelope | @destination_keys] and
+             second in [:envelope | @destination_keys] and first != second do
+    first = CommandDeclaration.option_switch!(command, frontend, first)
+    second = CommandDeclaration.option_switch!(command, frontend, second)
 
     %__MODULE__{
       command: command,
@@ -133,7 +136,21 @@ defmodule PtcRunner.Kernel.CommandRejection do
       retired: nil,
       replacement: nil,
       destination: nil,
-      conflicts: [conflicting, envelope]
+      conflicts: [first, second]
+    }
+  end
+
+  @spec private_output_recovery_collision(CommandDeclaration.frontend()) :: t()
+  def private_output_recovery_collision(frontend) do
+    %__MODULE__{
+      command: :run,
+      code: :conflicting_arguments,
+      kind: :private_output_recovery_collision,
+      accepted: [],
+      retired: nil,
+      replacement: nil,
+      destination: nil,
+      conflicts: [CommandDeclaration.option_switch!(:run, frontend, :private_output)]
     }
   end
 
