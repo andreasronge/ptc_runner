@@ -536,8 +536,13 @@ cannot reinterpret them. The sealed wrapper accepts only absolute destination
 paths and its exact field set. If the invocation cwd is unavailable, the engine
 seals the ordered keys it could not anchor alongside every absolute destination.
 Phase 6 can therefore preflight earlier absolute classes before projecting an
-`invalid_destination` for a later unanchored class, preserving the fixed
-trace/inspection/result precedence. A failed or exceptional wrapper
+artifact-specific invalid-destination diagnostic for a later unanchored class,
+preserving the fixed trace/inspection/result precedence. Phase 6 also retains
+the closed artifact class and cause through validation and reservation: trace,
+inspection, and result failures distinguish invalid, unavailable, and unsafe
+destinations without retaining or rendering a filesystem path. A collision
+between artifact arguments is instead `arguments/conflicting_arguments`, since
+no destination open or publication was attempted. A failed or exceptional wrapper
 construction releases the prepared run's activity owner before the engine
 projects its closed internal diagnostic. Long switch names use their documented
 dashed spellings, and underscore spellings before the `--` option terminator

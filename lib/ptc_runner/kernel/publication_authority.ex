@@ -58,6 +58,8 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
           }
 
   @type lease :: {pid(), reference()}
+  @type artifact_destination :: :trace | :inspection | :result
+  @type authorization_error :: atom() | {atom(), artifact_destination()}
 
   @doc false
   @spec new(keyword()) :: {:ok, t()} | {:error, :invalid_publication_authority}
@@ -80,7 +82,7 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
 
   @doc "Authorizes all requested artifact destinations during phase 6."
   @spec authorize(binary(), keyword(), :normal | :private, :normal | :private_inspection) ::
-          {:ok, t()} | {:error, atom()}
+          {:ok, t()} | {:error, authorization_error()}
   def authorize(run_ref, opts, event_policy, provider_class)
       when is_binary(run_ref) and is_list(opts) and event_policy in [:normal, :private] and
              provider_class in [:normal, :private_inspection] do
@@ -518,9 +520,12 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
 
       true ->
         with {:ok, trace} <- trace_target(run_ref, trace, trace_dir, private?),
-             {:ok, inspect} <- optional_path(Keyword.get(opts, :inspect)),
-             {:ok, output} <- optional_path(Keyword.get(opts, :output)),
-             {:ok, private_output} <- optional_path(Keyword.get(opts, :private_output)),
+             {:ok, inspect} <-
+               tagged_destination(optional_path(Keyword.get(opts, :inspect)), :inspection),
+             {:ok, output} <-
+               tagged_destination(optional_path(Keyword.get(opts, :output)), :result),
+             {:ok, private_output} <-
+               tagged_destination(optional_path(Keyword.get(opts, :private_output)), :result),
              targets = %{
                trace: trace,
                inspect: inspect,
@@ -537,19 +542,23 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
   end
 
   defp trace_target(_run_ref, nil, nil, _private?), do: {:ok, nil}
-  defp trace_target(_run_ref, path, nil, _private?), do: optional_path(path)
+
+  defp trace_target(_run_ref, path, nil, _private?),
+    do: tagged_destination(optional_path(path), :trace)
 
   defp trace_target(run_ref, nil, trace_dir, private?) do
     with {:ok, directory} <- optional_path(trace_dir),
          {:ok, %{type: :directory}} <- File.stat(directory, time: :posix) do
       {:ok, Path.join(directory, run_ref <> trace_suffix(private?))}
     else
-      {:error, _reason} -> {:error, :destination_unavailable}
-      _other -> {:error, :destination_unavailable}
+      {:error, :invalid_destination} -> {:error, {:invalid_destination, :trace}}
+      {:error, _reason} -> {:error, {:destination_unavailable, :trace}}
+      _other -> {:error, {:invalid_destination, :trace}}
     end
   end
 
-  defp trace_target(_run_ref, _path, _trace_dir, _private?), do: {:error, :invalid_destination}
+  defp trace_target(_run_ref, _path, _trace_dir, _private?),
+    do: {:error, {:invalid_destination, :trace}}
 
   defp trace_suffix(false), do: ".jsonl"
   defp trace_suffix(true), do: ".private.jsonl"
@@ -566,8 +575,8 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
   defp optional_path(_path), do: {:error, :invalid_destination}
 
   defp validate_target_paths(%{trace: trace, inspect: inspect}, private?) do
-    with :ok <- validate_trace_path(trace, private?),
-         do: validate_inspection_path(inspect)
+    with :ok <- tagged_destination(validate_trace_path(trace, private?), :trace),
+         do: tagged_destination(validate_inspection_path(inspect), :inspection)
   end
 
   defp validate_trace_path(nil, _private?), do: :ok
@@ -592,11 +601,11 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
 
           {:error, reason} ->
             cleanup_reserved([trace])
-            {:error, reason}
+            reservation_error(reason, :inspection)
         end
 
       {:error, reason} ->
-        {:error, reason}
+        reservation_error(reason, :trace)
     end
   end
 
@@ -610,14 +619,26 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
 
           {:error, reason} ->
             cleanup_reserved([trace, inspect, output])
-            {:error, reason}
+            reservation_error(reason, :result)
         end
 
       {:error, reason} ->
         cleanup_reserved([trace, inspect])
-        {:error, reason}
+        reservation_error(reason, :result)
     end
   end
+
+  defp tagged_destination(:ok, _destination), do: :ok
+  defp tagged_destination({:ok, value}, _destination), do: {:ok, value}
+
+  defp tagged_destination({:error, reason}, destination),
+    do: {:error, {reason, destination}}
+
+  defp reservation_error(reason, _destination)
+       when reason in [:destination_exists, :recovery_reservation_failed],
+       do: {:error, reason}
+
+  defp reservation_error(reason, destination), do: {:error, {reason, destination}}
 
   defp reserve_optional(nil, _kind, _mode, _claim_owner), do: {:ok, nil}
 
@@ -669,8 +690,8 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
       {:error, :destination_exists} ->
         {:error, :destination_exists}
 
-      {:error, _reason} ->
-        {:error, :recovery_reservation_failed}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

@@ -34,8 +34,14 @@ defmodule PtcRunner.Kernel.CommandDestination do
   def preflight(%CommandPreparation{} = preparation) do
     if CommandPreparation.valid?(preparation) do
       case preparation.artifact_destination_failures do
-        [] -> authorize_prepared(preparation)
-        _failures -> destination_failure(preparation, :invalid_destination)
+        [] ->
+          authorize_prepared(preparation)
+
+        [failure | _rest] ->
+          destination_failure(
+            preparation,
+            destination_diagnostic({:invalid_destination, artifact_name(failure)})
+          )
       end
     else
       {:error, internal_outcome(preparation)}
@@ -76,11 +82,11 @@ defmodule PtcRunner.Kernel.CommandDestination do
            preparation.prepared_run.effective_data_class
          ) do
       {:ok, authority} -> {:ok, authority}
-      {:error, reason} -> destination_failure(preparation, destination_code(reason))
+      {:error, reason} -> destination_failure(preparation, destination_diagnostic(reason))
     end
   end
 
-  defp destination_failure(preparation, code) do
+  defp destination_failure(preparation, {phase, code}) do
     CommandPreparation.close(preparation)
 
     options =
@@ -92,16 +98,93 @@ defmodule PtcRunner.Kernel.CommandDestination do
     {:error,
      CommandOutcome.run_error(
        preparation.run_ref,
-       diagnostic(:destination, code),
+       diagnostic(phase, code),
        requested_artifact_state(options)
      )}
   end
 
-  defp destination_code(:destination_exists), do: :destination_exists
-  defp destination_code(:private_destination_required), do: :private_destination_required
-  defp destination_code(:recovery_reservation_failed), do: :recovery_reservation_failed
-  defp destination_code(:destination_collision), do: :destination_exists
-  defp destination_code(_reason), do: :invalid_destination
+  defp destination_diagnostic(:conflicting_destinations),
+    do: {:arguments, :conflicting_arguments}
+
+  defp destination_diagnostic(:conflicting_trace_destinations),
+    do: {:arguments, :conflicting_arguments}
+
+  defp destination_diagnostic(:conflicting_result_destinations),
+    do: {:arguments, :conflicting_arguments}
+
+  defp destination_diagnostic({:invalid_destination, destination}),
+    do: {:destination, invalid_destination_code(destination)}
+
+  defp destination_diagnostic({reason, destination})
+       when reason in [
+              :destination_unavailable,
+              :source_unavailable,
+              :private_directory_unavailable,
+              :private_directory_unsupported,
+              :private_directory_parent_unavailable
+            ] do
+    {:destination, unavailable_destination_code(destination)}
+  end
+
+  defp destination_diagnostic({:private_directory_parent_unsafe, destination}),
+    do: {:destination, unsafe_destination_code(destination)}
+
+  defp destination_diagnostic({:trace_destination_unavailable, :trace}),
+    do: {:destination, :trace_destination_unavailable}
+
+  defp destination_diagnostic({:trace_destination_unsafe, :trace}),
+    do: {:destination, :trace_destination_unsafe}
+
+  defp destination_diagnostic({:invalid_trace_path, :trace}),
+    do: {:destination, :invalid_trace_destination}
+
+  defp destination_diagnostic({:inspection_destination_unavailable, :inspection}),
+    do: {:destination, :inspection_destination_unavailable}
+
+  defp destination_diagnostic({:inspection_destination_unsafe, :inspection}),
+    do: {:destination, :inspection_destination_unsafe}
+
+  defp destination_diagnostic({:inspection_persistence_failed, :inspection}),
+    do: {:destination, :inspection_destination_unavailable}
+
+  defp destination_diagnostic({:invalid_inspection_path, :inspection}),
+    do: {:destination, :invalid_inspection_destination}
+
+  defp destination_diagnostic({reason, _destination})
+       when reason in [
+              :destination_exists,
+              :private_destination_required,
+              :recovery_reservation_failed,
+              :destination_collision
+            ],
+       do: destination_diagnostic(reason)
+
+  defp destination_diagnostic(:destination_exists), do: {:destination, :destination_exists}
+
+  defp destination_diagnostic(:private_destination_required),
+    do: {:destination, :private_destination_required}
+
+  defp destination_diagnostic(:recovery_reservation_failed),
+    do: {:destination, :recovery_reservation_failed}
+
+  defp destination_diagnostic(:destination_collision), do: {:destination, :destination_exists}
+  defp destination_diagnostic(_reason), do: {:destination, :invalid_destination}
+
+  defp invalid_destination_code(:trace), do: :invalid_trace_destination
+  defp invalid_destination_code(:inspection), do: :invalid_inspection_destination
+  defp invalid_destination_code(:result), do: :invalid_result_destination
+
+  defp unavailable_destination_code(:trace), do: :trace_destination_unavailable
+  defp unavailable_destination_code(:inspection), do: :inspection_destination_unavailable
+  defp unavailable_destination_code(:result), do: :result_destination_unavailable
+
+  defp unsafe_destination_code(:trace), do: :trace_destination_unsafe
+  defp unsafe_destination_code(:inspection), do: :inspection_destination_unsafe
+  defp unsafe_destination_code(:result), do: :result_destination_unsafe
+
+  defp artifact_name(:trace_dir), do: :trace
+  defp artifact_name(:inspect), do: :inspection
+  defp artifact_name(key) when key in [:output, :private_output], do: :result
 
   defp internal_outcome(%CommandPreparation{run_ref: run_ref}) do
     run_ref = if CommandRunRef.valid?(run_ref), do: run_ref, else: fallback_run_ref()
