@@ -1206,6 +1206,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                %{
                  "switches" => ["--envelope ENVELOPE.json"],
                  "description" => "atomically publish the V1 command envelope"
+               },
+               %{
+                 "switches" => ["--help"],
+                 "description" => "show help for this command"
                }
              ],
              "notices" => []
@@ -1215,16 +1219,25 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              CommandParser.parse(["validate", "ptc.json", "--output", "result.json"])
 
     assert rejection.kind == :unknown_switch
-    assert rejection.accepted == ["--host-config", "--envelope"]
+    assert rejection.accepted == ["--host-config", "--envelope", "--help"]
   end
 
-  test "the repl short help alias resolves to its generated help topic only by itself" do
-    assert {:ok, arguments} = CommandParser.parse(["repl", "-h"])
-    assert arguments.command == :help
-    assert arguments.options.topic == :repl
+  test "declared command help aliases resolve to generated topics only by themselves" do
+    for {command, alias_name} <- [{"run", "--help"}, {"repl", "-h"}] do
+      assert {:ok, arguments} = CommandParser.parse([command, alias_name])
+      assert arguments.command == :help
+      assert arguments.options.topic == String.to_existing_atom(command)
+    end
 
     assert {:error, rejection} = CommandParser.parse(["repl", "-h", "-e", "42"])
     assert rejection.code == :invalid_arguments
+
+    assert {:error, rejection} =
+             CommandParser.parse(["run", "--help", "--envelope", "out.json"])
+
+    assert rejection.command == :help
+    assert rejection.kind == :unknown_switch
+    assert rejection.accepted == []
   end
 
   test "unknown-switch rejections expose only the closed accepted list" do
@@ -1248,7 +1261,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "--private-output",
              "--inspect",
              "--component-override-descriptor",
-             "--envelope"
+             "--envelope",
+             "--help"
            ]
 
     refute inspect(first) =~ "secret-first"

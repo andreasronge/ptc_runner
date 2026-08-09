@@ -56,20 +56,6 @@ defmodule PtcRunner.Kernel.CommandParser do
   defp dispatch_argv(["help" | rest], frontend),
     do: reject_closed_command(:help, rest, frontend)
 
-  defp dispatch_argv([command, "--help"], frontend) do
-    case CommandDeclaration.command_atom(command) do
-      {:ok, topic} -> help(topic, frontend)
-      :error -> reject(:unknown, :invalid_command)
-    end
-  end
-
-  defp dispatch_argv([command, "--help" | _rest], _frontend) do
-    case CommandDeclaration.command_atom(command) do
-      {:ok, _topic} -> reject(:help, :invalid_arguments)
-      :error -> reject(:unknown, :invalid_command)
-    end
-  end
-
   defp dispatch_argv([command | argv], frontend) do
     case CommandDeclaration.command_atom(command) do
       {:ok, command} -> parse_command(command, argv, frontend)
@@ -98,6 +84,9 @@ defmodule PtcRunner.Kernel.CommandParser do
 
       duplicate_options?(option_arguments, command, frontend) ->
         reject(command, :invalid_arguments)
+
+      Keyword.has_key?(options, :help) ->
+        validate_help_alias(command, positional, options, frontend)
 
       conflicting?(options, :input, :private_input) or
           conflicting?(options, :output, :private_output) ->
@@ -243,12 +232,6 @@ defmodule PtcRunner.Kernel.CommandParser do
   defp validate_command(:repl, positional, options, ordered, [], frontend)
        when length(positional) <= 1 do
     cond do
-      options == %{help: true} and positional == [] ->
-        help(:repl, frontend)
-
-      Map.has_key?(options, :help) ->
-        reject(:repl, :invalid_arguments)
-
       not allowed?(:repl, options, frontend) ->
         reject(:repl, :invalid_arguments)
 
@@ -274,6 +257,14 @@ defmodule PtcRunner.Kernel.CommandParser do
 
   defp validate_command(command, _positional, _options, _ordered, _frontend_options, _frontend),
     do: reject(command, :invalid_arguments)
+
+  defp validate_help_alias(command, [], [help: true], frontend), do: help(command, frontend)
+
+  defp validate_help_alias(_command, _positional, options, frontend) do
+    if length(options) > 1,
+      do: {:error, CommandRejection.unknown_switch(:help, frontend)},
+      else: reject(:help, :invalid_arguments)
+  end
 
   defp repl_arguments_valid?(options, ordered, positional) do
     format = Map.get(options, :format, "clojure")

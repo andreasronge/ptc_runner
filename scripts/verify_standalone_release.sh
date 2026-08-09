@@ -35,6 +35,19 @@ cat > "$application_root/ptc.json" <<'EOF'
 }
 EOF
 
+cat > "$application_root/private-ptc.json" <<'EOF'
+{
+  "version": 1,
+  "workflow": {
+    "components": [{"id": "smoke.main", "path": "main.clj"}],
+    "entry": "smoke.main/run"
+  },
+  "input": {"value": {"private": true}},
+  "events": {"policy": "private"},
+  "providers": {"workflow": [], "mission": []}
+}
+EOF
+
 cat > "$fixture_root/provider-host.json" <<'EOF'
 {
   "credentials": {"key": {"literal": "invalid-smoke-credential"}},
@@ -91,6 +104,74 @@ grep -q '"provider_activity":false' "$release_tmp_dir/validate.stdout"
 printf '%s\n' '{"smoke":true}' > "$release_tmp_dir/run.expected"
 cmp "$release_tmp_dir/run.expected" "$release_tmp_dir/run.stdout"
 
+envelope_path="$release_tmp_dir/run-envelope.json"
+"$command_bin" run "$application_root/ptc.json" --envelope "$envelope_path" \
+  > "$release_tmp_dir/envelope.stdout" \
+  2> "$release_tmp_dir/envelope.stderr"
+test ! -s "$release_tmp_dir/envelope.stdout"
+test ! -s "$release_tmp_dir/envelope.stderr"
+"$release_root/bin/ptc_runner" eval '
+  [path] = System.argv()
+  envelope = path |> File.read!() |> Jason.decode!()
+  true = PtcRunner.Kernel.CommandContract.valid_envelope?(envelope)
+  "ok" = envelope["status"]
+' "$envelope_path"
+
+failed_envelope="$release_tmp_dir/failed-envelope.json"
+set +e
+"$command_bin" validate "$application_root/missing.json" --envelope "$failed_envelope" \
+  > "$release_tmp_dir/failed-envelope.stdout" \
+  2> "$release_tmp_dir/failed-envelope.stderr"
+failed_envelope_status=$?
+set -e
+test "$failed_envelope_status" -eq 3
+test ! -s "$release_tmp_dir/failed-envelope.stdout"
+test ! -s "$release_tmp_dir/failed-envelope.stderr"
+"$release_root/bin/ptc_runner" eval '
+  [path] = System.argv()
+  envelope = path |> File.read!() |> Jason.decode!()
+  true = PtcRunner.Kernel.CommandContract.valid_envelope?(envelope)
+  "error" = envelope["status"]
+' "$failed_envelope"
+
+rejected_envelope="$release_tmp_dir/rejected-envelope.json"
+set +e
+"$command_bin" run "$application_root/ptc.json" --unknown \
+  --envelope "$rejected_envelope" \
+  > "$release_tmp_dir/rejected.stdout" \
+  2> "$release_tmp_dir/rejected.stderr"
+rejected_status=$?
+set -e
+test "$rejected_status" -eq 2
+test ! -e "$rejected_envelope"
+grep -q 'arguments/invalid_arguments' "$release_tmp_dir/rejected.stderr"
+grep -q 'unknown switch; accepted:' "$release_tmp_dir/rejected.stderr"
+
+collision_path="$release_tmp_dir/collision.json"
+set +e
+"$command_bin" run "$application_root/ptc.json" \
+  --output "$collision_path" --envelope "$collision_path" \
+  > "$release_tmp_dir/collision.stdout" \
+  2> "$release_tmp_dir/collision.stderr"
+collision_status=$?
+set -e
+test "$collision_status" -eq 2
+test ! -e "$collision_path"
+grep -q 'arguments/invalid_arguments' "$release_tmp_dir/collision.stderr"
+
+existing_envelope="$release_tmp_dir/existing-envelope.json"
+printf '%s\n' 'original' > "$existing_envelope"
+set +e
+"$command_bin" doctor --envelope "$existing_envelope" \
+  > "$release_tmp_dir/existing-envelope.stdout" \
+  2> "$release_tmp_dir/existing-envelope.stderr"
+existing_envelope_status=$?
+set -e
+test "$existing_envelope_status" -eq 74
+printf '%s\n' 'original' > "$release_tmp_dir/existing-envelope.expected"
+cmp "$release_tmp_dir/existing-envelope.expected" "$existing_envelope"
+grep -q 'envelope/publication_failed' "$release_tmp_dir/existing-envelope.stderr"
+
 "$command_bin" doctor "$application_root/ptc.json" > "$release_tmp_dir/doctor.stdout"
 grep -q '"provider_activity":false' "$release_tmp_dir/doctor.stdout"
 
@@ -101,6 +182,17 @@ grep -q '"installations"' "$release_tmp_dir/models.stdout"
 "$command_bin" repl -e -10 > "$release_tmp_dir/repl.stdout"
 printf '%s\n' '-10' > "$release_tmp_dir/repl.expected"
 cmp "$release_tmp_dir/repl.expected" "$release_tmp_dir/repl.stdout"
+
+set +e
+"$command_bin" repl --manifest "$application_root/private-ptc.json" --private-terminal \
+  < /dev/null \
+  > "$release_tmp_dir/private-repl.stdout" \
+  2> "$release_tmp_dir/private-repl.stderr"
+private_repl_status=$?
+set -e
+test "$private_repl_status" -eq 1
+grep -q 'private manifest REPL requires attached stdin and stdout terminals' \
+  "$release_tmp_dir/private-repl.stderr"
 
 set +e
 "$command_bin" doctor "$fixture_root/provider-application.json" \

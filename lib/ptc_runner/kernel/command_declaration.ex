@@ -8,6 +8,12 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
   """
 
   @shared_frontends [:standalone, :mix]
+  @help_option %{
+    key: :help,
+    type: :boolean,
+    syntax: ["--help"],
+    description: "show help for this command"
+  }
 
   @declarations %{
     root: %{
@@ -39,7 +45,8 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           type: :string,
           syntax: ["--envelope ENVELOPE.json"],
           description: "atomically publish the V1 command envelope"
-        }
+        },
+        @help_option
       ],
       retired: %{}
     },
@@ -57,7 +64,8 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           type: :string,
           syntax: ["--envelope ENVELOPE.json"],
           description: "atomically publish the V1 command envelope"
-        }
+        },
+        @help_option
       ],
       retired: %{}
     },
@@ -126,7 +134,8 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           frontends: [:mix],
           owner: :frontend,
           repeatable: true
-        }
+        },
+        @help_option
       ],
       retired: %{
         "--mission" => "--input",
@@ -155,7 +164,8 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           type: :string,
           syntax: ["--envelope ENVELOPE.json"],
           description: "atomically publish the V1 command envelope"
-        }
+        },
+        @help_option
       ],
       retired: %{}
     },
@@ -173,7 +183,8 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           type: :string,
           syntax: ["--envelope ENVELOPE.json"],
           description: "atomically publish the V1 command envelope"
-        }
+        },
+        @help_option
       ],
       retired: %{}
     },

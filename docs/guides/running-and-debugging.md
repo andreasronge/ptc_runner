@@ -7,14 +7,12 @@ rendering paths.
 
 ## Commands
 
-`mix ptc init DIRECTORY` creates the
-exact two-file scaffold documented in [Getting started](getting-started.md#create-a-minimal-application).
-Initialization validates the scaffold before filesystem access and publishes
-the completed directory atomically without replacing an existing directory or
-symlink.
-
 | Command | Purpose |
 | --- | --- |
+| `mix ptc help [COMMAND]` | Show root or per-command help generated from the accepted declarations |
+| `mix ptc --version` | Show the packaged command version |
+| `mix ptc init DIRECTORY` | Atomically publish the validated two-file application scaffold |
+| `mix ptc validate MANIFEST` | Validate and compile a manifest without running its workflow |
 | `mix ptc run MANIFEST` | Run the manifest's qualified entry and render its public result |
 | `mix ptc run MANIFEST --host-config HOST.json` | Install the provider aliases a provider-bearing manifest selects |
 | `mix ptc run MANIFEST --input INPUT.json` | Run with a confined alternate input object |
@@ -23,12 +21,21 @@ symlink.
 | `mix ptc run MANIFEST --inspect RUN.inspection.jsonl` | Also write the owner-only private artifact |
 | `mix ptc run MANIFEST --envelope ENVELOPE.json` | Atomically publish the machine-readable V1 command envelope |
 | `mix ptc run MANIFEST --component-override-descriptor D.json` | Compile one selected component from verified replacement source |
+| `mix ptc doctor [MANIFEST]` | Inspect application and provider readiness without running the workflow |
+| `mix ptc doctor MANIFEST --host-config HOST.json --connect` | Perform active provider connectivity checks |
+| `mix ptc models --host-config HOST.json` | List the host document's installed model aliases |
 | `mix ptc.materialize MANIFEST --component ID --out DIR --source S.clj` | Publish model-authored source as a gated candidate component |
 | `mix ptc repl` | Start the direct transactional PTC-Lisp REPL |
 | `mix ptc repl -e EXPR -l SETUP.clj` | Run repeatable expressions with optional setup |
 | `mix ptc repl --manifest MANIFEST [--host-config HOST.json]` | Reuse a manifest's workflow bundle and one provider session |
 | `mix ptc repl --profile PROFILE --resource NAME=DIR` | Query an immutable trace or inspection capture |
 | `mix ptc.viewer --trace-dir DIR` | Browse canonical JSONL traces locally |
+
+`mix ptc init DIRECTORY` creates the exact two-file scaffold documented in
+[Getting started](getting-started.md#create-a-minimal-application).
+Initialization validates the scaffold before filesystem access and publishes
+the completed directory atomically without replacing an existing directory or
+symlink.
 
 Run `mix ptc help COMMAND` or `bin/ptc help COMMAND` for help generated from the
 same per-command declarations the strict parser accepts.
@@ -286,9 +293,11 @@ with no envelope, described below:
   envelope and exits `70`.
 
 The envelope schema is `priv/schemas/ptc-command-envelope-v1.schema.json`.
-The command never renders an inspected exception, arbitrary callback result,
-credential, private value, provider response, selector, or filesystem path into
-either public stream.
+One-shot command presentation never renders an inspected exception, arbitrary
+callback result, credential, private value, provider response, selector, or
+filesystem path into either public stream. The long-lived REPL has its own
+documented projections; notably, a profile session reports the path of its
+successfully published analysis trace.
 
 The shared command core implements every one-shot command through
 `PtcRunner.Kernel.CommandEngine`, while `ptc repl` shares the same parser and
