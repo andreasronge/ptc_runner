@@ -428,7 +428,10 @@ inspection artifact answers *what the model saw and wrote*. It is created with
 owner-only permissions and contains the full request, response, generated
 source, and capability payloads. The log-analysis REPL cannot read or join this
 private data by design; use the development Viewer below or the private
-inspection profile in the [Kernel REPL guide](kernel-repl.md).
+inspection profile in the [Kernel REPL guide](kernel-repl.md). Private
+inspection needs `--private-unattended` for non-interactive use, including by
+a coding agent — see ["Private analysis without a
+terminal"](kernel-repl.md#private-analysis-without-a-terminal).
 
 In one verified `03-file-agent` run, the request contained four relevant parts:
 

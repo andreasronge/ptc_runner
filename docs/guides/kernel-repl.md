@@ -306,6 +306,44 @@ source and exact trace-query payloads are not copied into canonical events.
 The output directory cannot be the input directory, an ancestor or descendant
 of it, or the same physical directory through symlinked parents.
 
+### Private analysis without a terminal
+
+`inspection-analysis-v2` requires one authorized private destination. Two are
+available, and exactly one may be given:
+
+- `--private-terminal` — the attached terminal is the private sink. Requires
+  stdin and stdout to be terminals, and admits only interactive input.
+- `--private-unattended` — this command's own streams are the private sink.
+  Admits `-e`, `--load`, script, and stdin input, and `--format jsonl`.
+
+```bash
+mix ptc.repl --profile inspection-analysis-v2 \
+  --resource traces=tmp/traces --resource inspection=tmp/inspection \
+  --session-trace-dir tmp/analysis \
+  --private-unattended --format jsonl \
+  -e '(inspection/runs {})'
+```
+
+The attached-terminal check is an **accident guard, not access control**. It
+stops private values reaching a log or transcript by mistake; it cannot stop a
+determined caller, because `isatty` cannot tell a human's terminal from a
+pseudo-terminal allocated by `script(1)`, `tmux`, or `ssh -t`, and because a
+caller running as the same user can read the inspection artifact directly.
+`--private-unattended` makes deliberate non-interactive use explicit and
+greppable instead of requiring that workaround.
+
+Private values still reach whatever this command's stdout is. That is the
+point when the caller is a coding agent reading its own output — the intended
+use is a session trace or a human-reviewed log, not routine relay elsewhere.
+Exact model messages, generated source, capability arguments/results,
+effective preludes, and MCP request/response bodies routed this way become
+part of whatever consumes this command's output: a coding agent's own
+conversation transcript, and from there potentially that agent's own LLM
+provider logs. That is a materially different exposure than a human
+redirecting stdout to a file by mistake, and it is the expected outcome of
+this flag, not a misuse of it. Treat the destination of this command's stdout
+with the same care as the private data itself.
+
 ### JSON Lines for coding agents
 
 Coding agents can avoid PTY and prompt handling by repeating `-e` with
