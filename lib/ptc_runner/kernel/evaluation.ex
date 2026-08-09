@@ -146,7 +146,8 @@ defmodule PtcRunner.Kernel.Evaluation do
           Keyword.get(opts, :after_started_hook),
           projection_boundary,
           Keyword.fetch(opts, :params)
-        }
+        },
+        Keyword.get(opts, :space, RunState.default_space())
       )
 
     result
@@ -161,10 +162,11 @@ defmodule PtcRunner.Kernel.Evaluation do
          source,
          timeout_ms,
          capture,
-         evaluation_context
+         evaluation_context,
+         space
        ) do
     with :ok <- source_within_limit(source, RunState.limits(state).subordinate_source_bytes),
-         {:ok, memory, history, lease} <- RunState.reserve_evaluation(state) do
+         {:ok, memory, history, lease} <- RunState.reserve_evaluation(state, space) do
       evaluate_with_lease(
         state,
         mission_environment,
@@ -172,7 +174,8 @@ defmodule PtcRunner.Kernel.Evaluation do
         timeout_ms,
         {memory, history, lease},
         capture,
-        evaluation_context
+        evaluation_context,
+        space
       )
     else
       {:error, :busy} ->
@@ -199,7 +202,8 @@ defmodule PtcRunner.Kernel.Evaluation do
          timeout_ms,
          {memory, history, lease},
          capture,
-         {evaluation_id, started_ms, after_started_hook, projection_boundary, params}
+         {evaluation_id, started_ms, after_started_hook, projection_boundary, params},
+         space
        ) do
     limits = RunState.limits(state)
 
@@ -222,6 +226,7 @@ defmodule PtcRunner.Kernel.Evaluation do
            Events.emit(state, capture.event_sink, "evaluation-started", %{
              evaluation_id: evaluation_id,
              environment: :mission,
+             space: space,
              program_kind: :"ptc-lisp",
              source_hash: source_hash,
              source_bytes: source_bytes
@@ -246,6 +251,7 @@ defmodule PtcRunner.Kernel.Evaluation do
         Events.emit(state, capture.event_sink, "evaluation-stopped", %{
           evaluation_id: evaluation_id,
           environment: :mission,
+          space: space,
           status: result.outcome,
           continuation: RunState.evaluation_memory_summary(state),
           duration_ms: duration_ms

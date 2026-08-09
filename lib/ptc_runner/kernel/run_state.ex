@@ -59,6 +59,14 @@ defmodule PtcRunner.Kernel.RunState do
 
   @history_depth 3
 
+  # SPIKE: one continuation per named mission space. `reserve_evaluation/2`
+  # selects the space; the active lease records it so a commit can only land in
+  # the space it was reserved against. `continuation_revision` stays global: a
+  # commit in any space invalidates an outstanding source check in every space.
+  # That over-invalidates rather than under-invalidates, which is the safe
+  # direction, and it keeps the space out of the source-check API for now.
+  @default_space "default"
+
   @enforce_keys [:pid, :token, :provider_tracker]
   defstruct [:pid, :token, :provider_tracker]
 
@@ -189,13 +197,25 @@ defmodule PtcRunner.Kernel.RunState do
   def mark_evaluation_terminal_provider_failure(state),
     do: safe_call(state, :mark_evaluation_terminal_provider_failure, :ok)
 
-  @spec reserve_evaluation(t()) :: {:ok, map(), [term()], reference()} | {:error, atom()}
-  @doc "Atomically reserves and returns native subordinate memory and turn history."
-  def reserve_evaluation(state), do: call(state, :reserve_evaluation)
+  @spec reserve_evaluation(t(), binary()) ::
+          {:ok, map(), [term()], reference()} | {:error, atom()}
+  @doc """
+  Atomically reserves one mission space's native memory and turn history.
+
+  The returned lease is bound to `space`; `commit_evaluation/4` writes back to
+  that same space and cannot be redirected by its caller.
+  """
+  def reserve_evaluation(state, space \\ @default_space) when is_binary(space),
+    do: call(state, {:reserve_evaluation, space})
 
   @doc false
-  @spec reserve_source_check(t()) :: {:ok, map(), non_neg_integer()} | {:error, atom()}
-  def reserve_source_check(state), do: call(state, :reserve_source_check)
+  @spec reserve_source_check(t(), binary()) :: {:ok, map(), non_neg_integer()} | {:error, atom()}
+  def reserve_source_check(state, space \\ @default_space) when is_binary(space),
+    do: call(state, {:reserve_source_check, space})
+
+  @doc false
+  @spec default_space() :: binary()
+  def default_space, do: @default_space
 
   @doc false
   @spec finish_source_check(t(), non_neg_integer()) :: :ok | {:error, atom()}
@@ -349,10 +369,10 @@ defmodule PtcRunner.Kernel.RunState do
        source_checks: 0,
        protocol_errors: 0,
        terminal_failure: nil,
-       memory: %{},
-       history: [],
+       continuations: %{},
        continuation_revision: 0,
        evaluation_lease: nil,
+       evaluation_space: nil,
        evaluation_release_waiter: nil,
        evaluation_terminal_provider_failure?: false,
        reservations: %{}
@@ -456,7 +476,7 @@ defmodule PtcRunner.Kernel.RunState do
     {:reply, :ok, state}
   end
 
-  def handle_call({token, :reserve_evaluation}, {caller, _tag}, %{token: token} = state) do
+  def handle_call({token, {:reserve_evaluation, space}}, {caller, _tag}, %{token: token} = state) do
     cond do
       state.closed? ->
         {:reply, {:error, :run_closed}, state}
@@ -472,19 +492,21 @@ defmodule PtcRunner.Kernel.RunState do
 
       true ->
         lease = {make_ref(), caller, Process.monitor(caller)}
+        %{memory: memory, history: history} = continuation(state, space)
 
-        {:reply, {:ok, state.memory, state.history, elem(lease, 0)},
+        {:reply, {:ok, memory, history, elem(lease, 0)},
          %{
            state
            | evaluations: state.evaluations + 1,
              evaluation_lease: lease,
+             evaluation_space: space,
              evaluation_release_waiter: nil,
              evaluation_terminal_provider_failure?: false
          }}
     end
   end
 
-  def handle_call({token, :reserve_source_check}, _from, %{token: token} = state) do
+  def handle_call({token, {:reserve_source_check, space}}, _from, %{token: token} = state) do
     cond do
       state.closed? ->
         {:reply, {:error, :run_closed}, state}
@@ -499,7 +521,7 @@ defmodule PtcRunner.Kernel.RunState do
         {:reply, {:error, :limit_exceeded}, state}
 
       true ->
-        {:reply, {:ok, state.memory, state.continuation_revision},
+        {:reply, {:ok, continuation(state, space).memory, state.continuation_revision},
          %{state | source_checks: state.source_checks + 1}}
     end
   end
@@ -526,11 +548,28 @@ defmodule PtcRunner.Kernel.RunState do
       {^lease, ^caller, monitor_ref} ->
         Process.demonitor(monitor_ref, [:flush])
 
+        space = state.evaluation_space
+
+        # Per-space bytes AND the run-wide total are both held under the same
+        # ceiling. Enforcing only the per-space figure would silently multiply
+        # the run's retained heap by the number of spaces.
         memory_bytes =
-          RetainedSize.bytes_with_cap(memory, state.limits.evaluation_memory_bytes)
+          space_and_total_bytes(
+            state.continuations,
+            space,
+            :memory,
+            memory,
+            state.limits.evaluation_memory_bytes
+          )
 
         history_bytes =
-          RetainedSize.bytes_with_cap(history, state.limits.evaluation_history_bytes)
+          space_and_total_bytes(
+            state.continuations,
+            space,
+            :history,
+            history,
+            state.limits.evaluation_history_bytes
+          )
 
         history_values_valid? =
           length(history) <= @history_depth and
@@ -571,11 +610,15 @@ defmodule PtcRunner.Kernel.RunState do
             {:reply, {:error, :history_exceeded}, clear_evaluation(state)}
 
           true ->
+            committed = %{
+              memory: RetainedSize.detach_binaries(memory),
+              history: RetainedSize.detach_binaries(history)
+            }
+
             {:reply, :ok,
              %{
                state
-               | memory: RetainedSize.detach_binaries(memory),
-                 history: RetainedSize.detach_binaries(history),
+               | continuations: Map.put(state.continuations, space, committed),
                  continuation_revision: state.continuation_revision + 1
              }
              |> clear_evaluation()}
@@ -698,7 +741,8 @@ defmodule PtcRunner.Kernel.RunState do
         {caller, _tag},
         %{token: token, owner: caller} = state
       ),
-      do: {:reply, Lisp.externalize_memory(state.memory), state}
+      # REPL sessions only ever drive the default space.
+      do: {:reply, Lisp.externalize_memory(continuation(state, @default_space).memory), state}
 
   def handle_call(
         {token, :evaluation_memory_observation},
@@ -947,9 +991,41 @@ defmodule PtcRunner.Kernel.RunState do
     %{
       state
       | evaluation_lease: nil,
+        evaluation_space: nil,
         evaluation_release_waiter: nil,
         evaluation_terminal_provider_failure?: false
     }
+  end
+
+  defp continuation(state, space),
+    do: Map.get(state.continuations, space, %{memory: %{}, history: []})
+
+  # Returns the larger of the candidate space's own retained bytes and the
+  # run-wide total once the candidate replaces that space, or :error when
+  # either measurement exceeds the cap. Callers compare one number.
+  defp space_and_total_bytes(continuations, space, key, candidate, limit) do
+    own = RetainedSize.bytes_with_cap(candidate, limit)
+
+    others =
+      continuations
+      |> Map.delete(space)
+      |> Enum.reduce(0, fn {_name, held}, acc ->
+        case RetainedSize.bytes_with_cap(Map.fetch!(held, key), limit) do
+          bytes when is_integer(bytes) and is_integer(acc) -> acc + bytes
+          _ -> :oversized
+        end
+      end)
+
+    if is_integer(own) and is_integer(others), do: max(own, own + others), else: :oversized
+  end
+
+  defp continuations_total(continuations, key, limit) do
+    Enum.reduce(continuations, 0, fn {_name, held}, acc ->
+      case RetainedSize.bytes_with_cap(Map.fetch!(held, key), limit) do
+        bytes when is_integer(bytes) and is_integer(acc) -> acc + bytes
+        _ -> :error
+      end
+    end)
   end
 
   defp reservation_by_provider_ref(reservations, ref) do
@@ -982,24 +1058,27 @@ defmodule PtcRunner.Kernel.RunState do
       subordinate_source_checks: state.source_checks,
       protocol_errors: state.protocol_errors,
       evaluation_memory_bytes:
-        RetainedSize.bytes_with_cap(state.memory, state.limits.evaluation_memory_bytes),
+        continuations_total(state.continuations, :memory, state.limits.evaluation_memory_bytes),
       evaluation_history_bytes:
-        RetainedSize.bytes_with_cap(state.history, state.limits.evaluation_history_bytes),
+        continuations_total(state.continuations, :history, state.limits.evaluation_history_bytes),
       evaluation_continuation_bytes: continuation_bytes(state),
+      evaluation_spaces: state.continuations |> Map.keys() |> Enum.sort(),
       evaluation_busy?: not is_nil(state.evaluation_lease)
     }
   end
 
   defp continuation_summary(state) do
     memory_bytes =
-      RetainedSize.bytes_with_cap(state.memory, state.limits.evaluation_memory_bytes)
+      continuations_total(state.continuations, :memory, state.limits.evaluation_memory_bytes)
 
     history_bytes =
-      RetainedSize.bytes_with_cap(state.history, state.limits.evaluation_history_bytes)
+      continuations_total(state.continuations, :history, state.limits.evaluation_history_bytes)
 
     %{
-      defined_count: map_size(state.memory),
-      history_count: length(state.history),
+      defined_count:
+        Enum.reduce(state.continuations, 0, fn {_n, c}, acc -> acc + map_size(c.memory) end),
+      history_count:
+        Enum.reduce(state.continuations, 0, fn {_n, c}, acc -> acc + length(c.history) end),
       memory_bytes: memory_bytes,
       history_bytes: history_bytes,
       bytes: sum_retained_bytes(memory_bytes, history_bytes)
