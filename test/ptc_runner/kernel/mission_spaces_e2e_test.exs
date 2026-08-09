@@ -46,6 +46,19 @@ defmodule PtcRunner.Kernel.MissionSpacesE2ETest do
     (some? (re-find #"[0-9]" claim)))
   """
 
+  @shipped_loop_source """
+  (ns spike.shipped "Two agent.core loops, one per named mission space.")
+
+  (defn run [_input]
+    (let [fact (agent.core/run-value
+                 "Retrieve the stored record and return it as a string."
+                 {"max_turns" 4 "mission" "research"})
+          verdict (agent.core/run-value
+                    (str "Does this claim contain a numeric identifier? Claim: " fact)
+                    {"max_turns" 4 "mission" "review"})]
+      (return {"fact" fact "verdict" verdict})))
+  """
+
   @workflow_source """
   (ns spike.team "Two agents driven against two named mission spaces.")
 
@@ -189,6 +202,63 @@ defmodule PtcRunner.Kernel.MissionSpacesE2ETest do
 
     assert "research" in spaces
     assert "review" in spaces
+  end
+
+  test "the shipped agent.core loop drives two spaces via its cfg" do
+    {:ok, limits} =
+      Limits.new(
+        run_duration_ms: 150_000,
+        workflow_timeout_ms: 150_000,
+        evaluation_timeout_ms: 10_000,
+        subordinate_evaluations: 12,
+        workflow_capability_calls: 64
+      )
+
+    {:ok, %{capabilities: [llm_capability], close: close}} = build_live_llm(limits)
+    if close, do: on_exit(close)
+
+    {:ok, shipped} =
+      Component.new(
+        id: "spike.shipped",
+        source: @shipped_loop_source,
+        dependencies: ["agent.core"]
+      )
+
+    {:ok, components} = Library.resolve_components([shipped, {:library, "agent.core"}])
+    {:ok, bundle} = Kernel.compile_bundle(components)
+
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm_capability])
+    {:ok, default_mission} = MissionEnvironment.new([])
+    {:ok, research} = MissionEnvironment.new(bundle: mission_bundle("res", @research_source))
+    {:ok, review} = MissionEnvironment.new(bundle: mission_bundle("rev", @review_source))
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "mission-spaces-shipped")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: default_mission,
+        extra_missions: %{"research" => research, "review" => review},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: value}} = Kernel.run("(spike.shipped/run data/input)", config)
+
+    assert is_binary(value["fact"])
+    assert value["fact"] =~ "4021"
+    refute is_nil(value["verdict"])
+
+    spaces =
+      sink
+      |> EventSink.events()
+      |> Enum.filter(&(&1.type == "evaluation-started"))
+      |> Enum.map(fn event -> event.data[:space] end)
+      |> Enum.uniq()
+
+    assert "research" in spaces
+    assert "review" in spaces
+    refute "default" in spaces
   end
 
   defp workflow_bundle do

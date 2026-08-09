@@ -81,6 +81,7 @@
                              "max_program_chars" max-program-chars
                              "max_observation_chars" max-observation-chars
                              "max_transcript_chars" max-transcript-chars)
+        mission-space (or (get cfg "mission") "default")
         initial-prompt-state (agent.prompt/initial-state effective-cfg)]
     (if (not (map? initial-prompt-state))
       (fail (result/error :invalid-prompt :invalid-initial-state))
@@ -98,7 +99,7 @@
               {:turn turn :kind (get action :kind)})
             (case (get action :kind)
               :tool-call
-              (let [evaluation (kernel/eval-source (get action :program))]
+              (let [evaluation (kernel/eval-source-in mission-space (get action :program))]
                 ;; Host policy and malformed/provider-initiated MCP exchanges
                 ;; are not argument mistakes the model can correct. The Kernel
                 ;; derives this provenance from the private capability ledger,

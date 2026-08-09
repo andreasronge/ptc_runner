@@ -2,6 +2,10 @@
 
 (defn initial-state [cfg]
   {:revision 0
+   ;; The prompt renders the API of the space this agent evaluates into, so
+   ;; two agents in one run can be given two different mission APIs without a
+   ;; second mechanism.
+   :mission (or (get cfg "mission") "default")
    :turns-remaining (get cfg "max_turns")
    :max-observation-chars (get cfg "max_observation_chars")
    :max-program-chars (get cfg "max_program_chars")})
@@ -230,7 +234,8 @@
 
 (defn render [state]
   (if (map? state)
-    (let [context (json/parse-string (kernel/mission-model-context))]
+    (let [context (json/parse-string
+                    (kernel/mission-model-context-in (or (get state :mission) "default")))]
       (if (and (map? context) (= 2 (get context "schema_version")))
         (str "PTC_AGENT_PROMPT_V1\n\n"
              "Instructions\n"
