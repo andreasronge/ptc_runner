@@ -664,7 +664,8 @@ defmodule PtcRunner.Kernel.TraceLog do
          max_result_bytes,
          _source_kind
        ) do
-    with :ok <- validate_keys(arguments, ~w(run_id limit cursor status evaluation_id capability)),
+    with :ok <-
+           validate_keys(arguments, ~w(run_id limit cursor status evaluation_id capability space)),
          :ok <- valid_string(run_id),
          :ok <- validate_turn_filters(arguments),
          true <- Enum.any?(events, &(&1["run_id"] == run_id)),
@@ -2129,7 +2130,9 @@ defmodule PtcRunner.Kernel.TraceLog do
     (is_nil(arguments["status"]) or status == arguments["status"]) and
       (is_nil(arguments["evaluation_id"]) or
          event_data(event, "evaluation_id") == arguments["evaluation_id"]) and
-      (is_nil(arguments["capability"]) or event_data(event, "name") == arguments["capability"])
+      (is_nil(arguments["capability"]) or event_data(event, "name") == arguments["capability"]) and
+      (is_nil(arguments["space"]) or
+         stringify(event_data(event, "space")) == arguments["space"])
   end
 
   defp counters(events) do
@@ -2139,8 +2142,23 @@ defmodule PtcRunner.Kernel.TraceLog do
       "errors" => Enum.count(events, &error_event?/1),
       "evaluations" => Enum.count(events, &(&1["type"] == "evaluation-started")),
       "workflow_capability_calls" => capability_call_count(events, "workflow"),
-      "mission_capability_calls" => capability_call_count(events, "mission")
+      "mission_capability_calls" => capability_call_count(events, "mission"),
+      # SPIKE: per-space evaluation counts. The two figures above stay keyed by
+      # environment so existing queries keep working; a multi-agent run needs
+      # the breakdown to attribute spend to an agent.
+      "evaluations_by_space" => evaluations_by_space(events)
     }
+  end
+
+  defp evaluations_by_space(events) do
+    events
+    |> Enum.filter(&(&1["type"] == "evaluation-started"))
+    |> Enum.reduce(%{}, fn event, acc ->
+      case stringify(event_data(event, "space")) do
+        space when is_binary(space) -> Map.update(acc, space, 1, &(&1 + 1))
+        _other -> acc
+      end
+    end)
   end
 
   defp capability_call_count(events, environment) do
@@ -2327,7 +2345,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp validate_turn_filters(arguments),
-    do: optional_strings(arguments, ~w(status evaluation_id capability))
+    do: optional_strings(arguments, ~w(status evaluation_id capability space))
 
   defp optional_strings(arguments, keys) do
     if Enum.all?(keys, &(is_nil(arguments[&1]) or valid_string(arguments[&1]) == :ok)),

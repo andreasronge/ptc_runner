@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.MissionSpacesSpikeTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
 
   defp config(extra_missions) do
@@ -110,6 +111,52 @@ defmodule PtcRunner.Kernel.MissionSpacesSpikeTest do
     """
 
     assert {:ok, %{value: 7}} = Kernel.run(source, config)
+  end
+
+  test "a trace can be queried down to one agent's space" do
+    {config, sink} = config(two_spaces())
+
+    source = """
+    (do
+      (kernel/eval-source-in "research" "(def a 1)")
+      (kernel/eval-source-in "research" "(return a)")
+      (kernel/eval-source-in "review" "(return 9)")
+      (return :done))
+    """
+
+    assert {:ok, _result} = Kernel.run(source, config)
+
+    events = Enum.map(EventSink.events(sink), &normalize_event/1)
+
+    assert {:ok, %{"evaluations_by_space" => by_space}} =
+             TraceLog.query_loaded(events, "spike", :counters, %{}, 1_000_000, :sanitized)
+
+    assert by_space == %{"research" => 2, "review" => 1}
+
+    assert {:ok, %{"items" => items}} =
+             TraceLog.query_loaded(
+               events,
+               "spike",
+               :list_turns,
+               %{"run_id" => "mission-spaces-spike", "space" => "review"},
+               1_000_000,
+               :sanitized
+             )
+
+    assert items != []
+
+    assert Enum.all?(items, fn item ->
+             get_in(item, ["data", "space"]) in [nil, "review"]
+           end)
+  end
+
+  # The canonical JSONL projection uses string keys; sink events are structs.
+  defp normalize_event(event) do
+    Map.new(event, fn
+      {:data, data} -> {"data", Map.new(data, fn {k, v} -> {to_string(k), v} end)}
+      {:timestamp, %DateTime{} = at} -> {"timestamp", DateTime.to_iso8601(at)}
+      {key, value} -> {to_string(key), value}
+    end)
   end
 
   test "mission evaluation events carry the space that ran them" do
