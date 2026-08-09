@@ -669,7 +669,11 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       capabilities:
         capabilities
         |> Enum.sort_by(&elem(&1, 0))
-        |> Enum.flat_map(&elem(&1, 1))
+        |> Enum.flat_map(&elem(&1, 1)),
+      # Retained so a caller can grant a subset of the destination's providers
+      # to one mission space. Acquisition still acquires the whole selection
+      # once; this only records which occurrence produced which capability.
+      by_occurrence: Map.new(capabilities)
     }
   end
 

@@ -564,6 +564,33 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
+  # One environment per declared space, each compiled from its own components
+  # and granted only the mission providers that space named. A grant a space did
+  # not name is simply absent from its environment, so authority is enforced by
+  # assembly rather than by anything the model is asked to respect.
+  defp mission_spaces(package, providers) do
+    by_occurrence = Map.get(providers.mission, :by_occurrence, %{})
+
+    Enum.reduce_while(Map.get(package, :missions) || %{}, {:ok, %{}}, fn {name, spec},
+                                                                         {:ok, acc} ->
+      capabilities =
+        spec.provider_occurrences
+        |> Enum.flat_map(&Map.get(by_occurrence, &1, []))
+
+      with {:ok, bundle} <- bundle(spec.components),
+           {:ok, environment} <-
+             MissionEnvironment.new(
+               bundle: bundle,
+               capabilities: capabilities,
+               data: spec.data
+             ) do
+        {:cont, {:ok, Map.put(acc, name, environment)}}
+      else
+        {:error, _reason} -> {:halt, {:error, :invalid_mission_space}}
+      end
+    end)
+  end
+
   defp build_with_providers(
          request,
          {workflow_bundle, mission_bundle},
@@ -587,6 +614,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
                capabilities: providers.mission.capabilities,
                data: package.mission_data
              ),
+           {:ok, extra_missions} <- mission_spaces(package, providers),
            {:ok, publication_authority, sink, inspection_sink} <-
              execution_sinks(request, providers, opts, failure_mode, sink_source),
            :ok <-
@@ -601,7 +629,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
           {request, entry_source},
           providers,
           workflow,
-          mission,
+          {mission, extra_missions},
           {sink, inspection_sink},
           package.component_overrides,
           publication_authority,
@@ -765,7 +793,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
          {request, entry_source},
          providers,
          workflow,
-         mission,
+         {mission, extra_missions},
          {sink, inspection_sink},
          component_overrides,
          publication_authority,
@@ -776,6 +804,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
     case RunConfig.new(
            workflow_environment: workflow,
            mission_environment: mission,
+           extra_missions: extra_missions,
            input: %{"input" => request.input.value},
            limits: package.limits,
            event_sink: sink,

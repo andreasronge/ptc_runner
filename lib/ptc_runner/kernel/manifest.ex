@@ -80,7 +80,7 @@ defmodule PtcRunner.Kernel.Manifest do
   @max_contract_bytes 65_536
   @component_id ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @entry ~r/\A[a-z][a-z0-9._-]{0,127}\/[a-z][a-z0-9._?!-]{0,127}\z/
-  @top_keys ~w($schema version workflow mission input contracts providers limits events labels)
+  @top_keys ~w($schema version workflow mission missions input contracts providers limits events labels)
   @label_keys ~w(name model provider tags)
   @tag_keys ~w(environment mode stage suite)
   @label_identifier ~r/\A(?:[A-Za-z0-9][A-Za-z0-9._:\/@+-]{0,255}|sha256:[0-9a-f]{64})\z/
@@ -103,6 +103,7 @@ defmodule PtcRunner.Kernel.Manifest do
     :contracts,
     :contract_sources,
     :mission_data,
+    :missions,
     :providers,
     :limits,
     :installed_limits,
@@ -123,6 +124,14 @@ defmodule PtcRunner.Kernel.Manifest do
           contracts: %{input: ValueContract.t() | nil, result: ValueContract.t() | nil},
           contract_sources: %{input: binary() | nil, result: binary() | nil},
           mission_data: map(),
+          missions: %{
+            binary() => %{
+              components: [Component.t()],
+              kinds: %{binary() => :local | :library},
+              data: map(),
+              provider_occurrences: [non_neg_integer()]
+            }
+          },
           providers: %{workflow: [map()], mission: [map()]},
           limits: Limits.t(),
           installed_limits: Limits.t(),
@@ -215,6 +224,7 @@ defmodule PtcRunner.Kernel.Manifest do
              materialize_input?
            ),
          {:ok, providers} <- providers(Map.get(manifest, "providers", %{})),
+         {:ok, missions} <- missions(Map.get(manifest, "missions", %{}), source, providers),
          {:ok, limits} <- limits(Map.get(manifest, "limits", %{}), installed_limits),
          {:ok, events} <- events(Map.get(manifest, "events", %{})),
          {:ok, labels} <- labels(Map.get(manifest, "labels", %{})) do
@@ -231,6 +241,7 @@ defmodule PtcRunner.Kernel.Manifest do
          contracts: contract_result.contracts,
          contract_sources: contract_result.sources,
          mission_data: mission.data,
+         missions: missions,
          providers: providers,
          limits: limits,
          installed_limits: installed_limits,
@@ -324,6 +335,79 @@ defmodule PtcRunner.Kernel.Manifest do
 
   defp mission(_value, _source),
     do: manifest_value_error([{:property, "mission"}], :invalid_mission_manifest)
+
+  # Named mission spaces. Each declares its own components, data, and a subset
+  # of the mission providers selected at the top level. Selecting a provider a
+  # space does not name is the whole point: the grant is absent from that
+  # space's environment, so the model cannot reach it even if it tries.
+  defp missions(value, source, providers) when is_map(value) and not is_struct(value) do
+    if map_size(value) > 16 do
+      manifest_value_error([{:property, "missions"}], :invalid_missions_manifest)
+    else
+      names = providers.mission |> Enum.map(& &1["name"]) |> Enum.with_index() |> Map.new()
+
+      Enum.reduce_while(value, {:ok, %{}}, fn {name, spec}, {:ok, acc} ->
+        case mission_space(name, spec, source, names) do
+          {:ok, space} -> {:cont, {:ok, Map.put(acc, name, space)}}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+    end
+  end
+
+  defp missions(_value, _source, _providers),
+    do: manifest_value_error([{:property, "missions"}], :invalid_missions_manifest)
+
+  defp mission_space(name, spec, source, provider_names) do
+    path = [{:property, "missions"}, {:property, name}]
+
+    with true <- space_name?(name),
+         true <- is_map(spec) and not is_struct(spec),
+         :ok <- section_keys(spec, "missions", ~w(components data providers), []),
+         {:ok, component_result} <-
+           components(Map.get(spec, "components", []), source, :mission),
+         {:ok, data} <- mission_data(Map.get(spec, "data", %{})),
+         {:ok, occurrences} <- space_providers(Map.get(spec, "providers", []), provider_names) do
+      {:ok,
+       %{
+         components: component_result.components,
+         kinds: component_result.kinds,
+         data: data,
+         provider_occurrences: occurrences
+       }}
+    else
+      {:error, _reason} = error -> error
+      _ -> manifest_value_error(path, :invalid_missions_manifest)
+    end
+  end
+
+  defp space_name?(name),
+    do: is_binary(name) and name != "default" and Regex.match?(@component_id, name)
+
+  defp space_providers(values, provider_names) when is_list(values) do
+    Enum.reduce_while(values, {:ok, []}, fn value, {:ok, acc} ->
+      # A space may only narrow what `providers.mission` already selected. It
+      # can never introduce a grant, so a space cannot widen run authority.
+      case Map.fetch(provider_names, value) do
+        {:ok, index} ->
+          {:cont, {:ok, acc ++ [index]}}
+
+        :error ->
+          {:halt,
+           manifest_value_error(
+             [{:property, "missions"}, {:property, "providers"}],
+             :unknown_mission_space_provider
+           )}
+      end
+    end)
+  end
+
+  defp space_providers(_values, _provider_names),
+    do:
+      manifest_value_error(
+        [{:property, "missions"}, {:property, "providers"}],
+        :invalid_missions_manifest
+      )
 
   defp mission_data(data) when is_map(data) and not is_struct(data) do
     case StrictJSON.admit(data) do
@@ -1022,6 +1106,7 @@ defmodule PtcRunner.Kernel.Manifest do
         "version" => %{"const" => 1},
         "workflow" => workflow_schema(),
         "mission" => mission_schema(),
+        "missions" => missions_schema(),
         "input" => input_schema(),
         "contracts" => contracts_schema(),
         "providers" => providers_schema(),
@@ -1050,6 +1135,24 @@ defmodule PtcRunner.Kernel.Manifest do
       "components" => components_schema(),
       "data" => %{"type" => "object"}
     })
+  end
+
+  defp missions_schema do
+    %{
+      "type" => "object",
+      "maxProperties" => 16,
+      "propertyNames" => %{"pattern" => "^[a-z][a-z0-9._-]{0,127}$"},
+      "additionalProperties" =>
+        closed_object(%{
+          "components" => components_schema(),
+          "data" => %{"type" => "object"},
+          "providers" => %{
+            "type" => "array",
+            "maxItems" => 32,
+            "items" => component_id_schema()
+          }
+        })
+    }
   end
 
   defp components_schema do
