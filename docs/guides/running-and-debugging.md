@@ -500,7 +500,7 @@ Build the checks in three layers:
 Layer 2 needs no test framework:
 
 ```console
-actual="$(mix ptc.run examples/kernel-tutorial/01-orders/ptc.json | jq -c '.value')"
+actual="$(mix ptc.run examples/kernel-tutorial/01-orders/ptc.json | jq -c '.result.value')"
 test "$actual" = \
   '{"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}'
 ```

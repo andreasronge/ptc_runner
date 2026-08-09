@@ -68,7 +68,7 @@ mix deps.get
 mix ptc.run examples/kernel-tutorial/01-orders/ptc.json
 ```
 
-The command prints one JSON object. Its `value` is:
+The command prints one JSON command envelope. Its `result.value` is:
 
 ```json
 {
