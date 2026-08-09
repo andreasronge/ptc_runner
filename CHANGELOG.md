@@ -55,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grapheme-based. Oversized or unrepresentable String operations now return the
   documented bounded condition; locale-sensitive `.toLowerCase` and
   `.toUpperCase` and all legacy Java String aliases were removed.
-- Added the code-owned `log-analysis-v2` profile to `mix ptc.repl`, with
+- Added the code-owned `log-analysis-v2` profile to `mix ptc repl`, with
   bounded multi-turn mission evaluation over an immutable trace capture,
   explicit whole-result cursor traversal, deterministic JSONL output for
   coding agents, safe profile discovery, and separate atomic analysis-trace
@@ -76,6 +76,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Added the runtime-included `bin/ptc` command and replaced the separate
+  `mix ptc.run` and `mix ptc.repl` tasks with the generic
+  `mix ptc <command>` surface. The dotted Mix tasks were removed without
+  compatibility shims.
 - Removed the unreferenced `diagnostic` and `artifact_state` definitions from
   the published `ptc-command-envelope-v1` schema. Both were emitted but
   referenced by no envelope branch, and `diagnostic` was a union over the whole
@@ -149,7 +153,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   products with the owner-based `PtcRunner.Kernel` runtime.
 - Added immutable component bundles, structurally separate workflow and mission
   environments, explicit host capabilities, strict JSON manifests, and shared
-  `ptc.run` / `ptc.repl` construction.
+  `ptc run` / `ptc repl` construction.
 - Added bounded mission evaluation, LLM/file/trace capability libraries,
   generic Lisp-authored agent libraries, and canonical Kernel events.
 - Consolidated the Lisp evaluator around neutral contexts and results; removed
@@ -170,7 +174,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their consequences ("`'defn-' defines a private helper in component source
   only; use defn in dynamic source"), and undefined-variable failures carry the
   names structurally in `details.unbound_names`.
-- `mix ptc.repl` profile resources whose artifacts sit one directory level down
+- `mix ptc repl` profile resources whose artifacts sit one directory level down
   are refused with a message that states the rule, instead of capturing zero
   files and answering every query with an empty page. A started session reports
   the admitted file and run counts per resource.

@@ -110,13 +110,23 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   end
 
   defp connect_prepared(arguments, run_ref, host, catalog, prepared, runtime) do
-    case connect_checks(host, catalog, prepared, run_ref, runtime) do
-      {:ok, checks, provider_activity} ->
-        connect_success(arguments, run_ref, checks, provider_activity)
-
-      {:error, diagnostic} ->
+    with :ok <- maybe_setup_environment(host, prepared, runtime),
+         {:ok, checks, provider_activity} <-
+           connect_checks(host, catalog, prepared, run_ref, runtime) do
+      connect_success(arguments, run_ref, checks, provider_activity)
+    else
+      {:error, %CommandDiagnostic{} = diagnostic} ->
         {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+
+      {:error, _reason} ->
+        {:error, arguments_outcome(arguments, run_ref, diagnostic(:internal, :internal_error))}
     end
+  end
+
+  defp maybe_setup_environment(host, prepared, runtime) do
+    if CommandAcquisition.environment_setup_required?(host, prepared),
+      do: CommandRuntime.setup_environment(runtime),
+      else: :ok
   end
 
   defp connect_success(arguments, run_ref, checks, provider_activity) do

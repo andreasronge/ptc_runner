@@ -1,26 +1,21 @@
-defmodule Mix.Tasks.Ptc.ReplTest do
+defmodule PtcRunner.ReplFrontendTest do
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
 
-  alias Mix.Tasks.Ptc.Repl
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.MixCommandAdapter
 
   @stdio_root Path.expand("../../..", __DIR__)
   @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
 
-  setup do
-    Mix.Task.reenable("ptc.repl")
-    :ok
-  end
-
   test "repeated evals preserve definitions, history, and captured output" do
     output =
       capture_io(fn ->
-        Repl.run([
+        run_repl([
           "-e",
           "(def x 40)",
           "-e",
@@ -35,18 +30,18 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   end
 
   test "interactive mode prints output and exits on EOF" do
-    output = capture_io("(println 42)\n", fn -> Repl.run([]) end)
+    output = capture_io("(println 42)\n", fn -> run_repl([]) end)
     assert output =~ "42\nnil"
     assert output =~ "Goodbye!"
   end
 
   test "empty stdin is a successful empty script" do
-    assert "" = capture_io("", fn -> Repl.run(["-"]) end)
+    assert "" = capture_io("", fn -> run_repl(["-"]) end)
   end
 
   test "manifest-only host authority is rejected by direct mode" do
     assert_raise Mix.Error, ~r/arguments\/invalid_arguments/, fn ->
-      Repl.run(["--host-config", "missing-host.json", "-e", "42"])
+      run_repl(["--host-config", "missing-host.json", "-e", "42"])
     end
   end
 
@@ -73,7 +68,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     )
 
     output =
-      capture_io(fn -> Repl.run(["--manifest", manifest_path, "-e", "(helpers/answer)"]) end)
+      capture_io(fn -> run_repl(["--manifest", manifest_path, "-e", "(helpers/answer)"]) end)
 
     assert output == "42\n"
   end
@@ -83,7 +78,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     tmp_dir: directory
   } do
     path = Path.join(directory, "repl.jsonl")
-    assert "3\n" = capture_io(fn -> Repl.run(["--trace", path, "-e", "(+ 1 2)"]) end)
+    assert "3\n" = capture_io(fn -> run_repl(["--trace", path, "-e", "(+ 1 2)"]) end)
     {:ok, trace_log} = TraceLog.new(source: {:file, path})
 
     assert {:ok,
@@ -99,8 +94,8 @@ defmodule Mix.Tasks.Ptc.ReplTest do
 
   @tag :tmp_dir
   test "direct trace destinations fail before opening a session", %{tmp_dir: directory} do
-    assert_raise Mix.Error, ~r/ptc\.repl setup failed: :trace_preflight_failed/, fn ->
-      Repl.run(["--trace", directory, "-e", "(+ 1 2)"])
+    assert_raise Mix.Error, ~r/ptc repl setup failed: :trace_preflight_failed/, fn ->
+      run_repl(["--trace", directory, "-e", "(+ 1 2)"])
     end
   end
 
@@ -129,7 +124,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     )
 
     assert_raise Mix.Error, ~r/private manifest REPL is interactive-only/, fn ->
-      Repl.run([
+      run_repl([
         "--manifest",
         manifest_path,
         "--trace",
@@ -168,7 +163,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     )
 
     assert_raise Mix.Error, ~r/provider-backed manifest requires --host-config/, fn ->
-      Repl.run(["--manifest", manifest_path, "-e", "42"])
+      run_repl(["--manifest", manifest_path, "-e", "42"])
     end
   end
 
@@ -230,7 +225,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
 
     output =
       capture_io(fn ->
-        Repl.run([
+        run_repl([
           "--manifest",
           manifest_path,
           "--host-config",
@@ -254,33 +249,33 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   test "-l evaluates setup before entering the REPL", %{tmp_dir: directory} do
     path = Path.join(directory, "setup.clj")
     File.write!(path, "(def loaded 41)")
-    output = capture_io("(+ loaded 1)\n", fn -> Repl.run(["-l", path]) end)
+    output = capture_io("(+ loaded 1)\n", fn -> run_repl(["-l", path]) end)
     assert output =~ "Loaded #{path}"
     assert output =~ "42"
   end
 
   test "removed upstream and special log options fail closed" do
     assert_raise Mix.Error, ~r/unknown switch; accepted:/, fn ->
-      Repl.run(["--log-prelude", "-e", "(+ 1 2)"])
+      run_repl(["--log-prelude", "-e", "(+ 1 2)"])
     end
   end
 
   test "eval and positional script modes are mutually exclusive" do
     assert_raise Mix.Error, ~r/arguments\/conflicting_arguments/, fn ->
-      Repl.run(["-e", "42", "script.clj"])
+      run_repl(["-e", "42", "script.clj"])
     end
   end
 
   test "removed configurable history depth fails closed" do
     assert_raise Mix.Error, ~r/unknown switch; accepted:/, fn ->
-      Repl.run(["--history-depth", "0", "--manifest", "missing.json"])
+      run_repl(["--history-depth", "0", "--manifest", "missing.json"])
     end
   end
 
   test "describes the fixed log-analysis profile as safe JSONL" do
     output =
       capture_io(fn ->
-        Repl.run(["--describe-profile", "log-analysis-v2", "--format", "jsonl"])
+        run_repl(["--describe-profile", "log-analysis-v2", "--format", "jsonl"])
       end)
 
     assert [description] = decode_jsonl(output)
@@ -314,10 +309,8 @@ defmodule Mix.Tasks.Ptc.ReplTest do
           {["--private-terminal", "--private-unattended"], ~r/conflicting_arguments/}
         ] do
       capture_io(fn ->
-        assert_raise Mix.Error, message, fn -> Repl.run(missing_resources ++ suffix) end
+        assert_raise Mix.Error, message, fn -> run_repl(missing_resources ++ suffix) end
       end)
-
-      Mix.Task.reenable("ptc.repl")
     end
   end
 
@@ -339,7 +332,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     ]
 
     capture_io(fn ->
-      assert_raise Mix.Error, ~r/must be existing directories/, fn -> Repl.run(args) end
+      assert_raise Mix.Error, ~r/must be existing directories/, fn -> run_repl(args) end
     end)
   end
 
@@ -360,7 +353,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
 
     capture_io(fn ->
       assert_raise Mix.Error, ~r/arguments\/invalid_arguments/, fn ->
-        Repl.run(args)
+        run_repl(args)
       end
     end)
   end
@@ -376,7 +369,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
 
     output =
       capture_io(fn ->
-        Repl.run([
+        run_repl([
           "--profile",
           "log-analysis-v2",
           "--resource",
@@ -445,10 +438,9 @@ defmodule Mix.Tasks.Ptc.ReplTest do
           output_directory
         ] ++ args
 
-      output = capture_io(input, fn -> Repl.run(command) end)
+      output = capture_io(input, fn -> run_repl(command) end)
       assert output =~ expected
       assert Enum.count(File.ls!(output_directory), &String.ends_with?(&1, ".jsonl")) == 1
-      Mix.Task.reenable("ptc.repl")
     end
   end
 
@@ -466,7 +458,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     output =
       capture_io(fn ->
         assert_raise Mix.Error, ~r/one or more profile evaluations failed/, fn ->
-          Repl.run([
+          run_repl([
             "--profile",
             "log-analysis-v2",
             "--resource",
@@ -526,7 +518,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     output =
       capture_io(fn ->
         assert_raise Mix.Error, ~r/profile evaluation failed/, fn ->
-          Repl.run(
+          run_repl(
             profile_args(source, output_directory) ++
               [
                 "--format",
@@ -560,7 +552,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     assert_raise Mix.Error,
                  ~r/the traces resource directory contains no \*\.jsonl trace files at its own level/,
                  fn ->
-                   Repl.run(profile_args(source, output_directory) ++ ["-e", "42"])
+                   run_repl(profile_args(source, output_directory) ++ ["-e", "42"])
                  end
 
     assert File.ls!(output_directory) == []
@@ -580,23 +572,21 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     seed_trace(source, "seed")
 
     assert_raise Mix.Error, ~r/physically separate/, fn ->
-      Repl.run(profile_args(source, nested) ++ ["-e", "42"])
+      run_repl(profile_args(source, nested) ++ ["-e", "42"])
     end
 
-    Mix.Task.reenable("ptc.repl")
     File.ln_s!(directory, alias_root)
     aliased_nested = Path.join(alias_root, "source/nested")
 
     assert_raise Mix.Error, ~r/physically separate/, fn ->
-      Repl.run(profile_args(source, aliased_nested) ++ ["-e", "42"])
+      run_repl(profile_args(source, aliased_nested) ++ ["-e", "42"])
     end
 
-    Mix.Task.reenable("ptc.repl")
     File.rm!(alias_root)
     File.ln_s!(deep, alias_root)
 
     assert_raise Mix.Error, ~r/physically separate/, fn ->
-      Repl.run(profile_args(source, Path.join(alias_root, "output")) ++ ["-e", "42"])
+      run_repl(profile_args(source, Path.join(alias_root, "output")) ++ ["-e", "42"])
     end
 
     assert File.ls!(nested) == []
@@ -612,7 +602,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
 
     output =
       capture_io(fn ->
-        Repl.run([
+        run_repl([
           "--profile",
           "log-analysis-v2",
           "--resource",
@@ -646,18 +636,17 @@ defmodule Mix.Tasks.Ptc.ReplTest do
 
     capture_io(fn ->
       assert_raise Mix.Error, ~r/could not read the profile script/, fn ->
-        Repl.run(profile_args(source, input_output) ++ [Path.join(directory, "missing.clj")])
+        run_repl(profile_args(source, input_output) ++ [Path.join(directory, "missing.clj")])
       end
     end)
 
     assert log_analysis_session_pids() == before_sessions
-    Mix.Task.reenable("ptc.repl")
     File.chmod!(persistence_output, 0o500)
 
     try do
       capture_io(fn ->
         assert_raise Mix.Error, ~r/profile trace persistence failed/, fn ->
-          Repl.run(profile_args(source, persistence_output) ++ ["-e", "42"])
+          run_repl(profile_args(source, persistence_output) ++ ["-e", "42"])
         end
       end)
 
@@ -693,8 +682,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
             "42"
           ]
         ] do
-      capture_io(fn -> assert_raise Mix.Error, fn -> Repl.run(args) end end)
-      Mix.Task.reenable("ptc.repl")
+      capture_io(fn -> assert_raise Mix.Error, fn -> run_repl(args) end end)
     end
   end
 
@@ -720,11 +708,9 @@ defmodule Mix.Tasks.Ptc.ReplTest do
 
       capture_io(input, fn ->
         assert_raise Mix.Error, ~r/profile .* exceeds the 65536-byte source limit/, fn ->
-          Repl.run(profile_args(source, output_directory) ++ args)
+          run_repl(profile_args(source, output_directory) ++ args)
         end
       end)
-
-      Mix.Task.reenable("ptc.repl")
     end
   end
 
@@ -741,7 +727,8 @@ defmodule Mix.Tasks.Ptc.ReplTest do
       System.cmd(
         "mix",
         [
-          "ptc.repl",
+          "ptc",
+          "repl",
           "--profile",
           "log-analysis-v2",
           "--resource",
@@ -762,6 +749,8 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     assert Enum.at(records, 1)["result"]["value"] == 1
     assert File.regular?(List.last(records)["trace_path"])
   end
+
+  defp run_repl(args), do: MixCommandAdapter.run_task(["repl" | args], :raise).outcome
 
   defp profile_args(source, output_directory) do
     [

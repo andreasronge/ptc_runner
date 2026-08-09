@@ -135,8 +135,11 @@ defmodule PtcRunner.Kernel.CommandParser do
   defp undeclared_raw_switch?([argument | rest], value_switches) do
     cond do
       argument in value_switches and rest != [] ->
-        [_value | remaining] = rest
-        undeclared_raw_switch?(remaining, value_switches)
+        [value | remaining] = rest
+
+        if option_parser_consumes_value?(value),
+          do: undeclared_raw_switch?(remaining, value_switches),
+          else: undeclared_raw_switch?(rest, value_switches)
 
       String.starts_with?(argument, "--no-") ->
         true
@@ -153,6 +156,13 @@ defmodule PtcRunner.Kernel.CommandParser do
     do: byte_size(rest) > 1 and not String.starts_with?(rest, "-")
 
   defp compact_short_switch?(_argument), do: false
+
+  defp option_parser_consumes_value?("-"), do: true
+
+  defp option_parser_consumes_value?("-" <> rest) when rest != "",
+    do: Regex.match?(~r/\A\d/, rest)
+
+  defp option_parser_consumes_value?(_value), do: true
 
   defp validate_command(:init, [directory], options, ordered, frontend_options, frontend)
        when map_size(options) == 0,

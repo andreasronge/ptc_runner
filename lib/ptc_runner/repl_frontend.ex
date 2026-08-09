@@ -122,7 +122,7 @@ defmodule PtcRunner.ReplFrontend do
   defp validate_common_command(arguments, invalid, evals, format) do
     cond do
       invalid != [] ->
-        {:error, "invalid ptc.repl options: #{inspect(invalid)}"}
+        {:error, "invalid ptc repl options: #{inspect(invalid)}"}
 
       length(arguments) > 1 ->
         {:error, "usage: ptc repl [OPTIONS] [SCRIPT|-]"}
@@ -131,7 +131,7 @@ defmodule PtcRunner.ReplFrontend do
         {:error, "cannot combine --eval with a script or stdin"}
 
       format not in ["clojure", "jsonl"] ->
-        {:error, "invalid ptc.repl format: #{inspect(format)}"}
+        {:error, "invalid ptc repl format: #{inspect(format)}"}
 
       true ->
         :ok
@@ -494,7 +494,7 @@ defmodule PtcRunner.ReplFrontend do
        )
        when source in [:ptc_trace_snapshot, :ptc_inspection_snapshot] and
               is_integer(measured_bytes) and is_integer(limit_bytes) do
-    "ptc.repl profile setup failed: #{source} retains #{measured_bytes} bytes " <>
+    "ptc repl profile setup failed: #{source} retains #{measured_bytes} bytes " <>
       "(limit: #{limit_bytes} bytes)"
   end
 
@@ -505,12 +505,12 @@ defmodule PtcRunner.ReplFrontend do
     do: empty_resource_error("inspection", "*.inspection.jsonl records")
 
   defp profile_setup_error(reason) when is_atom(reason),
-    do: "ptc.repl profile setup failed: #{reason}"
+    do: "ptc repl profile setup failed: #{reason}"
 
-  defp profile_setup_error(_reason), do: "ptc.repl profile setup failed"
+  defp profile_setup_error(_reason), do: "ptc repl profile setup failed"
 
   defp empty_resource_error(resource, artifacts) do
-    "ptc.repl profile setup failed: the #{resource} resource directory contains no " <>
+    "ptc repl profile setup failed: the #{resource} resource directory contains no " <>
       "#{artifacts} at its own level; artifacts in subdirectories are not captured"
   end
 
@@ -859,7 +859,7 @@ defmodule PtcRunner.ReplFrontend do
   defp emit_jsonl(value) do
     case value |> json_projection() |> DeterministicJSON.encode() do
       {:ok, encoded} -> IO.puts(encoded)
-      {:error, _reason} -> fail("ptc.repl could not encode JSONL output")
+      {:error, _reason} -> fail("ptc repl could not encode JSONL output")
     end
   end
 
@@ -985,7 +985,7 @@ defmodule PtcRunner.ReplFrontend do
   defp run_direct_session(opts, arguments) do
     case ReplSession.new(trace_path: opts[:trace]) do
       {:ok, session} -> run_workflow_session(session, opts, arguments)
-      {:error, reason} -> fail("ptc.repl setup failed: #{inspect(reason)}")
+      {:error, reason} -> fail("ptc repl setup failed: #{inspect(reason)}")
     end
   end
 
@@ -1002,7 +1002,7 @@ defmodule PtcRunner.ReplFrontend do
       run_workflow_session(session, opts, arguments)
     else
       {:error, %{code: code}} -> fail(manifest_repl_error(code))
-      {:error, reason} -> fail("ptc.repl setup failed: #{inspect(reason)}")
+      {:error, reason} -> fail("ptc repl setup failed: #{inspect(reason)}")
     end
   end
 
@@ -1052,10 +1052,10 @@ defmodule PtcRunner.ReplFrontend do
     do: "--private-terminal requires a private manifest"
 
   defp manifest_repl_error(:trace_preflight_failed),
-    do: "ptc.repl trace destination is unavailable"
+    do: "ptc repl trace destination is unavailable"
 
   defp manifest_repl_error(code) when is_atom(code),
-    do: "ptc.repl setup failed: #{code}"
+    do: "ptc repl setup failed: #{code}"
 
   defp evaluate_mode(session, opts, arguments) do
     with {:ok, session} <- maybe_load(session, opts[:load]) do
@@ -1200,7 +1200,7 @@ defmodule PtcRunner.ReplFrontend do
 
   defp finish({:error, reason, session}) do
     stop_session(session)
-    fail("ptc.repl failed: #{inspect(reason)}")
+    fail("ptc repl failed: #{inspect(reason)}")
   end
 
   defp stop_session(session) do
@@ -1209,29 +1209,29 @@ defmodule PtcRunner.ReplFrontend do
         :ok
 
       {:error, :provider_cleanup_failed, _events} ->
-        fail("ptc.repl cleanup failed: :provider_cleanup_failed")
+        fail("ptc repl cleanup failed: :provider_cleanup_failed")
 
       {:error, :provider_cleanup_failed} ->
-        fail("ptc.repl cleanup failed: :provider_cleanup_failed")
+        fail("ptc repl cleanup failed: :provider_cleanup_failed")
 
       {:error, :trace_persistence_failed, _events} ->
-        fail("ptc.repl trace failed: :trace_persistence_failed")
+        fail("ptc repl trace failed: :trace_persistence_failed")
 
       {:error, reason} ->
-        fail("ptc.repl cleanup failed: #{inspect(reason)}")
+        fail("ptc repl cleanup failed: #{inspect(reason)}")
     end
   end
 
   defp abort_session(session, reason) do
     case ReplSession.abort(session, reason) do
       {:error, :trace_persistence_failed, _events} ->
-        IO.puts(:stderr, "ptc.repl trace failed: :trace_persistence_failed")
+        IO.puts(:stderr, "ptc repl trace failed: :trace_persistence_failed")
 
       {:error, :provider_cleanup_failed, _events} ->
-        IO.puts(:stderr, "ptc.repl cleanup failed: :provider_cleanup_failed")
+        IO.puts(:stderr, "ptc repl cleanup failed: :provider_cleanup_failed")
 
       {:error, :provider_cleanup_failed} ->
-        IO.puts(:stderr, "ptc.repl cleanup failed: :provider_cleanup_failed")
+        IO.puts(:stderr, "ptc repl cleanup failed: :provider_cleanup_failed")
 
       _result ->
         :ok

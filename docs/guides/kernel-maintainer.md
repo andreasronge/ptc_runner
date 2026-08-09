@@ -483,11 +483,14 @@ closed check list. A selection naming no provider has no operation to run —
 connectivity answers for selected occurrences — so the engine projects the
 derived plan directly and reports no activity, which is the only case where a
 connect answer skips the coordinator. Anything that fails renders one
-catalogued diagnostic and no rows at all. The engine still performs no frontend
-VM setup: it neither loads a `.env` nor starts an optional provider
-application, because it cannot prove it owns the VM it was called in, so a
-connect against a stopped optional application reports
-`active_preflight/provider_application_unavailable` rather than starting one.
+catalogued diagnostic and no rows at all. Before active connect work, the
+frontend runtime runs its environment-setup callback only when inert
+preparation proves that a selected LLM installation uses an environment
+credential. The Mix frontend may therefore load `.env`; the standalone
+frontend has no environment-setup callback. The runtime's provider-application
+mode then controls optional applications: `:command_vm` starts a selected
+application inside the marked provider session, while `:host_owned` requires
+the application to be running already.
 Successful `models` is terminal as well. It loads one bounded host document,
 constructs its inert installation catalog, and projects
 `PtcRunner.Kernel.InstallationCatalog.public_installations/1` in alias order. It

@@ -116,7 +116,7 @@ in subdirectories admits nothing, so the session refuses to start rather than
 answering every query with an empty page:
 
 ```
-ptc.repl profile setup failed: the traces resource directory contains no
+ptc repl profile setup failed: the traces resource directory contains no
 *.jsonl trace files at its own level; artifacts in subdirectories are not
 captured
 ```

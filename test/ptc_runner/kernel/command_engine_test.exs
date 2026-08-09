@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.CommandParser
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandPreparation
+  alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRunOutcome
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandRuntime
@@ -124,6 +125,28 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert Code.ensure_loaded?(CommandEngine)
     assert function_exported?(CommandEngine, :prepare, 1)
     refute function_exported?(CommandEngine, :prepare, 2)
+  end
+
+  test "the direct engine APIs reject frontend-owned envelope publication" do
+    for operation <- [&CommandEngine.prepare/1, &CommandEngine.dispatch/1] do
+      path = Path.join(System.tmp_dir!(), "ptc-direct-envelope-#{System.unique_integer()}.json")
+
+      assert {:error, %CommandOutcome{} = outcome} =
+               operation.(["doctor", "--envelope", path])
+
+      assert outcome.envelope["error"]["phase"] == "arguments"
+      assert outcome.envelope["error"]["code"] == "invalid_arguments"
+      refute File.exists?(path)
+    end
+  end
+
+  test "a switch after a missing string value remains an unknown switch" do
+    for argv <- [
+          ["repl", "--eval", "--no-help"],
+          ["repl", "-e", "-hh"]
+        ] do
+      assert {:error, %CommandRejection{kind: :unknown_switch}} = CommandParser.parse(argv)
+    end
   end
 
   @tag :tmp_dir
@@ -686,9 +709,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "doctor --connect admits selected applications in a command-owned VM", %{
+  test "doctor --connect sets up selected environment credentials before active work", %{
     tmp_dir: directory
   } do
+    environment_name = "PTC_TEST_DOCTOR_CONNECT_TOKEN"
+    previous_environment = System.get_env(environment_name)
+    System.delete_env(environment_name)
+
     initially_running =
       Application.started_applications()
       |> Enum.map(&elem(&1, 0))
@@ -715,6 +742,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
 
     on_exit(fn ->
+      if previous_environment,
+        do: System.put_env(environment_name, previous_environment),
+        else: System.delete_env(environment_name)
+
       if :req_llm in Enum.map(Application.started_applications(), &elem(&1, 0)),
         do: Application.stop(:req_llm)
 
@@ -735,7 +766,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     host_path =
       write_host_config(directory, "command-owned-model", %{
-        "credentials" => %{"key" => %{"literal" => "test-secret"}},
+        "credentials" => %{"key" => %{"env" => environment_name}},
         "install" => %{
           "model" => %{
             "source" => "llm",
@@ -747,15 +778,27 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       })
 
     application = doctor_application(directory, "command-owned-model", workflow: ["model"])
+    caller = self()
+
+    assert {:ok, runtime} =
+             CommandRuntime.new(
+               provider_application_mode: :command_vm,
+               environment_setup: fn ->
+                 System.put_env(environment_name, "test-secret")
+                 send(caller, :doctor_environment_setup)
+                 :ok
+               end
+             )
 
     assert {:ok, %CommandOutcome{} = outcome} =
              CommandEngine.dispatch(
                ["doctor", application, "--host-config", host_path, "--connect"],
-               CommandRuntime.standalone()
+               runtime
              )
 
     assert outcome.exit_status == 0
     assert outcome.envelope["result"]["provider_activity"] == true
+    assert_received :doctor_environment_setup
     assert_received {:host_llm_ensure_ready, _pid}
     assert_received {:host_llm_request, "openrouter:test/model", _request}
   end

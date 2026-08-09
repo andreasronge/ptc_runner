@@ -16,7 +16,6 @@ defmodule PtcRunner.StableCLITransitionCheck do
     "CommandEngine.authorize" => %{},
     "CommandEngine.catalog" => %{},
     "CommandEngine.request" => %{},
-    "Repl.persist_terminal_result" => %{},
     "RunBuilder.check_built" => %{},
     "RunBuilder.check_built_claimed" => %{},
     "RunBuilder.load_and_build" => %{},
@@ -52,8 +51,6 @@ defmodule PtcRunner.StableCLITransitionCheck do
     {"provider-active-session check route", ~r/:check/,
      ["lib/ptc_runner/kernel/provider_active_session.ex"], %{}},
     {"provider-session check route", ~r/:check/, ["lib/ptc_runner/kernel/provider_session.ex"],
-     %{}},
-    {"Mix REPL persistence seam", ~r/\bpersist_terminal_result\(/, ["lib/mix/tasks/ptc.repl.ex"],
      %{}},
     {"RunBuilder mission option plumbing", ~r/opts, :mission\b|:mission,|:mission\]/,
      ["lib/ptc_runner/kernel/run_builder.ex"], %{}},
@@ -504,8 +501,6 @@ defmodule PtcRunner.StableCLITransitionCheck do
        do: "CommandEngine.#{function}"
 
   defp caller_key([:PtcRunner, :Kernel, :RunCoordinator], :check), do: "RunCoordinator.check"
-  defp caller_key([:Mix, :Tasks, :Ptc, :Repl], :persist_terminal_result),
-    do: "Repl.persist_terminal_result"
 
   defp caller_key(_module, _function), do: nil
 
@@ -727,7 +722,6 @@ defmodule PtcRunner.StableCLITransitionCheck do
     )
   end
 
-  defp canonical_module("Repl.persist_terminal_result"), do: "Mix.Tasks.Ptc.Repl"
   defp canonical_module("RunBuilder." <> _function), do: "PtcRunner.Kernel.RunBuilder"
   defp canonical_module("CommandEngine." <> _function), do: "PtcRunner.Kernel.CommandEngine"
   defp canonical_module("RunCoordinator.check"), do: "PtcRunner.Kernel.RunCoordinator"

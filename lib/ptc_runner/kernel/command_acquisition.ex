@@ -285,9 +285,11 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
 
   defp require_repl_host(%RunRequest{}, %HostConfig{}), do: :ok
 
-  defp environment_setup_required?(nil, _prepared), do: false
+  @doc false
+  @spec environment_setup_required?(HostConfig.t() | nil, PreparedRun.t()) :: boolean()
+  def environment_setup_required?(nil, %PreparedRun{}), do: false
 
-  defp environment_setup_required?(%HostConfig{} = host, %PreparedRun{} = prepared) do
+  def environment_setup_required?(%HostConfig{} = host, %PreparedRun{} = prepared) do
     selected = MapSet.new(prepared.provider_declarations, & &1.name)
 
     Enum.any?(selected, fn name ->

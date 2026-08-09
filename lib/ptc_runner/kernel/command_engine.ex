@@ -7,6 +7,9 @@ defmodule PtcRunner.Kernel.CommandEngine do
   components own their respective phase ranges. Shared code never writes
   process streams, halts the VM, or renders arbitrary failures.
 
+  Frontend-owned switches such as `--envelope` are accepted only through a
+  `CommandEntry`; the direct `prepare/1` and `dispatch/1` APIs reject them.
+
   Provider-free and provider-backed `run` commands complete through the same
   owner-backed execution and publication path. Provider-free runs retain
   `ExecutionSessionOwner` while omitting only the provider session.
@@ -56,6 +59,11 @@ defmodule PtcRunner.Kernel.CommandEngine do
   def dispatch(argv, %CommandRuntime{} = runtime) do
     if CommandRuntime.valid?(runtime) do
       case CommandEntry.open(argv, :standalone) do
+        {:ok, %CommandEntry{envelope_path: envelope_path} = entry}
+        when is_binary(envelope_path) ->
+          {:error,
+           arguments_outcome(entry.arguments, entry.run_ref, :arguments, :invalid_arguments)}
+
         {:ok, %CommandEntry{arguments: %{command: :repl}} = entry} ->
           {:error, outcome(:unknown, entry.run_ref, :arguments, :invalid_command)}
 
@@ -135,13 +143,16 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   defp prepare_with_ref(argv, run_ref, runtime) do
     case CommandParser.parse(argv) do
-      {:ok, %CommandArguments{} = arguments} ->
+      {:ok, %CommandArguments{frontend_options: []} = arguments} ->
         prepare_arguments_safely(
           arguments,
           run_ref,
           CommandDestination.capture(arguments.options),
           runtime
         )
+
+      {:ok, %CommandArguments{} = arguments} ->
+        {:error, arguments_outcome(arguments, run_ref, :arguments, :invalid_arguments)}
 
       {:error, %CommandRejection{} = rejection} ->
         {:error, outcome(rejection.command, run_ref, :arguments, rejection.code)}
