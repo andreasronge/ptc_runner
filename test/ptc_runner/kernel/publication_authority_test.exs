@@ -138,7 +138,7 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
              CommandEngine.prepare(["run", application, "--trace-dir", unsafe])
 
     assert {:error, unsafe_outcome} = CommandEngine.preflight(unsafe_preparation)
-    assert unsafe_outcome.envelope["error"]["code"] == "invalid_destination"
+    assert unsafe_outcome.envelope["error"]["code"] == "trace_destination_unsafe"
     assert unsafe_outcome.envelope["error"]["provider_activity"] == false
     File.chmod!(unsafe, 0o700)
   end
@@ -432,8 +432,68 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
              CommandEngine.prepare(["run", application, "--inspect", invalid_inspection])
 
     assert {:error, outcome} = CommandEngine.preflight(preparation)
-    assert outcome.envelope["error"]["code"] == "invalid_destination"
+    assert outcome.envelope["error"]["code"] == "invalid_inspection_destination"
     assert outcome.envelope["error"]["provider_activity"] == false
+    refute Jason.encode!(outcome.envelope) =~ dir
+  end
+
+  @tag :tmp_dir
+  test "command authorization names the failing artifact and destination cause", %{tmp_dir: dir} do
+    application = application!(dir, "destination-diagnostics")
+    trace_file = Path.join(dir, "not-a-trace-directory")
+    File.write!(trace_file, "occupied")
+
+    cases = [
+      {[
+         "--trace-dir",
+         Path.join(dir, "missing-trace-directory")
+       ], "trace_destination_unavailable", "the trace destination is unavailable"},
+      {["--trace-dir", trace_file], "invalid_trace_destination",
+       "the trace destination is invalid"},
+      {[
+         "--inspect",
+         Path.join([dir, "missing-inspection-parent", "run.inspection.jsonl"])
+       ], "inspection_destination_unavailable", "the inspection destination is unavailable"},
+      {[
+         "--output",
+         Path.join([dir, "missing-result-parent", "result.json"])
+       ], "result_destination_unavailable", "the result destination is unavailable"}
+    ]
+
+    for {destination_args, code, message} <- cases do
+      assert {:ok, preparation} =
+               CommandEngine.prepare(["run", application | destination_args])
+
+      assert {:error, outcome} = CommandEngine.preflight(preparation)
+      assert outcome.envelope["error"]["phase"] == "destination"
+      assert outcome.envelope["error"]["code"] == code
+      assert outcome.envelope["error"]["message"] == message
+      refute Jason.encode!(outcome.envelope) =~ dir
+    end
+  end
+
+  @tag :tmp_dir
+  test "artifact destination collisions are conflicting arguments", %{tmp_dir: dir} do
+    application = application!(dir, "artifact-destination-collision")
+    destination = Path.join(dir, "shared.inspection.jsonl")
+
+    assert {:ok, preparation} =
+             CommandEngine.prepare([
+               "run",
+               application,
+               "--output",
+               destination,
+               "--inspect",
+               destination
+             ])
+
+    assert {:error, outcome} = CommandEngine.preflight(preparation)
+    assert outcome.envelope["error"]["phase"] == "arguments"
+    assert outcome.envelope["error"]["code"] == "conflicting_arguments"
+
+    assert outcome.envelope["error"]["message"] ==
+             "choose only one option from the conflicting argument group"
+
     refute Jason.encode!(outcome.envelope) =~ dir
   end
 
