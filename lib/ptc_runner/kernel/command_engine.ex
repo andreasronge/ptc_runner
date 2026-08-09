@@ -9,7 +9,9 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   Every command it completes in full is inert except one: `doctor --connect`
   runs a real connectivity operation and may contact a provider and incur cost,
-  which is what the `doctor` help notice warns about. It still performs no
+  which is what the `doctor` help notice warns about. `models` loads one bounded
+  host document and returns only its ordered public installation declarations;
+  it invokes no provider callback or runtime service. The engine performs no
   frontend VM setup of its own — it neither loads a `.env` nor starts an
   optional provider application — because it cannot prove it owns the VM it was
   called in.
@@ -74,11 +76,6 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   def preflight(_preparation),
     do: {:error, outcome(:run, generated_or_safe_ref(), :internal, :internal_error)}
-
-  @doc false
-  @spec authorize(CommandPreparation.t()) ::
-          {:ok, PublicationAuthority.t()} | {:error, CommandOutcome.t()}
-  def authorize(%CommandPreparation{} = preparation), do: preflight(preparation)
 
   @doc false
   @spec request(binary(), InstallationCatalog.t(), keyword()) ::
@@ -216,30 +213,52 @@ defmodule PtcRunner.Kernel.CommandEngine do
          run_ref,
          _destinations
        ) do
-    case catalog(Map.get(options, :host_config)) do
-      {:ok, host, catalog} ->
-        try do
-          result = doctor_mode_outcome(arguments, run_ref, host, catalog)
-          InstallationCatalog.close(catalog)
-          result
-        rescue
-          exception ->
-            InstallationCatalog.close(catalog)
-            reraise exception, __STACKTRACE__
-        catch
-          kind, reason ->
-            InstallationCatalog.close(catalog)
-            :erlang.raise(kind, reason, __STACKTRACE__)
-        end
-
+    case with_catalog(Map.get(options, :host_config), fn host, catalog ->
+           doctor_mode_outcome(arguments, run_ref, host, catalog)
+         end) do
       {:error, %CommandDiagnostic{} = diagnostic} ->
         {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+
+      result ->
+        result
     end
   end
 
-  defp prepare_arguments(%CommandArguments{command: command} = arguments, run_ref, _destinations)
-       when command in [:init, :models],
-       do: {:error, arguments_outcome(arguments, run_ref, :internal, :internal_error)}
+  defp prepare_arguments(
+         %CommandArguments{command: :models, options: %{host_config: host_config}} = arguments,
+         run_ref,
+         _destinations
+       ) do
+    case with_catalog(host_config, fn _host, catalog ->
+           {:ok,
+            CommandOutcome.success(:models, run_ref, %{
+              "installations" => InstallationCatalog.public_installations(catalog)
+            })}
+         end) do
+      {:error, %CommandDiagnostic{} = diagnostic} ->
+        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+
+      result ->
+        result
+    end
+  end
+
+  defp prepare_arguments(%CommandArguments{command: :init} = arguments, run_ref, _destinations),
+    do: {:error, arguments_outcome(arguments, run_ref, :internal, :internal_error)}
+
+  defp with_catalog(host_config, callback) when is_function(callback, 2) do
+    case catalog(host_config) do
+      {:ok, host, catalog} ->
+        try do
+          callback.(host, catalog)
+        after
+          InstallationCatalog.close(catalog)
+        end
+
+      {:error, %CommandDiagnostic{} = diagnostic} ->
+        {:error, diagnostic}
+    end
+  end
 
   # `doctor --connect` is the one command this module completes that performs
   # provider work. The parser guarantees it both an application and a host

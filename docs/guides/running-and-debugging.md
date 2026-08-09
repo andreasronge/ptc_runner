@@ -282,6 +282,14 @@ The command never renders an inspected exception, arbitrary callback result,
 credential, private value, provider response, selector, or filesystem path into
 either public stream.
 
+The shared command core already implements `ptc models --host-config HOST.json`
+through `PtcRunner.Kernel.CommandEngine`. It reads one bounded host document and
+returns the installed aliases in lexical order with only their public source,
+revision, data-class, accepted-class, and destination declarations. Listing
+models invokes no provider callback, credential or OAuth service, optional
+application, process, port, or network operation. The standalone process
+wrapper that exposes this core as an executable remains release work.
+
 With `--trace-dir DIR`, the command-generated `run_ref` is also the complete
 trace stem. A normal trace is exactly `<run_ref>.jsonl`; a private trace is
 exactly `<run_ref>.private.jsonl`. The envelope's `artifact_class` selects which
