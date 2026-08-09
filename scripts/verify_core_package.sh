@@ -38,6 +38,7 @@ elixir -e '
 
 test ! -e "$package_tmp_dir/source/ptc_runner_launcher"
 test -z "$(find "$package_tmp_dir/source" -type f \( -name '*.c' -o -name '*.so' -o -name '*.dylib' \) -print -quit)"
+test -x "$package_tmp_dir/source/rel/overlays/bin/ptc"
 test -f "$package_tmp_dir/source/priv/schemas/ptc-host-config.schema.json"
 test -f "$package_tmp_dir/source/priv/schemas/ptc-application-manifest.schema.json"
 
