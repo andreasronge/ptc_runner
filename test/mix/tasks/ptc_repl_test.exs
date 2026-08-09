@@ -331,7 +331,8 @@ defmodule Mix.Tasks.Ptc.ReplTest do
           {[], ~r/requires --private-terminal/},
           {["--private-terminal"], ~r/requires attached stdin and stdout terminals/},
           {["--private-terminal", "-e", "42"], ~r/interactive-only/},
-          {["--private-terminal", "--format", "jsonl"], ~r/does not allow this output format/}
+          {["--private-terminal", "--format", "jsonl"], ~r/does not allow this output format/},
+          {["--private-terminal", "--private-unattended"], ~r/mutually exclusive/}
         ] do
       capture_io(fn ->
         assert_raise Mix.Error, message, fn -> Repl.run(missing_resources ++ suffix) end
@@ -339,6 +340,53 @@ defmodule Mix.Tasks.Ptc.ReplTest do
 
       Mix.Task.reenable("ptc.repl")
     end
+  end
+
+  test "private_unattended admits eval and jsonl output, reaching source preflight" do
+    args = [
+      "--profile",
+      "inspection-analysis-v2",
+      "--resource",
+      "traces=/definitely/missing/private-traces",
+      "--resource",
+      "inspection=/definitely/missing/private-inspection",
+      "--session-trace-dir",
+      "/definitely/missing/private-output",
+      "--private-unattended",
+      "--format",
+      "jsonl",
+      "-e",
+      "(+ 1 1)"
+    ]
+
+    capture_io(fn ->
+      assert_raise Mix.Error, ~r/must be existing directories/, fn -> Repl.run(args) end
+    end)
+  end
+
+  test "private_unattended with jsonl and no input is rejected, not silently interactive" do
+    # Regression for #1220: the profile's static output_formats omits :jsonl,
+    # so a guard reading that declaration skipped this very call and let it
+    # fall through to the interactive REPL loop.
+    args = [
+      "--profile",
+      "inspection-analysis-v2",
+      "--resource",
+      "traces=/definitely/missing/private-traces",
+      "--resource",
+      "inspection=/definitely/missing/private-inspection",
+      "--session-trace-dir",
+      "/definitely/missing/private-output",
+      "--private-unattended",
+      "--format",
+      "jsonl"
+    ]
+
+    capture_io(fn ->
+      assert_raise Mix.Error, ~r/requires non-interactive profile input/, fn ->
+        Repl.run(args)
+      end
+    end)
   end
 
   @tag :tmp_dir

@@ -46,11 +46,18 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     assert description["source_data_class"] == "private_inspection"
     assert description["result_data_class"] == "private_inspection"
 
+    # The declared modes describe the attended path; the private_unattended
+    # block describes the rest of the reachable surface, so a caller reading
+    # this contract is not told half of it.
     assert description["frontend"] == %{
              "continue_on_error" => "forbidden",
              "input_modes" => ["interactive"],
              "output_formats" => ["clojure"],
-             "private_terminal" => "required"
+             "private_terminal" => "required",
+             "private_unattended" => %{
+               "input_modes" => ["eval", "load", "script", "stdin"],
+               "output_formats" => ["clojure", "jsonl"]
+             }
            }
 
     assert description["explicit_capabilities"] ==
@@ -100,6 +107,113 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
                resources,
                {:directory, "/definitely/missing/private-output"},
                private_terminal: true
+             )
+  end
+
+  test "private_unattended is a second authorized destination, mutually exclusive with the terminal" do
+    {:ok, recipe} = AnalysisProfileRegistry.fetch(@profile_id)
+
+    refute AnalysisTerminal.attached?()
+
+    base = %{
+      output_format: :clojure,
+      continue_on_error: false,
+      private_terminal: false,
+      terminal_attached: false
+    }
+
+    # Unattended alone admits every non-interactive input mode.
+    for input_mode <- [:eval, :load, :script, :stdin] do
+      assert :ok =
+               AnalysisProfileRegistry.authorize_frontend(
+                 recipe,
+                 Map.merge(base, %{input_mode: input_mode, private_unattended: true})
+               )
+    end
+
+    # ...but not :interactive. Waiting on a human at a keyboard is the one
+    # thing "unattended" rules out, and admitting it let
+    # `--private-unattended --format jsonl` with no input reach the
+    # interactive REPL loop and print its prompt banner into the JSONL
+    # stream (#1220).
+    assert {:error, :unsupported_profile_input} =
+             AnalysisProfileRegistry.authorize_frontend(
+               recipe,
+               Map.merge(base, %{input_mode: :interactive, private_unattended: true})
+             )
+
+    # The reachable surface is what a frontend must consult; the static
+    # declaration describes only the attended path, and reading it instead is
+    # what skipped the guard that should have caught #1220.
+    assert %{input_modes: [:eval, :load, :script, :stdin], output_formats: [:clojure, :jsonl]} =
+             AnalysisProfileRegistry.reachable_frontend(recipe, true)
+
+    assert %{input_modes: [:interactive], output_formats: [:clojure]} =
+             AnalysisProfileRegistry.reachable_frontend(recipe, false)
+
+    # ...and the machine-readable output format.
+    assert :ok =
+             AnalysisProfileRegistry.authorize_frontend(
+               recipe,
+               Map.merge(base, %{
+                 input_mode: :eval,
+                 output_format: :jsonl,
+                 private_unattended: true
+               })
+             )
+
+    # Neither destination: unchanged behavior.
+    assert {:error, :private_terminal_required} =
+             AnalysisProfileRegistry.authorize_frontend(
+               recipe,
+               Map.merge(base, %{input_mode: :interactive, private_unattended: false})
+             )
+
+    # Both destinations at once is a conflict, not a silent preference.
+    assert {:error, :private_destination_conflict} =
+             AnalysisProfileRegistry.authorize_frontend(
+               recipe,
+               Map.merge(base, %{
+                 input_mode: :interactive,
+                 private_terminal: true,
+                 private_unattended: true,
+                 terminal_attached: true
+               })
+             )
+
+    # A profile that forbids the terminal (log-analysis-v2) forbids unattended too.
+    {:ok, log_recipe} = AnalysisProfileRegistry.fetch("log-analysis-v2")
+
+    assert {:error, :private_terminal_unsupported} =
+             AnalysisProfileRegistry.authorize_frontend(
+               log_recipe,
+               Map.merge(base, %{input_mode: :interactive, private_unattended: true})
+             )
+
+    # The builder layer mirrors the same matrix for an embedding host.
+    resources = %{
+      "traces" => "/definitely/missing/private-traces",
+      "inspection" => "/definitely/missing/private-inspection"
+    }
+
+    assert {:error, :private_destination_conflict} =
+             AnalysisSessionBuilder.start(
+               @profile_id,
+               resources,
+               {:directory, "/definitely/missing/private-output"},
+               private_terminal: true,
+               private_unattended: true
+             )
+
+    # Unattended bypasses the terminal-attachment check entirely and reaches
+    # source preflight instead - a different, later failure than the gate
+    # itself, proving the gate was actually crossed.
+    assert {:error, :invalid_inspection_analysis_source} =
+             AnalysisSessionBuilder.start(
+               @profile_id,
+               resources,
+               {:directory, "/definitely/missing/private-output"},
+               private_unattended: true
              )
   end
 
