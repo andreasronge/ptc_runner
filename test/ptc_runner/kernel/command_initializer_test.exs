@@ -187,6 +187,39 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
   end
 
   @tag :tmp_dir
+  test "a committed publication survives an indeterminate launcher status", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "application")
+
+    publisher = fn staging, ^target ->
+      File.rename!(staging, target)
+      {:error, :publication_status_unknown}
+    end
+
+    assert {:ok, %CommandOutcome{}} =
+             CommandInitializer.initialize(target, @run_ref, publisher: publisher)
+
+    assert_exact_scaffold(target)
+    assert staging_entries(directory) == []
+  end
+
+  @tag :tmp_dir
+  test "an indeterminate status without a commit cleans owned staging", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "application")
+    publisher = fn _staging, ^target -> {:error, :publication_status_unknown} end
+
+    assert_initialization_failed(
+      CommandInitializer.initialize(target, @run_ref, publisher: publisher)
+    )
+
+    refute File.exists?(target)
+    assert staging_entries(directory) == []
+  end
+
+  @tag :tmp_dir
   test "the publication commit survives later frontend failure", %{tmp_dir: directory} do
     target = Path.join(directory, "application")
 

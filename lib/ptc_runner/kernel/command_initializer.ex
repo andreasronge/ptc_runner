@@ -165,11 +165,21 @@ defmodule PtcRunner.Kernel.CommandInitializer do
   defp publish_complete(state, target, publisher, fault_hook) do
     with :ok <- verify_complete(state),
          :ok <- invoke_fault(fault_hook, :before_publish, state, target),
-         :ok <- verify_complete(state),
-         :ok <- invoke_publisher(publisher, state.path, target) do
-      :ok
+         :ok <- verify_complete(state) do
+      case invoke_publisher(publisher, state.path, target) do
+        :ok -> :ok
+        {:error, :publication_status_unknown} -> recover_publication_status(state, target)
+        {:error, _reason} -> {:error, state}
+      end
     else
       _failure -> {:error, state}
+    end
+  end
+
+  defp recover_publication_status(state, target) do
+    case verify_published_complete(state, target) do
+      :ok -> :ok
+      {:error, _reason} -> {:error, state}
     end
   end
 
@@ -230,6 +240,19 @@ defmodule PtcRunner.Kernel.CommandInitializer do
     end
   end
 
+  defp verify_published_complete(state, target) do
+    with {:error, :enoent} <- File.lstat(state.path),
+         {:ok, identity} when identity == state.identity <- owned_directory_identity(target),
+         {:ok, names} <- File.ls(target),
+         true <- Enum.sort(names) == Enum.sort(@created),
+         true <- Enum.all?(state.children, &published_child_matches?(state, target, &1)),
+         {:ok, identity} when identity == state.identity <- owned_directory_identity(target) do
+      :ok
+    else
+      _changed_or_uncommitted -> {:error, :publication_unverified}
+    end
+  end
+
   defp verify_staging(state) do
     case owned_directory_identity(state.path) do
       {:ok, identity} when identity == state.identity -> :ok
@@ -239,6 +262,13 @@ defmodule PtcRunner.Kernel.CommandInitializer do
 
   defp child_matches?(state, {name, identity}) do
     case owned_file_identity(Path.join(state.path, name), state.identity) do
+      {:ok, current} -> current == identity
+      {:error, _reason} -> false
+    end
+  end
+
+  defp published_child_matches?(state, target, {name, identity}) do
+    case owned_file_identity(Path.join(target, name), state.identity) do
       {:ok, current} -> current == identity
       {:error, _reason} -> false
     end
@@ -278,6 +308,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
   defp invoke_publisher(publisher, staging, target) do
     case publisher.(staging, target) do
       :ok -> :ok
+      {:error, :publication_status_unknown} = unknown -> unknown
       _failure -> {:error, :publication_failed}
     end
   rescue
