@@ -1,5 +1,5 @@
 defmodule PtcRunner.Kernel.PublicationAuthorityTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome

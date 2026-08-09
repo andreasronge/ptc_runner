@@ -1,5 +1,5 @@
 defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp.Java.Oracle.Config
   alias PtcRunner.Lisp.Java.Oracle.Fixtures
