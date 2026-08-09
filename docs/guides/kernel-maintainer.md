@@ -388,6 +388,27 @@ request, entry expression, and correlated frozen bundles without reconstructing
 coordinator-owned fields. The provider-free
 `RunBuilder.build/3` convenience path crosses that same boundary and closes its
 temporary prepared run after assembly.
+
+### Command initialization
+
+`CommandInitializer` owns the shared `init` command's bounded filesystem state
+machine. Its fixed `main.clj` and `ptc.json` documents pass through
+`ApplicationPackage.request_memory/3` and `RunCoordinator.prepare/2` before
+target filesystem access, so the scaffold uses the same manifest, compilation,
+and sealed-preparation boundary as ordinary applications without opening a
+provider session.
+
+The initializer creates one mode-0700 sibling staging directory and records
+the directory and known-child identities. Pre-publication failures remove only
+children whose identities still match and then use non-recursive `rmdir`; a
+replaced or otherwise uncertain staging entry is left untouched. The native
+companion performs only the final no-replace directory rename, using
+`renameat2(RENAME_NOREPLACE)` on Linux or `renamex_np(RENAME_EXCL)` on macOS.
+That rename is the commit point. No later branch deletes or rolls back the
+published target, and collision, symlink, unsupported-filesystem, staging, and
+publication failures all project the same path-free
+`publication/initialization_failed` diagnostic.
+
 `PtcRunner.Kernel.RunBuilder` remains the shared environment assembly and
 cleanup boundary.
 

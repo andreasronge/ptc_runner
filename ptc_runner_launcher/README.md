@@ -1,8 +1,8 @@
 # PtcRunner Launcher
 
-`ptc_runner_launcher` is the optional native companion for PtcRunner's MCP
-stdio transport. It provides one small packet-framed executable that launches
-a host-authorized server with:
+`ptc_runner_launcher` is the optional native POSIX companion for PtcRunner. Its
+primary mode is the small packet-framed MCP stdio launcher, which starts a
+host-authorized server with:
 
 - an explicit compatibility environment plus configured bindings;
 - a caller-frozen SHA-256 identity checked against the executable opened by
@@ -27,6 +27,12 @@ The core package uses this companion through its internal owner-monitored stdio
 transport. Data-driven stdio installation remains part of MCP source
 unification.
 
+The same executable also owns the initializer's single platform operation:
+atomic no-replace directory publication. It calls
+`renameat2(RENAME_NOREPLACE)` on Linux and `renamex_np(RENAME_EXCL)` on macOS,
+and fails closed when the primitive is unavailable. Scaffold construction,
+staging ownership, cleanup, and command outcomes remain in the core package.
+
 This is process containment for trusted host-installed MCP servers, not a
 hostile-code sandbox. A trusted child can deliberately leave its process group.
 The trusted operator must not modify executable contents during startup.
@@ -39,6 +45,7 @@ The Elixir API is intentionally small:
 ```elixir
 {:ok, path} = PtcRunnerLauncher.executable_path()
 1 = PtcRunnerLauncher.protocol_version()
+:ok = PtcRunnerLauncher.publish_directory_noreplace(staging, target)
 ```
 
 MCP protocol handling, request ownership, and transport policy remain in the

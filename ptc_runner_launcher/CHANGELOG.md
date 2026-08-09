@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added atomic no-replace directory publication for the shared initializer on
+  macOS and Linux.
 - Added the version 1 MCP stdio launcher protocol and macOS/Linux reference
   implementation.
 - Added a cross-platform lifecycle, backpressure, environment, and descriptor

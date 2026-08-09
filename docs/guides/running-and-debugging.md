@@ -6,6 +6,13 @@ manifest, execution, result, and trace paths.
 
 ## Commands
 
+The shared command engine also implements `ptc init DIRECTORY`. In a source
+checkout it is available through `CommandEngine.dispatch/1`; it creates the
+exact two-file scaffold documented in [Getting started](getting-started.md#create-a-minimal-application).
+Initialization validates the scaffold before filesystem access and publishes
+the completed directory atomically without replacing an existing directory or
+symlink.
+
 | Command | Purpose |
 | --- | --- |
 | `mix ptc.run MANIFEST` | Run the manifest's qualified entry and print the closed V1 envelope |

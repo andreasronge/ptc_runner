@@ -1,0 +1,241 @@
+defmodule PtcRunner.Kernel.CommandInitializerTest do
+  use ExUnit.Case, async: false
+
+  alias PtcRunner.Kernel.CommandContract
+  alias PtcRunner.Kernel.CommandEngine
+  alias PtcRunner.Kernel.CommandInitializer
+  alias PtcRunner.Kernel.CommandOutcome
+  alias PtcRunner.Kernel.CommandRunRef
+
+  @run_ref CommandRunRef.encode(<<0::128>>)
+
+  @main_clj """
+  (ns main)
+
+  (defn run [input]
+    (return input))
+  """
+
+  @manifest """
+  {
+    "version": 1,
+    "workflow": {
+      "components": [
+        {
+          "id": "main",
+          "path": "main.clj"
+        }
+      ],
+      "entry": "main/run"
+    },
+    "input": {
+      "value": {}
+    }
+  }
+  """
+
+  @tag :tmp_dir
+  test "init publishes the exact validated two-file scaffold", %{tmp_dir: directory} do
+    target = Path.join(directory, "application")
+
+    assert {:ok, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["init", target])
+    assert outcome.envelope["result"] == %{"created" => ["main.clj", "ptc.json"]}
+    assert File.read!(Path.join(target, "main.clj")) == @main_clj
+    assert File.read!(Path.join(target, "ptc.json")) == @manifest
+    assert Enum.sort(File.ls!(target)) == ["main.clj", "ptc.json"]
+
+    assert {:ok, root} =
+             JSV.build(CommandContract.schema(), atoms: false, warnings: :silent)
+
+    assert {:ok, _validated} = JSV.validate(outcome.envelope, root, cast: false)
+  end
+
+  @tag :tmp_dir
+  test "init collisions preserve the existing directory and clean unpublished staging", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "application")
+    File.mkdir!(target)
+    sentinel = Path.join(target, "keep.txt")
+    File.write!(sentinel, "existing")
+
+    assert_initialization_failed(CommandEngine.dispatch(["init", target]))
+    assert File.read!(sentinel) == "existing"
+    assert File.ls!(target) == ["keep.txt"]
+    assert staging_entries(directory) == []
+  end
+
+  @tag :tmp_dir
+  test "init never follows or replaces a target symlink", %{tmp_dir: directory} do
+    target = Path.join(directory, "application")
+    destination = Path.join(directory, "destination")
+    File.mkdir!(destination)
+    sentinel = Path.join(destination, "keep.txt")
+    File.write!(sentinel, "existing")
+    File.ln_s!(destination, target)
+
+    assert_initialization_failed(CommandEngine.dispatch(["init", target]))
+    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(target)
+    assert File.read!(sentinel) == "existing"
+    assert staging_entries(directory) == []
+  end
+
+  @tag :tmp_dir
+  test "absolute targets with trailing separators stage beside the normalized target", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "application")
+
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target <> "/"])
+    assert_exact_scaffold(target)
+    assert staging_entries(directory) == []
+
+    sentinel = Path.join(target, "keep.txt")
+    File.write!(sentinel, "existing")
+    assert_initialization_failed(CommandEngine.dispatch(["init", target <> "//"]))
+    assert File.read!(sentinel) == "existing"
+    assert staging_entries(directory) == []
+  end
+
+  @tag :tmp_dir
+  test "trailing normalization preserves parent symlink and dot-dot filesystem semantics", %{
+    tmp_dir: directory
+  } do
+    physical_parent = Path.join(directory, "physical")
+    nested = Path.join(physical_parent, "nested")
+    File.mkdir_p!(nested)
+    link = Path.join(directory, "link")
+    File.ln_s!(nested, link)
+
+    requested = Path.join([link, "..", "application"]) <> "/"
+    physical_target = Path.join(physical_parent, "application")
+    lexical_target = Path.join(directory, "application")
+
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", requested])
+    assert_exact_scaffold(physical_target)
+    refute File.exists?(lexical_target)
+    assert staging_entries(physical_parent) == []
+  end
+
+  @tag :tmp_dir
+  test "a partial child write rolls back only owned staging and permits a clean retry", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "application")
+
+    fault = fn
+      {:during_child_write, "ptc.json"}, _context -> {:error, :partial_write}
+      _stage, _context -> :ok
+    end
+
+    assert_initialization_failed(
+      CommandInitializer.initialize(target, @run_ref, fault_hook: fault)
+    )
+
+    refute File.exists?(target)
+    assert staging_entries(directory) == []
+
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    assert_exact_scaffold(target)
+  end
+
+  @tag :tmp_dir
+  test "uncertain staging ownership is left untouched and never published", %{tmp_dir: directory} do
+    target = Path.join(directory, "application")
+    test_process = self()
+
+    fault = fn
+      :before_publish, %{staging: staging} ->
+        original = staging <> ".original"
+        File.rename!(staging, original)
+        File.mkdir!(staging)
+        File.chmod!(staging, 0o700)
+        File.write!(Path.join(staging, "replacement.txt"), "replacement")
+        send(test_process, {:replaced_staging, staging, original})
+        :ok
+
+      _stage, _context ->
+        :ok
+    end
+
+    assert_initialization_failed(
+      CommandInitializer.initialize(target, @run_ref, fault_hook: fault)
+    )
+
+    assert_receive {:replaced_staging, replacement, original}
+    refute File.exists?(target)
+    assert File.read!(Path.join(replacement, "replacement.txt")) == "replacement"
+    assert_exact_scaffold(original)
+
+    File.rm_rf!(replacement)
+    File.rm_rf!(original)
+  end
+
+  @tag :tmp_dir
+  test "unsupported no-replace publication cleans staging without touching the target", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "application")
+    publisher = fn _staging, _target -> {:error, :unsupported_platform} end
+
+    assert_initialization_failed(
+      CommandInitializer.initialize(target, @run_ref, publisher: publisher)
+    )
+
+    refute File.exists?(target)
+    assert staging_entries(directory) == []
+  end
+
+  @tag :tmp_dir
+  test "the publication commit survives later frontend failure", %{tmp_dir: directory} do
+    target = Path.join(directory, "application")
+
+    assert_raise RuntimeError, "frontend output failed", fn ->
+      assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+      raise "frontend output failed"
+    end
+
+    assert_exact_scaffold(target)
+  end
+
+  @tag :tmp_dir
+  test "concurrent initializers have exactly one no-replace winner", %{tmp_dir: directory} do
+    target = Path.join(directory, "application")
+
+    results =
+      1..4
+      |> Task.async_stream(
+        fn _index -> CommandEngine.dispatch(["init", target]) end,
+        max_concurrency: 4,
+        ordered: false,
+        timeout: 30_000
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    assert Enum.count(results, &match?({:ok, %CommandOutcome{}}, &1)) == 1
+    assert Enum.count(results, &match?({:error, %CommandOutcome{}}, &1)) == 3
+    assert_exact_scaffold(target)
+    assert staging_entries(directory) == []
+  end
+
+  defp assert_initialization_failed({:error, %CommandOutcome{} = outcome}) do
+    assert outcome.envelope["error"]["phase"] == "publication"
+    assert outcome.envelope["error"]["code"] == "initialization_failed"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    assert outcome.envelope["error"]["path"] == nil
+    assert outcome.envelope["error"]["source"] == nil
+    outcome
+  end
+
+  defp assert_exact_scaffold(target) do
+    assert File.read!(Path.join(target, "main.clj")) == @main_clj
+    assert File.read!(Path.join(target, "ptc.json")) == @manifest
+    assert Enum.sort(File.ls!(target)) == ["main.clj", "ptc.json"]
+  end
+
+  defp staging_entries(directory) do
+    directory
+    |> File.ls!()
+    |> Enum.filter(&String.starts_with?(&1, ".ptc-private-"))
+  end
+end

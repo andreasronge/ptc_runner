@@ -12,6 +12,8 @@ defmodule PtcRunner.Kernel.CommandEngine do
   `ExecutionSessionOwner` while omitting only the provider session.
   `doctor --connect` remains its own active operation. `models` projects only
   public installation declarations and invokes no provider runtime service.
+  `init` validates its fixed memory scaffold before atomically publishing a
+  complete directory without replacing an existing target.
   """
 
   alias PtcRunner.Kernel.CommandAcquisition
@@ -20,6 +22,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.CommandDestination
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandDoctor
+  alias PtcRunner.Kernel.CommandInitializer
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandParser
   alias PtcRunner.Kernel.CommandPreparation
@@ -115,7 +118,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
         models_outcome(arguments, run_ref)
 
       :init ->
-        {:error, arguments_outcome(arguments, run_ref, :internal, :internal_error)}
+        CommandInitializer.initialize(arguments.directory, run_ref)
     end
   rescue
     _exception -> {:error, arguments_outcome(arguments, run_ref, :internal, :internal_error)}
