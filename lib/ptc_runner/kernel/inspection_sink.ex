@@ -286,11 +286,16 @@ defmodule PtcRunner.Kernel.InspectionSink do
   end
 
   defp shape("evaluation-source", %{"evaluation_id" => id}, payload) do
+    # `space` is optional here for the same reason it is optional in the
+    # persisted artifact: a reader must accept evidence written before named
+    # mission spaces existed.
     valid? =
-      exact_payload(
-        payload,
-        ~w(environment program_kind source source_hash source_bytes)
-      ) and valid_id?(id) and payload["environment"] == "mission" and
+      (exact_payload(payload, ~w(environment program_kind source source_hash source_bytes)) or
+         exact_payload(
+           payload,
+           ~w(environment space program_kind source source_hash source_bytes)
+         )) and valid_id?(id) and payload["environment"] == "mission" and
+        (is_nil(payload["space"]) or is_binary(payload["space"])) and
         payload["program_kind"] == "ptc-lisp" and is_binary(payload["source"]) and
         payload["source_hash"] == sha256(payload["source"]) and
         payload["source_bytes"] == byte_size(payload["source"])

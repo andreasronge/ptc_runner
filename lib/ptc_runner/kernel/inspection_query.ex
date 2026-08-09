@@ -235,6 +235,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       "sequence" => record["sequence"],
       "timestamp" => record["timestamp"],
       "environment" => payload["environment"],
+      "space" => payload["space"],
       "program_kind" => payload["program_kind"],
       "source" => payload["source"],
       "source_hash" => descriptor_hash(payload["source_hash"]),

@@ -462,8 +462,13 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          "correlation" => %{"evaluation_id" => id},
          "payload" => payload
        }) do
-    exact_keys?(payload, ~w(environment program_kind source source_hash source_bytes)) and
+    # `space` is optional: an artifact written before named mission spaces has
+    # no such key, and persisted evidence must stay readable. Present means it
+    # must be a string.
+    (exact_keys?(payload, ~w(environment program_kind source source_hash source_bytes)) or
+       exact_keys?(payload, ~w(environment space program_kind source source_hash source_bytes))) and
       valid_id?(id) and payload["environment"] == "mission" and
+      (is_nil(payload["space"]) or is_binary(payload["space"])) and
       payload["program_kind"] == "ptc-lisp" and is_binary(payload["source"]) and
       payload["source_bytes"] == byte_size(payload["source"]) and
       payload["source_hash"] == sha256(payload["source"])

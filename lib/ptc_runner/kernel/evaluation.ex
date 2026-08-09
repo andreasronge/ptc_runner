@@ -254,7 +254,8 @@ defmodule PtcRunner.Kernel.Evaluation do
              evaluation_id,
              source,
              source_hash,
-             source_bytes
+             source_bytes,
+             space
            ),
          :ok <-
            Events.emit(state, capture.event_sink, "evaluation-started", %{
@@ -760,15 +761,19 @@ defmodule PtcRunner.Kernel.Evaluation do
 
   defp maybe_emit_limit(_state, _event_sink, _result), do: :ok
 
-  defp inspection_source(nil, _evaluation_id, _source, _source_hash, _source_bytes), do: :ok
+  defp inspection_source(nil, _evaluation_id, _source, _source_hash, _source_bytes, _space),
+    do: :ok
 
-  defp inspection_source(sink, evaluation_id, source, source_hash, source_bytes) do
+  defp inspection_source(sink, evaluation_id, source, source_hash, source_bytes, space) do
     InspectionSink.emit(
       sink,
       "evaluation-source",
       %{evaluation_id: evaluation_id},
       %{
         environment: :mission,
+        # Without this, a generated program cannot be attributed to an agent:
+        # every record reads environment=mission and nothing distinguishes them.
+        space: space,
         program_kind: :"ptc-lisp",
         source: source,
         source_hash: source_hash,
