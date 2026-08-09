@@ -1,5 +1,5 @@
 defmodule PtcRunner.Kernel.PublicationAuthorityTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
@@ -457,6 +457,10 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
       {[
          "--output",
          Path.join([dir, "missing-result-parent", "result.json"])
+       ], "result_destination_unavailable", "the result destination is unavailable"},
+      {[
+         "--private-output",
+         Path.join([dir, "missing-private-result-parent", "result.json"])
        ], "result_destination_unavailable", "the result destination is unavailable"}
     ]
 
@@ -470,6 +474,30 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
       assert outcome.envelope["error"]["message"] == message
       refute Jason.encode!(outcome.envelope) =~ dir
     end
+  end
+
+  @tag :tmp_dir
+  test "missing publication primitives make the artifact destination unavailable", %{tmp_dir: dir} do
+    application = application!(dir, "missing-publication-primitives")
+    original_path = System.get_env("PATH")
+
+    on_exit(fn -> restore_env("PATH", original_path) end)
+
+    assert {:ok, preparation} =
+             CommandEngine.prepare([
+               "run",
+               application,
+               "--output",
+               Path.join(dir, "result.json")
+             ])
+
+    System.put_env("PATH", "")
+
+    assert {:error, outcome} = CommandEngine.preflight(preparation)
+    assert outcome.envelope["error"]["phase"] == "destination"
+    assert outcome.envelope["error"]["code"] == "result_destination_unavailable"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    refute Jason.encode!(outcome.envelope) =~ dir
   end
 
   @tag :tmp_dir
@@ -531,6 +559,9 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
 
   defp maybe_private_output(argv, :private, output),
     do: argv ++ ["--private-output", output]
+
+  defp restore_env(name, nil), do: System.delete_env(name)
+  defp restore_env(name, value), do: System.put_env(name, value)
 
   defp authorize_after_creator_cleanup(target, attempts \\ 100)
 

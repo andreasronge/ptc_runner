@@ -119,6 +119,8 @@ defmodule PtcRunner.Kernel.CommandDestination do
        when reason in [
               :destination_unavailable,
               :source_unavailable,
+              :private_directory_unavailable,
+              :private_directory_unsupported,
               :private_directory_parent_unavailable
             ] do
     {:destination, unavailable_destination_code(destination)}

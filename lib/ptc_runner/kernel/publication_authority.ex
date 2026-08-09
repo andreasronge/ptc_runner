@@ -690,8 +690,8 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
       {:error, :destination_exists} ->
         {:error, :destination_exists}
 
-      {:error, _reason} ->
-        {:error, :recovery_reservation_failed}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

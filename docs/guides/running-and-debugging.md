@@ -89,9 +89,9 @@ whether compilation or execution exhausted it.
 owner-only artifact containing sensitive execution details. Do not publish it
 with normal traces. Artifact publication through `--output`,
 `--private-output`, or `--inspect` requires a Unix host and POSIX-compatible
-`mkdir` and `id` executables on `PATH`; it fails closed with
-`result_persistence_failed` or `inspection_persistence_failed` when that
-authority or mode-at-create primitive is unavailable. Publication validates
+`mkdir` and `id` executables on `PATH`; command preflight reports the matching
+artifact destination as unavailable when that authority or mode-at-create
+primitive is unavailable. Publication validates
 both lexical and resolved physical ancestry and rejects an untrusted owner or a
 group/other-writable directory without sticky-directory protection, because
 another tenant could otherwise replace the private temporary directory before
