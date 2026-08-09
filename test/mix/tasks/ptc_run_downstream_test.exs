@@ -53,7 +53,12 @@ defmodule Mix.Tasks.Ptc.RunDownstreamTest do
       )
 
     assert status == 0, output
-    assert %{"status" => "ok", "command" => "run"} = Jason.decode!(output)
+
+    assert %{"status" => "ok", "command" => "run"} =
+             output
+             |> String.split("\n", trim: true)
+             |> List.last()
+             |> Jason.decode!()
   end
 
   defp write_consumer_project(dir) do

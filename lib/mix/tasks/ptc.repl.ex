@@ -17,6 +17,10 @@ defmodule Mix.Tasks.Ptc.Repl do
         --resource traces=tmp/traces \
         --resource inspection=tmp/inspection \
         --private-terminal
+      mix ptc.repl --profile inspection-analysis-v2 \
+        --resource traces=tmp/traces \
+        --resource inspection=tmp/inspection \
+        --private-unattended --format jsonl -e '(inspection/runs {})'
       mix ptc.repl --describe-profile log-analysis-v2
 
   Options:
@@ -34,6 +38,12 @@ defmodule Mix.Tasks.Ptc.Repl do
       separate canonical trace;
     * `--private-terminal` — explicitly authorize an attached terminal as the
       private output sink required by `inspection-analysis-v2`;
+    * `--private-unattended` — explicitly authorize this command's own streams
+      as that sink instead, admitting `-e`/`--load`/script/stdin and
+      `--format jsonl`. The attached-terminal check is an accident guard, not
+      access control; this flag makes deliberate non-interactive use explicit
+      rather than requiring a `script(1)` pseudo-terminal. Mutually exclusive
+      with `--private-terminal`;
     * `--format clojure|jsonl` — choose human output or non-interactive
       profile-mode JSON Lines;
     * `--continue-on-error` — evaluate later repeated `--eval` forms after a
@@ -87,6 +97,7 @@ defmodule Mix.Tasks.Ptc.Repl do
     format: :string,
     continue_on_error: :boolean,
     private_terminal: :boolean,
+    private_unattended: :boolean,
     describe_profile: :string,
     help: :boolean
   ]
@@ -155,7 +166,8 @@ defmodule Mix.Tasks.Ptc.Repl do
 
       resources != [] or not is_nil(opts[:session_trace_dir]) or
         Keyword.has_key?(opts, :continue_on_error) or
-          Keyword.has_key?(opts, :private_terminal) ->
+        Keyword.has_key?(opts, :private_terminal) or
+          Keyword.has_key?(opts, :private_unattended) ->
         {:error, "profile options require --profile"}
 
       format == "jsonl" ->
@@ -215,6 +227,7 @@ defmodule Mix.Tasks.Ptc.Repl do
              output_format: output_format(opts),
              continue_on_error: Keyword.get(opts, :continue_on_error, false),
              private_terminal: Keyword.get(opts, :private_terminal, false),
+             private_unattended: Keyword.get(opts, :private_unattended, false),
              terminal_attached: AnalysisTerminal.attached?()
            }) do
       {:ok, :profile}
@@ -249,8 +262,7 @@ defmodule Mix.Tasks.Ptc.Repl do
       resources == [] ->
         {:error, :profile_resources_required}
 
-      format == "jsonl" and :jsonl in recipe.frontend().output_formats and evals == [] and
-          arguments == [] ->
+      format == "jsonl" and jsonl_reachable?(recipe, opts) and evals == [] and arguments == [] ->
         {:error, :jsonl_requires_input}
 
       opts[:continue_on_error] && length(evals) < 2 ->
@@ -259,6 +271,13 @@ defmodule Mix.Tasks.Ptc.Repl do
       true ->
         :ok
     end
+  end
+
+  # Ask the registry what this invocation can actually reach rather than
+  # reading the profile's static declaration; --private-unattended widens it.
+  defp jsonl_reachable?(recipe, opts) do
+    unattended = Keyword.get(opts, :private_unattended, false)
+    :jsonl in AnalysisProfileRegistry.reachable_frontend(recipe, unattended).output_formats
   end
 
   defp profile_input_mode(opts, arguments, evals) do
@@ -306,6 +325,9 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   defp profile_frontend_error(:private_terminal_unsupported),
     do: "--private-terminal is supported only by a private analysis profile"
+
+  defp profile_frontend_error(:private_destination_conflict),
+    do: "--private-terminal and --private-unattended are mutually exclusive"
 
   defp profile_frontend_error(_reason), do: "invalid profile command"
 
@@ -514,6 +536,11 @@ defmodule Mix.Tasks.Ptc.Repl do
   end
 
   defp maybe_private_terminal(builder_options, opts) do
+    builder_options =
+      if Keyword.get(opts, :private_unattended, false),
+        do: Keyword.put(builder_options, :private_unattended, true),
+        else: builder_options
+
     if Keyword.get(opts, :private_terminal, false),
       do: Keyword.put(builder_options, :private_terminal, true),
       else: builder_options
