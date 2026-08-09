@@ -267,6 +267,9 @@ jobs:
       - name: Check compile-time dependency cycles
         run: mix xref graph --format cycles --label compile-connected --fail-above 0
 
+      - name: Check stable CLI transitional callers
+        run: mix run --no-start scripts/check_stable_cli_transition.exs
+
       - name: Run tests
         run: mix test --max-failures 1 --trace --warnings-as-errors
 
@@ -425,6 +428,9 @@ jobs:
         with:
           cache-plt: 'false'
           install-babashka: 'false'
+
+      - name: Check stable CLI transitional callers
+        run: mix run --no-start scripts/check_stable_cli_transition.exs
 
       - name: Build documentation
         run: mix docs --warnings-as-errors

@@ -159,6 +159,7 @@ defmodule PtcRunner.MixProject do
       precommit: [
         "format --check-formatted",
         "compile --warnings-as-errors",
+        "run --no-start scripts/check_stable_cli_transition.exs",
         "xref graph --format cycles --label compile-connected --fail-above 0",
         "credo --strict",
         "cmd bash scripts/duplication_gate.sh check",

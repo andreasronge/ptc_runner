@@ -449,6 +449,12 @@ VM setup: it neither loads a `.env` nor starts an optional provider
 application, because it cannot prove it owns the VM it was called in, so a
 connect against a stopped optional application reports
 `active_preflight/provider_application_unavailable` rather than starting one.
+Successful `models` is terminal as well. It loads one bounded host document,
+constructs its inert installation catalog, and projects
+`PtcRunner.Kernel.InstallationCatalog.public_installations/1` in alias order. It
+never invokes a local check, selection validator, builder, credential resolver,
+OAuth service, provider application, process, port, or network operation, and
+it closes the inert catalog before returning the sealed outcome.
 Successful `run` preparation returns a sealed
 `PtcRunner.Kernel.CommandPreparation`, not a bare `PreparedRun`. That wrapper
 retains the original command reference, inert

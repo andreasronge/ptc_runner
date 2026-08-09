@@ -191,17 +191,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     host_path =
       write_host_config(directory, "inert-validate", %{
-        "install" => %{
-          "workspace" => %{
-            "source" => "mcp",
-            "installation_revision" => "inert-v1",
-            "transport" => %{
-              "type" => "stdio",
-              "command" => "ptc-nonexistent-executable-9f3a"
-            },
-            "tools" => %{"read" => %{"as" => "workspace.read", "effect" => "read"}}
-          }
-        }
+        "install" => %{"workspace" => inert_stdio_installation("inert-v1")}
       })
 
     assert {:error, %CommandOutcome{} = doctored} =
@@ -217,6 +207,76 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert validated.envelope["command"] == "validate"
     assert validated.envelope["result"]["provider_activity"] == false
     assert_schema_valid(validated.envelope)
+  end
+
+  @tag :tmp_dir
+  test "models projects declarations without invoking a hostile local callback", %{
+    tmp_dir: directory
+  } do
+    manifest =
+      valid_manifest(%{
+        "providers" => %{
+          "workflow" => [],
+          "mission" => [%{"name" => "zeta", "config" => %{}}]
+        }
+      })
+
+    application = write_application(directory, "inert-models", manifest)
+
+    host_path =
+      write_host_config(directory, "inert-models", %{
+        "install" => %{
+          "zeta" => inert_stdio_installation("zeta-v1"),
+          "alpha" => inert_stdio_installation("alpha-v1")
+        }
+      })
+
+    assert {:error, %CommandOutcome{} = doctored} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    assert doctored.envelope["error"]["phase"] == "local_preflight"
+    assert doctored.envelope["error"]["provider_activity"] == false
+
+    assert {:ok, %CommandOutcome{} = modeled} =
+             CommandEngine.prepare(["models", "--host-config", host_path])
+
+    assert modeled.exit_status == 0
+    assert modeled.envelope["command"] == "models"
+
+    assert modeled.envelope["result"] == %{
+             "installations" => [
+               %{
+                 "alias" => "alpha",
+                 "source" => "mcp",
+                 "installation_revision" => "alpha-v1",
+                 "data_class" => "normal",
+                 "accepts_data" => ["normal"],
+                 "destinations" => ["mission"]
+               },
+               %{
+                 "alias" => "zeta",
+                 "source" => "mcp",
+                 "installation_revision" => "zeta-v1",
+                 "data_class" => "normal",
+                 "accepts_data" => ["normal"],
+                 "destinations" => ["mission"]
+               }
+             ]
+           }
+
+    assert_schema_valid(modeled.envelope)
+
+    assert {:error, %CommandOutcome{} = missing_host} =
+             CommandEngine.prepare([
+               "models",
+               "--host-config",
+               Path.join(directory, "missing-host.json")
+             ])
+
+    assert missing_host.envelope["error"]["phase"] == "host"
+    assert missing_host.envelope["error"]["code"] == "host_unavailable"
+    assert missing_host.envelope["error"]["provider_activity"] == false
+    assert_schema_valid(missing_host.envelope)
   end
 
   test "default doctor reports the environment without an application or host" do
@@ -4436,6 +4496,18 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           }
         }
       }
+    }
+  end
+
+  defp inert_stdio_installation(revision) do
+    %{
+      "source" => "mcp",
+      "installation_revision" => revision,
+      "transport" => %{
+        "type" => "stdio",
+        "command" => "ptc-nonexistent-executable-9f3a"
+      },
+      "tools" => %{"read" => %{"as" => "workspace.read", "effect" => "read"}}
     }
   end
 
