@@ -244,6 +244,7 @@ jobs:
     if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     name: Core validation
+    timeout-minutes: 25
     env:
       MIX_ENV: test
       HEX_SPONSOR: false
