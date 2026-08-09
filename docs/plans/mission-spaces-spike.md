@@ -87,6 +87,41 @@ property of environment assembly, not an instruction the model may ignore.
 4. **Not regenerated:** `priv/semantic_build_projection.json`. `mix regen`
    rewrites it, but that is a main-only step before tagging.
 
+## Parallel agents (measured, not reasoned)
+
+Two `agent.core` loops in two spaces under `pcalls`, live DeepSeek: **works**,
+5/5 runs, 4.1s parallel vs 5.3s sequential. Concurrency is real because the
+provider call happens outside the evaluation lease.
+
+Scaling up finds two ceilings, both **pre-existing** — a stub-provider repro
+behaves identically on `main`:
+
+| Concurrent agents | Result |
+| --- | --- |
+| 2 | OK |
+| 4 | `workflow_failed/private_prelude_error`, fails fast |
+| 8 | same |
+
+With live models, 4 agents additionally **hung to `run_duration_ms`** in 2 of 3
+runs rather than failing fast. Not isolated. `RunState.release_evaluation_status`
+can answer `{:noreply, …}` and park the caller until that evaluation's
+capability reservations drain, which is the first place to look.
+
+Two hard bounds worth knowing before designing on this:
+
+- **The `pcalls`/`pmap` deadline is 5s and cannot be configured from an
+  application.** `:pmap_timeout` is a `PtcRunner.Lisp.run/2` option defaulting to
+  `Context.@default_pmap_timeout` (5_000). `Runner.execute_workflow/5` never
+  passes it, and the name is absent from `LimitCatalog`, so neither a manifest
+  nor a host document can raise it. Two agents at 4.1s already sit close to it.
+- **`return` and `fail` raise inside `pcalls`/`pmap`**, so any agent
+  subject-failure inside a parallel branch aborts the branch rather than
+  returning a value.
+
+Making parallel research agents supportable therefore needs: `pmap_timeout` as a
+real limit, the `private_prelude_error` ceiling understood, and the live-model
+hang isolated. None of that is mission-space work.
+
 ## What a hand-rolled loop costs
 
 The first e2e used a hand-written agent loop and died on an ordinary prose reply

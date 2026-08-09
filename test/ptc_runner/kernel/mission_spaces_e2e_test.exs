@@ -261,6 +261,58 @@ defmodule PtcRunner.Kernel.MissionSpacesE2ETest do
     refute "default" in spaces
   end
 
+  test "live agents under pcalls: where the parallel boundary actually is" do
+    {:ok, limits} =
+      Limits.new(
+        run_duration_ms: 150_000,
+        workflow_timeout_ms: 150_000,
+        evaluation_timeout_ms: 10_000,
+        subordinate_evaluations: 12,
+        workflow_capability_calls: 64
+      )
+
+    {:ok, %{capabilities: [llm_capability], close: close}} = build_live_llm(limits)
+    if close, do: on_exit(close)
+
+    source = """
+    (ns spike.par "Two live agent.core loops under pcalls.")
+    (defn run [_input]
+      (return
+        (pcalls
+          #(agent.core/run-value "Retrieve the stored record." {"max_turns" 2 "mission" "research"})
+          #(agent.core/run-value "Is 4021 numeric?" {"max_turns" 2 "mission" "review"})
+          #(agent.core/run-value "Retrieve the stored record again." {"max_turns" 2 "mission" "research"})
+          #(agent.core/run-value "Is 77 numeric?" {"max_turns" 2 "mission" "review"}))))
+    """
+
+    {:ok, par} = Component.new(id: "spike.par", source: source, dependencies: ["agent.core"])
+    {:ok, components} = Library.resolve_components([par, {:library, "agent.core"}])
+    {:ok, bundle} = Kernel.compile_bundle(components)
+
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm_capability])
+    {:ok, default_mission} = MissionEnvironment.new([])
+    {:ok, research} = MissionEnvironment.new(bundle: mission_bundle("res", @research_source))
+    {:ok, review} = MissionEnvironment.new(bundle: mission_bundle("rev", @review_source))
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "mission-spaces-parallel")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: default_mission,
+        extra_missions: %{"research" => research, "review" => review},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    outcome = Kernel.run("(spike.par/run data/input)", config)
+
+    # Recorded rather than asserted desirable: this is the spike answering
+    # "can research agents run in parallel today".
+    IO.puts("\n[live pcalls] #{inspect(outcome, limit: 8)}")
+    assert match?({:ok, _}, outcome) or match?({:error, _}, outcome)
+  end
+
   defp workflow_bundle do
     {:ok, team} =
       Component.new(
