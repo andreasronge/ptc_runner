@@ -230,21 +230,8 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
                inspection_capture: false
              ),
            :ok <- require_repl_host(request, host),
-           {:ok, prepared} <- RunCoordinator.prepare(request, catalog),
-           {:ok, runtime_services} <- command_runtime_services(host, runtime) do
-        case ManifestReplPreparation.new(
-               prepared,
-               catalog,
-               runtime_services,
-               environment_setup_required?(host, prepared)
-             ) do
-          {:ok, preparation} ->
-            {:ok, preparation}
-
-          {:error, _reason} ->
-            PreparedRun.close(prepared)
-            {:error, :invalid_manifest_repl}
-        end
+           {:ok, prepared} <- RunCoordinator.prepare(request, catalog) do
+        prepare_repl_runtime(prepared, catalog, host, runtime)
       else
         {:error, %CommandDiagnostic{} = diagnostic} -> {:error, diagnostic}
         {:error, :host_config_required} = error -> error
@@ -260,6 +247,33 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   catch
     _kind, _reason ->
       InstallationCatalog.close(catalog)
+      {:error, :invalid_manifest_repl}
+  end
+
+  defp prepare_repl_runtime(prepared, catalog, host, runtime) do
+    result =
+      with {:ok, runtime_services} <- command_runtime_services(host, runtime),
+           {:ok, preparation} <-
+             ManifestReplPreparation.new(
+               prepared,
+               catalog,
+               runtime_services,
+               environment_setup_required?(host, prepared)
+             ) do
+        {:ok, preparation}
+      else
+        {:error, _reason} -> {:error, :invalid_manifest_repl}
+      end
+
+    if match?({:error, _reason}, result), do: PreparedRun.close(prepared)
+    result
+  rescue
+    _exception ->
+      PreparedRun.close(prepared)
+      {:error, :invalid_manifest_repl}
+  catch
+    _kind, _reason ->
+      PreparedRun.close(prepared)
       {:error, :invalid_manifest_repl}
   end
 

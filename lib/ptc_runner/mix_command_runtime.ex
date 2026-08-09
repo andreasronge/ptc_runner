@@ -4,6 +4,21 @@ defmodule PtcRunner.MixCommandRuntime do
   alias PtcRunner.Dotenv
 
   @doc false
+  @spec bootstrap() :: :ok | {:error, :command_bootstrap_failed}
+  def bootstrap do
+    Mix.Task.run("app.config")
+
+    case Application.ensure_all_started(:ptc_runner) do
+      {:ok, _started} -> :ok
+      {:error, _reason} -> {:error, :command_bootstrap_failed}
+    end
+  rescue
+    _exception -> {:error, :command_bootstrap_failed}
+  catch
+    _kind, _reason -> {:error, :command_bootstrap_failed}
+  end
+
+  @doc false
   @spec options() :: keyword()
   def options do
     [

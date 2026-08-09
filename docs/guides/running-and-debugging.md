@@ -293,8 +293,10 @@ The shared command core already implements `ptc run` and
 executes provider-free and provider-backed work through one execution owner,
 publishes immutable execution evidence, and returns a schema-valid normal or
 private envelope; a private envelope never contains the result value. The Mix
-task is a thin adapter over this boundary and adds only interactive
-`--authorize-mcp NAME` for the immediately following run.
+task is a thin renderer over this boundary. Its adapter owns Mix application
+bootstrap and adds only interactive `--authorize-mcp NAME` for the immediately
+following run. Bootstrap failures use the same closed private-safe run envelope
+as other internal failures; raw startup reasons and argv paths are not rendered.
 
 `models` reads one bounded host document and
 returns the installed aliases in lexical order with only their public source,

@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRunOutcome
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunCoordinator
@@ -81,13 +82,34 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
           if(provider_activity, do: :incomplete, else: :not_started)
         )
 
+      {:error, %OwnerFailure{} = failure} ->
+        case OwnerFailure.evidence(failure) do
+          {:ok, reason, provider_activity, execution_state} ->
+            operation_failure(
+              preparation,
+              reason,
+              authority_artifact_state(authority),
+              provider_activity,
+              execution_state
+            )
+
+          {:error, :invalid_owner_failure} ->
+            operation_failure(
+              preparation,
+              :internal_error,
+              authority_artifact_state(authority),
+              false,
+              :not_started
+            )
+        end
+
       {:error, reason} ->
         operation_failure(
           preparation,
           reason,
           authority_artifact_state(authority),
-          provider_bearing?(preparation),
-          :incomplete
+          false,
+          :not_started
         )
     end
   rescue

@@ -829,6 +829,45 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "run sink-opening failures preserve not-started activity evidence", %{
+    tmp_dir: directory
+  } do
+    limits = %{"evaluation_timeout_ms" => 5_000, "normal_event_bytes" => 1}
+
+    provider_free =
+      write_application(
+        directory,
+        "run-sink-provider-free",
+        valid_manifest(%{"limits" => limits})
+      )
+
+    marker = Path.join(directory, "run-sink-provider-backed-methods")
+
+    host_path =
+      write_host_config(directory, "run-sink-provider-backed", connect_host_config(marker))
+
+    provider_backed =
+      doctor_application(directory, "run-sink-provider-backed",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: limits
+      )
+
+    for argv <- [
+          ["run", provider_free],
+          ["run", provider_backed, "--host-config", host_path]
+        ] do
+      assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch(argv)
+      assert outcome.envelope["error"]["phase"] == "internal"
+      assert outcome.envelope["error"]["code"] == "internal_error"
+      assert outcome.envelope["error"]["provider_activity"] == false
+      assert outcome.envelope["execution"] == %{"state" => "not_started"}
+      assert_schema_valid(outcome.envelope)
+    end
+
+    refute File.exists?(marker)
+  end
+
+  @tag :tmp_dir
   test "an internal failure after the marker still reports provider activity", %{
     tmp_dir: directory
   } do

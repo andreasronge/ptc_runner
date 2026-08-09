@@ -4,11 +4,15 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
 
   alias PtcRunner.Kernel.CommandAcquisition
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.HostRuntimePayload
   alias PtcRunner.Kernel.ManifestRepl
   alias PtcRunner.Kernel.ManifestReplOpening
   alias PtcRunner.Kernel.ManifestReplPreparation
+  alias PtcRunner.Kernel.OwnerFailure
+  alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.ReplSessionOwner
   alias PtcRunner.Kernel.TraceLog
@@ -29,6 +33,60 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
            |> ManifestReplPreparation.valid?()
 
     assert :ok = ManifestReplPreparation.close(preparation)
+  end
+
+  @tag :tmp_dir
+  test "runtime-service sealing failure closes the prepared activity owner", %{
+    tmp_dir: directory
+  } do
+    {manifest, host} =
+      write_mcp_application(
+        directory,
+        Path.join(directory, "unused-runtime-service"),
+        20_000,
+        "mark-close"
+      )
+
+    {:ok, runtime} = CommandRuntime.new(provider_application_mode: :host_owned)
+    storage_key = {PtcRunner.Kernel.Attestation, HostRuntimePayload}
+    previous_key = :persistent_term.get(storage_key, :missing)
+
+    on_exit(fn ->
+      case previous_key do
+        :missing -> :persistent_term.erase(storage_key)
+        key -> :persistent_term.put(storage_key, key)
+      end
+    end)
+
+    :persistent_term.put(storage_key, :invalid_hmac_key)
+    owners_before = provider_activity_owners()
+
+    assert {:error, _reason} = CommandAcquisition.prepare_repl(manifest, host, runtime)
+
+    assert MapSet.difference(provider_activity_owners(), owners_before) == MapSet.new()
+  end
+
+  @tag :tmp_dir
+  test "opening failure projects the exact public failure envelope", %{tmp_dir: directory} do
+    write_component(directory)
+    manifest = Path.join(directory, "opening-failure.json")
+
+    document =
+      :normal
+      |> manifest_document(%{})
+      |> Map.put("limits", %{"normal_event_bytes" => 1})
+
+    File.write!(manifest, Jason.encode!(document))
+
+    assert {:error, failure} =
+             ManifestRepl.open(manifest, nil,
+               input_mode: :interactive,
+               terminal_attached: true
+             )
+
+    assert %{code: code, provider_activity: false} = failure
+    assert is_atom(code)
+    assert Enum.sort(Map.keys(failure)) == [:code, :provider_activity]
   end
 
   test "manifest opening status redacts retained state" do
@@ -197,14 +255,38 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
     assert_receive {:host_llm_ensure_ready, worker}, 5_000
     Process.exit(worker, :kill)
 
-    assert_receive {:manifest_repl_result, {:error, %{provider_activity: true, code: code}}},
-                   5_000
+    assert_receive {:manifest_repl_result, {:error, failure}}, 5_000
 
+    assert %{provider_activity: true, code: code} = failure
     assert is_atom(code)
+    assert Enum.sort(Map.keys(failure)) == [:code, :provider_activity]
     refute Process.alive?(opener)
 
     assert_eventually(fn -> File.exists?(trace_path) end)
     assert File.read!(trace_path) == ""
+  end
+
+  @tag :tmp_dir
+  test "the opening owner seals marked failure evidence before teardown", %{
+    tmp_dir: directory
+  } do
+    gate = make_ref()
+    configure_host_llm(host_llm_test_ready_gate: gate)
+    {manifest, host} = write_llm_application(directory, :normal)
+    {:ok, runtime} = CommandRuntime.new(provider_application_mode: :host_owned)
+    assert {:ok, preparation} = CommandAcquisition.prepare_repl(manifest, host, runtime)
+    assert {:ok, authority} = PublicationAuthority.new([])
+    assert {:ok, opening} = ManifestReplOpening.start(preparation, authority, nil, self())
+    opening_ref = Process.monitor(ManifestReplOpening.pid(opening))
+
+    assert_receive {:host_llm_ensure_ready, worker}, 5_000
+    Process.exit(worker, :kill)
+
+    assert {:error, failure} = ManifestReplOpening.await(opening)
+    assert_receive {:DOWN, ^opening_ref, :process, _pid, :normal}, 5_000
+
+    assert {:ok, %CommandDiagnostic{provider_activity: true}, true, :incomplete} =
+             OwnerFailure.evidence(failure)
   end
 
   @tag :tmp_dir
@@ -368,5 +450,20 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
       {:ok, contents} -> String.split(contents, "\n", trim: true)
       {:error, :enoent} -> []
     end
+  end
+
+  defp provider_activity_owners do
+    Process.list()
+    |> Enum.filter(fn pid ->
+      case Process.info(pid, :dictionary) do
+        {:dictionary, dictionary} ->
+          Keyword.get(dictionary, :"$initial_call") ==
+            {PtcRunner.Kernel.ProviderActivity, :init, 1}
+
+        nil ->
+          false
+      end
+    end)
+    |> MapSet.new()
   end
 end

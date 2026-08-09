@@ -9,7 +9,9 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
   alias PtcRunner.Kernel.ManifestReplPreparation
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
+  alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderExecutionResources
   alias PtcRunner.Kernel.ProviderRegistry
@@ -154,9 +156,11 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
   def handle_call(
         {token, :await},
         {caller, _tag},
-        %{token: token, caller: caller, result: {:error, _reason} = error} = state
-      ),
-      do: {:stop, :normal, error, state}
+        %{token: token, caller: caller, result: {:error, reason}} = state
+      ) do
+    {error, next} = sealed_failure(state, reason)
+    {:stop, :normal, error, next}
+  end
 
   def handle_call(
         {token, {:resource, action, kind, resource}},
@@ -414,10 +418,28 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
     {:noreply, %{state | waiter: nil}}
   end
 
-  defp reply_or_wait(%{waiter: waiter, result: {:error, _reason} = error} = state) do
+  defp reply_or_wait(%{waiter: waiter, result: {:error, reason}} = state) do
+    {error, state} = sealed_failure(state, reason)
     GenServer.reply(waiter, error)
     {:stop, :normal, %{state | waiter: nil}}
   end
+
+  defp sealed_failure(state, %OwnerFailure{} = failure),
+    do: {{:error, failure}, %{state | result: {:error, failure}}}
+
+  defp sealed_failure(state, reason) do
+    failure = OwnerFailure.new!(reason, provider_activity(state), :incomplete)
+    {{:error, failure}, %{state | result: {:error, failure}}}
+  end
+
+  defp provider_activity(%{preparation: %{prepared_run: %{provider_activity: activity}}}) do
+    case ProviderActivity.value(activity) do
+      value when is_boolean(value) -> value
+      _unknown -> false
+    end
+  end
+
+  defp provider_activity(_state), do: false
 
   defp close_owned_provider_session(%{provider_cleanup: nil, provider_session: nil} = state),
     do: {:ok, %{state | provider_cleanup: :ok}}

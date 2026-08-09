@@ -86,9 +86,10 @@ PTC-Lisp owns replaceable workflow policy:
 Frontends own presentation and host choices. They must enter through
 `PtcRunner.Kernel.ApplicationPackage` and a sealed
 `PtcRunner.Kernel.RunRequest`. The closed command pipeline uses
-`PtcRunner.Kernel.CommandEngine`; the Mix task is a thin adapter that prepends
-`run`, supplies VM-owned runtime callbacks, and renders the returned sealed V1
-envelope. One-shot runs execute through a dedicated execution-session owner,
+`PtcRunner.Kernel.CommandEngine`; the Mix task is a thin renderer whose adapter
+owns bootstrap, prepends `run`, and supplies VM-owned runtime callbacks. The
+task renders the returned sealed V1 envelope. One-shot runs execute through a
+dedicated execution-session owner,
 whether or not they select providers, and a provider-bearing invocation opens
 `ProviderActiveSession` inside that owner's subordinate worker rather than in
 the adapter. `doctor --connect` is a distinct active operation with its own
@@ -372,8 +373,11 @@ sealed preparation, opens its sinks before activity, and retains the acquired
 runtime registry and provider session behind one `ManifestReplOpening` handle.
 It atomically adopts the completed `RunConfig`, run state, trace grant, and
 opening handle into `ReplSessionOwner` before exposing a process-affine
-session. Provider-free manifests take the same opening and REPL-owner path but
-omit only the provider session. After application admission, an active session
+session. On failure, the opening owner attests the marker's current activity
+before its terminal cleanup closes the preparation; the public failure
+projection consumes that captured evidence instead of racing owner teardown.
+Provider-free manifests take the same opening and REPL-owner path but omit only
+the provider session. After application admission, an active session
 anchors one absolute run deadline shared by active selection, construction,
 and Kernel execution. The active build atomically claims the session sealed to
 the exact prepared run; swapping sessions or replaying the same prepared/session
@@ -455,10 +459,14 @@ selected leaves the prepared run reusable.
 The `PtcRunner.Kernel.CommandEngine` core allocates a command reference
 before strict argv parsing, consumes host/application paths through acquisition
 adapters, and projects failures into `PtcRunner.Kernel.CommandOutcome`.
-`Mix.Tasks.Ptc.Run` is a thin adapter over that boundary: it supplies the
-Mix-owned runtime hooks, renders only the sealed outcome, and raises a Mix error
-for a nonzero status without halting the VM. A future outer standalone wrapper
-may turn the same outcome status into a process exit.
+`Mix.Tasks.Ptc.Run` is a thin renderer over that boundary. Its Mix-owned
+adapter owns bootstrap, the interactive authorization extension, and runtime
+hooks. Bootstrap exceptions and application
+start failures are projected as the same closed run outcome as other internal
+failures; neither their reason nor argv paths reach the envelope. The task
+renders only the sealed outcome and raises a Mix error for a nonzero status
+without halting the VM. A future outer standalone wrapper may turn the same
+outcome status into a process exit.
 Successful `validate` is terminal: it projects the five-field digest result,
 closes its prepared run, and returns a sealed `CommandOutcome`. Both doctor
 modes are terminal too, and `doctor --connect` is the one command the engine
@@ -499,7 +507,12 @@ access.
 `CommandEngine.dispatch/1` keeps `ExecutionSessionOwner` for provider-free
 runs, omitting only `ProviderExecution` and its provider session. A
 provider-backed run creates one `ProviderExecution`, opens at most one provider
-session, and uses the same owner and publication path. Phase-12 projection
+session, and uses the same owner and publication path. Before that owner closes
+the prepared run's activity marker on any failure, it seals the marker value
+and whether execution had started into an internal failure value. Dispatch
+therefore never infers activity from provider declarations: a provider-bearing
+sink-opening failure remains inactive and `not_started`, while a later marked
+failure remains active and `incomplete`. Phase-12 projection
 narrows the Kernel's richer internal usage snapshot to the closed envelope
 vocabulary, flattens capability counts by workflow/mission scope, preserves
 evaluation-memory evidence, and never includes a private result value.
@@ -585,10 +598,12 @@ disjoint schema branches: `ok` requires a null diagnostic and `error` requires
 a non-null closed diagnostic. Unclassified run failures admit only
 `execution.state: "not_started"`; successful run branches bind normal/private
 result projection to the same artifact class. Classified setup and audited-local
-failures also remain `not_started`. Once execution crosses into the owner,
-failures without sealed execution evidence are `incomplete` with unavailable
-usage and evaluation-memory fields; defensive publication and projection
-failures cannot claim that execution never began. Successful trace and inspection
+failures also remain `not_started`. The execution owner seals stage and activity
+evidence before closing their owner-backed marker: pre-worker failures remain
+`not_started`, while bare failures returned after a worker starts are
+`incomplete` with unavailable usage and evaluation-memory fields. Defensive
+publication and projection failures cannot claim that execution never began.
+Successful trace and inspection
 artifacts are only `not_requested` or `written`; a normal result has the same
 choice, while a private result must be `written`. Recovery-only publication
 states are confined to the result field of a failed envelope. The generated

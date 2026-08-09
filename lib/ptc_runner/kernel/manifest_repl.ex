@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.ManifestRepl do
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.ManifestReplOpening
   alias PtcRunner.Kernel.ManifestReplPreparation
+  alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.PublicationAuthority
@@ -59,21 +60,17 @@ defmodule PtcRunner.Kernel.ManifestRepl do
            :ok <- maybe_setup_environment(preparation, options.runtime),
            {:ok, authority} <- PublicationAuthority.new([]) do
         open_authorized(preparation, authority, trace_path)
-      else
-        {:error, reason} ->
-          {:error, failure(reason, activity(preparation))}
       end
+      |> project_open_result(preparation)
 
     if match?({:error, _failure}, result), do: ManifestReplPreparation.close(preparation)
     result
   rescue
     _exception ->
-      ManifestReplPreparation.close(preparation)
-      {:error, failure(:invalid_manifest_repl, activity(preparation))}
+      fail_and_close(preparation)
   catch
     _kind, _reason ->
-      ManifestReplPreparation.close(preparation)
-      {:error, failure(:invalid_manifest_repl, activity(preparation))}
+      fail_and_close(preparation)
   end
 
   defp open_authorized(preparation, authority, trace_path) do
@@ -174,6 +171,30 @@ defmodule PtcRunner.Kernel.ManifestRepl do
 
   defp failure(reason, activity) when is_atom(reason),
     do: %{code: reason, provider_activity: activity == true}
+
+  defp failure(_reason, activity),
+    do: %{code: :invalid_manifest_repl, provider_activity: activity == true}
+
+  defp project_open_result({:ok, %ReplSession{}} = result, _preparation), do: result
+
+  defp project_open_result({:error, %OwnerFailure{} = owner_failure}, _preparation) do
+    case OwnerFailure.evidence(owner_failure) do
+      {:ok, reason, provider_activity, _stage} ->
+        {:error, failure(reason, provider_activity)}
+
+      {:error, :invalid_owner_failure} ->
+        {:error, failure(:invalid_manifest_repl, false)}
+    end
+  end
+
+  defp project_open_result({:error, reason}, preparation),
+    do: {:error, failure(reason, activity(preparation))}
+
+  defp fail_and_close(preparation) do
+    provider_activity = activity(preparation)
+    ManifestReplPreparation.close(preparation)
+    {:error, failure(:invalid_manifest_repl, provider_activity)}
+  end
 
   defp activity(preparation) do
     case ProviderActivity.value(preparation.prepared_run.provider_activity) do

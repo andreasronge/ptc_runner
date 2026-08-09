@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
@@ -315,7 +316,8 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     activity_ref = Process.monitor(activity)
     assert {:ok, authority} = PublicationAuthority.new([])
 
-    assert {:error, :invalid_event_sink} = RunCoordinator.execute(prepared, authority)
+    assert {:error, %OwnerFailure{} = failure} = RunCoordinator.execute(prepared, authority)
+    assert {:ok, :invalid_event_sink, false, :not_started} = OwnerFailure.evidence(failure)
     assert_receive {:DOWN, ^activity_ref, :process, ^activity, :normal}, 5_000
 
     assert :ok = InstallationCatalog.close(catalog)
@@ -382,7 +384,10 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       assert {:ok, owner} = ExecutionSessionOwner.start(prepared, authority, self())
       owner_pid = ExecutionSessionOwner.pid(owner)
 
-      assert {:error, :run_started_metadata_exceeded} = ExecutionSessionOwner.await(owner)
+      assert {:error, %OwnerFailure{} = failure} = ExecutionSessionOwner.await(owner)
+
+      assert {:ok, :run_started_metadata_exceeded, false, :not_started} =
+               OwnerFailure.evidence(failure)
 
       assert_receive {:trace, ^owner_pid, :call, {EventSink, :start, _arguments}}, 5_000
 

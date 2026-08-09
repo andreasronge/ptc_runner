@@ -9,7 +9,9 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
+  alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderExecutionResources
   alias PtcRunner.Kernel.ProviderRegistry
@@ -184,20 +186,23 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         end
 
       {:error, reason, opened_sinks} ->
+        failure = execution_failure(initial, reason, :not_started)
+
         next =
           initial
           |> Map.put(:opened_sinks, opened_sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
           |> abort_authority()
-          |> put_result({:error, reason})
+          |> put_result({:error, failure})
 
         {:ok, next}
 
       {:error, reason} ->
+        failure = execution_failure(initial, reason, :not_started)
         close_prepared(prepared)
         _ = PublicationAuthority.abort(authority)
-        {:ok, %{initial | prepared: nil, result: {:error, reason}}}
+        {:ok, %{initial | prepared: nil, result: {:error, failure}}}
     end
   end
 
@@ -251,6 +256,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         %{token: token, worker_pid: worker_pid} = state
       ) do
     Process.demonitor(state.worker_ref, [:flush])
+    result = seal_execution_result(state, result)
 
     next =
       state
@@ -275,12 +281,14 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         {:DOWN, ref, :process, worker_pid, _reason},
         %{worker_ref: ref, worker_pid: worker_pid} = state
       ) do
+    failure = execution_failure(state, :execution_session_unavailable, :incomplete)
+
     next =
       state
       |> Map.put(:worker_pid, nil)
       |> Map.put(:worker_ref, nil)
       |> abort()
-      |> put_result({:error, :execution_session_unavailable})
+      |> put_result({:error, failure})
 
     finish_or_wait(next)
   end
@@ -346,6 +354,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
          }}
 
       {:error, reason, registry} ->
+        failure = execution_failure(initial, reason, :not_started)
+
         next =
           initial
           |> Map.put(:registry, registry)
@@ -353,18 +363,20 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
           |> abort_authority()
-          |> put_result({:error, reason})
+          |> put_result({:error, failure})
 
         {:ok, next}
 
       {:error, reason} ->
+        failure = execution_failure(initial, reason, :not_started)
+
         next =
           initial
           |> Map.put(:opened_sinks, opened_sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
           |> abort_authority()
-          |> put_result({:error, reason})
+          |> put_result({:error, failure})
 
         {:ok, next}
     end
@@ -428,13 +440,15 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           {:DOWN, ^worker_ref, :process, ^worker_pid, _reason} -> :ok
         end
 
+        failure = execution_failure(initial, :invalid_prepared_run, :not_started)
+
         next =
           initial
           |> Map.put(:opened_sinks, opened_sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
           |> abort_authority()
-          |> put_result({:error, :invalid_prepared_run})
+          |> put_result({:error, failure})
 
         {:ok, next}
     end
@@ -560,6 +574,25 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   defp cleanup_diagnostic,
     do: CommandDiagnostic.new!(:result_cleanup, :provider_cleanup_failed, provider_activity: true)
+
+  defp seal_execution_result(_state, {:ok, _result} = result), do: result
+
+  defp seal_execution_result(_state, {:error, %CommandDiagnostic{}} = result), do: result
+
+  defp seal_execution_result(state, {:error, reason}),
+    do: {:error, execution_failure(state, reason, :incomplete)}
+
+  defp execution_failure(state, reason, execution_state),
+    do: OwnerFailure.new!(reason, provider_activity(state), execution_state)
+
+  defp provider_activity(%{prepared: %{provider_activity: activity}}) do
+    case ProviderActivity.value(activity) do
+      value when is_boolean(value) -> value
+      _unknown -> false
+    end
+  end
+
+  defp provider_activity(_state), do: false
 
   defp maybe_finalize_failed_execution(state, {:ok, _outcome}),
     do: %{state | opened_sinks: nil}

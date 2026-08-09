@@ -13,11 +13,12 @@ defmodule Mix.Tasks.Ptc.Run do
       mix ptc.run ptc.json --host-config ptc-host.json --authorize-mcp workspace
       mix ptc.run ptc.json --component-override-descriptor private/candidate.json
 
-  The task prepends the fixed `run` command and delegates parsing, acquisition,
-  execution, publication, and outcome projection to
-  `PtcRunner.Kernel.CommandEngine`. Its only extension to the stable grammar is
-  repeatable `--authorize-mcp NAME`, which opens interactive OAuth for the named
-  selected MCP installation during the immediately following run.
+  The task delegates startup and its repeatable `--authorize-mcp NAME`
+  extension to its Mix-owned adapter, then delegates the stable grammar,
+  acquisition, execution, publication, and outcome projection to
+  `PtcRunner.Kernel.CommandEngine`. The authorization extension opens
+  interactive OAuth for the named selected MCP installation during the
+  immediately following run.
 
   Both successful and failed invocations render the same closed V1 JSON
   envelope. A failed envelope is raised as the `Mix.Error` message so an
@@ -28,17 +29,12 @@ defmodule Mix.Tasks.Ptc.Run do
   """
   use Mix.Task
 
-  alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
-  alias PtcRunner.Kernel.CommandRuntime
-  alias PtcRunner.MixCommandRuntime
+  alias PtcRunner.MixRunAdapter
 
   @impl Mix.Task
   def run(args) do
-    Mix.Task.run("app.config")
-    start_core_application!()
-
-    {status, outcome} = dispatch(args)
+    {status, outcome} = MixRunAdapter.dispatch(args)
     envelope = outcome |> CommandOutcome.to_map() |> Jason.encode!()
 
     if status == :ok do
@@ -47,73 +43,5 @@ defmodule Mix.Tasks.Ptc.Run do
     else
       Mix.raise(envelope)
     end
-  end
-
-  defp dispatch(args) do
-    case extract_authorizations(args) do
-      {:ok, stable_args, targets} ->
-        case command_runtime(targets) do
-          {:ok, runtime} -> CommandEngine.dispatch(["run" | stable_args], runtime)
-          {:error, :invalid_command_runtime} -> invalid_arguments_outcome()
-        end
-
-      :error ->
-        invalid_arguments_outcome()
-    end
-  end
-
-  defp command_runtime(targets) do
-    options = MixCommandRuntime.options()
-
-    options =
-      case targets do
-        [] ->
-          options
-
-        [_target | _rest] ->
-          options ++
-            [authorization_targets: targets, authorization_notifier: &notify_authorization_url/1]
-      end
-
-    CommandRuntime.new(options)
-  end
-
-  defp extract_authorizations(args), do: extract_authorizations(args, [], [])
-
-  defp extract_authorizations([], stable, targets),
-    do: {:ok, Enum.reverse(stable), Enum.reverse(targets)}
-
-  defp extract_authorizations(["--" | rest], stable, targets),
-    do: {:ok, Enum.reverse(stable, ["--" | rest]), Enum.reverse(targets)}
-
-  defp extract_authorizations(["--authorize-mcp", name | rest], stable, targets)
-       when is_binary(name) and name != "" do
-    if String.starts_with?(name, "--"),
-      do: :error,
-      else: extract_authorizations(rest, stable, [name | targets])
-  end
-
-  defp extract_authorizations(["--authorize-mcp=" <> name | rest], stable, targets)
-       when name != "",
-       do: extract_authorizations(rest, stable, [name | targets])
-
-  defp extract_authorizations(["--authorize-mcp" | _rest], _stable, _targets), do: :error
-
-  defp extract_authorizations([argument | rest], stable, targets),
-    do: extract_authorizations(rest, [argument | stable], targets)
-
-  defp invalid_arguments_outcome,
-    do: CommandEngine.dispatch(["run", "--authorize-mcp"])
-
-  defp start_core_application! do
-    case Application.ensure_all_started(:ptc_runner) do
-      {:ok, _started} -> :ok
-      {:error, reason} -> Mix.raise("could not start PtcRunner: #{inspect(reason)}")
-    end
-  end
-
-  defp notify_authorization_url(url) do
-    Mix.shell().info("Open this one-time authorization URL:\n#{url}")
-    :ok
   end
 end

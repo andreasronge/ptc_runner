@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
@@ -213,7 +214,11 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
 
     Process.exit(state.worker_pid, :kill)
 
-    assert_receive {:execution_result, {:error, :execution_session_unavailable}}, 5_000
+    assert_receive {:execution_result, {:error, failure}}, 5_000
+
+    assert {:ok, :execution_session_unavailable, true, :incomplete} =
+             OwnerFailure.evidence(failure)
+
     assert_all_down(watched)
   end
 

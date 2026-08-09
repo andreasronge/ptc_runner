@@ -5,6 +5,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
 
   alias Mix.Tasks.Ptc.Run
   alias PtcRunner.Dotenv
+  alias PtcRunner.MixRunAdapter
 
   @tag :tmp_dir
   test "delegates the stable run grammar and renders its closed envelope", %{tmp_dir: dir} do
@@ -102,6 +103,27 @@ defmodule Mix.Tasks.Ptc.RunTest do
       assert envelope["error"]["code"] == "invalid_arguments"
       assert envelope["error"]["provider_activity"] == false
     end
+  end
+
+  test "bootstrap failures return a closed private-safe run outcome" do
+    private_reason = "bootstrap-secret"
+
+    assert {:error, outcome} =
+             MixRunAdapter.dispatch(["private/application/ptc.json"], fn ->
+               raise private_reason
+             end)
+
+    envelope = outcome.envelope
+    encoded = Jason.encode!(envelope)
+
+    assert envelope["status"] == "error"
+    assert envelope["command"] == "run"
+    assert envelope["error"]["phase"] == "internal"
+    assert envelope["error"]["code"] == "internal_error"
+    assert envelope["error"]["provider_activity"] == false
+    assert envelope["execution"] == %{"state" => "not_started"}
+    refute encoded =~ private_reason
+    refute encoded =~ "private/application"
   end
 
   @tag :tmp_dir

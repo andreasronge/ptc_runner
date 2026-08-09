@@ -70,6 +70,19 @@ defmodule PtcRunner.Kernel.CommandEngine do
   def dispatch(_argv, _runtime),
     do: {:error, outcome(:unknown, generated_or_safe_ref(), :internal, :internal_error)}
 
+  @doc false
+  @spec run_startup_failure() :: {:error, CommandOutcome.t()}
+  def run_startup_failure do
+    run_ref = generated_or_safe_ref()
+
+    {:error,
+     CommandOutcome.run_error(
+       run_ref,
+       diagnostic(:internal, :internal_error),
+       CommandDestination.requested_artifact_state(%{})
+     )}
+  end
+
   @doc "Authorizes a prepared run's destinations at the phase-6 boundary."
   @spec preflight(CommandPreparation.t()) ::
           {:ok, PublicationAuthority.t()} | {:error, CommandOutcome.t()}
