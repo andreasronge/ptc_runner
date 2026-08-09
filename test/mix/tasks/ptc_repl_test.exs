@@ -750,7 +750,7 @@ defmodule PtcRunner.ReplFrontendTest do
     assert File.regular?(List.last(records)["trace_path"])
   end
 
-  defp run_repl(args), do: MixCommandAdapter.run_task(["repl" | args], :raise).outcome
+  defp run_repl(args), do: MixCommandAdapter.run_task(["repl" | args]).outcome
 
   defp profile_args(source, output_directory) do
     [

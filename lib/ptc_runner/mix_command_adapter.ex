@@ -20,21 +20,17 @@ defmodule PtcRunner.MixCommandAdapter do
   def execute(_args), do: execute([])
 
   @doc false
-  @spec run_task([binary()], :exit | :raise) :: CommandPresentation.t() | no_return()
-  def run_task(args, failure_mode) when is_list(args) and failure_mode in [:exit, :raise] do
+  @spec run_task([binary()]) :: CommandPresentation.t() | no_return()
+  def run_task(args) when is_list(args) do
     presentation = execute(args)
 
-    case {presentation.exit_status, failure_mode} do
-      {0, _mode} ->
+    case presentation.exit_status do
+      0 ->
         write_output(presentation.stdout, presentation.stderr)
         presentation
 
-      {_status, :exit} ->
-        write_output(presentation.stdout, presentation.stderr)
-        exit({:shutdown, presentation.exit_status})
-
-      {_status, :raise} ->
-        Mix.raise(failure_message(presentation))
+      status ->
+        Mix.raise(failure_message(presentation), exit_status: status)
     end
   end
 

@@ -125,20 +125,25 @@ defmodule Mix.Tasks.PtcTest do
   end
 
   @tag :slow
-  test "the Mix process preserves rejection bytes and diagnostic status" do
+  test "the Mix process preserves human rendering and normal-mode diagnostic status" do
     args = ["doctor", "--caller-secret", "value"]
 
-    {output, status} =
-      System.cmd(System.find_executable("mix"), ["ptc" | args],
-        cd: @root,
-        env: [{"MIX_ENV", "test"}, {"MIX_QUIET", "1"}],
-        stderr_to_stdout: true
-      )
+    for {extra_env, expected_status} <- [
+          {[{"MIX_DEBUG", nil}], 2},
+          {[{"MIX_DEBUG", "1"}], 1}
+        ] do
+      {output, status} =
+        System.cmd(System.find_executable("mix"), ["ptc" | args],
+          cd: @root,
+          env: [{"MIX_ENV", "test"}, {"MIX_QUIET", "1"} | extra_env],
+          stderr_to_stdout: true
+        )
 
-    assert status == 2
-    assert [_, run_ref] = Regex.run(~r/\(run_ref: (cmd-[^)]+)\)/, output)
-    assert {:error, entry} = CommandEntry.open_with_ref(args, :mix, run_ref)
-    assert output == CommandRenderer.rejection(run_ref, entry.rejection)
+      assert status == expected_status
+      assert [_, run_ref] = Regex.run(~r/\(run_ref: (cmd-[^)]+)\)/, output)
+      assert {:error, entry} = CommandEntry.open_with_ref(args, :mix, run_ref)
+      assert output =~ String.trim_trailing(CommandRenderer.rejection(run_ref, entry.rejection))
+    end
   end
 
   test "rejects malformed and duplicate Mix authorization extensions before bootstrap" do
@@ -207,15 +212,9 @@ defmodule Mix.Tasks.PtcTest do
   defp failed_message(args) do
     Mix.Task.reenable("ptc")
 
-    message =
-      capture_io(:stderr, fn ->
-        reason = catch_exit(Ptc.run(args))
-        send(self(), {:failure_exit, reason})
-      end)
-
-    assert_received {:failure_exit, {:shutdown, status}}
-    assert status > 0
-    message
+    error = assert_raise Mix.Error, fn -> Ptc.run(args) end
+    assert error.mix > 0
+    error.message
   end
 
   defp write_manifest(dir, input) do

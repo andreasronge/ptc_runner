@@ -19,5 +19,5 @@ defmodule Mix.Tasks.Ptc do
   alias PtcRunner.MixCommandAdapter
 
   @impl Mix.Task
-  def run(args), do: MixCommandAdapter.run_task(args, :exit).outcome
+  def run(args), do: MixCommandAdapter.run_task(args).outcome
 end

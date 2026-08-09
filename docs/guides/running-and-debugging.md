@@ -298,8 +298,14 @@ publishes immutable execution evidence, and returns a schema-valid normal or
 private envelope; a private envelope never contains the result value. The Mix
 task is a thin renderer over this boundary. Its adapter owns Mix application
 bootstrap and adds only interactive `--authorize-mcp NAME` for the immediately
-following run. Bootstrap failures use the same closed private-safe run envelope
-as other internal failures; raw startup reasons and argv paths are not rendered.
+following run. A nonzero presentation raises a rescuable `Mix.Error` carrying
+the diagnostic status; in its normal mode, the outer `mix` executable maps that
+status to its process exit, while the task and shared adapter never exit or halt
+their caller. `MIX_DEBUG=1` deliberately reraises Mix exceptions for debugging,
+so the outer VM uses its generic exception status `1`; the exception still
+carries the diagnostic status. Bootstrap failures use the same closed
+private-safe run envelope as other internal failures; raw startup reasons and
+argv paths are not rendered.
 
 `models` reads one bounded host document and
 returns the installed aliases in lexical order with only their public source,
