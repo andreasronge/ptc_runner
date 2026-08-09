@@ -61,6 +61,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   alias PtcRunner.Kernel.MissionInventory
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ProviderTaskTracker
+  alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -82,6 +83,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   defstruct [
     :workflow_environment,
     :mission_environment,
+    :mission_spaces,
     :input,
     :limits,
     :event_sink,
@@ -103,6 +105,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   @type t :: %__MODULE__{
           workflow_environment: WorkflowEnvironment.t(),
           mission_environment: MissionEnvironment.t(),
+          mission_spaces: %{binary() => %{environment: MissionEnvironment.t(), inventory: term()}},
           input: map(),
           limits: Limits.t(),
           event_sink: EventSink.t(),
@@ -144,7 +147,8 @@ defmodule PtcRunner.Kernel.RunConfig do
                :connector_snapshots,
                :session_profile,
                :labels,
-               :component_overrides
+               :component_overrides,
+               :extra_missions
              ] !=
              [],
          %WorkflowEnvironment{} = workflow <- Keyword.get(opts, :workflow_environment),
@@ -168,6 +172,13 @@ defmodule PtcRunner.Kernel.RunConfig do
          {:ok, component_overrides} <-
            component_overrides(Keyword.get(opts, :component_overrides, [])),
          {:ok, mission_inventory} <- MissionInventory.build(mission, limits),
+         {:ok, mission_spaces} <-
+           mission_spaces(
+             mission,
+             mission_inventory,
+             Keyword.get(opts, :extra_missions, %{}),
+             limits
+           ),
          {:ok, run_started_metadata} <-
            run_started_metadata(
              workflow,
@@ -190,6 +201,7 @@ defmodule PtcRunner.Kernel.RunConfig do
        %__MODULE__{
          workflow_environment: workflow,
          mission_environment: mission,
+         mission_spaces: mission_spaces,
          input: Keyword.fetch!(opts, :input),
          limits: limits,
          event_sink: sink,
@@ -213,6 +225,45 @@ defmodule PtcRunner.Kernel.RunConfig do
       _ -> {:error, :invalid_run_config}
     end
   end
+
+  # SPIKE: `mission_environment` remains the "default" space so every existing
+  # caller keeps working; `:extra_missions` adds further named spaces. Each
+  # space carries its own frozen inventory, which is what makes a per-agent
+  # prompt fall out of this rather than needing a separate mechanism.
+  defp mission_spaces(default, default_inventory, extra, limits) when is_map(extra) do
+    base = %{RunState.default_space() => %{environment: default, inventory: default_inventory}}
+
+    Enum.reduce_while(extra, {:ok, base}, fn
+      {name, %MissionEnvironment{} = environment}, {:ok, acc} ->
+        cond do
+          not space_name?(name) ->
+            {:halt, {:error, :invalid_run_config}}
+
+          Map.has_key?(acc, name) ->
+            {:halt, {:error, :invalid_run_config}}
+
+          true ->
+            case MissionInventory.build(environment, limits) do
+              {:ok, inventory} ->
+                {:cont,
+                 {:ok, Map.put(acc, name, %{environment: environment, inventory: inventory})}}
+
+              {:error, _reason} = error ->
+                {:halt, error}
+            end
+        end
+
+      _entry, {:ok, _acc} ->
+        {:halt, {:error, :invalid_run_config}}
+    end)
+  end
+
+  defp mission_spaces(_default, _inventory, _extra, _limits), do: {:error, :invalid_run_config}
+
+  defp space_name?(name) when is_binary(name),
+    do: name != "" and byte_size(name) <= 64 and Regex.match?(~r/\A[a-z][a-z0-9._-]*\z/, name)
+
+  defp space_name?(_name), do: false
 
   defp result_contract?(nil), do: true
   defp result_contract?(%ValueContract{} = contract), do: ValueContract.sealed?(contract)

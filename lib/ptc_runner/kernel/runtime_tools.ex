@@ -58,44 +58,98 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   end
 
   @doc "Builds the workflow-only frozen mission-inventory callback."
-  def mission_inventory(state, rendered) when is_binary(rendered) do
-    fn
-      arguments when is_map(arguments) and map_size(arguments) == 0 ->
-        %{status: :ok, value: rendered}
-
-      _arguments ->
-        protocol_error(state, :invalid_mission_inventory_request)
-    end
+  def mission_inventory(state, rendered_by_space) when is_map(rendered_by_space) do
+    frozen_by_space(state, rendered_by_space, :invalid_mission_inventory_request)
   end
 
   @doc "Builds the workflow-only frozen compact mission-model-context callback."
-  def mission_model_context(state, rendered) when is_binary(rendered) do
+  def mission_model_context(state, rendered_by_space) when is_map(rendered_by_space) do
+    frozen_by_space(state, rendered_by_space, :invalid_mission_model_context_request)
+  end
+
+  # Both frozen renderings are selected the same way: no argument means the
+  # default space, and an explicit "space" must name a declared one. An unknown
+  # space is a protocol error rather than a silent fall back to the default,
+  # because falling back would hand a model the wrong environment's API.
+  defp frozen_by_space(state, rendered_by_space, error_reason) do
     fn
       arguments when is_map(arguments) and map_size(arguments) == 0 ->
-        %{status: :ok, value: rendered}
+        %{status: :ok, value: Map.fetch!(rendered_by_space, RunState.default_space())}
+
+      %{"space" => space} = arguments when is_binary(space) and map_size(arguments) == 1 ->
+        case Map.fetch(rendered_by_space, space) do
+          {:ok, rendered} -> %{status: :ok, value: rendered}
+          :error -> protocol_error(state, :unknown_mission_space)
+        end
 
       _arguments ->
-        protocol_error(state, :invalid_mission_model_context_request)
+        protocol_error(state, error_reason)
     end
   end
 
-  @doc "Builds the workflow-only subordinate-evaluation callback."
-  def kernel_eval(state, mission, limits, event_sink, inspection_sink \\ nil) do
-    fn
-      %{"kind" => kind, "source" => source} = arguments
-      when is_binary(source) and map_size(arguments) == 2 ->
+  @doc """
+  Builds the workflow-only subordinate-evaluation callback.
+
+  `spaces` maps a mission space name to its environment. An optional `"space"`
+  argument selects one; omitting it selects the default space.
+  """
+  def kernel_eval(state, spaces, limits, event_sink, inspection_sink \\ nil)
+      when is_map(spaces) and not is_struct(spaces) do
+    fn arguments ->
+      case take_space(arguments, spaces) do
+        {:ok, space, mission, rest} ->
+          dispatch_kernel_eval(
+            state,
+            {space, mission},
+            rest,
+            limits,
+            event_sink,
+            inspection_sink
+          )
+
+        :error ->
+          invalid_kernel_eval_request(state)
+
+        {:error, :unknown_space} ->
+          protocol_error(state, :unknown_mission_space)
+      end
+    end
+  end
+
+  defp take_space(arguments, spaces) when is_map(arguments) do
+    case Map.pop(arguments, "space") do
+      {nil, rest} ->
+        {:ok, RunState.default_space(), Map.fetch!(spaces, RunState.default_space()), rest}
+
+      {space, rest} when is_binary(space) ->
+        case Map.fetch(spaces, space) do
+          {:ok, mission} -> {:ok, space, mission, rest}
+          :error -> {:error, :unknown_space}
+        end
+
+      _other ->
+        :error
+    end
+  end
+
+  defp take_space(_arguments, _spaces), do: :error
+
+  defp dispatch_kernel_eval(state, target, arguments, limits, event_sink, inspection_sink) do
+    case arguments do
+      %{"kind" => kind, "source" => source} = rest
+      when is_binary(source) and map_size(rest) == 2 ->
         if keyword_name(kind) == "source" do
-          evaluate_source(state, mission, source, limits, event_sink, inspection_sink)
+          evaluate_source(state, target, source, limits, event_sink, inspection_sink)
         else
           invalid_kernel_eval_request(state)
         end
 
-      %{"kind" => kind, "source" => source, "params" => params} = arguments
-      when is_binary(source) and map_size(arguments) == 3 ->
+      %{"kind" => kind, "source" => source, "params" => params} = rest
+      when is_binary(source) and map_size(rest) == 3 ->
         if keyword_name(kind) == "source" do
           evaluate_source_with(
             state,
-            mission,
+            target,
             source,
             params,
             limits,
@@ -106,20 +160,20 @@ defmodule PtcRunner.Kernel.RuntimeTools do
           invalid_kernel_eval_request(state)
         end
 
-      %{"kind" => kind, "program" => %Program{source: source}} = arguments
-      when map_size(arguments) == 2 ->
+      %{"kind" => kind, "program" => %Program{source: source}} = rest
+      when map_size(rest) == 2 ->
         if keyword_name(kind) == "embedded" do
-          evaluate_source(state, mission, source, limits, event_sink, inspection_sink)
+          evaluate_source(state, target, source, limits, event_sink, inspection_sink)
         else
           invalid_kernel_eval_request(state)
         end
 
-      %{"kind" => kind, "program" => %Program{source: source}, "params" => params} = arguments
-      when map_size(arguments) == 3 ->
+      %{"kind" => kind, "program" => %Program{source: source}, "params" => params} = rest
+      when map_size(rest) == 3 ->
         if keyword_name(kind) == "embedded" do
           evaluate_source_with(
             state,
-            mission,
+            target,
             source,
             params,
             limits,
@@ -130,7 +184,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
           invalid_kernel_eval_request(state)
         end
 
-      _arguments ->
+      _rest ->
         invalid_kernel_eval_request(state)
     end
   end
@@ -185,12 +239,13 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end)
   end
 
-  defp evaluate_source(state, mission, source, limits, event_sink, inspection_sink) do
+  defp evaluate_source(state, {space, mission}, source, limits, event_sink, inspection_sink) do
     %{
       status: :ok,
       value:
-        Evaluation.evaluate_source(
+        Evaluation.evaluate_space(
           state,
+          space,
           mission,
           source,
           limits.evaluation_timeout_ms,
@@ -202,7 +257,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
   defp evaluate_source_with(
          state,
-         mission,
+         {space, mission},
          source,
          params,
          limits,
@@ -214,14 +269,15 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         %{
           status: :ok,
           value:
-            Evaluation.evaluate_source(
+            Evaluation.evaluate_space(
               state,
+              space,
               mission,
               source,
               limits.evaluation_timeout_ms,
               event_sink,
               inspection_sink,
-              params
+              params: params
             )
         }
 

@@ -61,6 +61,33 @@
       (get response :value)
       response)))
 
+(defn eval-source-in
+  "Evaluate bounded dynamic source text in the named mission space."
+  [space source]
+  (let [response (tool/kernel-eval {:kind :source :source source :space space})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      response)))
+
+(defn eval-source-with-in
+  "Evaluate bounded dynamic source in the named mission space with JSON parameters."
+  [space source params]
+  (let [response (tool/kernel-eval {:kind :source
+                                    :source source
+                                    :params params
+                                    :space space})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      response)))
+
+(defn mission-model-context-in
+  "Return the compact deterministic mission context for one named space."
+  [space]
+  (let [response (tool/kernel-mission-model-context {:space space})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      response)))
+
 (defn check-source
   "Check bounded dynamic source against the live mission environment without executing it."
   [source]

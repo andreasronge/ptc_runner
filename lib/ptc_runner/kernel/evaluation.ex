@@ -106,6 +106,40 @@ defmodule PtcRunner.Kernel.Evaluation do
   end
 
   @doc false
+  @spec evaluate_space(
+          RunState.t(),
+          binary(),
+          map(),
+          binary(),
+          non_neg_integer(),
+          term(),
+          term(),
+          keyword()
+        ) :: map()
+  def evaluate_space(
+        state,
+        space,
+        mission_environment,
+        source,
+        timeout_ms,
+        event_sink,
+        inspection_sink,
+        opts \\ []
+      )
+      when is_binary(space) and is_binary(source) and is_list(opts) do
+    state
+    |> evaluate_source_detailed(
+      mission_environment,
+      source,
+      timeout_ms,
+      event_sink,
+      inspection_sink,
+      Keyword.put(opts, :space, space)
+    )
+    |> legacy_projection()
+  end
+
+  @doc false
   @spec evaluate_source_detailed(
           RunState.t(),
           map(),

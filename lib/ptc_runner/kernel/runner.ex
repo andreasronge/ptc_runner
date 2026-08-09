@@ -280,6 +280,15 @@ defmodule PtcRunner.Kernel.Runner do
     end
   end
 
+  defp space_environments(config),
+    do: Map.new(config.mission_spaces, fn {name, space} -> {name, space.environment} end)
+
+  defp space_renderings(config, field),
+    do:
+      Map.new(config.mission_spaces, fn {name, space} ->
+        {name, Map.fetch!(space.inventory, field)}
+      end)
+
   defp workflow_tools(config, state) do
     state
     |> ToolGrant.capability_callbacks(
@@ -298,7 +307,7 @@ defmodule PtcRunner.Kernel.Runner do
         "kernel-eval",
         RuntimeTools.kernel_eval(
           state,
-          config.mission_environment,
+          space_environments(config),
           config.limits,
           config.event_sink,
           config.inspection_sink
@@ -327,7 +336,7 @@ defmodule PtcRunner.Kernel.Runner do
         config.event_sink,
         :workflow,
         "kernel-mission-inventory",
-        RuntimeTools.mission_inventory(state, config.mission_inventory.rendered)
+        RuntimeTools.mission_inventory(state, space_renderings(config, :rendered))
       )
     )
     |> Map.put(
@@ -337,7 +346,7 @@ defmodule PtcRunner.Kernel.Runner do
         config.event_sink,
         :workflow,
         "kernel-mission-model-context",
-        RuntimeTools.mission_model_context(state, config.mission_inventory.model_rendered)
+        RuntimeTools.mission_model_context(state, space_renderings(config, :model_rendered))
       )
     )
     |> Map.put(

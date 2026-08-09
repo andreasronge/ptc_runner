@@ -617,7 +617,7 @@ defmodule PtcRunner.Kernel.ReplSession do
         "kernel-eval",
         RuntimeTools.kernel_eval(
           session.state,
-          session.config.mission_environment,
+          %{RunState.default_space() => session.config.mission_environment},
           session.config.limits,
           session.config.event_sink,
           session.config.inspection_sink
@@ -648,7 +648,7 @@ defmodule PtcRunner.Kernel.ReplSession do
         "kernel-mission-inventory",
         RuntimeTools.mission_inventory(
           session.state,
-          session.config.mission_inventory.rendered
+          %{RunState.default_space() => session.config.mission_inventory.rendered}
         )
       )
     )
@@ -661,7 +661,7 @@ defmodule PtcRunner.Kernel.ReplSession do
         "kernel-mission-model-context",
         RuntimeTools.mission_model_context(
           session.state,
-          session.config.mission_inventory.model_rendered
+          %{RunState.default_space() => session.config.mission_inventory.model_rendered}
         )
       )
     )
