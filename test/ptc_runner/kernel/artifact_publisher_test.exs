@@ -1,12 +1,16 @@
 defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.CommandRunOutcome
+  alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @tag :tmp_dir
   test "normal publication reports partial ordering and path-free failures", %{tmp_dir: dir} do
@@ -16,18 +20,21 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
     {built, registry} = build!(dir, "normal-publication", :normal, trace, inspection, output)
 
     assert {:ok, outcome} = RunBuilder.execute_built(built)
+    assert {:ok, evidence} = ExecutionOutcome.open(outcome, built.publication_authority)
 
     fault = fn
       :after_validation -> {:error, :partial_write}
       _stage -> :ok
     end
 
-    assert {:error, report} =
-             RunBuilder.publish_execution_report(
-               outcome,
-               built.publication_authority,
-               %{trace: fault}
-             )
+    settlement =
+      RunBuilder.publish_execution_report(
+        outcome,
+        built.publication_authority,
+        %{trace: fault}
+      )
+
+    assert {:error, report} = settlement
 
     assert report.artifact_state == %{
              "trace" => "failed",
@@ -38,12 +45,65 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
     assert report.failed == [:trace]
     assert Enum.sort(report.withheld) == [:inspection, :result]
     assert report.error == {:trace, :partial_write}
+
+    assert {:error, projected} =
+             CommandRunOutcome.project(
+               evidence,
+               settlement,
+               "cmd-00000000000000000000000000",
+               false
+             )
+
+    assert projected.envelope["status"] == "error"
+    assert projected.envelope["error"]["code"] == "trace_publication_failed"
+    assert projected.envelope["artifact_state"] == report.artifact_state
+    assert projected.envelope["execution"]["state"] == "finished"
+    assert projected.envelope["execution"]["outcome"] == "ok"
     refute inspect(report) =~ dir
     refute File.exists?(trace)
     refute File.exists?(inspection)
     refute File.exists?(output)
 
     assert :ok = PublicationAuthority.abort(built.publication_authority)
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
+  test "maximum-length capability names remain valid after usage qualification", %{tmp_dir: dir} do
+    {built, registry} = build!(dir, "qualified-capability-name", :normal, nil, nil, nil)
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+    assert {:ok, evidence} = ExecutionOutcome.open(outcome, built.publication_authority)
+
+    assert {:ok, report} =
+             RunBuilder.publish_execution_report(outcome, built.publication_authority)
+
+    capability_name = "a" <> String.duplicate("b", 127)
+    {:ok, %Result{} = result} = evidence.result
+
+    evidence =
+      put_in(
+        evidence,
+        [:result],
+        {:ok,
+         %Result{
+           result
+           | usage: put_in(result.usage, [:capability_calls, :workflow], %{capability_name => 1})
+         }}
+      )
+
+    assert {:ok, projected} =
+             CommandRunOutcome.project(
+               evidence,
+               {:ok, report},
+               "cmd-00000000000000000000000000",
+               false
+             )
+
+    assert projected.envelope["execution"]["usage"]["capability_calls"] == %{
+             ("workflow/" <> capability_name) => 1
+           }
+
+    assert :ok = PublicationAuthority.close(built.publication_authority)
     assert :ok = ProviderRegistry.close(registry)
   end
 
@@ -368,24 +428,6 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   end
 
   @tag :tmp_dir
-  test "projected publication errors retain only safe completed-result context", %{tmp_dir: dir} do
-    output = Path.join(dir, "result.json")
-    {built, registry} = build!(dir, "safe-context", :normal, nil, nil, output)
-    assert {:ok, outcome} = RunBuilder.execute_built(built)
-
-    File.write!(output, "attacker")
-
-    assert {:error,
-            {:result_persistence_failed, :destination_collision,
-             {:ok, %Result{value: "safe-context"}}}} =
-             RunBuilder.publish_execution(outcome, built.publication_authority)
-
-    File.rm!(output)
-    assert :ok = PublicationAuthority.abort(built.publication_authority)
-    assert :ok = ProviderRegistry.close(registry)
-  end
-
-  @tag :tmp_dir
   test "private publication materializes recovery before final requested result", %{tmp_dir: dir} do
     trace = Path.join(dir, "private.private.jsonl")
     inspection = Path.join(dir, "private.inspection.jsonl")
@@ -598,22 +640,80 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
     end
 
     assert {:ok, outcome} = RunBuilder.execute_built(built)
+    assert {:ok, evidence} = ExecutionOutcome.open(outcome, built.publication_authority)
 
-    assert {:error, report} =
-             RunBuilder.publish_execution_report(
-               outcome,
-               built.publication_authority,
-               %{result: hook}
-             )
+    settlement =
+      RunBuilder.publish_execution_report(
+        outcome,
+        built.publication_authority,
+        %{result: hook}
+      )
+
+    assert {:error, report} = settlement
 
     assert report.artifact_state["result"] == "recovery_written"
     assert report.error == :sync_observed
+
+    assert {:error, projected} =
+             CommandRunOutcome.project(
+               evidence,
+               settlement,
+               "cmd-00000000000000000000000000",
+               false
+             )
+
+    assert projected.envelope["artifact_state"]["result"] == "recovery_written"
     assert File.regular?(recovery_path)
     refute File.exists?(output)
     refute inspect(report) =~ dir
 
     assert :ok = PublicationAuthority.close(built.publication_authority)
     assert File.regular?(recovery_path)
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
+  test "a private recovery collision retains the collision diagnostic", %{tmp_dir: dir} do
+    output = Path.join(dir, "private-collision.json")
+    {built, registry} = build!(dir, "private-collision", :private, nil, nil, output)
+    recovery = PublicationAuthority.handles(built.publication_authority) |> Map.fetch!(:recovery)
+    recovery_path = PublicationHandle.path(recovery)
+
+    hook = fn
+      :after_sync ->
+        File.write!(output, "attacker")
+        :ok
+
+      _stage ->
+        :ok
+    end
+
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+    assert {:ok, evidence} = ExecutionOutcome.open(outcome, built.publication_authority)
+
+    assert {:error, report} =
+             RunBuilder.publish_execution_report(outcome, built.publication_authority, %{
+               result: hook
+             })
+
+    assert report.artifact_state["result"] == "recovery_written"
+    assert report.error == :destination_collision
+    settlement = {:error, report}
+
+    assert {:error, projected} =
+             CommandRunOutcome.project(
+               evidence,
+               settlement,
+               "cmd-00000000000000000000000000",
+               false
+             )
+
+    assert projected.envelope["error"]["code"] == "destination_collision"
+    assert projected.envelope["artifact_state"]["result"] == "recovery_written"
+
+    File.rm!(output)
+    assert :ok = PublicationAuthority.abort(built.publication_authority)
+    File.rm!(recovery_path)
     assert :ok = ProviderRegistry.close(registry)
   end
 
@@ -666,16 +766,29 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
     end
 
     assert {:ok, outcome} = RunBuilder.execute_built(built)
+    assert {:ok, evidence} = ExecutionOutcome.open(outcome, built.publication_authority)
 
-    assert {:error, report} =
-             RunBuilder.publish_execution_report(
-               outcome,
-               built.publication_authority,
-               %{result: hook}
-             )
+    settlement =
+      RunBuilder.publish_execution_report(
+        outcome,
+        built.publication_authority,
+        %{result: hook}
+      )
+
+    assert {:error, report} = settlement
 
     assert report.artifact_state["result"] == "finalization_uncertain"
     assert report.error == :result_publication_failed
+
+    assert {:error, projected} =
+             CommandRunOutcome.project(
+               evidence,
+               settlement,
+               "cmd-00000000000000000000000000",
+               false
+             )
+
+    assert projected.envelope["artifact_state"]["result"] == "finalization_uncertain"
     refute File.exists?(output)
     refute File.exists?(recovery_path)
     refute inspect(report) =~ dir
@@ -774,13 +887,22 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
 
     opts =
       []
-      |> maybe_put(:trace, trace)
+      |> maybe_put(:trace_path, trace)
       |> maybe_put(:inspect, inspection)
       |> maybe_put(:private_output, output, result_destination == :private_output)
       |> maybe_put(:private_output, output, result_destination == :policy and policy == :private)
       |> maybe_put(:output, output, result_destination == :policy and policy == :normal)
 
-    {:ok, built} = RunBuilder.load_and_build(manifest_path, registry, opts)
+    request_opts = [
+      installed_limits: registry.installed_limits,
+      inspection_capture: is_binary(opts[:inspect])
+    ]
+
+    {:ok, built} =
+      manifest_path
+      |> ApplicationPackage.request_directory(request_opts)
+      |> RunLifecycle.build(registry, opts)
+
     {built, registry}
   end
 

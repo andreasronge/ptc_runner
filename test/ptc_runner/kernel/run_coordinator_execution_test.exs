@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
@@ -31,8 +32,8 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     assert {:ok, outcome} = RunCoordinator.execute(prepared, authority)
     assert ExecutionOutcome.valid?(outcome)
 
-    assert {:ok, %{value: %{"answer" => 42}}, :normal} =
-             RunBuilder.publish_execution(outcome, authority)
+    assert {:ok, %{result: {:ok, %{value: %{"answer" => 42}}}, result_class: :normal}} =
+             RunBuilder.publish_execution_report(outcome, authority)
 
     assert :ok = PreparedRun.close(prepared)
     assert :ok = InstallationCatalog.close(catalog)
@@ -51,8 +52,20 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
 
     assert ExecutionOutcome.valid?(outcome)
 
-    assert {:ok, %{value: %{"answer" => 42}}, :normal} =
-             RunBuilder.publish_execution(outcome, authority)
+    assert {:ok, %{result: {:ok, %{value: %{"answer" => 42}}}, result_class: :normal}} =
+             RunBuilder.publish_execution_report(outcome, authority)
+
+    assert :ok = PreparedRun.close(prepared)
+    assert :ok = InstallationCatalog.close(catalog)
+  end
+
+  test "noninteractive provider execution needs no authorization notifier" do
+    {prepared, catalog, services} = provider_prepared_run()
+    assert {:ok, execution} = ProviderExecution.new(catalog, services, [])
+    assert {:ok, authority} = PublicationAuthority.new([])
+
+    assert {:ok, outcome} = RunCoordinator.execute(prepared, authority, execution, nil)
+    assert ExecutionOutcome.valid?(outcome)
 
     assert :ok = PreparedRun.close(prepared)
     assert :ok = InstallationCatalog.close(catalog)
@@ -303,7 +316,8 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     activity_ref = Process.monitor(activity)
     assert {:ok, authority} = PublicationAuthority.new([])
 
-    assert {:error, :invalid_event_sink} = RunCoordinator.execute(prepared, authority)
+    assert {:error, %OwnerFailure{} = failure} = RunCoordinator.execute(prepared, authority)
+    assert {:ok, :invalid_event_sink, false, :not_started} = OwnerFailure.evidence(failure)
     assert_receive {:DOWN, ^activity_ref, :process, ^activity, :normal}, 5_000
 
     assert :ok = InstallationCatalog.close(catalog)
@@ -370,7 +384,10 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       assert {:ok, owner} = ExecutionSessionOwner.start(prepared, authority, self())
       owner_pid = ExecutionSessionOwner.pid(owner)
 
-      assert {:error, :run_started_metadata_exceeded} = ExecutionSessionOwner.await(owner)
+      assert {:error, %OwnerFailure{} = failure} = ExecutionSessionOwner.await(owner)
+
+      assert {:ok, :run_started_metadata_exceeded, false, :not_started} =
+               OwnerFailure.evidence(failure)
 
       assert_receive {:trace, ^owner_pid, :call, {EventSink, :start, _arguments}}, 5_000
 

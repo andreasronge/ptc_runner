@@ -459,11 +459,11 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     refute_received {:probe_invoked, _name}
   end
 
-  test "run, check, and connect all invoke an unverified local check" do
+  test "run and connect both invoke an unverified local check" do
     # The step is wired into the shared operation prefix rather than into any
-    # one branch, so all three operations reach it. Default doctor does not,
+    # one branch, so both operations reach it. Default doctor does not,
     # which its own regressions cover.
-    for operation <- [:run, :check, :connect] do
+    for operation <- [:run, :connect] do
       %{prepared: prepared, execution: execution} =
         fixture(%{"custom" => [destination: :workflow, local_preflight: :unverified]})
 
@@ -729,13 +729,13 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     assert diagnostic.provider_activity
   end
 
-  test "run, check, and connect all refuse a selected OAuth occurrence up front" do
+  test "run and connect both refuse a selected OAuth occurrence up front" do
     # Standalone V1 disables OAuth execution and `--authorize-mcp` is the only
     # shipped path to a grant, so an occurrence nobody named has no store to draw
     # one from. Refusing before the branch is what keeps the answer honest: the
     # alternative walks into acquisition against an empty store and blames
     # whatever the transport happens to say.
-    for operation <- [:run, :check, :connect] do
+    for operation <- [:run, :connect] do
       %{prepared: prepared, execution: execution} =
         fixture(%{
           "authorized" => [
@@ -934,9 +934,6 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
 
   defp dispatch(:run, prepared, execution),
     do: RunCoordinator.execute(prepared, authority(), execution, &never_notify/1)
-
-  defp dispatch(:check, prepared, execution),
-    do: RunCoordinator.check(prepared, authority(), execution, &never_notify/1)
 
   defp never_notify(_url), do: flunk("no operation here may notify authorization")
 

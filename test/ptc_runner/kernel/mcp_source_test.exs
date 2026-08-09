@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DeterministicJSON
@@ -31,6 +32,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   alias PtcRunner.Test.MCPOAuthRecordingStore
   alias PtcRunner.TestSupport.MCPHTTPFixture
   alias PtcRunner.TestSupport.ProviderSessionFixture
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @owner_lifecycle_timeout_ms 30_000
   @max_logical_result_bytes 1_048_576
@@ -411,7 +413,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     registry = registry(fixture.endpoint)
     manifest = manifest(dir, ~w(remote.structured remote.text remote.fail))
 
-    {:ok, built} = RunBuilder.load_and_build(manifest, registry)
+    {:ok, built} =
+      manifest
+      |> directory_request(registry)
+      |> RunLifecycle.build()
 
     assert [snapshot] = built.config.connector_snapshots
     assert snapshot["provider"] == "fixture-mcp"
@@ -476,7 +481,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_invalid_catalog} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(fixture.endpoint))
+             |> directory_request(registry(fixture.endpoint))
+             |> RunLifecycle.build()
   end
 
   @tag :tmp_dir
@@ -498,7 +504,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, built} =
       dir
       |> manifest(["remote.fail"], program: program)
-      |> RunBuilder.load_and_build(registry(fixture.endpoint, tools: tools))
+      |> directory_request(registry(fixture.endpoint, tools: tools))
+      |> RunLifecycle.build()
 
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
@@ -531,10 +538,13 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     manifest_path = manifest(dir, Map.keys(public_mappings()))
 
     assert {:ok, _result} =
-             RunBuilder.run(manifest_path, registry(fixture.endpoint),
+             manifest_path
+             |> directory_request(registry(fixture.endpoint),
                inspect: inspection_path,
-               trace: trace_path
+               trace_path: trace_path
              )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
 
     assert_receive {:mcp_body, "tools/call", request_body}
 
@@ -577,8 +587,15 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         evaluation_timeout_ms: 5_000
       )
 
-    assert {:ok, http_built} = RunBuilder.load_and_build(manifest, http_registry)
-    assert {:ok, built} = RunBuilder.load_and_build(manifest, stdio_registry)
+    assert {:ok, http_built} =
+             manifest
+             |> directory_request(http_registry)
+             |> RunLifecycle.build()
+
+    assert {:ok, built} =
+             manifest
+             |> directory_request(stdio_registry)
+             |> RunLifecycle.build()
 
     assert capability_contracts(http_built) == capability_contracts(built)
 
@@ -648,7 +665,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                timeout_ms: 5_000,
                evaluation_timeout_ms: 5_000
              )
-             |> RunBuilder.load_and_build(registry)
+             |> directory_request(registry)
+             |> RunLifecycle.build()
 
     assert %Capability{effect: :write} =
              built.config.mission_environment.capabilities["remote.structured"]
@@ -728,7 +746,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         )
 
       assert {:ok, built} =
-               RunBuilder.load_and_build(manifest, registry, installed_limits: installed_limits)
+               manifest
+               |> directory_request(registry,
+                 installed_limits: installed_limits
+               )
+               |> RunLifecycle.build()
 
       assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
@@ -785,7 +807,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, built} =
              dir
              |> manifest(~w(remote.structured), timeout_ms: 5_000, evaluation_timeout_ms: 5_000)
-             |> RunBuilder.load_and_build(registry)
+             |> directory_request(registry)
+             |> RunLifecycle.build()
 
     assert [snapshot] = built.config.connector_snapshots
     assert snapshot["launcher_sha256"] == file_sha256(launcher)
@@ -807,7 +830,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
           evaluation_timeout_ms: 5_000
         )
 
-      assert {:ok, built} = RunBuilder.load_and_build(manifest, registry)
+      assert {:ok, built} =
+               manifest
+               |> directory_request(registry)
+               |> RunLifecycle.build()
+
       assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
       assert %{
@@ -853,7 +880,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                timeout_ms: 5_000,
                evaluation_timeout_ms: 5_000
              )
-             |> RunBuilder.load_and_build(registry)
+             |> directory_request(registry)
+             |> RunLifecycle.build()
 
     assert marker
            |> File.read!()
@@ -871,7 +899,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     registry = registry(fixture.endpoint)
     manifest = manifest(dir, ~w(remote.structured))
 
-    assert {:ok, built} = RunBuilder.load_and_build(manifest, registry)
+    assert {:ok, built} =
+             manifest
+             |> directory_request(registry)
+             |> RunLifecycle.build()
 
     assert [snapshot] = built.config.connector_snapshots
     assert Enum.map(snapshot["tools"], & &1["name"]) == ["remote.structured"]
@@ -909,7 +940,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                mission_source: mission_source,
                program: single_call_program("remote.structured", "x")
              )
-             |> RunBuilder.load_and_build(registry(fixture.endpoint, tools: tools))
+             |> directory_request(registry(fixture.endpoint, tools: tools))
+             |> RunLifecycle.build()
 
     assert %Capability{effect: :write} =
              built.config.mission_environment.capabilities["remote.structured"]
@@ -950,14 +982,16 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :invalid_mcp_selection} =
              dir
              |> manifest(["remote.structured"], omit_allow?: true)
-             |> RunBuilder.load_and_build(registry(fixture.endpoint, tools: write_tools))
+             |> directory_request(registry(fixture.endpoint, tools: write_tools))
+             |> RunLifecycle.build()
 
     refute_receive {:mcp_request, _method, _headers}
 
     assert {:ok, built} =
              dir
              |> manifest(["remote.structured"], omit_allow?: true)
-             |> RunBuilder.load_and_build(registry(fixture.endpoint))
+             |> directory_request(registry(fixture.endpoint))
+             |> RunLifecycle.build()
 
     assert :ok = RunBuilder.close(built)
   end
@@ -1063,12 +1097,13 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                    evaluation_timeout_ms: 5_000
                  ] ++ manifest_opts
                )
-               |> RunBuilder.load_and_build(
+               |> directory_request(
                  registry(fixture.endpoint,
                    tools: tools,
                    timeout_ms: 5_000
                  )
                )
+               |> RunLifecycle.build()
 
       assert {:ok, result} = Kernel.run(built.entry_source, built.config)
       failure = get_in(result.value, [:value, :value])
@@ -1210,9 +1245,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                  timeout_ms: 100,
                  evaluation_timeout_ms: 2_000
                )
-               |> RunBuilder.load_and_build(
-                 registry(fixture.endpoint, tools: tools, timeout_ms: 100)
-               )
+               |> directory_request(registry(fixture.endpoint, tools: tools, timeout_ms: 100))
+               |> RunLifecycle.build()
 
       assert {:ok, result} = Kernel.run(built.entry_source, built.config)
       failure = get_in(result.value, [:value, :value])
@@ -1258,9 +1292,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                  program: single_call_program("remote.structured", query),
                  evaluation_timeout_ms: 5_000
                )
-               |> RunBuilder.load_and_build(
-                 registry(fixture.endpoint, [tools: tools] ++ registry_opts)
-               )
+               |> directory_request(registry(fixture.endpoint, [tools: tools] ++ registry_opts))
+               |> RunLifecycle.build()
 
       assert_receive {:mcp_request, "server/discover", _headers}
       assert_receive {:mcp_request, "tools/list", _headers}
@@ -1289,7 +1322,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              |> manifest(["remote.structured"],
                program: single_call_program("remote.structured", "x")
              )
-             |> RunBuilder.load_and_build(registry(fixture.endpoint, tools: tools))
+             |> directory_request(registry(fixture.endpoint, tools: tools))
+             |> RunLifecycle.build()
 
     capability = built.config.mission_environment.capabilities["remote.structured"]
     assert :ok = RunBuilder.close(built)
@@ -1326,12 +1360,14 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_mapped_tool_missing} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry)
+             |> directory_request(registry)
+             |> RunLifecycle.build()
 
     assert {:ok, built} =
              dir
              |> manifest(["remote.text"])
-             |> RunBuilder.load_and_build(registry)
+             |> directory_request(registry)
+             |> RunLifecycle.build()
 
     assert [snapshot] = built.config.connector_snapshots
     assert Enum.map(snapshot["tools"], & &1["name"]) == ["remote.text"]
@@ -1381,7 +1417,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, first} =
       dir
       |> manifest(["remote.structured"], timeout_ms: 900, max_result_bytes: 31_000)
-      |> RunBuilder.load_and_build(registry)
+      |> directory_request(registry)
+      |> RunLifecycle.build()
 
     [first_snapshot] = first.config.connector_snapshots
     assert first_snapshot["timeout_ms"] == 900
@@ -1391,7 +1428,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, second} =
       dir
       |> manifest(["remote.structured"], timeout_ms: 800, max_result_bytes: 30_000)
-      |> RunBuilder.load_and_build(registry)
+      |> directory_request(registry)
+      |> RunLifecycle.build()
 
     [second_snapshot] = second.config.connector_snapshots
     assert second_snapshot["timeout_ms"] == 800
@@ -1408,7 +1446,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, built} =
       dir
       |> manifest(["remote.structured"])
-      |> RunBuilder.load_and_build(registry(fixture.endpoint))
+      |> directory_request(registry(fixture.endpoint))
+      |> RunLifecycle.build()
 
     capability = built.config.mission_environment.capabilities["remote.structured"]
     assert :ok = RunBuilder.close(built)
@@ -1430,7 +1469,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     registry = registry(fixture.endpoint)
     manifest = manifest(dir, Map.keys(public_mappings()))
 
-    {:ok, built} = RunBuilder.load_and_build(manifest, registry)
+    {:ok, built} =
+      manifest
+      |> directory_request(registry)
+      |> RunLifecycle.build()
+
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
     assert %{
@@ -1457,7 +1500,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       registry = registry(fixture.endpoint)
       manifest = manifest(dir, ~w(remote.structured))
 
-      assert {:ok, built} = RunBuilder.load_and_build(manifest, registry)
+      assert {:ok, built} =
+               manifest
+               |> directory_request(registry)
+               |> RunLifecycle.build()
+
       assert :ok = RunBuilder.close(built)
       fixture.close.()
     end
@@ -1475,14 +1522,16 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :invalid_mcp_selection} =
              dir
              |> manifest(["unmapped"])
-             |> RunBuilder.load_and_build(registry)
+             |> directory_request(registry)
+             |> RunLifecycle.build()
 
     refute_receive {:mcp_request, _, _}
 
     assert {:error, :mcp_invalid_tool_schema} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry)
+             |> directory_request(registry)
+             |> RunLifecycle.build()
 
     assert_receive {:mcp_request, "server/discover", _headers}
     assert_receive {:mcp_request, "tools/list", _headers}
@@ -1617,7 +1666,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_transport_error} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry)
+             |> directory_request(registry)
+             |> RunLifecycle.build()
   end
 
   test "stdio rollback cleanup failure overrides the acquisition error" do
@@ -1644,7 +1694,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_authentication_failed} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry)
+             |> directory_request(registry)
+             |> RunLifecycle.build()
   end
 
   @tag :tmp_dir
@@ -1663,7 +1714,12 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     registry = registry(fixture.endpoint, headers: headers)
     manifest = manifest(dir, ~w(remote.structured remote.text remote.fail))
-    assert {:ok, built} = RunBuilder.load_and_build(manifest, registry)
+
+    assert {:ok, built} =
+             manifest
+             |> directory_request(registry)
+             |> RunLifecycle.build()
+
     assert {:ok, _result} = Kernel.run(built.entry_source, built.config)
     assert Agent.get(counter, & &1) == 1
 
@@ -1686,7 +1742,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, built} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry)
+             |> directory_request(registry)
+             |> RunLifecycle.build()
 
     built.config.mission_environment.capabilities
     |> Map.values()
@@ -1707,7 +1764,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_protocol_error} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(duplicate.endpoint))
+             |> directory_request(registry(duplicate.endpoint))
+             |> RunLifecycle.build()
   end
 
   @tag :tmp_dir
@@ -1719,7 +1777,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_protocol_error} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(legacy.endpoint))
+             |> directory_request(registry(legacy.endpoint))
+             |> RunLifecycle.build()
 
     assert_receive {:mcp_request, "server/discover", _headers}
     refute_receive {:mcp_request, "initialize", _headers}
@@ -1736,7 +1795,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_remote_error} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(discovery_error.endpoint))
+             |> directory_request(registry(discovery_error.endpoint))
+             |> RunLifecycle.build()
 
     invocation_error = fixture(parent, rpc_error_tool: "structured")
     on_exit(invocation_error.close)
@@ -1744,7 +1804,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, built} =
       dir
       |> manifest(Map.keys(public_mappings()))
-      |> RunBuilder.load_and_build(registry(invocation_error.endpoint))
+      |> directory_request(registry(invocation_error.endpoint))
+      |> RunLifecycle.build()
 
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
@@ -1760,7 +1821,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, built} =
       dir
       |> manifest(Map.keys(public_mappings()))
-      |> RunBuilder.load_and_build(registry(protocol_error.endpoint))
+      |> directory_request(registry(protocol_error.endpoint))
+      |> RunLifecycle.build()
 
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
@@ -1782,7 +1844,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         timeout_ms: 5_000,
         evaluation_timeout_ms: 5_000
       )
-      |> RunBuilder.load_and_build(registry(invalid.endpoint, timeout_ms: 5_000))
+      |> directory_request(registry(invalid.endpoint, timeout_ms: 5_000))
+      |> RunLifecycle.build()
 
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
@@ -1803,7 +1866,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, built} =
       dir
       |> manifest(["remote.structured"])
-      |> RunBuilder.load_and_build(registry(sse.endpoint, timeout_ms: 5_000))
+      |> directory_request(registry(sse.endpoint, timeout_ms: 5_000))
+      |> RunLifecycle.build()
 
     assert [snapshot] = built.config.connector_snapshots
     assert Enum.map(snapshot["tools"], & &1["name"]) == ["remote.structured"]
@@ -1816,7 +1880,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, repeated_build} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(repeated.endpoint, timeout_ms: 5_000))
+             |> directory_request(registry(repeated.endpoint, timeout_ms: 5_000))
+             |> RunLifecycle.build()
 
     assert :ok = RunBuilder.close(repeated_build)
 
@@ -1827,7 +1892,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, repeated_chunked_build} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(repeated_chunked.endpoint, timeout_ms: 5_000))
+             |> directory_request(registry(repeated_chunked.endpoint, timeout_ms: 5_000))
+             |> RunLifecycle.build()
 
     assert_receive {:mcp_stream_holding, repeated_chunked_holder}
     send(repeated_chunked_holder, :release)
@@ -1839,7 +1905,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, coalesced_tail_build} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(coalesced_tail.endpoint, timeout_ms: 5_000))
+             |> directory_request(registry(coalesced_tail.endpoint, timeout_ms: 5_000))
+             |> RunLifecycle.build()
 
     assert :ok = RunBuilder.close(coalesced_tail_build)
 
@@ -1850,7 +1917,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, split_tail_build} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(split_tail.endpoint, timeout_ms: 5_000))
+             |> directory_request(registry(split_tail.endpoint, timeout_ms: 5_000))
+             |> RunLifecycle.build()
 
     assert_receive {:mcp_stream_holding, split_tail_holder}
     send(split_tail_holder, :release)
@@ -1862,7 +1930,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_response_exceeded} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(oversized_prefix.endpoint, timeout_ms: 5_000))
+             |> directory_request(registry(oversized_prefix.endpoint, timeout_ms: 5_000))
+             |> RunLifecycle.build()
 
     empty_data = fixture(parent, sse?: true, sse_empty_data?: true)
     on_exit(empty_data.close)
@@ -1870,7 +1939,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_protocol_error} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(empty_data.endpoint, timeout_ms: 5_000))
+             |> directory_request(registry(empty_data.endpoint, timeout_ms: 5_000))
+             |> RunLifecycle.build()
 
     held_open = fixture(parent, sse?: true, sse_hold_open?: true)
     on_exit(held_open.close)
@@ -1880,7 +1950,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         result =
           dir
           |> manifest(["remote.structured"])
-          |> RunBuilder.load_and_build(registry(held_open.endpoint, timeout_ms: 5_000))
+          |> directory_request(registry(held_open.endpoint, timeout_ms: 5_000))
+          |> RunLifecycle.build()
 
         send(parent, {:held_build_complete, self(), result})
 
@@ -1902,7 +1973,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, cr_build} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(cr_only.endpoint, timeout_ms: 5_000))
+             |> directory_request(registry(cr_only.endpoint, timeout_ms: 5_000))
+             |> RunLifecycle.build()
 
     assert :ok = RunBuilder.close(cr_build)
 
@@ -1920,7 +1992,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         result =
           dir
           |> manifest(["remote.structured"])
-          |> RunBuilder.load_and_build(registry(fragmented_bom.endpoint, timeout_ms: 5_000))
+          |> directory_request(registry(fragmented_bom.endpoint, timeout_ms: 5_000))
+          |> RunLifecycle.build()
 
         send(parent, {:bom_build_complete, self(), result})
 
@@ -1942,7 +2015,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_invalid_catalog} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(duplicate.endpoint))
+             |> directory_request(registry(duplicate.endpoint))
+             |> RunLifecycle.build()
 
     excessive = fixture(parent)
     on_exit(excessive.close)
@@ -1950,12 +2024,14 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_catalog_exceeded} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(excessive.endpoint, max_pages: 1))
+             |> directory_request(registry(excessive.endpoint, max_pages: 1))
+             |> RunLifecycle.build()
 
     assert {:error, :invalid_mcp_selection} =
              dir
              |> manifest(["remote.structured"], config_extra: %{"endpoint" => "forbidden"})
-             |> RunBuilder.load_and_build(registry(excessive.endpoint))
+             |> directory_request(registry(excessive.endpoint))
+             |> RunLifecycle.build()
   end
 
   @tag :tmp_dir
@@ -1971,7 +2047,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         evaluation_timeout_ms: 5_000,
         config_extra: %{"model_visible" => ["remote.structured"]}
       )
-      |> RunBuilder.load_and_build(registry(fixture.endpoint, timeout_ms: 5_000))
+      |> directory_request(registry(fixture.endpoint, timeout_ms: 5_000))
+      |> RunLifecycle.build()
 
     visibility =
       Map.new(built.config.mission_environment.capabilities, fn {_name, capability} ->
@@ -1995,7 +2072,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         timeout_ms: 5_000,
         evaluation_timeout_ms: 5_000
       )
-      |> RunBuilder.load_and_build(registry(fixture.endpoint, timeout_ms: 5_000))
+      |> directory_request(registry(fixture.endpoint, timeout_ms: 5_000))
+      |> RunLifecycle.build()
 
     [fully_visible_snapshot] = fully_visible.config.connector_snapshots
     assert fully_visible_snapshot["snapshot_hash"] != restricted_snapshot["snapshot_hash"]
@@ -2006,7 +2084,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              |> manifest(["remote.structured"],
                config_extra: %{"model_visible" => ["remote.text"]}
              )
-             |> RunBuilder.load_and_build(registry(fixture.endpoint))
+             |> directory_request(registry(fixture.endpoint))
+             |> RunLifecycle.build()
   end
 
   @tag :tmp_dir
@@ -2019,17 +2098,29 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     registry = registry(fixture.endpoint)
     manifest = manifest(dir, ~w(remote.structured remote.text remote.fail))
 
-    {:ok, first} = RunBuilder.load_and_build(manifest, registry)
+    {:ok, first} =
+      manifest
+      |> directory_request(registry)
+      |> RunLifecycle.build()
+
     first_snapshot = first.config.connector_snapshots
     assert :ok = RunBuilder.close(first)
 
-    {:ok, second} = RunBuilder.load_and_build(manifest, registry)
+    {:ok, second} =
+      manifest
+      |> directory_request(registry)
+      |> RunLifecycle.build()
+
     assert second.config.connector_snapshots == first_snapshot
     assert :ok = RunBuilder.close(second)
 
     {:ok, owner} =
       Task.start(fn ->
-        result = RunBuilder.load_and_build(manifest, registry)
+        result =
+          manifest
+          |> directory_request(registry)
+          |> RunLifecycle.build()
+
         send(parent, {:owner_build, result})
       end)
 
@@ -2057,7 +2148,9 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     invalid_registry = registry(invalid_output.endpoint)
 
     {:ok, invalid} =
-      RunBuilder.load_and_build(manifest(dir, Map.keys(public_mappings())), invalid_registry)
+      manifest(dir, Map.keys(public_mappings()))
+      |> directory_request(invalid_registry)
+      |> RunLifecycle.build()
 
     assert {:ok, invalid_result} = Kernel.run(invalid.entry_source, invalid.config)
 
@@ -2071,7 +2164,9 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     oversized_registry = registry(oversized.endpoint)
 
     {:ok, large} =
-      RunBuilder.load_and_build(manifest(dir, Map.keys(public_mappings())), oversized_registry)
+      manifest(dir, Map.keys(public_mappings()))
+      |> directory_request(oversized_registry)
+      |> RunLifecycle.build()
 
     assert {:ok, large_result} = Kernel.run(large.entry_source, large.config)
 
@@ -2086,7 +2181,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_transport_error} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(disconnected.endpoint))
+             |> directory_request(registry(disconnected.endpoint))
+             |> RunLifecycle.build()
 
     oversized_unauthorized = fixture(parent, http_error_status: 401)
     on_exit(oversized_unauthorized.close)
@@ -2094,7 +2190,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_authentication_failed} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(oversized_unauthorized.endpoint))
+             |> directory_request(registry(oversized_unauthorized.endpoint))
+             |> RunLifecycle.build()
 
     oversized_server_error = fixture(parent, http_error_status: 500)
     on_exit(oversized_server_error.close)
@@ -2102,7 +2199,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_transport_error} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(registry(oversized_server_error.endpoint))
+             |> directory_request(registry(oversized_server_error.endpoint))
+             |> RunLifecycle.build()
 
     secret = "not-for-errors"
 
@@ -2121,7 +2219,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_authentication_failed} =
              dir
              |> manifest(["remote.structured"])
-             |> RunBuilder.load_and_build(auth_registry)
+             |> directory_request(auth_registry)
+             |> RunLifecycle.build()
 
     refute inspect(:mcp_authentication_failed) =~ secret
 
@@ -2133,7 +2232,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       Task.async(fn ->
         dir
         |> manifest(["remote.structured"], timeout_ms: 500)
-        |> RunBuilder.load_and_build(timeout_registry)
+        |> directory_request(timeout_registry)
+        |> RunLifecycle.build()
       end)
 
     assert_receive {:mcp_blocked, worker}, 1_000
@@ -2163,7 +2263,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       Task.async(fn ->
         dir
         |> manifest(["remote.structured"], timeout_ms: 500)
-        |> RunBuilder.load_and_build(header_registry)
+        |> directory_request(header_registry)
+        |> RunLifecycle.build()
       end)
 
     assert_receive {:mcp_header_blocked, header_worker}, 1_000
@@ -2182,7 +2283,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, built} =
       dir
       |> manifest(Map.keys(public_mappings()), timeout_ms: 500, evaluation_timeout_ms: 500)
-      |> RunBuilder.load_and_build(registry)
+      |> directory_request(registry)
+      |> RunLifecycle.build()
 
     task = Task.async(fn -> Kernel.run(built.entry_source, built.config) end)
     assert_receive {:mcp_blocked, worker}
@@ -2437,7 +2539,12 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
   defp build_snapshot(dir, endpoint, tools) do
     registry = registry(endpoint, tools: tools)
-    {:ok, built} = RunBuilder.load_and_build(manifest(dir, ["remote.structured"]), registry)
+
+    {:ok, built} =
+      manifest(dir, ["remote.structured"])
+      |> directory_request(registry)
+      |> RunLifecycle.build()
+
     [snapshot] = built.config.connector_snapshots
     assert :ok = RunBuilder.close(built)
     snapshot
@@ -2807,6 +2914,22 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   defp maybe_sse(response, _opts, _method), do: response
+
+  defp request_options(registry, opts) do
+    [
+      installed_limits: Keyword.get(opts, :installed_limits, registry.installed_limits),
+      inspection_capture: is_binary(opts[:inspect])
+    ]
+  end
+
+  defp directory_request(path, registry, opts \\ []) do
+    {ApplicationPackage.request_directory(path, request_options(registry, opts)), registry,
+     build_options(opts)}
+  end
+
+  defp build_options(opts) do
+    Keyword.take(opts, [:inspect, :installed_limits, :output, :private_output, :trace_path])
+  end
 
   defp manifest(dir, allow, opts \\ []) do
     File.write!(

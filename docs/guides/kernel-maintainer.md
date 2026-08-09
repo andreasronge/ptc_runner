@@ -86,24 +86,27 @@ PTC-Lisp owns replaceable workflow policy:
 Frontends own presentation and host choices. They must enter through
 `PtcRunner.Kernel.ApplicationPackage` and a sealed
 `PtcRunner.Kernel.RunRequest`. The closed command pipeline uses
-`PtcRunner.Kernel.CommandEngine`; the existing Mix command still has its
-transitional argv and presentation adapter, but its runtime path now prepares
-through `RunCoordinator` and preflights destinations. One-shot runs and
-`--check` both execute through a dedicated execution-session owner, whether or
-not they select providers, and a provider-bearing invocation opens
+`PtcRunner.Kernel.CommandEngine`; the Mix task is a thin renderer whose adapter
+owns bootstrap, prepends `run`, and supplies VM-owned runtime callbacks. The
+task renders the returned sealed V1 envelope. One-shot runs execute through a
+dedicated execution-session owner,
+whether or not they select providers, and a provider-bearing invocation opens
 `ProviderActiveSession` inside that owner's subordinate worker rather than in
-the adapter. A check differs from a run only in how the owner completes an
-assembled build: it reports the acquisition's safe connector snapshots instead
-of evaluating the entry, so both share one activity marker, session, registry,
-credential, OAuth, acquisition, and cleanup boundary. The REPL keeps its
-adapter-owned path until its parity cutover.
+the adapter. `doctor --connect` is a distinct active operation with its own
+closed result. Manifest REPL startup enters through `ManifestRepl`: it uses the
+same inert catalog, preparation, phase-7 checks, activity marker, and active
+provider-session prefix as a one-shot run, but transfers the resulting opening
+handle and run state to `ReplSessionOwner` for repeated evaluations.
 Embedding frontends execute a sealed request through
 `PtcRunner.Kernel.RunBuilder.build/3`. For a provider-free request they may
 instead call the path-free `PtcRunner.Kernel.RunCoordinator` and pass its
 sealed `PreparedRun` to `PtcRunner.Kernel.RunBuilder.build_prepared/3`.
-Provider-bearing command preparation is already sealed by `CommandEngine`, but
-its later active continuation is not implemented yet; callers must close that
-`CommandPreparation` rather than pass its embedded run to `build_prepared/3`.
+Provider-bearing command preparation and its later active continuation are
+sealed by `CommandEngine`. `CommandEngine.dispatch/1` completes phase-6
+authorization, the one execution-owner lifecycle, publication from immutable
+execution evidence, and closed run-outcome projection. Callers using the staged
+`prepare/1` boundary must still close an unused `CommandPreparation` rather than
+pass its embedded run to `build_prepared/3`.
 Frontends must not create another manifest parser, provider registry, event
 model, or evaluator; once integrated, command frontends must also share the
 engine's argv parser and diagnostic vocabulary.
@@ -203,12 +206,9 @@ validation records `active_required`; `validate` reports
 
 `RunCoordinator.local_checks/3` is the only entry to phase 7 and the only place
 an `audited_local` callback runs. Every active command crosses it before
-provider activity is marked: run, `--check`, and `doctor --connect` from
-`ProviderExecution` immediately before the session opens, and default doctor
-directly, because it opens no session. The REPL does not, and that is a stated
-limit rather than an omission: it builds providers through the direct-embedding
-registry rather than an execution owner, so it crosses neither this step nor the
-activity marker. Applicability is derived from the sealed
+provider activity is marked: run, `doctor --connect`, and manifest REPL opening
+from `ProviderExecution` immediately before the session opens, and default
+doctor directly, because it opens no session. Applicability is derived from the sealed
 prepared/catalog/services trio rather than supplied, the coordinator anchors one
 `local_preflight_timeout_ms` deadline that every applicable occurrence spends,
 and the result is only `:ok` or one catalogued diagnostic. There is no
@@ -219,8 +219,8 @@ audited-local rows only after the step as a whole succeeded.
 `unverified` callbacks are the other half and never run there.
 `LocalPreflight.run_unverified/4` is their only entry, reached from the shared
 operation prefix after the phase-8 marker and bounded by the operation deadline
-rather than by `local_preflight_timeout_ms`. Run, `--check`, and
-`doctor --connect` all cross it; default doctor does not, and reports
+rather than by `local_preflight_timeout_ms`. Run and `doctor --connect` both
+cross it; default doctor does not, and reports
 `active_check_required` instead. The two steps derive applicability separately,
 so neither can reach the other's declarations, and they share the reason
 translation with one deliberate difference: after the marker,
@@ -365,13 +365,19 @@ continuation state for the staged command pipeline. `RunBuilder.build_prepared/3
 rejects them; the execution-session owner consumes one when it opens its
 sinks, `ProviderActiveSession` then marks activity and opens the session, and
 the runtime registry, active value, and that same session are passed to
-`RunBuilder`. A run and a `--check` both do that inside the execution-session
-owner's subordinate worker, which calls `build_active_owned/7` with the
-owner-opened sinks, the catalog acquisition plans from, and the phase-8 step-5
-credentials, then completes through
-`execute_built/1` or `check_built/1`. The REPL remains transitional and opens no active session: it
-calls `load_and_build/3` with an empty registry, keeping its current shape
-until the parity cutover. After application admission, that session
+`RunBuilder`. A run does that inside the execution-session owner's subordinate
+worker, which calls `build_active_owned/7` with the owner-opened sinks, the
+catalog acquisition plans from, and the phase-8 step-5 credentials, then
+completes through `execute_built/1`. Manifest REPL opening consumes the same
+sealed preparation, opens its sinks before activity, and retains the acquired
+runtime registry and provider session behind one `ManifestReplOpening` handle.
+It atomically adopts the completed `RunConfig`, run state, trace grant, and
+opening handle into `ReplSessionOwner` before exposing a process-affine
+session. On failure, the opening owner attests the marker's current activity
+before its terminal cleanup closes the preparation; the public failure
+projection consumes that captured evidence instead of racing owner teardown.
+Provider-free manifests take the same opening and REPL-owner path but omit only
+the provider session. After application admission, an active session
 anchors one absolute run deadline shared by active selection, construction,
 and Kernel execution. The active build atomically claims the session sealed to
 the exact prepared run; swapping sessions or replaying the same prepared/session
@@ -390,6 +396,27 @@ request, entry expression, and correlated frozen bundles without reconstructing
 coordinator-owned fields. The provider-free
 `RunBuilder.build/3` convenience path crosses that same boundary and closes its
 temporary prepared run after assembly.
+
+### Command initialization
+
+`CommandInitializer` owns the shared `init` command's bounded filesystem state
+machine. Its fixed `main.clj` and `ptc.json` documents pass through
+`ApplicationPackage.request_memory/3` and `RunCoordinator.prepare/2` before
+target filesystem access, so the scaffold uses the same manifest, compilation,
+and sealed-preparation boundary as ordinary applications without opening a
+provider session.
+
+The initializer creates one mode-0700 sibling staging directory and records
+the directory and known-child identities. Pre-publication failures remove only
+children whose identities still match and then use non-recursive `rmdir`; a
+replaced or otherwise uncertain staging entry is left untouched. The native
+companion performs only the final no-replace directory rename, using
+`renameat2(RENAME_NOREPLACE)` on Linux or `renamex_np(RENAME_EXCL)` on macOS.
+That rename is the commit point. No later branch deletes or rolls back the
+published target, and collision, symlink, unsupported-filesystem, staging, and
+publication failures all project the same path-free
+`publication/initialization_failed` diagnostic.
+
 `PtcRunner.Kernel.RunBuilder` remains the shared environment assembly and
 cleanup boundary.
 
@@ -429,11 +456,17 @@ execution that is not bound to its exact preparation before consuming that
 preparation, so a mismatched catalog or an authorization target the run never
 selected leaves the prepared run reusable.
 
-The staged `PtcRunner.Kernel.CommandEngine` core allocates a command reference
+The `PtcRunner.Kernel.CommandEngine` core allocates a command reference
 before strict argv parsing, consumes host/application paths through acquisition
-adapters, and projects failures into `PtcRunner.Kernel.CommandOutcome`. It is
-not yet the public Mix or standalone adapter. After frontend integration, only
-an outer standalone wrapper may turn the outcome's status into a process exit.
+adapters, and projects failures into `PtcRunner.Kernel.CommandOutcome`.
+`Mix.Tasks.Ptc.Run` is a thin renderer over that boundary. Its Mix-owned
+adapter owns bootstrap, the interactive authorization extension, and runtime
+hooks. Bootstrap exceptions and application
+start failures are projected as the same closed run outcome as other internal
+failures; neither their reason nor argv paths reach the envelope. The task
+renders only the sealed outcome and raises a Mix error for a nonzero status
+without halting the VM. A future outer standalone wrapper may turn the same
+outcome status into a process exit.
 Successful `validate` is terminal: it projects the five-field digest result,
 closes its prepared run, and returns a sealed `CommandOutcome`. Both doctor
 modes are terminal too, and `doctor --connect` is the one command the engine
@@ -455,19 +488,34 @@ constructs its inert installation catalog, and projects
 never invokes a local check, selection validator, builder, credential resolver,
 OAuth service, provider application, process, port, or network operation, and
 it closes the inert catalog before returning the sealed outcome.
-Successful `run` preparation returns a sealed
+Successful staged `run` preparation returns a sealed
 `PtcRunner.Kernel.CommandPreparation`, not a bare `PreparedRun`. That wrapper
-retains the original command reference, inert
-catalog, and only the artifact destinations needed by phase 6 alongside the
-separately sealed path-free prepared run. Host-backed catalogs retain only an
-opaque path-free per-alias implementation recipe in the wrapper; they retain
-neither a live owner nor runtime services, host paths, installation payloads,
-credential values, or a credential resolver.
-The active adapter supplies `ProviderRuntimeServices` when it opens the active
-session. Selected optional applications are admitted before it opens a runtime
-registry. That registry owns the resulting private authority, and callers that
-retain it must use `ProviderRegistry.close/1` when the execution scope ends;
-closing revokes retained builders and credential access.
+retains the original command reference, inert catalog, sealed path-free
+`ProviderRuntimeServices`, and only the artifact destinations needed by phase 6
+alongside the separately sealed path-free prepared run. A host document is
+encrypted into the runtime-services payload during acquisition and is not
+retained as plaintext or reopened by dispatch. `CommandRuntime` carries only
+frontend VM policy and callbacks. If inert preparation proves that a selected
+LLM installation uses an environment credential, dispatch invokes the sealed
+environment-setup callback before creating the execution owner or deadline.
+Selected optional applications are admitted inside the marked provider session
+before it opens a runtime registry. That registry owns the resulting private
+authority, and callers that retain it must use `ProviderRegistry.close/1` when
+the execution scope ends; closing revokes retained builders and credential
+access.
+
+`CommandEngine.dispatch/1` keeps `ExecutionSessionOwner` for provider-free
+runs, omitting only `ProviderExecution` and its provider session. A
+provider-backed run creates one `ProviderExecution`, opens at most one provider
+session, and uses the same owner and publication path. Before that owner closes
+the prepared run's activity marker on any failure, it seals the marker value
+and whether execution had started into an internal failure value. Dispatch
+therefore never infers activity from provider declarations: a provider-bearing
+sink-opening failure remains inactive and `not_started`, while a later marked
+failure remains active and `incomplete`. Phase-12 projection
+narrows the Kernel's richer internal usage snapshot to the closed envelope
+vocabulary, flattens capability counts by workflow/mission scope, preserves
+evaluation-memory evidence, and never includes a private result value.
 Construction
 validates the complete catalog, requires its installed limits to match the captured
 package, requires JSON result projection, binds inspection presence to the
@@ -549,7 +597,13 @@ diagnostics therefore cannot carry a path. Finished execution records have two
 disjoint schema branches: `ok` requires a null diagnostic and `error` requires
 a non-null closed diagnostic. Unclassified run failures admit only
 `execution.state: "not_started"`; successful run branches bind normal/private
-result projection to the same artifact class. Successful trace and inspection
+result projection to the same artifact class. Classified setup and audited-local
+failures also remain `not_started`. The execution owner seals stage and activity
+evidence before closing their owner-backed marker: pre-worker failures remain
+`not_started`, while bare failures returned after a worker starts are
+`incomplete` with unavailable usage and evaluation-memory fields. Defensive
+publication and projection failures cannot claim that execution never began.
+Successful trace and inspection
 artifacts are only `not_requested` or `written`; a normal result has the same
 choice, while a private result must be `written`. Recovery-only publication
 states are confined to the result field of a failed envelope. The generated
@@ -827,7 +881,7 @@ in execution preparation and ownership. A frontend wording or argv-only change
 therefore does not invalidate application identity, while a coordinator change
 does.
 Regenerate with `mix regen` (or `mix ptc.gen_semantic_revision`) on main before
-tagging a release. The release gate runs the `--check` form and fails on
+tagging a release. The release gate runs `mix ptc.gen_semantic_revision --check` and fails on
 dependency inventory drift, missing classified paths, changed semantic bytes,
 or a stale projection. It runs there and nowhere else: the projection's hashes
 cover the whole source closure, so regenerating it per branch made every pair
@@ -1053,7 +1107,7 @@ declarative selection grammar belongs in `SelectionRules`; active transport
 behavior belongs in each provider module and the later runtime dispatcher.
 
 Ambient `.env` acquisition belongs to the CLI frontend, not the Kernel. The
-Mix adapter decides once, before the `--check`/one-shot branch, whether a
+Mix adapter decides once, before entering shared run dispatch, whether a
 selected live-LLM installation declares an environment-backed credential, and
 loads the nearest `.env` there, containing a loader failure as a closed command
 diagnostic. No Kernel module loads it, so an embedding acquires ambient

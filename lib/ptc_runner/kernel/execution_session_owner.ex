@@ -9,8 +9,11 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
+  alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderExecution
+  alias PtcRunner.Kernel.ProviderExecutionResources
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
@@ -38,7 +41,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           pid(),
           ProviderExecution.t() | nil,
           (binary() -> term()) | nil,
-          :run | :check | :connect
+          :run | :connect
         ) ::
           {:ok, t()}
           | {:error,
@@ -49,7 +52,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   def start(prepared, authority, caller, provider_execution, notifier, operation \\ :run)
 
   def start(prepared, authority, caller, provider_execution, notifier, operation)
-      when is_pid(caller) and operation in [:run, :check, :connect] do
+      when is_pid(caller) and operation in [:run, :connect] do
     with :ok <- admissible(prepared, authority, provider_execution, notifier, operation),
          {:ok, lease} <- PublicationAuthority.claim(authority) do
       token = make_ref()
@@ -96,7 +99,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
       # Decided here, before `init/1` consumes the preparation, so a connect
       # that asked for authorization leaves its preparation reusable rather
-      # than being spent on a check that would have skipped it.
+      # than being spent on a connectivity check that would have skipped it.
       operation == :connect and not ProviderExecution.non_interactive?(provider_execution) ->
         {:error, :invalid_provider_execution}
 
@@ -108,7 +111,9 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   # Connectivity never notifies or opens an interaction, so it carries no
   # authorization notifier at all.
   defp notifier_matches_operation?(notifier, :connect), do: is_nil(notifier)
-  defp notifier_matches_operation?(notifier, _operation), do: is_function(notifier, 1)
+
+  defp notifier_matches_operation?(notifier, _operation),
+    do: is_nil(notifier) or is_function(notifier, 1)
 
   # Connectivity answers for selected occurrences, so it has nothing to do
   # without any. Refusing keeps `:connect` off the provider-free completion,
@@ -122,11 +127,10 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     do: {:error, :invalid_provider_execution}
 
   # Each operation completes with its own evidence: a run with a sealed
-  # execution outcome, a check with the acquisition's safe connector snapshots,
-  # and connectivity with the sealed per-occurrence result.
+  # execution outcome and connectivity with the sealed per-occurrence result.
   @doc false
   @spec await(t()) ::
-          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | [map()] | ConnectivityResult.t()}
+          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | ConnectivityResult.t()}
           | {:error, term()}
   def await(%__MODULE__{pid: pid, token: token}) do
     result = GenServer.call(pid, {token, :await}, :infinity)
@@ -182,20 +186,23 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         end
 
       {:error, reason, opened_sinks} ->
+        failure = execution_failure(initial, reason, :not_started)
+
         next =
           initial
           |> Map.put(:opened_sinks, opened_sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
           |> abort_authority()
-          |> put_result({:error, reason})
+          |> put_result({:error, failure})
 
         {:ok, next}
 
       {:error, reason} ->
+        failure = execution_failure(initial, reason, :not_started)
         close_prepared(prepared)
         _ = PublicationAuthority.abort(authority)
-        {:ok, %{initial | prepared: nil, result: {:error, reason}}}
+        {:ok, %{initial | prepared: nil, result: {:error, failure}}}
     end
   end
 
@@ -221,7 +228,14 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         %{token: token, worker_pid: worker_pid} = state
       )
       when action in [:put, :drop] and kind in [:session, :registry, :memory, :listener] do
-    case update_resource(state, action, kind, resource) do
+    case ProviderExecutionResources.update(
+           state,
+           action,
+           kind,
+           resource,
+           self(),
+           :execution_session_unavailable
+         ) do
       {:ok, next} -> {:reply, :ok, next}
       {:error, _reason} = error -> {:reply, error, state}
     end
@@ -242,6 +256,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         %{token: token, worker_pid: worker_pid} = state
       ) do
     Process.demonitor(state.worker_ref, [:flush])
+    result = seal_execution_result(state, result)
 
     next =
       state
@@ -266,12 +281,14 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         {:DOWN, ref, :process, worker_pid, _reason},
         %{worker_ref: ref, worker_pid: worker_pid} = state
       ) do
+    failure = execution_failure(state, :execution_session_unavailable, :incomplete)
+
     next =
       state
       |> Map.put(:worker_pid, nil)
       |> Map.put(:worker_ref, nil)
       |> abort()
-      |> put_result({:error, :execution_session_unavailable})
+      |> put_result({:error, failure})
 
     finish_or_wait(next)
   end
@@ -337,6 +354,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
          }}
 
       {:error, reason, registry} ->
+        failure = execution_failure(initial, reason, :not_started)
+
         next =
           initial
           |> Map.put(:registry, registry)
@@ -344,18 +363,20 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
           |> abort_authority()
-          |> put_result({:error, reason})
+          |> put_result({:error, failure})
 
         {:ok, next}
 
       {:error, reason} ->
+        failure = execution_failure(initial, reason, :not_started)
+
         next =
           initial
           |> Map.put(:opened_sinks, opened_sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
           |> abort_authority()
-          |> put_result({:error, reason})
+          |> put_result({:error, failure})
 
         {:ok, next}
     end
@@ -419,13 +440,15 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           {:DOWN, ^worker_ref, :process, ^worker_pid, _reason} -> :ok
         end
 
+        failure = execution_failure(initial, :invalid_prepared_run, :not_started)
+
         next =
           initial
           |> Map.put(:opened_sinks, opened_sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
           |> abort_authority()
-          |> put_result({:error, :invalid_prepared_run})
+          |> put_result({:error, failure})
 
         {:ok, next}
     end
@@ -433,9 +456,6 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   defp complete_operation(%{publication_lease: lease} = built, :run),
     do: RunBuilder.execute_built_claimed(built, lease)
-
-  defp complete_operation(%{publication_lease: lease} = built, :check),
-    do: RunBuilder.check_built_claimed(built, lease)
 
   defp finish_or_wait(%{waiter: nil} = state), do: {:noreply, state}
 
@@ -555,38 +575,24 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   defp cleanup_diagnostic,
     do: CommandDiagnostic.new!(:result_cleanup, :provider_cleanup_failed, provider_activity: true)
 
-  defp update_resource(state, :put, kind, resource) do
-    field = resource_field(kind)
+  defp seal_execution_result(_state, {:ok, _result} = result), do: result
 
-    if is_nil(Map.fetch!(state, field)) and valid_resource?(kind, resource) do
-      {:ok, Map.put(state, field, resource)}
-    else
-      {:error, :execution_session_unavailable}
+  defp seal_execution_result(_state, {:error, %CommandDiagnostic{}} = result), do: result
+
+  defp seal_execution_result(state, {:error, reason}),
+    do: {:error, execution_failure(state, reason, :incomplete)}
+
+  defp execution_failure(state, reason, execution_state),
+    do: OwnerFailure.new!(reason, provider_activity(state), execution_state)
+
+  defp provider_activity(%{prepared: %{provider_activity: activity}}) do
+    case ProviderActivity.value(activity) do
+      value when is_boolean(value) -> value
+      _unknown -> false
     end
   end
 
-  defp update_resource(state, :drop, kind, resource) do
-    field = resource_field(kind)
-
-    if Map.fetch!(state, field) === resource do
-      {:ok, Map.put(state, field, nil)}
-    else
-      {:error, :execution_session_unavailable}
-    end
-  end
-
-  defp resource_field(:session), do: :provider_session
-  defp resource_field(:registry), do: :registry
-  defp resource_field(:memory), do: :oauth_memory
-  defp resource_field(:listener), do: :oauth_listener
-
-  defp valid_resource?(:session, session),
-    do: ProviderSession.valid?(session) and ProviderSession.lifecycle_owner(session) == self()
-
-  defp valid_resource?(:registry, registry), do: ProviderRegistry.valid?(registry)
-  defp valid_resource?(:memory, %Memory{pid: pid}), do: is_pid(pid) and Process.alive?(pid)
-  defp valid_resource?(:listener, %LoopbackListener{}), do: true
-  defp valid_resource?(_kind, _resource), do: false
+  defp provider_activity(_state), do: false
 
   defp maybe_finalize_failed_execution(state, {:ok, _outcome}),
     do: %{state | opened_sinks: nil}

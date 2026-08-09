@@ -37,6 +37,16 @@ defmodule PtcRunner.TestSupport.HostLLMAdapter do
     owner = Application.fetch_env!(:ptc_runner, :host_llm_test_owner)
     send(owner, {:host_llm_ensure_ready, self()})
 
+    case Application.get_env(:ptc_runner, :host_llm_test_ready_gate) do
+      gate when is_reference(gate) ->
+        receive do
+          {^gate, :continue} -> :ok
+        end
+
+      _ungated ->
+        :ok
+    end
+
     _warm_words =
       :ptc_runner
       |> List.duplicate(Application.get_env(:ptc_runner, :host_llm_test_warm_words, 0))

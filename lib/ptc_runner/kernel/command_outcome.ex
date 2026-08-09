@@ -121,6 +121,75 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     end
   end
 
+  @doc false
+  @spec run_success(binary(), :normal | :private, term(), map(), map(), map()) :: t()
+  def run_success(run_ref, result_class, value, artifact_state, usage, evaluation_memory)
+      when result_class in [:normal, :private] and is_map(artifact_state) and is_map(usage) and
+             is_map(evaluation_memory) do
+    result =
+      case result_class do
+        :normal -> %{"result_class" => "normal", "value" => value}
+        :private -> %{"result_class" => "private"}
+      end
+
+    envelope = %{
+      "schema_version" => 1,
+      "command" => "run",
+      "status" => "ok",
+      "run_ref" => run_ref,
+      "result" => result,
+      "secondary_errors" => [],
+      "artifact_state" => artifact_state,
+      "artifact_class" => Atom.to_string(result_class),
+      "execution" => %{
+        "state" => "finished",
+        "outcome" => "ok",
+        "diagnostic" => nil,
+        "usage" => usage,
+        "evaluation_memory" => evaluation_memory
+      }
+    }
+
+    seal(:run, envelope, 0)
+  end
+
+  @doc false
+  @spec run_classified_error(
+          binary(),
+          :normal | :private,
+          CommandDiagnostic.t(),
+          [CommandDiagnostic.t()],
+          map(),
+          map()
+        ) :: t()
+  def run_classified_error(
+        run_ref,
+        result_class,
+        %CommandDiagnostic{} = diagnostic,
+        secondary,
+        artifact_state,
+        execution
+      )
+      when result_class in [:normal, :private] and is_list(secondary) and
+             length(secondary) <= 6 and is_map(artifact_state) and is_map(execution) do
+    if CommandRunRef.valid?(run_ref) and CommandDiagnostic.valid?(diagnostic) and
+         Enum.all?(secondary, &CommandDiagnostic.valid?/1) and
+         valid_mode_diagnostics?(:run, [diagnostic | secondary]) and
+         valid_compound_diagnostics?(diagnostic, secondary) do
+      envelope =
+        error_envelope(:run, run_ref, diagnostic, secondary)
+        |> Map.merge(%{
+          "artifact_state" => artifact_state,
+          "artifact_class" => Atom.to_string(result_class),
+          "execution" => execution
+        })
+
+      seal(:run, envelope, diagnostic.exit_status)
+    else
+      raise ArgumentError, "invalid closed command outcome"
+    end
+  end
+
   @spec success(command_mode(), binary(), map()) :: t()
   def success(command_mode, run_ref, result) when is_map(result) do
     public_command = public_command(command_mode)
@@ -230,6 +299,20 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   defp valid_mode_activity?(mode, _activity) when mode in @static_modes, do: false
   defp valid_mode_activity?({:doctor, :connect}, activity), do: is_boolean(activity)
   defp valid_mode_activity?(:run, activity), do: is_boolean(activity)
+
+  defp valid_envelope_mode?(
+         :run,
+         %{
+           "command" => "run",
+           "status" => "ok",
+           "run_ref" => run_ref,
+           "result" => %{"result_class" => result_class},
+           "artifact_class" => result_class,
+           "secondary_errors" => []
+         },
+         0
+       ),
+       do: CommandRunRef.valid?(run_ref) and result_class in ["normal", "private"]
 
   defp valid_envelope_mode?(
          command_mode,
@@ -451,51 +534,13 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   end
 
   defp unique_compound_categories?(diagnostics) do
-    categories = Enum.map(diagnostics, &compound_category/1)
+    categories =
+      Enum.map(diagnostics, fn diagnostic ->
+        DiagnosticCatalog.compound_category(diagnostic.phase, diagnostic.code)
+      end)
+
     Enum.all?(categories, &is_atom/1) and categories == Enum.uniq(categories)
   end
-
-  defp compound_category(%CommandDiagnostic{
-         phase: :result_cleanup,
-         code: code
-       })
-       when code in [:provider_cleanup_timeout, :provider_cleanup_failed],
-       do: :cleanup
-
-  defp compound_category(%CommandDiagnostic{phase: :internal}), do: :internal
-
-  defp compound_category(%CommandDiagnostic{
-         phase: :result_cleanup,
-         code: code
-       })
-       when code in [:result_invalid, :result_contract_failed, :result_limit_exceeded],
-       do: :result_guard
-
-  defp compound_category(%CommandDiagnostic{
-         phase: :execution,
-         code: code
-       })
-       when code in [:event_capture_limit_exceeded, :event_sink_unavailable],
-       do: :event_sink
-
-  defp compound_category(%CommandDiagnostic{
-         phase: :execution,
-         code: code
-       })
-       when code in [:inspection_capture_limit_exceeded, :inspection_sink_unavailable],
-       do: :inspection_sink
-
-  defp compound_category(%CommandDiagnostic{phase: phase})
-       when phase in [
-              :local_preflight,
-              :active_preflight,
-              :provider_acquisition,
-              :execution
-            ],
-       do: :kernel_or_session
-
-  defp compound_category(%CommandDiagnostic{phase: :publication}), do: :publication
-  defp compound_category(_diagnostic), do: nil
 
   defp ordered_by_precedence?(diagnostics) do
     keys = Enum.map(diagnostics, &precedence_key/1)

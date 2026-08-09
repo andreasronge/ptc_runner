@@ -167,48 +167,6 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
     refute_received {:authorization_notice, _other}
   end
 
-  test "a check authorizes exactly as the run it shares its session with" do
-    # `--check --authorize-mcp` was deferred to the execution-owner cutover.
-    # A check runs the same marker, session, registry, credentials, OAuth, and
-    # acquisition prefix, so it stops at the same transport rule as the run
-    # above and never reaches a second authorization.
-    parent = self()
-    server = start_server()
-    fixture = provider_fixture(server)
-    trace_run_start()
-
-    {:ok, owner} =
-      ExecutionSessionOwner.start(
-        fixture.prepared,
-        fixture.authority,
-        self(),
-        fixture.execution,
-        &visit_authorization_url(parent, &1),
-        :check
-      )
-
-    assert {:error, %CommandDiagnostic{} = transport_stop} =
-             ExecutionSessionOwner.await(owner)
-
-    # The HTTPS-only transport rule is where an in-process OAuth run stops, and
-    # that stop is now classified: the provider could not be acquired, named by
-    # occurrence. Reaching it is still the evidence that authorization settled
-    # and the run got as far as acquisition.
-    assert transport_stop.phase == :provider_acquisition
-    assert transport_stop.code == :provider_unavailable
-
-    # `provider_unavailable` also covers a plain connection failure, so naming
-    # the occurrence is what keeps this pinned to the builder-validation stop
-    # rather than to any transport fault that happened to occur.
-    assert transport_stop.subject.name == "fixture"
-    assert transport_stop.subject.operation == :acquisition
-    assert transport_stop.subject.occurrence == %{destination: :mission, index: 0}
-    assert [:token_exchange, :run_started] == [next_event(), next_event()]
-    assert_received {:authorization_notice, _url}
-    refute_received {:authorization_notice, _other}
-    refute_received {:oauth_request, "POST", "/token"}
-  end
-
   test "selected authorities share one execution-scoped OAuth context" do
     parent = self()
     server = start_server()

@@ -18,7 +18,7 @@ defmodule PtcRunnerLauncher.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       aliases: aliases(),
-      description: "Native POSIX process launcher for PtcRunner MCP stdio transports.",
+      description: "Native POSIX platform companion for PtcRunner.",
       source_url: @source_url,
       package: package(),
       make_precompiler: {:port, CCPrecompiler},

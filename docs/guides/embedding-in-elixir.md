@@ -87,8 +87,7 @@ to both package acquisition and `RunBuilder.build/3`.
 The core application deliberately starts no provider dependency on your behalf,
 so depending on `ptc_runner` never starts `req_llm` or `llm_db` inside your
 release. A run admits the application it needs through
-`PtcRunner.Kernel.ProviderApplicationGate`. Both `mix ptc.run` and
-`mix ptc.run --check` reach it through the execution-owned
+`PtcRunner.Kernel.ProviderApplicationGate`. `mix ptc.run` reaches it through the execution-owned
 `ProviderActiveSession.open_consumed_setup/5`, where the execution-session owner
 already owns the prepared run and the session's lifecycle. There is no
 creator-owned variant.
@@ -176,8 +175,11 @@ the creator-side lookup entry for the dead session.
 
 If provider cleanup fails after terminal finalization, `close/1` and `abort/2`
 return `{:error, :provider_cleanup_failed, events}` so the host can persist the
-frozen batch before reporting the error. The Mix frontend does this for normal
-closure and exception-driven aborts. Each bounded worker starts a small
+frozen batch before reporting the error. If an authorized trace cannot be
+persisted after finalization, `close/1` and `abort/2` similarly return
+`{:error, :trace_persistence_failed, events}` so the already frozen evidence is
+not lost. The Mix frontend reports either failure after owner cleanup. Each
+bounded worker starts a small
 monitor-only watchdog before running the workload. The watchdog cancels the
 worker when the creator exits, without changing its trap-exit behavior or
 holding an unbounded workload copy, before retained resources are closed.

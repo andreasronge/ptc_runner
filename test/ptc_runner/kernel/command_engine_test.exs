@@ -11,7 +11,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.CommandParser
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandPreparation
+  alias PtcRunner.Kernel.CommandRunOutcome
   alias PtcRunner.Kernel.CommandRunRef
+  alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.ComponentOverride
@@ -22,10 +24,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.InstallationCatalog
-  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
@@ -49,6 +51,26 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert :ok = ProviderActivity.mark(activity)
     assert :ok = ProviderActivity.mark(activity)
     assert ProviderActivity.value(activity) == true
+  end
+
+  test "command runtimes pair authorization targets with their notifier" do
+    runtime = CommandRuntime.standalone()
+    assert runtime.authorization_targets == []
+    assert runtime.authorization_notifier == nil
+
+    assert {:error, :invalid_command_runtime} =
+             CommandRuntime.new(authorization_notifier: fn _url -> :ok end)
+
+    assert {:error, :invalid_command_runtime} =
+             CommandRuntime.new(authorization_targets: ["workspace"])
+
+    assert {:ok, runtime} =
+             CommandRuntime.new(
+               authorization_targets: ["workspace"],
+               authorization_notifier: fn _url -> :ok end
+             )
+
+    assert runtime.authorization_targets == ["workspace"]
   end
 
   test "help and version are exact phase-1 successes" do
@@ -95,36 +117,287 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "shared request acquisition owns the command policy invariants", %{tmp_dir: directory} do
-    application = write_application(directory, "shared-request", valid_manifest())
-    assert {:ok, catalog} = InstallationCatalog.new()
+  test "shared dispatch completes a provider-free run through publication", %{tmp_dir: directory} do
+    application = write_application(directory, "shared-dispatch", valid_manifest())
+    output = Path.join(directory, "result.json")
 
-    assert {:ok, request} =
-             CommandEngine.request(application, catalog,
-               installed_limits: :caller_supplied,
-               result_projection: :native
-             )
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--output", output])
 
-    assert request.package.installed_limits == catalog.installed_limits
-    assert request.policy.result_projection == :json
+    assert outcome.envelope["status"] == "ok"
+    assert outcome.envelope["artifact_class"] == "normal"
+    assert outcome.envelope["artifact_state"]["result"] == "written"
+    assert outcome.envelope["result"] == %{"result_class" => "normal", "value" => %{}}
+    assert outcome.envelope["execution"]["state"] == "finished"
+    assert outcome.envelope["execution"]["outcome"] == "ok"
+    assert outcome.envelope["execution"]["diagnostic"] == nil
+    assert_schema_valid(outcome.envelope)
 
-    assert {:error, :invalid_application_options} =
-             CommandEngine.request(application, catalog, [:not_keyword])
+    assert Jason.decode!(File.read!(output)) == %{}
   end
 
   @tag :tmp_dir
-  test "shared catalog acquisition returns the host and its inert catalog", %{tmp_dir: directory} do
-    host_path = write_host_config(directory, "shared-catalog", valid_host_config())
+  test "provider-free dispatch rejects explicit authorization targets", %{tmp_dir: directory} do
+    application = write_application(directory, "provider-free-authorization", valid_manifest())
 
-    assert {:ok, nil, empty_catalog} = CommandEngine.catalog(nil)
-    assert empty_catalog.descriptors == %{}
+    assert {:ok, runtime} =
+             CommandRuntime.new(
+               authorization_targets: ["workspace"],
+               authorization_notifier: fn _url -> :ok end
+             )
 
-    assert {:ok, host, catalog} = CommandEngine.catalog(host_path)
-    assert Map.keys(host.install) == ["workspace"]
-    assert InstallationCatalog.names(catalog) == ["workspace"]
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application], runtime)
 
-    assert {:error, %CommandDiagnostic{phase: :host, code: :host_unavailable}} =
-             CommandEngine.catalog(Path.join(directory, "missing-host.json"))
+    assert outcome.envelope["error"]["phase"] == "internal"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    assert outcome.envelope["execution"] == %{"state" => "not_started"}
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "shared dispatch withholds a private result after owner-backed publication", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "private-dispatch", valid_manifest())
+    input = Path.join(Path.dirname(application), "private-input.json")
+    output = Path.join(directory, "private-result.json")
+    File.write!(input, ~s({"secret":"not-for-the-envelope"}))
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch([
+               "run",
+               application,
+               "--private-input",
+               "private-input.json",
+               "--private-output",
+               output
+             ])
+
+    assert outcome.envelope["artifact_class"] == "private"
+    assert outcome.envelope["artifact_state"]["result"] == "written"
+    assert outcome.envelope["result"] == %{"result_class" => "private"}
+    refute Jason.encode!(outcome.envelope) =~ "not-for-the-envelope"
+    assert Jason.decode!(File.read!(output)) == %{"secret" => "not-for-the-envelope"}
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "shared dispatch opens and closes one provider-backed run", %{tmp_dir: directory} do
+    marker = Path.join(directory, "dispatch-methods")
+    host_path = write_host_config(directory, "dispatch-stdio", connect_host_config(marker))
+
+    application =
+      doctor_application(directory, "dispatch-selects-stdio",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: %{"evaluation_timeout_ms" => 5_000}
+      )
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert outcome.envelope["status"] == "ok"
+    assert outcome.envelope["result"] == %{"result_class" => "normal", "value" => %{}}
+    assert File.exists?(marker)
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "shared dispatch keeps audited-local rejection before execution and provider activity", %{
+    tmp_dir: directory
+  } do
+    manifest =
+      valid_manifest(%{
+        "providers" => %{
+          "workflow" => [],
+          "mission" => [%{"name" => "workspace", "config" => %{}}]
+        }
+      })
+
+    application = write_application(directory, "run-local-preflight", manifest)
+
+    host_path =
+      write_host_config(directory, "run-local-preflight", %{
+        "install" => %{"workspace" => inert_stdio_installation("run-local-v1")}
+      })
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert outcome.envelope["error"]["phase"] == "local_preflight"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    assert outcome.envelope["execution"] == %{"state" => "not_started"}
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "shared dispatch classifies a Kernel failure without exposing its value", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "failed-dispatch", valid_manifest())
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (fail {"secret" "must-not-escape"}))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["artifact_class"] == "normal"
+    assert outcome.envelope["error"]["phase"] == "execution"
+    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    assert outcome.envelope["execution"]["state"] == "incomplete"
+    assert is_map(outcome.envelope["execution"]["usage"])
+    refute Jason.encode!(outcome.envelope) =~ "must-not-escape"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "shared dispatch classifies an invalid terminal result as a result-guard failure", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "invalid-terminal-result", valid_manifest())
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (return #{1 2}))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["error"]["phase"] == "result_cleanup"
+    assert outcome.envelope["error"]["code"] == "result_invalid"
+    assert outcome.exit_status == 7
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "shared dispatch classifies Kernel-boundary projection failures as invalid results", %{
+    tmp_dir: directory
+  } do
+    for {name, source} <- [
+          {"java-terminal-result",
+           ~S|(ns app) (defn run [_input] (return Boolean/parseBoolean))|},
+          {"colliding-terminal-result",
+           ~S|(ns app) (defn run [_input] (return {(fn [x] x) 1 "#fn[...]" 2}))|}
+        ] do
+      application = write_application(directory, name, valid_manifest())
+      File.write!(Path.join(Path.dirname(application), "main.clj"), source)
+
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandEngine.dispatch(["run", application])
+
+      assert outcome.envelope["error"]["phase"] == "result_cleanup"
+      assert outcome.envelope["error"]["code"] == "result_invalid"
+      assert_schema_valid(outcome.envelope)
+    end
+  end
+
+  test "post-execution settlement failures cannot report execution as not started" do
+    artifact_state = %{
+      "trace" => "not_requested",
+      "inspection" => "not_requested",
+      "result" => "not_requested"
+    }
+
+    run_ref = CommandRunRef.encode(@zero_entropy)
+    assert {:ok, authority} = PublicationAuthority.authorize(run_ref, [], :normal, :normal)
+    on_exit(fn -> PublicationAuthority.close(authority) end)
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandRunOutcome.settle(
+               :invalid_execution_outcome,
+               authority,
+               run_ref,
+               :normal,
+               artifact_state,
+               true
+             )
+
+    assert outcome.envelope["execution"] == %{
+             "state" => "incomplete",
+             "usage" => nil,
+             "evaluation_memory" => nil
+           }
+
+    assert outcome.envelope["error"]["provider_activity"] == true
+    assert_schema_valid(outcome.envelope)
+
+    assert {:error, %CommandOutcome{} = fallback} =
+             CommandRunOutcome.project(
+               %{result_class: :normal},
+               :invalid_settlement,
+               run_ref,
+               true
+             )
+
+    assert fallback.envelope["execution"] == %{
+             "state" => "incomplete",
+             "usage" => nil,
+             "evaluation_memory" => nil
+           }
+
+    assert fallback.envelope["error"]["provider_activity"] == true
+    assert_schema_valid(fallback.envelope)
+  end
+
+  @tag :tmp_dir
+  test "frontend environment setup fails before the execution owner and activity marker", %{
+    tmp_dir: directory
+  } do
+    host = %{
+      "credentials" => %{"key" => %{"env" => "PTC_TEST_ABSENT_KEY"}},
+      "install" => %{
+        "model" => %{
+          "source" => "llm",
+          "installation_revision" => "model-v1",
+          "model" => "openrouter:test/model",
+          "credential" => "key"
+        }
+      }
+    }
+
+    host_path = write_host_config(directory, "environment-setup", host)
+    trace_directory = Path.join(directory, "traces")
+    File.mkdir!(trace_directory)
+
+    application =
+      doctor_application(directory, "environment-selected", workflow: ["model"])
+
+    parent = self()
+
+    assert {:ok, runtime} =
+             CommandRuntime.new(
+               provider_application_mode: :host_owned,
+               environment_setup: fn ->
+                 send(parent, :environment_setup)
+                 {:error, :unavailable}
+               end
+             )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(
+               [
+                 "run",
+                 application,
+                 "--host-config",
+                 host_path,
+                 "--trace-dir",
+                 trace_directory
+               ],
+               runtime
+             )
+
+    assert_received :environment_setup
+    assert outcome.envelope["artifact_class"] == "normal"
+    assert outcome.envelope["error"]["phase"] == "internal"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    assert outcome.envelope["execution"] == %{"state" => "not_started"}
+    assert outcome.envelope["artifact_state"]["trace"] == "not_written"
+    assert_schema_valid(outcome.envelope)
   end
 
   test "malformed phase-1 forms retain their recognized command" do
@@ -553,6 +826,45 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["error"]["provider_activity"] == false
     refute File.exists?(marker)
     assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "run sink-opening failures preserve not-started activity evidence", %{
+    tmp_dir: directory
+  } do
+    limits = %{"evaluation_timeout_ms" => 5_000, "normal_event_bytes" => 1}
+
+    provider_free =
+      write_application(
+        directory,
+        "run-sink-provider-free",
+        valid_manifest(%{"limits" => limits})
+      )
+
+    marker = Path.join(directory, "run-sink-provider-backed-methods")
+
+    host_path =
+      write_host_config(directory, "run-sink-provider-backed", connect_host_config(marker))
+
+    provider_backed =
+      doctor_application(directory, "run-sink-provider-backed",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: limits
+      )
+
+    for argv <- [
+          ["run", provider_free],
+          ["run", provider_backed, "--host-config", host_path]
+        ] do
+      assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch(argv)
+      assert outcome.envelope["error"]["phase"] == "internal"
+      assert outcome.envelope["error"]["code"] == "internal_error"
+      assert outcome.envelope["error"]["provider_activity"] == false
+      assert outcome.envelope["execution"] == %{"state" => "not_started"}
+      assert_schema_valid(outcome.envelope)
+    end
+
+    refute File.exists?(marker)
   end
 
   @tag :tmp_dir
@@ -2810,6 +3122,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert %InstallationCatalog{} = preparation.catalog
     assert CommandPreparation.valid?(preparation)
     refute CommandPreparation.valid?(%{preparation | run_ref: "cmd-invalid"})
+    refute CommandPreparation.valid?(Map.put(preparation, :__struct__, PreparedRun))
     assert :ok = PreparedRun.close(preparation.prepared_run)
   end
 
@@ -3009,6 +3322,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                preparation.run_ref,
                preparation.prepared_run,
                preparation.catalog,
+               preparation.runtime_services,
+               preparation.environment_setup_required,
                %{output: "relative-result.json"},
                []
              )
@@ -3040,6 +3355,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  preparation.run_ref,
                  preparation.prepared_run,
                  catalog,
+                 preparation.runtime_services,
+                 preparation.environment_setup_required,
                  destinations,
                  []
                )
@@ -3056,6 +3373,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                preparation.run_ref,
                native_prepared,
                preparation.catalog,
+               preparation.runtime_services,
+               preparation.environment_setup_required,
                %{},
                []
              )
@@ -3117,6 +3436,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                preparation.run_ref,
                Map.put(preparation.prepared_run, :application_path, "private"),
                preparation.catalog,
+               preparation.runtime_services,
+               preparation.environment_setup_required,
                %{},
                []
              )
@@ -3279,7 +3600,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              RunBuilder.build_prepared(prepared, registry, [:not_keyword])
 
     assert {:error, :invalid_build_options} =
-             RunBuilder.build_prepared(prepared, registry, trace: "first", trace: "second")
+             RunBuilder.build_prepared(prepared, registry,
+               trace_path: "first",
+               trace_path: "second"
+             )
 
     assert {:error, :invalid_build_options} =
              RunBuilder.build_prepared(prepared, registry, caller_secret: true)
@@ -3302,59 +3626,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:ok, built} = RunBuilder.build_prepared(prepared, registry)
     assert :ok = RunBuilder.close(built)
     assert :ok = PreparedRun.close(prepared)
-  end
-
-  @tag :tmp_dir
-  test "load and run reject duplicate artifact options before acquisition", %{tmp_dir: directory} do
-    missing = Path.join(directory, "missing")
-    duplicate_trace = [trace: "first.jsonl", trace: "second.jsonl"]
-
-    invalid_limits = [
-      %{Limits.installed_defaults() | run_duration_ms: :invalid},
-      Map.delete(Limits.installed_defaults(), :run_duration_ms),
-      Map.put(Limits.installed_defaults(), :unexpected_limit, 1)
-    ]
-
-    assert {:ok, registry} = ProviderRegistry.new()
-
-    assert {:error, :invalid_build_options} =
-             RunBuilder.load_and_build(missing, registry, duplicate_trace)
-
-    assert {:error, :invalid_build_options} =
-             RunBuilder.run(missing, registry, duplicate_trace)
-
-    assert {:error, :invalid_build_options} =
-             RunBuilder.load_and_build(missing, registry, installed_limits: :invalid)
-
-    assert {:error, :invalid_build_options} =
-             RunBuilder.run(missing, registry, installed_limits: :invalid)
-
-    extended_invalid_registry = Map.put(registry, :unexpected, :retained)
-
-    assert {:error, :invalid_provider_registry} =
-             RunBuilder.load_and_build(missing, extended_invalid_registry)
-
-    assert {:error, :invalid_provider_registry} =
-             RunBuilder.run(missing, extended_invalid_registry)
-
-    for limits <- invalid_limits do
-      invalid_registry = %{registry | installed_limits: limits}
-
-      assert {:error, :invalid_provider_registry} =
-               ProviderRegistry.new(%{}, installed_limits: limits)
-
-      assert {:error, :invalid_build_options} =
-               RunBuilder.load_and_build(missing, registry, installed_limits: limits)
-
-      assert {:error, :invalid_build_options} =
-               RunBuilder.run(missing, registry, installed_limits: limits)
-
-      assert {:error, :invalid_provider_registry} =
-               RunBuilder.load_and_build(missing, invalid_registry)
-
-      assert {:error, :invalid_provider_registry} =
-               RunBuilder.run(missing, invalid_registry)
-    end
   end
 
   @tag :tmp_dir

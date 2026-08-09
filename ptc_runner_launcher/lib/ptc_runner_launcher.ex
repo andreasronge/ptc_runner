@@ -1,13 +1,12 @@
 defmodule PtcRunnerLauncher do
   @moduledoc """
-  Locates the native launcher being prepared for PtcRunner's MCP stdio
-  transport.
+  Locates PtcRunner's native POSIX platform helper.
 
   The package owns the native process boundary and its artifact locator.
   Supported release targets restore a mandatory-checksum precompiled
   executable; other macOS and Linux targets compile the included source. The
   core `ptc_runner` package owns MCP framing, request correlation, deadlines,
-  and transport supervision.
+  transport supervision, and initialization state.
   """
 
   @protocol_version 1
@@ -41,6 +40,44 @@ defmodule PtcRunnerLauncher do
       _reason -> {:error, :launcher_unavailable}
     end
   end
+
+  @doc """
+  Atomically publishes one directory without replacing the target.
+
+  Linux uses `renameat2(RENAME_NOREPLACE)` and macOS uses
+  `renamex_np(RENAME_EXCL)`. Unsupported filesystems and cross-device targets
+  fail without falling back to a check-then-rename sequence.
+  """
+  @spec publish_directory_noreplace(binary(), binary()) ::
+          :ok
+          | {:error,
+             :collision | :publication_failed | :launcher_unavailable | :unsupported_platform}
+  def publish_directory_noreplace(staging, target)
+      when is_binary(staging) and is_binary(target) do
+    with true <- Path.type(staging) == :absolute and Path.type(target) == :absolute,
+         {:ok, executable} <- executable_path() do
+      case System.cmd(
+             executable,
+             ["--publish-directory-noreplace", staging, target],
+             stderr_to_stdout: true
+           ) do
+        {"", 0} -> :ok
+        {_output, 73} -> {:error, :collision}
+        {_output, 74} -> {:error, :unsupported_platform}
+        {_output, _status} -> {:error, :publication_failed}
+      end
+    else
+      false -> {:error, :publication_failed}
+      {:error, _reason} = error -> error
+    end
+  rescue
+    _exception -> {:error, :publication_failed}
+  catch
+    _kind, _reason -> {:error, :publication_failed}
+  end
+
+  def publish_directory_noreplace(_staging, _target),
+    do: {:error, :publication_failed}
 
   defp supported_platform do
     case :os.type() do

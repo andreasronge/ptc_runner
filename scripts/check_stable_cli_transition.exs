@@ -14,138 +14,73 @@ defmodule PtcRunner.StableCLITransitionCheck do
 
   @expected_callers %{
     "CommandEngine.authorize" => %{},
-    "CommandEngine.catalog" => %{
-      "lib/mix/tasks/ptc.run.ex" => 2,
-      "test/ptc_runner/kernel/command_engine_test.exs" => 3
-    },
-    "CommandEngine.request" => %{
-      "lib/mix/tasks/ptc.run.ex" => 1,
-      "test/ptc_runner/kernel/command_engine_test.exs" => 2
-    },
-    "Repl.persist_terminal_result" => %{"test/mix/tasks/ptc_repl_test.exs" => 1},
-    "Run.failure_message" => %{"test/mix/tasks/ptc_run_test.exs" => 5},
+    "CommandEngine.catalog" => %{},
+    "CommandEngine.request" => %{},
+    "Repl.persist_terminal_result" => %{},
+    "Run.failure_message" => %{},
     "RunBuilder.check_built" => %{},
-    "RunBuilder.check_built_claimed" => %{
-      "lib/ptc_runner/kernel/execution_session_owner.ex" => 1,
-      "lib/ptc_runner/kernel/provider_execution.ex" => 1
-    },
-    "RunBuilder.load_and_build" => %{
-      "lib/mix/tasks/ptc.repl.ex" => 1,
-      "test/ptc_runner/kernel/application_package_test.exs" => 1,
-      "test/ptc_runner/kernel/artifact_publisher_test.exs" => 1,
-      "test/ptc_runner/kernel/command_engine_test.exs" => 5,
-      "test/ptc_runner/kernel/component_override_test.exs" => 4,
-      "test/ptc_runner/kernel/filesystem_mcp_e2e_test.exs" => 1,
-      "test/ptc_runner/kernel/host_installation_test.exs" => 1,
-      "test/ptc_runner/kernel/inspection_snapshot_test.exs" => 2,
-      "test/ptc_runner/kernel/manifest_test.exs" => 9,
-      "test/ptc_runner/kernel/mcp_source_test.exs" => 66,
-      "test/ptc_runner/kernel/provider_lifecycle_test.exs" => 11,
-      "test/ptc_runner/kernel/repo_analyst_application_test.exs" => 1,
-      "test/ptc_runner/kernel/repo_analyst_e2e_test.exs" => 2,
-      "test/ptc_runner/kernel/run_builder_publication_test.exs" => 2
-    },
-    "RunBuilder.preflight_prepared" => %{"lib/mix/tasks/ptc.run.ex" => 1},
-    "RunBuilder.publish_execution" => %{
-      "lib/mix/tasks/ptc.run.ex" => 1,
-      "test/ptc_runner/kernel/artifact_publisher_test.exs" => 1,
-      "test/ptc_runner/kernel/run_builder_publication_test.exs" => 4,
-      "test/ptc_runner/kernel/run_coordinator_execution_test.exs" => 2
-    },
-    "RunBuilder.run" => %{
-      "examples/kernel-inspection-lab/support/lab.exs" => 1,
-      "test/ptc_runner/kernel/application_package_test.exs" => 1,
-      "test/ptc_runner/kernel/command_engine_test.exs" => 5,
-      "test/ptc_runner/kernel/component_override_test.exs" => 12,
-      "test/ptc_runner/kernel/filesystem_mcp_e2e_test.exs" => 1,
-      "test/ptc_runner/kernel/inspection_preflight_test.exs" => 14,
-      "test/ptc_runner/kernel/inspection_sink_test.exs" => 1,
-      "test/ptc_runner/kernel/llm_replay_test.exs" => 4,
-      "test/ptc_runner/kernel/manifest_test.exs" => 7,
-      "test/ptc_runner/kernel/mcp_remote_agent_e2e_test.exs" => 1,
-      "test/ptc_runner/kernel/mcp_source_test.exs" => 1,
-      "test/ptc_runner/kernel/provider_lifecycle_test.exs" => 3,
-      "test/ptc_runner/kernel/repo_analyst_e2e_test.exs" => 2,
-      "test/ptc_runner/kernel/repo_analyst_evaluation_e2e_test.exs" => 3,
-      "test/ptc_runner/kernel/tutorial_examples_e2e_test.exs" => 1,
-      "test/ptc_runner/kernel/tutorial_examples_test.exs" => 2
-    },
-    "RunBuilder.run_with_class" => %{
-      "test/ptc_runner/kernel/repo_analyst_live_e2e_test.exs" => 1
-    },
-    "RunCoordinator.check" => %{
-      "lib/mix/tasks/ptc.run.ex" => 2,
-      "test/ptc_runner/kernel/provider_connectivity_test.exs" => 1
-    }
+    "RunBuilder.check_built_claimed" => %{},
+    "RunBuilder.load_and_build" => %{},
+    "RunBuilder.preflight_prepared" => %{},
+    "RunBuilder.publish_execution" => %{},
+    "RunBuilder.run" => %{},
+    "RunBuilder.run_with_class" => %{},
+    "RunCoordinator.check" => %{}
   }
 
   @source_inventories [
     {"RunBuilder transitional definitions",
      ~r/(?:@spec|def) (?:load_and_build|run|run_with_class|preflight_prepared|publish_execution)\(/,
-     %{"lib/ptc_runner/kernel/run_builder.ex" => 12}},
+     ["lib/ptc_runner/kernel/run_builder.ex"], %{}},
     {"CommandEngine transitional definitions", ~r/(?:@spec|def) (?:authorize|request|catalog)\(/,
-     %{"lib/ptc_runner/kernel/command_engine.ex" => 7}},
+     ["lib/ptc_runner/kernel/command_engine.ex"], %{}},
     {"CommandEngine catalog local references", ~r/\bcatalog\(/,
-     %{"lib/ptc_runner/kernel/command_engine.ex" => 7}},
+     ["lib/ptc_runner/kernel/command_engine.ex"], %{}},
     {"CommandEngine request local references", ~r/\brequest\(/,
-     %{"lib/ptc_runner/kernel/command_engine.ex" => 4}},
+     ["lib/ptc_runner/kernel/command_engine.ex"], %{}},
     {"RunCoordinator check definitions", ~r/(?:@spec|def) check\(/,
-     %{"lib/ptc_runner/kernel/run_coordinator.ex" => 6}},
-    {"RunCoordinator check route", ~r/\bcheck\b/,
-     %{"lib/ptc_runner/kernel/run_coordinator.ex" => 13}},
+     ["lib/ptc_runner/kernel/run_coordinator.ex"], %{}},
+    {"RunCoordinator check route", ~r/:check|check_built|\bcheck\(/,
+     ["lib/ptc_runner/kernel/run_coordinator.ex"], %{}},
     {"RunBuilder check definitions", ~r/(?:@spec|def) check_built(?:_claimed)?\(/,
-     %{"lib/ptc_runner/kernel/run_builder.ex" => 6}},
+     ["lib/ptc_runner/kernel/run_builder.ex"], %{}},
     {"RunBuilder check local references", ~r/\bcheck_built(?:_claimed)?\(/,
-     %{"lib/ptc_runner/kernel/run_builder.ex" => 7}},
+     ["lib/ptc_runner/kernel/run_builder.ex"], %{}},
     {"execution-owner check route", ~r/:check|check_built/,
-     %{"lib/ptc_runner/kernel/execution_session_owner.ex" => 4}},
+     ["lib/ptc_runner/kernel/execution_session_owner.ex"], %{}},
     {"provider-execution check route", ~r/:check|check_built/,
-     %{"lib/ptc_runner/kernel/provider_execution.ex" => 6}},
+     ["lib/ptc_runner/kernel/provider_execution.ex"], %{}},
     {"provider-active-session check route", ~r/:check/,
-     %{"lib/ptc_runner/kernel/provider_active_session.ex" => 2}},
-    {"provider-session check route", ~r/:check/,
-     %{"lib/ptc_runner/kernel/provider_session.ex" => 7}},
+     ["lib/ptc_runner/kernel/provider_active_session.ex"], %{}},
+    {"provider-session check route", ~r/:check/, ["lib/ptc_runner/kernel/provider_session.ex"],
+     %{}},
     {"Mix run check route", ~r/:check|RunCoordinator\.check|--check/,
-     %{"lib/mix/tasks/ptc.run.ex" => 10}},
-    {"Mix run failure seam", ~r/\bfailure_message\(/, %{"lib/mix/tasks/ptc.run.ex" => 5}},
-    {"Mix REPL persistence seam", ~r/\bpersist_terminal_result\(/,
-     %{"lib/mix/tasks/ptc.repl.ex" => 5}},
+     ["lib/mix/tasks/ptc.run.ex"], %{}},
+    {"Mix run failure seam", ~r/\bfailure_message\(/, ["lib/mix/tasks/ptc.run.ex"], %{}},
+    {"Mix REPL persistence seam", ~r/\bpersist_terminal_result\(/, ["lib/mix/tasks/ptc.repl.ex"],
+     %{}},
     {"RunBuilder mission option plumbing", ~r/opts, :mission\b|:mission,|:mission\]/,
-     %{"lib/ptc_runner/kernel/run_builder.ex" => 4}},
+     ["lib/ptc_runner/kernel/run_builder.ex"], %{}},
     {"RunBuilder private-mission option plumbing", ~r/private_mission/,
-     %{"lib/ptc_runner/kernel/run_builder.ex" => 5}},
-    {"RunBuilder trace option plumbing", ~r/opts, :trace\b|:trace,|:trace\]/,
-     %{"lib/ptc_runner/kernel/run_builder.ex" => 4}},
-    {"Mix run mission option plumbing", ~r/:mission\b/, %{"lib/mix/tasks/ptc.run.ex" => 4}},
-    {"Mix run private-mission option plumbing", ~r/private_mission/,
-     %{"lib/mix/tasks/ptc.run.ex" => 5}},
-    {"Mix run trace option plumbing", ~r/:trace\b/, %{"lib/mix/tasks/ptc.run.ex" => 2}}
+     ["lib/ptc_runner/kernel/run_builder.ex"], %{}},
+    {"RunBuilder legacy trace input plumbing",
+     ~r/Keyword\.(?:get|fetch)\(opts, :trace\)|:trace\]/,
+     ["lib/ptc_runner/kernel/run_builder.ex"], %{}},
+    {"Mix run mission option plumbing", ~r/:mission\b/, ["lib/mix/tasks/ptc.run.ex"], %{}},
+    {"Mix run private-mission option plumbing", ~r/private_mission/, ["lib/mix/tasks/ptc.run.ex"],
+     %{}},
+    {"Mix run trace option plumbing", ~r/:trace\b/, ["lib/mix/tasks/ptc.run.ex"], %{}}
   ]
 
   @mix_run_trace_pattern ~r/mix ptc\.run[^\n]*--trace(?=$|[ =])|^[ \t]*--trace(?=$|[ =])[^\n]*/m
 
   @text_inventories [
     {"legacy input option names", ~r/--mission|--private-mission/,
-     %{
-       "docs/guides/manifests-and-capabilities.md" => 3,
-       "docs/guides/running-and-debugging.md" => 2,
-       "lib/mix/tasks/ptc.run.ex" => 6,
-       "test/mix/tasks/ptc_run_test.exs" => 6
-     }},
-    {"Mix run trace syntax", @mix_run_trace_pattern,
-     %{
-       "docs/guides/building-agents.md" => 1,
-       "docs/guides/getting-started.md" => 1,
-       "docs/guides/kernel-repl.md" => 1,
-       "docs/guides/running-and-debugging.md" => 5,
-       "examples/viewer-demo/run.sh" => 1,
-       "lib/mix/tasks/ptc.run.ex" => 2
-     }},
-    {"RunBuilder transitional documentation", ~r/\b(?:load_and_build|check_built)\/[13]\b/,
-     %{
-       "docs/guides/kernel-maintainer.md" => 2,
-       "lib/ptc_runner/kernel/run_builder.ex" => 2
-     }}
+     %{"test/mix/tasks/ptc_run_test.exs" => 2}},
+    {"Mix run trace syntax", @mix_run_trace_pattern, %{}},
+    {"RunBuilder transitional documentation",
+     ~r/\b(?:RunBuilder\.(?:load_and_build|run_with_class|run|check_built)|(?:load_and_build|check_built))\/[123]\b/,
+     %{}}
   ]
 
   @legacy_option_keys [:mission, :private_mission, :trace]
@@ -158,33 +93,7 @@ defmodule PtcRunner.StableCLITransitionCheck do
   # be resolved to a closed keyword list locally. Keeping it in the frozen
   # inventory makes that uncertainty explicit instead of silently omitting
   # options assembled by a helper, comprehension, or caller-supplied tail.
-  @expected_legacy_call_options %{
-    "dynamic" => %{
-      "test/ptc_runner/kernel/artifact_publisher_test.exs" => 1,
-      "test/ptc_runner/kernel/inspection_preflight_test.exs" => 2,
-      "test/ptc_runner/kernel/repo_analyst_evaluation_e2e_test.exs" => 1
-    },
-    "mission" => %{
-      "test/ptc_runner/kernel/inspection_preflight_test.exs" => 1,
-      "test/ptc_runner/kernel/manifest_test.exs" => 2
-    },
-    "private_mission" => %{
-      "test/ptc_runner/kernel/repo_analyst_evaluation_e2e_test.exs" => 2
-    },
-    "trace" => %{
-      "examples/kernel-inspection-lab/support/lab.exs" => 1,
-      "test/ptc_runner/kernel/command_engine_test.exs" => 2,
-      "test/ptc_runner/kernel/inspection_preflight_test.exs" => 6,
-      "test/ptc_runner/kernel/inspection_sink_test.exs" => 1,
-      "test/ptc_runner/kernel/manifest_test.exs" => 1,
-      "test/ptc_runner/kernel/mcp_remote_agent_e2e_test.exs" => 1,
-      "test/ptc_runner/kernel/mcp_source_test.exs" => 1,
-      "test/ptc_runner/kernel/provider_lifecycle_test.exs" => 1,
-      "test/ptc_runner/kernel/repo_analyst_evaluation_e2e_test.exs" => 1,
-      "test/ptc_runner/kernel/repo_analyst_live_e2e_test.exs" => 1,
-      "test/ptc_runner/kernel/run_builder_publication_test.exs" => 1
-    }
-  }
+  @expected_legacy_call_options %{}
 
   def run! do
     validate_scanners!()
@@ -195,7 +104,7 @@ defmodule PtcRunner.StableCLITransitionCheck do
       compare_group("caller", @expected_callers, callers) ++
         compare_remote_text_callers(files) ++
         compare_group("legacy call option", @expected_legacy_call_options, legacy_options) ++
-        compare_text_inventories(@source_inventories, files, :expected_files) ++
+        compare_source_inventories(@source_inventories) ++
         compare_text_inventories(@text_inventories, files, :all_files) ++
         compare_forbidden_source_references()
 
@@ -377,6 +286,58 @@ defmodule PtcRunner.StableCLITransitionCheck do
       )
 
     {scan_children(arguments, environment, inventories, file), environment}
+  end
+
+  defp scan_ast(
+         {:&, _,
+          [
+            {:/, _, [{{:., _, [{:__aliases__, _, parts}, function]}, _, []}, arity]}
+          ]},
+         environment,
+         inventories,
+         file
+       )
+       when is_atom(function) and is_integer(arity) and arity >= 0 do
+    inventories =
+      collect_reference(resolve_module(parts, environment.aliases), function, file, inventories)
+
+    {inventories, environment}
+  end
+
+  defp scan_ast(
+         {{:., _, [{:__aliases__, _, function_parts}, :capture]}, _,
+          [{:__aliases__, _, module_parts}, function, arity]},
+         environment,
+         inventories,
+         file
+       )
+       when is_atom(function) and is_integer(arity) and arity >= 0 do
+    inventories =
+      if resolve_module(function_parts, environment.aliases) == [:Function] do
+        collect_reference(
+          resolve_module(module_parts, environment.aliases),
+          function,
+          file,
+          inventories
+        )
+      else
+        inventories
+      end
+
+    {inventories, environment}
+  end
+
+  defp scan_ast(
+         {:{}, _, [{:__aliases__, _, parts}, function, arity]},
+         environment,
+         inventories,
+         file
+       )
+       when is_atom(function) and is_integer(arity) and arity >= 0 do
+    inventories =
+      collect_reference(resolve_module(parts, environment.aliases), function, file, inventories)
+
+    {inventories, environment}
   end
 
   defp scan_ast(
@@ -563,6 +524,24 @@ defmodule PtcRunner.StableCLITransitionCheck do
     assert_scan_count!(@mix_run_trace_pattern, "  --trace=run.jsonl", 1)
     assert_scan_count!(@mix_run_trace_pattern, "mix ptc.run ptc.json --trace-dir traces", 0)
 
+    remote_text_pattern = remote_text_caller_pattern("RunBuilder.run")
+
+    assert_scan_count!(remote_text_pattern, "RunBuilder.run(\"ptc.json\", registry)", 1)
+    assert_scan_count!(remote_text_pattern, "&RunBuilder.run/3", 1)
+    assert_scan_count!(remote_text_pattern, "Function.capture(RunBuilder, :run, 3)", 1)
+    assert_scan_count!(remote_text_pattern, "{PtcRunner.Kernel.RunBuilder, :run, 3}", 1)
+    assert_scan_count!(remote_text_pattern, "Function.capture(OtherBuilder, :run, 3)", 0)
+
+    mix_text_pattern = remote_text_caller_pattern("Run.failure_message")
+
+    assert_scan_count!(
+      mix_text_pattern,
+      "Function.capture(Mix.Tasks.Ptc.Run, :failure_message, 1)",
+      1
+    )
+
+    assert_scan_count!(mix_text_pattern, "{Mix.Tasks.Ptc.Run, :failure_message, 1}", 1)
+
     source = """
     defmodule ScannerFixture do
       alias PtcRunner.Kernel.RunBuilder, as: Builder
@@ -576,6 +555,9 @@ defmodule PtcRunner.StableCLITransitionCheck do
 
         opts = [private_mission: "input.json", trace: "run.jsonl"] ++ runtime_opts
         Builder.run("ptc.json", catalog, opts)
+        &Builder.run/3
+        Function.capture(Builder, :run, 3)
+        {Builder, :run, 3}
 
         alias String, as: Builder
         Builder.run("not a transitional call")
@@ -599,7 +581,7 @@ defmodule PtcRunner.StableCLITransitionCheck do
     expected = %{
       "CommandEngine.request" => %{"fixture.ex" => 2},
       "RunBuilder.load_and_build" => %{"fixture.ex" => 1},
-      "RunBuilder.run" => %{"fixture.ex" => 3},
+      "RunBuilder.run" => %{"fixture.ex" => 6},
       "RunBuilder.run_with_class" => %{"fixture.ex" => 1},
       "RunCoordinator.check" => %{"fixture.ex" => 1}
     }
@@ -616,6 +598,13 @@ defmodule PtcRunner.StableCLITransitionCheck do
 
     if normalize(options) != expected_options do
       raise "stable CLI indirect-option scanner self-test failed"
+    end
+
+    reintroduced =
+      text_inventory_actual(~r/def run\(/, ["fixture.ex"], fn _file -> "def run(" end)
+
+    if compare("source inventory self-test", %{}, reintroduced) == [] do
+      raise "stable CLI empty source inventory self-test failed"
     end
   end
 
@@ -681,26 +670,35 @@ defmodule PtcRunner.StableCLITransitionCheck do
     Map.new(inventory, fn {key, files} -> {key, Map.new(Enum.sort(files))} end)
   end
 
-  defp compare_text_inventories(inventories, files, scope) do
-    Enum.flat_map(inventories, fn {name, pattern, expected} ->
-      inventory_files = if scope == :expected_files, do: Map.keys(expected), else: files
-
-      actual =
-        inventory_files
-        |> Enum.reduce(%{}, fn file, acc ->
-          source = File.read!(Path.join(@root, file))
-
-          if String.valid?(source) do
-            case length(Regex.scan(pattern, source)) do
-              0 -> acc
-              count -> Map.put(acc, file, count)
-            end
-          else
-            acc
-          end
-        end)
-
+  defp compare_source_inventories(inventories) do
+    Enum.flat_map(inventories, fn {name, pattern, files, expected} ->
+      actual = text_inventory_actual(pattern, files)
       compare("reference #{name}", expected, actual)
+    end)
+  end
+
+  defp compare_text_inventories(inventories, files, :all_files) do
+    Enum.flat_map(inventories, fn {name, pattern, expected} ->
+      actual = text_inventory_actual(pattern, files)
+      compare("reference #{name}", expected, actual)
+    end)
+  end
+
+  defp text_inventory_actual(pattern, files),
+    do: text_inventory_actual(pattern, files, &File.read!(Path.join(@root, &1)))
+
+  defp text_inventory_actual(pattern, files, read) do
+    Enum.reduce(files, %{}, fn file, acc ->
+      source = read.(file)
+
+      if String.valid?(source) do
+        case length(Regex.scan(pattern, source)) do
+          0 -> acc
+          count -> Map.put(acc, file, count)
+        end
+      else
+        acc
+      end
     end)
   end
 
@@ -711,7 +709,7 @@ defmodule PtcRunner.StableCLITransitionCheck do
   defp compare_remote_text_callers(files) do
     actual =
       Map.new(@expected_callers, fn {caller, _expected} ->
-        pattern = Regex.compile!("\\b" <> Regex.escape(caller) <> "\\s*\\(")
+        pattern = remote_text_caller_pattern(caller)
 
         counts =
           Enum.reduce(files, %{}, fn file, acc ->
@@ -732,6 +730,28 @@ defmodule PtcRunner.StableCLITransitionCheck do
 
     compare_group("text caller", @expected_callers, actual)
   end
+
+  defp remote_text_caller_pattern(caller) do
+    [module, function] = String.split(caller, ".", parts: 2)
+    canonical_module = canonical_module(caller)
+    module = Regex.escape(module)
+    module_reference = "(?:#{Regex.escape(canonical_module)}|#{module})"
+    function = Regex.escape(function)
+
+    Regex.compile!(
+      "(?:\\b#{module}\\.#{function}\\s*(?:\\(|/[0-9]+\\b)" <>
+        "|\\bFunction\\.capture\\s*\\(\\s*#{module_reference}" <>
+        "\\s*,\\s*:#{function}\\s*,\\s*[0-9]+\\s*\\)" <>
+        "|\\{\\s*#{module_reference}\\s*,\\s*:#{function}" <>
+        "\\s*,\\s*[0-9]+\\s*\\})"
+    )
+  end
+
+  defp canonical_module("Run.failure_message"), do: "Mix.Tasks.Ptc.Run"
+  defp canonical_module("Repl.persist_terminal_result"), do: "Mix.Tasks.Ptc.Repl"
+  defp canonical_module("RunBuilder." <> _function), do: "PtcRunner.Kernel.RunBuilder"
+  defp canonical_module("CommandEngine." <> _function), do: "PtcRunner.Kernel.CommandEngine"
+  defp canonical_module("RunCoordinator.check"), do: "PtcRunner.Kernel.RunCoordinator"
 
   defp compare_forbidden_source_references do
     Enum.flat_map(@forbidden_source_references, fn {name, file, pattern} ->

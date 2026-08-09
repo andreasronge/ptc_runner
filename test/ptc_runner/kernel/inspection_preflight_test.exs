@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.TestSupport.RunLifecycle
 
   describe "InspectionArtifact.preflight_destination/1" do
     @tag :tmp_dir
@@ -139,10 +140,15 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.write!(occupied, "occupied")
 
       assert {:error, {:inspection_preflight_failed, :inspection_destination_exists}} =
-               RunBuilder.run(manifest_path, registry,
-                 trace: Path.join(dir, "run.jsonl"),
+               manifest_path
+               |> ApplicationPackage.request_directory(
+                 request_options(registry, inspect: occupied)
+               )
+               |> RunLifecycle.build(registry,
+                 trace_path: Path.join(dir, "run.jsonl"),
                  inspect: occupied
                )
+               |> RunLifecycle.execute()
 
       refute_received :provider_builder_invoked
     end
@@ -158,17 +164,27 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       missing_manifest = Path.join(dir, "absent.json")
 
       assert {:error, reason} =
-               RunBuilder.run(missing_manifest, registry, inspect: occupied)
+               missing_manifest
+               |> ApplicationPackage.request_directory(
+                 request_options(registry, inspect: occupied)
+               )
+               |> RunLifecycle.build(registry, inspect: occupied)
+               |> RunLifecycle.execute()
 
       refute match?({:inspection_preflight_failed, _reason}, reason)
 
       manifest_path = write_manifest(dir, %{})
 
       assert {:error, reason} =
-               RunBuilder.run(manifest_path, registry,
-                 mission: "absent-override.json",
-                 inspect: occupied
+               manifest_path
+               |> ApplicationPackage.request_directory(
+                 request_options(registry,
+                   input: "absent-override.json",
+                   inspect: occupied
+                 )
                )
+               |> RunLifecycle.build(registry, inspect: occupied)
+               |> RunLifecycle.execute()
 
       refute match?({:inspection_preflight_failed, _reason}, reason)
     end
@@ -191,7 +207,12 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.write!(occupied, "occupied")
 
       assert {:error, {:result_preflight_failed, :result_destination_exists}} =
-               RunBuilder.run(manifest_path, registry, output: occupied)
+               manifest_path
+               |> ApplicationPackage.request_directory(
+                 request_options(registry, output: occupied)
+               )
+               |> RunLifecycle.build(registry, output: occupied)
+               |> RunLifecycle.execute()
 
       refute_received :provider_builder_invoked
       assert File.read!(occupied) == "occupied"
@@ -216,7 +237,12 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       destination = Path.join([dir, "missing", "result.json"])
 
       assert {:error, {:result_preflight_failed, :invalid_result_destination}} =
-               RunBuilder.run(manifest_path, registry, output: destination)
+               manifest_path
+               |> ApplicationPackage.request_directory(
+                 request_options(registry, output: destination)
+               )
+               |> RunLifecycle.build(registry, output: destination)
+               |> RunLifecycle.execute()
 
       refute_received :provider_builder_invoked
     end
@@ -245,7 +271,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       for options <- [
             [
               output: Path.join(dir, "same.jsonl"),
-              trace: Path.join(dir, "same.jsonl")
+              trace_path: Path.join(dir, "same.jsonl")
             ],
             [
               output: Path.join(dir, "same.inspection.jsonl"),
@@ -253,19 +279,22 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
             ],
             [
               output: Path.join(real_parent, "same.jsonl"),
-              trace: Path.join(alias_parent, "same.jsonl")
+              trace_path: Path.join(alias_parent, "same.jsonl")
             ],
             [
               output: Path.join(real_parent, "Case.jsonl"),
-              trace: Path.join(real_parent, "case.jsonl")
+              trace_path: Path.join(real_parent, "case.jsonl")
             ],
             [
               output: Path.join(real_parent, "σ.jsonl"),
-              trace: Path.join(real_parent, "ς.jsonl")
+              trace_path: Path.join(real_parent, "ς.jsonl")
             ]
           ] do
         assert {:error, {:artifact_preflight_failed, :conflicting_destinations}} =
-                 RunBuilder.run(manifest_path, registry, options)
+                 manifest_path
+                 |> ApplicationPackage.request_directory(request_options(registry, options))
+                 |> RunLifecycle.build(registry, options)
+                 |> RunLifecycle.execute()
 
         refute_received :provider_builder_invoked
       end
@@ -289,7 +318,12 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       destination = Path.join([dir, "missing", "run.inspection.jsonl"])
 
       assert {:error, {:inspection_preflight_failed, :inspection_destination_unavailable}} =
-               RunBuilder.run(manifest_path, registry, inspect: destination)
+               manifest_path
+               |> ApplicationPackage.request_directory(
+                 request_options(registry, inspect: destination)
+               )
+               |> RunLifecycle.build(registry, inspect: destination)
+               |> RunLifecycle.execute()
 
       refute_received :provider_builder_invoked
     end
@@ -318,12 +352,17 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
          {:result_preflight_failed, :invalid_result_destination}},
         {[inspect: Path.join(unwritable, "run.inspection.jsonl")],
          {:inspection_preflight_failed, :inspection_destination_unavailable}},
-        {[trace: Path.join(unwritable, "run.jsonl")],
+        {[trace_path: Path.join(unwritable, "run.jsonl")],
          {:trace_preflight_failed, :trace_destination_unavailable}}
       ]
 
       for {options, reason} <- cases do
-        assert {:error, ^reason} = RunBuilder.run(manifest_path, registry, options)
+        assert {:error, ^reason} =
+                 manifest_path
+                 |> ApplicationPackage.request_directory(request_options(registry, options))
+                 |> RunLifecycle.build(registry, options)
+                 |> RunLifecycle.execute()
+
         refute_received :provider_builder_invoked
       end
     end
@@ -343,7 +382,12 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
 
       assert {:error, {:trace_preflight_failed, :normal_trace_requires_normal_suffix}} =
-               RunBuilder.run(manifest_path, registry, trace: Path.join(dir, "run.private.jsonl"))
+               manifest_path
+               |> ApplicationPackage.request_directory(request_options(registry, []))
+               |> RunLifecycle.build(registry,
+                 trace_path: Path.join(dir, "run.private.jsonl")
+               )
+               |> RunLifecycle.execute()
 
       refute_received :provider_builder_invoked
     end
@@ -376,7 +420,10 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
 
       assert {:error, {:trace_preflight_failed, :source_unavailable}} =
-               RunBuilder.run(manifest_path, registry, trace: Path.join(dir, "run.jsonl"))
+               manifest_path
+               |> ApplicationPackage.request_directory(request_options(registry, []))
+               |> RunLifecycle.build(registry, trace_path: Path.join(dir, "run.jsonl"))
+               |> RunLifecycle.execute()
 
       refute_received :provider_builder_invoked
     end
@@ -406,13 +453,19 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.ln_s!(target, symlink)
 
       assert {:error, {:trace_preflight_failed, :trace_destination_unavailable}} =
-               RunBuilder.run(manifest_path, registry, trace: missing_parent)
+               manifest_path
+               |> ApplicationPackage.request_directory(request_options(registry, []))
+               |> RunLifecycle.build(registry, trace_path: missing_parent)
+               |> RunLifecycle.execute()
 
       refute_received :provider_builder_invoked
 
       for destination <- [directory, symlink] do
         assert {:error, {:trace_preflight_failed, :invalid_trace_path}} =
-                 RunBuilder.run(manifest_path, registry, trace: destination)
+                 manifest_path
+                 |> ApplicationPackage.request_directory(request_options(registry, []))
+                 |> RunLifecycle.build(registry, trace_path: destination)
+                 |> RunLifecycle.execute()
 
         refute_received :provider_builder_invoked
       end
@@ -484,7 +537,10 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.cd!(dir)
 
       assert {:ok, %{value: 42}} =
-               RunBuilder.run(manifest_path, registry, output: "result.json")
+               manifest_path
+               |> ApplicationPackage.request_directory(request_options(registry, []))
+               |> RunLifecycle.build(registry, output: "result.json")
+               |> RunLifecycle.execute()
 
       assert File.regular?(Path.join(dir, "result.json"))
       refute File.exists?(Path.join(changed_cwd, "result.json"))
@@ -517,11 +573,16 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.cd!(dir)
 
       assert {:ok, %{value: 42}} =
-               RunBuilder.run(manifest_path, registry,
+               manifest_path
+               |> ApplicationPackage.request_directory(
+                 request_options(registry, inspect: "run.inspection.jsonl")
+               )
+               |> RunLifecycle.build(registry,
                  output: "result.json",
-                 trace: "trace.jsonl",
+                 trace_path: "trace.jsonl",
                  inspect: "run.inspection.jsonl"
                )
+               |> RunLifecycle.execute()
 
       for name <- ["result.json", "trace.jsonl", "run.inspection.jsonl"] do
         assert File.regular?(Path.join(dir, name))
@@ -948,6 +1009,13 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
     path = Path.join(dir, "ptc.json")
     File.write!(path, Jason.encode!(manifest))
     path
+  end
+
+  defp request_options(registry, opts) do
+    [
+      installed_limits: registry.installed_limits,
+      inspection_capture: is_binary(opts[:inspect])
+    ] ++ Keyword.take(opts, [:input])
   end
 
   defp current_uid do

@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.MCPProtocol
+  alias PtcRunner.Kernel.OwnerHandoff
   alias PtcRunner.Lisp.RetainedSize
 
   @default_record_bytes 2_000_000
@@ -95,6 +96,13 @@ defmodule PtcRunner.Kernel.InspectionSink do
   def owner(sink), do: call(sink, :owner)
 
   @doc false
+  @spec transfer_owner(t(), pid()) :: :ok | {:error, :inspection_sink_error}
+  def transfer_owner(%__MODULE__{} = sink, owner) when is_pid(owner),
+    do: call(sink, {:transfer_owner, owner})
+
+  def transfer_owner(_sink, _owner), do: {:error, :inspection_sink_error}
+
+  @doc false
   @spec identity(t()) ::
           {:ok, %{run_id: binary(), trace_id: binary()}} | {:error, :inspection_sink_error}
   def identity(sink), do: call(sink, :identity)
@@ -133,6 +141,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
        token: token,
        owner: owner,
        owner_ref: Process.monitor(owner),
+       owner_transferable?: true,
        run_id: run_id,
        trace_id: trace_id,
        schema_version: schema_version,
@@ -154,6 +163,18 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   def handle_call({token, :owner?}, {caller, _tag}, %{token: token} = state),
     do: {:reply, caller == state.owner, state}
+
+  def handle_call(
+        {token, {:transfer_owner, owner}},
+        {caller, _tag},
+        %{token: token, owner: caller, owner_transferable?: true} = state
+      )
+      when is_pid(owner) do
+    case OwnerHandoff.transfer_once(state, owner) do
+      {:ok, next} -> {:reply, :ok, next}
+      :error -> {:reply, {:error, :inspection_sink_error}, state}
+    end
+  end
 
   def handle_call({token, :records}, _from, %{token: token, failed?: false} = state),
     do: {:reply, {:ok, Enum.reverse(state.records)}, state}

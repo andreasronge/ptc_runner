@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.TestSupport.RunLifecycle
 
   setup do
     {:ok, base} = Library.component("agent.retry")
@@ -26,12 +27,22 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
 
       # Without the override the marker does not exist, so a passing run is
       # proof the candidate source compiled rather than the shipped source.
-      assert {:error, _reason} = RunBuilder.run(paths.manifest, context.registry)
+      assert {:error, _reason} =
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: context.registry.installed_limits
+               )
+               |> RunLifecycle.build(context.registry)
+               |> RunLifecycle.execute()
 
       assert {:ok, result} =
-               RunBuilder.run(paths.manifest, context.registry,
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
+               |> RunLifecycle.build(context.registry)
+               |> RunLifecycle.execute()
 
       assert result.value == "candidate"
     end
@@ -41,9 +52,13 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       paths = write_application(context, context.base, source_hash: hash("something else"))
 
       assert {:error, {:source_role, :component_override, :override_source_hash_mismatch}} =
-               RunBuilder.run(paths.manifest, context.registry,
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
+               |> RunLifecycle.build(context.registry)
+               |> RunLifecycle.execute()
     end
 
     @tag :tmp_dir
@@ -51,9 +66,13 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       paths = write_application(context, context.base, base_source_hash: hash("stale base"))
 
       assert {:error, {:source_role, :component_override, :override_base_hash_mismatch}} =
-               RunBuilder.run(paths.manifest, context.registry,
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
+               |> RunLifecycle.build(context.registry)
+               |> RunLifecycle.execute()
     end
 
     @tag :tmp_dir
@@ -61,9 +80,13 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       paths = write_application(context, context.base, component_id: "agent.core")
 
       assert {:error, {:source_role, :component_override, :override_component_not_selected}} =
-               RunBuilder.run(paths.manifest, context.registry,
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
+               |> RunLifecycle.build(context.registry)
+               |> RunLifecycle.execute()
     end
 
     @tag :tmp_dir
@@ -72,9 +95,13 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       File.write!(Path.join(Path.dirname(paths.descriptor), "../escape.clj"), "(ns escape)")
 
       assert {:error, {:source_role, :component_override, :invalid_override_source}} =
-               RunBuilder.run(paths.manifest, context.registry,
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
+               |> RunLifecycle.build(context.registry)
+               |> RunLifecycle.execute()
     end
 
     @tag :tmp_dir
@@ -83,9 +110,13 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       File.write!(Path.join(Path.dirname(paths.descriptor), "Candidate.clj"), context.base.source)
 
       assert {:error, {:source_role, :component_override, :invalid_override_source}} =
-               RunBuilder.run(paths.manifest, context.registry,
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
+               |> RunLifecycle.build(context.registry)
+               |> RunLifecycle.execute()
     end
 
     @tag :tmp_dir
@@ -109,9 +140,13 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       )
 
       assert {:error, {:source_role, :component_override, :invalid_override_source}} =
-               RunBuilder.run(paths.manifest, context.registry,
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: context.registry.installed_limits,
                  component_override_descriptor: descriptor_path
                )
+               |> RunLifecycle.build(context.registry)
+               |> RunLifecycle.execute()
     end
 
     @tag :tmp_dir
@@ -128,9 +163,13 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
         assert {:error,
                 {:source_role, :component_override,
                  {:component_override_path, ^expected_path, :invalid_override_descriptor}}} =
-                 RunBuilder.run(paths.manifest, context.registry,
+                 paths.manifest
+                 |> ApplicationPackage.request_directory(
+                   installed_limits: context.registry.installed_limits,
                    component_override_descriptor: paths.descriptor
-                 ),
+                 )
+                 |> RunLifecycle.build(context.registry)
+                 |> RunLifecycle.execute(),
                "accepted #{inspect(mutation)}"
       end
     end
@@ -140,9 +179,13 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       paths = write_application(context, context.base)
 
       assert {:error, {:source_role, :component_override, :invalid_override_descriptor}} =
-               RunBuilder.run(paths.manifest, context.registry,
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: context.registry.installed_limits,
                  component_override_descriptor: Path.join(paths.dir, "absent.json")
                )
+               |> RunLifecycle.build(context.registry)
+               |> RunLifecycle.execute()
     end
   end
 
@@ -152,9 +195,12 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       paths = write_application(context, context.base)
 
       assert {:ok, built} =
-               RunBuilder.load_and_build(paths.manifest, context.registry,
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
+               |> RunLifecycle.build(context.registry)
 
       # The effective bundle hash changes whenever source changes, but it
       # cannot say which component was overridden or what base the candidate
@@ -178,7 +224,13 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       paths = write_application(context, context.base)
       File.write!(Path.join(paths.dir, "w.clj"), ~S|(ns app) (defn run [_i] (return 1))|)
 
-      assert {:ok, built} = RunBuilder.load_and_build(paths.manifest, context.registry)
+      assert {:ok, built} =
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: context.registry.installed_limits
+               )
+               |> RunLifecycle.build(context.registry)
+
       refute Map.has_key?(built.config.run_started_metadata, :component_overrides)
       assert :ok = RunBuilder.close(built)
     end
@@ -188,9 +240,12 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       paths = write_application(context, context.base, both_environments: true)
 
       assert {:error, {:source_role, :component_override, :ambiguous_override_target}} =
-               RunBuilder.load_and_build(paths.manifest, context.registry,
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
+               |> RunLifecycle.build(context.registry)
     end
   end
 
@@ -231,9 +286,12 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       paths = write_application(context, context.base)
 
       assert {:ok, built} =
-               RunBuilder.load_and_build(paths.manifest, context.registry,
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
+               |> RunLifecycle.build(context.registry)
 
       # The candidate reaches the bundle and nothing else: a generated program
       # must not be able to read the source under evaluation.
@@ -317,9 +375,13 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
         )
 
       assert {:error, {:source_role, :component_override, reason}} =
-               RunBuilder.run(paths.manifest, context.registry,
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
+               |> RunLifecycle.build(context.registry)
+               |> RunLifecycle.execute()
 
       assert {:component_override_path, [{:property, "provenance"}], :invalid_override_descriptor} =
                reason
@@ -335,9 +397,13 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
         )
 
       assert {:error, {:source_role, :component_override, reason}} =
-               RunBuilder.run(paths.manifest, context.registry,
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
+               |> RunLifecycle.build(context.registry)
+               |> RunLifecycle.execute()
 
       assert {:component_override_path, [{:property, "provenance"}], :invalid_override_descriptor} =
                reason

@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.ProviderCredentials do
   # Phase-8 step 5: the one place an active command resolves ordinary
   # credentials.
   #
-  # Every active command — a run, a `--check`, and `doctor --connect` — crosses
+  # Every active command — a run and `doctor --connect` — crosses
   # this step once, after the registry and OAuth context exist and before any
   # provider callback runs. Resolving here rather than inside acquisition is
   # what makes one credential model serve all three: acquisition answers for

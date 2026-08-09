@@ -78,7 +78,10 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     # The placeholder's stub returns 0, so 42 is proof the candidate's source
     # compiled and ran rather than the shipped source.
-    assert %{"value" => 42} = Jason.decode!(run_output)
+    assert %{
+             "status" => "ok",
+             "result" => %{"result_class" => "normal", "value" => 42}
+           } = Jason.decode!(run_output)
   end
 
   @tag :tmp_dir

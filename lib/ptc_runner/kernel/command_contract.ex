@@ -26,7 +26,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   @digest "^sha256:[0-9a-f]{64}$(?![\\s\\S])"
   @alias "^[a-z][a-z0-9._-]{0,127}$(?![\\s\\S])"
   @installation_revision ~r/\A[a-z][a-z0-9._-]{0,127}\z/
-  @capability_name "^[a-z][a-z0-9._/-]{0,127}$(?![\\s\\S])"
+  @capability_name "^(?:workflow|mission)/[a-z][a-z0-9._/-]{0,127}$(?![\\s\\S])"
   @event_type "^[a-z][a-z0-9-]{0,127}$(?![\\s\\S])"
   @json_pointer "^(?:/(?:[^~/]|~[01])*)*$(?![\\s\\S])"
   @doctor_provider_name ~r/\Aprovider\/(?<alias>[a-z][a-z0-9._-]{0,127})\/(?<operation>local|selection|credentials|authorization|connectivity)\z/

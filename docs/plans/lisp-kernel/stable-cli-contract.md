@@ -1,10 +1,9 @@
 # Stable CLI and transport-neutral application plan
 
-**Status:** accepted; Checkpoints A–D are complete. Checkpoint E is next,
-followed by standalone packaging in Checkpoint F and final acceptance in
-Checkpoint G.
-**Revised:** 2026-08-08 to remove completed implementation records and retain
-only the contracts and work that still constrain Checkpoints E–G.
+**Status:** accepted; Checkpoints A–E are complete. Standalone packaging in
+Checkpoint F is next, followed by final acceptance in Checkpoint G.
+**Revised:** 2026-08-09 to record Checkpoint E completion and retain the
+contracts that still constrain Checkpoints F–G.
 
 This plan now describes unfinished delivery work. Implemented architecture
 belongs in the [Kernel maintainer guide](../../guides/kernel-maintainer.md),
@@ -169,6 +168,35 @@ states. No projection publishes destination paths.
 Checkpoint E finishes the shared command implementation and removes the last
 frontend-owned execution path. It is a rendering, dispatch, and lifecycle
 cutover, not another acquisition refactor.
+
+**Completed 2026-08-09.** The delivered implementation:
+
+- installs `scripts/check_stable_cli_transition.exs` in `mix precommit`; it
+  scans Git's complete tracked and unignored file set across production,
+  development, tests, examples, retained guides, generated artifacts, package
+  inputs, and CI inputs, and freezes the expected caller set at zero for every
+  E1 transitional API;
+- routes `help`, `version`, `validate`, `models`, default and connected
+  `doctor`, `run`, and `init` through one `CommandEngine`, with run acquisition,
+  phase-6 destination authority, owner-backed execution, publication, and
+  closed outcome projection split into cohesive command modules;
+- reduces `mix ptc.run` to a Mix-owned startup/authorization adapter over the
+  shared grammar and sealed command outcome;
+- publishes the exact two-file initializer scaffold with the required
+  owner-only staging and atomic no-replace commit boundary; and
+- gives manifest REPLs the shared inert acquisition prefix, phase-6 privacy
+  authorization, one retained provider session when required, provider-free
+  operation without a host configuration, atomic owner handoff, and exactly-once
+  terminal cleanup.
+
+The cutover deleted the path-backed `RunBuilder` run helpers, transitional
+phase-6/publication helpers, public `CommandEngine` request/catalog/authorize
+seams, the complete internal `:check` operation, legacy run option plumbing,
+and the public Mix failure/persistence test seams together with their final
+callers and superseded coverage. `doctor --connect` remains independent, and a
+provider-free run still uses `ExecutionSessionOwner` while omitting only the
+provider session. The durable ownership, privacy, and user-facing contracts are
+recorded in the Kernel maintainer and running/debugging guides.
 
 ### E1. Inventory, deletion, and module boundaries
 

@@ -1,10 +1,11 @@
 defmodule PtcRunner.Kernel.TutorialExamplesTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.ProviderRegistry
-  alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @examples Path.expand("../../../examples/kernel-tutorial", __DIR__)
   @host Path.join(@examples, "ptc-host.json")
@@ -21,7 +22,12 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
                 "paid_total" => 335.75,
                 "pending_ids" => ["A-101"]
               }
-            }} = RunBuilder.run(path("01-orders"), registry)
+            }} =
+             "01-orders"
+             |> path()
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
+             |> RunLifecycle.execute()
   end
 
   test "the live-model tutorial manifests and shared host installation load strictly" do
@@ -37,7 +43,12 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
   test "the signature tutorial renders retryable model feedback without a provider" do
     {:ok, registry} = ProviderRegistry.new()
 
-    assert {:ok, result} = RunBuilder.run(path("05-signature-feedback"), registry)
+    assert {:ok, result} =
+             "05-signature-feedback"
+             |> path()
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
+             |> RunLifecycle.execute()
 
     assert %{
              "invalid_evaluation" => %{

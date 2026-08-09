@@ -237,7 +237,7 @@ defmodule PtcRunner.Kernel.Runner do
              %Error{
                kind: :workflow_failed,
                reason: :invalid_result_projection,
-               details: %{},
+               details: %{result_projection: true},
                usage: RunState.usage(state)
              }}
 
@@ -246,7 +246,10 @@ defmodule PtcRunner.Kernel.Runner do
              %Error{
                kind: :workflow_failed,
                reason: ProjectionError.kind(reason),
-               details: %{projection_error: inspect(reason, limit: 10)},
+               details: %{
+                 result_projection: true,
+                 projection_error: inspect(reason, limit: 10)
+               },
                usage: RunState.usage(state)
              }}
         end

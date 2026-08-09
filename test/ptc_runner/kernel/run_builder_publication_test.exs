@@ -1,11 +1,13 @@
 defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @tag :tmp_dir
   test "one-shot publication uses only frozen execution evidence", %{tmp_dir: directory} do
@@ -37,8 +39,16 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
     {:ok, registry} = ProviderRegistry.new()
 
     File.cd!(directory)
-    opts = [trace: "run.jsonl", inspect: "run.inspection.jsonl", output: "result.json"]
-    assert {:ok, built} = RunBuilder.load_and_build(manifest_path, registry, opts)
+    opts = [trace_path: "run.jsonl", inspect: "run.inspection.jsonl", output: "result.json"]
+
+    assert {:ok, built} =
+             manifest_path
+             |> ApplicationPackage.request_directory(
+               installed_limits: registry.installed_limits,
+               inspection_capture: true
+             )
+             |> RunLifecycle.build(registry, opts)
+
     event_sink_pid = built.config.event_sink.pid
     inspection_sink_pid = built.config.inspection_sink.pid
 
@@ -75,13 +85,15 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
                PublicationAuthority.new(trace: conflicting_path, output: conflicting_path)
 
       assert {:error, :invalid_execution_outcome} =
-               RunBuilder.publish_execution(outcome, substituted_authority)
+               RunBuilder.publish_execution_report(outcome, substituted_authority)
 
       refute File.exists?(conflicting_path)
-      assert {:error, :invalid_execution_outcome} = RunBuilder.publish_execution(outcome, opts)
 
-      assert {:ok, %{value: %{"answer" => 42}}, :normal} =
-               RunBuilder.publish_execution(outcome, built.publication_authority)
+      assert {:error, :invalid_execution_outcome} =
+               RunBuilder.publish_execution_report(outcome, opts)
+
+      assert {:ok, %{result: {:ok, %{value: %{"answer" => 42}}}, result_class: :normal}} =
+               RunBuilder.publish_execution_report(outcome, built.publication_authority)
 
       tracee = self()
       reference = :erlang.trace_delivered(tracee)
@@ -132,7 +144,11 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
     manifest_path = Path.join(directory, "ptc.json")
     File.write!(manifest_path, Jason.encode!(manifest))
     {:ok, registry} = ProviderRegistry.new()
-    assert {:ok, built} = RunBuilder.load_and_build(manifest_path, registry)
+
+    assert {:ok, built} =
+             manifest_path
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
 
     tampered_config = %{built.config | result_contract: nil}
 
@@ -141,8 +157,8 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
 
     assert {:ok, outcome} = RunBuilder.execute_built(built)
 
-    assert {:error, {:result_contract_failed, details}} =
-             RunBuilder.publish_execution(outcome, built.publication_authority)
+    assert {:error, %{error: {:error, {:result_contract_failed, details}}}} =
+             RunBuilder.publish_execution_report(outcome, built.publication_authority)
 
     assert is_map(details)
     assert :ok = RunBuilder.close(built)

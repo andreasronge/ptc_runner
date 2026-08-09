@@ -16,17 +16,6 @@ defmodule PtcRunner.Kernel.GitHubMCPE2ETest do
     token = required_environment!("PTC_TEST_GITHUB_TOKEN")
     paths = write_application(dir, binary)
 
-    check_output =
-      capture_io(fn ->
-        Mix.Task.reenable("ptc.run")
-        Run.run([paths.manifest, "--host-config", paths.host, "--check"])
-      end)
-
-    assert check_output =~ "mission  github  mcp/stdio  1 tools"
-    assert check_output =~ "snapshot "
-    refute check_output =~ token
-    refute_server_process(binary)
-
     run_output =
       capture_io(fn ->
         Mix.Task.reenable("ptc.run")
@@ -35,14 +24,17 @@ defmodule PtcRunner.Kernel.GitHubMCPE2ETest do
           paths.manifest,
           "--host-config",
           paths.host,
-          "--trace",
-          paths.trace
+          "--trace-dir",
+          Path.dirname(paths.trace)
         ])
       end)
 
-    assert run_output =~ "PtcRunner"
+    envelope = Jason.decode!(run_output)
+    assert envelope["status"] == "ok"
+    assert envelope["result"]["value"] =~ "PtcRunner"
     refute run_output =~ token
-    refute File.read!(paths.trace) =~ token
+    trace = Path.join(Path.dirname(paths.trace), envelope["run_ref"] <> ".jsonl")
+    refute File.read!(trace) =~ token
     refute_server_process(binary)
   end
 

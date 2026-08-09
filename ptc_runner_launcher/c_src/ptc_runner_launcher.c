@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #if defined(__linux__)
+#include <sys/syscall.h>
 #include <sys/prctl.h>
 #endif
 
@@ -91,6 +92,44 @@ struct sha256_context {
 };
 
 static volatile sig_atomic_t launcher_signal = 0;
+
+static int publish_directory_noreplace(const char *staging,
+                                       const char *target) {
+  int result;
+
+#if defined(__linux__)
+#ifndef RENAME_NOREPLACE
+#define RENAME_NOREPLACE (1U << 0U)
+#endif
+#if defined(SYS_renameat2)
+  result = (int)syscall(SYS_renameat2, AT_FDCWD, staging, AT_FDCWD, target,
+                        RENAME_NOREPLACE);
+#else
+  errno = ENOSYS;
+  result = -1;
+#endif
+#elif defined(__APPLE__)
+  result = renamex_np(staging, target, RENAME_EXCL);
+#else
+  errno = ENOSYS;
+  result = -1;
+#endif
+
+  if (result == 0) {
+    return 0;
+  }
+
+  if (errno == EEXIST || errno == ENOTEMPTY) {
+    return 73;
+  }
+
+  if (errno == ENOSYS || errno == EOPNOTSUPP || errno == EXDEV ||
+      errno == EINVAL) {
+    return 74;
+  }
+
+  return 75;
+}
 
 static const uint32_t sha256_constants[64] = {
     0x428a2f98U, 0x71374491U, 0xb5c0fbcfU, 0xe9b5dba5U, 0x3956c25bU,
@@ -1485,8 +1524,14 @@ int main(int argc, char **argv) {
   enum startup_result startup;
   int result;
 
-  (void)argc;
-  (void)argv;
+  if (argc > 1) {
+    if (argc == 4 &&
+        strcmp(argv[1], "--publish-directory-noreplace") == 0) {
+      return publish_directory_noreplace(argv[2], argv[3]);
+    }
+
+    return 64;
+  }
 
   memset(&action, 0, sizeof(action));
   action.sa_handler = record_signal;

@@ -1412,6 +1412,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
              end)
 
     assert {:ok, run_ref} = CommandRunRef.generate()
+    assert {:ok, runtime_services} = ProviderRuntimeServices.new()
 
     assert {:error, :invalid_command_preparation} =
              CommandPreparation.new(
@@ -1419,6 +1420,8 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                run_ref,
                prepared,
                other_catalog,
+               runtime_services,
+               false,
                %{},
                []
              )

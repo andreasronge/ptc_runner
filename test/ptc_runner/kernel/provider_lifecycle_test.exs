@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.TestSupport.ProviderSessionFixture
+  alias PtcRunner.TestSupport.RunLifecycle
   alias ReqLLM.ToolCall
 
   @schema %{"type" => "object", "additionalProperties" => false}
@@ -239,7 +240,11 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
       })
 
     path = manifest(dir, [], [provider("consumer", %{}), provider("producer", %{})])
-    {:ok, built} = RunBuilder.load_and_build(path, registry)
+
+    {:ok, built} =
+      path
+      |> directory_request(registry)
+      |> RunLifecycle.build()
 
     assert built.config.mission_environment.capabilities
            |> Map.values()
@@ -284,7 +289,9 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     path = manifest(dir, [], [provider("consumer", %{})])
 
     assert {:error, :provider_dependency_unavailable} =
-             RunBuilder.load_and_build(path, registry)
+             path
+             |> directory_request(registry)
+             |> RunLifecycle.build()
 
     refute_received :dependency_preflighted
     refute_received :dependency_credentials_resolved
@@ -492,7 +499,11 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
       ProviderRegistry.new(%{"private" => ProviderRegistry.staged(staged)})
 
     path = manifest(dir, [], [provider("private", %{})])
-    {:ok, built} = RunBuilder.load_and_build(path, registry)
+
+    {:ok, built} =
+      path
+      |> directory_request(registry)
+      |> RunLifecycle.build()
 
     assert built.config.event_sink.policy == :private
     assert :ok = RunBuilder.close(built)
@@ -531,7 +542,9 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     path = manifest(dir, [], [provider("private", %{})])
 
     assert {:error, :provider_data_class_denied} =
-             RunBuilder.load_and_build(path, registry)
+             path
+             |> directory_request(registry)
+             |> RunLifecycle.build()
 
     refute_received :provider_preflighted
     refute_received :credentials_resolved
@@ -607,11 +620,21 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     manifest = manifest(dir, [provider("owned", %{"id" => "run"})], [])
     {:ok, registry} = registry_with_close(parent)
 
-    assert {:ok, _result} = RunBuilder.run(manifest, registry)
+    assert {:ok, _result} =
+             manifest
+             |> directory_request(registry)
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
     assert_receive {:closed, "run"}
 
     repl_manifest = manifest(dir, [provider("owned", %{"id" => "repl"})], [])
-    {:ok, built} = RunBuilder.load_and_build(repl_manifest, registry)
+
+    {:ok, built} =
+      repl_manifest
+      |> directory_request(registry)
+      |> RunLifecycle.build()
+
     {:ok, repl} = ReplSession.new(config: built.config)
     assert {:ok, _events} = ReplSession.close(repl)
     assert_receive {:closed, "repl"}
@@ -619,7 +642,12 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     refute Process.alive?(built.config.event_sink.pid)
 
     unused_manifest = manifest(dir, [provider("owned", %{"id" => "unused"})], [])
-    {:ok, unused} = RunBuilder.load_and_build(unused_manifest, registry)
+
+    {:ok, unused} =
+      unused_manifest
+      |> directory_request(registry)
+      |> RunLifecycle.build()
+
     assert :ok = RunBuilder.close(unused)
     assert_receive {:closed, "unused"}
     refute Process.alive?(unused.config.event_sink.pid)
@@ -654,7 +682,12 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     manifest = manifest(dir, [provider("staged", %{})], [])
 
     assert {:error, {:trace_preflight_failed, :normal_trace_requires_normal_suffix}} =
-             RunBuilder.run(manifest, registry, trace: Path.join(dir, "wrong.private.jsonl"))
+             manifest
+             |> directory_request(registry,
+               trace_path: Path.join(dir, "wrong.private.jsonl")
+             )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
 
     refute_receive :trace_provider_prepared
     refute_receive :trace_provider_preflighted
@@ -688,12 +721,20 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
             %PtcRunner.Kernel.Error{
               kind: :provider_cleanup_error,
               reason: :provider_cleanup_failed
-            }} = RunBuilder.run(manifest, registry)
+            }} =
+             manifest
+             |> directory_request(registry)
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
 
     assert_receive :cleanup_attempted
     refute_receive :cleanup_attempted
 
-    assert {:ok, repl_built} = RunBuilder.load_and_build(manifest, registry)
+    assert {:ok, repl_built} =
+             manifest
+             |> directory_request(registry)
+             |> RunLifecycle.build()
+
     assert {:ok, repl} = ReplSession.new(config: repl_built.config)
 
     assert {:error, :provider_cleanup_failed, close_events} = ReplSession.close(repl)
@@ -707,7 +748,11 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert_receive :cleanup_attempted
     refute_receive :cleanup_attempted
 
-    assert {:ok, abort_built} = RunBuilder.load_and_build(manifest, registry)
+    assert {:ok, abort_built} =
+             manifest
+             |> directory_request(registry)
+             |> RunLifecycle.build()
+
     assert {:ok, abort_repl} = ReplSession.new(config: abort_built.config)
     sink_pid = abort_built.config.event_sink.pid
     :erlang.trace(sink_pid, true, [:receive])
@@ -725,7 +770,11 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert_receive :cleanup_attempted
     refute_receive :cleanup_attempted
 
-    assert {:ok, dead_sink_built} = RunBuilder.load_and_build(manifest, registry)
+    assert {:ok, dead_sink_built} =
+             manifest
+             |> directory_request(registry)
+             |> RunLifecycle.build()
+
     assert {:ok, dead_sink_repl} = ReplSession.new(config: dead_sink_built.config)
     EventSink.stop(dead_sink_built.config.event_sink)
 
@@ -733,7 +782,11 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert_receive :cleanup_attempted
     refute_receive :cleanup_attempted
 
-    assert {:ok, dead_state_built} = RunBuilder.load_and_build(manifest, registry)
+    assert {:ok, dead_state_built} =
+             manifest
+             |> directory_request(registry)
+             |> RunLifecycle.build()
+
     assert {:ok, dead_state_repl} = ReplSession.new(config: dead_state_built.config)
     [{_, {owner_pid, token}}] = :ets.lookup(dead_state_repl.access, dead_state_repl.id)
     assert {:ok, _config, run_state} = ReplSessionOwner.resources(owner_pid, token)
@@ -745,7 +798,11 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert_receive :cleanup_attempted
     refute_receive :cleanup_attempted
 
-    assert {:ok, built} = RunBuilder.load_and_build(manifest, registry)
+    assert {:ok, built} =
+             manifest
+             |> directory_request(registry)
+             |> RunLifecycle.build()
+
     assert {:error, :provider_cleanup_failed} = RunBuilder.close(built)
     assert_receive :cleanup_attempted
     refute_receive :cleanup_attempted
@@ -1462,6 +1519,17 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   end
 
   defp provider(name, config), do: %{"name" => name, "config" => config}
+
+  defp request_options(registry, _opts),
+    do: [installed_limits: registry.installed_limits]
+
+  defp directory_request(path, registry, opts \\ []) do
+    {ApplicationPackage.request_directory(path, request_options(registry, opts)), registry,
+     build_options(opts)}
+  end
+
+  defp build_options(opts),
+    do: Keyword.take(opts, [:inspect, :output, :private_output, :trace_path])
 
   defp manifest(dir, workflow_providers, mission_providers) do
     path = Path.join(dir, "#{System.unique_integer([:positive])}.json")

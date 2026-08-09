@@ -1,13 +1,14 @@
 defmodule PtcRunner.Kernel.InspectionSinkTest do
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.ProviderRegistry
-  alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ViewerAdapter
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @source "(return 42)"
   @source_hash :crypto.hash(:sha256, @source) |> Base.encode16(case: :lower)
@@ -654,12 +655,18 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     {:ok, registry} = ProviderRegistry.new(%{"native" => builder})
 
     assert {:ok, _result} =
-             RunBuilder.run(manifest_path, registry,
-               trace: trace_path,
-               inspect: inspection_path,
-               private_output: result_path,
-               result_projection: :json
+             manifest_path
+             |> ApplicationPackage.request_directory(
+               inspection_capture: true,
+               result_projection: :json,
+               installed_limits: registry.installed_limits
              )
+             |> RunLifecycle.build(registry,
+               trace_path: trace_path,
+               inspect: inspection_path,
+               private_output: result_path
+             )
+             |> RunLifecycle.execute()
 
     assert {:ok, [prelude, source, input, output] = records} =
              InspectionArtifact.load(inspection_path)

@@ -6,29 +6,35 @@ manifest, execution, result, and trace paths.
 
 ## Commands
 
+The shared command engine also implements `ptc init DIRECTORY`. In a source
+checkout it is available through `CommandEngine.dispatch/1`; it creates the
+exact two-file scaffold documented in [Getting started](getting-started.md#create-a-minimal-application).
+Initialization validates the scaffold before filesystem access and publishes
+the completed directory atomically without replacing an existing directory or
+symlink.
+
 | Command | Purpose |
 | --- | --- |
-| `mix ptc.run MANIFEST` | Run the manifest's qualified entry and print public JSON |
+| `mix ptc.run MANIFEST` | Run the manifest's qualified entry and print the closed V1 envelope |
 | `mix ptc.run MANIFEST --host-config HOST.json` | Install the provider aliases a provider-bearing manifest selects |
-| `mix ptc.run MANIFEST --mission INPUT.json` | Run with a confined alternate input object |
+| `mix ptc.run MANIFEST --input INPUT.json` | Run with a confined alternate input object |
 | `mix ptc.run MANIFEST --output VALUE.json` | Write only the validated result value |
-| `mix ptc.run MANIFEST --trace TRACE.jsonl` | Persist bounded canonical events after the run |
+| `mix ptc.run MANIFEST --trace-dir DIR` | Persist bounded canonical events under the command run reference |
 | `mix ptc.run MANIFEST --inspect RUN.inspection.jsonl` | Also write the owner-only private artifact |
 | `mix ptc.run MANIFEST --component-override-descriptor D.json` | Compile one selected component from verified replacement source |
 | `mix ptc.materialize MANIFEST --component ID --out DIR --source S.clj` | Publish model-authored source as a gated candidate component |
 | `mix ptc.repl` | Start the direct transactional PTC-Lisp REPL |
 | `mix ptc.repl -e EXPR -l SETUP.clj` | Run repeatable expressions with optional setup |
-| `mix ptc.repl --manifest MANIFEST` | Reuse a manifest's workflow bundle and capabilities |
+| `mix ptc.repl --manifest MANIFEST [--host-config HOST.json]` | Reuse a manifest's workflow bundle and one provider session |
 | `mix ptc.repl --profile PROFILE --resource NAME=DIR` | Query an immutable trace or inspection capture |
 | `mix ptc.viewer --trace-dir DIR` | Browse canonical JSONL traces locally |
 
 `mix help ptc.run`, `mix help ptc.repl`, and `mix help ptc.viewer` list the
 installed options for each command.
 
-A provider-bearing manifest requires `--host-config`. Add `--check` to assemble
-and discover those providers, print a safe resolved view, and close everything
-without invoking the workflow or calling a model — see
-[Host configuration](host-configuration.md#verify-an-installation).
+A provider-bearing manifest requires `--host-config`. Use the standalone
+`ptc doctor MANIFEST --host-config HOST.json --connect` operation when active
+provider connectivity must be checked without running the workflow.
 
 A fresh Mix invocation safely configures and starts a selected optional
 provider application only after provider activity begins. A later `ptc.run`
@@ -39,24 +45,23 @@ so task chaining and `iex -S mix` do not require restarting the VM.
 
 ```console
 mix ptc.run ptc.json
-mix ptc.run ptc.json --trace traces/run.jsonl
+mix ptc.run ptc.json --trace-dir traces
 mix ptc.run ptc.json \
-  --trace traces/run.jsonl \
+  --trace-dir traces \
   --inspect traces/run.inspection.jsonl
 ```
 
-Normal traces use a `.jsonl` suffix. A run whose effective event policy is
-private requires the reserved `.private.jsonl` suffix:
+The command creates `<run_ref>.jsonl` for a normal run and the reserved
+`<run_ref>.private.jsonl` form for a private run:
 
 ```console
 mix ptc.run private-ptc.json \
-  --trace traces/run.private.jsonl \
+  --trace-dir traces \
   --private-output results/run.private.json
 ```
 
-The command checks this rule after assembly determines the effective run class
-but before workflow execution or model activity. A normal run may not use the
-reserved private suffix.
+The envelope reports the run reference and artifact class without publishing a
+destination path.
 
 Configured result, trace, and inspection destinations must be pairwise
 distinct after resolving their existing parent-directory identity; final names
@@ -113,9 +118,9 @@ per-authority lease directory is owner-only; its first creation additionally
 requires `mkdir`, while later appends validate its type, owner, and exact mode
 without changing permissions through an unresolved path.
 
-The current 0.x `--mission PATH` option replaces the manifest input file. Its
-name is historical and is planned to become `--input` without a compatibility
-alias before the standalone command contract is released.
+`--input PATH` replaces the manifest input file. `--private-input PATH` uses
+the same confined JSON shape and classifies the complete run as private before
+provider activity; the two options are mutually exclusive.
 
 ### Replace one component's source
 
@@ -282,8 +287,18 @@ The command never renders an inspected exception, arbitrary callback result,
 credential, private value, provider response, selector, or filesystem path into
 either public stream.
 
-The shared command core already implements `ptc models --host-config HOST.json`
-through `PtcRunner.Kernel.CommandEngine`. It reads one bounded host document and
+The shared command core already implements `ptc run` and
+`ptc models --host-config HOST.json` through
+`PtcRunner.Kernel.CommandEngine`. Shared run dispatch authorizes destinations,
+executes provider-free and provider-backed work through one execution owner,
+publishes immutable execution evidence, and returns a schema-valid normal or
+private envelope; a private envelope never contains the result value. The Mix
+task is a thin renderer over this boundary. Its adapter owns Mix application
+bootstrap and adds only interactive `--authorize-mcp NAME` for the immediately
+following run. Bootstrap failures use the same closed private-safe run envelope
+as other internal failures; raw startup reasons and argv paths are not rendered.
+
+`models` reads one bounded host document and
 returns the installed aliases in lexical order with only their public source,
 revision, data-class, accepted-class, and destination declarations. Listing
 models invokes no provider callback, credential or OAuth service, optional
@@ -339,11 +354,17 @@ Start a direct session or reuse a manifest's frozen workflow environment:
 mix ptc.repl
 mix ptc.repl -e '(def x 40)' -e '(+ x 2)' -e '(+ *1 1)'
 mix ptc.repl --manifest ptc.json
+mix ptc.repl --manifest ptc.json --host-config ptc-host.json
 mix ptc.repl --manifest ptc.json --trace traces/repl.jsonl
 ```
 
 Definitions and the three most recent ordinary successful values persist for
-one session. Failed forms keep the previously committed state. See the
+one session. Failed forms keep the previously committed state. A manifest that
+selects providers requires `--host-config`; it acquires those providers once
+and reuses the session across expressions. Provider-free manifests omit the
+host configuration and still use the same caller-death and sink owner. Private
+manifest sessions are interactive-only and require both `--private-terminal`
+and attached stdin/stdout terminals before provider activity can begin. See the
 [Kernel REPL guide](kernel-repl.md) for scripts, stdin, JSONL output, resource
 limits, and lifecycle details.
 
@@ -389,7 +410,7 @@ Pass both output paths when exact development diagnostics are required:
 mkdir -p tmp/inspection
 mix ptc.run examples/kernel-tutorial/03-file-agent/ptc.json \
   --host-config examples/kernel-tutorial/ptc-host.json \
-  --trace tmp/inspection/run.jsonl \
+  --trace-dir tmp/inspection \
   --inspect tmp/inspection/run.inspection.jsonl
 ```
 
@@ -479,7 +500,7 @@ Build the checks in three layers:
 Layer 2 needs no test framework:
 
 ```console
-actual="$(mix ptc.run examples/kernel-tutorial/01-orders/ptc.json | jq -c '.value')"
+actual="$(mix ptc.run examples/kernel-tutorial/01-orders/ptc.json | jq -c '.result.value')"
 test "$actual" = \
   '{"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}'
 ```

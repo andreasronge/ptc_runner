@@ -10,6 +10,7 @@ defmodule Mix.Tasks.Ptc.Repl do
       mix ptc.repl script.clj
       mix ptc.repl -
       mix ptc.repl --manifest ptc.json
+      mix ptc.repl --manifest ptc.json --host-config ptc-host.json
       mix ptc.repl --manifest ptc.json --trace trace.jsonl
       mix ptc.repl --profile log-analysis-v2 --resource traces=tmp/traces
       mix ptc.repl --profile inspection-analysis-v2 \
@@ -25,6 +26,7 @@ defmodule Mix.Tasks.Ptc.Repl do
     * `-l, --load` — evaluate a setup file before expressions or interaction;
     * `-m, --manifest` — reuse a strict Kernel manifest's workflow bundle,
       capabilities, limits, input, labels, and event policy;
+    * `--host-config` — manifest-only trusted provider installation document;
     * `-t, --trace` — append this session's canonical events to a JSONL file;
     * `--profile` — select a code-owned mission session profile;
     * `--resource NAME=VALUE` — supply a required profile resource; repeatable;
@@ -65,18 +67,19 @@ defmodule Mix.Tasks.Ptc.Repl do
   alias PtcRunner.Kernel.AnalysisSession
   alias PtcRunner.Kernel.AnalysisSessionBuilder
   alias PtcRunner.Kernel.AnalysisTerminal
+  alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.DeterministicJSON
-  alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ManifestRepl
   alias PtcRunner.Kernel.ReplSession
-  alias PtcRunner.Kernel.RunBuilder
-  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Registry
+  alias PtcRunner.MixCommandRuntime
 
   @switches [
     eval: :keep,
     load: :string,
     manifest: :string,
+    host_config: :string,
     trace: :string,
     profile: :string,
     resource: :keep,
@@ -100,7 +103,8 @@ defmodule Mix.Tasks.Ptc.Repl do
       case validate_command(opts, arguments, invalid) do
         {:ok, :describe} -> describe_profile(opts)
         {:ok, :profile} -> run_profile_session(opts, arguments)
-        {:ok, :direct} -> run_session(opts, arguments)
+        {:ok, :manifest} -> run_manifest_session(opts, arguments)
+        {:ok, :direct} -> run_direct_session(opts, arguments)
         {:error, message} -> command_error(opts, :cli, message)
       end
     end
@@ -143,8 +147,11 @@ defmodule Mix.Tasks.Ptc.Repl do
       opts[:profile] ->
         validate_profile_command(opts, arguments, evals, resources, format)
 
-      opts[:manifest] && (resources != [] or not is_nil(opts[:session_trace_dir])) ->
-        {:error, "profile resources require --profile"}
+      opts[:manifest] ->
+        validate_manifest_command(opts, resources, format)
+
+      opts[:host_config] ->
+        {:error, "--host-config requires --manifest"}
 
       resources != [] or not is_nil(opts[:session_trace_dir]) or
         Keyword.has_key?(opts, :continue_on_error) or
@@ -156,6 +163,20 @@ defmodule Mix.Tasks.Ptc.Repl do
 
       true ->
         {:ok, :direct}
+    end
+  end
+
+  defp validate_manifest_command(opts, resources, format) do
+    cond do
+      resources != [] or not is_nil(opts[:session_trace_dir]) or
+          Keyword.has_key?(opts, :continue_on_error) ->
+        {:error, "profile resources require --profile"}
+
+      format == "jsonl" ->
+        {:error, "--format jsonl requires --profile or --describe-profile"}
+
+      true ->
+        {:ok, :manifest}
     end
   end
 
@@ -219,6 +240,9 @@ defmodule Mix.Tasks.Ptc.Repl do
       opts[:manifest] ->
         {:error, :profile_with_manifest}
 
+      opts[:host_config] ->
+        {:error, :profile_with_host_config}
+
       opts[:trace] ->
         {:error, :profile_with_trace}
 
@@ -252,6 +276,9 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   defp profile_frontend_error(:profile_with_trace),
     do: "use --session-trace-dir instead of --trace with --profile"
+
+  defp profile_frontend_error(:profile_with_host_config),
+    do: "--host-config requires --manifest"
 
   defp profile_frontend_error(:profile_resources_required),
     do: "--profile requires its declared --resource values"
@@ -949,33 +976,75 @@ defmodule Mix.Tasks.Ptc.Repl do
     end
   end
 
-  defp run_session(opts, arguments) do
-    with {:ok, config} <- load_config(opts[:manifest]),
-         {:ok, session} <- ReplSession.new(config: config) do
-      try do
-        outcome = evaluate_mode(session, opts, arguments)
-        finish(outcome, opts[:trace])
-      rescue
-        exception ->
-          abort_and_persist(session, :frontend_exception, opts[:trace])
-          reraise exception, __STACKTRACE__
-      catch
-        kind, reason ->
-          abort_and_persist(session, :frontend_exit, opts[:trace])
-          :erlang.raise(kind, reason, __STACKTRACE__)
-      end
-    else
+  defp run_direct_session(opts, arguments) do
+    case ReplSession.new(trace_path: opts[:trace]) do
+      {:ok, session} -> run_workflow_session(session, opts, arguments)
       {:error, reason} -> Mix.raise("ptc.repl setup failed: #{inspect(reason)}")
     end
   end
 
-  defp load_config(nil), do: {:ok, nil}
-
-  defp load_config(path) do
-    with {:ok, registry} <- ProviderRegistry.new(),
-         {:ok, built} <- RunBuilder.load_and_build(path, registry, result_projection: :native),
-         do: {:ok, built.config}
+  defp run_manifest_session(opts, arguments) do
+    with {:ok, runtime} <- manifest_runtime(),
+         {:ok, session} <-
+           ManifestRepl.open(opts[:manifest], opts[:host_config],
+             runtime: runtime,
+             trace_path: opts[:trace],
+             private_terminal: Keyword.get(opts, :private_terminal, false),
+             terminal_attached: AnalysisTerminal.attached?(),
+             input_mode: manifest_input_mode(opts, arguments)
+           ) do
+      run_workflow_session(session, opts, arguments)
+    else
+      {:error, %{code: code}} -> Mix.raise(manifest_repl_error(code))
+      {:error, reason} -> Mix.raise("ptc.repl setup failed: #{inspect(reason)}")
+    end
   end
+
+  defp run_workflow_session(session, opts, arguments) do
+    outcome = evaluate_mode(session, opts, arguments)
+    finish(outcome)
+  rescue
+    exception ->
+      abort_session(session, :frontend_exception)
+      reraise exception, __STACKTRACE__
+  catch
+    kind, reason ->
+      abort_session(session, :frontend_exit)
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  defp manifest_input_mode(opts, arguments) do
+    cond do
+      opts[:load] -> :load
+      Keyword.get_values(opts, :eval) != [] -> :eval
+      arguments == ["-"] -> :stdin
+      arguments != [] -> :script
+      true -> :interactive
+    end
+  end
+
+  defp manifest_runtime, do: CommandRuntime.new(MixCommandRuntime.options())
+
+  defp manifest_repl_error(:host_config_required),
+    do: "provider-backed manifest requires --host-config"
+
+  defp manifest_repl_error(:private_terminal_required),
+    do: "private manifest REPL requires --private-terminal"
+
+  defp manifest_repl_error(:private_manifest_interactive_only),
+    do: "private manifest REPL is interactive-only"
+
+  defp manifest_repl_error(:interactive_terminal_required),
+    do: "private manifest REPL requires attached stdin and stdout terminals"
+
+  defp manifest_repl_error(:private_terminal_unsupported),
+    do: "--private-terminal requires a private manifest"
+
+  defp manifest_repl_error(:trace_preflight_failed),
+    do: "ptc.repl trace destination is unavailable"
+
+  defp manifest_repl_error(code) when is_atom(code),
+    do: "ptc.repl setup failed: #{code}"
 
   defp evaluate_mode(session, opts, arguments) do
     with {:ok, session} <- maybe_load(session, opts[:load]) do
@@ -1109,88 +1178,55 @@ defmodule Mix.Tasks.Ptc.Repl do
   defp format_error(%{fail: %{reason: reason, message: message}}),
     do: "Error (#{reason}): #{message}"
 
-  defp finish({:ok, session}, trace_path) do
-    persist_and_stop(session, trace_path)
+  defp finish({:ok, session}) do
+    stop_session(session)
   end
 
-  defp finish({:error, %{} = step, session}, trace_path) do
-    persist_and_stop(session, trace_path)
+  defp finish({:error, %{} = step, session}) do
+    stop_session(session)
     Mix.raise(format_error(step))
   end
 
-  defp finish({:error, reason, session}, trace_path) do
-    persist_and_stop(session, trace_path)
+  defp finish({:error, reason, session}) do
+    stop_session(session)
     Mix.raise("ptc.repl failed: #{inspect(reason)}")
   end
 
-  defp persist_and_stop(session, trace_path) do
-    private? = ReplSession.event_policy(session) == :private
-
-    case persist_terminal_result(ReplSession.close(session), trace_path, private?) do
-      :ok ->
+  defp stop_session(session) do
+    case ReplSession.close(session) do
+      {:ok, _events} ->
         :ok
 
-      {:error, :cleanup, reason} ->
+      {:error, :provider_cleanup_failed, _events} ->
+        Mix.raise("ptc.repl cleanup failed: :provider_cleanup_failed")
+
+      {:error, :provider_cleanup_failed} ->
+        Mix.raise("ptc.repl cleanup failed: :provider_cleanup_failed")
+
+      {:error, :trace_persistence_failed, _events} ->
+        Mix.raise("ptc.repl trace failed: :trace_persistence_failed")
+
+      {:error, reason} ->
         Mix.raise("ptc.repl cleanup failed: #{inspect(reason)}")
-
-      {:error, :terminal, reason} ->
-        Mix.raise("ptc.repl trace failed: #{inspect(reason)}")
     end
   end
 
-  defp abort_and_persist(session, reason, trace_path) do
-    private? = ReplSession.event_policy(session) == :private
-    _ = persist_abort_result(ReplSession.abort(session, reason), trace_path, private?)
+  defp abort_session(session, reason) do
+    case ReplSession.abort(session, reason) do
+      {:error, :trace_persistence_failed, _events} ->
+        IO.puts(:stderr, "ptc.repl trace failed: :trace_persistence_failed")
+
+      {:error, :provider_cleanup_failed, _events} ->
+        IO.puts(:stderr, "ptc.repl cleanup failed: :provider_cleanup_failed")
+
+      {:error, :provider_cleanup_failed} ->
+        IO.puts(:stderr, "ptc.repl cleanup failed: :provider_cleanup_failed")
+
+      _result ->
+        :ok
+    end
+
     :ok
-  end
-
-  defp persist_abort_result({:ok, events}, trace_path, private?),
-    do: persist_trace(trace_path, events, private?)
-
-  defp persist_abort_result(
-         {:error, :provider_cleanup_failed, events},
-         trace_path,
-         private?
-       ),
-       do: persist_trace(trace_path, events, private?)
-
-  defp persist_abort_result(_result, _trace_path, _private?), do: :ok
-
-  @doc false
-  def persist_terminal_result({:ok, events}, trace_path, private?) do
-    persist_trace!(trace_path, events, private?)
-  end
-
-  def persist_terminal_result(
-        {:error, reason, events},
-        trace_path,
-        private?
-      ) do
-    persist_trace!(trace_path, events, private?)
-    {:error, :cleanup, reason}
-  end
-
-  def persist_terminal_result(
-        {:error, :provider_cleanup_failed},
-        _trace_path,
-        _private?
-      ),
-      do: {:error, :cleanup, :provider_cleanup_failed}
-
-  def persist_terminal_result({:error, reason}, _trace_path, _private?),
-    do: {:error, :terminal, reason}
-
-  defp persist_trace!(trace_path, events, private?) do
-    case persist_trace(trace_path, events, private?) do
-      :ok -> :ok
-      {:error, reason} -> Mix.raise("ptc.repl trace failed: #{inspect(reason)}")
-    end
-  end
-
-  defp persist_trace(nil, _events, _private?), do: :ok
-
-  defp persist_trace(path, events, private?) do
-    TraceLog.append_jsonl(path, events, private: private?)
   end
 
   defp handle_command("help", _session) do

@@ -15,6 +15,50 @@ The Kernel product is currently run from a source checkout with Elixir and Mix.
 A standalone macOS command and Docker image are planned for a later 0.x release
 from `main`.
 
+## Create a minimal application
+
+The shared command surface accepts `ptc init DIRECTORY`. From a source checkout,
+invoke that same command boundary in `iex -S mix`:
+
+```elixir
+{:ok, outcome} =
+  PtcRunner.Kernel.CommandEngine.dispatch(["init", "hello-ptc"])
+```
+
+Initialization publishes exactly `main.clj` and `ptc.json`. Their bytes are a
+stable contract:
+
+```clojure
+(ns main)
+
+(defn run [input]
+  (return input))
+```
+
+```json
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "main",
+        "path": "main.clj"
+      }
+    ],
+    "entry": "main/run"
+  },
+  "input": {
+    "value": {}
+  }
+}
+```
+
+The complete scaffold is validated in memory and assembled in an owner-only
+sibling directory. Publication uses an atomic no-replace rename, so an
+existing directory or symlink is never merged, overwritten, or removed. A
+failed initialization returns the path-free `initialization_failed` diagnostic;
+a clean pre-publication failure can be retried.
+
 ## Run the example
 
 From the repository root:
@@ -24,7 +68,7 @@ mix deps.get
 mix ptc.run examples/kernel-tutorial/01-orders/ptc.json
 ```
 
-The command prints one JSON object. Its `value` is:
+The command prints one JSON command envelope. Its `result.value` is:
 
 ```json
 {
@@ -96,7 +140,7 @@ capability payloads, or generated source:
 ```console
 mkdir -p tmp/tutorial-traces
 mix ptc.run examples/kernel-tutorial/01-orders/ptc.json \
-  --trace tmp/tutorial-traces/orders.jsonl
+  --trace-dir tmp/tutorial-traces
 ```
 
 The JSON Lines file records the run, workflow evaluation, outcome, usage, and

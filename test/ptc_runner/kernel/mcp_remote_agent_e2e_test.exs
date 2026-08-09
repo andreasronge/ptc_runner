@@ -15,12 +15,13 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
   @moduletag :e2e
   @moduletag timeout: 180_000
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
-  alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.TestSupport.LLMSupport
+  alias PtcRunner.TestSupport.RunLifecycle
 
   setup_all do
     :ok = PtcRunner.Dotenv.load()
@@ -108,10 +109,16 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
     inspection_path = Path.join(dir, "run.inspection.jsonl")
 
     assert {:ok, result} =
-             RunBuilder.run(manifest_path, registry,
-               trace: trace_path,
+             manifest_path
+             |> ApplicationPackage.request_directory(
+               inspection_capture: true,
+               installed_limits: registry.installed_limits
+             )
+             |> RunLifecycle.build(registry,
+               trace_path: trace_path,
                inspect: inspection_path
              )
+             |> RunLifecycle.execute()
 
     encoded_value = Jason.encode!(result.value)
     assert encoded_value =~ "current time in New York City"

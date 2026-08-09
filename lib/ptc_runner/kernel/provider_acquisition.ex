@@ -7,8 +7,10 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   is committed to its provisional registrar immediately, before the next
   provider can run.
 
-  `acquire/6` is the entry every active command uses — a run, a `--check`, and
-  `doctor --connect`. It plans from sealed evidence: the preparation phase 5
+  `acquire/6` is the entry every provider-acquiring run uses and also serves
+  acquisition-mode occurrences under `doctor --connect`. Connectivity has its
+  own sealed completion while sharing the surrounding active-session ownership.
+  Acquisition plans from sealed evidence: the preparation phase 5
   produced and the exact catalog it was validated against, which together
   supply the dependency graph that decides the closure and the
   whole-application judgements already made over the complete selection.
@@ -76,8 +78,8 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   would make the authority to invoke a callback depend on invoking callbacks,
   and would let executable code redirect which executable code runs.
 
-  `targets` is `:all` for a run and a check, which acquire the whole selection,
-  or the `{destination, index}` occurrences connectivity answers for — the same
+  `targets` is `:all` for a run, which acquires the whole selection, or the
+  `{destination, index}` occurrences connectivity answers for — the same
   identity the sealed declarations and `ConnectivityResult` use. They are
   checked against the sealed occurrences before any callback runs, so an unknown
   or empty target set costs nothing.
@@ -256,7 +258,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     _exception -> {:error, :invalid_provider_acquisition}
   end
 
-  # A run and a check target the whole selection, so the closure is every sealed
+  # A run targets the whole selection, so the closure is every sealed
   # occurrence. An application that reaches acquisition with none is refused
   # rather than succeeding with nothing acquired, exactly as an empty target
   # list is.

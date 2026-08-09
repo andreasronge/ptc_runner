@@ -14,12 +14,13 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
   @moduletag :e2e
   @moduletag timeout: 180_000
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InspectionArtifact
-  alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.TestSupport.LLMSupport
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @root Path.expand("../../..", __DIR__)
   @host_template Path.join(@root, "repo-analyst.host.json")
@@ -56,11 +57,17 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
              end)
 
     assert {:ok, result, :normal} =
-             RunBuilder.run_with_class(paths.manifest, registry,
-               trace: trace_path,
+             paths.manifest
+             |> ApplicationPackage.request_directory(
+               inspection_capture: true,
+               installed_limits: registry.installed_limits
+             )
+             |> RunLifecycle.build(registry,
+               trace_path: trace_path,
                inspect: inspection_path,
                output: output_path
              )
+             |> RunLifecycle.execute_with_class()
 
     assert %{"answer" => answer, "citations" => citations} = result.value
     assert is_binary(answer) and answer != ""

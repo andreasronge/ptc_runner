@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
   """
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.HostConfig
@@ -23,6 +24,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.Prelude
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @root Path.expand("../../..", __DIR__)
   @host Path.join(@root, "repo-analyst.host.json")
@@ -161,7 +163,14 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
                end)
 
       for name <- ~w(repo-analyst-review.json repo-analyst-improve.json) do
-        assert {:ok, built} = RunBuilder.load_and_build(path(name), registry)
+        assert {:ok, built} =
+                 name
+                 |> path()
+                 |> ApplicationPackage.request_directory(
+                   installed_limits: registry.installed_limits
+                 )
+                 |> RunLifecycle.build(registry)
+
         assert built.config.event_sink.policy == :private
 
         assert built.config.connector_snapshots

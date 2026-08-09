@@ -2,11 +2,13 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   @moduledoc false
 
   alias PtcRunner.Examples.KernelInspectionLab.MCPFixture
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
 
   @task "Use every available read-only fixture and return their results in one map."
@@ -21,12 +23,12 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
     fixture = MCPFixture.start(&mcp_response/1)
 
     try do
-      journeys = [
-        run_journey(output_dir, fixture.endpoint, "direct", @direct_program, false),
-        run_journey(output_dir, fixture.endpoint, "wrapper", @wrapper_program, true)
-      ]
-
-      {:ok, journeys}
+      with {:ok, direct} <-
+             run_journey(output_dir, fixture.endpoint, "direct", @direct_program, false),
+           {:ok, wrapper} <-
+             run_journey(output_dir, fixture.endpoint, "wrapper", @wrapper_program, true) do
+        {:ok, [direct, wrapper]}
+      end
     after
       fixture.close.()
     end
@@ -55,19 +57,73 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
     :ok = File.write(manifest_path, Jason.encode!(manifest))
     registry = registry(endpoint, program, wrapper?, directory)
 
-    {:ok, result} =
-      RunBuilder.run(manifest_path, registry, trace: trace_path, inspect: inspection_path)
-
-    {:ok, records} = InspectionArtifact.load(inspection_path)
-
-    %{
-      name: name,
-      result: result,
-      trace: trace_path,
-      inspection: inspection_path,
-      run_id: records |> hd() |> Map.fetch!("run_id")
-    }
+    with {:ok, request} <-
+           ApplicationPackage.request_directory(manifest_path,
+             installed_limits: registry.installed_limits,
+             inspection_capture: true
+           ),
+         {:ok, built} <-
+           RunBuilder.build(request, registry,
+             trace_path: trace_path,
+             inspect: inspection_path
+           ),
+         {:ok, result} <- execute_and_publish(built),
+         {:ok, records} <- InspectionArtifact.load(inspection_path) do
+      {:ok,
+       %{
+         name: name,
+         result: result,
+         trace: trace_path,
+         inspection: inspection_path,
+         run_id: records |> hd() |> Map.fetch!("run_id")
+       }}
+    end
   end
+
+  defp execute_and_publish(%{publication_authority: authority} = built) do
+    case RunBuilder.execute_built(built) do
+      {:ok, outcome} ->
+        result = published_result(outcome, authority)
+        prefer_cleanup_error(result, PublicationAuthority.close(authority))
+
+      {:error, _reason} = error ->
+        prefer_cleanup_error(error, PublicationAuthority.abort(authority))
+    end
+  end
+
+  defp published_result(outcome, authority) do
+    case RunBuilder.publish_execution_report(outcome, authority) do
+      {:ok, %{result: {:ok, result}}} -> {:ok, result}
+      {:ok, %{result: {:error, reason}}} -> {:error, reason}
+      {:error, %{error: error, result: result}} -> publication_error(error, result)
+      {:error, %{error: error}} -> publication_error(error)
+      {:error, _report} -> {:error, :invalid_execution_outcome}
+    end
+  end
+
+  defp publication_error({:result_contract_failed, _details} = error), do: {:error, error}
+
+  defp publication_error({:error, {:result_contract_failed, _details} = error}),
+    do: {:error, error}
+
+  defp publication_error(%PtcRunner.Kernel.Error{} = error), do: {:error, error}
+
+  defp publication_error({stage, reason}) when stage in [:trace, :inspection, :result],
+    do: {:error, {persistence_failure(stage), reason}}
+
+  defp publication_error(error), do: {:error, error}
+
+  defp publication_error({stage, reason}, result) when stage in [:trace, :inspection, :result],
+    do: {:error, {persistence_failure(stage), reason, result}}
+
+  defp publication_error(error, result), do: {:error, {error, result}}
+
+  defp persistence_failure(:trace), do: :trace_persistence_failed
+  defp persistence_failure(:inspection), do: :inspection_persistence_failed
+  defp persistence_failure(:result), do: :result_persistence_failed
+
+  defp prefer_cleanup_error(_result, {:error, _reason} = cleanup), do: cleanup
+  defp prefer_cleanup_error(result, :ok), do: result
 
   defp registry(endpoint, program, wrapper?, directory) do
     turn = :atomics.new(1, signed: false)
