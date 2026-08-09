@@ -13,13 +13,14 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
   @moduletag :e2e
   @moduletag timeout: 120_000
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.ProviderRegistry
-  alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.ValueContract
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @root Path.expand("../../..", __DIR__)
   @replay_manifest Path.join(@root, "repo-analyst-evaluate-replay.json")
@@ -95,7 +96,12 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
         HostInstallation.runtime_registry(host, catalog)
       end)
 
-    assert {:ok, result} = RunBuilder.run(@replay_manifest, registry)
+    assert {:ok, result} =
+             @replay_manifest
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
+             |> RunLifecycle.execute()
+
     assert result.value["status"] == "scored"
     assert result.value["passed"]
     assert result.value["detail"] == "cited lib/zz_beacon.ex"
@@ -232,9 +238,14 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
     {:ok, empty_registry} = ProviderRegistry.new()
 
     assert {:ok, evaluation} =
-             RunBuilder.run(@aggregate_manifest, empty_registry,
-               private_input: relative(trials_path)
+             @aggregate_manifest
+             |> ApplicationPackage.request_directory(
+               installed_limits: empty_registry.installed_limits,
+               input: relative(trials_path),
+               input_authority: :private
              )
+             |> RunLifecycle.build(empty_registry)
+             |> RunLifecycle.execute()
 
     evaluation
   end
@@ -242,14 +253,20 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
   defp run_trial(manifest, registry, input_path, trace_path, opts \\ []) do
     inspection_path = String.replace_suffix(trace_path, ".jsonl", ".inspection.jsonl")
 
-    opts =
+    request_opts =
       [
-        private_input: relative(input_path),
-        trace_path: trace_path,
-        inspect: inspection_path
-      ] ++ opts
+        installed_limits: registry.installed_limits,
+        input: relative(input_path),
+        input_authority: :private,
+        inspection_capture: true
+      ] ++ Keyword.take(opts, [:component_override_descriptor])
 
-    case RunBuilder.run(manifest, registry, opts) do
+    build_opts = [trace_path: trace_path, inspect: inspection_path]
+
+    case manifest
+         |> ApplicationPackage.request_directory(request_opts)
+         |> RunLifecycle.build(registry, build_opts)
+         |> RunLifecycle.execute() do
       {:ok, result} ->
         assert File.regular?(inspection_path)
         result.value

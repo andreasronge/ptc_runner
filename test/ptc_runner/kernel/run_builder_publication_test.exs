@@ -1,11 +1,13 @@
 defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @tag :tmp_dir
   test "one-shot publication uses only frozen execution evidence", %{tmp_dir: directory} do
@@ -38,7 +40,15 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
 
     File.cd!(directory)
     opts = [trace_path: "run.jsonl", inspect: "run.inspection.jsonl", output: "result.json"]
-    assert {:ok, built} = RunBuilder.load_and_build(manifest_path, registry, opts)
+
+    assert {:ok, built} =
+             manifest_path
+             |> ApplicationPackage.request_directory(
+               installed_limits: registry.installed_limits,
+               inspection_capture: true
+             )
+             |> RunLifecycle.build(registry, opts)
+
     event_sink_pid = built.config.event_sink.pid
     inspection_sink_pid = built.config.inspection_sink.pid
 
@@ -134,7 +144,11 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
     manifest_path = Path.join(directory, "ptc.json")
     File.write!(manifest_path, Jason.encode!(manifest))
     {:ok, registry} = ProviderRegistry.new()
-    assert {:ok, built} = RunBuilder.load_and_build(manifest_path, registry)
+
+    assert {:ok, built} =
+             manifest_path
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
 
     tampered_config = %{built.config | result_contract: nil}
 

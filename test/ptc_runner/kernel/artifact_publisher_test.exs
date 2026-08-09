@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandRunOutcome
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ProviderRegistry
@@ -9,6 +10,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @tag :tmp_dir
   test "normal publication reports partial ordering and path-free failures", %{tmp_dir: dir} do
@@ -891,7 +893,16 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
       |> maybe_put(:private_output, output, result_destination == :policy and policy == :private)
       |> maybe_put(:output, output, result_destination == :policy and policy == :normal)
 
-    {:ok, built} = RunBuilder.load_and_build(manifest_path, registry, opts)
+    request_opts = [
+      installed_limits: registry.installed_limits,
+      inspection_capture: is_binary(opts[:inspect])
+    ]
+
+    {:ok, built} =
+      manifest_path
+      |> ApplicationPackage.request_directory(request_opts)
+      |> RunLifecycle.build(registry, opts)
+
     {built, registry}
   end
 

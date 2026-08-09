@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.Deadline
@@ -18,6 +19,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.SelectionRules
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @tag :tmp_dir
   test "installs only declared aliases and enforces MCP mission placement", %{tmp_dir: dir} do
@@ -723,7 +725,11 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
                HostInstallation.runtime_registry(host, catalog)
              end)
 
-    assert {:ok, built} = RunBuilder.load_and_build(manifest_path, registry)
+    assert {:ok, built} =
+             manifest_path
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
+
     assert built.config.limits.subordinate_evaluations == 24
     assert :ok = RunBuilder.close(built.config)
   end

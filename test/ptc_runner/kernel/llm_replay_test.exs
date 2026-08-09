@@ -20,8 +20,8 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ResourceRegistrar
-  alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @request %{"system" => "bounded", "messages" => [%{"role" => "user", "content" => "hi"}]}
 
@@ -310,7 +310,14 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
           HostInstallation.runtime_registry(host, catalog)
         end)
 
-      assert {:ok, result} = RunBuilder.run(paths.manifest, registry)
+      assert {:ok, result} =
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: registry.installed_limits
+               )
+               |> RunLifecycle.build(registry)
+               |> RunLifecycle.execute()
+
       assert result.value == %{"first" => %{"content" => "a"}, "second" => %{"content" => "b"}}
     end
 
@@ -376,7 +383,13 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
           HostInstallation.runtime_registry(host, catalog)
         end)
 
-      assert {:error, :ambiguous_workflow_llm} = RunBuilder.run(paths.manifest, registry)
+      assert {:error, :ambiguous_workflow_llm} =
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: registry.installed_limits
+               )
+               |> RunLifecycle.build(registry)
+               |> RunLifecycle.execute()
     end
 
     @tag :tmp_dir
@@ -393,7 +406,13 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
           HostInstallation.runtime_registry(host, catalog)
         end)
 
-      assert {:error, :provider_destination_denied} = RunBuilder.run(paths.manifest, registry)
+      assert {:error, :provider_destination_denied} =
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: registry.installed_limits
+               )
+               |> RunLifecycle.build(registry)
+               |> RunLifecycle.execute()
     end
 
     @tag :tmp_dir
@@ -410,7 +429,13 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
           HostInstallation.runtime_registry(host, catalog)
         end)
 
-      assert {:error, :invalid_llm_replay_selection} = RunBuilder.run(paths.manifest, registry)
+      assert {:error, :invalid_llm_replay_selection} =
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: registry.installed_limits
+               )
+               |> RunLifecycle.build(registry)
+               |> RunLifecycle.execute()
     end
   end
 

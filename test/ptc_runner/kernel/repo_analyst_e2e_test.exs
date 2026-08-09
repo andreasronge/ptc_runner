@@ -18,9 +18,10 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
   @moduletag :e2e
   @moduletag timeout: 120_000
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
-  alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @root Path.expand("../../..", __DIR__)
   @server Path.join(@root, "examples/mcp/filesystem/dist/server.js")
@@ -45,7 +46,11 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
         HostInstallation.runtime_registry(host, catalog)
       end)
 
-    assert {:ok, built} = RunBuilder.load_and_build(paths.manifest, registry)
+    assert {:ok, built} =
+             paths.manifest
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
+
     assert [provider_snapshot] = built.config.connector_snapshots
     assert {:ok, result} = PtcRunner.Kernel.run(built.entry_source, built.config)
     assert %{status: :ok, value: %{outcome: :returned, value: value}} = result.value
@@ -94,7 +99,12 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
 
     # This workflow returns the rendered prompt directly rather than through
     # kernel-eval, so the projected value is the prompt string itself.
-    assert {:ok, result} = RunBuilder.run(paths.manifest, registry)
+    assert {:ok, result} =
+             paths.manifest
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
+             |> RunLifecycle.execute()
+
     assert is_binary(prompt = result.value)
 
     for name <- ~w(repo/ls repo/find-files repo/search repo/read-range) do
@@ -129,7 +139,9 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
       end)
 
     assert {:error, :mcp_invalid_snapshot_identity} =
-             RunBuilder.load_and_build(paths.manifest, registry)
+             paths.manifest
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
   end
 
   @tag :tmp_dir
@@ -185,7 +197,12 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
         HostInstallation.runtime_registry(host, catalog)
       end)
 
-    assert {:ok, result} = RunBuilder.run(manifest_path, registry)
+    assert {:ok, result} =
+             manifest_path
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
+             |> RunLifecycle.execute()
+
     assert %{status: :ok, value: %{outcome: :returned, value: value}} = result.value
 
     info = value["info"]

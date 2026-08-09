@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.TypedCanonicalJSON
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @source "(ns app) (defn run [input] (return input))"
   @schema ~S({"type":"object","properties":{"answer":{"type":"integer"}},"additionalProperties":false})
@@ -276,7 +277,9 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     assert :ok = RunBuilder.close(sealed_build)
 
     assert {:ok, filesystem_build} =
-             RunBuilder.load_and_build(manifest_path, registry)
+             manifest_path
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
 
     assert filesystem_build.result_projection == :native
 
@@ -755,7 +758,12 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     end
 
     {:ok, registry} = ProviderRegistry.new(%{"capture" => builder})
-    assert {:error, :stop_after_context} = RunBuilder.run(manifest_path, registry)
+
+    assert {:error, :stop_after_context} =
+             manifest_path
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
+             |> RunLifecycle.execute()
 
     assert_receive {:context, context}
     refute Map.has_key?(context, :directory)

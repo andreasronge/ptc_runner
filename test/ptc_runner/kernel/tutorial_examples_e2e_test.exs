@@ -4,10 +4,11 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
   @moduletag :e2e
   @moduletag timeout: 180_000
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
-  alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.TestSupport.LLMSupport
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @examples Path.expand("../../../examples/kernel-tutorial", __DIR__)
   @host Path.join(@examples, "ptc-host.json")
@@ -66,7 +67,11 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
         HostInstallation.runtime_registry(host, catalog)
       end)
 
-    RunBuilder.run(path(example), registry)
+    example
+    |> path()
+    |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+    |> RunLifecycle.build(registry)
+    |> RunLifecycle.execute()
   end
 
   defp path(example), do: Path.join([@examples, example, "ptc.json"])

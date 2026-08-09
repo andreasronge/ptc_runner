@@ -24,7 +24,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.InstallationCatalog
-  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderRegistry
@@ -3588,59 +3587,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:ok, built} = RunBuilder.build_prepared(prepared, registry)
     assert :ok = RunBuilder.close(built)
     assert :ok = PreparedRun.close(prepared)
-  end
-
-  @tag :tmp_dir
-  test "load and run reject duplicate artifact options before acquisition", %{tmp_dir: directory} do
-    missing = Path.join(directory, "missing")
-    duplicate_trace = [trace_path: "first.jsonl", trace_path: "second.jsonl"]
-
-    invalid_limits = [
-      %{Limits.installed_defaults() | run_duration_ms: :invalid},
-      Map.delete(Limits.installed_defaults(), :run_duration_ms),
-      Map.put(Limits.installed_defaults(), :unexpected_limit, 1)
-    ]
-
-    assert {:ok, registry} = ProviderRegistry.new()
-
-    assert {:error, :invalid_build_options} =
-             RunBuilder.load_and_build(missing, registry, duplicate_trace)
-
-    assert {:error, :invalid_build_options} =
-             RunBuilder.run(missing, registry, duplicate_trace)
-
-    assert {:error, :invalid_build_options} =
-             RunBuilder.load_and_build(missing, registry, installed_limits: :invalid)
-
-    assert {:error, :invalid_build_options} =
-             RunBuilder.run(missing, registry, installed_limits: :invalid)
-
-    extended_invalid_registry = Map.put(registry, :unexpected, :retained)
-
-    assert {:error, :invalid_provider_registry} =
-             RunBuilder.load_and_build(missing, extended_invalid_registry)
-
-    assert {:error, :invalid_provider_registry} =
-             RunBuilder.run(missing, extended_invalid_registry)
-
-    for limits <- invalid_limits do
-      invalid_registry = %{registry | installed_limits: limits}
-
-      assert {:error, :invalid_provider_registry} =
-               ProviderRegistry.new(%{}, installed_limits: limits)
-
-      assert {:error, :invalid_build_options} =
-               RunBuilder.load_and_build(missing, registry, installed_limits: limits)
-
-      assert {:error, :invalid_build_options} =
-               RunBuilder.run(missing, registry, installed_limits: limits)
-
-      assert {:error, :invalid_provider_registry} =
-               RunBuilder.load_and_build(missing, invalid_registry)
-
-      assert {:error, :invalid_provider_registry} =
-               RunBuilder.run(missing, invalid_registry)
-    end
   end
 
   @tag :tmp_dir

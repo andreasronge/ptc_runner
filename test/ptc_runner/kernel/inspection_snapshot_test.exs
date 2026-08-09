@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.HostConfig
@@ -11,6 +12,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceSnapshot
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @source "(return 42)"
   @source_hash :crypto.hash(:sha256, @source) |> Base.encode16(case: :lower)
@@ -365,7 +367,10 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
         HostInstallation.runtime_registry(host, catalog)
       end)
 
-    {:ok, built} = RunBuilder.load_and_build(manifest_path, registry)
+    {:ok, built} =
+      manifest_path
+      |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+      |> RunLifecycle.build(registry)
 
     assert built.config.event_sink.policy == :private
 
@@ -465,7 +470,9 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       end)
 
     assert {:error, :provider_data_class_denied} =
-             RunBuilder.load_and_build(manifest_path, registry)
+             manifest_path
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
   end
 
   @tag :tmp_dir

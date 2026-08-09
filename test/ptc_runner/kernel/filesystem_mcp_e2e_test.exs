@@ -13,9 +13,10 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
   @moduletag :e2e
   @moduletag timeout: 120_000
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
-  alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.TestSupport.RunLifecycle
 
   @server Path.expand("../../../examples/mcp/filesystem/dist/server.js", __DIR__)
 
@@ -34,7 +35,10 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
                HostInstallation.runtime_registry(host, catalog)
              end)
 
-    assert {:ok, built} = RunBuilder.load_and_build(paths.manifest, registry)
+    assert {:ok, built} =
+             paths.manifest
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
 
     assert [snapshot] = built.config.connector_snapshots
     assert snapshot["provider"] == "workspace"
@@ -47,7 +51,11 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
     assert snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/
     assert length(snapshot["acquisition"]["tools"]) == 5
 
-    assert {:ok, result} = RunBuilder.run(paths.manifest, registry)
+    assert {:ok, result} =
+             paths.manifest
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
+             |> RunLifecycle.execute()
 
     assert %{status: :ok, value: %{outcome: :returned, value: values}} = result.value
 
