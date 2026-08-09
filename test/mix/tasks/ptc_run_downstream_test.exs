@@ -25,16 +25,30 @@ defmodule Mix.Tasks.Ptc.RunDownstreamTest do
     {manifest_path, host_path} = write_llm_application(dir)
     File.cp!(Path.join(@root, "mix.lock"), Path.join(dir, "mix.lock"))
 
+    env = [
+      {"MIX_ENV", "prod"},
+      {"MIX_DEPS_PATH", Path.join(@root, "deps")},
+      {"MIX_BUILD_PATH", @build_path}
+    ]
+
+    # Build the consumer in its own invocation. Mix reports compilation progress
+    # on standard output, so a cold `@build_path` -- every fresh clone, and every
+    # CI run -- would otherwise prefix the closed run envelope with build noise.
+    {build_output, build_status} =
+      System.cmd(System.find_executable("mix"), ["compile"],
+        cd: dir,
+        env: env,
+        stderr_to_stdout: true
+      )
+
+    assert build_status == 0, build_output
+
     {output, status} =
       System.cmd(
         System.find_executable("mix"),
         ["ptc.run", manifest_path, "--host-config", host_path],
         cd: dir,
-        env: [
-          {"MIX_ENV", "prod"},
-          {"MIX_DEPS_PATH", Path.join(@root, "deps")},
-          {"MIX_BUILD_PATH", @build_path}
-        ],
+        env: env,
         stderr_to_stdout: true
       )
 
