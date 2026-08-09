@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   alias PtcRunner.Kernel.ManifestReplOpening
   alias PtcRunner.Kernel.ManifestReplPreparation
   alias PtcRunner.Kernel.ReplSession
+  alias PtcRunner.Kernel.ReplSessionOwner
   alias PtcRunner.Kernel.TraceLog
 
   @stdio_root Path.expand("../../..", __DIR__)
@@ -88,6 +89,29 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
     assert {:ok, %File.Stat{mode: mode}} = File.stat(trace_path)
     assert Bitwise.band(mode, 0o777) == 0o600
     assert {:ok, _trace} = TraceLog.new(source: {:private_file, trace_path})
+  end
+
+  @tag :tmp_dir
+  test "killing an adopted session owner also terminates its run state", %{tmp_dir: directory} do
+    manifest = write_provider_free_application(directory, :normal)
+
+    assert {:ok, session} =
+             ManifestRepl.open(manifest, nil,
+               input_mode: :interactive,
+               terminal_attached: true
+             )
+
+    [{id, {owner, token}}] = :ets.lookup(session.access, session.id)
+    assert {:ok, _config, run_state} = ReplSessionOwner.resources(owner, token)
+    owner_ref = Process.monitor(owner)
+    run_state_ref = Process.monitor(run_state.pid)
+
+    Process.exit(owner, :kill)
+
+    assert_receive {:DOWN, ^owner_ref, :process, ^owner, :killed}, 5_000
+    assert_receive {:DOWN, ^run_state_ref, :process, _pid, :killed}, 5_000
+    assert {:error, :session_closed} = ReplSession.close(session)
+    assert :ets.lookup(session.access, id) == []
   end
 
   @tag :tmp_dir
