@@ -535,14 +535,21 @@ application acquisition, so later continuation work and VM-global cwd changes
 cannot reinterpret them. The sealed wrapper accepts only absolute destination
 paths and its exact field set. If the invocation cwd is unavailable, the engine
 seals the ordered keys it could not anchor alongside every absolute destination.
-Phase 6 can therefore preflight earlier absolute classes before projecting an
-artifact-specific invalid-destination diagnostic for a later unanchored class,
-preserving the fixed trace/inspection/result precedence. Phase 6 also retains
-the closed artifact class and cause through validation and reservation: trace,
-inspection, and result failures distinguish invalid, unavailable, and unsafe
-destinations without retaining or rendering a filesystem path. A collision
-between artifact arguments is instead `arguments/conflicting_arguments`, since
-no destination open or publication was attempted. A failed or exceptional wrapper
+Entry still compares the successfully captured absolute destinations with the
+envelope before startup. Artifact-to-artifact distinctness remains in phase 6,
+after artifact-specific validation and preparation have selected the
+privacy-dependent trace suffix. Frontend dispatch retains the colliding
+declaration-owned switches for human rendering. This ordering lets phase 6
+project an artifact-specific invalid-destination diagnostic before considering
+a lexical collision and preflight earlier absolute classes before projecting an
+invalid-destination diagnostic for a later unanchored class, preserving the
+fixed trace/inspection/result precedence. It also retains the closed artifact
+class and cause through validation and reservation: trace, inspection, and
+result failures distinguish invalid, unavailable, and unsafe destinations
+without retaining or rendering a filesystem path. Artifact destinations that
+resolve to the same file project
+`arguments/conflicting_arguments`: no destination failed to open, so the
+rejected combination remains an argument error. A failed or exceptional wrapper
 construction releases the prepared run's activity owner before the engine
 projects its closed internal diagnostic. Long switch names use their documented
 dashed spellings, and underscore spellings before the `--` option terminator
@@ -656,7 +663,10 @@ single-use claim transfers the claimant monitor to the same owner, so caller
 death before the claim is harmless while claimant death cleans every
 provisional reservation. Reservation failure is
 `destination/recovery_reservation_failed` before provider activity, and the
-file remains empty while execution is in progress.
+file remains empty while execution is in progress. A requested private result
+that names its own run-reference-derived recovery file is instead a deterministic
+`arguments/conflicting_arguments` rejection; the frontend identifies only the
+owning `--private-output` switch and phase 6 creates neither reservation.
 
 After a valid result and successful provider cleanup, the publisher writes the
 already-bounded bytes through that handle, syncs the file, and syncs its

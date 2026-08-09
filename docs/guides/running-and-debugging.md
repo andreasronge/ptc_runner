@@ -274,15 +274,16 @@ bounded classifications at the Kernel boundary.
 Mix and release failures use the same bounded human renderer. Failures returned
 by the shared preparation and runtime path render only the closed diagnostic
 catalog or fixed argument guidance; they never inspect a rejected runtime term.
-Name `--envelope` when a caller needs the stable JSON result and exit status.
+Name `--envelope` when a caller also needs the stable JSON result and exit
+status in a file. Envelope publication is additive: it never redirects,
+suppresses, or replaces the command's normal terminal rendering.
 
 ### Stable standalone process contract
 
-The standalone `ptc` command reports through one V1 JSON command
-envelope written to a caller-named destination. When a destination is named and
-the arguments parse, every ordinary or caught path produces exactly one
-envelope — except a failure to publish the envelope itself, which exits `74`
-with no envelope, described below:
+When `--envelope` names a destination, the standalone `ptc` command additionally
+writes one V1 JSON command envelope there. When the arguments parse, every
+ordinary or caught path produces exactly one envelope — except a failure to
+publish the envelope itself, which exits `74` with no envelope, described below:
 
 - success exits `0`;
 - a classified failure exits with the primary diagnostic's exact
@@ -341,14 +342,16 @@ can interleave with it and an existing entry is never replaced.
 The switch is `--envelope PATH`, separate from `--output` and
 `--private-output`.
 
-When no destination is named the command writes no envelope. It writes a short
-human rendering of the same sealed outcome. A failure renders the primary phase,
-code, and catalog message on stderr. A successful normal `run` renders its
-result value on stdout; a successful private `run` renders only its completion
-and artifact class, because the private envelope omits the value and a private
-result still requires an authorized owner-only sink. That rendering is projected
-from the outcome, obeys the same privacy rules as the envelope, and is
-presentation rather than a contract: do not parse it.
+The command writes a short human rendering of the sealed outcome whether or not
+an envelope destination is named. Without `--envelope` it writes no envelope;
+with `--envelope` it additionally publishes the envelope file. A failure
+renders the primary phase, code, and catalog message on stderr. A successful
+normal `run` renders its result value on stdout; a successful private `run`
+renders only its completion and artifact class, because the private envelope
+omits the value and a private result still requires an authorized owner-only
+sink. That rendering is projected from the outcome, obeys the same privacy
+rules as the envelope, and is presentation rather than a contract: do not
+parse it.
 
 The destination names a file and only a file; there is no stdout spelling.
 **Standalone stdout is not a machine channel** — it is shared with the runtime,
@@ -449,25 +452,32 @@ publishes `assertion-failed`. Prefer the second shape. It costs one key and it
 is the difference between a caller knowing what class of thing went wrong and
 knowing only that something did.
 
-**When the classification is not enough**, the detail is in the private
-inspection artifact, not the trace. Rerun with `--inspect`:
+**When provider-backed detail is needed**, rerun with `--inspect`:
 
 ```console
 mix ptc run ptc.json --trace-dir traces --inspect traces/run.inspection.jsonl
 ```
 
-That artifact holds prompts, model responses, generated source, and capability
-arguments and results. It is owner-only and sensitive: read it, do not publish
-it beside a normal trace, and see [Use private inspection
+Every inspection artifact holds the exact frozen component source in
+`prelude-source` records. Provider-backed activity may add prompts, normalized
+model responses, generated subordinate source, capability arguments and
+results, and MCP request and response bodies. A provider-free workflow adds no
+run-time record beyond `prelude-source`: its `println` output and detailed error
+fields are not retained. The artifact is owner-only and sensitive: read it, do
+not publish it beside a normal trace, and see [Use private inspection
 deliberately](#use-private-inspection-deliberately).
 
-**For a compile or parse failure**, load the component in a REPL instead. The
-REPL reports the diagnostic directly rather than through the closed catalog,
-which is usually faster than inspecting a failed run:
+**To exercise the component compiler in a REPL**, load the manifest, not the
+component as a setup file:
 
 ```console
-mix ptc repl -l path/to/component.clj
+mix ptc repl -m ptc.json
 ```
+
+The `-l`/`--load` option dynamically evaluates a setup file and cannot load the
+component-only `ns` and `defn-` forms. Manifest setup currently reports a
+compile failure as `ptc repl setup failed: compile_failed`; it does not expose
+the underlying compiler explanation.
 
 **To find the artifacts**, use the run reference. It appears in the command
 envelope, and every artifact is named from it: `<run_ref>.jsonl` for a normal

@@ -84,16 +84,32 @@ defmodule PtcRunner.Kernel.CommandEngine do
   @doc false
   @spec dispatch_entry(CommandEntry.t(), CommandRuntime.t()) ::
           {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
-  def dispatch_entry(
-        %CommandEntry{arguments: %CommandArguments{command: :repl}} = entry,
-        _runtime
-      ),
-      do: one_shot_repl_failure(entry.run_ref, :invalid_command)
+  def dispatch_entry(%CommandEntry{} = entry, %CommandRuntime{} = runtime) do
+    {status, outcome, _rejection} = dispatch_entry_context(entry, runtime, false)
+    {status, outcome}
+  end
 
-  def dispatch_entry(
-        %CommandEntry{arguments: %CommandArguments{} = arguments, rejection: nil} = entry,
-        %CommandRuntime{} = runtime
-      ) do
+  def dispatch_entry(%CommandEntry{} = entry, _runtime), do: startup_failure(entry)
+
+  @doc false
+  @spec dispatch_frontend_entry(CommandEntry.t(), CommandRuntime.t()) ::
+          {:ok, CommandOutcome.t(), nil}
+          | {:error, CommandOutcome.t(), CommandRejection.t() | nil}
+  def dispatch_frontend_entry(%CommandEntry{} = entry, %CommandRuntime{} = runtime),
+    do: dispatch_entry_context(entry, runtime, true)
+
+  defp dispatch_entry_context(
+         %CommandEntry{arguments: %CommandArguments{command: :repl}} = entry,
+         _runtime,
+         _presentation?
+       ),
+       do: with_rejection(one_shot_repl_failure(entry.run_ref, :invalid_command))
+
+  defp dispatch_entry_context(
+         %CommandEntry{arguments: %CommandArguments{} = arguments, rejection: nil} = entry,
+         %CommandRuntime{} = runtime,
+         presentation?
+       ) do
     if CommandRuntime.valid?(runtime) do
       case prepare_arguments_safely(
              arguments,
@@ -102,17 +118,28 @@ defmodule PtcRunner.Kernel.CommandEngine do
              runtime
            ) do
         {:ok, %CommandPreparation{} = preparation} ->
-          CommandRunDispatch.dispatch(preparation, runtime)
+          dispatch_preparation(preparation, runtime, entry, presentation?)
 
         terminal ->
-          terminal
+          with_rejection(terminal)
       end
     else
-      startup_failure(entry)
+      with_rejection(startup_failure(entry))
     end
   end
 
-  def dispatch_entry(%CommandEntry{} = entry, _runtime), do: startup_failure(entry)
+  defp dispatch_entry_context(%CommandEntry{} = entry, _runtime, _presentation?),
+    do: with_rejection(startup_failure(entry))
+
+  defp dispatch_preparation(preparation, runtime, entry, true) do
+    CommandRunDispatch.dispatch_frontend(preparation, runtime, entry.frontend)
+  end
+
+  defp dispatch_preparation(preparation, runtime, _entry, false),
+    do: with_rejection(CommandRunDispatch.dispatch(preparation, runtime))
+
+  defp with_rejection({status, %CommandOutcome{} = outcome}) when status in [:ok, :error],
+    do: {status, outcome, nil}
 
   @doc false
   @spec entry_failure(CommandEntry.t()) :: {:error, CommandOutcome.t()}

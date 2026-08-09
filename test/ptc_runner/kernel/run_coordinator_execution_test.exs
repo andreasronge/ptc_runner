@@ -344,7 +344,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     shared = Path.join(directory, "shared.inspection.jsonl")
     {prepared, catalog} = prepared_run("(return 1)", inspection_capture: true)
 
-    assert {:error, :conflicting_destinations} =
+    assert {:error, {:conflicting_destinations, [:inspect, :output]}} =
              PublicationAuthority.authorize(
                "run-conflict",
                [inspect: shared, output: shared],

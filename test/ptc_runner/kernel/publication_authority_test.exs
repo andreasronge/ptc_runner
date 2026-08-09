@@ -424,6 +424,23 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   end
 
   @tag :tmp_dir
+  test "a target-specific reservation failure releases earlier exclusive handles", %{tmp_dir: dir} do
+    trace = Path.join(dir, "run.jsonl")
+    inspection = Path.join([dir, "missing", "run.inspection.jsonl"])
+
+    assert {:error, {:private_directory_parent_unavailable, :inspection}} =
+             PublicationAuthority.authorize(
+               "reservation-target-rollback",
+               [trace: trace, inspect: inspection],
+               :normal,
+               :normal
+             )
+
+    assert File.lstat(trace) == {:error, :enoent}
+    assert File.ls!(dir) == []
+  end
+
+  @tag :tmp_dir
   test "command authorization validates inspection destinations centrally", %{tmp_dir: dir} do
     application = application!(dir, "invalid-inspection")
     invalid_inspection = Path.join(dir, "inspection.json")
@@ -522,7 +539,29 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
     assert outcome.envelope["error"]["message"] ==
              "choose only one option from the conflicting argument group"
 
+    assert outcome.envelope["artifact_state"] == %{
+             "trace" => "not_requested",
+             "inspection" => "not_written",
+             "result" => "not_written"
+           }
+
     refute Jason.encode!(outcome.envelope) =~ dir
+  end
+
+  @tag :tmp_dir
+  test "private result cannot name its derived recovery destination", %{tmp_dir: dir} do
+    run_ref = "cmd-00000000000000000000000001"
+    recovery = PublicationAuthority.recovery_path(run_ref, Path.join(dir, "requested.json"))
+
+    assert {:error, {:conflicting_destinations, [:private_output, :recovery]}} =
+             PublicationAuthority.authorize(
+               run_ref,
+               [private_output: recovery],
+               :private,
+               :normal
+             )
+
+    refute File.exists?(recovery)
   end
 
   @tag :tmp_dir
