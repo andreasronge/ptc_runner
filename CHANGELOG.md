@@ -164,6 +164,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Command envelope publication no longer suppresses the normal terminal
+  rendering. Help, version, and init now use readable code-owned projections,
+  while workflow result values retain deterministic JSON rendering.
+- Destination failures now preserve their closed trace, inspection, or result
+  identity, and destination collisions consistently report actionable argument
+  conflicts without exposing caller paths.
+- Corrected the debugging and `println` documentation to distinguish dynamic
+  REPL setup files from compiled components and provider-backed inspection
+  records from evaluation-local `prints` entries.
 - Private analysis sessions no longer redact diagnostics built from the
   operator's own submitted source. An undefined-variable failure now reports
   its names, each verified to appear verbatim in the submitted source and

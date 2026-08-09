@@ -4,23 +4,42 @@ defmodule PtcRunner.Kernel.CommandRejection do
 
   Unknown switches are deliberately not retained. The value may carry only a
   declaration-owned accepted list or a declaration-owned retired switch and
-  replacement.
+  replacement. Destination failures and collisions retain only
+  declaration-owned switch names, never caller-owned paths.
   """
 
   alias PtcRunner.Kernel.CommandDeclaration
 
   @commands [:help, :version, :unknown | CommandDeclaration.commands()]
   @codes [:invalid_command, :invalid_arguments, :conflicting_arguments]
-  @enforce_keys [:command, :code, :kind, :accepted, :retired, :replacement]
+  @destination_keys [:trace_dir, :inspect, :output, :private_output]
+  @enforce_keys [
+    :command,
+    :code,
+    :kind,
+    :accepted,
+    :retired,
+    :replacement,
+    :destination,
+    :conflicts
+  ]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
           command: atom(),
           code: atom(),
-          kind: :generic | :unknown_switch | :retired_switch,
+          kind:
+            :generic
+            | :unknown_switch
+            | :retired_switch
+            | :invalid_destination
+            | :destination_collision
+            | :init_destination_collision,
           accepted: [binary()],
           retired: binary() | nil,
-          replacement: binary() | nil
+          replacement: binary() | nil,
+          destination: binary() | nil,
+          conflicts: [binary()]
         }
 
   @spec generic(atom(), atom()) :: t()
@@ -31,7 +50,9 @@ defmodule PtcRunner.Kernel.CommandRejection do
       kind: :generic,
       accepted: [],
       retired: nil,
-      replacement: nil
+      replacement: nil,
+      destination: nil,
+      conflicts: []
     }
   end
 
@@ -43,7 +64,9 @@ defmodule PtcRunner.Kernel.CommandRejection do
       kind: :unknown_switch,
       accepted: accepted_switches(command, frontend),
       retired: nil,
-      replacement: nil
+      replacement: nil,
+      destination: nil,
+      conflicts: []
     }
   end
 
@@ -67,7 +90,64 @@ defmodule PtcRunner.Kernel.CommandRejection do
       kind: :retired_switch,
       accepted: CommandDeclaration.accepted_switches(command, frontend),
       retired: switch,
-      replacement: replacement
+      replacement: replacement,
+      destination: nil,
+      conflicts: []
+    }
+  end
+
+  @spec invalid_destination(
+          CommandDeclaration.command(),
+          :envelope,
+          CommandDeclaration.frontend()
+        ) :: t()
+  def invalid_destination(command, :envelope, frontend)
+      when command in [:validate, :run, :doctor, :models, :init] do
+    %__MODULE__{
+      command: command,
+      code: :invalid_arguments,
+      kind: :invalid_destination,
+      accepted: [],
+      retired: nil,
+      replacement: nil,
+      destination: CommandDeclaration.option_switch!(command, frontend, :envelope),
+      conflicts: []
+    }
+  end
+
+  @spec destination_collision(
+          CommandDeclaration.command(),
+          atom(),
+          CommandDeclaration.frontend()
+        ) :: t()
+  def destination_collision(command, key, frontend)
+      when command == :run and key in @destination_keys do
+    conflicting = CommandDeclaration.option_switch!(command, frontend, key)
+    envelope = CommandDeclaration.option_switch!(command, frontend, :envelope)
+
+    %__MODULE__{
+      command: command,
+      code: :conflicting_arguments,
+      kind: :destination_collision,
+      accepted: [],
+      retired: nil,
+      replacement: nil,
+      destination: nil,
+      conflicts: [conflicting, envelope]
+    }
+  end
+
+  @spec init_destination_collision(CommandDeclaration.frontend()) :: t()
+  def init_destination_collision(frontend) do
+    %__MODULE__{
+      command: :init,
+      code: :conflicting_arguments,
+      kind: :init_destination_collision,
+      accepted: [],
+      retired: nil,
+      replacement: nil,
+      destination: nil,
+      conflicts: [CommandDeclaration.option_switch!(:init, frontend, :envelope)]
     }
   end
 end

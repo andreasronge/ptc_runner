@@ -25,6 +25,15 @@ defmodule PtcRunner.Kernel.CommandRenderer do
       %{"status" => "ok", "command" => "run", "artifact_class" => artifact_class} ->
         {:stdout, json_line(%{"artifact_class" => artifact_class, "status" => "ok"})}
 
+      %{"status" => "ok", "command" => "help", "result" => result} ->
+        {:stdout, help_text(result)}
+
+      %{"status" => "ok", "command" => "version", "result" => %{"version" => version}} ->
+        {:stdout, version <> "\n"}
+
+      %{"status" => "ok", "command" => "init", "result" => %{"created" => created}} ->
+        {:stdout, "created " <> Enum.join(created, ", ") <> "\n"}
+
       %{"status" => "ok", "result" => result} ->
         {:stdout, json_line(result)}
 
@@ -77,7 +86,52 @@ defmodule PtcRunner.Kernel.CommandRenderer do
        }),
        do: "; retired switch #{retired}; use #{replacement}"
 
+  defp rejection_suffix(%CommandRejection{
+         kind: :invalid_destination,
+         destination: destination
+       }),
+       do: "; invalid destination: #{destination}"
+
+  defp rejection_suffix(%CommandRejection{
+         kind: :destination_collision,
+         conflicts: [first, second]
+       }),
+       do: "; two destinations name the same file: #{first} and #{second}"
+
+  defp rejection_suffix(%CommandRejection{kind: :init_destination_collision}),
+    do: "; --envelope must be outside the init directory"
+
   defp rejection_suffix(_rejection), do: ""
+
+  defp help_text(%{"usage" => usage, "options" => options, "notices" => notices}) do
+    option_labels = Enum.map(options, &Enum.join(&1["switches"], ", "))
+    option_width = option_labels |> Enum.map(&String.length/1) |> Enum.max(fn -> 0 end)
+
+    lines =
+      ["Usage:" | Enum.map(usage, &("  " <> &1))]
+      |> append_options(options, option_labels, option_width)
+      |> append_notices(notices)
+
+    Enum.join(lines, "\n") <> "\n"
+  end
+
+  defp append_options(lines, [], _labels, _width), do: lines
+
+  defp append_options(lines, options, labels, width) do
+    rows =
+      options
+      |> Enum.zip(labels)
+      |> Enum.map(fn {option, label} ->
+        "  " <> String.pad_trailing(label, width) <> " — " <> option["description"]
+      end)
+
+    lines ++ ["", "Options:" | rows]
+  end
+
+  defp append_notices(lines, []), do: lines
+
+  defp append_notices(lines, notices),
+    do: lines ++ ["", "Notices:" | Enum.map(notices, &("  " <> &1))]
 
   defp json_line(value) do
     case DeterministicJSON.encode(value) do

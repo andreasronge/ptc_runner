@@ -384,6 +384,16 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
     end)
   end
 
+  @doc false
+  @spec option_switch!(command(), frontend(), atom()) :: binary()
+  def option_switch!(command, frontend, key)
+      when command in @commands and frontend in @shared_frontends and is_atom(key) do
+    command
+    |> options(frontend)
+    |> Enum.find(&(&1.key == key))
+    |> canonical_switch()
+  end
+
   @spec usage(topic()) :: [binary()]
   def usage(topic) when topic in @topics,
     do: @declarations |> Map.fetch!(topic) |> Map.fetch!(:usage)

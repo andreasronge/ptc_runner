@@ -596,7 +596,11 @@ exception, because arguments genuinely precede everything. And it lands **before
 the delivery boundary**: destination distinctness is argument validation that
 happens to require the filesystem, so a parse is not successful until it passes,
 and a collision therefore produces no envelope, exits `2`, and writes one closed
-stderr line.
+stderr line. That line uses `conflicting_arguments` and names only the
+declaration-owned switches whose destinations collide; it never includes either
+caller-owned path. Init containment instead states that `--envelope` must be
+outside the init directory, again without retaining either path. An unusable
+envelope destination is a separate rejection that names only `--envelope`.
 
 That last point is what makes the rule implementable. `init --envelope
 TARGET/inside.json` names an envelope beneath a target directory that does not
@@ -631,11 +635,12 @@ closes its own races. A destination that becomes aliased after preflight fails
 at commit with `74`, and the atomic no-replace commit is what makes that failure
 safe rather than destructive.
 
-Without the switch, the command does **not** write the envelope. It writes a
-short human rendering of the same sealed outcome. An envelope is machine output;
-a person at a terminal reading a wrapped several-hundred-character JSON line to
-find one message is a worse experience than the message alone, and the Mix
-frontend demonstrates that failure mode today.
+Without the switch, the command does **not** write the envelope. With or without
+the switch, it writes a short human rendering of the same sealed outcome. The
+switch adds atomic envelope publication; it does not replace the terminal
+rendering. An envelope is machine output; a person at a terminal reading a
+wrapped several-hundred-character JSON line to find one message is a worse
+experience than the message alone.
 
 The rendering must carry what the invocation was for:
 
@@ -649,7 +654,10 @@ The rendering must carry what the invocation was for:
 - a successful `run` whose result class is private renders only its completion
   and artifact class, never the value. The private envelope already omits the
   value, and a private result still requires an authorized owner-only sink; and
-- every other successful command renders its own public projection.
+- every other successful command renders its own public projection. Help uses
+  usage lines and aligned option descriptions, version prints its bare version,
+  and init names the fixed files it created. The remaining structured
+  projections use compact JSON.
 
 The rendering is projected from the sealed outcome, never assembled separately,
 and obeys the same privacy rules as the envelope: no private value, credential,
@@ -668,10 +676,12 @@ command is `mix ptc.run` until the generic task lands and `mix ptc run`
 afterwards; the rendering is the same either way.
 
 Rendering is a byte contract, not an intention, so fix it with fixtures rather
-than adjectives. One rule settles the whole surface: **every rendered value is
-compact JSON**, including a string value, which therefore appears quoted and
-escaped. Each rendering ends with exactly one newline, the only unescaped one it
-contains.
+than adjectives. **Every rendered workflow result value is compact JSON**,
+including a string result value, which therefore appears quoted and escaped.
+Code-owned projections may instead use readable text because no
+caller-controlled byte reaches them. Each rendering ends with exactly one
+newline, the only unescaped
+one it contains except for the deliberate line structure of help.
 
 "Compact JSON" alone is not byte-exact, because it does not fix the order of
 object members. Specify a deterministic encoding — a stable key order applied by
@@ -700,11 +710,14 @@ Pin the exact fixture rows. The matrix is:
   `:execution`, `:result_cleanup`, `:publication`, `:internal`), so any
   hand-written grouping into fewer "classes" would omit real phases and drift
   as the catalog changes;
-- **two additional `:arguments` rows, supplementing rather than replacing that
-  phase's row** — the unknown-switch rejection carrying its accepted list and
-  the retired-switch rejection carrying its replacement. Both are `:arguments`
-  diagnostics; they are listed separately because they render structure no
-  other diagnostic does, not because they sit outside the catalog;
+- **five additional `:arguments` rows, supplementing rather than replacing that
+  phase's row** — the unknown-switch rejection carrying its accepted list, the
+  retired-switch rejection carrying its replacement, the invalid envelope
+  destination naming its declaration-owned switch, the envelope collision
+  carrying two declaration-owned switch names, and init containment carrying
+  fixed guidance. All are `:arguments` diagnostics; they are listed separately
+  because they render structure no other diagnostic does, not because they sit
+  outside the catalog;
 - **one row for the `74` destination failure**, the only rendered outcome that
   is not a catalog diagnostic;
 - **one value-shape row**: a string result containing newlines, proving the
@@ -909,13 +922,14 @@ Checkpoint F is complete when:
   reader to call `CommandEngine.dispatch/1` from `iex`;
 - rendering matches byte-exact fixtures, identically under Mix and the release,
   for normal and private `run` success, each non-run command's success, one
-  failure per `DiagnosticCatalog` phase, the two `:arguments` rejection shapes,
+  failure per `DiagnosticCatalog` phase, the five `:arguments` rejection shapes,
   the `74` destination failure, and a string value containing newlines;
 - every failure rendering carries the run reference;
-- an invocation with no named destination prints a readable rendering rather
-  than an envelope: a normal `run` prints its result value on stdout, a private
-  `run` prints completion and artifact class without the value, and a failure
-  prints phase, code, and message on stderr;
+- every invocation that reaches a sealed outcome prints a readable rendering: a
+  normal `run` prints its result value on stdout, a private `run` prints
+  completion and artifact class without the value, and a failure prints phase,
+  code, and message on stderr. Naming `--envelope` adds its atomic file
+  publication without suppressing that rendering;
 - `mix ptc run` renders identically to the release and no longer raises a JSON
   envelope as its error message, and `mix ptc.run` no longer exists;
 - every documented recipe that parses command output names a destination rather

@@ -228,7 +228,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `pos?` | `(pos? ...)` |  |
 | `postwalk` * | `(postwalk f form)` | Transform tree bottom-up (post-order traversal) |
 | `prewalk` * | `(prewalk f form)` | Transform tree top-down (pre-order traversal) |
-| `println` | `(println ...)` | Prints arguments to the execution trace, separated by spaces. Returns `nil`. |
+| `println` | `(println ...)` | Records spaced arguments in the evaluation result's bounded `prints` list. Returns `nil`. |
 | `quote` | `(quote symbol)` | Return a symbolic reference without resolving it |
 | `range` | `(range end), (range start end), (range start end step)` | Returns sequence with specific step |
 | `ratio?` | `(ratio? ...)` |  |

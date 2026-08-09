@@ -2803,7 +2803,8 @@
     },
     %{
       name: "println",
-      description: "Prints arguments to the execution trace, separated by spaces. Returns `nil`.",
+      description:
+        "Records spaced arguments in the evaluation result's bounded `prints` list. Returns `nil`.",
       binding: :special,
       category: :core,
       dispatch: :env,

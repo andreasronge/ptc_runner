@@ -320,6 +320,11 @@ defmodule PtcRunner.Lisp do
 
   ## Return Value
 
+  `println` writes only to an evaluation-local buffer. Successful and failed
+  results expose any retained entries through `step.prints`; a caller must
+  explicitly render or store them. The evaluator itself does not write those
+  entries to stdout or a canonical trace.
+
   On success, returns:
    - `{:ok, PtcRunner.Lisp.Result.t()}` with:
      - `step.return`: An inert public projection of the evaluated value.

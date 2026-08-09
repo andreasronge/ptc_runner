@@ -2995,14 +2995,16 @@ arguments between `f` and the collection are passed as fixed prefix arguments.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `println` | `(println ...)` | Prints arguments to the execution trace, separated by spaces. Returns `nil`. |
+| `println` | `(println ...)` | Records spaced arguments in the evaluation result's bounded `prints` list. Returns `nil`. |
 
-`println` records bounded diagnostic text in the evaluation result.
+`println` records bounded diagnostic text in the evaluation result. It does not
+write to stdout or to a canonical execution trace; a host or frontend must
+render or retain the returned entries explicitly.
 
 **Behavior:**
 - Arguments are converted to Clojure syntax strings.
 - Multiple arguments are separated by single spaces.
-- Each `println` call results in a new line in the output buffer.
+- Each `println` call appends one entry to the `prints` list.
 - Returns `nil`.
 
 ```clojure
@@ -3012,8 +3014,9 @@ arguments between `f` and the collection are passed as fixed prefix arguments.
 results
 ```
 
-**Trace Output:**
-Programs that call `println` will have their output available in the `prints` list of the result:
+**Evaluation Result:**
+Programs evaluated through `PtcRunner.Lisp.run/2` return captured `println`
+output in the result's `prints` list:
 
 ```elixir
 # Result of Lisp.run(...)
@@ -3908,7 +3911,8 @@ PTC-Lisp intentionally omits many Clojure features for sandbox safety and simpli
 
 Key omissions: lazy sequences, macros, mutable state (`atom`/`ref`/`agent`), `eval`/`read-string`, file I/O, `try`/`catch`/`throw`, multi-methods/protocols, user-defined namespaces, and full Java interop (minimal Date/Time subset supported: see §8.14).
 
-**Note:** `println` IS supported — see §8.13. It writes to an internal trace buffer, not stdout.
+**Note:** `println` IS supported — see §8.13. It appends to the evaluation
+result's bounded `prints` list, not stdout or a canonical trace.
 
 ### 13.1 Anonymous Functions (Supported, With Restrictions)
 

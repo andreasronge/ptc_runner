@@ -3546,7 +3546,14 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert preparation.artifact_destinations == %{trace_dir: absolute_trace}
     assert preparation.artifact_destination_failures == [:output]
     assert CommandPreparation.valid?(preparation)
-    assert :ok = CommandPreparation.close(preparation)
+
+    assert {:error, outcome} = CommandEngine.preflight(preparation)
+    assert outcome.exit_status == 7
+    assert outcome.envelope["error"]["phase"] == "destination"
+    assert outcome.envelope["error"]["code"] == "result_destination_unavailable"
+    assert outcome.envelope["artifact_state"]["trace"] == "not_written"
+    assert outcome.envelope["artifact_state"]["result"] == "not_written"
+    refute Jason.encode!(outcome.envelope) =~ directory
   end
 
   @tag :tmp_dir

@@ -86,9 +86,10 @@ test -d "$release_root/erts-$(elixir -e 'IO.write(:erlang.system_info(:version))
 find "$release_root/lib" -maxdepth 1 -type d -name 'req_llm-*' -print -quit | grep -q .
 
 "$command_bin" --version > "$release_tmp_dir/version.stdout"
-grep -Eq '^\{"version":"[0-9]+\.[0-9]+\.[0-9]+"\}$' "$release_tmp_dir/version.stdout"
+grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' "$release_tmp_dir/version.stdout"
 
 "$command_bin" help > "$release_tmp_dir/help.stdout"
+grep -q '^Usage:$' "$release_tmp_dir/help.stdout"
 for command in init validate run doctor models repl; do
   grep -q "ptc $command" "$release_tmp_dir/help.stdout"
   "$command_bin" help "$command" > "$release_tmp_dir/help-$command.stdout"
@@ -96,6 +97,7 @@ done
 
 "$command_bin" init "$fixture_root/initialized" > "$release_tmp_dir/init.stdout"
 test -f "$fixture_root/initialized/ptc.json"
+grep -qx 'created main.clj, ptc.json' "$release_tmp_dir/init.stdout"
 
 "$command_bin" validate "$application_root/ptc.json" > "$release_tmp_dir/validate.stdout"
 grep -q '"provider_activity":false' "$release_tmp_dir/validate.stdout"
@@ -108,7 +110,7 @@ envelope_path="$release_tmp_dir/run-envelope.json"
 "$command_bin" run "$application_root/ptc.json" --envelope "$envelope_path" \
   > "$release_tmp_dir/envelope.stdout" \
   2> "$release_tmp_dir/envelope.stderr"
-test ! -s "$release_tmp_dir/envelope.stdout"
+cmp "$release_tmp_dir/run.expected" "$release_tmp_dir/envelope.stdout"
 test ! -s "$release_tmp_dir/envelope.stderr"
 "$release_root/bin/ptc_runner" eval '
   [path] = System.argv()
@@ -126,7 +128,7 @@ failed_envelope_status=$?
 set -e
 test "$failed_envelope_status" -eq 3
 test ! -s "$release_tmp_dir/failed-envelope.stdout"
-test ! -s "$release_tmp_dir/failed-envelope.stderr"
+grep -q 'application/application_unavailable' "$release_tmp_dir/failed-envelope.stderr"
 "$release_root/bin/ptc_runner" eval '
   [path] = System.argv()
   envelope = path |> File.read!() |> Jason.decode!()
@@ -157,7 +159,9 @@ collision_status=$?
 set -e
 test "$collision_status" -eq 2
 test ! -e "$collision_path"
-grep -q 'arguments/invalid_arguments' "$release_tmp_dir/collision.stderr"
+grep -q 'arguments/conflicting_arguments' "$release_tmp_dir/collision.stderr"
+grep -q 'two destinations name the same file: --output and --envelope' \
+  "$release_tmp_dir/collision.stderr"
 
 existing_envelope="$release_tmp_dir/existing-envelope.json"
 printf '%s\n' 'original' > "$existing_envelope"

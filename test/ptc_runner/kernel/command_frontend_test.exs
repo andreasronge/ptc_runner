@@ -96,7 +96,11 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
     assert presentation.exit_status == 70
     assert presentation.stdout == ""
-    assert presentation.stderr == ""
+
+    assert presentation.stderr ==
+             "error: internal/internal_error: the command failed internally " <>
+               "(run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
+
     assert presentation.envelope_path == path
 
     encoded = File.read!(path)
@@ -105,6 +109,53 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     assert envelope["command"] == "doctor"
     assert envelope["error"]["phase"] == "internal"
     refute String.ends_with?(encoded, "\n")
+  end
+
+  @tag :tmp_dir
+  test "a successful envelope publication also renders the public result", %{tmp_dir: dir} do
+    application = write_application(dir)
+    path = Path.join(dir, "command-envelope.json")
+
+    presentation =
+      CommandFrontend.execute(
+        ["run", application, "--envelope", path],
+        :standalone,
+        fn _arguments -> {:ok, CommandRuntime.standalone()} end
+      )
+
+    assert presentation.exit_status == 0
+    assert presentation.stdout == "{\"answer\":42}\n"
+    assert presentation.stderr == ""
+    assert presentation.envelope_path == path
+    assert File.regular?(path)
+  end
+
+  @tag :tmp_dir
+  test "an envelope request preserves an artifact destination diagnosis", %{tmp_dir: dir} do
+    application = write_application(dir)
+    envelope_path = Path.join(dir, "command-envelope.json")
+    output_path = Path.join([dir, "missing", "result.json"])
+
+    presentation =
+      CommandFrontend.execute(
+        [
+          "run",
+          application,
+          "--output",
+          output_path,
+          "--envelope",
+          envelope_path
+        ],
+        :standalone,
+        fn _arguments -> {:ok, CommandRuntime.standalone()} end
+      )
+
+    assert presentation.exit_status == 7
+    assert presentation.stdout == ""
+    assert presentation.stderr =~ "destination/result_destination_unavailable"
+    assert presentation.envelope_path == envelope_path
+    assert File.regular?(envelope_path)
+    refute presentation.stderr =~ output_path
   end
 
   @tag :tmp_dir
@@ -154,39 +205,60 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   test "entry rejects resolved envelope collisions before bootstrap or delivery", %{tmp_dir: dir} do
     output = Path.join(dir, "answer.json")
 
-    assert_collision([
-      "run",
-      "ptc.json",
-      "--output",
-      output,
-      "--envelope",
-      Path.join([dir, ".", "answer.json"])
-    ])
+    assert_run_collision(
+      [
+        "run",
+        "ptc.json",
+        "--output",
+        output,
+        "--envelope",
+        Path.join([dir, ".", "answer.json"])
+      ],
+      "--output"
+    )
+
+    for {switch, name} <- [
+          {"--private-output", "private-answer.json"},
+          {"--inspect", "run.inspection.jsonl"}
+        ] do
+      path = Path.join(dir, name)
+
+      assert_run_collision(
+        ["run", "ptc.json", switch, path, "--envelope", path],
+        switch
+      )
+    end
 
     trace_dir = Path.join(dir, "traces")
     File.mkdir!(trace_dir)
 
     for suffix <- [".jsonl", ".private.jsonl"] do
-      assert_collision([
-        "run",
-        "ptc.json",
-        "--trace-dir",
-        trace_dir,
-        "--envelope",
-        Path.join(trace_dir, @run_ref <> suffix)
-      ])
+      assert_run_collision(
+        [
+          "run",
+          "ptc.json",
+          "--trace-dir",
+          trace_dir,
+          "--envelope",
+          Path.join(trace_dir, @run_ref <> suffix)
+        ],
+        "--trace-dir"
+      )
     end
 
     private_output = Path.join(dir, "private.json")
 
-    assert_collision([
-      "run",
-      "ptc.json",
-      "--private-output",
-      private_output,
-      "--envelope",
-      Path.join(dir, ".ptc-private-result-" <> @run_ref <> ".json")
-    ])
+    assert_run_collision(
+      [
+        "run",
+        "ptc.json",
+        "--private-output",
+        private_output,
+        "--envelope",
+        Path.join(dir, ".ptc-private-result-" <> @run_ref <> ".json")
+      ],
+      "--private-output"
+    )
   end
 
   @tag :tmp_dir
@@ -232,20 +304,39 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   @tag :tmp_dir
   test "init rejects an envelope at or beneath the resolved target", %{tmp_dir: dir} do
     target = Path.join(dir, "new-project")
-    assert_collision(["init", target, "--envelope", target])
-    assert_collision(["init", target, "--envelope", Path.join(target, "envelope.json")])
+    assert_init_collision(["init", target, "--envelope", target])
+    assert_init_collision(["init", target, "--envelope", Path.join(target, "envelope.json")])
 
     real_parent = Path.join(dir, "real")
     linked_parent = Path.join(dir, "linked")
     File.mkdir!(real_parent)
     File.ln_s!(real_parent, linked_parent)
 
-    assert_collision([
+    assert_init_collision([
       "init",
       Path.join(linked_parent, "project"),
       "--envelope",
       Path.join([real_parent, "project", "envelope.json"])
     ])
+  end
+
+  test "an invalid envelope path is not reported as a destination collision" do
+    for path <- ["", "-"] do
+      assert {:error, entry} =
+               CommandEntry.open_with_ref(
+                 ["run", "ptc.json", "--envelope", path],
+                 :standalone,
+                 @run_ref
+               )
+
+      assert entry.rejection.code == :invalid_arguments
+      assert entry.rejection.kind == :invalid_destination
+      assert entry.rejection.destination == "--envelope"
+      assert entry.rejection.conflicts == []
+
+      assert CommandRenderer.rejection(@run_ref, entry.rejection) ==
+               @human_fixtures["failure"]["invalid_destination"]
+    end
   end
 
   test "help and version reject envelope as an undeclared switch" do
@@ -406,12 +497,34 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
                 "(run_ref: #{@run_ref})\n"}
   end
 
-  defp assert_collision(argv) do
+  defp assert_run_collision(argv, conflicting_switch) do
     assert {:error, entry} = CommandEntry.open_with_ref(argv, :standalone, @run_ref)
     assert entry.envelope_path == nil
     assert entry.arguments == nil
-    assert entry.rejection.code == :invalid_arguments
-    assert entry.rejection.kind == :generic
+    assert entry.rejection.code == :conflicting_arguments
+    assert entry.rejection.kind == :destination_collision
+    assert entry.rejection.conflicts == [conflicting_switch, "--envelope"]
+
+    expected =
+      String.replace(
+        @human_fixtures["failure"]["destination_collision"],
+        "--output and --envelope",
+        "#{conflicting_switch} and --envelope"
+      )
+
+    assert CommandRenderer.rejection(@run_ref, entry.rejection) == expected
+  end
+
+  defp assert_init_collision(argv) do
+    assert {:error, entry} = CommandEntry.open_with_ref(argv, :standalone, @run_ref)
+    assert entry.envelope_path == nil
+    assert entry.arguments == nil
+    assert entry.rejection.code == :conflicting_arguments
+    assert entry.rejection.kind == :init_destination_collision
+    assert entry.rejection.conflicts == ["--envelope"]
+
+    assert CommandRenderer.rejection(@run_ref, entry.rejection) ==
+             @human_fixtures["failure"]["init_destination_collision"]
   end
 
   defp write_application(directory) do

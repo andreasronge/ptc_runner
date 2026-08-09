@@ -24,7 +24,9 @@ defmodule Mix.Tasks.PtcTest do
   @tag :tmp_dir
   test "publishes the closed envelope only when its destination is named", %{tmp_dir: dir} do
     manifest_path = write_manifest(dir, %{"value" => 1})
-    envelope = run_envelope(dir, ["run", manifest_path])
+    {rendering, envelope} = run_envelope(dir, ["run", manifest_path])
+
+    assert rendering == "1\n"
 
     assert %{
              "schema_version" => 1,
@@ -63,7 +65,7 @@ defmodule Mix.Tasks.PtcTest do
              private_output
            ]) == "{\"artifact_class\":\"private\",\"status\":\"ok\"}\n"
 
-    envelope =
+    {rendering, envelope} =
       run_envelope(dir, [
         "run",
         manifest_path,
@@ -73,6 +75,7 @@ defmodule Mix.Tasks.PtcTest do
         Path.join(dir, "second.private.json")
       ])
 
+    assert rendering == "{\"artifact_class\":\"private\",\"status\":\"ok\"}\n"
     assert envelope["result"] == %{"result_class" => "private"}
     refute Jason.encode!(envelope) =~ "confidential"
     assert Jason.decode!(File.read!(private_output)) == "confidential"
@@ -84,8 +87,10 @@ defmodule Mix.Tasks.PtcTest do
     trace_dir = Path.join(dir, "traces")
     File.mkdir!(trace_dir)
 
-    envelope = run_envelope(dir, ["run", manifest_path, "--trace-dir", trace_dir])
+    {rendering, envelope} =
+      run_envelope(dir, ["run", manifest_path, "--trace-dir", trace_dir])
 
+    assert rendering == "1\n"
     assert envelope["artifact_state"]["trace"] == "written"
     assert File.exists?(Path.join(trace_dir, envelope["run_ref"] <> ".jsonl"))
   end
@@ -205,8 +210,8 @@ defmodule Mix.Tasks.PtcTest do
 
   defp run_envelope(dir, args) do
     path = Path.join(dir, "envelope-#{System.unique_integer([:positive])}.json")
-    assert run_output(args ++ ["--envelope", path]) == ""
-    path |> File.read!() |> Jason.decode!()
+    rendering = run_output(args ++ ["--envelope", path])
+    {rendering, path |> File.read!() |> Jason.decode!()}
   end
 
   defp failed_message(args) do

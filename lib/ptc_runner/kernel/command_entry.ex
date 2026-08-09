@@ -105,12 +105,32 @@ defmodule PtcRunner.Kernel.CommandEntry do
 
           {:ok, accepted(run_ref, frontend, arguments, envelope, destinations)}
         else
-          _invalid ->
+          {:error, :invalid_destination} ->
             {:error,
              rejected(
                run_ref,
                frontend,
-               CommandRejection.generic(arguments.command, :invalid_arguments)
+               CommandRejection.invalid_destination(
+                 arguments.command,
+                 :envelope,
+                 frontend
+               )
+             )}
+
+          {:error, {:destination_collision, key}} ->
+            {:error,
+             rejected(
+               run_ref,
+               frontend,
+               CommandRejection.destination_collision(arguments.command, key, frontend)
+             )}
+
+          {:error, :init_destination_collision} ->
+            {:error,
+             rejected(
+               run_ref,
+               frontend,
+               CommandRejection.init_destination_collision(frontend)
              )}
         end
     end
@@ -118,18 +138,21 @@ defmodule PtcRunner.Kernel.CommandEntry do
 
   defp distinct?(%CommandArguments{command: :run}, {_destinations, failures}, _run_ref, _envelope)
        when failures != [],
-       do: {:error, :invalid_destination}
+       do: :ok
 
   defp distinct?(%CommandArguments{command: :run}, {destinations, []}, run_ref, envelope) do
     candidates =
       [:output, :private_output, :inspect]
-      |> Enum.flat_map(&destination_option(destinations, &1))
+      |> Enum.flat_map(&destination_option_candidate(destinations, &1))
       |> Kernel.++(derived_trace_paths(destinations, run_ref))
       |> Kernel.++(derived_recovery_path(destinations, run_ref))
 
-    if Enum.any?(candidates, &(DestinationIdentity.key(&1) == DestinationIdentity.key(envelope))),
-      do: {:error, :collision},
-      else: :ok
+    case Enum.find(candidates, fn {_key, path} ->
+           DestinationIdentity.key(path) == DestinationIdentity.key(envelope)
+         end) do
+      {key, _path} -> {:error, {:destination_collision, key}}
+      nil -> :ok
+    end
   end
 
   defp distinct?(
@@ -140,7 +163,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
        ) do
     case DestinationIdentity.within?(envelope, target) do
       false -> :ok
-      _collision_or_invalid -> {:error, :collision}
+      _collision_or_invalid -> {:error, :init_destination_collision}
     end
   end
 
@@ -152,8 +175,8 @@ defmodule PtcRunner.Kernel.CommandEntry do
         case anchor_path(directory) do
           {:ok, directory} ->
             [
-              Path.join(directory, run_ref <> ".jsonl"),
-              Path.join(directory, run_ref <> ".private.jsonl")
+              {:trace_dir, Path.join(directory, run_ref <> ".jsonl")},
+              {:trace_dir, Path.join(directory, run_ref <> ".private.jsonl")}
             ]
 
           {:error, _reason} ->
@@ -168,7 +191,10 @@ defmodule PtcRunner.Kernel.CommandEntry do
   defp derived_recovery_path(options, run_ref) do
     case destination_option(options, :private_output) do
       [requested] ->
-        [Path.join(Path.dirname(requested), ".ptc-private-result-" <> run_ref <> ".json")]
+        [
+          {:private_output,
+           Path.join(Path.dirname(requested), ".ptc-private-result-" <> run_ref <> ".json")}
+        ]
 
       [] ->
         []
@@ -183,6 +209,10 @@ defmodule PtcRunner.Kernel.CommandEntry do
       :error ->
         []
     end
+  end
+
+  defp destination_option_candidate(options, key) do
+    Enum.map(destination_option(options, key), &{key, &1})
   end
 
   defp anchor_init_target(%CommandArguments{command: :init, directory: directory} = arguments) do

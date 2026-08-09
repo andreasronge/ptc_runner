@@ -73,7 +73,7 @@ defmodule PtcRunner.Kernel.CommandFrontend do
        when is_binary(path) do
     case CommandEnvelope.publish(outcome, path) do
       :ok ->
-        presentation(outcome, path, "", "", outcome.exit_status)
+        rendered_presentation(outcome, path, entry.rejection)
 
       {:error, :envelope_publication_failed} ->
         presentation(outcome, nil, "", CommandRenderer.envelope_failure(entry.run_ref), 74)
@@ -81,9 +81,16 @@ defmodule PtcRunner.Kernel.CommandFrontend do
   end
 
   defp present(%CommandEntry{} = entry, %CommandOutcome{} = outcome) do
-    case CommandRenderer.render(outcome, entry.rejection) do
-      {:stdout, bytes} -> presentation(outcome, nil, bytes, "", outcome.exit_status)
-      {:stderr, bytes} -> presentation(outcome, nil, "", bytes, outcome.exit_status)
+    rendered_presentation(outcome, nil, entry.rejection)
+  end
+
+  defp rendered_presentation(outcome, envelope_path, rejection) do
+    case CommandRenderer.render(outcome, rejection) do
+      {:stdout, bytes} ->
+        presentation(outcome, envelope_path, bytes, "", outcome.exit_status)
+
+      {:stderr, bytes} ->
+        presentation(outcome, envelope_path, "", bytes, outcome.exit_status)
     end
   end
 
