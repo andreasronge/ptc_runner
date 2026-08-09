@@ -29,8 +29,9 @@ symlink.
 | `mix ptc.repl --profile PROFILE --resource NAME=DIR` | Query an immutable trace or inspection capture |
 | `mix ptc.viewer --trace-dir DIR` | Browse canonical JSONL traces locally |
 
-`mix help ptc.run`, `mix help ptc.repl`, and `mix help ptc.viewer` list the
-installed options for each command.
+The option tables in this guide are the current reference. `mix help ptc.run`
+describes the task rather than enumerating its switches; enumerated per-command
+help is release work.
 
 A provider-bearing manifest requires `--host-config`. Use the standalone
 `ptc doctor MANIFEST --host-config HOST.json --connect` operation when active
@@ -270,9 +271,11 @@ release work for the shared standalone `ptc` frontend.
 
 ### Stable standalone process contract
 
-The planned standalone `ptc` command treats stdout as its only machine
-channel. On every ordinary or caught path it writes exactly one V1 JSON command
-envelope followed by one newline:
+The planned standalone `ptc` command reports through one V1 JSON command
+envelope written to a caller-named destination. When a destination is named and
+the arguments parse, every ordinary or caught path produces exactly one
+envelope — except a failure to publish the envelope itself, which exits `74`
+with no envelope, described below:
 
 - success exits `0`;
 - a classified failure exits with the primary diagnostic's exact
@@ -302,8 +305,8 @@ as other internal failures; raw startup reasons and argv paths are not rendered.
 returns the installed aliases in lexical order with only their public source,
 revision, data-class, accepted-class, and destination declarations. Listing
 models invokes no provider callback, credential or OAuth service, optional
-application, process, port, or network operation. The standalone process
-wrapper that exposes this core as an executable remains release work.
+application, process, port, or network operation. The release that exposes this
+core as an executable remains packaging work.
 
 With `--trace-dir DIR`, the command-generated `run_ref` is also the complete
 trace stem. A normal trace is exactly `<run_ref>.jsonl`; a private trace is
@@ -312,39 +315,138 @@ suffix callers use, so they can locate the file without a published path.
 Normal discovery excludes the private suffix; private-aware discovery accepts
 and classifies it explicitly.
 
-An outer release wrapper owns the caller's stdout and stderr before BEAM starts.
-It redirects the VM's ordinary descriptor 1 to the null device, captures the
-VM's descriptor 2, and gives the command writer a private bounded envelope pipe.
-The wrapper alone copies one complete framed envelope from that pipe to caller
-stdout. Child processes and ports must not inherit the envelope descriptor.
+The envelope destination is named by the caller and is separate from `--output`
+and `--private-output`, which name the run's result artifact. The command opens
+that destination itself and commits the envelope through the same owner-only
+staging and atomic no-replace boundary as other artifacts, so no other writer
+can interleave with it and an existing entry is never replaced.
 
-Stderr is not a second framing channel. VM stderr is drained behind the outer
-boundary and never copied through verbatim; the wrapper may write only bounded,
-fixed, code-owned launcher messages to caller stderr. The packaged boot profile
-configures no Logger or SASL console handler before the command core starts.
-Optional applications may not install one, and child stderr remains captured
-behind its provider boundary. Expected command diagnostics stay inside the
-stdout envelope.
+The switch is `--envelope PATH`, separate from `--output` and
+`--private-output`.
 
-Supported-target sentinels cover `IO.warn`/`:standard_error`, Logger/SASL,
-optional handlers, direct descriptor-2 operations, child stderr, and known
-NIF/native numeric-descriptor routes. A route that can write the private
-envelope descriptor or bypass the wrapper remains unsupported until it is
-removed or captured. This focused evidence is retained without maintaining a
-dependency-version-pinned inventory of every reachable stderr call site.
+When no destination is named the command writes no envelope. It writes a short
+human rendering of the same sealed outcome. A failure renders the primary phase,
+code, and catalog message on stderr. A successful normal `run` renders its
+result value on stdout; a successful private `run` renders only its completion
+and artifact class, because the private envelope omits the value and a private
+result still requires an authorized owner-only sink. That rendering is projected
+from the outcome, obeys the same privacy rules as the envelope, and is
+presentation rather than a contract: do not parse it.
 
-If envelope framing or its byte bound fails, or if caller stdout closes and the
-wrapper write fails, the wrapper stops without retrying on stderr or another
-descriptor. It exits `74` within 5,000 milliseconds of detecting the transport
-failure. No valid envelope is promised on that path.
+The destination names a file and only a file; there is no stdout spelling.
+**Standalone stdout is not a machine channel** — it is shared with the runtime,
+its optional applications, and their children — so a caller that needs the
+envelope writes it to a file and reads that file.
+
+The envelope destination is validated before any work begins, once the arguments
+have parsed. It is resolved and compared against every artifact destination the
+command could write — result, private result, inspection, both trace suffixes,
+and the private-result recovery name derived from the run reference — under the
+same resolved-parent-identity rule those artifacts use, so an alias such as
+`out.json` against `./out.json` or a symlinked parent is rejected up front
+rather than at commit. For `init` the envelope may also be neither the target
+directory nor a path beneath it. A collision is an argument failure: it exits
+`2` and produces no envelope, because the arguments were refused rather than
+anything failing to publish.
+
+`run`, `validate`, `doctor`, `models`, and `init` accept an envelope
+destination. `repl` does not, and neither do `help` and `version`, which
+complete without touching the filesystem.
+
+Delivery begins at a successful parse. Once the arguments parse, every later
+failure — including a recoverable startup failure — delivers its envelope to the
+named destination. Rejected arguments produce no envelope: the command exits
+`2`, the arguments phase's status, and writes one closed stderr line — naming an
+unknown switch's accepted list or a retired switch's replacement where those
+apply, since a missing positional or a malformed value names neither. A VM abort
+produces no envelope either.
+
+The command therefore requires no outer process wrapper, no private envelope
+descriptor, and no interception of the runtime's own streams. The guarantee
+comes from the destination, not from stream discipline: the core command modules
+render no stream, but dispatch invokes runtime callbacks, the Mix authorization
+notifier writes through `Mix.shell`, and starting an optional provider
+application may emit output. Because the envelope is a file committed atomically
+rather than a stream artifact, none of that can interleave with it. The release
+entrypoint alone turns a sealed outcome status into a process exit.
+
+Both process streams are consequently non-contractual. The command's own
+rendering and diagnostics are closed and carry no private value, credential,
+path, selector, or arbitrary term, but nothing constrains what the runtime, an
+optional application, or a child writes there — neither content nor secrecy.
+Capture those streams outside the command if a deployment needs a guarantee on
+them.
+
+If the envelope destination cannot be opened, staged, or committed, the failure
+cannot be reported through the envelope. The command writes a bounded, fixed,
+code-owned diagnostic to stderr and exits `74`. No valid envelope is promised on
+that path.
 
 `SIGINT`, `SIGTERM`, VM abort, OOM, and failure before the command boundary are
-outside the V1 envelope and stderr-content contract. They may produce no
-envelope or VM/OS emergency output, and the OS or shell determines their
-status. Packaged tests characterize termination and child behavior but do not
-promote one observed signal status to a portable guarantee. A deployment that
-requires a bounded signal response, application bootstrap, or child-tree
-cleanup must use the separately triggered outer supervisor design.
+outside the V1 envelope contract. They may produce no envelope or VM/OS
+emergency output, and the OS or shell determines their status. Packaged tests
+characterize termination and child behavior but do not promote one observed
+signal status to a portable guarantee. A deployment that requires a bounded
+signal response, application bootstrap, or child-tree cleanup must use the
+separately triggered outer supervisor design.
+
+The supported distribution targets are a locally built macOS command and a
+glibc container image. The macOS command is unsigned: a copy that acquires the
+quarantine attribute is refused by the operating system, so build it locally
+rather than expecting a downloadable command. Signed downloads, notarization,
+package-manager formulas, and single-file packaging are out of scope.
+
+### Diagnose a failed run
+
+A failed run reports a phase and a code from the closed diagnostic catalog and
+nothing else. That is deliberate — the public envelope never carries arbitrary
+text — but it means a workflow that fails on purpose reports
+`execution/workflow_failed`, "the workflow failed", and no trace of whatever the
+workflow was trying to say.
+
+**Your `fail` value decides how much survives.** The value passes through a
+failure taxonomy that keeps a classification and discards everything else:
+
+| `(fail …)` value | What the envelope carries |
+| --- | --- |
+| a string, or any non-map | nothing |
+| a map with a `kind` naming a known failure kind | that kind, readable |
+| a map with any other `kind`, or none | a one-way fingerprint, not readable |
+
+The known failure kinds are `invalid-input`, `invalid-prompt`,
+`invalid-transcript`, `transcript-limit`, `turn-limit`, `model-program-failed`,
+`non-retryable-evaluation`, `llm-provider-error`, `protocol-error`,
+`provider-error`, `capability-error`, `assertion-failed`, and `unknown-action`.
+
+So `(fail "the invoice total did not balance")` publishes nothing, while
+`(fail {:kind "assertion-failed" :detail "the invoice total did not balance"})`
+publishes `assertion-failed`. Prefer the second shape. It costs one key and it
+is the difference between a caller knowing what class of thing went wrong and
+knowing only that something did.
+
+**When the classification is not enough**, the detail is in the private
+inspection artifact, not the trace. Rerun with `--inspect`:
+
+```console
+mix ptc.run ptc.json --trace-dir traces --inspect traces/run.inspection.jsonl
+```
+
+That artifact holds prompts, model responses, generated source, and capability
+arguments and results. It is owner-only and sensitive: read it, do not publish
+it beside a normal trace, and see [Use private inspection
+deliberately](#use-private-inspection-deliberately).
+
+**For a compile or parse failure**, load the component in a REPL instead. The
+REPL reports the diagnostic directly rather than through the closed catalog,
+which is usually faster than inspecting a failed run:
+
+```console
+mix ptc.repl -l path/to/component.clj
+```
+
+**To find the artifacts**, use the run reference. It appears in the command
+envelope, and every artifact is named from it: `<run_ref>.jsonl` for a normal
+trace and `<run_ref>.private.jsonl` for a private one.
 
 ## Use workflow REPL sessions
 
@@ -428,10 +530,7 @@ inspection artifact answers *what the model saw and wrote*. It is created with
 owner-only permissions and contains the full request, response, generated
 source, and capability payloads. The log-analysis REPL cannot read or join this
 private data by design; use the development Viewer below or the private
-inspection profile in the [Kernel REPL guide](kernel-repl.md). Private
-inspection needs `--private-unattended` for non-interactive use, including by
-a coding agent — see ["Private analysis without a
-terminal"](kernel-repl.md#private-analysis-without-a-terminal).
+inspection profile in the [Kernel REPL guide](kernel-repl.md).
 
 In one verified `03-file-agent` run, the request contained four relevant parts:
 

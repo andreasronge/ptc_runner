@@ -16,8 +16,8 @@ expertise.
 
 | Priority | Area | Current limitation | Consequence |
 | --- | --- | --- | --- |
-| P0 | CLI diagnostics | `mix ptc.run` still reports many failures through `Mix.raise/1` and inspected Elixir terms. | Scripts cannot reliably identify the failing phase, file, field, or repair. |
-| P1 | Command-line workflow | The repository lacks focused initialize, validate, model-list, and doctor commands, and the input override is still named `--mission`. | First-time users must know internal terminology and infer setup failures from the generic runner. |
+| P0 | CLI diagnostics | Checkpoint E closed the inspected-term failures, but `mix ptc.run` still raises the raw JSON envelope as its error message, so a human reads a several-hundred-character line to find one diagnostic. Checkpoint F replaces this with a rendered phase, code, message, and run reference. | A failing command is hard to read at a terminal, though its phase and code are now closed and reliable. |
+| P1 | Command-line workflow | Checkpoint E delivered `init`, `validate`, `models`, and `doctor` in the shared engine and retired `--mission`, but only `run` has a Mix task, so the others are reachable in a source checkout solely through `CommandEngine.dispatch/1`. Checkpoint F adds a generic `mix ptc <command>` task. | First-time users cannot reach most commands without calling an Elixir API directly. |
 | P1 | Model protocol | Host-installed LLMs freeze bounded sampling options, but structured-output schema, reasoning controls, an explicit provider timeout, and enforceable token or cost ceilings remain outside the public configuration surface. | Deployments cannot yet express richer model contracts or complete operational budgets. |
 | P1 | Trace operation | A malformed, duplicate, or oversized trace can make a directory source fail as a whole, and trace persistence remains post-run. | One damaged file can hide healthy runs and a crash can lose buffered events. |
 | P1 | Distribution | The user workflow assumes a source checkout, Erlang/Elixir, and Mix; the Viewer is a development path dependency. | Installation and deployment remain too heavy for the intended non-Elixir audience. |
@@ -32,10 +32,11 @@ expertise.
 The detailed, implementation-ordered work is tracked in
 [Stable CLI and application-source contract](stable-cli-contract.md).
 
-Successful and failed standalone invocations need stable JSON envelopes on stdout,
-documented exit statuses, non-contractual stderr framing with secret-safe
-content on supported paths, and an evidence gate for any outer framing process.
-A failure should identify at least:
+Successful and failed standalone invocations need one stable JSON envelope at a
+caller-named destination and documented exit statuses. The process streams carry
+best-effort human rendering rather than the envelope and are explicitly
+non-contractual in both content and secrecy, so no outer framing process and no
+evidence gate for one is required. A failure should identify at least:
 
 - phase and stable code;
 - JSON path and safe logical source when applicable;

@@ -28,18 +28,19 @@ Start this work when any condition holds:
   constraint.
 
 Do not start it to suppress dependency warnings. `IO.warn` writes to stderr,
-never to the stdout envelope, and the shipped fix for the one known warning is
+never to the command envelope, and the shipped fix for the one known warning is
 to pass a structured model value instead of a string spec.
 
-The packaged output audit is deliberately not a trigger. The outer standalone
-wrapper defined in
+The packaged output audit is deliberately not a trigger, though the reason
+changed when
 [`../lisp-kernel/stable-cli-contract.md`](../lisp-kernel/stable-cli-contract.md)
-owns caller stdout, redirects ordinary dependency stdout on the VM's descriptor
-1 to the null device, drains VM stderr behind its boundary, and accepts the
-command envelope only through a private bounded pipe. Stdout framing therefore
-does not depend on dependency-closure behavior. Supported-target sentinels still
-cover secret-bearing stderr and numeric-descriptor bypass routes, and that
-focused evidence is not dominated by this dependency.
+withdrew the outer standalone wrapper. It no longer holds because a wrapper
+isolates dependency stdout behind a private descriptor; it holds because the
+command envelope is written to a caller-named file and never travels on stdout
+at all. Dependency stdout noise therefore cannot reach the envelope under any
+dependency closure, and the conclusion survives the withdrawal with a simpler
+argument. Secret-bearing stderr remains worth watching on its own merits, but
+the descriptor-bypass sentinel matrix went with the wrapper.
 
 ## Current evidence
 
@@ -57,11 +58,11 @@ Dependency closure size, counted as physical lines in the locked
 
 `req_llm` plus `llm_db` is roughly 76,000 lines, more than the library itself.
 That is the dependency-review and artifact-size surface the third trigger
-refers to. It is not an argument about stdout framing, which the separate
-outer-wrapper design addresses independently. This table is a size inventory,
-not a warning-reachability inventory; focused supported-target sentinels cover
-secret-bearing and descriptor-bypass routes without a dependency-version-pinned
-inventory of every reachable call site.
+refers to. It is not an argument about command output, which no longer depends
+on any dependency's stream behavior now that the envelope is written to a
+caller-named file. This table is a size inventory, not a warning-reachability
+inventory; secret-bearing stderr remains worth watching on its own merits,
+without a dependency-version-pinned inventory of every reachable call site.
 
 The request and response formats crossing the adapter seam are deliberately
 close to OpenAI's wire format:

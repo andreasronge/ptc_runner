@@ -465,7 +465,7 @@ hooks. Bootstrap exceptions and application
 start failures are projected as the same closed run outcome as other internal
 failures; neither their reason nor argv paths reach the envelope. The task
 renders only the sealed outcome and raises a Mix error for a nonzero status
-without halting the VM. A future outer standalone wrapper may turn the same
+without halting the VM. A future standalone release entrypoint may turn the same
 outcome status into a process exit.
 Successful `validate` is terminal: it projects the five-field digest result,
 closes its prepared run, and returns a sealed `CommandOutcome`. Both doctor

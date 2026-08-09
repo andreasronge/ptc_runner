@@ -41,21 +41,6 @@ runs:
       working-directory: ${{ inputs.project-directory }}
       shell: bash
 
-    # The bundled launcher is the only dependency carrying a native artifact,
-    # and nothing in the Mix or make staleness chain ties that artifact to
-    # `c_src`. A restored `_build` keeps the cached executable, and a rebuilt
-    # one is downloaded from the release matching the launcher version. Either
-    # way the root project can run against an executable older than the tree
-    # it is testing, so drop the artifact and build this tree's source.
-    - name: Rebuild the bundled native launcher from source
-      if: inputs.project-directory == '.'
-      env:
-        PTC_RUNNER_LAUNCHER_BUILD_FROM_SOURCE: '1'
-      run: |
-        rm -rf "_build/${MIX_ENV:-dev}/lib/ptc_runner_launcher"
-        mix deps.compile ptc_runner_launcher
-      shell: bash
-
     - name: Cache Dialyzer PLT
       if: inputs.cache-plt == 'true'
       uses: actions/cache@v5

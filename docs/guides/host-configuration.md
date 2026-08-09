@@ -351,6 +351,15 @@ the `mcp-*` family.
 
 #### OAuth-protected MCP servers
 
+Interactive authorization is a Mix-frontend capability. `--authorize-mcp` is a
+Mix-only option and the planned standalone command disables the interactive
+authorization notifier, so an OAuth-protected installation cannot complete a
+first authorization from the packaged command or a container. Authorize through
+Mix in a source checkout. A packaged invocation against an unauthorized
+installation fails with an authorization diagnostic rather than prompting.
+Tokens live only in the memory of the run that acquired them; no persistent
+token storage ships today.
+
 An OAuth installation replaces static `auth` with a host-owned `oauth` block:
 
 ```json
@@ -608,7 +617,7 @@ does not consume an evaluation or mission capability-call reservation.
 ## Verify an installation
 
 The shared `doctor --connect` command checks the selected providers without
-invoking the workflow. Until the standalone wrapper is packaged, an Elixir
+invoking the workflow. Until the standalone command is packaged, an Elixir
 host can invoke the shipped command boundary directly:
 
 ```elixir
