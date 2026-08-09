@@ -546,7 +546,7 @@ Run it from the repository root and retain its sanitized trace:
 mkdir -p tmp/file-agent-traces
 mix ptc.run examples/kernel-tutorial/03-file-agent/ptc.json \
   --host-config examples/kernel-tutorial/ptc-host.json \
-  --trace tmp/file-agent-traces/file-agent.jsonl
+  --trace-dir tmp/file-agent-traces
 ```
 
 The public result has this stable shape (duration and remaining budgets vary):

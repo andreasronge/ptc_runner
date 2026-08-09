@@ -412,39 +412,8 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert_declaration_refused(fixture)
   end
 
-  test "a check assembles its providers without ever executing the workflow" do
-    # The entry occupies its worker for seconds, so a check that returns
-    # promptly proves the Kernel was not run; only the acquisition's safe
-    # snapshots come back. (The old body here was `(loop [] (recur))`, which
-    # only looks non-terminating -- see `long_running_body/1` for why that is
-    # not the same thing.)
-    fixture = provider_fixture(body: long_running_body())
-
-    assert {:ok, owner} =
-             ExecutionSessionOwner.start(
-               fixture.prepared,
-               fixture.authority,
-               self(),
-               fixture.execution,
-               &never_notify/1,
-               :check
-             )
-
-    assert {:ok, []} = ExecutionSessionOwner.await(owner)
-    assert_receive {:provider_phase, :acquire}, 5_000
-  end
-
-  test "a check closes its provider session inside the runtime that acquired it" do
-    # A run closes its session while the registry and the OAuth runtime that
-    # produced its resources are still alive. A check that left the close to the
-    # execution owner would unwind that runtime first and run connector closers
-    # against a store and managers that are already gone.
-    assert_session_closes_before_registry(provider_fixture(closing_acquire()), :check)
-  end
-
   test "connectivity closes its provider session inside the runtime that acquired it" do
-    # The same invariant as the check above, on the operation that used to break
-    # it. A connectivity acquisition commits real closers to the session, so
+    # A connectivity acquisition commits real closers to the session, so
     # unwinding the registry first would run them against a runtime that is
     # already gone. An independent review found the inversion; this is what
     # would have caught it.

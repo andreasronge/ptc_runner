@@ -28,7 +28,7 @@ defmodule Mix.Tasks.Ptc.RunDownstreamTest do
     {output, status} =
       System.cmd(
         System.find_executable("mix"),
-        ["ptc.run", manifest_path, "--host-config", host_path, "--check"],
+        ["ptc.run", manifest_path, "--host-config", host_path],
         cd: dir,
         env: [
           {"MIX_ENV", "prod"},
@@ -39,7 +39,7 @@ defmodule Mix.Tasks.Ptc.RunDownstreamTest do
       )
 
     assert status == 0, output
-    assert output =~ "workflow  deepseek  llm  revision downstream-llm-v1"
+    assert %{"status" => "ok", "command" => "run"} = Jason.decode!(output)
   end
 
   defp write_consumer_project(dir) do

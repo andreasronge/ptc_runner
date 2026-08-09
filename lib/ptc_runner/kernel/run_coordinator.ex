@@ -87,8 +87,8 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   caller could turn into a passing row. The coordinator anchors the single
   deadline the whole step spends.
 
-  Every active command crosses it before provider activity is marked: run,
-  `--check`, and `doctor --connect` through `ProviderExecution`, and default
+  Every active command crosses it before provider activity is marked: run and
+  `doctor --connect` through `ProviderExecution`, and default
   doctor by calling this directly, because it opens no provider session at all.
 
   The REPL does not, and saying so is not an omission to fix here. It builds
@@ -135,18 +135,6 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   def execute(_prepared, _authority), do: {:error, :invalid_prepared_run}
 
-  @doc false
-  @spec check(PreparedRun.t(), PublicationAuthority.t()) ::
-          {:ok, [map()]}
-          | {:error,
-             :invalid_prepared_run
-             | :invalid_publication_authority
-             | :provider_session_required
-             | term()}
-  def check(%PreparedRun{} = prepared, authority), do: open_free(prepared, authority, :check)
-
-  def check(_prepared, _authority), do: {:error, :invalid_prepared_run}
-
   defp open_free(prepared, authority, operation) do
     cond do
       not PreparedRun.valid?(prepared) ->
@@ -185,37 +173,17 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   def execute(_prepared, _authority, _provider_execution, _notifier),
     do: {:error, :invalid_prepared_run}
 
-  @doc false
-  @spec check(
-          PreparedRun.t(),
-          PublicationAuthority.t(),
-          ProviderExecution.t(),
-          (binary() -> term())
-        ) ::
-          {:ok, [map()]}
-          | {:error,
-             :invalid_prepared_run
-             | :invalid_publication_authority
-             | :invalid_provider_execution
-             | term()}
-  def check(%PreparedRun{} = prepared, authority, provider_execution, notifier)
-      when is_function(notifier, 1),
-      do: open_active(prepared, authority, provider_execution, notifier, :check)
-
-  def check(_prepared, _authority, _provider_execution, _notifier),
-    do: {:error, :invalid_prepared_run}
-
-  # Internal only, like its `execute/4` and `check/4` neighbours.
+  # Internal only, like its `execute/4` neighbour.
   # `PtcRunner.Kernel.CommandEngine` dispatches `doctor --connect` through it.
   # Connectivity answers for selected occurrences, so unlike a run it has no
   # provider-free form: a preparation selecting no provider is refused here, and
   # the command answers for it without opening an operation at all.
   #
   # It takes no authorization notifier and refuses an execution carrying
-  # authorization targets, because a health check must never open an interactive
+  # authorization targets, because a connectivity check must never open an interactive
   # authorization or ask a human for anything. The refusal is deliberate rather
   # than a silent downgrade to the non-interactive path: a caller that asked for
-  # authorization and got a check that skipped it would be told the wrong thing.
+  # authorization and got a connectivity check that skipped it would be told the wrong thing.
   @doc false
   @spec connect(PreparedRun.t(), PublicationAuthority.t(), ProviderExecution.t()) ::
           {:ok, ConnectivityResult.t()}

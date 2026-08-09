@@ -96,7 +96,7 @@ capability payloads, or generated source:
 ```console
 mkdir -p tmp/tutorial-traces
 mix ptc.run examples/kernel-tutorial/01-orders/ptc.json \
-  --trace tmp/tutorial-traces/orders.jsonl
+  --trace-dir tmp/tutorial-traces
 ```
 
 The JSON Lines file records the run, workflow evaluation, outcome, usage, and

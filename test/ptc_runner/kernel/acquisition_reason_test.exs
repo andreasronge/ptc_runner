@@ -64,7 +64,7 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
   end
 
   test "every pair the table can emit is admissible where it can surface" do
-    # Acquisition runs for a run, a check, and `doctor --connect`. A pair the
+    # Acquisition runs for a run and acquisition-mode `doctor --connect`. A pair the
     # contract refuses would be unrenderable at exactly the moment it matters.
     for {reason, phase, code, _operation} <- @expected do
       assert CommandContract.diagnostic_allowed?(:run, phase, code),

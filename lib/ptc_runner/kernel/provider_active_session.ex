@@ -89,7 +89,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
           PreparedRun.t(),
           InstallationCatalog.t(),
           ProviderRuntimeServices.t(),
-          :run | :check | :connect
+          :run | :connect
         ) :: {:ok, ProviderSession.t()} | {:error, CommandDiagnostic.t()}
   def begin_owned_operation(
         session,
@@ -98,7 +98,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
         %ProviderRuntimeServices{} = services,
         operation
       )
-      when operation in [:run, :check, :connect] do
+      when operation in [:run, :connect] do
     if PreparedRun.active_valid?(prepared) and InstallationCatalog.valid?(catalog) and
          prepared.catalog_attestation == catalog.attestation and
          ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding) and

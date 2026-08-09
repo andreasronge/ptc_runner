@@ -86,17 +86,13 @@ PTC-Lisp owns replaceable workflow policy:
 Frontends own presentation and host choices. They must enter through
 `PtcRunner.Kernel.ApplicationPackage` and a sealed
 `PtcRunner.Kernel.RunRequest`. The closed command pipeline uses
-`PtcRunner.Kernel.CommandEngine`; the existing Mix command still has its
-transitional argv and presentation adapter, but its runtime path now prepares
-through `RunCoordinator` and preflights destinations. One-shot runs and
-`--check` both execute through a dedicated execution-session owner, whether or
-not they select providers, and a provider-bearing invocation opens
+`PtcRunner.Kernel.CommandEngine`; the Mix task is a thin adapter that prepends
+`run`, supplies VM-owned runtime callbacks, and renders the returned sealed V1
+envelope. One-shot runs execute through a dedicated execution-session owner,
+whether or not they select providers, and a provider-bearing invocation opens
 `ProviderActiveSession` inside that owner's subordinate worker rather than in
-the adapter. A check differs from a run only in how the owner completes an
-assembled build: it reports the acquisition's safe connector snapshots instead
-of evaluating the entry, so both share one activity marker, session, registry,
-credential, OAuth, acquisition, and cleanup boundary. The REPL keeps its
-adapter-owned path until its parity cutover.
+the adapter. `doctor --connect` is a distinct active operation with its own
+closed result. The REPL keeps its adapter-owned path until its parity cutover.
 Embedding frontends execute a sealed request through
 `PtcRunner.Kernel.RunBuilder.build/3`. For a provider-free request they may
 instead call the path-free `PtcRunner.Kernel.RunCoordinator` and pass its
@@ -206,7 +202,7 @@ validation records `active_required`; `validate` reports
 
 `RunCoordinator.local_checks/3` is the only entry to phase 7 and the only place
 an `audited_local` callback runs. Every active command crosses it before
-provider activity is marked: run, `--check`, and `doctor --connect` from
+provider activity is marked: run and `doctor --connect` from
 `ProviderExecution` immediately before the session opens, and default doctor
 directly, because it opens no session. The REPL does not, and that is a stated
 limit rather than an omission: it builds providers through the direct-embedding
@@ -222,8 +218,8 @@ audited-local rows only after the step as a whole succeeded.
 `unverified` callbacks are the other half and never run there.
 `LocalPreflight.run_unverified/4` is their only entry, reached from the shared
 operation prefix after the phase-8 marker and bounded by the operation deadline
-rather than by `local_preflight_timeout_ms`. Run, `--check`, and
-`doctor --connect` all cross it; default doctor does not, and reports
+rather than by `local_preflight_timeout_ms`. Run and `doctor --connect` both
+cross it; default doctor does not, and reports
 `active_check_required` instead. The two steps derive applicability separately,
 so neither can reach the other's declarations, and they share the reason
 translation with one deliberate difference: after the marker,
@@ -368,11 +364,10 @@ continuation state for the staged command pipeline. `RunBuilder.build_prepared/3
 rejects them; the execution-session owner consumes one when it opens its
 sinks, `ProviderActiveSession` then marks activity and opens the session, and
 the runtime registry, active value, and that same session are passed to
-`RunBuilder`. A run and a `--check` both do that inside the execution-session
-owner's subordinate worker, which calls `build_active_owned/7` with the
-owner-opened sinks, the catalog acquisition plans from, and the phase-8 step-5
-credentials, then completes through
-`execute_built/1` or `check_built/1`. The REPL remains transitional and opens no active session: it
+`RunBuilder`. A run does that inside the execution-session owner's subordinate
+worker, which calls `build_active_owned/7` with the owner-opened sinks, the
+catalog acquisition plans from, and the phase-8 step-5 credentials, then
+completes through `execute_built/1`. The REPL remains transitional and opens no active session: it
 calls `load_and_build/3` with an empty registry, keeping its current shape
 until the parity cutover. After application admission, that session
 anchors one absolute run deadline shared by active selection, construction,
@@ -844,7 +839,7 @@ in execution preparation and ownership. A frontend wording or argv-only change
 therefore does not invalidate application identity, while a coordinator change
 does.
 Regenerate with `mix regen` (or `mix ptc.gen_semantic_revision`) on main before
-tagging a release. The release gate runs the `--check` form and fails on
+tagging a release. The release gate runs `mix ptc.gen_semantic_revision --check` and fails on
 dependency inventory drift, missing classified paths, changed semantic bytes,
 or a stale projection. It runs there and nowhere else: the projection's hashes
 cover the whole source closure, so regenerating it per branch made every pair
@@ -1070,7 +1065,7 @@ declarative selection grammar belongs in `SelectionRules`; active transport
 behavior belongs in each provider module and the later runtime dispatcher.
 
 Ambient `.env` acquisition belongs to the CLI frontend, not the Kernel. The
-Mix adapter decides once, before the `--check`/one-shot branch, whether a
+Mix adapter decides once, before entering shared run dispatch, whether a
 selected live-LLM installation declares an environment-backed credential, and
 loads the nearest `.env` there, containing a loader failure as a closed command
 diagnostic. No Kernel module loads it, so an embedding acquires ambient

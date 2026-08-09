@@ -267,8 +267,8 @@ particular selection chooses reads only. This makes adding a write mapping to an
 existing installation fail closed for unchanged manifests rather than silently
 widening their authority. Omitted `allow` remains a convenience only for
 all-read installations. Installation plus explicit selection is standing
-authorization; there is no separate per-call approval prompt. `mix ptc.run
---check` reports the selected read and write counts before execution.
+authorization; there is no separate per-call approval prompt. The mapped
+effects remain visible in the host document and capability inventory.
 
 The declared effect also controls failure safety. A read transport failure keeps
 its provider retry policy. A write failure after dispatch may have begun is
@@ -386,10 +386,9 @@ mix ptc.run ptc.json --host-config ptc-host.json \
 
 The command binds an operating-system-selected loopback port, prints one
 authorization URL for you to open, waits for the exact callback, and only then
-builds the provider. It never launches a browser. The option composes with
-`--check`; the check performs authorization first and reports only the closed
-mode `oauth`, never account, issuer, client, scope, redirect, or token details.
-Repeat `--authorize-mcp` to authorize multiple named installations.
+builds the provider. It never launches a browser. The option composes with the
+immediately following run only. Repeat `--authorize-mcp` to authorize multiple
+named installations.
 The CLI store is process-local: the grant and any later `403` scope requirement
 exist only for that command invocation, so another invocation must authorize
 again. Embeddings may retain state across runs only by supplying their own
@@ -608,38 +607,25 @@ does not consume an evaluation or mission capability-call reservation.
 
 ## Verify an installation
 
-`--check` assembles and discovers the providers a manifest selects, prints a
-safe resolved view, and closes every resource without invoking the workflow or
-calling a model:
+The shared `doctor --connect` command checks the selected providers without
+invoking the workflow. Until the standalone wrapper is packaged, an Elixir
+host can invoke the shipped command boundary directly:
 
-```console
-mix ptc.run examples/kernel-tutorial/02-deepseek-extract/ptc.json \
-  --host-config examples/kernel-tutorial/ptc-host.json \
-  --check
+```elixir
+PtcRunner.Kernel.CommandEngine.dispatch([
+  "doctor",
+  "examples/kernel-tutorial/02-deepseek-extract/ptc.json",
+  "--host-config",
+  "examples/kernel-tutorial/ptc-host.json",
+  "--connect"
+])
 ```
 
-```text
-workflow  deepseek  llm  revision deepseek-policy-v1  accepts: normal  snapshot 7a768b7771c97e4975c9b9943acdeb87b725dd325b55e397ed343b6a54ea9de7
-```
-
-Each line reports the environment, alias, source, public revision, accepted
-data classes, and provider snapshot hash. The snapshot contains a declaration
-projection (alias, source, revision, data policy, authorization mode, and
-normalized selection) and a separately hashed acquisition projection of
-bounded observed facts. For frozen content, that acquisition projection also
-contains the algorithm-qualified content hash, so `acquisition_identity_hash`
-is exactly recomputable from the published `acquisition` object. The bare-hex
-`snapshot_hash` covers both declaration and acquisition identity. A
-frozen-content provider also publishes an algorithm-qualified
-`content_snapshot_hash` covering only the captured bytes. Raw model selectors,
-endpoints, commands, paths, credentials, OAuth authority, and identifiers
-derived from secret-bearing values are excluded. Audited stdio executable and
-launcher content digests are included so build replacement changes provider
-identity without exposing either path.
-
-Use `--check` in deployment pipelines to catch a missing credential, an
-unreachable endpoint, a renamed upstream tool, or a changed server build before
-a real run spends model tokens.
+The sealed outcome reports one closed check row per required local,
+credential, authorization, and connectivity operation, plus whether provider
+activity occurred. It exposes no endpoint, command, path, credential, OAuth
+authority, or secret-derived identifier. This operation is distinct from run;
+the removed `run --check` route is not an alias or hidden compatibility path.
 
 ## Next steps
 

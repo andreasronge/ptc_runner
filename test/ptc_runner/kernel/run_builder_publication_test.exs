@@ -37,7 +37,7 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
     {:ok, registry} = ProviderRegistry.new()
 
     File.cd!(directory)
-    opts = [trace: "run.jsonl", inspect: "run.inspection.jsonl", output: "result.json"]
+    opts = [trace_path: "run.jsonl", inspect: "run.inspection.jsonl", output: "result.json"]
     assert {:ok, built} = RunBuilder.load_and_build(manifest_path, registry, opts)
     event_sink_pid = built.config.event_sink.pid
     inspection_sink_pid = built.config.inspection_sink.pid
@@ -75,13 +75,15 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
                PublicationAuthority.new(trace: conflicting_path, output: conflicting_path)
 
       assert {:error, :invalid_execution_outcome} =
-               RunBuilder.publish_execution(outcome, substituted_authority)
+               RunBuilder.publish_execution_report(outcome, substituted_authority)
 
       refute File.exists?(conflicting_path)
-      assert {:error, :invalid_execution_outcome} = RunBuilder.publish_execution(outcome, opts)
 
-      assert {:ok, %{value: %{"answer" => 42}}, :normal} =
-               RunBuilder.publish_execution(outcome, built.publication_authority)
+      assert {:error, :invalid_execution_outcome} =
+               RunBuilder.publish_execution_report(outcome, opts)
+
+      assert {:ok, %{result: {:ok, %{value: %{"answer" => 42}}}, result_class: :normal}} =
+               RunBuilder.publish_execution_report(outcome, built.publication_authority)
 
       tracee = self()
       reference = :erlang.trace_delivered(tracee)
@@ -141,8 +143,8 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
 
     assert {:ok, outcome} = RunBuilder.execute_built(built)
 
-    assert {:error, {:result_contract_failed, details}} =
-             RunBuilder.publish_execution(outcome, built.publication_authority)
+    assert {:error, %{error: {:error, {:result_contract_failed, details}}}} =
+             RunBuilder.publish_execution_report(outcome, built.publication_authority)
 
     assert is_map(details)
     assert :ok = RunBuilder.close(built)

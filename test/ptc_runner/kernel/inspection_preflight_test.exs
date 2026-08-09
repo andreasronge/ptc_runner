@@ -140,7 +140,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       assert {:error, {:inspection_preflight_failed, :inspection_destination_exists}} =
                RunBuilder.run(manifest_path, registry,
-                 trace: Path.join(dir, "run.jsonl"),
+                 trace_path: Path.join(dir, "run.jsonl"),
                  inspect: occupied
                )
 
@@ -166,7 +166,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       assert {:error, reason} =
                RunBuilder.run(manifest_path, registry,
-                 mission: "absent-override.json",
+                 input: "absent-override.json",
                  inspect: occupied
                )
 
@@ -245,7 +245,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       for options <- [
             [
               output: Path.join(dir, "same.jsonl"),
-              trace: Path.join(dir, "same.jsonl")
+              trace_path: Path.join(dir, "same.jsonl")
             ],
             [
               output: Path.join(dir, "same.inspection.jsonl"),
@@ -253,15 +253,15 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
             ],
             [
               output: Path.join(real_parent, "same.jsonl"),
-              trace: Path.join(alias_parent, "same.jsonl")
+              trace_path: Path.join(alias_parent, "same.jsonl")
             ],
             [
               output: Path.join(real_parent, "Case.jsonl"),
-              trace: Path.join(real_parent, "case.jsonl")
+              trace_path: Path.join(real_parent, "case.jsonl")
             ],
             [
               output: Path.join(real_parent, "σ.jsonl"),
-              trace: Path.join(real_parent, "ς.jsonl")
+              trace_path: Path.join(real_parent, "ς.jsonl")
             ]
           ] do
         assert {:error, {:artifact_preflight_failed, :conflicting_destinations}} =
@@ -318,7 +318,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
          {:result_preflight_failed, :invalid_result_destination}},
         {[inspect: Path.join(unwritable, "run.inspection.jsonl")],
          {:inspection_preflight_failed, :inspection_destination_unavailable}},
-        {[trace: Path.join(unwritable, "run.jsonl")],
+        {[trace_path: Path.join(unwritable, "run.jsonl")],
          {:trace_preflight_failed, :trace_destination_unavailable}}
       ]
 
@@ -343,7 +343,9 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
 
       assert {:error, {:trace_preflight_failed, :normal_trace_requires_normal_suffix}} =
-               RunBuilder.run(manifest_path, registry, trace: Path.join(dir, "run.private.jsonl"))
+               RunBuilder.run(manifest_path, registry,
+                 trace_path: Path.join(dir, "run.private.jsonl")
+               )
 
       refute_received :provider_builder_invoked
     end
@@ -376,7 +378,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
 
       assert {:error, {:trace_preflight_failed, :source_unavailable}} =
-               RunBuilder.run(manifest_path, registry, trace: Path.join(dir, "run.jsonl"))
+               RunBuilder.run(manifest_path, registry, trace_path: Path.join(dir, "run.jsonl"))
 
       refute_received :provider_builder_invoked
     end
@@ -406,13 +408,13 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.ln_s!(target, symlink)
 
       assert {:error, {:trace_preflight_failed, :trace_destination_unavailable}} =
-               RunBuilder.run(manifest_path, registry, trace: missing_parent)
+               RunBuilder.run(manifest_path, registry, trace_path: missing_parent)
 
       refute_received :provider_builder_invoked
 
       for destination <- [directory, symlink] do
         assert {:error, {:trace_preflight_failed, :invalid_trace_path}} =
-                 RunBuilder.run(manifest_path, registry, trace: destination)
+                 RunBuilder.run(manifest_path, registry, trace_path: destination)
 
         refute_received :provider_builder_invoked
       end
@@ -519,7 +521,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       assert {:ok, %{value: 42}} =
                RunBuilder.run(manifest_path, registry,
                  output: "result.json",
-                 trace: "trace.jsonl",
+                 trace_path: "trace.jsonl",
                  inspect: "run.inspection.jsonl"
                )
 

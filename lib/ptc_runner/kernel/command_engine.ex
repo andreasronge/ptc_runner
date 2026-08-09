@@ -29,7 +29,6 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PublicationAuthority
-  alias PtcRunner.Kernel.RunRequest
 
   @fallback_run_ref "cmd-00000000000000000000000000"
 
@@ -73,18 +72,6 @@ defmodule PtcRunner.Kernel.CommandEngine do
   @spec preflight(CommandPreparation.t()) ::
           {:ok, PublicationAuthority.t()} | {:error, CommandOutcome.t()}
   def preflight(preparation), do: CommandDestination.preflight(preparation)
-
-  @doc false
-  @spec request(binary(), InstallationCatalog.t(), keyword()) ::
-          {:ok, RunRequest.t()} | {:error, term()}
-  def request(application, catalog, options),
-    do: CommandAcquisition.request(application, catalog, options)
-
-  @doc false
-  @spec catalog(binary() | nil) ::
-          {:ok, PtcRunner.Kernel.HostConfig.t() | nil, InstallationCatalog.t()}
-          | {:error, CommandDiagnostic.t()}
-  def catalog(path), do: CommandAcquisition.catalog(path)
 
   defp prepare_with_ref(argv, run_ref, runtime) do
     case CommandParser.parse(argv) do

@@ -29,12 +29,25 @@ run_journey() {
   local journey=$1 expect=$2
   rm -f "$out/$journey.jsonl" "$out/$journey.inspection.jsonl"
   echo "=== $journey ==="
+  local marker="$out/.${journey}.started"
+  touch "$marker"
 
   local status=0
   mix ptc.run "$demo_dir/$journey.json" \
     --host-config "$demo_dir/ptc-host.json" \
-    --trace "$out/$journey.jsonl" \
+    --trace-dir "$out" \
     --inspect "$out/$journey.inspection.jsonl" || status=$?
+
+  local generated_trace
+  generated_trace="$(find "$out" -maxdepth 1 -type f -name 'cmd-*.jsonl' -newer "$marker" -print)"
+  rm -f "$marker"
+
+  if [ ! -f "$generated_trace" ]; then
+    echo "FAIL: $journey did not produce exactly one trace" >&2
+    exit 1
+  fi
+
+  mv "$generated_trace" "$out/$journey.jsonl"
 
   case "$expect" in
     ok)

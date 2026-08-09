@@ -366,7 +366,7 @@ callback, process identifier, source, or credential.
 - [Running and debugging](running-and-debugging.md) owns the run command,
   result shape, trace capture, private inspection capture, and the Viewer. For
   a manifest entry run rather than a REPL session, use
-  `mix ptc.run MANIFEST --trace PATH`.
+  `mix ptc.run MANIFEST --trace-dir DIR`.
 - [Manifests and capabilities](manifests-and-capabilities.md) documents the
   manifest that `--manifest` sessions attach to, and the trace and inspection
   snapshot providers these profiles read.

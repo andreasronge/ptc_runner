@@ -19,10 +19,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
   execution-session owner so the prepared run and both sinks share one
   caller-death boundary.
   A provider-bearing prepared run is preflighted the same way, and its active
-  session is passed here for runtime assembly. One-shot runs and `--check` both
-  open that session inside the execution-session owner and call
-  `build_active_owned/7` with the owner's sinks, then complete through
-  `execute_built/1` or `check_built/1`. The REPL remains transitional: it calls
+  session is passed here for runtime assembly. One-shot runs open that session
+  inside the execution-session owner and call `build_active_owned/7` with the
+  owner's sinks, then complete through `execute_built/1`. The REPL remains transitional: it calls
   `load_and_build/3` with an empty registry and opens no active session at
   all.
   `PtcRunner.Kernel.ProviderAcquisition` then runs the selected providers'
@@ -73,8 +72,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   @acquisition_options [
     :component_override_descriptor,
-    :mission,
-    :private_mission,
+    :input,
+    :private_input,
     :result_projection
   ]
   @build_options [
@@ -82,10 +81,10 @@ defmodule PtcRunner.Kernel.RunBuilder do
     :installed_limits,
     :output,
     :private_output,
-    :trace
+    :trace_path
   ]
   @load_options @acquisition_options ++ @build_options
-  @artifact_options [:trace, :inspect, :output, :private_output]
+  @artifact_options [:trace_path, :inspect, :output, :private_output]
   @opened_sink_keys [
     :attestation,
     :effective_event_policy,
@@ -180,7 +179,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
          true <- provider_free?(prepared.request.package.providers),
          true <- PublicationAuthority.authorized?(authority),
          true <- PublicationAuthority.matches_prepared?(authority, prepared),
-         opts = PublicationAuthority.destination_options(authority),
+         opts = authority |> PublicationAuthority.destination_options() |> build_options(),
          :ok <- validate_build_options(opts),
          :ok <- validate_installed_limits(prepared.request.package, registry, opts),
          :ok <- validate_inspection_selection(prepared.request, opts),
@@ -269,45 +268,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
       {:error, _reason} = error -> error
     end
   end
-
-  @doc false
-  @spec preflight_prepared(PreparedRun.t(), keyword()) ::
-          {:ok, PublicationAuthority.t()} | {:error, term()}
-  def preflight_prepared(%PreparedRun{} = prepared, opts) when is_list(opts) do
-    with true <- PreparedRun.valid?(prepared),
-         :ok <- validate_build_options(opts),
-         :ok <- validate_inspection_selection(prepared.request, opts),
-         {:ok, anchored_opts} <- anchor_artifact_options(opts),
-         :ok <- preflight_inspection(anchored_opts),
-         :ok <- preflight_artifact_destinations(anchored_opts),
-         :ok <-
-           preflight_trace(
-             prepared.effective_event_policy,
-             prepared.effective_data_class,
-             anchored_opts
-           ),
-         :ok <-
-           preflight_result(
-             prepared.effective_event_policy,
-             prepared.effective_data_class,
-             anchored_opts
-           ),
-         {:ok, run_ref} <- authorization_run_ref(prepared.request),
-         {:ok, authority} <-
-           PublicationAuthority.authorize(
-             run_ref,
-             anchored_opts,
-             prepared.effective_event_policy,
-             prepared.effective_data_class
-           ) do
-      {:ok, authority}
-    else
-      false -> {:error, :invalid_prepared_run}
-      {:error, _reason} = error -> error
-    end
-  end
-
-  def preflight_prepared(_prepared, _opts), do: {:error, :invalid_prepared_run}
 
   @doc false
   @spec build_active_owned(
@@ -411,10 +371,10 @@ defmodule PtcRunner.Kernel.RunBuilder do
          :ok <- validate_artifact_option_types(opts),
          true <- valid_optional_installed_limits?(opts),
          true <- valid_optional_binary?(opts, :component_override_descriptor),
-         true <- valid_optional_binary?(opts, :mission),
-         true <- valid_optional_binary?(opts, :private_mission),
+         true <- valid_optional_binary?(opts, :input),
+         true <- valid_optional_binary?(opts, :private_input),
          true <- valid_result_projection?(opts),
-         :ok <- validate_mission_option_conflict(opts),
+         :ok <- validate_input_option_conflict(opts),
          :ok <- validate_result_option_conflict(opts) do
       :ok
     else
@@ -464,10 +424,10 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp validate_mission_option_conflict(opts) do
-    if is_binary(Keyword.get(opts, :mission)) and
-         is_binary(Keyword.get(opts, :private_mission)),
-       do: {:error, :conflicting_mission_inputs},
+  defp validate_input_option_conflict(opts) do
+    if is_binary(Keyword.get(opts, :input)) and
+         is_binary(Keyword.get(opts, :private_input)),
+       do: {:error, :conflicting_inputs},
        else: :ok
   end
 
@@ -988,8 +948,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   # An active command preflighted its artifact destinations when its publication
   # authority opened the sinks, before any provider work began, so acquisition
-  # has nothing left to authorize here. A run and a check acquire the whole
-  # selection; only connectivity narrows the targets.
+  # has nothing left to authorize here. A run acquires the whole selection;
+  # connectivity narrows the targets.
   defp acquire_providers(
          _manifest,
          registry,
@@ -1065,7 +1025,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp execute_and_publish(%{publication_authority: authority} = built) do
     case execute_built(built) do
       {:ok, outcome} ->
-        result = publish_execution(outcome, authority)
+        result = published_execution_result(outcome, authority)
         finalize_authority(result, authority)
 
       {:error, _reason} = error ->
@@ -1131,66 +1091,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   def execute_built_claimed(_built, _lease), do: {:error, :invalid_execution_outcome}
 
-  # Completes an assembled build as a check rather than an execution: it reports
-  # the safe connector snapshots the acquisition produced, closes the provider
-  # session, and stops the sinks. It never evaluates the entry, finalizes a
-  # terminal event batch, or publishes an artifact, so nothing belonging only to
-  # execution can reach a destination through this path.
-  #
-  # Closing the session here is what keeps a check on the run's cleanup
-  # ordering: a run closes its session inside `PtcRunner.Kernel` while the
-  # registry and the OAuth runtime that produced its resources are still alive,
-  # so a check closes its own session in the same place rather than returning an
-  # open one to the execution owner.
-  @doc false
-  @spec check_built(map()) :: {:ok, [map()]} | {:error, term()}
-  def check_built(%{config: %RunConfig{}, publication_authority: authority} = built) do
-    if valid_built_binding?(built) do
-      case PublicationAuthority.claim(authority) do
-        {:ok, lease} -> check_built_claimed(built, lease)
-        {:error, _reason} -> {:error, :invalid_execution_outcome}
-      end
-    else
-      {:error, :invalid_execution_outcome}
-    end
-  end
-
-  def check_built(_built), do: {:error, :invalid_execution_outcome}
-
-  @doc false
-  @spec check_built_claimed(map(), PublicationAuthority.lease()) ::
-          {:ok, [map()]} | {:error, term()}
-  def check_built_claimed(
-        %{config: %RunConfig{} = config, publication_authority: authority} = built,
-        lease
-      ) do
-    if valid_built_binding?(built) and PublicationAuthority.lease_valid?(authority, lease) do
-      snapshots = config.connector_snapshots
-      cleanup = RunConfig.close_provider_session(config)
-      stop_execution_sinks(config)
-      authority_cleanup = PublicationAuthority.abort(authority)
-
-      case cleanup do
-        :ok ->
-          case authority_cleanup do
-            :ok -> {:ok, snapshots}
-            {:error, _reason} = error -> error
-          end
-
-        {:error, :provider_cleanup_failed} = error ->
-          error
-      end
-    else
-      {:error, :invalid_execution_outcome}
-    end
-  end
-
-  def check_built_claimed(_built, _lease), do: {:error, :invalid_execution_outcome}
-
-  @doc false
-  @spec publish_execution(ExecutionOutcome.t(), PublicationAuthority.t()) ::
-          {:ok, term(), :normal | :private} | {:error, term()}
-  def publish_execution(outcome, authority) do
+  defp published_execution_result(outcome, authority) do
     case publish_execution_report(outcome, authority) do
       {:ok, %{result: result, result_class: class}} -> execution_result(result, class)
       {:error, %{error: error, result: result}} -> publication_error(error, result)
@@ -1311,7 +1212,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   @doc """
   Loads a manifest and builds its run.
 
-  The optional `:mission` or `:private_mission` path replaces the manifest
+  The optional `:input` or `:private_input` path replaces the manifest
   input using the same manifest-relative confinement rules. They are mutually
   exclusive. A private mission marks the complete run value private before
   provider preflight or acquisition. The option names refer to CLI input
@@ -1360,7 +1261,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   defp input_options(opts) do
-    case {Keyword.get(opts, :mission), Keyword.get(opts, :private_mission)} do
+    case {Keyword.get(opts, :input), Keyword.get(opts, :private_input)} do
       {nil, nil} ->
         {:ok, [input_authority: :normal]}
 
@@ -1371,7 +1272,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
         {:ok, [input: path, input_authority: :private]}
 
       {path, private} when is_binary(path) and is_binary(private) ->
-        {:error, :conflicting_mission_inputs}
+        {:error, :conflicting_inputs}
 
       _invalid ->
         {:error, :invalid_input}
@@ -1443,14 +1344,14 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   defp preflight_artifact_destinations(opts) do
-    case PublicationAuthority.validate_distinct_destinations(opts) do
+    case opts |> publication_options() |> PublicationAuthority.validate_distinct_destinations() do
       :ok -> :ok
       {:error, reason} -> {:error, {:artifact_preflight_failed, reason}}
     end
   end
 
   defp preflight_trace(event_policy, provider_class, opts) do
-    case Keyword.get(opts, :trace) do
+    case Keyword.get(opts, :trace_path) do
       nil ->
         :ok
 
@@ -1489,7 +1390,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   @doc """
   Loads, builds, and executes a manifest-backed run.
 
-  In addition to `:mission`, the optional `:trace` path persists retained
+  In addition to `:input`, the optional `:trace_path` persists retained
   canonical events as JSONL after execution. The event sink is always stopped.
   A trace persistence error is returned together with the completed Kernel
   result so callers do not mistake persistence failure for workflow failure.
@@ -1521,7 +1422,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp provider_input_class(:private), do: :private_inspection
 
   defp authorize_artifacts(request, opts, provider_class) do
-    artifact_opts = Keyword.take(opts, @artifact_options)
+    artifact_opts = opts |> Keyword.take(@artifact_options) |> publication_options()
 
     if artifact_opts == [] do
       PublicationAuthority.new([])
@@ -1538,6 +1439,20 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   defp authorization_run_ref(_request), do: CommandRunRef.generate()
+
+  defp publication_options(opts) do
+    case Keyword.pop(opts, :trace_path) do
+      {nil, opts} -> opts
+      {path, opts} -> Keyword.put(opts, :trace, path)
+    end
+  end
+
+  defp build_options(opts) do
+    case Keyword.pop(opts, :trace) do
+      {nil, opts} -> opts
+      {path, opts} -> Keyword.put(opts, :trace_path, path)
+    end
+  end
 
   defp persistence_failure(:trace), do: :trace_persistence_failed
   defp persistence_failure(:inspection), do: :inspection_persistence_failed

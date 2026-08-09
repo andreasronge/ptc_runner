@@ -233,7 +233,7 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
 
     assert {:ok, evaluation} =
              RunBuilder.run(@aggregate_manifest, empty_registry,
-               private_mission: relative(trials_path)
+               private_input: relative(trials_path)
              )
 
     evaluation
@@ -244,8 +244,8 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
 
     opts =
       [
-        private_mission: relative(input_path),
-        trace: trace_path,
+        private_input: relative(input_path),
+        trace_path: trace_path,
         inspect: inspection_path
       ] ++ opts
 

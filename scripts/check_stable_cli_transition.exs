@@ -14,21 +14,12 @@ defmodule PtcRunner.StableCLITransitionCheck do
 
   @expected_callers %{
     "CommandEngine.authorize" => %{},
-    "CommandEngine.catalog" => %{
-      "lib/mix/tasks/ptc.run.ex" => 2,
-      "test/ptc_runner/kernel/command_engine_test.exs" => 3
-    },
-    "CommandEngine.request" => %{
-      "lib/mix/tasks/ptc.run.ex" => 1,
-      "test/ptc_runner/kernel/command_engine_test.exs" => 2
-    },
+    "CommandEngine.catalog" => %{},
+    "CommandEngine.request" => %{},
     "Repl.persist_terminal_result" => %{"test/mix/tasks/ptc_repl_test.exs" => 1},
-    "Run.failure_message" => %{"test/mix/tasks/ptc_run_test.exs" => 5},
+    "Run.failure_message" => %{},
     "RunBuilder.check_built" => %{},
-    "RunBuilder.check_built_claimed" => %{
-      "lib/ptc_runner/kernel/execution_session_owner.ex" => 1,
-      "lib/ptc_runner/kernel/provider_execution.ex" => 1
-    },
+    "RunBuilder.check_built_claimed" => %{},
     "RunBuilder.load_and_build" => %{
       "lib/mix/tasks/ptc.repl.ex" => 1,
       "test/ptc_runner/kernel/application_package_test.exs" => 1,
@@ -45,13 +36,8 @@ defmodule PtcRunner.StableCLITransitionCheck do
       "test/ptc_runner/kernel/repo_analyst_e2e_test.exs" => 2,
       "test/ptc_runner/kernel/run_builder_publication_test.exs" => 2
     },
-    "RunBuilder.preflight_prepared" => %{"lib/mix/tasks/ptc.run.ex" => 1},
-    "RunBuilder.publish_execution" => %{
-      "lib/mix/tasks/ptc.run.ex" => 1,
-      "test/ptc_runner/kernel/artifact_publisher_test.exs" => 1,
-      "test/ptc_runner/kernel/run_builder_publication_test.exs" => 4,
-      "test/ptc_runner/kernel/run_coordinator_execution_test.exs" => 2
-    },
+    "RunBuilder.preflight_prepared" => %{},
+    "RunBuilder.publish_execution" => %{},
     "RunBuilder.run" => %{
       "examples/kernel-inspection-lab/support/lab.exs" => 1,
       "test/ptc_runner/kernel/application_package_test.exs" => 1,
@@ -73,78 +59,48 @@ defmodule PtcRunner.StableCLITransitionCheck do
     "RunBuilder.run_with_class" => %{
       "test/ptc_runner/kernel/repo_analyst_live_e2e_test.exs" => 1
     },
-    "RunCoordinator.check" => %{
-      "lib/mix/tasks/ptc.run.ex" => 2,
-      "test/ptc_runner/kernel/provider_connectivity_test.exs" => 1
-    }
+    "RunCoordinator.check" => %{}
   }
 
   @source_inventories [
     {"RunBuilder transitional definitions",
      ~r/(?:@spec|def) (?:load_and_build|run|run_with_class|preflight_prepared|publish_execution)\(/,
-     %{"lib/ptc_runner/kernel/run_builder.ex" => 12}},
-    {"CommandEngine transitional definitions", ~r/(?:@spec|def) (?:authorize|request|catalog)\(/,
-     %{"lib/ptc_runner/kernel/command_engine.ex" => 4}},
-    {"CommandEngine catalog local references", ~r/\bcatalog\(/,
-     %{"lib/ptc_runner/kernel/command_engine.ex" => 3}},
-    {"CommandEngine request local references", ~r/\brequest\(/,
-     %{"lib/ptc_runner/kernel/command_engine.ex" => 3}},
-    {"RunCoordinator check definitions", ~r/(?:@spec|def) check\(/,
-     %{"lib/ptc_runner/kernel/run_coordinator.ex" => 6}},
-    {"RunCoordinator check route", ~r/\bcheck\b/,
-     %{"lib/ptc_runner/kernel/run_coordinator.ex" => 13}},
-    {"RunBuilder check definitions", ~r/(?:@spec|def) check_built(?:_claimed)?\(/,
-     %{"lib/ptc_runner/kernel/run_builder.ex" => 6}},
-    {"RunBuilder check local references", ~r/\bcheck_built(?:_claimed)?\(/,
      %{"lib/ptc_runner/kernel/run_builder.ex" => 7}},
-    {"execution-owner check route", ~r/:check|check_built/,
-     %{"lib/ptc_runner/kernel/execution_session_owner.ex" => 4}},
-    {"provider-execution check route", ~r/:check|check_built/,
-     %{"lib/ptc_runner/kernel/provider_execution.ex" => 6}},
-    {"provider-active-session check route", ~r/:check/,
-     %{"lib/ptc_runner/kernel/provider_active_session.ex" => 2}},
-    {"provider-session check route", ~r/:check/,
-     %{"lib/ptc_runner/kernel/provider_session.ex" => 7}},
-    {"Mix run check route", ~r/:check|RunCoordinator\.check|--check/,
-     %{"lib/mix/tasks/ptc.run.ex" => 10}},
-    {"Mix run failure seam", ~r/\bfailure_message\(/, %{"lib/mix/tasks/ptc.run.ex" => 5}},
+    {"CommandEngine transitional definitions", ~r/(?:@spec|def) (?:authorize|request|catalog)\(/,
+     %{}},
+    {"CommandEngine catalog local references", ~r/\bcatalog\(/, %{}},
+    {"CommandEngine request local references", ~r/\brequest\(/, %{}},
+    {"RunCoordinator check definitions", ~r/(?:@spec|def) check\(/, %{}},
+    {"RunCoordinator check route", ~r/\bcheck\b/, %{}},
+    {"RunBuilder check definitions", ~r/(?:@spec|def) check_built(?:_claimed)?\(/, %{}},
+    {"RunBuilder check local references", ~r/\bcheck_built(?:_claimed)?\(/, %{}},
+    {"execution-owner check route", ~r/:check|check_built/, %{}},
+    {"provider-execution check route", ~r/:check|check_built/, %{}},
+    {"provider-active-session check route", ~r/:check/, %{}},
+    {"provider-session check route", ~r/:check/, %{}},
+    {"Mix run check route", ~r/:check|RunCoordinator\.check|--check/, %{}},
+    {"Mix run failure seam", ~r/\bfailure_message\(/, %{}},
     {"Mix REPL persistence seam", ~r/\bpersist_terminal_result\(/,
      %{"lib/mix/tasks/ptc.repl.ex" => 5}},
-    {"RunBuilder mission option plumbing", ~r/opts, :mission\b|:mission,|:mission\]/,
-     %{"lib/ptc_runner/kernel/run_builder.ex" => 4}},
-    {"RunBuilder private-mission option plumbing", ~r/private_mission/,
-     %{"lib/ptc_runner/kernel/run_builder.ex" => 5}},
-    {"RunBuilder trace option plumbing", ~r/opts, :trace\b|:trace,|:trace\]/,
-     %{"lib/ptc_runner/kernel/run_builder.ex" => 4}},
-    {"Mix run mission option plumbing", ~r/:mission\b/, %{"lib/mix/tasks/ptc.run.ex" => 4}},
-    {"Mix run private-mission option plumbing", ~r/private_mission/,
-     %{"lib/mix/tasks/ptc.run.ex" => 5}},
-    {"Mix run trace option plumbing", ~r/:trace\b/, %{"lib/mix/tasks/ptc.run.ex" => 2}}
+    {"RunBuilder mission option plumbing", ~r/opts, :mission\b|:mission,|:mission\]/, %{}},
+    {"RunBuilder private-mission option plumbing", ~r/private_mission/, %{}},
+    {"RunBuilder legacy trace input plumbing",
+     ~r/Keyword\.(?:get|fetch)\(opts, :trace\)|:trace\]/, %{}},
+    {"Mix run mission option plumbing", ~r/:mission\b/, %{}},
+    {"Mix run private-mission option plumbing", ~r/private_mission/, %{}},
+    {"Mix run trace option plumbing", ~r/:trace\b/, %{}}
   ]
 
   @mix_run_trace_pattern ~r/mix ptc\.run[^\n]*--trace(?=$|[ =])|^[ \t]*--trace(?=$|[ =])[^\n]*/m
 
   @text_inventories [
     {"legacy input option names", ~r/--mission|--private-mission/,
-     %{
-       "docs/guides/manifests-and-capabilities.md" => 3,
-       "docs/guides/running-and-debugging.md" => 2,
-       "lib/mix/tasks/ptc.run.ex" => 6,
-       "test/mix/tasks/ptc_run_test.exs" => 6
-     }},
-    {"Mix run trace syntax", @mix_run_trace_pattern,
-     %{
-       "docs/guides/building-agents.md" => 1,
-       "docs/guides/getting-started.md" => 1,
-       "docs/guides/kernel-repl.md" => 1,
-       "docs/guides/running-and-debugging.md" => 5,
-       "examples/viewer-demo/run.sh" => 1,
-       "lib/mix/tasks/ptc.run.ex" => 2
-     }},
+     %{"test/mix/tasks/ptc_run_test.exs" => 2}},
+    {"Mix run trace syntax", @mix_run_trace_pattern, %{}},
     {"RunBuilder transitional documentation", ~r/\b(?:load_and_build|check_built)\/[13]\b/,
      %{
-       "docs/guides/kernel-maintainer.md" => 2,
-       "lib/ptc_runner/kernel/run_builder.ex" => 2
+       "docs/guides/kernel-maintainer.md" => 1,
+       "lib/ptc_runner/kernel/run_builder.ex" => 1
      }}
   ]
 
@@ -163,26 +119,6 @@ defmodule PtcRunner.StableCLITransitionCheck do
       "test/ptc_runner/kernel/artifact_publisher_test.exs" => 1,
       "test/ptc_runner/kernel/inspection_preflight_test.exs" => 2,
       "test/ptc_runner/kernel/repo_analyst_evaluation_e2e_test.exs" => 1
-    },
-    "mission" => %{
-      "test/ptc_runner/kernel/inspection_preflight_test.exs" => 1,
-      "test/ptc_runner/kernel/manifest_test.exs" => 2
-    },
-    "private_mission" => %{
-      "test/ptc_runner/kernel/repo_analyst_evaluation_e2e_test.exs" => 2
-    },
-    "trace" => %{
-      "examples/kernel-inspection-lab/support/lab.exs" => 1,
-      "test/ptc_runner/kernel/command_engine_test.exs" => 2,
-      "test/ptc_runner/kernel/inspection_preflight_test.exs" => 6,
-      "test/ptc_runner/kernel/inspection_sink_test.exs" => 1,
-      "test/ptc_runner/kernel/manifest_test.exs" => 1,
-      "test/ptc_runner/kernel/mcp_remote_agent_e2e_test.exs" => 1,
-      "test/ptc_runner/kernel/mcp_source_test.exs" => 1,
-      "test/ptc_runner/kernel/provider_lifecycle_test.exs" => 1,
-      "test/ptc_runner/kernel/repo_analyst_evaluation_e2e_test.exs" => 1,
-      "test/ptc_runner/kernel/repo_analyst_live_e2e_test.exs" => 1,
-      "test/ptc_runner/kernel/run_builder_publication_test.exs" => 1
     }
   }
 

@@ -57,7 +57,7 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
 
     assert {:ok, result, :normal} =
              RunBuilder.run_with_class(paths.manifest, registry,
-               trace: trace_path,
+               trace_path: trace_path,
                inspect: inspection_path,
                output: output_path
              )

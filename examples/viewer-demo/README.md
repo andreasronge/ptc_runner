@@ -17,8 +17,8 @@ examples/viewer-demo/run.sh /path/out  # or an explicit directory
 ```
 
 The script regenerates the granted `files/` root, launches the committed
-filesystem MCP sample through `ptc-host.json`, runs each journey with `--trace`
-and `--inspect`, and prints a `mix ptc.viewer` command. Node.js is required,
+filesystem MCP sample through `ptc-host.json`, runs each journey with
+`--trace-dir` and `--inspect`, and prints a `mix ptc.viewer` command. Node.js is required,
 but the committed bundle needs no package installation. The viewer
 pins exactly one inspection artifact per instance — pick the journey whose
 private payloads you want to inspect; the other runs still render their

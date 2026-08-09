@@ -167,8 +167,8 @@ manifest-relative JSON Schema files:
 }
 ```
 
-The input contract covers inline input, an input file, and any `--mission` or
-`--private-mission` override. It is compiled and checked before provider
+The input contract covers inline input, an input file, and any `--input` or
+`--private-input` override. It is compiled and checked before provider
 preflight, credential resolution, process launch, or remote discovery. The
 result contract is checked after execution and evidence capture, but before
 stdout or `--output`/`--private-output` publication. The shipped
@@ -258,7 +258,7 @@ MCP capability schemas.
 
 `--output PATH` atomically writes only the validated `Result.value`, never
 clobbers an existing file, and can be passed directly to a later run with
-`--mission`. Use `--private-output` for a private run; it creates a `0600`
+`--input`. Use `--private-output` for a private run; it creates a `0600`
 artifact and keeps the value off stdout. Destination conflicts and
 normal/private class mismatches are rejected before provider acquisition, while
 exclusive creation remains authoritative if the path appears during the run.

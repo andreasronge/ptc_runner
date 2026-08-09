@@ -109,7 +109,7 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
 
     assert {:ok, result} =
              RunBuilder.run(manifest_path, registry,
-               trace: trace_path,
+               trace_path: trace_path,
                inspect: inspection_path
              )
 

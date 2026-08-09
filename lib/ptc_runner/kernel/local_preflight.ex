@@ -174,9 +174,8 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   This is the only entry to an `:unverified` callback, and it is reachable only
   after the phase-8 marker: nothing bounds what such a callback may do, so it
   cannot be trusted with the pre-activity window that `run/4` occupies. Default
-  doctor reports `active_check_required` rather than calling this; run, check,
-  and `doctor --connect` call it under the operation deadline their session
-  anchored.
+  doctor reports `active_check_required` rather than calling this; runs and
+  `doctor --connect` call it under the operation deadline their session anchored.
 
   There is no trust gate here, unlike `run/4`. `:unverified` is precisely the
   declaration that makes no trust claim, so there is nothing to verify — the

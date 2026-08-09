@@ -426,24 +426,6 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   end
 
   @tag :tmp_dir
-  test "projected publication errors retain only safe completed-result context", %{tmp_dir: dir} do
-    output = Path.join(dir, "result.json")
-    {built, registry} = build!(dir, "safe-context", :normal, nil, nil, output)
-    assert {:ok, outcome} = RunBuilder.execute_built(built)
-
-    File.write!(output, "attacker")
-
-    assert {:error,
-            {:result_persistence_failed, :destination_collision,
-             {:ok, %Result{value: "safe-context"}}}} =
-             RunBuilder.publish_execution(outcome, built.publication_authority)
-
-    File.rm!(output)
-    assert :ok = PublicationAuthority.abort(built.publication_authority)
-    assert :ok = ProviderRegistry.close(registry)
-  end
-
-  @tag :tmp_dir
   test "private publication materializes recovery before final requested result", %{tmp_dir: dir} do
     trace = Path.join(dir, "private.private.jsonl")
     inspection = Path.join(dir, "private.inspection.jsonl")
@@ -903,7 +885,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
 
     opts =
       []
-      |> maybe_put(:trace, trace)
+      |> maybe_put(:trace_path, trace)
       |> maybe_put(:inspect, inspection)
       |> maybe_put(:private_output, output, result_destination == :private_output)
       |> maybe_put(:private_output, output, result_destination == :policy and policy == :private)

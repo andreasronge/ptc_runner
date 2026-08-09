@@ -87,8 +87,7 @@ to both package acquisition and `RunBuilder.build/3`.
 The core application deliberately starts no provider dependency on your behalf,
 so depending on `ptc_runner` never starts `req_llm` or `llm_db` inside your
 release. A run admits the application it needs through
-`PtcRunner.Kernel.ProviderApplicationGate`. Both `mix ptc.run` and
-`mix ptc.run --check` reach it through the execution-owned
+`PtcRunner.Kernel.ProviderApplicationGate`. `mix ptc.run` reaches it through the execution-owned
 `ProviderActiveSession.open_consumed_setup/5`, where the execution-session owner
 already owns the prepared run and the session's lifecycle. There is no
 creator-owned variant.

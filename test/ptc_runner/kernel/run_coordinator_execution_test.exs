@@ -31,8 +31,8 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     assert {:ok, outcome} = RunCoordinator.execute(prepared, authority)
     assert ExecutionOutcome.valid?(outcome)
 
-    assert {:ok, %{value: %{"answer" => 42}}, :normal} =
-             RunBuilder.publish_execution(outcome, authority)
+    assert {:ok, %{result: {:ok, %{value: %{"answer" => 42}}}, result_class: :normal}} =
+             RunBuilder.publish_execution_report(outcome, authority)
 
     assert :ok = PreparedRun.close(prepared)
     assert :ok = InstallationCatalog.close(catalog)
@@ -51,8 +51,8 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
 
     assert ExecutionOutcome.valid?(outcome)
 
-    assert {:ok, %{value: %{"answer" => 42}}, :normal} =
-             RunBuilder.publish_execution(outcome, authority)
+    assert {:ok, %{result: {:ok, %{value: %{"answer" => 42}}}, result_class: :normal}} =
+             RunBuilder.publish_execution_report(outcome, authority)
 
     assert :ok = PreparedRun.close(prepared)
     assert :ok = InstallationCatalog.close(catalog)

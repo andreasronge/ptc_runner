@@ -654,7 +654,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     manifest = manifest(dir, [provider("staged", %{})], [])
 
     assert {:error, {:trace_preflight_failed, :normal_trace_requires_normal_suffix}} =
-             RunBuilder.run(manifest, registry, trace: Path.join(dir, "wrong.private.jsonl"))
+             RunBuilder.run(manifest, registry, trace_path: Path.join(dir, "wrong.private.jsonl"))
 
     refute_receive :trace_provider_prepared
     refute_receive :trace_provider_preflighted

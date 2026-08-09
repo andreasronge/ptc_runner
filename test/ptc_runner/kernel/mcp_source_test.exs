@@ -533,7 +533,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, _result} =
              RunBuilder.run(manifest_path, registry(fixture.endpoint),
                inspect: inspection_path,
-               trace: trace_path
+               trace_path: trace_path
              )
 
     assert_receive {:mcp_body, "tools/call", request_body}

@@ -401,39 +401,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_schema_valid(outcome.envelope)
   end
 
-  @tag :tmp_dir
-  test "shared request acquisition owns the command policy invariants", %{tmp_dir: directory} do
-    application = write_application(directory, "shared-request", valid_manifest())
-    assert {:ok, catalog} = InstallationCatalog.new()
-
-    assert {:ok, request} =
-             CommandEngine.request(application, catalog,
-               installed_limits: :caller_supplied,
-               result_projection: :native
-             )
-
-    assert request.package.installed_limits == catalog.installed_limits
-    assert request.policy.result_projection == :json
-
-    assert {:error, :invalid_application_options} =
-             CommandEngine.request(application, catalog, [:not_keyword])
-  end
-
-  @tag :tmp_dir
-  test "shared catalog acquisition returns the host and its inert catalog", %{tmp_dir: directory} do
-    host_path = write_host_config(directory, "shared-catalog", valid_host_config())
-
-    assert {:ok, nil, empty_catalog} = CommandEngine.catalog(nil)
-    assert empty_catalog.descriptors == %{}
-
-    assert {:ok, host, catalog} = CommandEngine.catalog(host_path)
-    assert Map.keys(host.install) == ["workspace"]
-    assert InstallationCatalog.names(catalog) == ["workspace"]
-
-    assert {:error, %CommandDiagnostic{phase: :host, code: :host_unavailable}} =
-             CommandEngine.catalog(Path.join(directory, "missing-host.json"))
-  end
-
   test "malformed phase-1 forms retain their recognized command" do
     cases = [
       {["version", "extra"], "version"},
@@ -3594,7 +3561,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              RunBuilder.build_prepared(prepared, registry, [:not_keyword])
 
     assert {:error, :invalid_build_options} =
-             RunBuilder.build_prepared(prepared, registry, trace: "first", trace: "second")
+             RunBuilder.build_prepared(prepared, registry,
+               trace_path: "first",
+               trace_path: "second"
+             )
 
     assert {:error, :invalid_build_options} =
              RunBuilder.build_prepared(prepared, registry, caller_secret: true)
@@ -3622,7 +3592,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   @tag :tmp_dir
   test "load and run reject duplicate artifact options before acquisition", %{tmp_dir: directory} do
     missing = Path.join(directory, "missing")
-    duplicate_trace = [trace: "first.jsonl", trace: "second.jsonl"]
+    duplicate_trace = [trace_path: "first.jsonl", trace_path: "second.jsonl"]
 
     invalid_limits = [
       %{Limits.installed_defaults() | run_duration_ms: :invalid},

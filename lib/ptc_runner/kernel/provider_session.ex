@@ -130,7 +130,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
             operation_identity: binary() | nil,
             run_duration_ms: pos_integer(),
             connectivity_duration_ms: pos_integer(),
-            begun_operation: :run | :check | :connect | nil,
+            begun_operation: :run | :connect | nil,
             run_deadline: Deadline.t() | nil,
             cleanup_timeout_ms: pos_integer(),
             max_heap_words: pos_integer(),
@@ -282,19 +282,19 @@ defmodule PtcRunner.Kernel.ProviderSession do
   operation can silently inherit a clock sized for another.
   `run_deadline/1` returns whichever was anchored.
   """
-  @spec begin_operation(t(), :run | :check | :connect) ::
+  @spec begin_operation(t(), :run | :connect) ::
           {:ok, t()} | {:error, :provider_session_unavailable}
   def begin_operation(%__MODULE__{} = session, operation)
-      when operation in [:run, :check, :connect],
+      when operation in [:run, :connect],
       do: begin_operation(session, operation, @claim_timeout_ms)
 
   def begin_operation(_session, _operation), do: {:error, :provider_session_unavailable}
 
   @doc false
-  @spec begin_operation(t(), :run | :check | :connect, timeout()) ::
+  @spec begin_operation(t(), :run | :connect, timeout()) ::
           {:ok, t()} | {:error, :provider_session_unavailable}
   def begin_operation(%__MODULE__{} = session, operation, claim_timeout_ms)
-      when operation in [:run, :check, :connect] do
+      when operation in [:run, :connect] do
     if valid?(session) and session.creator == self() and
          is_binary(session.operation_identity) and is_nil(session.run_deadline) do
       run_deadline = Deadline.new(sealed_duration(session, operation))
@@ -333,7 +333,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
   defp sealed_duration(session, _operation), do: session.run_duration_ms
 
   @doc false
-  @spec begun_operation(term()) :: :run | :check | :connect | nil
+  @spec begun_operation(term()) :: :run | :connect | nil
   def begun_operation(%__MODULE__{} = session) do
     if valid?(session), do: session.begun_operation
   end
@@ -495,11 +495,10 @@ defmodule PtcRunner.Kernel.ProviderSession do
   # The claim boundary validates identity and limits, not which clock this
   # session anchored. A connect session holds `doctor_connectivity_timeout_ms`,
   # which an application that narrowed `run_duration_ms` can make the longer of
-  # the two, so claiming it for a run or a check would hand execution a budget
+  # the two, so claiming it for a run would hand execution a budget
   # its limits never granted. The operation the session began with is sealed
   # into it for exactly this check.
-  defp claimable_operation?(%__MODULE__{begun_operation: operation}),
-    do: operation in [:run, :check]
+  defp claimable_operation?(%__MODULE__{begun_operation: operation}), do: operation == :run
 
   @spec open_registrar(t()) ::
           {:ok, ResourceRegistrar.t()} | {:error, :provider_session_unavailable}

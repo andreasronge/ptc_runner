@@ -182,11 +182,11 @@ defmodule PtcRunner.Kernel.ManifestTest do
     assert {:error,
             {:source_role, :external_input,
              {:input_contract_failed, %{missing_required: ["question"]}}}} =
-             RunBuilder.load_and_build(path, registry, mission: "invalid.json")
+             RunBuilder.load_and_build(path, registry, input: "invalid.json")
 
     refute_receive :provider_prepared
 
-    assert {:ok, built} = RunBuilder.load_and_build(path, registry, mission: "valid.json")
+    assert {:ok, built} = RunBuilder.load_and_build(path, registry, input: "valid.json")
     assert_receive :provider_prepared
     assert :ok = RunBuilder.close(built)
 
@@ -312,7 +312,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
     invalid_output = Path.join(dir, "invalid.json")
     trace = Path.join(dir, "invalid.jsonl")
 
-    error = RunBuilder.run(path, registry, output: invalid_output, trace: trace)
+    error = RunBuilder.run(path, registry, output: invalid_output, trace_path: trace)
 
     # The rejected value stays withheld, but the rejection now says enough to
     # act on: an operator learns the discriminator was unrecognised without

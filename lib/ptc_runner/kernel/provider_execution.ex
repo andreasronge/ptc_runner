@@ -108,9 +108,9 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           (binary() -> term()) | nil,
           tracker(),
           pid(),
-          :run | :check | :connect
+          :run | :connect
         ) ::
-          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | [map()] | ConnectivityResult.t()}
+          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | ConnectivityResult.t()}
           | {:error, term()}
   def execute(
         %PreparedRun{} = prepared,
@@ -123,7 +123,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         operation
       )
       when is_function(tracker, 3) and is_pid(lifecycle_owner) and
-             operation in [:run, :check, :connect] do
+             operation in [:run, :connect] do
     Process.put({__MODULE__, :publication_lease}, lease)
 
     with true <- notifier_matches_operation?(notifier, operation),
@@ -428,7 +428,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
-  # Every step above this one is shared by a run, a check, and connectivity: the
+  # Every step above this one is shared by a run and connectivity: the
   # same activity marker, session, registry, credentials, OAuth, and cleanup
   # ownership. Only the completion differs, so none of them can drift into its
   # own provider lifecycle.
@@ -442,7 +442,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          operation,
          credentials
        )
-       when operation in [:run, :check],
+       when operation == :run,
        do:
          build_and_complete(
            prepared,
@@ -456,7 +456,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          )
 
   # Connectivity is the one completion that does not build a run config. A run
-  # and a check both acquire every selected provider to reach their result;
+  # acquires every selected provider to reach its result;
   # connectivity decides per occurrence what its declaration asks for, so
   # building one here would acquire providers a `:none` occurrence never wanted.
   defp complete(
@@ -523,7 +523,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   end
 
   # The session closes here, inside the registry callback, exactly where a run
-  # and a check close theirs. Its committed closers belong to the runtime that
+  # closes its own. Its committed closers belong to the runtime that
   # acquired them — a connectivity acquisition commits real ones — so unwinding
   # the registry first would leave a closer reaching for authority that is
   # already gone. That is the owner's session-before-runtime ordering, and
@@ -660,16 +660,6 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
   defp complete_operation(%{publication_lease: lease} = built, :run),
     do: RunBuilder.execute_built_claimed(built, lease)
-
-  # A check closes its own provider session inside this runtime, exactly where a
-  # run closes its own, so its cleanup failure is classified here rather than
-  # reaching the owner as a bare reason after the session is already gone.
-  defp complete_operation(%{publication_lease: lease} = built, :check) do
-    case RunBuilder.check_built_claimed(built, lease) do
-      {:error, :provider_cleanup_failed} -> {:error, cleanup_diagnostic()}
-      result -> result
-    end
-  end
 
   defp with_runtime_registry(
          execution,
@@ -822,7 +812,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          _selected_names,
          _catalog
        )
-       when operation in [:run, :check],
+       when operation == :run,
        do: {:error, CommandDiagnostic.new!(:execution, :run_timeout, provider_activity: true)}
 
   # Connectivity spends a different budget, so exhausting it is not a run

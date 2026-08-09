@@ -38,7 +38,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           pid(),
           ProviderExecution.t() | nil,
           (binary() -> term()) | nil,
-          :run | :check | :connect
+          :run | :connect
         ) ::
           {:ok, t()}
           | {:error,
@@ -49,7 +49,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   def start(prepared, authority, caller, provider_execution, notifier, operation \\ :run)
 
   def start(prepared, authority, caller, provider_execution, notifier, operation)
-      when is_pid(caller) and operation in [:run, :check, :connect] do
+      when is_pid(caller) and operation in [:run, :connect] do
     with :ok <- admissible(prepared, authority, provider_execution, notifier, operation),
          {:ok, lease} <- PublicationAuthority.claim(authority) do
       token = make_ref()
@@ -96,7 +96,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
       # Decided here, before `init/1` consumes the preparation, so a connect
       # that asked for authorization leaves its preparation reusable rather
-      # than being spent on a check that would have skipped it.
+      # than being spent on a connectivity check that would have skipped it.
       operation == :connect and not ProviderExecution.non_interactive?(provider_execution) ->
         {:error, :invalid_provider_execution}
 
@@ -124,11 +124,10 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     do: {:error, :invalid_provider_execution}
 
   # Each operation completes with its own evidence: a run with a sealed
-  # execution outcome, a check with the acquisition's safe connector snapshots,
-  # and connectivity with the sealed per-occurrence result.
+  # execution outcome and connectivity with the sealed per-occurrence result.
   @doc false
   @spec await(t()) ::
-          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | [map()] | ConnectivityResult.t()}
+          {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | ConnectivityResult.t()}
           | {:error, term()}
   def await(%__MODULE__{pid: pid, token: token}) do
     result = GenServer.call(pid, {token, :await}, :infinity)
@@ -435,9 +434,6 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   defp complete_operation(%{publication_lease: lease} = built, :run),
     do: RunBuilder.execute_built_claimed(built, lease)
-
-  defp complete_operation(%{publication_lease: lease} = built, :check),
-    do: RunBuilder.check_built_claimed(built, lease)
 
   defp finish_or_wait(%{waiter: nil} = state), do: {:noreply, state}
 

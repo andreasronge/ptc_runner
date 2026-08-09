@@ -56,7 +56,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
     registry = registry(endpoint, program, wrapper?, directory)
 
     {:ok, result} =
-      RunBuilder.run(manifest_path, registry, trace: trace_path, inspect: inspection_path)
+      RunBuilder.run(manifest_path, registry, trace_path: trace_path, inspect: inspection_path)
 
     {:ok, records} = InspectionArtifact.load(inspection_path)
 

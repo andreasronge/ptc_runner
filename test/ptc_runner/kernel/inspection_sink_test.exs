@@ -655,7 +655,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     assert {:ok, _result} =
              RunBuilder.run(manifest_path, registry,
-               trace: trace_path,
+               trace_path: trace_path,
                inspect: inspection_path,
                private_output: result_path,
                result_projection: :json
