@@ -14,7 +14,7 @@ defmodule Mix.Tasks.Ptc.Materialize do
   at end of run: it is not in the frozen bundle, not covered by a component
   source hash, and absent from the mission inventory. This task closes that
   loop by making the authored bytes a real component candidate, which a later
-  run can evaluate through `mix ptc.run --component-override-descriptor`.
+  run can evaluate through `mix ptc run --component-override-descriptor`.
 
   Promotion stays an explicit human decision. This task does not promote
   anything; it makes the decision cheap to reach and well evidenced.
@@ -22,7 +22,7 @@ defmodule Mix.Tasks.Ptc.Materialize do
   ## Source acquisition
 
   `--source` reads raw candidate bytes. `--from-result` reads a result artifact
-  written by `mix ptc.run --output`/`--private-output` and resolves one RFC 6901
+  written by `mix ptc run --output`/`--private-output` and resolves one RFC 6901
   JSON pointer to one string, because a result artifact is JSON, not raw Lisp.
   A non-string or absent target is refused rather than coerced.
 
@@ -307,7 +307,7 @@ defmodule Mix.Tasks.Ptc.Materialize do
 
     Mix.shell().info(
       "promotion is a human decision: review the candidate, then run it with " <>
-        "mix ptc.run MANIFEST --component-override-descriptor #{published.descriptor}"
+        "mix ptc run MANIFEST --component-override-descriptor #{published.descriptor}"
     )
   end
 

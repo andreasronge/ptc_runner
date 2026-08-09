@@ -168,7 +168,7 @@ From the repository root:
 
 ```console
 mix deps.get
-mix ptc.run examples/kernel-tutorial/01-orders/ptc.json
+mix ptc run examples/kernel-tutorial/01-orders/ptc.json
 ```
 
 The example loads JSON input, runs a PTC-Lisp function, and returns a JSON
@@ -179,16 +179,16 @@ model-generated program.
 
 ## Availability
 
-The current product runs from a source checkout with Elixir and Mix. Other
-installations will be released from `main` after the standalone command is
-complete.
+The product runs from a source checkout with Elixir and Mix or as a locally
+built runtime-included release. The release does not need Erlang or Elixir on
+the target machine.
 
 | Installation | Status | Interface |
 | --- | --- | --- |
-| Source checkout with Mix | Available | `mix ptc.run`, `mix ptc.repl` |
+| Source checkout with Mix | Available | `mix ptc run`, `mix ptc repl` |
 | Hex dependency for Elixir applications | Next 0.x release | Mix tasks and `PtcRunner.Kernel` |
-| Standalone macOS installation | Planned | `ptc` command, without an Elixir installation |
-| Docker image | Planned | The same `ptc` command and runtime contract |
+| Local runtime-included release | Available from source | `_build/prod/rel/ptc_runner/bin/ptc` |
+| Signed packages and container images | Planned | The same `ptc` command and runtime contract |
 
 ## Guides
 

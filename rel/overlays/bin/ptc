@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+release_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+exec "$release_root/bin/ptc_runner" eval 'PtcRunner.StandaloneCLI.main(System.argv())' "$@"

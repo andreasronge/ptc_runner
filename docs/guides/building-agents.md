@@ -271,7 +271,7 @@ exhaustion also return bounded error envelopes. The example turns a provider
 error into `(fail ...)` rather than accidentally treating it as model content.
 
 ```console
-mix ptc.run examples/kernel-tutorial/02-deepseek-extract/ptc.json \
+mix ptc run examples/kernel-tutorial/02-deepseek-extract/ptc.json \
   --host-config examples/kernel-tutorial/ptc-host.json
 ```
 
@@ -382,7 +382,7 @@ The workflow stays a thin policy boundary, narrowed to two turns:
 ```
 
 ```console
-mix ptc.run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
+mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
   --host-config examples/kernel-tutorial/ptc-host.json
 ```
 
@@ -544,7 +544,7 @@ Run it from the repository root and retain its sanitized trace:
 
 ```console
 mkdir -p tmp/file-agent-traces
-mix ptc.run examples/kernel-tutorial/03-file-agent/ptc.json \
+mix ptc run examples/kernel-tutorial/03-file-agent/ptc.json \
   --host-config examples/kernel-tutorial/ptc-host.json \
   --trace-dir tmp/file-agent-traces
 ```
@@ -579,7 +579,7 @@ there was no ordinary intermediate value to retain as `*1`.
 Inspect the run through the bounded log-analysis REPL:
 
 ```console
-mix ptc.repl \
+mix ptc repl \
   --profile log-analysis-v2 \
   --resource traces=tmp/file-agent-traces \
   -e '(def run-id (get-in (log/runs {}) ["items" 0 "run_id"]))' \

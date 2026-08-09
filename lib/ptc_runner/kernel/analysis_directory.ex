@@ -28,6 +28,20 @@ defmodule PtcRunner.Kernel.AnalysisDirectory do
   def resolve(_directory), do: {:error, :directory_identity_unavailable}
 
   @doc false
+  @spec resolve_all([term()]) ::
+          {:ok, [resolved()]} | {:error, :directory_identity_unavailable}
+  def resolve_all(directories) when is_list(directories) do
+    Enum.reduce_while(directories, {:ok, []}, fn directory, {:ok, resolved} ->
+      case resolve(directory) do
+        {:ok, value} -> {:cont, {:ok, [value | resolved]}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  def resolve_all(_directories), do: {:error, :directory_identity_unavailable}
+
+  @doc false
   @spec pairwise_separate?([resolved()]) :: boolean()
   def pairwise_separate?(directories) when is_list(directories) do
     Enum.with_index(directories)

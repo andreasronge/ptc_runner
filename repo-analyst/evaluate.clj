@@ -5,7 +5,7 @@
 ;; A Kernel run has one frozen workflow environment, so a trial cannot switch
 ;; providers or reset state partway through. That is why the loop lives here
 ;; rather than inside a component that iterates cases: baseline and candidate,
-;; every case, and every repetition are separate `mix ptc.run` invocations with
+;; every case, and every repetition are separate `mix ptc run` invocations with
 ;; their own no-clobber artifacts. Nothing this component does can share state
 ;; with another trial, because there is no other trial in this process.
 ;;

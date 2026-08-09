@@ -76,7 +76,7 @@ program `(return (tutorial.signatures/double 21))`.
 Run it from the repository root:
 
 ```console
-mix ptc.run examples/kernel-tutorial/05-signature-feedback/ptc.json
+mix ptc run examples/kernel-tutorial/05-signature-feedback/ptc.json
 ```
 
 The result contains the failed evaluation, the exact feedback an agent model

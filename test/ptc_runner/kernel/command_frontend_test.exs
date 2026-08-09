@@ -1,0 +1,471 @@
+defmodule PtcRunner.Kernel.CommandFrontendTest do
+  use ExUnit.Case, async: true
+
+  alias PtcRunner.Kernel.CommandContract
+  alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandEngine
+  alias PtcRunner.Kernel.CommandEntry
+  alias PtcRunner.Kernel.CommandFrontend
+  alias PtcRunner.Kernel.CommandOutcome
+  alias PtcRunner.Kernel.CommandRenderer
+  alias PtcRunner.Kernel.CommandRouter
+  alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.DiagnosticCatalog
+
+  @run_ref "cmd-00000000000000000000000001"
+
+  @human_fixtures Path.expand("../../fixtures/command-human-v1.json", __DIR__)
+                  |> File.read!()
+                  |> Jason.decode!()
+
+  test "help and version complete without invoking bootstrap" do
+    parent = self()
+
+    for argv <- [[], ["help", "run"], ["--version"]] do
+      presentation =
+        CommandFrontend.execute(argv, :standalone, fn _arguments ->
+          send(parent, :unexpected_bootstrap)
+          {:error, :command_bootstrap_failed}
+        end)
+
+      assert presentation.exit_status == 0
+      assert presentation.stdout != ""
+      assert presentation.stderr == ""
+    end
+
+    refute_received :unexpected_bootstrap
+  end
+
+  test "repl structural rejections occur before bootstrap without echoing values" do
+    parent = self()
+
+    presentation =
+      CommandRouter.execute(
+        ["repl", "--describe-profile", "log-analysis-v2", "--load", "caller-value"],
+        :standalone,
+        fn _arguments ->
+          send(parent, :unexpected_bootstrap)
+          {:ok, CommandRuntime.standalone()}
+        end,
+        fn _arguments, _runtime ->
+          send(parent, :unexpected_repl)
+          :ok
+        end
+      )
+
+    assert presentation.exit_status == 2
+    assert presentation.stdout == ""
+    assert presentation.stderr =~ "arguments/invalid_arguments"
+    refute presentation.stderr =~ "caller-value"
+    refute_received :unexpected_bootstrap
+    refute_received :unexpected_repl
+  end
+
+  @tag :tmp_dir
+  test "a recoverable startup failure publishes one schema-valid envelope", %{tmp_dir: dir} do
+    path = Path.join(dir, "command-envelope.json")
+
+    presentation =
+      CommandFrontend.execute(["doctor", "--envelope", path], :standalone, fn _arguments ->
+        {:error, :command_bootstrap_failed}
+      end)
+
+    assert presentation.exit_status == 70
+    assert presentation.stdout == ""
+    assert presentation.stderr == ""
+    assert presentation.envelope_path == path
+
+    encoded = File.read!(path)
+    envelope = Jason.decode!(encoded)
+    assert CommandContract.valid_envelope?(envelope)
+    assert envelope["command"] == "doctor"
+    assert envelope["error"]["phase"] == "internal"
+    refute String.ends_with?(encoded, "\n")
+  end
+
+  @tag :tmp_dir
+  test "an argv rejection does not deliver an envelope or bootstrap", %{tmp_dir: dir} do
+    path = Path.join(dir, "must-not-exist.json")
+    parent = self()
+
+    presentation =
+      CommandFrontend.execute(
+        ["run", "ptc.json", "--unknown", "value", "--envelope", path],
+        :standalone,
+        fn _arguments ->
+          send(parent, :unexpected_bootstrap)
+          {:ok, CommandRuntime.standalone()}
+        end
+      )
+
+    assert presentation.exit_status == 2
+    assert presentation.envelope_path == nil
+    assert presentation.stderr =~ "; unknown switch; accepted:"
+    refute presentation.stderr =~ "--unknown"
+    refute File.exists?(path)
+    refute_received :unexpected_bootstrap
+  end
+
+  @tag :tmp_dir
+  test "an existing envelope destination is not replaced and reports status 74", %{tmp_dir: dir} do
+    path = Path.join(dir, "existing.json")
+    File.write!(path, "original")
+
+    presentation =
+      CommandFrontend.execute(["doctor", "--envelope", path], :standalone, fn _arguments ->
+        {:error, :command_bootstrap_failed}
+      end)
+
+    assert presentation.exit_status == 74
+    assert presentation.stdout == ""
+
+    assert presentation.stderr ==
+             "error: envelope/publication_failed: command envelope could not be published " <>
+               "(run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
+
+    assert File.read!(path) == "original"
+  end
+
+  @tag :tmp_dir
+  test "entry rejects resolved envelope collisions before bootstrap or delivery", %{tmp_dir: dir} do
+    output = Path.join(dir, "answer.json")
+
+    assert_collision([
+      "run",
+      "ptc.json",
+      "--output",
+      output,
+      "--envelope",
+      Path.join([dir, ".", "answer.json"])
+    ])
+
+    trace_dir = Path.join(dir, "traces")
+    File.mkdir!(trace_dir)
+
+    for suffix <- [".jsonl", ".private.jsonl"] do
+      assert_collision([
+        "run",
+        "ptc.json",
+        "--trace-dir",
+        trace_dir,
+        "--envelope",
+        Path.join(trace_dir, @run_ref <> suffix)
+      ])
+    end
+
+    private_output = Path.join(dir, "private.json")
+
+    assert_collision([
+      "run",
+      "ptc.json",
+      "--private-output",
+      private_output,
+      "--envelope",
+      Path.join(dir, ".ptc-private-result-" <> @run_ref <> ".json")
+    ])
+  end
+
+  @tag :tmp_dir
+  test "entry anchors destinations once and dispatch uses the captured paths", %{tmp_dir: dir} do
+    application = write_application(dir)
+    output = Path.join(dir, "captured-result.json")
+    decoy = Path.join(dir, "decoy-result.json")
+    relative_output = Path.relative_to(output, File.cwd!())
+
+    assert {:ok, entry} =
+             CommandEntry.open_with_ref(
+               ["run", application, "--output", relative_output],
+               :standalone,
+               @run_ref
+             )
+
+    assert {%{output: captured_output}, []} = entry.destinations
+    assert captured_output == Path.join(File.cwd!(), relative_output)
+
+    arguments = %{
+      entry.arguments
+      | options: Map.put(entry.arguments.options, :output, decoy)
+    }
+
+    assert {:ok, _outcome} =
+             CommandEngine.dispatch_entry(
+               %{entry | arguments: arguments},
+               CommandRuntime.standalone()
+             )
+
+    assert File.regular?(output)
+    refute File.exists?(decoy)
+
+    target = Path.join(dir, "new-project")
+    relative_target = Path.relative_to(target, File.cwd!())
+
+    assert {:ok, init_entry} =
+             CommandEntry.open_with_ref(["init", relative_target], :standalone, @run_ref)
+
+    assert init_entry.arguments.directory == Path.join(File.cwd!(), relative_target)
+  end
+
+  @tag :tmp_dir
+  test "init rejects an envelope at or beneath the resolved target", %{tmp_dir: dir} do
+    target = Path.join(dir, "new-project")
+    assert_collision(["init", target, "--envelope", target])
+    assert_collision(["init", target, "--envelope", Path.join(target, "envelope.json")])
+
+    real_parent = Path.join(dir, "real")
+    linked_parent = Path.join(dir, "linked")
+    File.mkdir!(real_parent)
+    File.ln_s!(real_parent, linked_parent)
+
+    assert_collision([
+      "init",
+      Path.join(linked_parent, "project"),
+      "--envelope",
+      Path.join([real_parent, "project", "envelope.json"])
+    ])
+  end
+
+  test "help and version reject envelope as an undeclared switch" do
+    for argv <- [
+          ["help", "run", "--envelope", "result.json"],
+          ["version", "--envelope", "result.json"],
+          ["--version", "--envelope", "result.json"]
+        ] do
+      presentation =
+        CommandFrontend.execute(argv, :standalone, fn _arguments ->
+          flunk("bootstrap must not run")
+        end)
+
+      assert presentation.exit_status == 2
+      assert presentation.stderr =~ "; unknown switch; accepted:"
+      refute presentation.stderr =~ "result.json"
+    end
+  end
+
+  test "success projections match the byte-exact human fixtures" do
+    artifacts = %{
+      "trace" => "not_requested",
+      "inspection" => "not_requested",
+      "result" => "not_requested"
+    }
+
+    private_artifacts = %{artifacts | "result" => "written"}
+
+    usage = %{
+      "remaining_ms" => 0,
+      "capability_calls" => %{},
+      "subordinate_evaluations" => 0,
+      "protocol_errors" => 0,
+      "evaluation_memory_bytes" => 0,
+      "evaluation_history_bytes" => 0,
+      "evaluation_continuation_bytes" => 0,
+      "events_dropped" => %{}
+    }
+
+    memory = %{
+      "defined_count" => 0,
+      "history_count" => 0,
+      "memory_bytes" => 0,
+      "history_bytes" => 0,
+      "bytes" => 0
+    }
+
+    doctor_default = Jason.decode!(@human_fixtures["success"]["doctor_default"])
+    doctor_connect = Jason.decode!(@human_fixtures["success"]["doctor_connect"])
+
+    rows = %{
+      "run_normal" =>
+        CommandOutcome.run_success(
+          @run_ref,
+          :normal,
+          %{"b" => 2, "a" => 1},
+          artifacts,
+          usage,
+          memory
+        ),
+      "run_private" =>
+        CommandOutcome.run_success(
+          @run_ref,
+          :private,
+          nil,
+          private_artifacts,
+          usage,
+          memory
+        ),
+      "validate" =>
+        CommandOutcome.success(:validate, @run_ref, %{
+          "application_content_digest" => "sha256:" <> String.duplicate("0", 64),
+          "effective_application_digest" => "sha256:" <> String.duplicate("1", 64),
+          "workflow_bundle_hash" => String.duplicate("2", 64),
+          "mission_bundle_hash" => nil,
+          "provider_activity" => false
+        }),
+      "doctor_default" => CommandOutcome.success(:doctor, @run_ref, doctor_default),
+      "doctor_connect" => CommandOutcome.success({:doctor, :connect}, @run_ref, doctor_connect),
+      "models" => CommandOutcome.success(:models, @run_ref, %{"installations" => []}),
+      "init" => CommandOutcome.success(:init, @run_ref, %{"created" => ["main.clj", "ptc.json"]}),
+      "help_root" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:root)),
+      "help_run" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:run)),
+      "version" => CommandOutcome.success(:version, @run_ref, CommandContract.version_result())
+    }
+
+    for {name, outcome} <- rows do
+      assert CommandRenderer.render(outcome) == {:stdout, @human_fixtures["success"][name]}
+    end
+  end
+
+  test "every catalog phase matches its byte-exact failure fixture" do
+    phases = DiagnosticCatalog.rows() |> Enum.map(& &1.phase) |> Enum.uniq()
+
+    for phase <- phases do
+      outcome = catalog_outcome(phase)
+      assert {:stderr, line} = CommandRenderer.render(outcome)
+      assert line == @human_fixtures["failure"][Atom.to_string(phase)]
+    end
+  end
+
+  test "structured argument rejections and envelope publication match exact fixtures" do
+    for {name, argv} <- [
+          {"unknown_switch", ["run", "ptc.json", "--caller-secret", "value"]},
+          {"retired_switch", ["run", "ptc.json", "--trace", "trace.jsonl"]}
+        ] do
+      assert {:error, entry} = CommandEntry.open_with_ref(argv, :standalone, @run_ref)
+
+      assert CommandRenderer.rejection(@run_ref, entry.rejection) ==
+               @human_fixtures["failure"][name]
+    end
+
+    assert CommandRenderer.envelope_failure(@run_ref) ==
+             @human_fixtures["failure"]["envelope_publication"]
+  end
+
+  test "a normal string result uses compact JSON and escapes embedded newlines" do
+    outcome =
+      CommandOutcome.run_success(
+        @run_ref,
+        :normal,
+        "first\nsecond",
+        %{
+          "trace" => "not_requested",
+          "inspection" => "not_requested",
+          "result" => "not_requested"
+        },
+        %{
+          "remaining_ms" => 0,
+          "capability_calls" => %{},
+          "subordinate_evaluations" => 0,
+          "protocol_errors" => 0,
+          "evaluation_memory_bytes" => 0,
+          "evaluation_history_bytes" => 0,
+          "evaluation_continuation_bytes" => 0,
+          "events_dropped" => %{}
+        },
+        %{
+          "defined_count" => 0,
+          "history_count" => 0,
+          "memory_bytes" => 0,
+          "history_bytes" => 0,
+          "bytes" => 0
+        }
+      )
+
+    assert CommandRenderer.render(outcome) ==
+             {:stdout, @human_fixtures["success"]["string_newline"]}
+  end
+
+  test "renderer fallback retains the sealed run reference" do
+    outcome = catalog_outcome(:arguments)
+    invalid = %{outcome | attestation: <<>>}
+
+    assert CommandRenderer.render(invalid) ==
+             {:stderr,
+              "error: internal/internal_error: internal command failure " <>
+                "(run_ref: #{@run_ref})\n"}
+  end
+
+  defp assert_collision(argv) do
+    assert {:error, entry} = CommandEntry.open_with_ref(argv, :standalone, @run_ref)
+    assert entry.envelope_path == nil
+    assert entry.arguments == nil
+    assert entry.rejection.code == :invalid_arguments
+    assert entry.rejection.kind == :generic
+  end
+
+  defp write_application(directory) do
+    File.write!(
+      Path.join(directory, "main.clj"),
+      "(ns main) (defn run [input] (return input))"
+    )
+
+    manifest = Path.join(directory, "ptc.json")
+
+    File.write!(
+      manifest,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "main", "path" => "main.clj"}],
+          "entry" => "main/run"
+        },
+        "input" => %{"value" => %{"answer" => 42}}
+      })
+    )
+
+    manifest
+  end
+
+  defp catalog_outcome(phase) do
+    DiagnosticCatalog.rows()
+    |> Enum.filter(&(&1.phase == phase))
+    |> Enum.find_value(fn row ->
+      operations = DiagnosticCatalog.subject_operations(row.phase, row.code)
+
+      subjects =
+        [nil] ++
+          Enum.flat_map(operations, fn operation ->
+            for occurrence <- [nil, %{destination: :workflow, index: 0}],
+                {:ok, subject} <- [CommandSubject.provider("provider", operation, occurrence)],
+                do: subject
+          end)
+
+      Enum.find_value(subjects, fn subject ->
+        Enum.find_value([false, true], fn activity ->
+          diagnostic_outcome(row, subject, activity)
+        end)
+      end)
+    end) || flunk("no renderable diagnostic for catalog phase #{phase}")
+  end
+
+  defp diagnostic_outcome(row, subject, activity) do
+    case CommandDiagnostic.new(row.phase, row.code,
+           subject: subject,
+           provider_activity: activity
+         ) do
+      {:ok, diagnostic} -> valid_outcome(diagnostic)
+      {:error, :invalid_command_diagnostic} -> false
+    end
+  end
+
+  defp valid_outcome(diagnostic) do
+    CommandOutcome.error(:run, @run_ref, diagnostic)
+  rescue
+    ArgumentError -> valid_classified_outcome(diagnostic)
+  end
+
+  defp valid_classified_outcome(diagnostic) do
+    CommandOutcome.run_classified_error(
+      @run_ref,
+      :normal,
+      diagnostic,
+      [],
+      %{
+        "trace" => "not_requested",
+        "inspection" => "not_requested",
+        "result" => "not_requested"
+      },
+      %{"state" => "incomplete", "usage" => nil, "evaluation_memory" => nil}
+    )
+  rescue
+    ArgumentError -> false
+  end
+end

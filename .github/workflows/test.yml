@@ -276,6 +276,9 @@ jobs:
       - name: Verify core release package
         run: bash scripts/verify_core_package.sh
 
+      - name: Verify assembled standalone release
+        run: bash scripts/verify_standalone_release.sh
+
       - name: Check code is formatted
         run: mix format --check-formatted
 

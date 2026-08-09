@@ -9,19 +9,19 @@ for the live model examples.
 Examples 01 and 05 are credential-free and select no providers:
 
 ```bash
-mix ptc.run examples/kernel-tutorial/01-orders/ptc.json
-mix ptc.run examples/kernel-tutorial/05-signature-feedback/ptc.json
+mix ptc run examples/kernel-tutorial/01-orders/ptc.json
+mix ptc run examples/kernel-tutorial/05-signature-feedback/ptc.json
 ```
 
 Examples 02 through 04 select providers, so each needs the shared host
 installation that gives those aliases meaning:
 
 ```bash
-mix ptc.run examples/kernel-tutorial/02-deepseek-extract/ptc.json \
+mix ptc run examples/kernel-tutorial/02-deepseek-extract/ptc.json \
   --host-config examples/kernel-tutorial/ptc-host.json
-mix ptc.run examples/kernel-tutorial/03-file-agent/ptc.json \
+mix ptc run examples/kernel-tutorial/03-file-agent/ptc.json \
   --host-config examples/kernel-tutorial/ptc-host.json
-mix ptc.run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
+mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
   --host-config examples/kernel-tutorial/ptc-host.json
 ```
 

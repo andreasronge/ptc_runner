@@ -33,7 +33,7 @@ run_journey() {
   touch "$marker"
 
   local status=0
-  mix ptc.run "$demo_dir/$journey.json" \
+  mix ptc run "$demo_dir/$journey.json" \
     --host-config "$demo_dir/ptc-host.json" \
     --trace-dir "$out" \
     --inspect "$out/$journey.inspection.jsonl" || status=$?

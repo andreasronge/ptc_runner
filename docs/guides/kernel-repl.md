@@ -1,6 +1,6 @@
 # Kernel REPL
 
-`mix ptc.repl` provides deliberately different PTC-Lisp session modes:
+`mix ptc repl` provides deliberately different PTC-Lisp session modes:
 
 - direct and manifest-backed sessions are workflow scratchpads;
 - `log-analysis-v2` is a fixed mission session for querying an immutable
@@ -23,20 +23,20 @@ Start an interactive session, repeat expressions, load setup code, or evaluate
 one script:
 
 ```bash
-mix ptc.repl
-mix ptc.repl -e '(def x 40)' -e '(+ x 2)' -e '(+ *1 1)'
-mix ptc.repl -l setup.clj
-mix ptc.repl script.clj
-mix ptc.repl - < script.clj
+mix ptc repl
+mix ptc repl -e '(def x 40)' -e '(+ x 2)' -e '(+ *1 1)'
+mix ptc repl -l setup.clj
+mix ptc repl script.clj
+mix ptc repl - < script.clj
 ```
 
-Use the same strict manifest as `mix ptc.run` to attach a frozen workflow
+Use the same strict manifest as `mix ptc run` to attach a frozen workflow
 bundle, workflow capabilities, limits, input, labels, and event policy:
 
 ```bash
-mix ptc.repl --manifest ptc.json
-mix ptc.repl --manifest ptc.json --host-config ptc-host.json
-mix ptc.repl --manifest ptc.json -e '(workflow/helper data/input)'
+mix ptc repl --manifest ptc.json
+mix ptc repl --manifest ptc.json --host-config ptc-host.json
+mix ptc repl --manifest ptc.json -e '(workflow/helper data/input)'
 ```
 
 The direct REPL does not accept an ambient capability catalog or arbitrary
@@ -44,7 +44,7 @@ profile configuration. Providers and component sources are selected only by
 the manifest and trusted provider registry.
 
 Manifest mode resolves `--host-config HOST.json` through the same bounded
-trusted-installation path as `mix ptc.run`. A manifest that selects a provider
+trusted-installation path as `mix ptc run`. A manifest that selects a provider
 requires this option; a provider-free manifest may omit it. Direct sessions and
 code-owned profile modes reject it. Provider-backed startup runs the shared
 audited-local checks before marking activity, then acquires one provider
@@ -66,8 +66,8 @@ Every workflow session emits canonical Kernel events. Persist them as bounded,
 append-only JSONL with:
 
 ```bash
-mix ptc.repl --trace trace.jsonl
-mix ptc.repl --manifest ptc.json --trace trace.jsonl
+mix ptc repl --trace trace.jsonl
+mix ptc repl --manifest ptc.json --trace trace.jsonl
 ```
 
 Private event policies require an explicit private manifest selection; the
@@ -101,7 +101,7 @@ evidence.
 Select the code-owned profile and supply its required trace resource:
 
 ```bash
-mix ptc.repl \
+mix ptc repl \
   --profile log-analysis-v2 \
   --resource traces=tmp/tutorial-traces
 ```
@@ -181,7 +181,7 @@ scripts, stdin, and accumulated interactive forms are rejected without first
 reading an unbounded source into the Mix task.
 
 ```bash
-mix ptc.repl \
+mix ptc repl \
   --profile log-analysis-v2 \
   --resource traces=tmp/tutorial-traces \
   -e '(def runs (log/runs {}))' \
@@ -198,7 +198,7 @@ Use the private profile only on an attached terminal, and explicitly authorize
 that terminal as the private result sink:
 
 ```bash
-mix ptc.repl \
+mix ptc repl \
   --profile inspection-analysis-v2 \
   --resource traces=tmp/tutorial-traces \
   --resource inspection=tmp/tutorial-inspection \
@@ -212,6 +212,26 @@ directories must be physically separate, including through ancestors and
 symlink aliases. Inspection capture validates every private artifact against
 the corresponding run in the immutable canonical trace capture; malformed,
 replaced, uncorrelated, or oversized input rejects the whole private source.
+
+### Private analysis without a terminal
+
+For a deliberately unattended private analysis, authorize the command's own
+streams instead with `--private-unattended`. That destination permits `--eval`,
+`--load`, a positional script or stdin, and `--format jsonl`; it is mutually
+exclusive with `--private-terminal`. Because private values may then reach the
+caller-controlled stdout sink, redirect it only to an owner-authorized private
+destination and do not treat it as an ordinary public command channel:
+
+```bash
+mix ptc repl \
+  --profile inspection-analysis-v2 \
+  --resource traces=tmp/tutorial-traces \
+  --resource inspection=tmp/tutorial-inspection \
+  --session-trace-dir tmp/analysis-traces \
+  --private-unattended \
+  --format jsonl \
+  -e '(inspection/runs {})' >tmp/private-analysis.jsonl
+```
 
 `inspection-analysis-v2` installs both core query components, both analysis
 layers, and their shared `cap` dependency. Alongside the ordinary `log/*`
@@ -249,12 +269,18 @@ effective preludes, and MCP request/response bodies may appear on the
 authorized terminal. They are private data: do not paste or redirect them to a
 public sink.
 
-The initial private frontend is intentionally interactive-only. It rejects
-`--eval`, `--load`, positional scripts, stdin, `--format jsonl`, and
-`--continue-on-error`. Its separate canonical analysis trace records only safe
-profile identity, hashes, sizes, timing, outcomes, and usage. It never records
-the evaluated REPL source, returned private value, prints, or retained REPL
-history.
+The attached-terminal check is an **accident guard, not access control**. It
+cannot distinguish a human terminal from a pseudo-terminal allocated by
+`script(1)`, `tmux`, or `ssh -t`, and a same-UID caller can already read the
+inspection artifact directly. `--private-unattended` makes deliberate
+non-interactive use explicit and greppable. Exact private values then become
+part of whatever consumes this command's output, including a coding agent's
+conversation transcript and potentially that agent's provider logs. Treat that
+destination with the same care as the private data itself.
+
+The separate canonical analysis trace records only safe profile identity,
+hashes, sizes, timing, outcomes, and usage. It never records the evaluated REPL
+source, returned private value, prints, or retained REPL history.
 
 ### Private diagnostics
 
@@ -290,7 +316,7 @@ Terminal profile sessions never write their analysis trace into the captured
 input tree. Supply an existing physically separate output directory:
 
 ```bash
-mix ptc.repl \
+mix ptc repl \
   --profile log-analysis-v2 \
   --resource traces=tmp/tutorial-traces \
   --session-trace-dir tmp/analysis-traces \
@@ -306,51 +332,13 @@ source and exact trace-query payloads are not copied into canonical events.
 The output directory cannot be the input directory, an ancestor or descendant
 of it, or the same physical directory through symlinked parents.
 
-### Private analysis without a terminal
-
-`inspection-analysis-v2` requires one authorized private destination. Two are
-available, and exactly one may be given:
-
-- `--private-terminal` — the attached terminal is the private sink. Requires
-  stdin and stdout to be terminals, and admits only interactive input.
-- `--private-unattended` — this command's own streams are the private sink.
-  Admits `-e`, `--load`, script, and stdin input, and `--format jsonl`.
-
-```bash
-mix ptc.repl --profile inspection-analysis-v2 \
-  --resource traces=tmp/traces --resource inspection=tmp/inspection \
-  --session-trace-dir tmp/analysis \
-  --private-unattended --format jsonl \
-  -e '(inspection/runs {})'
-```
-
-The attached-terminal check is an **accident guard, not access control**. It
-stops private values reaching a log or transcript by mistake; it cannot stop a
-determined caller, because `isatty` cannot tell a human's terminal from a
-pseudo-terminal allocated by `script(1)`, `tmux`, or `ssh -t`, and because a
-caller running as the same user can read the inspection artifact directly.
-`--private-unattended` makes deliberate non-interactive use explicit and
-greppable instead of requiring that workaround.
-
-Private values still reach whatever this command's stdout is. That is the
-point when the caller is a coding agent reading its own output — the intended
-use is a session trace or a human-reviewed log, not routine relay elsewhere.
-Exact model messages, generated source, capability arguments/results,
-effective preludes, and MCP request/response bodies routed this way become
-part of whatever consumes this command's output: a coding agent's own
-conversation transcript, and from there potentially that agent's own LLM
-provider logs. That is a materially different exposure than a human
-redirecting stdout to a file by mistake, and it is the expected outcome of
-this flag, not a misuse of it. Treat the destination of this command's stdout
-with the same care as the private data itself.
-
 ### JSON Lines for coding agents
 
 Coding agents can avoid PTY and prompt handling by repeating `-e` with
 `--format jsonl`:
 
 ```bash
-mix ptc.repl \
+mix ptc repl \
   --profile log-analysis-v2 \
   --resource traces=tmp/tutorial-traces \
   --session-trace-dir tmp/analysis-traces \
@@ -383,7 +371,7 @@ unsuccessful. To collect feedback from later expressions after a recoverable
 form error, use `--continue-on-error` with at least two `-e` arguments:
 
 ```bash
-mix ptc.repl \
+mix ptc repl \
   --profile log-analysis-v2 \
   --resource traces=tmp/tutorial-traces \
   --format jsonl \
@@ -401,8 +389,8 @@ Inspect the safe static contract without capturing traces or starting a
 session:
 
 ```bash
-mix ptc.repl --describe-profile log-analysis-v2
-mix ptc.repl --describe-profile log-analysis-v2 --format jsonl
+mix ptc repl --describe-profile log-analysis-v2
+mix ptc repl --describe-profile log-analysis-v2 --format jsonl
 ```
 
 The description lists the required resources, complete component closure,
@@ -414,7 +402,7 @@ callback, process identifier, source, or credential.
 - [Running and debugging](running-and-debugging.md) owns the run command,
   result shape, trace capture, private inspection capture, and the Viewer. For
   a manifest entry run rather than a REPL session, use
-  `mix ptc.run MANIFEST --trace-dir DIR`.
+  `mix ptc run MANIFEST --trace-dir DIR`.
 - [Manifests and capabilities](manifests-and-capabilities.md) documents the
   manifest that `--manifest` sessions attach to, and the trace and inspection
   snapshot providers these profiles read.

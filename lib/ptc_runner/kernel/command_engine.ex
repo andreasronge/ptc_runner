@@ -22,10 +22,12 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.CommandDestination
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandDoctor
+  alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandInitializer
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandParser
   alias PtcRunner.Kernel.CommandPreparation
+  alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRunDispatch
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandRuntime
@@ -53,14 +55,15 @@ defmodule PtcRunner.Kernel.CommandEngine do
           {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
   def dispatch(argv, %CommandRuntime{} = runtime) do
     if CommandRuntime.valid?(runtime) do
-      run_ref = generated_or_safe_ref()
+      case CommandEntry.open(argv, :standalone) do
+        {:ok, %CommandEntry{arguments: %{command: :repl}} = entry} ->
+          {:error, outcome(:unknown, entry.run_ref, :arguments, :invalid_command)}
 
-      case prepare_with_ref(argv, run_ref, runtime) do
-        {:ok, %CommandPreparation{} = preparation} ->
-          CommandRunDispatch.dispatch(preparation, runtime)
+        {:ok, %CommandEntry{} = entry} ->
+          dispatch_entry(entry, runtime)
 
-        terminal ->
-          terminal
+        {:error, %CommandEntry{} = entry} ->
+          entry_failure(entry)
       end
     else
       {:error, outcome(:unknown, generated_or_safe_ref(), :internal, :internal_error)}
@@ -69,6 +72,48 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   def dispatch(_argv, _runtime),
     do: {:error, outcome(:unknown, generated_or_safe_ref(), :internal, :internal_error)}
+
+  @doc false
+  @spec dispatch_entry(CommandEntry.t(), CommandRuntime.t()) ::
+          {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
+  def dispatch_entry(
+        %CommandEntry{arguments: %CommandArguments{} = arguments, rejection: nil} = entry,
+        %CommandRuntime{} = runtime
+      ) do
+    if CommandRuntime.valid?(runtime) do
+      case prepare_arguments_safely(
+             arguments,
+             entry.run_ref,
+             entry.destinations,
+             runtime
+           ) do
+        {:ok, %CommandPreparation{} = preparation} ->
+          CommandRunDispatch.dispatch(preparation, runtime)
+
+        terminal ->
+          terminal
+      end
+    else
+      startup_failure(entry)
+    end
+  end
+
+  def dispatch_entry(%CommandEntry{} = entry, _runtime), do: startup_failure(entry)
+
+  @doc false
+  @spec entry_failure(CommandEntry.t()) :: {:error, CommandOutcome.t()}
+  def entry_failure(%CommandEntry{rejection: %CommandRejection{} = rejection} = entry),
+    do: {:error, outcome(rejection.command, entry.run_ref, :arguments, rejection.code)}
+
+  @doc false
+  @spec startup_failure(CommandEntry.t()) :: {:error, CommandOutcome.t()}
+  def startup_failure(%CommandEntry{
+        arguments: %CommandArguments{} = arguments,
+        run_ref: run_ref
+      }),
+      do: {:error, arguments_outcome(arguments, run_ref, :internal, :internal_error)}
+
+  def startup_failure(%CommandEntry{} = entry), do: entry_failure(entry)
 
   @doc false
   @spec run_startup_failure() :: {:error, CommandOutcome.t()}
@@ -98,8 +143,8 @@ defmodule PtcRunner.Kernel.CommandEngine do
           runtime
         )
 
-      {:error, command, code} ->
-        {:error, outcome(command, run_ref, :arguments, code)}
+      {:error, %CommandRejection{} = rejection} ->
+        {:error, outcome(rejection.command, run_ref, :arguments, rejection.code)}
     end
   rescue
     _exception -> {:error, outcome(:unknown, run_ref, :internal, :internal_error)}
@@ -117,14 +162,14 @@ defmodule PtcRunner.Kernel.CommandEngine do
          CommandOutcome.success(
            :help,
            run_ref,
-           CommandContract.help_result(arguments.options.topic)
+           CommandContract.help_result(arguments.options.topic, arguments.frontend)
          )}
 
       :version ->
         {:ok, CommandOutcome.success(:version, run_ref, CommandContract.version_result())}
 
       :doctor ->
-        CommandDoctor.dispatch(arguments, run_ref)
+        CommandDoctor.dispatch(arguments, run_ref, runtime)
 
       :models ->
         models_outcome(arguments, run_ref)

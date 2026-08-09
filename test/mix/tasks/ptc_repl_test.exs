@@ -45,7 +45,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   end
 
   test "manifest-only host authority is rejected by direct mode" do
-    assert_raise Mix.Error, ~r/--host-config requires --manifest/, fn ->
+    assert_raise Mix.Error, ~r/arguments\/invalid_arguments/, fn ->
       Repl.run(["--host-config", "missing-host.json", "-e", "42"])
     end
   end
@@ -95,27 +95,6 @@ defmodule Mix.Tasks.Ptc.ReplTest do
              TraceLog.query(trace_log, :list_runs, %{})
 
     assert name == SafeMetadata.fingerprint("ptc.repl")
-  end
-
-  @tag :tmp_dir
-  test "--trace persists an abort batch before reraising a frontend exception", %{
-    tmp_dir: directory
-  } do
-    path = Path.join(directory, "frontend-exception.jsonl")
-    previous_shell = Mix.shell()
-
-    try do
-      Mix.shell(PtcRunner.Test.MissingMixShell)
-
-      assert_raise UndefinedFunctionError, fn ->
-        Repl.run(["--trace", path, "-e", "(+ 1 2)"])
-      end
-    after
-      Mix.shell(previous_shell)
-    end
-
-    assert {:ok, _trace_log} = TraceLog.new(source: {:file, path})
-    assert File.read!(path) =~ ~s("reason":"frontend_exception")
   end
 
   @tag :tmp_dir
@@ -281,19 +260,19 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   end
 
   test "removed upstream and special log options fail closed" do
-    assert_raise Mix.Error, ~r/invalid ptc.repl options/, fn ->
+    assert_raise Mix.Error, ~r/unknown switch; accepted:/, fn ->
       Repl.run(["--log-prelude", "-e", "(+ 1 2)"])
     end
   end
 
   test "eval and positional script modes are mutually exclusive" do
-    assert_raise Mix.Error, ~r/cannot combine --eval with a script/, fn ->
+    assert_raise Mix.Error, ~r/arguments\/conflicting_arguments/, fn ->
       Repl.run(["-e", "42", "script.clj"])
     end
   end
 
   test "removed configurable history depth fails closed" do
-    assert_raise Mix.Error, ~r/invalid ptc.repl options/, fn ->
+    assert_raise Mix.Error, ~r/unknown switch; accepted:/, fn ->
       Repl.run(["--history-depth", "0", "--manifest", "missing.json"])
     end
   end
@@ -331,8 +310,8 @@ defmodule Mix.Tasks.Ptc.ReplTest do
           {[], ~r/requires --private-terminal/},
           {["--private-terminal"], ~r/requires attached stdin and stdout terminals/},
           {["--private-terminal", "-e", "42"], ~r/interactive-only/},
-          {["--private-terminal", "--format", "jsonl"], ~r/does not allow this output format/},
-          {["--private-terminal", "--private-unattended"], ~r/mutually exclusive/}
+          {["--private-terminal", "--format", "jsonl"], ~r/arguments\/invalid_arguments/},
+          {["--private-terminal", "--private-unattended"], ~r/conflicting_arguments/}
         ] do
       capture_io(fn ->
         assert_raise Mix.Error, message, fn -> Repl.run(missing_resources ++ suffix) end
@@ -365,9 +344,6 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   end
 
   test "private_unattended with jsonl and no input is rejected, not silently interactive" do
-    # Regression for #1220: the profile's static output_formats omits :jsonl,
-    # so a guard reading that declaration skipped this very call and let it
-    # fall through to the interactive REPL loop.
     args = [
       "--profile",
       "inspection-analysis-v2",
@@ -383,7 +359,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     ]
 
     capture_io(fn ->
-      assert_raise Mix.Error, ~r/requires non-interactive profile input/, fn ->
+      assert_raise Mix.Error, ~r/arguments\/invalid_arguments/, fn ->
         Repl.run(args)
       end
     end)

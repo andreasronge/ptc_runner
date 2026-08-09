@@ -180,7 +180,7 @@ in the same owner process that holds its continuation and quotas, under a
 separate token. The active mutating session trace is never queryable from that
 session. The Viewer publishes into its host-configured input directory, so a
 later refreshed Viewer session captures the directory again and can query its
-predecessor. A terminal `mix ptc.repl` session instead publishes into a
+predecessor. A terminal `mix ptc repl` session instead publishes into a
 physically separate host-selected or private temporary directory and never
 mutates its captured input tree. The builder binds the accepted output
 directory's filesystem identity into `SessionTrace`; atomic publication

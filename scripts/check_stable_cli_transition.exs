@@ -17,7 +17,6 @@ defmodule PtcRunner.StableCLITransitionCheck do
     "CommandEngine.catalog" => %{},
     "CommandEngine.request" => %{},
     "Repl.persist_terminal_result" => %{},
-    "Run.failure_message" => %{},
     "RunBuilder.check_built" => %{},
     "RunBuilder.check_built_claimed" => %{},
     "RunBuilder.load_and_build" => %{},
@@ -54,9 +53,6 @@ defmodule PtcRunner.StableCLITransitionCheck do
      ["lib/ptc_runner/kernel/provider_active_session.ex"], %{}},
     {"provider-session check route", ~r/:check/, ["lib/ptc_runner/kernel/provider_session.ex"],
      %{}},
-    {"Mix run check route", ~r/:check|RunCoordinator\.check|--check/,
-     ["lib/mix/tasks/ptc.run.ex"], %{}},
-    {"Mix run failure seam", ~r/\bfailure_message\(/, ["lib/mix/tasks/ptc.run.ex"], %{}},
     {"Mix REPL persistence seam", ~r/\bpersist_terminal_result\(/, ["lib/mix/tasks/ptc.repl.ex"],
      %{}},
     {"RunBuilder mission option plumbing", ~r/opts, :mission\b|:mission,|:mission\]/,
@@ -65,18 +61,14 @@ defmodule PtcRunner.StableCLITransitionCheck do
      ["lib/ptc_runner/kernel/run_builder.ex"], %{}},
     {"RunBuilder legacy trace input plumbing",
      ~r/Keyword\.(?:get|fetch)\(opts, :trace\)|:trace\]/,
-     ["lib/ptc_runner/kernel/run_builder.ex"], %{}},
-    {"Mix run mission option plumbing", ~r/:mission\b/, ["lib/mix/tasks/ptc.run.ex"], %{}},
-    {"Mix run private-mission option plumbing", ~r/private_mission/, ["lib/mix/tasks/ptc.run.ex"],
-     %{}},
-    {"Mix run trace option plumbing", ~r/:trace\b/, ["lib/mix/tasks/ptc.run.ex"], %{}}
+     ["lib/ptc_runner/kernel/run_builder.ex"], %{}}
   ]
 
   @mix_run_trace_pattern ~r/mix ptc\.run[^\n]*--trace(?=$|[ =])|^[ \t]*--trace(?=$|[ =])[^\n]*/m
 
   @text_inventories [
     {"legacy input option names", ~r/--mission|--private-mission/,
-     %{"test/mix/tasks/ptc_run_test.exs" => 2}},
+     %{"lib/ptc_runner/kernel/command_declaration.ex" => 2}},
     {"Mix run trace syntax", @mix_run_trace_pattern, %{}},
     {"RunBuilder transitional documentation",
      ~r/\b(?:RunBuilder\.(?:load_and_build|run_with_class|run|check_built)|(?:load_and_build|check_built))\/[123]\b/,
@@ -512,8 +504,6 @@ defmodule PtcRunner.StableCLITransitionCheck do
        do: "CommandEngine.#{function}"
 
   defp caller_key([:PtcRunner, :Kernel, :RunCoordinator], :check), do: "RunCoordinator.check"
-  defp caller_key([:Mix, :Tasks, :Ptc, :Run], :failure_message), do: "Run.failure_message"
-
   defp caller_key([:Mix, :Tasks, :Ptc, :Repl], :persist_terminal_result),
     do: "Repl.persist_terminal_result"
 
@@ -531,16 +521,6 @@ defmodule PtcRunner.StableCLITransitionCheck do
     assert_scan_count!(remote_text_pattern, "Function.capture(RunBuilder, :run, 3)", 1)
     assert_scan_count!(remote_text_pattern, "{PtcRunner.Kernel.RunBuilder, :run, 3}", 1)
     assert_scan_count!(remote_text_pattern, "Function.capture(OtherBuilder, :run, 3)", 0)
-
-    mix_text_pattern = remote_text_caller_pattern("Run.failure_message")
-
-    assert_scan_count!(
-      mix_text_pattern,
-      "Function.capture(Mix.Tasks.Ptc.Run, :failure_message, 1)",
-      1
-    )
-
-    assert_scan_count!(mix_text_pattern, "{Mix.Tasks.Ptc.Run, :failure_message, 1}", 1)
 
     source = """
     defmodule ScannerFixture do
@@ -747,7 +727,6 @@ defmodule PtcRunner.StableCLITransitionCheck do
     )
   end
 
-  defp canonical_module("Run.failure_message"), do: "Mix.Tasks.Ptc.Run"
   defp canonical_module("Repl.persist_terminal_result"), do: "Mix.Tasks.Ptc.Repl"
   defp canonical_module("RunBuilder." <> _function), do: "PtcRunner.Kernel.RunBuilder"
   defp canonical_module("CommandEngine." <> _function), do: "PtcRunner.Kernel.CommandEngine"

@@ -107,7 +107,17 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         get_in(branch, ["properties", "topic", "const"])
       end)
 
-    assert topics == ~w(doctor init models root run validate)
+    assert topics == ~w(doctor init models repl root run run validate)
+
+    run_options =
+      help_branch
+      |> get_in(["properties", "result", "oneOf"])
+      |> Enum.filter(&(get_in(&1, ["properties", "topic", "const"]) == "run"))
+      |> Enum.map(&get_in(&1, ["properties", "options", "const"]))
+
+    assert Enum.count(run_options, fn options ->
+             Enum.any?(options, &(&1["switches"] == ["--authorize-mcp NAME"]))
+           end) == 1
   end
 
   test "the production command engine owns run-reference entropy" do
@@ -676,6 +686,81 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "doctor --connect admits selected applications in a command-owned VM", %{
+    tmp_dir: directory
+  } do
+    initially_running =
+      Application.started_applications()
+      |> Enum.map(&elem(&1, 0))
+      |> MapSet.new()
+
+    previous =
+      for key <- [
+            :llm_adapter,
+            :host_llm_test_owner,
+            :host_llm_test_provider_application,
+            :host_llm_test_result
+          ],
+          into: %{},
+          do: {key, Application.fetch_env(:ptc_runner, key)}
+
+    if MapSet.member?(initially_running, :req_llm), do: Application.stop(:req_llm)
+    if MapSet.member?(initially_running, :llm_db), do: Application.stop(:llm_db)
+
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_llm_test_owner, self())
+    Application.put_env(:ptc_runner, :host_llm_test_provider_application, :req_llm)
+    Application.put_env(:ptc_runner, :host_llm_test_result, {:ok, %{content: "ok", tokens: %{}}})
+    Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
+    Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+
+    on_exit(fn ->
+      if :req_llm in Enum.map(Application.started_applications(), &elem(&1, 0)),
+        do: Application.stop(:req_llm)
+
+      if :llm_db in Enum.map(Application.started_applications(), &elem(&1, 0)),
+        do: Application.stop(:llm_db)
+
+      Enum.each(previous, fn
+        {key, {:ok, value}} -> Application.put_env(:ptc_runner, key, value)
+        {key, :error} -> Application.delete_env(:ptc_runner, key)
+      end)
+
+      if MapSet.member?(initially_running, :llm_db),
+        do: Application.ensure_all_started(:llm_db)
+
+      if MapSet.member?(initially_running, :req_llm),
+        do: Application.ensure_all_started(:req_llm)
+    end)
+
+    host_path =
+      write_host_config(directory, "command-owned-model", %{
+        "credentials" => %{"key" => %{"literal" => "test-secret"}},
+        "install" => %{
+          "model" => %{
+            "source" => "llm",
+            "installation_revision" => "model-v1",
+            "model" => "openrouter:test/model",
+            "credential" => "key"
+          }
+        }
+      })
+
+    application = doctor_application(directory, "command-owned-model", workflow: ["model"])
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(
+               ["doctor", application, "--host-config", host_path, "--connect"],
+               CommandRuntime.standalone()
+             )
+
+    assert outcome.exit_status == 0
+    assert outcome.envelope["result"]["provider_activity"] == true
+    assert_received {:host_llm_ensure_ready, _pid}
+    assert_received {:host_llm_request, "openrouter:test/model", _request}
+  end
+
+  @tag :tmp_dir
   test "doctor --connect settles the rows default doctor defers", %{tmp_dir: directory} do
     # The whole command end to end, over a real MCP stdio server. The same host
     # and application under default doctor leave the connectivity row deferred;
@@ -968,7 +1053,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_schema_valid(outcome.envelope)
   end
 
-  test "command-specific invalid options preserve parser conflict precedence" do
+  test "undeclared options are rejected before cross-command conflict rules" do
     cases = [
       {:init, ["init", "project", "--input", "a", "--private-input", "b"]},
       {:validate, ["validate", "ptc.json", "--input", "a", "--private-input", "b"]},
@@ -980,7 +1065,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert {:error, %CommandOutcome{} = outcome} = CommandEngine.prepare(argv)
       assert outcome.command_mode == command
       assert outcome.envelope["command"] == Atom.to_string(command)
-      assert outcome.envelope["error"]["code"] == "conflicting_arguments"
+      assert outcome.envelope["error"]["code"] == "invalid_arguments"
       assert outcome.exit_status == 2
     end
   end
@@ -1047,6 +1132,170 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert arguments.command == :validate
     assert arguments.application == "--host-config"
     assert arguments.options == %{host_config: "host.json"}
+  end
+
+  test "command declarations are the single source for accepted switches and help" do
+    assert {:ok, validate_help} = CommandEngine.prepare(["help", "validate"])
+
+    assert validate_help.envelope["result"] == %{
+             "topic" => "validate",
+             "usage" => ["ptc validate ptc.json [--host-config HOST.json]"],
+             "options" => [
+               %{
+                 "switches" => ["--host-config HOST.json"],
+                 "description" => "trusted provider installation document"
+               },
+               %{
+                 "switches" => ["--envelope ENVELOPE.json"],
+                 "description" => "atomically publish the V1 command envelope"
+               }
+             ],
+             "notices" => []
+           }
+
+    assert {:error, rejection} =
+             CommandParser.parse(["validate", "ptc.json", "--output", "result.json"])
+
+    assert rejection.kind == :unknown_switch
+    assert rejection.accepted == ["--host-config", "--envelope"]
+  end
+
+  test "the repl short help alias resolves to its generated help topic only by itself" do
+    assert {:ok, arguments} = CommandParser.parse(["repl", "-h"])
+    assert arguments.command == :help
+    assert arguments.options.topic == :repl
+
+    assert {:error, rejection} = CommandParser.parse(["repl", "-h", "-e", "42"])
+    assert rejection.code == :invalid_arguments
+  end
+
+  test "unknown-switch rejections expose only the closed accepted list" do
+    assert {:error, first} =
+             CommandParser.parse(["run", "ptc.json", "--secret-first", "value"])
+
+    assert {:error, second} =
+             CommandParser.parse(["run", "ptc.json", "--secret-second", "value"])
+
+    assert first == second
+    assert first.command == :run
+    assert first.code == :invalid_arguments
+    assert first.kind == :unknown_switch
+
+    assert first.accepted == [
+             "--host-config",
+             "--input",
+             "--private-input",
+             "--trace-dir",
+             "--output",
+             "--private-output",
+             "--inspect",
+             "--component-override-descriptor",
+             "--envelope"
+           ]
+
+    refute inspect(first) =~ "secret-first"
+    refute inspect(second) =~ "secret-second"
+  end
+
+  test "retired switches are command-specific and carry fixed replacements" do
+    assert {:error, rejection} =
+             CommandParser.parse(["run", "ptc.json", "--trace", "run.jsonl"])
+
+    assert rejection.command == :run
+    assert rejection.code == :invalid_arguments
+    assert rejection.kind == :retired_switch
+    assert rejection.retired == "--trace"
+    assert rejection.replacement == "--trace-dir"
+  end
+
+  test "undeclared raw spellings are unknown rather than normalized by OptionParser" do
+    for argv <- [
+          ["run", "ptc.json", "--no-input"],
+          ["run", "ptc.json", "--no-trace"],
+          ["doctor", "--no-connect"],
+          ["repl", "--no-private-terminal"],
+          ["repl", "--no-continue-on-error"],
+          ["repl", "--no-help"],
+          ["repl", "-hh"]
+        ] do
+      assert {:error, rejection} = CommandParser.parse(argv)
+      assert rejection.kind == :unknown_switch
+      assert rejection.retired == nil
+      assert rejection.replacement == nil
+      assert rejection.accepted != []
+    end
+  end
+
+  test "raw spelling checks do not reinterpret declared string option values" do
+    assert {:ok, arguments} = CommandParser.parse(["repl", "-e", "-10"])
+    assert arguments.ordered_options == [eval: "-10"]
+  end
+
+  test "repl structural combinations are rejected by the shared parser" do
+    for argv <- [
+          ["repl", "--format", "yaml"],
+          ["repl", "--describe-profile", "log-analysis-v2", "--load", "caller-value"],
+          ["repl", "--profile", "log-analysis-v2", "--manifest", "ptc.json"],
+          ["repl", "--profile", "log-analysis-v2", "--host-config", "host.json"],
+          ["repl", "--profile", "log-analysis-v2", "--trace", "trace.jsonl"],
+          ["repl", "--profile", "log-analysis-v2"],
+          [
+            "repl",
+            "--profile",
+            "inspection-analysis-v2",
+            "--resource",
+            "traces=traces",
+            "--private-unattended",
+            "--format",
+            "jsonl"
+          ],
+          [
+            "repl",
+            "--profile",
+            "log-analysis-v2",
+            "--resource",
+            "traces=traces",
+            "--continue-on-error",
+            "-e",
+            "1"
+          ],
+          ["repl", "--manifest", "ptc.json", "--resource", "traces=traces"],
+          ["repl", "--manifest", "ptc.json", "--session-trace-dir", "traces"],
+          ["repl", "--manifest", "ptc.json", "--continue-on-error"],
+          ["repl", "--manifest", "ptc.json", "--private-unattended"],
+          ["repl", "--manifest", "ptc.json", "--format", "jsonl"],
+          ["repl", "--host-config", "host.json"],
+          ["repl", "--resource", "traces=traces"],
+          ["repl", "--session-trace-dir", "traces"],
+          ["repl", "--continue-on-error"],
+          ["repl", "--private-unattended"],
+          ["repl", "--format", "jsonl"]
+        ] do
+      assert {:error, rejection} = CommandParser.parse(argv)
+      assert rejection.command == :repl
+      assert rejection.code == :invalid_arguments
+    end
+  end
+
+  test "Mix help and rejections include the declared frontend-only authorization switch" do
+    assert {:ok, arguments} = CommandParser.parse(["help", "run"], :mix)
+
+    result = CommandContract.help_result(arguments.options.topic, arguments.frontend)
+
+    assert Enum.any?(result["options"], fn option ->
+             option["switches"] == ["--authorize-mcp NAME"]
+           end)
+
+    assert {:error, rejection} =
+             CommandParser.parse(["run", "ptc.json", "--unknown"], :mix)
+
+    assert "--authorize-mcp" in rejection.accepted
+
+    assert {:error, standalone} =
+             CommandParser.parse(["run", "ptc.json", "--authorize-mcp", "workspace"])
+
+    assert standalone.kind == :unknown_switch
+    refute "--authorize-mcp" in standalone.accepted
   end
 
   test "every catalog row renders with its generated schema constants" do
