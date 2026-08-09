@@ -692,7 +692,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, ordinary_state} = RunState.start(limits)
 
     assert {:error, :session_owner_mismatch} =
-             ReplSessionOwner.start(config, ordinary_state, self())
+             ReplSessionOwner.start(config, ordinary_state, self(), nil)
 
     :ok = RunState.close(ordinary_state)
     :ok = RunState.stop(ordinary_state)

@@ -28,10 +28,10 @@ defmodule Mix.Tasks.Ptc.Run do
   """
   use Mix.Task
 
-  alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.MixCommandRuntime
 
   @impl Mix.Task
   def run(args) do
@@ -63,10 +63,7 @@ defmodule Mix.Tasks.Ptc.Run do
   end
 
   defp command_runtime(targets) do
-    options = [
-      provider_application_mode: provider_application_mode(),
-      environment_setup: &load_dotenv/0
-    ]
+    options = MixCommandRuntime.options()
 
     options =
       case targets do
@@ -118,20 +115,5 @@ defmodule Mix.Tasks.Ptc.Run do
   defp notify_authorization_url(url) do
     Mix.shell().info("Open this one-time authorization URL:\n#{url}")
     :ok
-  end
-
-  defp provider_application_mode do
-    if :req_llm in started_applications(), do: :host_owned, else: :command_vm
-  end
-
-  defp started_applications,
-    do: Application.started_applications() |> Enum.map(&elem(&1, 0))
-
-  defp load_dotenv do
-    Dotenv.load()
-  rescue
-    _exception -> {:error, :dotenv_unavailable}
-  catch
-    _kind, _reason -> {:error, :dotenv_unavailable}
   end
 end

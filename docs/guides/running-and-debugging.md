@@ -25,7 +25,7 @@ symlink.
 | `mix ptc.materialize MANIFEST --component ID --out DIR --source S.clj` | Publish model-authored source as a gated candidate component |
 | `mix ptc.repl` | Start the direct transactional PTC-Lisp REPL |
 | `mix ptc.repl -e EXPR -l SETUP.clj` | Run repeatable expressions with optional setup |
-| `mix ptc.repl --manifest MANIFEST` | Reuse a manifest's workflow bundle and capabilities |
+| `mix ptc.repl --manifest MANIFEST [--host-config HOST.json]` | Reuse a manifest's workflow bundle and one provider session |
 | `mix ptc.repl --profile PROFILE --resource NAME=DIR` | Query an immutable trace or inspection capture |
 | `mix ptc.viewer --trace-dir DIR` | Browse canonical JSONL traces locally |
 
@@ -352,11 +352,17 @@ Start a direct session or reuse a manifest's frozen workflow environment:
 mix ptc.repl
 mix ptc.repl -e '(def x 40)' -e '(+ x 2)' -e '(+ *1 1)'
 mix ptc.repl --manifest ptc.json
+mix ptc.repl --manifest ptc.json --host-config ptc-host.json
 mix ptc.repl --manifest ptc.json --trace traces/repl.jsonl
 ```
 
 Definitions and the three most recent ordinary successful values persist for
-one session. Failed forms keep the previously committed state. See the
+one session. Failed forms keep the previously committed state. A manifest that
+selects providers requires `--host-config`; it acquires those providers once
+and reuses the session across expressions. Provider-free manifests omit the
+host configuration and still use the same caller-death and sink owner. Private
+manifest sessions are interactive-only and require both `--private-terminal`
+and attached stdin/stdout terminals before provider activity can begin. See the
 [Kernel REPL guide](kernel-repl.md) for scripts, stdin, JSONL output, resource
 limits, and lifecycle details.
 

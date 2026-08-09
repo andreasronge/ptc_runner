@@ -9,6 +9,9 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
 
+  @stdio_root Path.expand("../../..", __DIR__)
+  @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
+
   setup do
     Mix.Task.reenable("ptc.repl")
     :ok
@@ -41,13 +44,10 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     assert "" = capture_io("", fn -> Repl.run(["-"]) end)
   end
 
-  test "classifies cleanup failure without terminal events as cleanup" do
-    assert {:error, :cleanup, :provider_cleanup_failed} =
-             Repl.persist_terminal_result(
-               {:error, :provider_cleanup_failed},
-               nil,
-               false
-             )
+  test "manifest-only host authority is rejected by direct mode" do
+    assert_raise Mix.Error, ~r/--host-config requires --manifest/, fn ->
+      Repl.run(["--host-config", "missing-host.json", "-e", "42"])
+    end
   end
 
   @tag :tmp_dir
@@ -119,22 +119,14 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   end
 
   @tag :tmp_dir
-  test "abort trace failure does not replace the frontend exception", %{tmp_dir: directory} do
-    previous_shell = Mix.shell()
-
-    try do
-      Mix.shell(PtcRunner.Test.MissingMixShell)
-
-      assert_raise UndefinedFunctionError, fn ->
-        Repl.run(["--trace", directory, "-e", "(+ 1 2)"])
-      end
-    after
-      Mix.shell(previous_shell)
+  test "direct trace destinations fail before opening a session", %{tmp_dir: directory} do
+    assert_raise Mix.Error, ~r/ptc\.repl setup failed: :trace_preflight_failed/, fn ->
+      Repl.run(["--trace", directory, "-e", "(+ 1 2)"])
     end
   end
 
   @tag :tmp_dir
-  test "a private manifest restricts the trace before appending events", %{tmp_dir: directory} do
+  test "a private manifest rejects eval before authorizing its trace", %{tmp_dir: directory} do
     component_path = Path.join(directory, "helpers.clj")
     manifest_path = Path.join(directory, "private.json")
     trace_path = Path.join(directory, "private.private.jsonl")
@@ -157,13 +149,126 @@ defmodule Mix.Tasks.Ptc.ReplTest do
       })
     )
 
-    assert "42\n" =
-             capture_io(fn ->
-               Repl.run(["--manifest", manifest_path, "--trace", trace_path, "-e", "42"])
-             end)
+    assert_raise Mix.Error, ~r/private manifest REPL is interactive-only/, fn ->
+      Repl.run([
+        "--manifest",
+        manifest_path,
+        "--trace",
+        trace_path,
+        "--private-terminal",
+        "-e",
+        "42"
+      ])
+    end
 
-    {:ok, stat} = File.stat(trace_path)
-    assert Bitwise.band(stat.mode, 0o777) == 0o600
+    refute File.exists?(trace_path)
+  end
+
+  @tag :tmp_dir
+  test "a provider-backed manifest requires host authority before runtime work", %{
+    tmp_dir: directory
+  } do
+    File.write!(Path.join(directory, "main.clj"), "(ns app) (defn run [x] (return x))")
+
+    manifest_path = Path.join(directory, "provider.json")
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "app", "path" => "main.clj"}],
+          "entry" => "app/run"
+        },
+        "providers" => %{
+          "workflow" => [%{"name" => "workspace", "config" => %{}}],
+          "mission" => []
+        },
+        "input" => %{"value" => %{}}
+      })
+    )
+
+    assert_raise Mix.Error, ~r/provider-backed manifest requires --host-config/, fn ->
+      Repl.run(["--manifest", manifest_path, "-e", "42"])
+    end
+  end
+
+  @tag :tmp_dir
+  test "a host-backed manifest acquires once and reuses one provider session", %{
+    tmp_dir: directory
+  } do
+    marker = Path.join(directory, "provider-lifecycle")
+    manifest_path = Path.join(directory, "provider-repl.json")
+    host_path = Path.join(directory, "ptc-host.json")
+
+    File.write!(Path.join(directory, "main.clj"), "(ns app) (defn run [x] (return x))")
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "app", "path" => "main.clj"}],
+          "entry" => "app/run"
+        },
+        "providers" => %{
+          "workflow" => [],
+          "mission" => [
+            %{"name" => "workspace", "config" => %{"allow" => ["workspace.structured"]}}
+          ]
+        },
+        "input" => %{"value" => %{}},
+        "limits" => %{"evaluation_timeout_ms" => 5_000, "run_duration_ms" => 20_000}
+      })
+    )
+
+    File.write!(
+      host_path,
+      Jason.encode!(%{
+        "install" => %{
+          "workspace" => %{
+            "source" => "mcp",
+            "installation_revision" => "repl-stdio-v1",
+            "transport" => %{
+              "type" => "stdio",
+              "command" => System.find_executable("sh"),
+              "cwd" => @stdio_root,
+              "args" => [@stdio_fixture, marker, "mark-close"],
+              "start_timeout_ms" => 5_000
+            },
+            "tools" => %{
+              "structured" => %{
+                "as" => "workspace.structured",
+                "effect" => "write",
+                "model_visible" => true
+              }
+            },
+            "ceilings" => %{"timeout_ms" => 5_000}
+          }
+        }
+      })
+    )
+
+    output =
+      capture_io(fn ->
+        Repl.run([
+          "--manifest",
+          manifest_path,
+          "--host-config",
+          host_path,
+          "-e",
+          "(def x 41)",
+          "-e",
+          "(+ x 1)"
+        ])
+      end)
+
+    assert output =~ "#'x\n42\n"
+
+    lifecycle = marker |> File.read!() |> String.split("\n", trim: true)
+    assert Enum.count(lifecycle, &String.ends_with?(&1, ":server/discover")) == 1
+    assert Enum.count(lifecycle, &String.ends_with?(&1, ":tools/list")) == 2
+    assert Enum.count(lifecycle, &(&1 == "session-closed")) == 1
   end
 
   @tag :tmp_dir

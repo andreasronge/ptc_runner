@@ -647,7 +647,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def bind_lifecycle(%__MODULE__{} = session, owner, run_state, %ProviderTaskTracker{} = tracker)
       when is_pid(owner) and is_pid(run_state) do
     if valid?(session) and
-         (not session.fixed_lifecycle? or owner == session.creator) do
+         (not session.fixed_lifecycle? or
+            owner in [session.creator, session.lifecycle_owner]) do
       call(
         session.pid,
         {session.token, {:bind_lifecycle, owner, run_state, tracker}},
@@ -1091,6 +1092,25 @@ defmodule PtcRunner.Kernel.ProviderSession do
       when is_pid(owner) and is_pid(run_state) do
     with true <-
            owner == executor and Process.alive?(state.owner) and Process.alive?(run_state),
+         :ok <- ProviderTaskTracker.watch(tracker, self()) do
+      {:reply, :ok, %{state | lifecycle_bound?: true, provider_tasks: tracker}}
+    else
+      _unavailable -> {:reply, {:error, :provider_session_unavailable}, state}
+    end
+  end
+
+  def handle_call(
+        {token, {:bind_lifecycle, owner, run_state, tracker}},
+        {owner, _tag},
+        %{
+          token: token,
+          owner: owner,
+          lifecycle_fixed?: true,
+          lifecycle_bound?: false
+        } = state
+      )
+      when is_pid(owner) and is_pid(run_state) do
+    with true <- Process.alive?(owner) and Process.alive?(run_state),
          :ok <- ProviderTaskTracker.watch(tracker, self()) do
       {:reply, :ok, %{state | lifecycle_bound?: true, provider_tasks: tracker}}
     else

@@ -124,14 +124,82 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       )
       when is_function(tracker, 3) and is_pid(lifecycle_owner) and
              operation in [:run, :connect] do
-    Process.put({__MODULE__, :publication_lease}, lease)
+    do_execute(
+      prepared,
+      {authority, lease},
+      opened_sinks,
+      execution,
+      notifier,
+      tracker,
+      lifecycle_owner,
+      operation
+    )
+  end
+
+  def execute(
+        _prepared,
+        _publication,
+        _opened_sinks,
+        _execution,
+        _notifier,
+        _tracker,
+        _lifecycle_owner,
+        _operation
+      ),
+      do: {:error, :invalid_provider_execution}
+
+  @doc false
+  @spec open_repl(
+          PreparedRun.t(),
+          PublicationAuthority.t(),
+          map(),
+          t(),
+          tracker(),
+          pid()
+        ) :: {:ok, map()} | {:error, term()}
+  def open_repl(
+        %PreparedRun{} = prepared,
+        authority,
+        opened_sinks,
+        %__MODULE__{} = execution,
+        tracker,
+        lifecycle_owner
+      )
+      when is_function(tracker, 3) and is_pid(lifecycle_owner) do
+    do_execute(
+      prepared,
+      {authority, nil},
+      opened_sinks,
+      execution,
+      nil,
+      tracker,
+      lifecycle_owner,
+      :repl
+    )
+  end
+
+  def open_repl(_prepared, _authority, _opened_sinks, _execution, _tracker, _lifecycle_owner),
+    do: {:error, :invalid_provider_execution}
+
+  defp do_execute(
+         prepared,
+         {authority, lease},
+         opened_sinks,
+         execution,
+         notifier,
+         tracker,
+         lifecycle_owner,
+         operation
+       ) do
+    if operation != :repl,
+      do: Process.put({__MODULE__, :publication_lease}, lease)
 
     with true <- notifier_matches_operation?(notifier, operation),
          true <- valid?(execution),
          true <- operation != :connect or non_interactive?(execution),
          true <- PreparedRun.consumed_valid?(prepared),
          true <- PublicationAuthority.authorized?(authority),
-         true <- PublicationAuthority.lease_valid?(authority, lease),
+         true <- publication_valid?(authority, lease, operation),
          true <- bound_to_prepared?(execution, prepared),
          :ok <- RunCoordinator.local_checks(prepared, execution.catalog, execution.services),
          {:ok, session} <-
@@ -162,25 +230,20 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     _kind, _reason -> {:error, internal_diagnostic()}
   end
 
-  def execute(
-        _prepared,
-        _publication,
-        _opened_sinks,
-        _execution,
-        _notifier,
-        _tracker,
-        _lifecycle_owner,
-        _operation
-      ),
-      do: {:error, :invalid_provider_execution}
-
   # Connectivity carries no notifier at all, so the interactive branch below is
   # unreachable for it by construction rather than by the branch happening not
   # to be taken.
   defp notifier_matches_operation?(notifier, :connect), do: is_nil(notifier)
 
+  defp notifier_matches_operation?(notifier, :repl), do: is_nil(notifier)
+
   defp notifier_matches_operation?(notifier, _operation),
     do: is_nil(notifier) or is_function(notifier, 1)
+
+  defp publication_valid?(_authority, nil, :repl), do: true
+
+  defp publication_valid?(authority, lease, _operation),
+    do: PublicationAuthority.lease_valid?(authority, lease)
 
   defp execute_with_session(
          prepared,
@@ -210,10 +273,17 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           {:error, authorization_required_diagnostic(name)}
       end
 
-    result
-    |> classify_marked_failure()
-    |> close_owned_session(session, tracker)
+    result = classify_marked_failure(result)
+
+    if operation == :repl,
+      do: retain_or_close_repl(result, session, tracker),
+      else: close_owned_session(result, session, tracker)
   end
+
+  defp retain_or_close_repl({:ok, _built} = result, _session, _tracker), do: result
+
+  defp retain_or_close_repl(result, session, tracker),
+    do: close_owned_session(result, session, tracker)
 
   # Everything reachable from here has crossed the activity marker, so nothing
   # from here may answer with a bare reason: a consumer cannot tell one that was
@@ -318,7 +388,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
              prepared,
              execution.catalog,
              execution.services,
-             operation
+             provider_operation(operation)
            ),
          {:ok, authorities} <- oauth_authorities(execution, selected_names),
          deadline <-
@@ -390,7 +460,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
                    prepared,
                    execution.catalog,
                    execution.services,
-                   operation
+                   provider_operation(operation)
                  ) do
             complete(prepared, authority, opened_sinks, registry, session, execution, operation)
           end
@@ -455,6 +525,28 @@ defmodule PtcRunner.Kernel.ProviderExecution do
            credentials
          )
 
+  defp complete(
+         prepared,
+         authority,
+         opened_sinks,
+         registry,
+         session,
+         execution,
+         :repl,
+         credentials
+       ),
+       do:
+         build_and_complete(
+           prepared,
+           authority,
+           opened_sinks,
+           registry,
+           session,
+           execution.catalog,
+           :repl,
+           credentials
+         )
+
   # Connectivity is the one completion that does not build a run config. A run
   # acquires every selected provider to reach its result;
   # connectivity decides per occurrence what its declaration asks for, so
@@ -491,12 +583,21 @@ defmodule PtcRunner.Kernel.ProviderExecution do
              opened_sinks,
              credentials
            ) do
-      complete_operation(
-        Map.put(built, :publication_lease, Process.get({__MODULE__, :publication_lease})),
-        operation
-      )
+      case operation do
+        :run ->
+          complete_operation(
+            Map.put(built, :publication_lease, Process.get({__MODULE__, :publication_lease})),
+            operation
+          )
+
+        :repl ->
+          {:ok, built}
+      end
     end
   end
+
+  defp provider_operation(:repl), do: :run
+  defp provider_operation(operation), do: operation
 
   # Applicability comes from the sealed descriptor of each selected occurrence,
   # so no caller can narrow the work or reorder it. The deadline the session
@@ -792,11 +893,14 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
     with {:ok, registry} <- result,
          :ok <- tracker.(:put, :registry, registry) do
-      try do
-        callback.(registry)
-      after
+      result = callback.(registry)
+
+      if operation == :repl and match?({:ok, _built}, result) do
+        result
+      else
         ProviderRegistry.close(registry)
         _ = tracker.(:drop, :registry, registry)
+        result
       end
     else
       {:error, _reason} = error -> error
@@ -813,6 +917,14 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          _catalog
        )
        when operation == :run,
+       do: {:error, CommandDiagnostic.new!(:execution, :run_timeout, provider_activity: true)}
+
+  defp registry_result(
+         {:error, :operation_deadline_expired},
+         :repl,
+         _selected_names,
+         _catalog
+       ),
        do: {:error, CommandDiagnostic.new!(:execution, :run_timeout, provider_activity: true)}
 
   # Connectivity spends a different budget, so exhausting it is not a run

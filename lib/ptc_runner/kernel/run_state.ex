@@ -102,11 +102,12 @@ defmodule PtcRunner.Kernel.RunState do
     with true <- EventSink.owner?(event_sink),
          true <- inspection_owner?(inspection_sink),
          true <- Keyword.keyword?(opts),
-         true <- Keyword.keys(opts) -- [:run_deadline] == [],
+         true <- Keyword.keys(opts) -- [:owner, :run_deadline] == [],
+         owner = Keyword.get(opts, :owner, self()),
+         true <- is_pid(owner) and Process.alive?(owner),
          run_deadline = Keyword.get(opts, :run_deadline),
          true <- valid_run_deadline?(run_deadline),
          token = make_ref(),
-         owner = self(),
          {:ok, state} <-
            start_state(
              {limits, token, owner, nil, false, {event_sink, inspection_sink}, run_deadline}
@@ -272,6 +273,10 @@ defmodule PtcRunner.Kernel.RunState do
   def open?(state), do: call(state, :open?)
 
   @doc false
+  @spec closed?(t()) :: boolean()
+  def closed?(state), do: call(state, :closed?)
+
+  @doc false
   @spec owner?(t()) :: boolean()
   def owner?(state), do: call(state, :owner?) == true
 
@@ -279,6 +284,11 @@ defmodule PtcRunner.Kernel.RunState do
   @spec repl_owner?(t(), EventSink.t(), InspectionSink.t() | nil, Limits.t()) :: boolean()
   def repl_owner?(state, event_sink, inspection_sink, limits),
     do: call(state, {:repl_owner?, event_sink, inspection_sink, limits}) == true
+
+  @doc false
+  @spec repl_resources?(t(), EventSink.t(), InspectionSink.t() | nil, Limits.t()) :: boolean()
+  def repl_resources?(state, event_sink, inspection_sink, limits),
+    do: call(state, {:repl_resources?, event_sink, inspection_sink, limits}) == true
 
   @spec evaluation_memory_summary(t()) :: map()
   @doc "Returns bounded definition, history, and retained continuation byte counts."
@@ -649,6 +659,9 @@ defmodule PtcRunner.Kernel.RunState do
   def handle_call({token, :open?}, _from, %{token: token} = state),
     do: {:reply, not unavailable?(state), state}
 
+  def handle_call({token, :closed?}, _from, %{token: token} = state),
+    do: {:reply, state.closed?, state}
+
   def handle_call({token, :owner?}, {caller, _tag}, %{token: token} = state),
     do: {:reply, caller == state.owner, state}
 
@@ -663,6 +676,18 @@ defmodule PtcRunner.Kernel.RunState do
         state.limits === limits
 
     {:reply, owner?, state}
+  end
+
+  def handle_call(
+        {token, {:repl_resources?, event_sink, inspection_sink, limits}},
+        _from,
+        %{token: token} = state
+      ) do
+    resources? =
+      state.repl_resources === {event_sink, inspection_sink} and
+        state.limits === limits
+
+    {:reply, resources?, state}
   end
 
   def handle_call({token, :evaluation_memory_summary}, _from, %{token: token} = state),

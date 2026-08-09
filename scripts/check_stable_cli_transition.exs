@@ -16,12 +16,11 @@ defmodule PtcRunner.StableCLITransitionCheck do
     "CommandEngine.authorize" => %{},
     "CommandEngine.catalog" => %{},
     "CommandEngine.request" => %{},
-    "Repl.persist_terminal_result" => %{"test/mix/tasks/ptc_repl_test.exs" => 1},
+    "Repl.persist_terminal_result" => %{},
     "Run.failure_message" => %{},
     "RunBuilder.check_built" => %{},
     "RunBuilder.check_built_claimed" => %{},
     "RunBuilder.load_and_build" => %{
-      "lib/mix/tasks/ptc.repl.ex" => 1,
       "test/ptc_runner/kernel/application_package_test.exs" => 1,
       "test/ptc_runner/kernel/artifact_publisher_test.exs" => 1,
       "test/ptc_runner/kernel/command_engine_test.exs" => 5,
@@ -80,8 +79,7 @@ defmodule PtcRunner.StableCLITransitionCheck do
     {"provider-session check route", ~r/:check/, %{}},
     {"Mix run check route", ~r/:check|RunCoordinator\.check|--check/, %{}},
     {"Mix run failure seam", ~r/\bfailure_message\(/, %{}},
-    {"Mix REPL persistence seam", ~r/\bpersist_terminal_result\(/,
-     %{"lib/mix/tasks/ptc.repl.ex" => 5}},
+    {"Mix REPL persistence seam", ~r/\bpersist_terminal_result\(/, %{}},
     {"RunBuilder mission option plumbing", ~r/opts, :mission\b|:mission,|:mission\]/, %{}},
     {"RunBuilder private-mission option plumbing", ~r/private_mission/, %{}},
     {"RunBuilder legacy trace input plumbing",
@@ -97,11 +95,7 @@ defmodule PtcRunner.StableCLITransitionCheck do
     {"legacy input option names", ~r/--mission|--private-mission/,
      %{"test/mix/tasks/ptc_run_test.exs" => 2}},
     {"Mix run trace syntax", @mix_run_trace_pattern, %{}},
-    {"RunBuilder transitional documentation", ~r/\b(?:load_and_build|check_built)\/[13]\b/,
-     %{
-       "docs/guides/kernel-maintainer.md" => 1,
-       "lib/ptc_runner/kernel/run_builder.ex" => 1
-     }}
+    {"RunBuilder transitional documentation", ~r/\b(?:load_and_build|check_built)\/[13]\b/, %{}}
   ]
 
   @legacy_option_keys [:mission, :private_mission, :trace]

@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.PreparationSeal
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderRuntimeServices
 
@@ -104,12 +105,8 @@ defmodule PtcRunner.Kernel.CommandPreparation do
       do: {:error, :invalid_command_preparation}
 
   @spec valid?(term()) :: boolean()
-  def valid?(%__MODULE__{attestation: attestation} = preparation),
-    do:
-      fields_valid?(preparation) and
-        Attestation.valid?(__MODULE__, payload(preparation), attestation)
-
-  def valid?(_preparation), do: false
+  def valid?(preparation),
+    do: PreparationSeal.valid?(__MODULE__, preparation, &fields_valid?/1, &payload/1)
 
   @doc """
   Idempotently releases the embedded prepared run and inert catalog.

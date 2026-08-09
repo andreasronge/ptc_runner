@@ -4,6 +4,11 @@ marker=$1
 mode=${2:-serve}
 seen_ids=" "
 
+if [ "$mode" = "mark-close" ]; then
+  trap 'printf "%s\n" session-closed >> "$marker"' EXIT
+  mode=serve
+fi
+
 write_text_result() {
   response_id=$1
   text_bytes=$2

@@ -21,9 +21,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
   A provider-bearing prepared run is preflighted the same way, and its active
   session is passed here for runtime assembly. One-shot runs open that session
   inside the execution-session owner and call `build_active_owned/7` with the
-  owner's sinks, then complete through `execute_built/1`. The REPL remains transitional: it calls
-  `load_and_build/3` with an empty registry and opens no active session at
-  all.
+  owner's sinks, then complete through `execute_built/1`. Manifest REPLs use
+  the same prepared active build, retain its one provider session behind an
+  opening owner, and transfer that handle with the run state to the REPL owner.
+  Provider-free REPLs keep the same owner boundary while omitting only the
+  provider session.
   `PtcRunner.Kernel.ProviderAcquisition` then runs the selected providers'
   shared preparation and dependency-ordered acquisition barrier. It plans that
   barrier from the preparation and the catalog it was validated against, which

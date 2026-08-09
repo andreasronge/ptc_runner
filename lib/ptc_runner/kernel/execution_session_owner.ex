@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderExecution
+  alias PtcRunner.Kernel.ProviderExecutionResources
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
@@ -222,7 +223,14 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         %{token: token, worker_pid: worker_pid} = state
       )
       when action in [:put, :drop] and kind in [:session, :registry, :memory, :listener] do
-    case update_resource(state, action, kind, resource) do
+    case ProviderExecutionResources.update(
+           state,
+           action,
+           kind,
+           resource,
+           self(),
+           :execution_session_unavailable
+         ) do
       {:ok, next} -> {:reply, :ok, next}
       {:error, _reason} = error -> {:reply, error, state}
     end
@@ -552,39 +560,6 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   defp cleanup_diagnostic,
     do: CommandDiagnostic.new!(:result_cleanup, :provider_cleanup_failed, provider_activity: true)
-
-  defp update_resource(state, :put, kind, resource) do
-    field = resource_field(kind)
-
-    if is_nil(Map.fetch!(state, field)) and valid_resource?(kind, resource) do
-      {:ok, Map.put(state, field, resource)}
-    else
-      {:error, :execution_session_unavailable}
-    end
-  end
-
-  defp update_resource(state, :drop, kind, resource) do
-    field = resource_field(kind)
-
-    if Map.fetch!(state, field) === resource do
-      {:ok, Map.put(state, field, nil)}
-    else
-      {:error, :execution_session_unavailable}
-    end
-  end
-
-  defp resource_field(:session), do: :provider_session
-  defp resource_field(:registry), do: :registry
-  defp resource_field(:memory), do: :oauth_memory
-  defp resource_field(:listener), do: :oauth_listener
-
-  defp valid_resource?(:session, session),
-    do: ProviderSession.valid?(session) and ProviderSession.lifecycle_owner(session) == self()
-
-  defp valid_resource?(:registry, registry), do: ProviderRegistry.valid?(registry)
-  defp valid_resource?(:memory, %Memory{pid: pid}), do: is_pid(pid) and Process.alive?(pid)
-  defp valid_resource?(:listener, %LoopbackListener{}), do: true
-  defp valid_resource?(_kind, _resource), do: false
 
   defp maybe_finalize_failed_execution(state, {:ok, _outcome}),
     do: %{state | opened_sinks: nil}

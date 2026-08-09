@@ -15,10 +15,29 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.ManifestReplPreparation
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
+
+  @doc false
+  @spec prepare_repl(binary(), binary() | nil, CommandRuntime.t()) ::
+          {:ok, ManifestReplPreparation.t()}
+          | {:error, CommandDiagnostic.t() | :host_config_required | :invalid_manifest_repl}
+  def prepare_repl(application, host_config, %CommandRuntime{} = runtime)
+      when is_binary(application) and (is_binary(host_config) or is_nil(host_config)) do
+    case catalog(host_config) do
+      {:ok, host, catalog} ->
+        prepare_repl_with_catalog(application, runtime, host, catalog)
+
+      {:error, %CommandDiagnostic{} = diagnostic} ->
+        {:error, diagnostic}
+    end
+  end
+
+  def prepare_repl(_application, _host_config, _runtime),
+    do: {:error, :invalid_manifest_repl}
 
   @spec prepare(CommandArguments.t(), binary(), {map(), [atom()]}, CommandRuntime.t()) ::
           {:ok, CommandPreparation.t() | CommandOutcome.t()} | {:error, CommandOutcome.t()}
@@ -200,6 +219,57 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
       HostInstallation.runtime_services(host,
         provider_application_mode: runtime.provider_application_mode
       )
+
+  defp prepare_repl_with_catalog(application, runtime, host, catalog) do
+    result =
+      with {:ok, request} <-
+             ApplicationPackage.request_directory(application,
+               installed_limits: catalog.installed_limits,
+               result_projection: :native,
+               input_authority: :normal,
+               inspection_capture: false
+             ),
+           :ok <- require_repl_host(request, host),
+           {:ok, prepared} <- RunCoordinator.prepare(request, catalog),
+           {:ok, runtime_services} <- command_runtime_services(host, runtime) do
+        case ManifestReplPreparation.new(
+               prepared,
+               catalog,
+               runtime_services,
+               environment_setup_required?(host, prepared)
+             ) do
+          {:ok, preparation} ->
+            {:ok, preparation}
+
+          {:error, _reason} ->
+            PreparedRun.close(prepared)
+            {:error, :invalid_manifest_repl}
+        end
+      else
+        {:error, %CommandDiagnostic{} = diagnostic} -> {:error, diagnostic}
+        {:error, :host_config_required} = error -> error
+        {:error, reason} -> {:error, CommandApplicationDiagnostic.project(:run, reason)}
+      end
+
+    if match?({:error, _reason}, result), do: InstallationCatalog.close(catalog)
+    result
+  rescue
+    _exception ->
+      InstallationCatalog.close(catalog)
+      {:error, :invalid_manifest_repl}
+  catch
+    _kind, _reason ->
+      InstallationCatalog.close(catalog)
+      {:error, :invalid_manifest_repl}
+  end
+
+  defp require_repl_host(%RunRequest{} = request, nil) do
+    if request.package.providers == %{workflow: [], mission: []},
+      do: :ok,
+      else: {:error, :host_config_required}
+  end
+
+  defp require_repl_host(%RunRequest{}, %HostConfig{}), do: :ok
 
   defp environment_setup_required?(nil, _prepared), do: false
 

@@ -27,6 +27,7 @@ defmodule PtcRunner.Kernel.EventSink do
 
   alias PtcRunner.Kernel.EventSinkState
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.OwnerHandoff
   alias PtcRunner.Lisp.RetainedSize
 
   @drop_count_limit 4_294_967_295
@@ -225,6 +226,13 @@ defmodule PtcRunner.Kernel.EventSink do
   def owner(sink), do: call(sink, :owner)
 
   @doc false
+  @spec transfer_owner(t(), pid()) :: :ok | {:error, :event_sink_error}
+  def transfer_owner(%__MODULE__{} = sink, owner) when is_pid(owner),
+    do: call(sink, {:transfer_owner, owner})
+
+  def transfer_owner(_sink, _owner), do: {:error, :event_sink_error}
+
+  @doc false
   @spec stop_timeout_ms() :: pos_integer()
   def stop_timeout_ms, do: @stop_timeout_ms
 
@@ -256,7 +264,8 @@ defmodule PtcRunner.Kernel.EventSink do
     {:ok,
      sink_state
      |> Map.put(:owner, owner)
-     |> Map.put(:owner_ref, Process.monitor(owner))}
+     |> Map.put(:owner_ref, Process.monitor(owner))
+     |> Map.put(:owner_transferable?, true)}
   end
 
   @impl GenServer
@@ -265,6 +274,18 @@ defmodule PtcRunner.Kernel.EventSink do
 
   def handle_call({token, :owner?}, {caller, _tag}, %{token: token} = state),
     do: {:reply, caller == state.owner, state}
+
+  def handle_call(
+        {token, {:transfer_owner, owner}},
+        {caller, _tag},
+        %{token: token, owner: caller, owner_transferable?: true} = state
+      )
+      when is_pid(owner) do
+    case OwnerHandoff.transfer_once(state, owner) do
+      {:ok, next} -> {:reply, :ok, next}
+      :error -> {:reply, {:error, :event_sink_error}, state}
+    end
+  end
 
   def handle_call(request, _from, state) do
     {reply, next} = EventSinkState.handle(request, state)

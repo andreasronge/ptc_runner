@@ -3084,6 +3084,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert %InstallationCatalog{} = preparation.catalog
     assert CommandPreparation.valid?(preparation)
     refute CommandPreparation.valid?(%{preparation | run_ref: "cmd-invalid"})
+    refute CommandPreparation.valid?(Map.put(preparation, :__struct__, PreparedRun))
     assert :ok = PreparedRun.close(preparation.prepared_run)
   end
 

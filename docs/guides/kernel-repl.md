@@ -35,6 +35,7 @@ bundle, workflow capabilities, limits, input, labels, and event policy:
 
 ```bash
 mix ptc.repl --manifest ptc.json
+mix ptc.repl --manifest ptc.json --host-config ptc-host.json
 mix ptc.repl --manifest ptc.json -e '(workflow/helper data/input)'
 ```
 
@@ -42,12 +43,12 @@ The direct REPL does not accept an ambient capability catalog or arbitrary
 profile configuration. Providers and component sources are selected only by
 the manifest and trusted provider registry.
 
-The planned stable manifest mode adds `--host-config HOST.json` and resolves it
-through the same bounded trusted-installation path as `mix ptc.run`. A manifest
-that selects a provider requires this option; a provider-free manifest may omit
-it. Direct sessions and code-owned profile modes reject it. The current REPL
-does not yet accept this option; these rules record the release contract rather
-than a currently usable command combination.
+Manifest mode resolves `--host-config HOST.json` through the same bounded
+trusted-installation path as `mix ptc.run`. A manifest that selects a provider
+requires this option; a provider-free manifest may omit it. Direct sessions and
+code-owned profile modes reject it. Provider-backed startup runs the shared
+audited-local checks before marking activity, then acquires one provider
+session which every evaluation reuses until the REPL closes.
 
 An interactive session also accepts a few meta-commands:
 
@@ -74,17 +75,26 @@ REPL requires the reserved `.private.jsonl` suffix and restricts the file to
 owner read/write permissions before appending event data. Normal directory
 grants and the Viewer do not discover private-suffixed traces.
 
-The planned stable manifest-backed frontend will treat a private manifest
-result as interactive authority, not ordinary stdout. It will require an
-attached terminal and the explicit `--private-terminal` grant during
-destination preflight, after manifest classification but before audited-local
-checks or opening a provider session. It will reject `--eval`, `--load`,
-positional scripts, stdin, `--format jsonl`, and detached execution at that same
-boundary with `provider_activity: false` and no provider work. Returned private
-values and prints may reach only that authorized terminal; they never enter the
-JSONL stream or an unauthorized stdout sink. The current manifest mode does not
-yet accept this grant; this paragraph records the release contract, not a
-currently usable option combination.
+A private manifest result is interactive authority, not ordinary unattended
+stdout. Manifest mode requires an attached terminal and the explicit
+`--private-terminal` grant during destination preflight, after manifest
+classification but before audited-local checks or opening a provider session.
+It rejects `--eval`, `--load`, positional scripts, stdin, `--format jsonl`, and
+detached execution at that boundary with provider activity false and no
+provider work. Returned private values and prints may reach only that
+authorized terminal; they never enter the JSONL stream or an unauthorized
+stdout sink.
+
+The session owner is the only terminalization path for direct and manifest
+workflow sessions. It retains the trace grant, run state, and the manifest
+opening handle; that handle owns the active provider session and its acquired
+resources. Normal close, abort, caller death, evaluation-worker failure, and
+deadline failure converge on bounded cleanup. Provider cleanup precedes the
+single terminal event batch, trace persistence follows that batch, and sinks
+are stopped last. If trace persistence fails after finalization, programmatic
+`close/1` and `abort/2` return the frozen events alongside
+`:trace_persistence_failed` so an embedding host can retain or recover that
+evidence.
 
 ## Log-analysis mission sessions
 

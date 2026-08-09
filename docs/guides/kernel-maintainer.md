@@ -92,7 +92,10 @@ envelope. One-shot runs execute through a dedicated execution-session owner,
 whether or not they select providers, and a provider-bearing invocation opens
 `ProviderActiveSession` inside that owner's subordinate worker rather than in
 the adapter. `doctor --connect` is a distinct active operation with its own
-closed result. The REPL keeps its adapter-owned path until its parity cutover.
+closed result. Manifest REPL startup enters through `ManifestRepl`: it uses the
+same inert catalog, preparation, phase-7 checks, activity marker, and active
+provider-session prefix as a one-shot run, but transfers the resulting opening
+handle and run state to `ReplSessionOwner` for repeated evaluations.
 Embedding frontends execute a sealed request through
 `PtcRunner.Kernel.RunBuilder.build/3`. For a provider-free request they may
 instead call the path-free `PtcRunner.Kernel.RunCoordinator` and pass its
@@ -202,12 +205,9 @@ validation records `active_required`; `validate` reports
 
 `RunCoordinator.local_checks/3` is the only entry to phase 7 and the only place
 an `audited_local` callback runs. Every active command crosses it before
-provider activity is marked: run and `doctor --connect` from
-`ProviderExecution` immediately before the session opens, and default doctor
-directly, because it opens no session. The REPL does not, and that is a stated
-limit rather than an omission: it builds providers through the direct-embedding
-registry rather than an execution owner, so it crosses neither this step nor the
-activity marker. Applicability is derived from the sealed
+provider activity is marked: run, `doctor --connect`, and manifest REPL opening
+from `ProviderExecution` immediately before the session opens, and default
+doctor directly, because it opens no session. Applicability is derived from the sealed
 prepared/catalog/services trio rather than supplied, the coordinator anchors one
 `local_preflight_timeout_ms` deadline that every applicable occurrence spends,
 and the result is only `:ok` or one catalogued diagnostic. There is no
@@ -367,9 +367,13 @@ the runtime registry, active value, and that same session are passed to
 `RunBuilder`. A run does that inside the execution-session owner's subordinate
 worker, which calls `build_active_owned/7` with the owner-opened sinks, the
 catalog acquisition plans from, and the phase-8 step-5 credentials, then
-completes through `execute_built/1`. The REPL remains transitional and opens no active session: it
-calls `load_and_build/3` with an empty registry, keeping its current shape
-until the parity cutover. After application admission, that session
+completes through `execute_built/1`. Manifest REPL opening consumes the same
+sealed preparation, opens its sinks before activity, and retains the acquired
+runtime registry and provider session behind one `ManifestReplOpening` handle.
+It atomically adopts the completed `RunConfig`, run state, trace grant, and
+opening handle into `ReplSessionOwner` before exposing a process-affine
+session. Provider-free manifests take the same opening and REPL-owner path but
+omit only the provider session. After application admission, an active session
 anchors one absolute run deadline shared by active selection, construction,
 and Kernel execution. The active build atomically claims the session sealed to
 the exact prepared run; swapping sessions or replaying the same prepared/session
