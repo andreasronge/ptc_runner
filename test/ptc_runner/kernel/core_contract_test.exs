@@ -2661,7 +2661,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, state} = RunState.start(Limits.defaults())
     limits = Limits.defaults()
-    callback = RuntimeTools.kernel_eval(state, mission, limits, nil)
+
+    callback =
+      RuntimeTools.kernel_eval(state, %{RunState.default_space() => mission}, limits, nil)
 
     assert %{
              status: :error,
