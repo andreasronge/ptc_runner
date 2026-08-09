@@ -88,13 +88,13 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   deadline the whole step spends.
 
   Every active command crosses it before provider activity is marked: run and
-  `doctor --connect` through `ProviderExecution`, and default
-  doctor by calling this directly, because it opens no provider session at all.
-
-  The REPL does not, and saying so is not an omission to fix here. It builds
-  providers through the direct-embedding registry rather than through an
-  execution owner, so it crosses neither this step nor the activity marker.
-  Routing it through the shared boundary is its own slice.
+  `doctor --connect` through `ProviderExecution`, and default doctor by calling
+  this directly because it opens no provider session. Manifest-backed REPL
+  opening crosses the same step before provider activity, through
+  `ProviderExecution.open_repl/6` when providers are selected and directly for
+  provider-free manifests. Direct and analysis-profile REPL sessions do not
+  acquire a manifest application or its providers and therefore do not enter
+  this coordinator step.
   """
   @spec local_checks(
           PreparedRun.t() | nil,

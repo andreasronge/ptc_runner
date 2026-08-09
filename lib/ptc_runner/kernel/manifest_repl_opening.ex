@@ -106,7 +106,8 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
       provider_cleanup: nil,
       result: nil,
       waiter: nil,
-      adopted?: false
+      adopted?: false,
+      released?: false
     }
 
     case ReplSessionOwner.start_pending(caller) do
@@ -190,7 +191,7 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
         {repl_pid, _tag},
         %{token: token, repl_pid: repl_pid, adopted?: true} = state
       ),
-      do: {:stop, :normal, :ok, state}
+      do: {:stop, :normal, :ok, %{state | released?: true}}
 
   def handle_call(_request, _from, state),
     do: {:reply, {:error, :manifest_repl_unavailable}, state}
@@ -248,8 +249,8 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
     close_preparation(state.preparation)
     if state.authority, do: PublicationAuthority.close(state.authority)
 
-    if not state.adopted? do
-      ReplTerminalization.finalize_unadopted(
+    if not state.released? do
+      ReplTerminalization.finalize_abandoned(
         state.opened_sinks,
         state.trace_path,
         state.provider_cleanup

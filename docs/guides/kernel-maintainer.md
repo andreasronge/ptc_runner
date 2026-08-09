@@ -454,9 +454,11 @@ selected leaves the prepared run reusable.
 
 The `PtcRunner.Kernel.CommandEngine` core allocates a command reference
 before strict argv parsing, consumes host/application paths through acquisition
-adapters, and projects failures into `PtcRunner.Kernel.CommandOutcome`. It is
-not yet the public Mix or standalone adapter. After frontend integration, only
-an outer standalone wrapper may turn the outcome's status into a process exit.
+adapters, and projects failures into `PtcRunner.Kernel.CommandOutcome`.
+`Mix.Tasks.Ptc.Run` is a thin adapter over that boundary: it supplies the
+Mix-owned runtime hooks, renders only the sealed outcome, and raises a Mix error
+for a nonzero status without halting the VM. A future outer standalone wrapper
+may turn the same outcome status into a process exit.
 Successful `validate` is terminal: it projects the five-field digest result,
 closes its prepared run, and returns a sealed `CommandOutcome`. Both doctor
 modes are terminal too, and `doctor --connect` is the one command the engine

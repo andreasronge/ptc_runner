@@ -94,11 +94,13 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   @tag :tmp_dir
   test "killing an adopted session owner also terminates its run state", %{tmp_dir: directory} do
     manifest = write_provider_free_application(directory, :normal)
+    trace_path = Path.join(directory, "killed-owner.jsonl")
 
     assert {:ok, session} =
              ManifestRepl.open(manifest, nil,
                input_mode: :interactive,
-               terminal_attached: true
+               terminal_attached: true,
+               trace_path: trace_path
              )
 
     [{id, {owner, token}}] = :ets.lookup(session.access, session.id)
@@ -112,6 +114,10 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
     assert_receive {:DOWN, ^run_state_ref, :process, _pid, :killed}, 5_000
     assert {:error, :session_closed} = ReplSession.close(session)
     assert :ets.lookup(session.access, id) == []
+
+    assert_eventually(fn ->
+      File.exists?(trace_path) and File.read!(trace_path) =~ "session_owner_failed"
+    end)
   end
 
   @tag :tmp_dir

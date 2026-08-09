@@ -5,8 +5,8 @@ defmodule PtcRunner.Kernel.ReplTerminalization do
   alias PtcRunner.Kernel.TraceLog
 
   @doc false
-  @spec finalize_unadopted(map() | nil, binary() | nil, term()) :: :ok
-  def finalize_unadopted(
+  @spec finalize_abandoned(map() | nil, binary() | nil, term()) :: :ok
+  def finalize_abandoned(
         %{event_sink: %EventSink{} = event_sink},
         trace_path,
         provider_cleanup
@@ -30,7 +30,7 @@ defmodule PtcRunner.Kernel.ReplTerminalization do
     :ok
   end
 
-  def finalize_unadopted(_opened_sinks, _trace_path, _provider_cleanup), do: :ok
+  def finalize_abandoned(_opened_sinks, _trace_path, _provider_cleanup), do: :ok
 
   @doc false
   @spec persist(binary() | nil, EventSink.t(), [map()]) ::
