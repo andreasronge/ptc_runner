@@ -1,7 +1,6 @@
 defmodule PtcRunner.TestSupport.RunLifecycle do
   @moduledoc false
 
-  alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
@@ -26,7 +25,7 @@ defmodule PtcRunner.TestSupport.RunLifecycle do
 
   def execute_with_class({:ok, %{publication_authority: authority} = built}) do
     case RunBuilder.execute_built(built) do
-      {:ok, %ExecutionOutcome{} = outcome} ->
+      {:ok, outcome} ->
         result = published_result(outcome, authority)
         prefer_cleanup_error(result, PublicationAuthority.close(authority))
 

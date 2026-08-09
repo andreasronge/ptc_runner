@@ -29,7 +29,6 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.CommandRunDispatch
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandRuntime
-  alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PublicationAuthority
 
@@ -174,8 +173,5 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   defp command_mode(%CommandArguments{command: command}), do: command
 
-  defp diagnostic(phase, code) do
-    source = if phase == :host, do: CommandSource.fixed(:host), else: nil
-    CommandDiagnostic.new!(phase, code, source: source)
-  end
+  defp diagnostic(phase, code), do: CommandDiagnostic.new!(phase, code)
 end

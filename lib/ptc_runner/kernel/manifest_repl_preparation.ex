@@ -17,13 +17,13 @@ defmodule PtcRunner.Kernel.ManifestReplPreparation do
   defstruct @enforce_keys
   @field_keys Enum.sort([:__struct__ | @enforce_keys])
 
-  @opaque t :: %__MODULE__{
-            prepared_run: PreparedRun.t(),
-            catalog: InstallationCatalog.t(),
-            runtime_services: ProviderRuntimeServices.t(),
-            environment_setup_required: boolean(),
-            attestation: binary()
-          }
+  @type t :: %__MODULE__{
+          prepared_run: PreparedRun.t(),
+          catalog: InstallationCatalog.t(),
+          runtime_services: ProviderRuntimeServices.t(),
+          environment_setup_required: boolean(),
+          attestation: binary()
+        }
 
   @doc false
   @spec new(PreparedRun.t(), InstallationCatalog.t(), ProviderRuntimeServices.t(), boolean()) ::

@@ -5,7 +5,6 @@ defmodule PtcRunner.Kernel.CommandDestination do
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRunRef
-  alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.PublicationAuthority
 
@@ -152,10 +151,7 @@ defmodule PtcRunner.Kernel.CommandDestination do
 
   defp not_requested, do: Map.new(@artifact_names, &{&1, "not_requested"})
 
-  defp diagnostic(phase, code) do
-    source = if phase == :host, do: CommandSource.fixed(:host), else: nil
-    CommandDiagnostic.new!(phase, code, source: source)
-  end
+  defp diagnostic(phase, code), do: CommandDiagnostic.new!(phase, code)
 
   defp fallback_run_ref, do: "cmd-00000000000000000000000000"
 end

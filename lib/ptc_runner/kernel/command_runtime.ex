@@ -20,13 +20,13 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   defstruct @enforce_keys
   @field_keys Enum.sort([:__struct__ | @enforce_keys])
 
-  @opaque t :: %__MODULE__{
-            provider_application_mode: :host_owned | :command_vm,
-            authorization_targets: [binary()],
-            authorization_notifier: (binary() -> any()) | nil,
-            environment_setup: (-> :ok | {:error, term()}) | nil,
-            attestation: binary()
-          }
+  @type t :: %__MODULE__{
+          provider_application_mode: :host_owned | :command_vm,
+          authorization_targets: [binary()],
+          authorization_notifier: (binary() -> any()) | nil,
+          environment_setup: (-> :ok | {:error, term()}) | nil,
+          attestation: binary()
+        }
 
   @spec standalone() :: t()
   def standalone do

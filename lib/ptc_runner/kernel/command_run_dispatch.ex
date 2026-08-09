@@ -164,7 +164,7 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
     do:
       if(preparation.prepared_run.effective_event_policy == :private, do: :private, else: :normal)
 
-  defp authority_artifact_state(%PublicationAuthority{} = authority) do
+  defp authority_artifact_state(authority) do
     authority
     |> PublicationAuthority.destination_options()
     |> Map.new()

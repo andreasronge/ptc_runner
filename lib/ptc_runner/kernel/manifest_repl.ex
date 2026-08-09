@@ -172,15 +172,8 @@ defmodule PtcRunner.Kernel.ManifestRepl do
   defp failure(%CommandDiagnostic{} = diagnostic, _activity),
     do: %{code: diagnostic.code, provider_activity: diagnostic.provider_activity}
 
-  defp failure(%{code: code, provider_activity: activity}, _fallback)
-       when is_atom(code) and is_boolean(activity),
-       do: %{code: code, provider_activity: activity}
-
   defp failure(reason, activity) when is_atom(reason),
     do: %{code: reason, provider_activity: activity == true}
-
-  defp failure(_reason, activity),
-    do: %{code: :invalid_manifest_repl, provider_activity: activity == true}
 
   defp activity(preparation) do
     case ProviderActivity.value(preparation.prepared_run.provider_activity) do
