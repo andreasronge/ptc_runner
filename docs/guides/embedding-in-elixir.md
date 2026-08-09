@@ -87,7 +87,7 @@ to both package acquisition and `RunBuilder.build/3`.
 The core application deliberately starts no provider dependency on your behalf,
 so depending on `ptc_runner` never starts `req_llm` or `llm_db` inside your
 release. A run admits the application it needs through
-`PtcRunner.Kernel.ProviderApplicationGate`. `mix ptc.run` reaches it through the execution-owned
+`PtcRunner.Kernel.ProviderApplicationGate`. `mix ptc run` reaches it through the execution-owned
 `ProviderActiveSession.open_consumed_setup/5`, where the execution-session owner
 already owns the prepared run and the session's lifecycle. There is no
 creator-owned variant.
@@ -118,7 +118,7 @@ no provider implementation, so it admits every shipped LLM installation against
 `:req_llm` regardless of route. A host-owned run therefore still expects that
 application even for a direct `ollama:` or `openai-compat:` model.
 
-Credential loading is decided separately. `mix ptc.run` reads the nearest `.env`
+Credential loading is decided separately. `mix ptc run` reads the nearest `.env`
 whenever a selected LLM installation declares an `env` credential, including for
 direct routes that need no backing application at all.
 
@@ -195,7 +195,7 @@ sandbox boundary.
 
 - [Manifests and capabilities](manifests-and-capabilities.md) defines the
   strict manifest contract `RunBuilder` implements, so an embedded frontend
-  accepts the same projects as `mix ptc.run`.
+  accepts the same projects as `mix ptc run`.
 - [Host configuration](host-configuration.md) defines the operator document
   `HostConfig` loads and `HostInstallation` turns into a provider registry.
 - [Components and preludes](components-and-preludes.md) covers the bundle

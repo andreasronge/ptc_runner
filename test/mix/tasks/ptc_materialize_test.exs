@@ -8,8 +8,8 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
   import ExUnit.CaptureIO
 
+  alias Mix.Tasks.Ptc
   alias Mix.Tasks.Ptc.Materialize
-  alias Mix.Tasks.Ptc.Run
 
   # The placeholder idiom. It must stub every export its consumers call: a
   # component that declares nothing cannot be depended on, because the base
@@ -72,16 +72,13 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
     # compiled, hash-verified, and executed by a later one.
     run_output =
       capture_io(fn ->
-        Mix.Task.reenable("ptc.run")
-        Run.run([manifest, "--component-override-descriptor", descriptor])
+        Mix.Task.reenable("ptc")
+        Ptc.run(["run", manifest, "--component-override-descriptor", descriptor])
       end)
 
     # The placeholder's stub returns 0, so 42 is proof the candidate's source
     # compiled and ran rather than the shipped source.
-    assert %{
-             "status" => "ok",
-             "result" => %{"result_class" => "normal", "value" => 42}
-           } = Jason.decode!(run_output)
+    assert Jason.decode!(run_output) == 42
   end
 
   @tag :tmp_dir

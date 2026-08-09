@@ -3,7 +3,7 @@ defmodule PtcRunner.Kernel.GitHubMCPE2ETest do
 
   import ExUnit.CaptureIO
 
-  alias Mix.Tasks.Ptc.Run
+  alias Mix.Tasks.Ptc
 
   @moduletag :e2e
   @repository_commit "1f5361d24a72a822633e650a28159058f17c815b"
@@ -16,23 +16,29 @@ defmodule PtcRunner.Kernel.GitHubMCPE2ETest do
     token = required_environment!("PTC_TEST_GITHUB_TOKEN")
     paths = write_application(dir, binary)
 
+    envelope_path = Path.join(dir, "command-envelope.json")
+
     run_output =
       capture_io(fn ->
-        Mix.Task.reenable("ptc.run")
+        Mix.Task.reenable("ptc")
 
-        Run.run([
+        Ptc.run([
+          "run",
           paths.manifest,
           "--host-config",
           paths.host,
           "--trace-dir",
-          Path.dirname(paths.trace)
+          Path.dirname(paths.trace),
+          "--envelope",
+          envelope_path
         ])
       end)
 
-    envelope = Jason.decode!(run_output)
+    assert run_output == ""
+    envelope = envelope_path |> File.read!() |> Jason.decode!()
     assert envelope["status"] == "ok"
     assert envelope["result"]["value"] =~ "PtcRunner"
-    refute run_output =~ token
+    refute File.read!(envelope_path) =~ token
     trace = Path.join(Path.dirname(paths.trace), envelope["run_ref"] <> ".jsonl")
     refute File.read!(trace) =~ token
     refute_server_process(binary)

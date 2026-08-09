@@ -8,14 +8,25 @@ defmodule PtcRunner.Kernel.CommandArguments do
   phase-6 command continuation.
   """
 
-  @enforce_keys [:command, :application, :directory, :options]
+  @enforce_keys [
+    :command,
+    :application,
+    :directory,
+    :options,
+    :ordered_options,
+    :frontend,
+    :frontend_options
+  ]
   defstruct @enforce_keys
 
-  @type command :: :help | :version | :init | :validate | :run | :doctor | :models
+  @type command :: :help | :version | :init | :validate | :run | :doctor | :models | :repl
   @type t :: %__MODULE__{
           command: command(),
           application: binary() | nil,
           directory: binary() | nil,
-          options: map()
+          options: map(),
+          ordered_options: keyword(),
+          frontend: :standalone | :mix,
+          frontend_options: keyword()
         }
 end

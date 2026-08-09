@@ -7,6 +7,9 @@ defmodule PtcRunner.Kernel.CommandEngine do
   components own their respective phase ranges. Shared code never writes
   process streams, halts the VM, or renders arbitrary failures.
 
+  Frontend-owned switches such as `--envelope` are accepted only through a
+  `CommandEntry`; the direct `prepare/1` and `dispatch/1` APIs reject them.
+
   Provider-free and provider-backed `run` commands complete through the same
   owner-backed execution and publication path. Provider-free runs retain
   `ExecutionSessionOwner` while omitting only the provider session.
@@ -22,10 +25,12 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.CommandDestination
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandDoctor
+  alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandInitializer
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandParser
   alias PtcRunner.Kernel.CommandPreparation
+  alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRunDispatch
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandRuntime
@@ -53,14 +58,20 @@ defmodule PtcRunner.Kernel.CommandEngine do
           {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
   def dispatch(argv, %CommandRuntime{} = runtime) do
     if CommandRuntime.valid?(runtime) do
-      run_ref = generated_or_safe_ref()
+      case CommandEntry.open(argv, :standalone) do
+        {:ok, %CommandEntry{envelope_path: envelope_path} = entry}
+        when is_binary(envelope_path) ->
+          {:error,
+           arguments_outcome(entry.arguments, entry.run_ref, :arguments, :invalid_arguments)}
 
-      case prepare_with_ref(argv, run_ref, runtime) do
-        {:ok, %CommandPreparation{} = preparation} ->
-          CommandRunDispatch.dispatch(preparation, runtime)
+        {:ok, %CommandEntry{arguments: %{command: :repl}} = entry} ->
+          {:error, outcome(:unknown, entry.run_ref, :arguments, :invalid_command)}
 
-        terminal ->
-          terminal
+        {:ok, %CommandEntry{} = entry} ->
+          dispatch_entry(entry, runtime)
+
+        {:error, %CommandEntry{} = entry} ->
+          entry_failure(entry)
       end
     else
       {:error, outcome(:unknown, generated_or_safe_ref(), :internal, :internal_error)}
@@ -69,6 +80,62 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   def dispatch(_argv, _runtime),
     do: {:error, outcome(:unknown, generated_or_safe_ref(), :internal, :internal_error)}
+
+  @doc false
+  @spec dispatch_entry(CommandEntry.t(), CommandRuntime.t()) ::
+          {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
+  def dispatch_entry(
+        %CommandEntry{arguments: %CommandArguments{command: :repl}} = entry,
+        _runtime
+      ),
+      do: one_shot_repl_failure(entry.run_ref, :invalid_command)
+
+  def dispatch_entry(
+        %CommandEntry{arguments: %CommandArguments{} = arguments, rejection: nil} = entry,
+        %CommandRuntime{} = runtime
+      ) do
+    if CommandRuntime.valid?(runtime) do
+      case prepare_arguments_safely(
+             arguments,
+             entry.run_ref,
+             entry.destinations,
+             runtime
+           ) do
+        {:ok, %CommandPreparation{} = preparation} ->
+          CommandRunDispatch.dispatch(preparation, runtime)
+
+        terminal ->
+          terminal
+      end
+    else
+      startup_failure(entry)
+    end
+  end
+
+  def dispatch_entry(%CommandEntry{} = entry, _runtime), do: startup_failure(entry)
+
+  @doc false
+  @spec entry_failure(CommandEntry.t()) :: {:error, CommandOutcome.t()}
+  def entry_failure(
+        %CommandEntry{rejection: %CommandRejection{command: :repl} = rejection} = entry
+      ),
+      do: one_shot_repl_failure(entry.run_ref, rejection.code)
+
+  def entry_failure(%CommandEntry{rejection: %CommandRejection{} = rejection} = entry),
+    do: {:error, outcome(rejection.command, entry.run_ref, :arguments, rejection.code)}
+
+  @doc false
+  @spec startup_failure(CommandEntry.t()) :: {:error, CommandOutcome.t()}
+  def startup_failure(%CommandEntry{arguments: %CommandArguments{command: :repl}} = entry),
+    do: one_shot_repl_failure(entry.run_ref, :invalid_command)
+
+  def startup_failure(%CommandEntry{
+        arguments: %CommandArguments{} = arguments,
+        run_ref: run_ref
+      }),
+      do: {:error, arguments_outcome(arguments, run_ref, :internal, :internal_error)}
+
+  def startup_failure(%CommandEntry{} = entry), do: entry_failure(entry)
 
   @doc false
   @spec run_startup_failure() :: {:error, CommandOutcome.t()}
@@ -90,7 +157,10 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   defp prepare_with_ref(argv, run_ref, runtime) do
     case CommandParser.parse(argv) do
-      {:ok, %CommandArguments{} = arguments} ->
+      {:ok, %CommandArguments{command: :repl}} ->
+        one_shot_repl_failure(run_ref, :invalid_command)
+
+      {:ok, %CommandArguments{frontend_options: []} = arguments} ->
         prepare_arguments_safely(
           arguments,
           run_ref,
@@ -98,14 +168,26 @@ defmodule PtcRunner.Kernel.CommandEngine do
           runtime
         )
 
-      {:error, command, code} ->
-        {:error, outcome(command, run_ref, :arguments, code)}
+      {:ok, %CommandArguments{} = arguments} ->
+        {:error, arguments_outcome(arguments, run_ref, :arguments, :invalid_arguments)}
+
+      {:error, %CommandRejection{command: :repl} = rejection} ->
+        one_shot_repl_failure(run_ref, rejection.code)
+
+      {:error, %CommandRejection{} = rejection} ->
+        {:error, outcome(rejection.command, run_ref, :arguments, rejection.code)}
     end
   rescue
     _exception -> {:error, outcome(:unknown, run_ref, :internal, :internal_error)}
   catch
     _kind, _reason -> {:error, outcome(:unknown, run_ref, :internal, :internal_error)}
   end
+
+  defp one_shot_repl_failure(run_ref, :invalid_command),
+    do: {:error, outcome(:unknown, run_ref, :arguments, :invalid_command)}
+
+  defp one_shot_repl_failure(run_ref, _rejection_code),
+    do: {:error, outcome(:unknown, run_ref, :arguments, :invalid_arguments)}
 
   defp prepare_arguments_safely(%CommandArguments{} = arguments, run_ref, destinations, runtime) do
     case arguments.command do
@@ -117,14 +199,14 @@ defmodule PtcRunner.Kernel.CommandEngine do
          CommandOutcome.success(
            :help,
            run_ref,
-           CommandContract.help_result(arguments.options.topic)
+           CommandContract.help_result(arguments.options.topic, arguments.frontend)
          )}
 
       :version ->
         {:ok, CommandOutcome.success(:version, run_ref, CommandContract.version_result())}
 
       :doctor ->
-        CommandDoctor.dispatch(arguments, run_ref)
+        CommandDoctor.dispatch(arguments, run_ref, runtime)
 
       :models ->
         models_outcome(arguments, run_ref)

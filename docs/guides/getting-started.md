@@ -11,18 +11,15 @@ expressions are ordinary Clojure; arbitrary JVM access, macros, lazy or
 infinite sequences, and unsupported Clojure APIs are not part of the language.
 The [language specification](../ptc-lisp-specification.md) is authoritative.
 
-The Kernel product is currently run from a source checkout with Elixir and Mix.
-A standalone macOS command and Docker image are planned for a later 0.x release
-from `main`.
+The Kernel product runs from a source checkout through `mix ptc` and from a
+runtime-included release through `bin/ptc`.
 
 ## Create a minimal application
 
-The shared command surface accepts `ptc init DIRECTORY`. From a source checkout,
-invoke that same command boundary in `iex -S mix`:
+The shared command surface accepts `ptc init DIRECTORY`. From a source checkout:
 
-```elixir
-{:ok, outcome} =
-  PtcRunner.Kernel.CommandEngine.dispatch(["init", "hello-ptc"])
+```console
+mix ptc init hello-ptc
 ```
 
 Initialization publishes exactly `main.clj` and `ptc.json`. Their bytes are a
@@ -65,10 +62,10 @@ From the repository root:
 
 ```console
 mix deps.get
-mix ptc.run examples/kernel-tutorial/01-orders/ptc.json
+mix ptc run examples/kernel-tutorial/01-orders/ptc.json
 ```
 
-The command prints one JSON command envelope. Its `result.value` is:
+The command prints the compact JSON result value:
 
 ```json
 {
@@ -139,7 +136,7 @@ capability payloads, or generated source:
 
 ```console
 mkdir -p tmp/tutorial-traces
-mix ptc.run examples/kernel-tutorial/01-orders/ptc.json \
+mix ptc run examples/kernel-tutorial/01-orders/ptc.json \
   --trace-dir tmp/tutorial-traces
 ```
 
@@ -147,7 +144,7 @@ The JSON Lines file records the run, workflow evaluation, outcome, usage, and
 limits. Query the captured directory through the fixed log-analysis profile:
 
 ```console
-mix ptc.repl \
+mix ptc repl \
   --profile log-analysis-v2 \
   --resource traces=tmp/tutorial-traces \
   -e '(log.analysis/all-runs {"limit" 50} 10)'
@@ -164,7 +161,7 @@ before the captured source is exhausted.
 Use the bounded REPL for small expressions and definitions:
 
 ```console
-mix ptc.repl \
+mix ptc repl \
   -e '(def tax-rate 0.2)' \
   -e '(* 100 tax-rate)' \
   -e '(+ *1 5)'

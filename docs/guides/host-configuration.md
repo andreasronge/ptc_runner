@@ -10,7 +10,7 @@ introduce a provider, name an executable or endpoint, carry a credential, or
 raise a ceiling. Pass the document explicitly:
 
 ```console
-mix ptc.run MANIFEST --host-config ptc-host.json
+mix ptc run MANIFEST --host-config ptc-host.json
 ```
 
 A provider-bearing manifest requires `--host-config`; a provider-free manifest
@@ -130,7 +130,7 @@ shell-local environment manager or explicit secret source:
 
 ```console
 export OPENROUTER_API_KEY="$(secret-tool lookup service openrouter)"
-mix ptc.run ptc.json --host-config ptc-host.json
+mix ptc run ptc.json --host-config ptc-host.json
 ```
 
 Tools such as `direnv` may populate the process environment before the command
@@ -352,7 +352,7 @@ the `mcp-*` family.
 #### OAuth-protected MCP servers
 
 Interactive authorization is a Mix-frontend capability. `--authorize-mcp` is a
-Mix-only option and the planned standalone command disables the interactive
+Mix-only option and the standalone command disables the interactive
 authorization notifier, so an OAuth-protected installation cannot complete a
 first authorization from the packaged command or a container. Authorize through
 Mix in a source checkout. A packaged invocation against an unauthorized
@@ -389,7 +389,7 @@ An OAuth installation replaces static `auth` with a host-owned `oauth` block:
 Authorize a named installation explicitly before provider acquisition:
 
 ```console
-mix ptc.run ptc.json --host-config ptc-host.json \
+mix ptc run ptc.json --host-config ptc-host.json \
   --authorize-mcp workspace
 ```
 
@@ -617,17 +617,12 @@ does not consume an evaluation or mission capability-call reservation.
 ## Verify an installation
 
 The shared `doctor --connect` command checks the selected providers without
-invoking the workflow. Until the standalone command is packaged, an Elixir
-host can invoke the shipped command boundary directly:
+invoking the workflow:
 
-```elixir
-PtcRunner.Kernel.CommandEngine.dispatch([
-  "doctor",
-  "examples/kernel-tutorial/02-deepseek-extract/ptc.json",
-  "--host-config",
-  "examples/kernel-tutorial/ptc-host.json",
-  "--connect"
-])
+```console
+mix ptc doctor examples/kernel-tutorial/02-deepseek-extract/ptc.json \
+  --host-config examples/kernel-tutorial/ptc-host.json \
+  --connect
 ```
 
 The sealed outcome reports one closed check row per required local,

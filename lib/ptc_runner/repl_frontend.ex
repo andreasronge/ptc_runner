@@ -1,27 +1,26 @@
-defmodule Mix.Tasks.Ptc.Repl do
-  @shortdoc "Bounded direct or profile-backed PTC-Lisp REPL"
+defmodule PtcRunner.ReplFrontend do
   @moduledoc """
   Starts a direct workflow PTC-Lisp REPL or a fixed code-owned analysis
   profile.
 
-      mix ptc.repl
-      mix ptc.repl -e "(+ 1 2)" -e "(+ *1 3)"
-      mix ptc.repl -l setup.clj
-      mix ptc.repl script.clj
-      mix ptc.repl -
-      mix ptc.repl --manifest ptc.json
-      mix ptc.repl --manifest ptc.json --host-config ptc-host.json
-      mix ptc.repl --manifest ptc.json --trace trace.jsonl
-      mix ptc.repl --profile log-analysis-v2 --resource traces=tmp/traces
-      mix ptc.repl --profile inspection-analysis-v2 \
+      ptc repl
+      ptc repl -e "(+ 1 2)" -e "(+ *1 3)"
+      ptc repl -l setup.clj
+      ptc repl script.clj
+      ptc repl -
+      ptc repl --manifest ptc.json
+      ptc repl --manifest ptc.json --host-config ptc-host.json
+      ptc repl --manifest ptc.json --trace trace.jsonl
+      ptc repl --profile log-analysis-v2 --resource traces=tmp/traces
+      ptc repl --profile inspection-analysis-v2 \
         --resource traces=tmp/traces \
         --resource inspection=tmp/inspection \
         --private-terminal
-      mix ptc.repl --profile inspection-analysis-v2 \
+      ptc repl --profile inspection-analysis-v2 \
         --resource traces=tmp/traces \
         --resource inspection=tmp/inspection \
         --private-unattended --format jsonl -e '(inspection/runs {})'
-      mix ptc.repl --describe-profile log-analysis-v2
+      ptc repl --describe-profile log-analysis-v2
 
   Options:
 
@@ -40,10 +39,7 @@ defmodule Mix.Tasks.Ptc.Repl do
       private output sink required by `inspection-analysis-v2`;
     * `--private-unattended` — explicitly authorize this command's own streams
       as that sink instead, admitting `-e`/`--load`/script/stdin and
-      `--format jsonl`. The attached-terminal check is an accident guard, not
-      access control; this flag makes deliberate non-interactive use explicit
-      rather than requiring a `script(1)` pseudo-terminal. Mutually exclusive
-      with `--private-terminal`;
+      `--format jsonl`. Mutually exclusive with `--private-terminal`;
     * `--format clojure|jsonl` — choose human output or non-interactive
       profile-mode JSON Lines;
     * `--continue-on-error` — evaluate later repeated `--eval` forms after a
@@ -67,58 +63,50 @@ defmodule Mix.Tasks.Ptc.Repl do
   with `command-error`; validation failures can therefore emit that record
   alone. Evaluation records contain the existing bounded public mission result
   projection and never add a raw source field. A failing command raises
-  `Mix.Error`; the task never halts the VM directly.
+  a closed frontend error; this shared module never halts the VM.
   """
-
-  use Mix.Task
 
   alias PtcRunner.Kernel.AnalysisDirectory
   alias PtcRunner.Kernel.AnalysisProfileRegistry
   alias PtcRunner.Kernel.AnalysisSession
   alias PtcRunner.Kernel.AnalysisSessionBuilder
   alias PtcRunner.Kernel.AnalysisTerminal
+  alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.ManifestRepl
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Registry
-  alias PtcRunner.MixCommandRuntime
+  alias PtcRunner.ReplError
 
-  @switches [
-    eval: :keep,
-    load: :string,
-    manifest: :string,
-    host_config: :string,
-    trace: :string,
-    profile: :string,
-    resource: :keep,
-    session_trace_dir: :string,
-    format: :string,
-    continue_on_error: :boolean,
-    private_terminal: :boolean,
-    private_unattended: :boolean,
-    describe_profile: :string,
-    help: :boolean
-  ]
-  @aliases [e: :eval, l: :load, m: :manifest, t: :trace, h: :help]
+  @spec run(CommandArguments.t(), CommandRuntime.t()) :: :ok | {:error, binary()}
+  def run(
+        %CommandArguments{command: :repl, application: script, ordered_options: opts},
+        %CommandRuntime{} = runtime
+      ) do
+    arguments = if is_binary(script), do: [script], else: []
 
-  @impl Mix.Task
-  def run(args) do
-    Mix.Task.run("app.start")
-    {opts, arguments, invalid} = OptionParser.parse(args, strict: @switches, aliases: @aliases)
+    case validate_command(opts, arguments, []) do
+      {:ok, :describe} ->
+        describe_profile(opts)
 
-    if opts[:help] do
-      Mix.shell().info(@moduledoc)
-    else
-      case validate_command(opts, arguments, invalid) do
-        {:ok, :describe} -> describe_profile(opts)
-        {:ok, :profile} -> run_profile_session(opts, arguments)
-        {:ok, :manifest} -> run_manifest_session(opts, arguments)
-        {:ok, :direct} -> run_direct_session(opts, arguments)
-        {:error, message} -> command_error(opts, :cli, message)
-      end
+      {:ok, :profile} ->
+        run_profile_session(opts, arguments)
+
+      {:ok, :manifest} ->
+        run_manifest_session(Keyword.put(opts, :command_runtime, runtime), arguments)
+
+      {:ok, :direct} ->
+        run_direct_session(opts, arguments)
+
+      {:error, message} ->
+        command_error(opts, :cli, message)
     end
+
+    :ok
+  rescue
+    error in ReplError -> {:error, error.message}
   end
 
   defp validate_command(opts, arguments, invalid) do
@@ -134,16 +122,16 @@ defmodule Mix.Tasks.Ptc.Repl do
   defp validate_common_command(arguments, invalid, evals, format) do
     cond do
       invalid != [] ->
-        {:error, "invalid ptc.repl options: #{inspect(invalid)}"}
+        {:error, "invalid ptc repl options: #{inspect(invalid)}"}
 
       length(arguments) > 1 ->
-        {:error, "usage: mix ptc.repl [OPTIONS] [SCRIPT|-]"}
+        {:error, "usage: ptc repl [OPTIONS] [SCRIPT|-]"}
 
       evals != [] and arguments != [] ->
         {:error, "cannot combine --eval with a script or stdin"}
 
       format not in ["clojure", "jsonl"] ->
-        {:error, "invalid ptc.repl format: #{inspect(format)}"}
+        {:error, "invalid ptc repl format: #{inspect(format)}"}
 
       true ->
         :ok
@@ -244,7 +232,7 @@ defmodule Mix.Tasks.Ptc.Repl do
       emit_jsonl(Map.merge(description, %{"schema_version" => 1, "type" => "profile"}))
     else
       {formatted, _truncated?} = Format.to_clojure(description)
-      Mix.shell().info(formatted)
+      info(formatted)
     end
   end
 
@@ -449,21 +437,12 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   defp separate_directories(input_directories, output_directory) do
     with {:ok, output} <- AnalysisDirectory.resolve(output_directory),
-         {:ok, inputs} <- resolve_directories(input_directories),
+         {:ok, inputs} <- AnalysisDirectory.resolve_all(input_directories),
          true <- AnalysisDirectory.pairwise_separate?([output | inputs]) do
       {:ok, output.identity}
     else
       _ -> {:error, "input and session trace directories must be physically separate"}
     end
-  end
-
-  defp resolve_directories(directories) do
-    Enum.reduce_while(directories, {:ok, []}, fn directory, {:ok, resolved} ->
-      case AnalysisDirectory.resolve(directory) do
-        {:ok, value} -> {:cont, {:ok, [value | resolved]}}
-        {:error, _reason} = error -> {:halt, error}
-      end
-    end)
   end
 
   defp start_profile_session(
@@ -515,7 +494,7 @@ defmodule Mix.Tasks.Ptc.Repl do
        )
        when source in [:ptc_trace_snapshot, :ptc_inspection_snapshot] and
               is_integer(measured_bytes) and is_integer(limit_bytes) do
-    "ptc.repl profile setup failed: #{source} retains #{measured_bytes} bytes " <>
+    "ptc repl profile setup failed: #{source} retains #{measured_bytes} bytes " <>
       "(limit: #{limit_bytes} bytes)"
   end
 
@@ -526,12 +505,12 @@ defmodule Mix.Tasks.Ptc.Repl do
     do: empty_resource_error("inspection", "*.inspection.jsonl records")
 
   defp profile_setup_error(reason) when is_atom(reason),
-    do: "ptc.repl profile setup failed: #{reason}"
+    do: "ptc repl profile setup failed: #{reason}"
 
-  defp profile_setup_error(_reason), do: "ptc.repl profile setup failed"
+  defp profile_setup_error(_reason), do: "ptc repl profile setup failed"
 
   defp empty_resource_error(resource, artifacts) do
-    "ptc.repl profile setup failed: the #{resource} resource directory contains no " <>
+    "ptc repl profile setup failed: the #{resource} resource directory contains no " <>
       "#{artifacts} at its own level; artifacts in subdirectories are not captured"
   end
 
@@ -570,7 +549,7 @@ defmodule Mix.Tasks.Ptc.Repl do
       {:ok, source} ->
         case evaluate_profile_source(session, opts, source, :load, state) do
           {:ok, next} ->
-            if output_format(opts) == :clojure, do: Mix.shell().info("Loaded #{path}")
+            if output_format(opts) == :clojure, do: info("Loaded #{path}")
             {:ok, next}
 
           {_disposition, next} ->
@@ -662,7 +641,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   end
 
   defp interactive_profile(session, opts, state) do
-    Mix.shell().info("PTC-Lisp REPL [#{opts[:profile]}] (Ctrl+D to exit; :help for commands)\n")
+    info("PTC-Lisp REPL [#{opts[:profile]}] (Ctrl+D to exit; :help for commands)\n")
 
     profile_loop(session, opts, state)
   end
@@ -670,7 +649,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   defp profile_loop(session, opts, state) do
     case read_profile_expression("ptc> ", "", opts) do
       :eof ->
-        Mix.shell().info("\nGoodbye!")
+        info("\nGoodbye!")
         ensure_evaluation_failure(state)
 
       {:error, :source_limit_exceeded} ->
@@ -770,7 +749,7 @@ defmodule Mix.Tasks.Ptc.Repl do
       })
     else
       Enum.each(capture_summary(info.snapshot), fn {resource, counts} ->
-        Mix.shell().info(
+        info(
           "Captured #{resource}: #{pluralize(counts["file_count"], "file")}, " <>
             pluralize(counts["run_count"], "run")
         )
@@ -804,9 +783,9 @@ defmodule Mix.Tasks.Ptc.Repl do
         "result" => json_projection(result)
       })
     else
-      Enum.each(result.prints, fn print -> Mix.shell().info(print) end)
-      if is_binary(result.formatted), do: Mix.shell().info(result.formatted)
-      if result.status == :error, do: Mix.shell().error(format_profile_error(result))
+      Enum.each(result.prints, &info/1)
+      if is_binary(result.formatted), do: info(result.formatted)
+      if result.status == :error, do: error(format_profile_error(result))
     end
   end
 
@@ -823,7 +802,7 @@ defmodule Mix.Tasks.Ptc.Repl do
           |> json_projection()
       })
     else
-      Mix.shell().info("Analysis trace: #{trace_path}")
+      info("Analysis trace: #{trace_path}")
     end
   end
 
@@ -839,7 +818,7 @@ defmodule Mix.Tasks.Ptc.Repl do
     components = Enum.join(description["components"], ", ")
     namespaces = Enum.map_join(description["namespaces"], ", ", &(&1 <> "."))
 
-    Mix.shell().info("""
+    info("""
     Commands:
       :doc <name>      Show core function documentation
       :find <pattern>  Search core functions
@@ -871,7 +850,7 @@ defmodule Mix.Tasks.Ptc.Repl do
       )
     end
 
-    Mix.raise(message)
+    fail(message)
   end
 
   defp output_format(opts),
@@ -880,7 +859,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   defp emit_jsonl(value) do
     case value |> json_projection() |> DeterministicJSON.encode() do
       {:ok, encoded} -> IO.puts(encoded)
-      {:error, _reason} -> Mix.raise("ptc.repl could not encode JSONL output")
+      {:error, _reason} -> fail("ptc repl could not encode JSONL output")
     end
   end
 
@@ -1006,12 +985,12 @@ defmodule Mix.Tasks.Ptc.Repl do
   defp run_direct_session(opts, arguments) do
     case ReplSession.new(trace_path: opts[:trace]) do
       {:ok, session} -> run_workflow_session(session, opts, arguments)
-      {:error, reason} -> Mix.raise("ptc.repl setup failed: #{inspect(reason)}")
+      {:error, reason} -> fail("ptc repl setup failed: #{inspect(reason)}")
     end
   end
 
   defp run_manifest_session(opts, arguments) do
-    with {:ok, runtime} <- manifest_runtime(),
+    with {:ok, runtime} <- manifest_runtime(opts),
          {:ok, session} <-
            ManifestRepl.open(opts[:manifest], opts[:host_config],
              runtime: runtime,
@@ -1022,8 +1001,8 @@ defmodule Mix.Tasks.Ptc.Repl do
            ) do
       run_workflow_session(session, opts, arguments)
     else
-      {:error, %{code: code}} -> Mix.raise(manifest_repl_error(code))
-      {:error, reason} -> Mix.raise("ptc.repl setup failed: #{inspect(reason)}")
+      {:error, %{code: code}} -> fail(manifest_repl_error(code))
+      {:error, reason} -> fail("ptc repl setup failed: #{inspect(reason)}")
     end
   end
 
@@ -1050,7 +1029,12 @@ defmodule Mix.Tasks.Ptc.Repl do
     end
   end
 
-  defp manifest_runtime, do: CommandRuntime.new(MixCommandRuntime.options())
+  defp manifest_runtime(opts) do
+    case Keyword.fetch(opts, :command_runtime) do
+      {:ok, %CommandRuntime{} = runtime} -> {:ok, runtime}
+      _missing -> {:error, :invalid_command_runtime}
+    end
+  end
 
   defp manifest_repl_error(:host_config_required),
     do: "provider-backed manifest requires --host-config"
@@ -1068,10 +1052,10 @@ defmodule Mix.Tasks.Ptc.Repl do
     do: "--private-terminal requires a private manifest"
 
   defp manifest_repl_error(:trace_preflight_failed),
-    do: "ptc.repl trace destination is unavailable"
+    do: "ptc repl trace destination is unavailable"
 
   defp manifest_repl_error(code) when is_atom(code),
-    do: "ptc.repl setup failed: #{code}"
+    do: "ptc repl setup failed: #{code}"
 
   defp evaluate_mode(session, opts, arguments) do
     with {:ok, session} <- maybe_load(session, opts[:load]) do
@@ -1089,7 +1073,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   defp maybe_load(session, path) do
     with {:ok, source} <- File.read(path),
          {:ok, _step, session} <- evaluate(session, source, :noninteractive) do
-      Mix.shell().info("Loaded #{path}")
+      info("Loaded #{path}")
       {:ok, session}
     else
       {:error, reason} when is_atom(reason) -> {:error, reason, session}
@@ -1129,14 +1113,14 @@ defmodule Mix.Tasks.Ptc.Repl do
   end
 
   defp interactive(session) do
-    Mix.shell().info("PTC-Lisp REPL (Ctrl+D to exit; :help for commands)\n")
+    info("PTC-Lisp REPL (Ctrl+D to exit; :help for commands)\n")
     loop(session)
   end
 
   defp loop(session) do
     case read_expression("ptc> ", "") do
       :eof ->
-        Mix.shell().info("\nGoodbye!")
+        info("\nGoodbye!")
         {:ok, session}
 
       "" ->
@@ -1191,15 +1175,15 @@ defmodule Mix.Tasks.Ptc.Repl do
 
       {:error, step, next} ->
         message = format_error(step)
-        if mode == :interactive, do: Mix.shell().info(message), else: Mix.shell().error(message)
+        if mode == :interactive, do: info(message), else: error(message)
         {:error, step, next}
     end
   end
 
   defp print_step(step) do
-    Enum.each(step.prints, fn line -> Mix.shell().info(line) end)
+    Enum.each(step.prints, &info/1)
     {formatted, _truncated?} = Format.to_clojure(step.return)
-    Mix.shell().info(formatted)
+    info(formatted)
   end
 
   defp format_error(%{fail: %{reason: reason, message: message}}),
@@ -1211,12 +1195,12 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   defp finish({:error, %{} = step, session}) do
     stop_session(session)
-    Mix.raise(format_error(step))
+    fail(format_error(step))
   end
 
   defp finish({:error, reason, session}) do
     stop_session(session)
-    Mix.raise("ptc.repl failed: #{inspect(reason)}")
+    fail("ptc repl failed: #{inspect(reason)}")
   end
 
   defp stop_session(session) do
@@ -1225,29 +1209,29 @@ defmodule Mix.Tasks.Ptc.Repl do
         :ok
 
       {:error, :provider_cleanup_failed, _events} ->
-        Mix.raise("ptc.repl cleanup failed: :provider_cleanup_failed")
+        fail("ptc repl cleanup failed: :provider_cleanup_failed")
 
       {:error, :provider_cleanup_failed} ->
-        Mix.raise("ptc.repl cleanup failed: :provider_cleanup_failed")
+        fail("ptc repl cleanup failed: :provider_cleanup_failed")
 
       {:error, :trace_persistence_failed, _events} ->
-        Mix.raise("ptc.repl trace failed: :trace_persistence_failed")
+        fail("ptc repl trace failed: :trace_persistence_failed")
 
       {:error, reason} ->
-        Mix.raise("ptc.repl cleanup failed: #{inspect(reason)}")
+        fail("ptc repl cleanup failed: #{inspect(reason)}")
     end
   end
 
   defp abort_session(session, reason) do
     case ReplSession.abort(session, reason) do
       {:error, :trace_persistence_failed, _events} ->
-        IO.puts(:stderr, "ptc.repl trace failed: :trace_persistence_failed")
+        IO.puts(:stderr, "ptc repl trace failed: :trace_persistence_failed")
 
       {:error, :provider_cleanup_failed, _events} ->
-        IO.puts(:stderr, "ptc.repl cleanup failed: :provider_cleanup_failed")
+        IO.puts(:stderr, "ptc repl cleanup failed: :provider_cleanup_failed")
 
       {:error, :provider_cleanup_failed} ->
-        IO.puts(:stderr, "ptc.repl cleanup failed: :provider_cleanup_failed")
+        IO.puts(:stderr, "ptc repl cleanup failed: :provider_cleanup_failed")
 
       _result ->
         :ok
@@ -1257,7 +1241,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   end
 
   defp handle_command("help", _session) do
-    Mix.shell().info("""
+    info("""
     Commands:
       :doc <name>      Show core function documentation
       :find <pattern>  Search core functions
@@ -1269,8 +1253,8 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   defp handle_command("doc " <> name, _session) do
     case Registry.doc(String.trim(name)) do
-      nil -> Mix.shell().info("No documentation found for: #{String.trim(name)}")
-      entry -> Mix.shell().info(Enum.join(entry.signatures, "\n") <> "\n  " <> entry.description)
+      nil -> info("No documentation found for: #{String.trim(name)}")
+      entry -> info(Enum.join(entry.signatures, "\n") <> "\n  " <> entry.description)
     end
   end
 
@@ -1279,10 +1263,14 @@ defmodule Mix.Tasks.Ptc.Repl do
     |> String.trim()
     |> Registry.find_doc()
     |> Enum.each(fn entry ->
-      Mix.shell().info("#{entry.name} — #{Enum.join(entry.signatures, " | ")}")
+      info("#{entry.name} — #{Enum.join(entry.signatures, " | ")}")
     end)
   end
 
   defp handle_command(_command, _session),
-    do: Mix.shell().info("Unknown command. Available: :doc <name>, :find <pattern>, :help")
+    do: info("Unknown command. Available: :doc <name>, :find <pattern>, :help")
+
+  defp info(message), do: IO.puts(message)
+  defp error(message), do: IO.puts(:stderr, message)
+  defp fail(message), do: raise(ReplError, message: message)
 end

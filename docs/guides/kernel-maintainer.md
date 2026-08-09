@@ -58,9 +58,11 @@ contracts cut across every layer: one absolute-monotonic `Deadline` that nested
 work may narrow but never reset, and a closed diagnostic catalog whose
 envelopes carry no path, credential, or arbitrary term.
 
-The standalone `ptc` executable does not exist yet; `mix ptc.run` and
-`mix ptc.repl` are the shipped frontends. The command engine's phase-6
-boundary and the Mix run path use the same retained publication authority.
+The runtime-included release's `bin/ptc` entrypoint and generic `mix ptc`
+task are the shipped command frontends. They share the entry parser, human
+renderer, file-envelope publisher, and standalone-or-Mix runtime adapters. The
+command engine's phase-6 boundary and both frontends use the same retained
+publication authority.
 Private-result recovery is implemented by that authority and the compact
 `ArtifactPublisher` state machine described below.
 
@@ -86,9 +88,12 @@ PTC-Lisp owns replaceable workflow policy:
 Frontends own presentation and host choices. They must enter through
 `PtcRunner.Kernel.ApplicationPackage` and a sealed
 `PtcRunner.Kernel.RunRequest`. The closed command pipeline uses
-`PtcRunner.Kernel.CommandEngine`; the Mix task is a thin renderer whose adapter
-owns bootstrap, prepends `run`, and supplies VM-owned runtime callbacks. The
-task renders the returned sealed V1 envelope. One-shot runs execute through a
+`PtcRunner.Kernel.CommandEntry` to generate the run reference, parse once, and
+reject resolved envelope collisions before bootstrap. `CommandRouter` then
+sends parsed one-shot requests through `PtcRunner.Kernel.CommandEngine` and
+parsed REPL requests through the long-lived session frontend. Mix and release
+adapters supply their own runtime bootstrap policy and share presentation.
+One-shot runs execute through a
 dedicated execution-session owner,
 whether or not they select providers, and a provider-bearing invocation opens
 `ProviderActiveSession` inside that owner's subordinate worker rather than in
@@ -456,17 +461,18 @@ execution that is not bound to its exact preparation before consuming that
 preparation, so a mismatched catalog or an authorization target the run never
 selected leaves the prepared run reusable.
 
-The `PtcRunner.Kernel.CommandEngine` core allocates a command reference
-before strict argv parsing, consumes host/application paths through acquisition
-adapters, and projects failures into `PtcRunner.Kernel.CommandOutcome`.
-`Mix.Tasks.Ptc.Run` is a thin renderer over that boundary. Its Mix-owned
-adapter owns bootstrap, the interactive authorization extension, and runtime
-hooks. Bootstrap exceptions and application
+`PtcRunner.Kernel.CommandEntry` allocates a command reference before strict
+argv parsing and resolves envelope distinctness before bootstrap. The
+`PtcRunner.Kernel.CommandEngine` consumes the already-parsed request through
+acquisition adapters and projects failures into
+`PtcRunner.Kernel.CommandOutcome`. `Mix.Tasks.Ptc` is a thin adapter over that
+boundary. Its Mix-owned runtime owns bootstrap, the interactive authorization
+extension, and runtime hooks. Bootstrap exceptions and application
 start failures are projected as the same closed run outcome as other internal
 failures; neither their reason nor argv paths reach the envelope. The task
 renders only the sealed outcome and raises a Mix error for a nonzero status
-without halting the VM. A future standalone release entrypoint may turn the same
-outcome status into a process exit.
+without halting the VM. The standalone release entrypoint turns the same
+presentation status into a process exit.
 Successful `validate` is terminal: it projects the five-field digest result,
 closes its prepared run, and returns a sealed `CommandOutcome`. Both doctor
 modes are terminal too, and `doctor --connect` is the one command the engine
@@ -477,11 +483,14 @@ closed check list. A selection naming no provider has no operation to run —
 connectivity answers for selected occurrences — so the engine projects the
 derived plan directly and reports no activity, which is the only case where a
 connect answer skips the coordinator. Anything that fails renders one
-catalogued diagnostic and no rows at all. The engine still performs no frontend
-VM setup: it neither loads a `.env` nor starts an optional provider
-application, because it cannot prove it owns the VM it was called in, so a
-connect against a stopped optional application reports
-`active_preflight/provider_application_unavailable` rather than starting one.
+catalogued diagnostic and no rows at all. Before active connect work, the
+frontend runtime runs its environment-setup callback only when inert
+preparation proves that a selected LLM installation uses an environment
+credential. The Mix frontend may therefore load `.env`; the standalone
+frontend has no environment-setup callback. The runtime's provider-application
+mode then controls optional applications: `:command_vm` starts a selected
+application inside the marked provider session, while `:host_owned` requires
+the application to be running already.
 Successful `models` is terminal as well. It loads one bounded host document,
 constructs its inert installation catalog, and projects
 `PtcRunner.Kernel.InstallationCatalog.public_installations/1` in alias order. It

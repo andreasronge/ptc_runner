@@ -10,6 +10,7 @@ defmodule PtcRunner.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       aliases: aliases(),
+      releases: releases(),
       usage_rules: usage_rules(),
       name: "PtcRunner",
       description: "BEAM-native sandbox and minimal Kernel for bounded PTC-Lisp workflows.",
@@ -141,17 +142,23 @@ defmodule PtcRunner.MixProject do
     end
   end
 
-  # Local development exercises the companion from this checkout. Published
-  # package metadata instead carries the compatible optional Hex requirement,
-  # so HTTP-only consumers are not forced to install native support.
+  # Development, tests, and a release built from this checkout exercise the
+  # companion beside it. Ordinary production tasks retain package metadata's
+  # compatible optional Hex requirement, so HTTP-only consumers are not forced
+  # to install native support and `mix hex.build` never sees a path dependency.
   defp launcher_dep do
     launcher_path = Path.expand("ptc_runner_launcher", __DIR__)
 
-    if Mix.env() in [:dev, :test] and File.dir?(launcher_path) do
+    if local_launcher_checkout?(launcher_path) do
       {:ptc_runner_launcher, "~> 0.1.0", path: "ptc_runner_launcher", optional: true}
     else
       {:ptc_runner_launcher, "~> 0.1.0", optional: true}
     end
+  end
+
+  defp local_launcher_checkout?(launcher_path) do
+    File.dir?(launcher_path) and
+      (Mix.env() in [:dev, :test] or Enum.any?(System.argv(), &(&1 == "release")))
   end
 
   defp aliases do
@@ -169,7 +176,8 @@ defmodule PtcRunner.MixProject do
         "test --warnings-as-errors",
         "cmd --cd ptc_viewer mix test --color",
         "cmd --cd ptc_runner_launcher mix precommit",
-        "cmd bash scripts/verify_core_package.sh"
+        "cmd bash scripts/verify_core_package.sh",
+        "cmd bash scripts/verify_standalone_release.sh"
       ],
       # Slower checks kept out of the per-commit loop; run before pushing.
       # PR CI runs these as individual steps. The upstream audit attests all
@@ -215,6 +223,16 @@ defmodule PtcRunner.MixProject do
       regen: [
         "ptc.gen_semantic_revision",
         "cmd git add priv/semantic_build_projection.json"
+      ]
+    ]
+  end
+
+  defp releases do
+    [
+      ptc_runner: [
+        include_erts: true,
+        applications: [req_llm: :load],
+        overlays: ["rel/overlays"]
       ]
     ]
   end
@@ -374,7 +392,7 @@ defmodule PtcRunner.MixProject do
   defp package do
     [
       files:
-        ~w(lib docs examples/kernel-tutorial examples/kernel-inspection-lab .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
+        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",

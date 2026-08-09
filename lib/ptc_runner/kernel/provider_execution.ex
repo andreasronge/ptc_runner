@@ -332,7 +332,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
-  # Standalone V1 disables OAuth execution: `mix ptc.run --authorize-mcp NAME` is
+  # Standalone V1 disables OAuth execution: `mix ptc run --authorize-mcp NAME` is
   # the only shipped path to a grant, so a selected OAuth occurrence nobody named
   # has no store to draw one from. It used to walk into acquisition against an
   # empty one and fail with whatever that path produced.

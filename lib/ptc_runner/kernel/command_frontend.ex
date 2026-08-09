@@ -1,0 +1,99 @@
+defmodule PtcRunner.Kernel.CommandFrontend do
+  @moduledoc false
+
+  alias PtcRunner.Kernel.CommandArguments
+  alias PtcRunner.Kernel.CommandEngine
+  alias PtcRunner.Kernel.CommandEntry
+  alias PtcRunner.Kernel.CommandEnvelope
+  alias PtcRunner.Kernel.CommandOutcome
+  alias PtcRunner.Kernel.CommandPresentation
+  alias PtcRunner.Kernel.CommandRenderer
+  alias PtcRunner.Kernel.CommandRuntime
+
+  @type bootstrap ::
+          (CommandArguments.t() ->
+             {:ok, CommandRuntime.t()} | {:error, :command_bootstrap_failed})
+
+  @spec execute([binary()], :standalone | :mix, bootstrap()) :: CommandPresentation.t()
+  def execute(argv, frontend, bootstrap)
+      when is_list(argv) and frontend in [:standalone, :mix] and is_function(bootstrap, 1) do
+    case CommandEntry.open(argv, frontend) do
+      {:error, %CommandEntry{} = entry} ->
+        present_entry(entry, bootstrap)
+
+      {:ok, %CommandEntry{} = entry} ->
+        present_entry(entry, bootstrap)
+    end
+  end
+
+  @doc false
+  @spec present_entry(CommandEntry.t(), bootstrap()) :: CommandPresentation.t()
+  def present_entry(%CommandEntry{rejection: %{} = _rejection} = entry, _bootstrap) do
+    {:error, outcome} = CommandEngine.entry_failure(entry)
+    present(entry, outcome)
+  end
+
+  def present_entry(%CommandEntry{arguments: %{command: :repl}} = entry, _bootstrap) do
+    {:error, outcome} = CommandEngine.dispatch_entry(entry, CommandRuntime.standalone())
+    present(entry, outcome)
+  end
+
+  def present_entry(%CommandEntry{} = entry, bootstrap) when is_function(bootstrap, 1) do
+    outcome = execute_entry(entry, bootstrap)
+    present(entry, outcome)
+  end
+
+  defp execute_entry(%CommandEntry{arguments: %{command: command}} = entry, _bootstrap)
+       when command in [:help, :version] do
+    {_status, outcome} = CommandEngine.dispatch_entry(entry, CommandRuntime.standalone())
+    outcome
+  end
+
+  defp execute_entry(%CommandEntry{} = entry, bootstrap) do
+    case bootstrap.(entry.arguments) do
+      {:ok, %CommandRuntime{} = runtime} ->
+        {_status, outcome} = CommandEngine.dispatch_entry(entry, runtime)
+        outcome
+
+      _failure ->
+        {:error, outcome} = CommandEngine.startup_failure(entry)
+        outcome
+    end
+  rescue
+    _exception ->
+      {:error, outcome} = CommandEngine.startup_failure(entry)
+      outcome
+  catch
+    _kind, _reason ->
+      {:error, outcome} = CommandEngine.startup_failure(entry)
+      outcome
+  end
+
+  defp present(%CommandEntry{envelope_path: path} = entry, %CommandOutcome{} = outcome)
+       when is_binary(path) do
+    case CommandEnvelope.publish(outcome, path) do
+      :ok ->
+        presentation(outcome, path, "", "", outcome.exit_status)
+
+      {:error, :envelope_publication_failed} ->
+        presentation(outcome, nil, "", CommandRenderer.envelope_failure(entry.run_ref), 74)
+    end
+  end
+
+  defp present(%CommandEntry{} = entry, %CommandOutcome{} = outcome) do
+    case CommandRenderer.render(outcome, entry.rejection) do
+      {:stdout, bytes} -> presentation(outcome, nil, bytes, "", outcome.exit_status)
+      {:stderr, bytes} -> presentation(outcome, nil, "", bytes, outcome.exit_status)
+    end
+  end
+
+  defp presentation(outcome, envelope_path, stdout, stderr, exit_status) do
+    %CommandPresentation{
+      stdout: stdout,
+      stderr: stderr,
+      exit_status: exit_status,
+      outcome: outcome,
+      envelope_path: envelope_path
+    }
+  end
+end

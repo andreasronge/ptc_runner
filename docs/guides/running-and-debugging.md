@@ -1,53 +1,60 @@
 # Running and debugging
 
-The Kernel line currently runs from a repository checkout through Mix. The
-planned standalone macOS command and Docker image will delegate to the same
-manifest, execution, result, and trace paths.
+The Kernel command surface runs through `mix ptc` in a source checkout and
+through the runtime-included `ptc_runner` release's `bin/ptc` entrypoint. Both
+frontends use the same parser, preparation, execution, result, trace, and
+rendering paths.
 
 ## Commands
 
-The shared command engine also implements `ptc init DIRECTORY`. In a source
-checkout it is available through `CommandEngine.dispatch/1`; it creates the
-exact two-file scaffold documented in [Getting started](getting-started.md#create-a-minimal-application).
+| Command | Purpose |
+| --- | --- |
+| `mix ptc help [COMMAND]` | Show root or per-command help generated from the accepted declarations |
+| `mix ptc --version` | Show the packaged command version |
+| `mix ptc init DIRECTORY` | Atomically publish the validated two-file application scaffold |
+| `mix ptc validate MANIFEST` | Validate and compile a manifest without running its workflow |
+| `mix ptc run MANIFEST` | Run the manifest's qualified entry and render its public result |
+| `mix ptc run MANIFEST --host-config HOST.json` | Install the provider aliases a provider-bearing manifest selects |
+| `mix ptc run MANIFEST --input INPUT.json` | Run with a confined alternate input object |
+| `mix ptc run MANIFEST --output VALUE.json` | Write only the validated result value |
+| `mix ptc run MANIFEST --trace-dir DIR` | Persist bounded canonical events under the command run reference |
+| `mix ptc run MANIFEST --inspect RUN.inspection.jsonl` | Also write the owner-only private artifact |
+| `mix ptc run MANIFEST --envelope ENVELOPE.json` | Atomically publish the machine-readable V1 command envelope |
+| `mix ptc run MANIFEST --component-override-descriptor D.json` | Compile one selected component from verified replacement source |
+| `mix ptc doctor [MANIFEST]` | Inspect application and provider readiness without running the workflow |
+| `mix ptc doctor MANIFEST --host-config HOST.json --connect` | Perform active provider connectivity checks |
+| `mix ptc models --host-config HOST.json` | List the host document's installed model aliases |
+| `mix ptc.materialize MANIFEST --component ID --out DIR --source S.clj` | Publish model-authored source as a gated candidate component |
+| `mix ptc repl` | Start the direct transactional PTC-Lisp REPL |
+| `mix ptc repl -e EXPR -l SETUP.clj` | Run repeatable expressions with optional setup |
+| `mix ptc repl --manifest MANIFEST [--host-config HOST.json]` | Reuse a manifest's workflow bundle and one provider session |
+| `mix ptc repl --profile PROFILE --resource NAME=DIR` | Query an immutable trace or inspection capture |
+| `mix ptc.viewer --trace-dir DIR` | Browse canonical JSONL traces locally |
+
+`mix ptc init DIRECTORY` creates the exact two-file scaffold documented in
+[Getting started](getting-started.md#create-a-minimal-application).
 Initialization validates the scaffold before filesystem access and publishes
 the completed directory atomically without replacing an existing directory or
 symlink.
 
-| Command | Purpose |
-| --- | --- |
-| `mix ptc.run MANIFEST` | Run the manifest's qualified entry and print the closed V1 envelope |
-| `mix ptc.run MANIFEST --host-config HOST.json` | Install the provider aliases a provider-bearing manifest selects |
-| `mix ptc.run MANIFEST --input INPUT.json` | Run with a confined alternate input object |
-| `mix ptc.run MANIFEST --output VALUE.json` | Write only the validated result value |
-| `mix ptc.run MANIFEST --trace-dir DIR` | Persist bounded canonical events under the command run reference |
-| `mix ptc.run MANIFEST --inspect RUN.inspection.jsonl` | Also write the owner-only private artifact |
-| `mix ptc.run MANIFEST --component-override-descriptor D.json` | Compile one selected component from verified replacement source |
-| `mix ptc.materialize MANIFEST --component ID --out DIR --source S.clj` | Publish model-authored source as a gated candidate component |
-| `mix ptc.repl` | Start the direct transactional PTC-Lisp REPL |
-| `mix ptc.repl -e EXPR -l SETUP.clj` | Run repeatable expressions with optional setup |
-| `mix ptc.repl --manifest MANIFEST [--host-config HOST.json]` | Reuse a manifest's workflow bundle and one provider session |
-| `mix ptc.repl --profile PROFILE --resource NAME=DIR` | Query an immutable trace or inspection capture |
-| `mix ptc.viewer --trace-dir DIR` | Browse canonical JSONL traces locally |
-
-The option tables in this guide are the current reference. `mix help ptc.run`
-describes the task rather than enumerating its switches; enumerated per-command
-help is release work.
+Run `mix ptc help COMMAND` or `bin/ptc help COMMAND` for help generated from the
+same per-command declarations the strict parser accepts.
 
 A provider-bearing manifest requires `--host-config`. Use the standalone
 `ptc doctor MANIFEST --host-config HOST.json --connect` operation when active
 provider connectivity must be checked without running the workflow.
 
 A fresh Mix invocation safely configures and starts a selected optional
-provider application only after provider activity begins. A later `ptc.run`
+provider application only after provider activity begins. A later `ptc run`
 invocation in the same VM reuses an already-running application as host-owned,
 so task chaining and `iex -S mix` do not require restarting the VM.
 
 ## Run a manifest
 
 ```console
-mix ptc.run ptc.json
-mix ptc.run ptc.json --trace-dir traces
-mix ptc.run ptc.json \
+mix ptc run ptc.json
+mix ptc run ptc.json --trace-dir traces
+mix ptc run ptc.json \
   --trace-dir traces \
   --inspect traces/run.inspection.jsonl
 ```
@@ -56,7 +63,7 @@ The command creates `<run_ref>.jsonl` for a normal run and the reserved
 `<run_ref>.private.jsonl` form for a private run:
 
 ```console
-mix ptc.run private-ptc.json \
+mix ptc run private-ptc.json \
   --trace-dir traces \
   --private-output results/run.private.json
 ```
@@ -200,7 +207,7 @@ mix ptc.materialize ptc.json --component my.helper --out private/candidate \
 ```
 
 Source comes from `--source` (raw bytes) or from `--from-result PATH
---result-pointer /json/pointer`, because `mix ptc.run --output` writes a JSON
+--result-pointer /json/pointer`, because `mix ptc run --output` writes a JSON
 result artifact rather than raw Lisp. The pointer must resolve to one string;
 anything else is refused rather than coerced.
 
@@ -251,7 +258,8 @@ produces evidence and refuses unfit candidates; it never installs one.
 
 ## Understand results and errors
 
-A successful command prints a JSON projection containing:
+A successful normal `run` prints the compact JSON result value. Its command
+envelope additionally contains:
 
 - `value` — the public workflow result;
 - `usage` — remaining time, capability calls, evaluations, protocol errors,
@@ -263,15 +271,14 @@ workflow decides whether to retry, correct, degrade, or fail. Parser, compiler,
 timeout, heap, source, result, quota, provider, and event failures retain
 bounded classifications at the Kernel boundary.
 
-Current Mix failures are intended for people working from the repository.
-Failures returned by the shared preparation and runtime path render only the
-closed diagnostic catalog or a bounded sequence of code atoms; they never
-inspect a rejected runtime term. Stable JSON command errors and exit codes are
-release work for the shared standalone `ptc` frontend.
+Mix and release failures use the same bounded human renderer. Failures returned
+by the shared preparation and runtime path render only the closed diagnostic
+catalog or fixed argument guidance; they never inspect a rejected runtime term.
+Name `--envelope` when a caller needs the stable JSON result and exit status.
 
 ### Stable standalone process contract
 
-The planned standalone `ptc` command reports through one V1 JSON command
+The standalone `ptc` command reports through one V1 JSON command
 envelope written to a caller-named destination. When a destination is named and
 the arguments parse, every ordinary or caught path produces exactly one
 envelope — except a failure to publish the envelope itself, which exits `74`
@@ -286,34 +293,44 @@ with no envelope, described below:
   envelope and exits `70`.
 
 The envelope schema is `priv/schemas/ptc-command-envelope-v1.schema.json`.
-The command never renders an inspected exception, arbitrary callback result,
-credential, private value, provider response, selector, or filesystem path into
-either public stream.
+One-shot command presentation never renders an inspected exception, arbitrary
+callback result, credential, private value, provider response, selector, or
+filesystem path into either public stream. The long-lived REPL has its own
+documented projections; notably, a profile session reports the path of its
+successfully published analysis trace.
 
-The shared command core already implements `ptc run` and
-`ptc models --host-config HOST.json` through
-`PtcRunner.Kernel.CommandEngine`. Shared run dispatch authorizes destinations,
+The shared command core implements every one-shot command through
+`PtcRunner.Kernel.CommandEngine`, while `ptc repl` shares the same parser and
+then opens its long-lived session frontend. Shared run dispatch authorizes destinations,
 executes provider-free and provider-backed work through one execution owner,
 publishes immutable execution evidence, and returns a schema-valid normal or
 private envelope; a private envelope never contains the result value. The Mix
 task is a thin renderer over this boundary. Its adapter owns Mix application
 bootstrap and adds only interactive `--authorize-mcp NAME` for the immediately
-following run. Bootstrap failures use the same closed private-safe run envelope
-as other internal failures; raw startup reasons and argv paths are not rendered.
+following run. A nonzero presentation raises a rescuable `Mix.Error` carrying
+the diagnostic status; in its normal mode, the outer `mix` executable maps that
+status to its process exit, while the task and shared adapter never exit or halt
+their caller. `MIX_DEBUG=1` deliberately reraises Mix exceptions for debugging,
+so the outer VM uses its generic exception status `1`; the exception still
+carries the diagnostic status. Bootstrap failures use the same closed
+private-safe run envelope as other internal failures; raw startup reasons and
+argv paths are not rendered.
 
 `models` reads one bounded host document and
 returns the installed aliases in lexical order with only their public source,
 revision, data-class, accepted-class, and destination declarations. Listing
 models invokes no provider callback, credential or OAuth service, optional
-application, process, port, or network operation. The release that exposes this
-core as an executable remains packaging work.
+application, process, port, or network operation.
 
 With `--trace-dir DIR`, the command-generated `run_ref` is also the complete
 trace stem. A normal trace is exactly `<run_ref>.jsonl`; a private trace is
 exactly `<run_ref>.private.jsonl`. The envelope's `artifact_class` selects which
 suffix callers use, so they can locate the file without a published path.
 Normal discovery excludes the private suffix; private-aware discovery accepts
-and classifies it explicitly.
+and classifies it explicitly. If entropy is unavailable, the command preserves
+availability with the fixed fallback reference
+`cmd-00000000000000000000000000`; on that exceptional path the reference still
+names the command's artifacts but cannot distinguish concurrent commands.
 
 The envelope destination is named by the caller and is separate from `--output`
 and `--private-output`, which name the run's result artifact. The command opens
@@ -384,17 +401,25 @@ that path.
 
 `SIGINT`, `SIGTERM`, VM abort, OOM, and failure before the command boundary are
 outside the V1 envelope contract. They may produce no envelope or VM/OS
-emergency output, and the OS or shell determines their status. Packaged tests
-characterize termination and child behavior but do not promote one observed
+emergency output, and the OS or shell determines their status. Distribution
+tests characterize termination and child behavior but do not promote one observed
 signal status to a portable guarantee. A deployment that requires a bounded
 signal response, application bootstrap, or child-tree cleanup must use the
 separately triggered outer supervisor design.
 
-The supported distribution targets are a locally built macOS command and a
-glibc container image. The macOS command is unsigned: a copy that acquires the
-quarantine attribute is refused by the operating system, so build it locally
-rather than expecting a downloadable command. Signed downloads, notarization,
-package-manager formulas, and single-file packaging are out of scope.
+Build the runtime-included command from a source checkout with:
+
+```console
+mix deps.get
+MIX_ENV=prod mix release ptc_runner
+_build/prod/rel/ptc_runner/bin/ptc --version
+```
+
+The release includes ERTS, so the target machine does not need Erlang or
+Elixir. The standalone runtime deliberately does not load `.env`; credentials
+come only from bindings declared by the trusted host document. Signed downloads,
+notarization, package-manager formulas, container images, and single-file
+packaging remain separate distribution work.
 
 ### Diagnose a failed run
 
@@ -428,7 +453,7 @@ knowing only that something did.
 inspection artifact, not the trace. Rerun with `--inspect`:
 
 ```console
-mix ptc.run ptc.json --trace-dir traces --inspect traces/run.inspection.jsonl
+mix ptc run ptc.json --trace-dir traces --inspect traces/run.inspection.jsonl
 ```
 
 That artifact holds prompts, model responses, generated source, and capability
@@ -441,7 +466,7 @@ REPL reports the diagnostic directly rather than through the closed catalog,
 which is usually faster than inspecting a failed run:
 
 ```console
-mix ptc.repl -l path/to/component.clj
+mix ptc repl -l path/to/component.clj
 ```
 
 **To find the artifacts**, use the run reference. It appears in the command
@@ -453,11 +478,11 @@ trace and `<run_ref>.private.jsonl` for a private one.
 Start a direct session or reuse a manifest's frozen workflow environment:
 
 ```console
-mix ptc.repl
-mix ptc.repl -e '(def x 40)' -e '(+ x 2)' -e '(+ *1 1)'
-mix ptc.repl --manifest ptc.json
-mix ptc.repl --manifest ptc.json --host-config ptc-host.json
-mix ptc.repl --manifest ptc.json --trace traces/repl.jsonl
+mix ptc repl
+mix ptc repl -e '(def x 40)' -e '(+ x 2)' -e '(+ *1 1)'
+mix ptc repl --manifest ptc.json
+mix ptc repl --manifest ptc.json --host-config ptc-host.json
+mix ptc repl --manifest ptc.json --trace traces/repl.jsonl
 ```
 
 Definitions and the three most recent ordinary successful values persist for
@@ -477,7 +502,7 @@ responses, capability arguments/results, and generated source. Query an
 immutable directory capture through the fixed log-analysis profile:
 
 ```console
-mix ptc.repl \
+mix ptc repl \
   --profile log-analysis-v2 \
   --resource traces=traces \
   -e '(log/runs {})' \
@@ -510,7 +535,7 @@ Pass both output paths when exact development diagnostics are required:
 
 ```console
 mkdir -p tmp/inspection
-mix ptc.run examples/kernel-tutorial/03-file-agent/ptc.json \
+mix ptc run examples/kernel-tutorial/03-file-agent/ptc.json \
   --host-config examples/kernel-tutorial/ptc-host.json \
   --trace-dir tmp/inspection \
   --inspect tmp/inspection/run.inspection.jsonl
@@ -594,15 +619,19 @@ IDs, or remaining milliseconds.
 
 Build the checks in three layers:
 
-1. Exercise pure transformations in `mix ptc.repl`.
-2. Run fixed manifest inputs with `mix ptc.run` and assert `.value` with `jq`.
+1. Exercise pure transformations in `mix ptc repl`.
+2. Run fixed manifest inputs with `mix ptc run --envelope` and assert
+   `.result.value` with `jq`.
 3. Put live-provider checks behind an explicit flag and assert a narrow
    contract, not prose wording.
 
 Layer 2 needs no test framework:
 
 ```console
-actual="$(mix ptc.run examples/kernel-tutorial/01-orders/ptc.json | jq -c '.result.value')"
+envelope_dir="$(mktemp -d)"
+envelope="$envelope_dir/command-envelope.json"
+mix ptc run examples/kernel-tutorial/01-orders/ptc.json --envelope "$envelope"
+actual="$(jq -c '.result.value' "$envelope")"
 test "$actual" = \
   '{"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}'
 ```

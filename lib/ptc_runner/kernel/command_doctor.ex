@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandOutcome
+  alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.DoctorEnvironment
   alias PtcRunner.Kernel.DoctorPlan
   alias PtcRunner.Kernel.HostInstallation
@@ -14,11 +15,15 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunCoordinator
 
-  @spec dispatch(CommandArguments.t(), binary()) ::
+  @spec dispatch(CommandArguments.t(), binary(), CommandRuntime.t()) ::
           {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
-  def dispatch(%CommandArguments{options: options} = arguments, run_ref) do
+  def dispatch(
+        %CommandArguments{options: options} = arguments,
+        run_ref,
+        %CommandRuntime{} = runtime
+      ) do
     case CommandAcquisition.with_catalog(Map.get(options, :host_config), fn host, catalog ->
-           mode_outcome(arguments, run_ref, host, catalog)
+           mode_outcome(arguments, run_ref, host, catalog, runtime)
          end) do
       {:error, %CommandDiagnostic{} = diagnostic} ->
         {:error, arguments_outcome(arguments, run_ref, diagnostic)}
@@ -32,17 +37,18 @@ defmodule PtcRunner.Kernel.CommandDoctor do
          %CommandArguments{options: %{connect: true}} = arguments,
          run_ref,
          host,
-         catalog
+         catalog,
+         runtime
        ),
-       do: connect_outcome(arguments, run_ref, host, catalog)
+       do: connect_outcome(arguments, run_ref, host, catalog, runtime)
 
-  defp mode_outcome(arguments, run_ref, host, catalog),
-    do: local_outcome(arguments, run_ref, host, catalog)
+  defp mode_outcome(arguments, run_ref, host, catalog, runtime),
+    do: local_outcome(arguments, run_ref, host, catalog, runtime)
 
-  defp local_outcome(arguments, run_ref, host, catalog) do
+  defp local_outcome(arguments, run_ref, host, catalog, runtime) do
     case preparation(arguments, catalog, run_ref) do
       {:ok, prepared} ->
-        result = local_checks(host, catalog, prepared)
+        result = local_checks(host, catalog, prepared, runtime)
         if prepared, do: PreparedRun.close(prepared)
 
         case result do
@@ -67,9 +73,9 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   defp preparation(arguments, catalog, run_ref),
     do: CommandAcquisition.prepare_request(arguments, catalog, run_ref)
 
-  defp local_checks(host, catalog, prepared) do
+  defp local_checks(host, catalog, prepared, runtime) do
     with {:ok, rows} <- DoctorPlan.new(catalog, prepared, DoctorEnvironment.facts(), :default),
-         {:ok, services} <- runtime_services(host),
+         {:ok, services} <- runtime_services(host, runtime),
          :ok <- RunCoordinator.local_checks(prepared, catalog, services),
          {:ok, settled} <- DoctorPlan.settle_pending(rows),
          {:ok, checks} <- DoctorPlan.checks(settled) do
@@ -80,14 +86,20 @@ defmodule PtcRunner.Kernel.CommandDoctor do
     end
   end
 
-  defp runtime_services(nil), do: ProviderRuntimeServices.new([])
-  defp runtime_services(host), do: HostInstallation.runtime_services(host)
+  defp runtime_services(nil, runtime),
+    do: ProviderRuntimeServices.new(provider_application_mode: runtime.provider_application_mode)
 
-  defp connect_outcome(arguments, run_ref, host, catalog) do
+  defp runtime_services(host, runtime),
+    do:
+      HostInstallation.runtime_services(host,
+        provider_application_mode: runtime.provider_application_mode
+      )
+
+  defp connect_outcome(arguments, run_ref, host, catalog, runtime) do
     case preparation(arguments, catalog, run_ref) do
       {:ok, prepared} ->
         try do
-          connect_prepared(arguments, run_ref, host, catalog, prepared)
+          connect_prepared(arguments, run_ref, host, catalog, prepared, runtime)
         after
           PreparedRun.close(prepared)
         end
@@ -97,14 +109,24 @@ defmodule PtcRunner.Kernel.CommandDoctor do
     end
   end
 
-  defp connect_prepared(arguments, run_ref, host, catalog, prepared) do
-    case connect_checks(host, catalog, prepared, run_ref) do
-      {:ok, checks, provider_activity} ->
-        connect_success(arguments, run_ref, checks, provider_activity)
-
-      {:error, diagnostic} ->
+  defp connect_prepared(arguments, run_ref, host, catalog, prepared, runtime) do
+    with :ok <- maybe_setup_environment(host, prepared, runtime),
+         {:ok, checks, provider_activity} <-
+           connect_checks(host, catalog, prepared, run_ref, runtime) do
+      connect_success(arguments, run_ref, checks, provider_activity)
+    else
+      {:error, %CommandDiagnostic{} = diagnostic} ->
         {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+
+      {:error, _reason} ->
+        {:error, arguments_outcome(arguments, run_ref, diagnostic(:internal, :internal_error))}
     end
+  end
+
+  defp maybe_setup_environment(host, prepared, runtime) do
+    if CommandAcquisition.environment_setup_required?(host, prepared),
+      do: CommandRuntime.setup_environment(runtime),
+      else: :ok
   end
 
   defp connect_success(arguments, run_ref, checks, provider_activity) do
@@ -122,9 +144,9 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   defp connect_interrupted(arguments, run_ref, provider_activity),
     do: {:error, arguments_outcome(arguments, run_ref, projection_diagnostic(provider_activity))}
 
-  defp connect_checks(host, catalog, prepared, run_ref) do
+  defp connect_checks(host, catalog, prepared, run_ref, runtime) do
     case DoctorPlan.new(catalog, prepared, DoctorEnvironment.facts(), :connect) do
-      {:ok, rows} -> connect_operation(host, catalog, prepared, rows, run_ref)
+      {:ok, rows} -> connect_operation(host, catalog, prepared, rows, run_ref, runtime)
       {:error, _reason} -> {:error, diagnostic(:internal, :internal_error)}
     end
   end
@@ -134,12 +156,13 @@ defmodule PtcRunner.Kernel.CommandDoctor do
          _catalog,
          %PreparedRun{provider_declarations: []},
          rows,
-         _run_ref
+         _run_ref,
+         _runtime
        ),
        do: connect_projection(rows, false)
 
-  defp connect_operation(host, catalog, prepared, rows, run_ref) do
-    with {:ok, services} <- runtime_services(host),
+  defp connect_operation(host, catalog, prepared, rows, run_ref, runtime) do
+    with {:ok, services} <- runtime_services(host, runtime),
          {:ok, execution} <- ProviderExecution.new(catalog, services, []),
          {:ok, authority} <-
            PublicationAuthority.authorize(

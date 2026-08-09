@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   """
 
   alias PtcRunner.Kernel.ApplicationSource
+  alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.JSONValue
@@ -66,22 +67,6 @@ defmodule PtcRunner.Kernel.CommandContract do
                             [:result_invalid, :result_contract_failed, :result_limit_exceeded]
   @version Mix.Project.config() |> Keyword.fetch!(:version)
   @doctor_notice "doctor --connect may perform one or more real provider requests and may incur provider cost"
-  @help_usage %{
-    root: [
-      "ptc validate ptc.json [--host-config HOST.json]",
-      "ptc run ptc.json [OPTIONS]",
-      "ptc doctor [ptc.json] [--host-config HOST.json] [--connect]",
-      "ptc models --host-config HOST.json",
-      "ptc init DIRECTORY",
-      "ptc --version"
-    ],
-    init: ["ptc init DIRECTORY"],
-    validate: ["ptc validate ptc.json [--host-config HOST.json]"],
-    run: ["ptc run ptc.json [OPTIONS]"],
-    doctor: ["ptc doctor [ptc.json] [--host-config HOST.json] [--connect]"],
-    models: ["ptc models --host-config HOST.json"]
-  }
-
   @spec schema() :: map()
   def schema do
     %{
@@ -460,12 +445,17 @@ defmodule PtcRunner.Kernel.CommandContract do
   end
 
   @spec help_result(atom()) :: map()
-  def help_result(topic) when is_map_key(@help_usage, topic) do
-    %{
-      "topic" => Atom.to_string(topic),
-      "usage" => Map.fetch!(@help_usage, topic),
-      "notices" => if(topic == :doctor, do: [@doctor_notice], else: [])
-    }
+  def help_result(topic, frontend \\ :standalone) do
+    if topic in CommandDeclaration.topics() and frontend in [:standalone, :mix] do
+      %{
+        "topic" => Atom.to_string(topic),
+        "usage" => CommandDeclaration.usage(topic),
+        "options" => CommandDeclaration.help_options(topic, frontend),
+        "notices" => if(topic == :doctor, do: [@doctor_notice], else: [])
+      }
+    else
+      raise ArgumentError, "invalid help topic"
+    end
   end
 
   @spec version_result() :: map()
@@ -942,13 +932,13 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp help_result_schema do
     %{
       "oneOf" =>
-        @help_usage
-        |> Enum.sort_by(fn {topic, _usage} -> Atom.to_string(topic) end)
-        |> Enum.map(fn {topic, _usage} ->
+        for topic <- Enum.sort_by(CommandDeclaration.topics(), &Atom.to_string/1),
+            frontend <- [:standalone, :mix],
+            uniq: true do
           topic
-          |> help_result()
+          |> help_result(frontend)
           |> const_object()
-        end)
+        end
     }
   end
 

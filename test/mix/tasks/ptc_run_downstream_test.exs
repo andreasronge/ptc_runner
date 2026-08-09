@@ -11,7 +11,7 @@ defmodule Mix.Tasks.Ptc.RunDownstreamTest do
   # recompile it whenever the library sources change.
   @build_path Path.join(@root, "_build/downstream_consumer")
 
-  # `:slow` because the assertion is only observable through a real `mix ptc.run`
+  # `:slow` because the assertion is only observable through a real `mix ptc run`
   # in a separate OS process against a real prod build. The cached build above
   # holds a warm run to ~5.5 s, but the cache is per-worktree and PtcRunner is a
   # path dependency, so a fresh clone or any library change pays the full
@@ -46,7 +46,7 @@ defmodule Mix.Tasks.Ptc.RunDownstreamTest do
     {output, status} =
       System.cmd(
         System.find_executable("mix"),
-        ["ptc.run", manifest_path, "--host-config", host_path],
+        ["ptc", "run", manifest_path, "--host-config", host_path],
         cd: dir,
         env: env,
         stderr_to_stdout: true
@@ -54,11 +54,7 @@ defmodule Mix.Tasks.Ptc.RunDownstreamTest do
 
     assert status == 0, output
 
-    assert %{"status" => "ok", "command" => "run"} =
-             output
-             |> String.split("\n", trim: true)
-             |> List.last()
-             |> Jason.decode!()
+    assert Jason.decode!(output) == %{}
   end
 
   defp write_consumer_project(dir) do

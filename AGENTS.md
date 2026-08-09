@@ -13,7 +13,7 @@ reference in `docs/ptc-lisp-specification.md`, and built-ins in
 
 To debug the runtime itself (not a manifest under it) — query canonical
 traces or private inspection records (model exchanges, generated source,
-capability payloads) non-interactively — use `mix ptc.repl --profile
+capability payloads) non-interactively — use `mix ptc repl --profile
 inspection-analysis-v2 --private-unattended`. See ["Private analysis without a
 terminal"](docs/guides/kernel-repl.md#private-analysis-without-a-terminal).
 
@@ -49,7 +49,8 @@ how it was verified.
 ## Commands
 
 - `mix precommit` — comprehensive local quality gate (format, compile, credo, schema, spec,
-  root/Viewer tests, and launcher package/conformance/archive verification);
+  root/Viewer tests, assembled standalone release verification, and launcher
+  package/conformance/archive verification);
   run before every commit. This is intentionally much broader than the fast,
   staged-file Git pre-commit hook and can take a few minutes in a fresh worktree.
 - `MIX_ENV=dev mix docs --warnings-as-errors` — ExDoc reference and rendering

@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
   """
 
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.DestinationIdentity
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.PublicationClaimOwner
@@ -250,7 +251,7 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
       |> Keyword.take(@destination_keys)
       |> Enum.map(fn {_key, path} -> path end)
       |> Enum.reject(&is_nil/1)
-      |> Enum.map(&destination_identity/1)
+      |> Enum.map(&DestinationIdentity.key/1)
 
     if length(identities) == MapSet.size(MapSet.new(identities)),
       do: :ok,
@@ -576,26 +577,6 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
 
   defp validate_inspection_path(nil), do: :ok
   defp validate_inspection_path(path), do: InspectionArtifact.validate_destination_path(path)
-
-  defp destination_identity(path) do
-    parent = Path.dirname(path)
-    basename = path |> Path.basename() |> PrivateDirectory.casefold_name()
-
-    case File.stat(parent, time: :posix) do
-      {:ok,
-       %File.Stat{
-         type: :directory,
-         major_device: major,
-         minor_device: minor,
-         inode: inode
-       }}
-      when is_integer(major) and is_integer(minor) and is_integer(inode) ->
-        {:filesystem, major, minor, inode, basename}
-
-      _unavailable_or_unsupported ->
-        {:lexical, PrivateDirectory.casefold_name(path)}
-    end
-  end
 
   defp validate_result_class(true, %{output: output}) when not is_nil(output),
     do: {:error, :private_destination_required}
