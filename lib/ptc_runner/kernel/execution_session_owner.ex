@@ -108,7 +108,9 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   # Connectivity never notifies or opens an interaction, so it carries no
   # authorization notifier at all.
   defp notifier_matches_operation?(notifier, :connect), do: is_nil(notifier)
-  defp notifier_matches_operation?(notifier, _operation), do: is_function(notifier, 1)
+
+  defp notifier_matches_operation?(notifier, _operation),
+    do: is_nil(notifier) or is_function(notifier, 1)
 
   # Connectivity answers for selected occurrences, so it has nothing to do
   # without any. Refusing keeps `:connect` off the provider-free completion,

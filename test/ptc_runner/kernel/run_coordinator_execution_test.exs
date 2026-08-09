@@ -58,6 +58,18 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     assert :ok = InstallationCatalog.close(catalog)
   end
 
+  test "noninteractive provider execution needs no authorization notifier" do
+    {prepared, catalog, services} = provider_prepared_run()
+    assert {:ok, execution} = ProviderExecution.new(catalog, services, [])
+    assert {:ok, authority} = PublicationAuthority.new([])
+
+    assert {:ok, outcome} = RunCoordinator.execute(prepared, authority, execution, nil)
+    assert ExecutionOutcome.valid?(outcome)
+
+    assert :ok = PreparedRun.close(prepared)
+    assert :ok = InstallationCatalog.close(catalog)
+  end
+
   test "a run crosses phase 7 before provider activity is marked" do
     # Doctor is not the only caller of the shared step. A run whose audited-local
     # check fails must report the local diagnostic with activity still false, and

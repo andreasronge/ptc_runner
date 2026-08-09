@@ -178,7 +178,9 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # unreachable for it by construction rather than by the branch happening not
   # to be taken.
   defp notifier_matches_operation?(notifier, :connect), do: is_nil(notifier)
-  defp notifier_matches_operation?(notifier, _operation), do: is_function(notifier, 1)
+
+  defp notifier_matches_operation?(notifier, _operation),
+    do: is_nil(notifier) or is_function(notifier, 1)
 
   defp execute_with_session(
          prepared,
@@ -1104,7 +1106,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
-  defp notify(notifier, url, deadline) do
+  defp notify(notifier, url, deadline) when is_function(notifier, 1) do
     case Deadline.remaining(deadline) do
       0 ->
         {:error, :authorization_timeout}
@@ -1121,6 +1123,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         end
     end
   end
+
+  defp notify(nil, _url, _deadline), do: {:error, :authorization_unavailable}
 
   defp authorization_targets_valid?(execution, prepared) do
     selected = MapSet.new(prepared.provider_declarations, & &1.name)

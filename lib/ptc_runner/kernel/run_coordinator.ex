@@ -170,7 +170,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
           PreparedRun.t(),
           PublicationAuthority.t(),
           ProviderExecution.t(),
-          (binary() -> term())
+          (binary() -> term()) | nil
         ) ::
           {:ok, ExecutionOutcome.t()}
           | {:error,
@@ -179,7 +179,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              | :invalid_provider_execution
              | term()}
   def execute(%PreparedRun{} = prepared, authority, provider_execution, notifier)
-      when is_function(notifier, 1),
+      when is_nil(notifier) or is_function(notifier, 1),
       do: open_active(prepared, authority, provider_execution, notifier, :run)
 
   def execute(_prepared, _authority, _provider_execution, _notifier),

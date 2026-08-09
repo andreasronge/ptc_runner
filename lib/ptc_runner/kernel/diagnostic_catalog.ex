@@ -246,6 +246,41 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     end
   end
 
+  @doc false
+  @spec compound_category(phase(), atom()) ::
+          :cleanup
+          | :internal
+          | :result_guard
+          | :event_sink
+          | :inspection_sink
+          | :kernel_or_session
+          | :publication
+          | nil
+  def compound_category(:result_cleanup, code)
+      when code in [:provider_cleanup_timeout, :provider_cleanup_failed],
+      do: :cleanup
+
+  def compound_category(:internal, _code), do: :internal
+
+  def compound_category(:result_cleanup, code)
+      when code in [:result_invalid, :result_contract_failed, :result_limit_exceeded],
+      do: :result_guard
+
+  def compound_category(:execution, code)
+      when code in [:event_capture_limit_exceeded, :event_sink_unavailable],
+      do: :event_sink
+
+  def compound_category(:execution, code)
+      when code in [:inspection_capture_limit_exceeded, :inspection_sink_unavailable],
+      do: :inspection_sink
+
+  def compound_category(phase, _code)
+      when phase in [:local_preflight, :active_preflight, :provider_acquisition, :execution],
+      do: :kernel_or_session
+
+  def compound_category(:publication, _code), do: :publication
+  def compound_category(_phase, _code), do: nil
+
   @spec subject_policy(phase(), atom()) :: :required | :optional | :forbidden
   def subject_policy(:host, :installation_revision_missing), do: :required
 

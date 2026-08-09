@@ -101,9 +101,12 @@ Embedding frontends execute a sealed request through
 `PtcRunner.Kernel.RunBuilder.build/3`. For a provider-free request they may
 instead call the path-free `PtcRunner.Kernel.RunCoordinator` and pass its
 sealed `PreparedRun` to `PtcRunner.Kernel.RunBuilder.build_prepared/3`.
-Provider-bearing command preparation is already sealed by `CommandEngine`, but
-its later active continuation is not implemented yet; callers must close that
-`CommandPreparation` rather than pass its embedded run to `build_prepared/3`.
+Provider-bearing command preparation and its later active continuation are
+sealed by `CommandEngine`. `CommandEngine.dispatch/1` completes phase-6
+authorization, the one execution-owner lifecycle, publication from immutable
+execution evidence, and closed run-outcome projection. Callers using the staged
+`prepare/1` boundary must still close an unused `CommandPreparation` rather than
+pass its embedded run to `build_prepared/3`.
 Frontends must not create another manifest parser, provider registry, event
 model, or evaluator; once integrated, command frontends must also share the
 engine's argv parser and diagnostic vocabulary.
@@ -429,7 +432,7 @@ execution that is not bound to its exact preparation before consuming that
 preparation, so a mismatched catalog or an authorization target the run never
 selected leaves the prepared run reusable.
 
-The staged `PtcRunner.Kernel.CommandEngine` core allocates a command reference
+The `PtcRunner.Kernel.CommandEngine` core allocates a command reference
 before strict argv parsing, consumes host/application paths through acquisition
 adapters, and projects failures into `PtcRunner.Kernel.CommandOutcome`. It is
 not yet the public Mix or standalone adapter. After frontend integration, only
@@ -455,19 +458,29 @@ constructs its inert installation catalog, and projects
 never invokes a local check, selection validator, builder, credential resolver,
 OAuth service, provider application, process, port, or network operation, and
 it closes the inert catalog before returning the sealed outcome.
-Successful `run` preparation returns a sealed
+Successful staged `run` preparation returns a sealed
 `PtcRunner.Kernel.CommandPreparation`, not a bare `PreparedRun`. That wrapper
-retains the original command reference, inert
-catalog, and only the artifact destinations needed by phase 6 alongside the
-separately sealed path-free prepared run. Host-backed catalogs retain only an
-opaque path-free per-alias implementation recipe in the wrapper; they retain
-neither a live owner nor runtime services, host paths, installation payloads,
-credential values, or a credential resolver.
-The active adapter supplies `ProviderRuntimeServices` when it opens the active
-session. Selected optional applications are admitted before it opens a runtime
-registry. That registry owns the resulting private authority, and callers that
-retain it must use `ProviderRegistry.close/1` when the execution scope ends;
-closing revokes retained builders and credential access.
+retains the original command reference, inert catalog, sealed path-free
+`ProviderRuntimeServices`, and only the artifact destinations needed by phase 6
+alongside the separately sealed path-free prepared run. A host document is
+encrypted into the runtime-services payload during acquisition and is not
+retained as plaintext or reopened by dispatch. `CommandRuntime` carries only
+frontend VM policy and callbacks. If inert preparation proves that a selected
+LLM installation uses an environment credential, dispatch invokes the sealed
+environment-setup callback before creating the execution owner or deadline.
+Selected optional applications are admitted inside the marked provider session
+before it opens a runtime registry. That registry owns the resulting private
+authority, and callers that retain it must use `ProviderRegistry.close/1` when
+the execution scope ends; closing revokes retained builders and credential
+access.
+
+`CommandEngine.dispatch/1` keeps `ExecutionSessionOwner` for provider-free
+runs, omitting only `ProviderExecution` and its provider session. A
+provider-backed run creates one `ProviderExecution`, opens at most one provider
+session, and uses the same owner and publication path. Phase-12 projection
+narrows the Kernel's richer internal usage snapshot to the closed envelope
+vocabulary, flattens capability counts by workflow/mission scope, preserves
+evaluation-memory evidence, and never includes a private result value.
 Construction
 validates the complete catalog, requires its installed limits to match the captured
 package, requires JSON result projection, binds inspection presence to the
@@ -549,7 +562,11 @@ diagnostics therefore cannot carry a path. Finished execution records have two
 disjoint schema branches: `ok` requires a null diagnostic and `error` requires
 a non-null closed diagnostic. Unclassified run failures admit only
 `execution.state: "not_started"`; successful run branches bind normal/private
-result projection to the same artifact class. Successful trace and inspection
+result projection to the same artifact class. Classified setup and audited-local
+failures also remain `not_started`. Once execution crosses into the owner,
+failures without sealed execution evidence are `incomplete` with unavailable
+usage and evaluation-memory fields; defensive publication and projection
+failures cannot claim that execution never began. Successful trace and inspection
 artifacts are only `not_requested` or `written`; a normal result has the same
 choice, while a private result must be `written`. Recovery-only publication
 states are confined to the result field of a failed envelope. The generated

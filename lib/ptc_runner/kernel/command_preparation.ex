@@ -4,8 +4,9 @@ defmodule PtcRunner.Kernel.CommandPreparation do
 
   The command engine consumes application, host, input, and override paths
   before constructing this value. It retains the generated command reference,
-  the inert installation catalog needed by later assembly, and only the artifact
-  destinations that phase 6 must preflight. If the invocation directory was
+  the inert installation catalog and sealed path-free runtime services needed
+  by later assembly, and only the artifact destinations that phase 6 must
+  preflight. If the invocation directory was
   unavailable, it retains the ordered destination keys that could not be
   anchored so phase 6 can apply its fixed trace/inspection/result precedence.
   The path-free `PreparedRun` remains separately sealed inside it.
@@ -15,6 +16,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderRuntimeServices
 
   @artifact_keys [:trace_dir, :inspect, :output, :private_output]
 
@@ -23,6 +25,8 @@ defmodule PtcRunner.Kernel.CommandPreparation do
     :run_ref,
     :prepared_run,
     :catalog,
+    :runtime_services,
+    :environment_setup_required,
     :artifact_destinations,
     :artifact_destination_failures
   ]
@@ -34,6 +38,8 @@ defmodule PtcRunner.Kernel.CommandPreparation do
           run_ref: binary(),
           prepared_run: PreparedRun.t(),
           catalog: InstallationCatalog.t(),
+          runtime_services: ProviderRuntimeServices.t(),
+          environment_setup_required: boolean(),
           artifact_destinations: %{optional(atom()) => binary()},
           artifact_destination_failures: [atom()],
           attestation: binary() | nil
@@ -45,6 +51,8 @@ defmodule PtcRunner.Kernel.CommandPreparation do
           binary(),
           PreparedRun.t(),
           InstallationCatalog.t(),
+          ProviderRuntimeServices.t(),
+          boolean(),
           map(),
           [atom()]
         ) :: {:ok, t()} | {:error, :invalid_command_preparation}
@@ -53,16 +61,21 @@ defmodule PtcRunner.Kernel.CommandPreparation do
         run_ref,
         prepared_run,
         catalog,
+        runtime_services,
+        environment_setup_required,
         artifact_destinations,
         artifact_destination_failures
       )
-      when command in [:validate, :run] and is_map(artifact_destinations) and
+      when command in [:validate, :run] and is_boolean(environment_setup_required) and
+             is_map(artifact_destinations) and
              is_list(artifact_destination_failures) do
     preparation = %__MODULE__{
       command: command,
       run_ref: run_ref,
       prepared_run: prepared_run,
       catalog: catalog,
+      runtime_services: runtime_services,
+      environment_setup_required: environment_setup_required,
       artifact_destinations: artifact_destinations,
       artifact_destination_failures: artifact_destination_failures
     }
@@ -83,6 +96,8 @@ defmodule PtcRunner.Kernel.CommandPreparation do
         _run_ref,
         _prepared_run,
         _catalog,
+        _runtime_services,
+        _environment_setup_required,
         _artifact_destinations,
         _artifact_destination_failures
       ),
@@ -119,6 +134,11 @@ defmodule PtcRunner.Kernel.CommandPreparation do
       CommandRunRef.valid?(preparation.run_ref) and
       PreparedRun.valid?(preparation.prepared_run) and
       InstallationCatalog.valid?(preparation.catalog) and
+      ProviderRuntimeServices.bound_to?(
+        preparation.runtime_services,
+        preparation.catalog.runtime_binding
+      ) and
+      is_boolean(preparation.environment_setup_required) and
       catalog_matches_request?(preparation) and
       artifact_destinations_valid?(
         preparation.command,
@@ -178,6 +198,8 @@ defmodule PtcRunner.Kernel.CommandPreparation do
       preparation.run_ref,
       preparation.prepared_run,
       preparation.catalog,
+      preparation.runtime_services,
+      preparation.environment_setup_required,
       preparation.artifact_destinations,
       preparation.artifact_destination_failures
     }

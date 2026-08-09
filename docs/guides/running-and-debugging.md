@@ -282,8 +282,15 @@ The command never renders an inspected exception, arbitrary callback result,
 credential, private value, provider response, selector, or filesystem path into
 either public stream.
 
-The shared command core already implements `ptc models --host-config HOST.json`
-through `PtcRunner.Kernel.CommandEngine`. It reads one bounded host document and
+The shared command core already implements `ptc run` and
+`ptc models --host-config HOST.json` through
+`PtcRunner.Kernel.CommandEngine`. Shared run dispatch authorizes destinations,
+executes provider-free and provider-backed work through one execution owner,
+publishes immutable execution evidence, and returns a schema-valid normal or
+private envelope; a private envelope never contains the result value. The Mix
+task still uses its transitional adapter until its command-surface cutover.
+
+`models` reads one bounded host document and
 returns the installed aliases in lexical order with only their public source,
 revision, data-class, accepted-class, and destination declarations. Listing
 models invokes no provider callback, credential or OAuth service, optional
