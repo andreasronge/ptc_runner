@@ -1,8 +1,11 @@
 defmodule PtcRunner.Kernel.PrivateDirectory do
   @moduledoc false
 
+  alias PtcRunner.Kernel.SystemCommand
+
   @temporary_prefix ".ptc-private-"
   @temporary_random_bytes 6
+  @external_command_timeout_ms 10_000
 
   @type error ::
           :private_directory_unsupported
@@ -253,23 +256,23 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
   defp create_unix(executable, path) do
     path = if Path.type(path) == :relative, do: "./" <> path, else: path
 
-    case System.cmd(executable, ["-m", "700", path], stderr_to_stdout: true) do
-      {_output, 0} -> :ok
-      {_output, _status} -> {:error, :private_directory_creation_failed}
+    case SystemCommand.run(executable, ["-m", "700", path], @external_command_timeout_ms) do
+      {:ok, {_output, 0}} -> :ok
+      _failed_or_timed_out -> {:error, :private_directory_creation_failed}
     end
   rescue
     _exception -> {:error, :private_directory_creation_failed}
   end
 
   defp read_authority_uid(executable) do
-    case System.cmd(executable, ["-u"], stderr_to_stdout: true) do
-      {output, 0} ->
+    case SystemCommand.run(executable, ["-u"], @external_command_timeout_ms) do
+      {:ok, {output, 0}} ->
         case Integer.parse(String.trim(output)) do
           {uid, ""} when uid >= 0 -> {:ok, uid}
           _invalid -> {:error, :private_directory_unavailable}
         end
 
-      {_output, _status} ->
+      _failed_or_timed_out ->
         {:error, :private_directory_unavailable}
     end
   rescue
@@ -277,8 +280,8 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
   end
 
   defp read_authority_groups(executable) do
-    case System.cmd(executable, ["-G"], stderr_to_stdout: true) do
-      {output, 0} ->
+    case SystemCommand.run(executable, ["-G"], @external_command_timeout_ms) do
+      {:ok, {output, 0}} ->
         groups =
           output
           |> String.split()
@@ -299,7 +302,7 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
             {:error, :private_directory_unavailable}
         end
 
-      {_output, _status} ->
+      _failed_or_timed_out ->
         {:error, :private_directory_unavailable}
     end
   rescue

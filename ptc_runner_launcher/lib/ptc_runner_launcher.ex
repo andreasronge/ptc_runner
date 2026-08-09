@@ -11,6 +11,7 @@ defmodule PtcRunnerLauncher do
 
   @protocol_version 1
   @executable_name "ptc_runner_launcher"
+  @publish_timeout_ms 10_000
 
   @doc """
   Returns the packet protocol version implemented by the bundled launcher.
@@ -46,25 +47,33 @@ defmodule PtcRunnerLauncher do
 
   Linux uses `renameat2(RENAME_NOREPLACE)` and macOS uses
   `renamex_np(RENAME_EXCL)`. Unsupported filesystems and cross-device targets
-  fail without falling back to a check-then-rename sequence.
+  fail without falling back to a check-then-rename sequence. If the launcher
+  does not report its exit status before the deadline, returns
+  `:publication_status_unknown`; callers must verify the staged directory's
+  identity at the target before deciding whether publication committed.
   """
   @spec publish_directory_noreplace(binary(), binary()) ::
           :ok
           | {:error,
-             :collision | :publication_failed | :launcher_unavailable | :unsupported_platform}
+             :collision
+             | :publication_failed
+             | :publication_status_unknown
+             | :launcher_unavailable
+             | :unsupported_platform}
   def publish_directory_noreplace(staging, target)
       when is_binary(staging) and is_binary(target) do
     with true <- Path.type(staging) == :absolute and Path.type(target) == :absolute,
          {:ok, executable} <- executable_path() do
-      case System.cmd(
+      case PtcRunnerLauncher.Command.run(
              executable,
              ["--publish-directory-noreplace", staging, target],
-             stderr_to_stdout: true
+             @publish_timeout_ms
            ) do
-        {"", 0} -> :ok
-        {_output, 73} -> {:error, :collision}
-        {_output, 74} -> {:error, :unsupported_platform}
-        {_output, _status} -> {:error, :publication_failed}
+        {:ok, {"", 0}} -> :ok
+        {:ok, {_output, 73}} -> {:error, :collision}
+        {:ok, {_output, 74}} -> {:error, :unsupported_platform}
+        {:ok, {_output, _status}} -> {:error, :publication_failed}
+        {:error, _reason} -> {:error, :publication_status_unknown}
       end
     else
       false -> {:error, :publication_failed}
