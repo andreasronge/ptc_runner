@@ -1,5 +1,5 @@
 defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   @moduledoc """
   Covers the `repo-analyst` application package as files rather than runtime.

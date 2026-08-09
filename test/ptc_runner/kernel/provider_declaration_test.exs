@@ -1,5 +1,5 @@
 defmodule PtcRunner.Kernel.ProviderDeclarationTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandEngine

@@ -1,5 +1,5 @@
 defmodule PtcRunner.Kernel.TutorialExamplesTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.Manifest
