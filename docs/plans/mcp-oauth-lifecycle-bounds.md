@@ -119,17 +119,65 @@ over a monotonically growing table).
 `TokenManager.close/1` with exponential backoff capped at 30s. There is no
 attempt counter, no total deadline, and no terminal branch.
 
-`TokenManager.close/1`'s only error path is a timeout
-(`token_manager.ex:204-208`: `:exit, {:timeout, _}` → `{:error, :timeout}`;
-every other exit returns `:ok`), bounded by
-`@close_timeout_ms = @response_transition_timeout_ms + 1_000` = 6s
-(`token_manager.ex:40-41`).
+So a manager whose close never succeeds produces a worker that retries every 30s
+forever and holds one of `@max_managers 128` node-global slots
+(`manager_cleanup.ex:25`) permanently. Reaching 128 makes `adopt/2` return
+`:cleanup_unavailable` for the whole node until the VM restarts.
 
-So a manager whose `:close` handler blocks — a stalled revocation, a wedged
-transport — produces a worker that retries every 30s forever and holds one of
-`@max_managers 128` node-global slots (`manager_cleanup.ex:25`) permanently.
-Reaching 128 makes `adopt/2` return `:cleanup_unavailable` for the whole node
-until the VM restarts.
+### Two error paths, not one — and they need opposite treatment
+
+An earlier draft of this plan, and issue #1215, claimed the only error path is a
+timeout. **That is wrong**, and it invalidated the first attempted fix.
+`token_manager.ex:202`:
+
+```elixir
+@spec close(t()) :: :ok | {:error, :persistence_failed | :timeout}
+```
+
+- **`{:error, :timeout}`** comes from the `catch` at `token_manager.ex:205-207`
+  when the manager does not answer within
+  `@close_timeout_ms = @response_transition_timeout_ms + 1_000` (6s). The manager
+  is wedged; further retries accomplish nothing.
+- **`{:error, :persistence_failed}`** is an ordinary reply
+  (`token_manager.ex:858`), sent by `close_or_continue/1` once every outstanding
+  response persistence has status `:failed`. The manager is alive and answering.
+
+The second path is the important one, because **retrying is doing real work**.
+`handle_call(:close, from, %{closing: nil})` (`token_manager.ex:243-249`) calls
+`retry_failed_persistences/1` on every attempt. The retry loop is the mechanism
+by which a failed OAuth response eventually reaches durable persistence.
+
+### Consequence: a blanket deadline is wrong
+
+Killing the manager on exhaustion — the approach this plan originally
+recommended, implemented on `fix/oauth-cleanup-give-up` and **not merged** —
+breaks the `:persistence_failed` path. It:
+
+1. abandons durable persistence of a response that was still being retried, and
+2. strands the `LocalFences` entry for that operation, because
+   `LocalFences.resolve/2` runs only on the success branch
+   (`token_manager.ex:796`).
+
+Point 2 means the naive fix makes **Problem 1 measurably worse**. Nothing can
+resume the work: the persistence closure and its `operation_ref` live only in
+`TokenManager` state, and the fence is VM-local `:persistent_term`.
+
+**The two problems are therefore not independent.** An earlier version of this
+document said they were; that was wrong.
+
+### What this means for the design
+
+Bounding is still required — `:persistence_failed` can also repeat forever if the
+durable store is permanently unavailable — but the two paths want different
+bounds and different exhaustion behaviour:
+
+- `:timeout` — no progress is possible. A short bound with an abnormal exit is
+  defensible.
+- `:persistence_failed` — progress is possible. Any bound must decide what
+  happens to the unresolved fence, and "erase it" runs straight into the
+  fail-closed argument in Problem 1's option B.
+
+That coupling is the open design question, and it is why no fix is merged.
 
 ### What is already correct
 
@@ -154,20 +202,36 @@ manager running — strictly worse than today.
 
 ### The decision
 
-What is the bound?
+Two questions, and the second is the hard one.
 
-**A. Total deadline** (e.g. 5 minutes from adoption). Predictable worst-case slot
-occupancy; independent of how backoff is tuned.
+**Q1 — what shape is the bound?** A total deadline bounds slot-time directly; an
+attempt cap bounds it only through the backoff curve, so retuning the curve
+silently moves the worst case. **Deadline.**
 
-**B. Attempt cap** (e.g. 10 attempts). Simpler to test; worst-case wall time is
-an emergent property of the backoff curve and changes if the curve does.
+**Q2 — what happens on exhaustion for `:persistence_failed`?** Unresolved. The
+options each give something up:
 
-**Recommendation: A.** The resource being bounded is *slot-time*, and a deadline
-bounds it directly. With the current curve, 128 slots × a 5-minute deadline
-gives a comprehensible worst case; an attempt cap does not.
+- **Kill the manager anyway.** Simple, bounds the slot, but abandons durable
+  persistence and strands a fence. Rejected above.
+- **Resolve the fence, then kill.** Bounds everything, but admits a grant the
+  durable store may never have recorded — the exact failure the fence exists to
+  prevent. Needs the same argument as Problem 1 option B, which is probably
+  unwinnable.
+- **Separate the slot from the retry.** Let the cleanup *slot* be released at the
+  deadline while the manager keeps retrying persistence under some other owner.
+  Preserves both properties, but needs a second owner with its own bound, and
+  the `Process.link/1` reclamation contract has to be rethought.
+- **Bound only `:timeout`, leave `:persistence_failed` unbounded.** Fixes the
+  wedged-manager case, which is the one with no possible progress, and leaves
+  today's behaviour for the case where retrying still does work. Smallest honest
+  step; does not fully close slot exhaustion.
 
-Whatever is chosen, it must not be so short that a slow-but-recovering endpoint
-loses its graceful close — that close is what revokes the remote token.
+**Tentative recommendation: the last one**, as a first slice — it is the only
+option that strictly improves the situation without deciding the fence question.
+Full bounding waits on Problem 1.
+
+Whatever is chosen, the bound must not be so short that a slow-but-recovering
+endpoint loses its graceful close — that close is what revokes the remote token.
 
 ### Testability note
 
@@ -178,8 +242,11 @@ with the production value as the default, so a test can drive a 50ms deadline.
 
 ## Sequencing and scope
 
-- These are independent. Two PRs, one mechanism each, per the repo's
-  scope-one-mechanism convention.
+- **These are not independent** — see "Consequence: a blanket deadline is wrong".
+  Problem 2's exhaustion behaviour depends on how Problem 1 resolves fence
+  lifetime. Do Problem 1 first, or take only the `:timeout`-only slice of
+  Problem 2.
+- Still one mechanism per PR, per the repo's scope-one-mechanism convention.
 - Neither collides with the stable-CLI plan. Checkpoint F touches OAuth only to
   disable interactive authorization in the standalone VM
   (`docs/plans/lisp-kernel/stable-cli-contract.md:66,378`); nothing in E, F, or G
@@ -204,4 +271,14 @@ Problem 2:
       in CI time via an injected bound.
 - [ ] Exhaustion exits abnormally and the manager is reclaimed.
 - [ ] A slow-but-recovering close still completes gracefully within the bound.
+- [ ] **A test distinguishes `{:error, :timeout}` from
+      `{:error, :persistence_failed}` and proves the latter is not killed while
+      persistence retries can still succeed.**
+- [ ] **No fence is stranded by exhaustion** — assert the `:persistent_term`
+      entry count is unchanged across a give-up.
 - [ ] `@max_managers` is left alone, or changed with a stated reason.
+
+Note for implementers: the parked branch `fix/oauth-cleanup-give-up` has a
+working test harness for this (a stub manager that replies to `:close` with a
+chosen result, so retries cost no wall time). Reuse the harness; do not reuse the
+blanket-deadline fix.
