@@ -11,6 +11,7 @@ defmodule PtcRunnerLauncher do
 
   @protocol_version 1
   @executable_name "ptc_runner_launcher"
+  @publish_timeout_ms 5_000
 
   @doc """
   Returns the packet protocol version implemented by the bundled launcher.
@@ -56,15 +57,16 @@ defmodule PtcRunnerLauncher do
       when is_binary(staging) and is_binary(target) do
     with true <- Path.type(staging) == :absolute and Path.type(target) == :absolute,
          {:ok, executable} <- executable_path() do
-      case System.cmd(
+      case PtcRunnerLauncher.Command.run(
              executable,
              ["--publish-directory-noreplace", staging, target],
-             stderr_to_stdout: true
+             @publish_timeout_ms
            ) do
-        {"", 0} -> :ok
-        {_output, 73} -> {:error, :collision}
-        {_output, 74} -> {:error, :unsupported_platform}
-        {_output, _status} -> {:error, :publication_failed}
+        {:ok, {"", 0}} -> :ok
+        {:ok, {_output, 73}} -> {:error, :collision}
+        {:ok, {_output, 74}} -> {:error, :unsupported_platform}
+        {:ok, {_output, _status}} -> {:error, :publication_failed}
+        {:error, _reason} -> {:error, :publication_failed}
       end
     else
       false -> {:error, :publication_failed}
