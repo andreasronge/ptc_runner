@@ -19,33 +19,43 @@ defmodule PtcRunner.Lisp.Parser do
   """
   @spec parse(String.t()) :: {:ok, AST.t()} | {:error, {:parse_error, String.t()}}
   def parse(source) when is_binary(source) do
+    case parse_with_position(source) do
+      {:ok, ast} -> {:ok, ast}
+      {:error, {:parse_error, message, _position}} -> {:error, {:parse_error, message}}
+    end
+  end
+
+  @doc false
+  @spec parse_with_position(String.t()) ::
+          {:ok, AST.t()} | {:error, {:parse_error, String.t(), non_neg_integer() | nil}}
+  def parse_with_position(source) when is_binary(source) do
     # Check for unsupported syntax before parsing
     with :ok <- check_unsupported_syntax(source) do
-      do_parse(source)
+      do_parse_with_position(source)
     end
   end
 
   defp check_unsupported_syntax(source) do
     case check_unsupported_patterns(source) do
       nil -> :ok
-      message -> {:error, {:parse_error, message}}
+      message -> {:error, {:parse_error, message, nil}}
     end
   end
 
-  defp do_parse(source) do
-    case FastParser.parse(source) do
+  defp do_parse_with_position(source) do
+    case FastParser.parse_with_position(source) do
       {:ok, ast} ->
         {:ok, ast}
 
-      {:error, reason} ->
+      {:error, reason, position} ->
         improved_reason =
           check_unsupported_patterns(source) ||
             delimiter_error_or_reason(source, reason)
 
-        {:error, {:parse_error, improved_reason}}
+        {:error, {:parse_error, improved_reason, position}}
     end
   rescue
-    e in ArgumentError -> {:error, {:parse_error, e.message}}
+    e in ArgumentError -> {:error, {:parse_error, e.message, nil}}
   end
 
   defp delimiter_error_or_reason(source, reason) do

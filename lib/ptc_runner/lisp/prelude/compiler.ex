@@ -130,14 +130,22 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # ============================================================
 
   defp parse(source) do
-    case Parser.parse(source) do
+    case Parser.parse_with_position(source) do
       {:ok, ast} ->
         {:ok, normalize_program(ast)}
 
-      {:error, {:parse_error, message}} ->
-        {:error, ValidationError.new(:parse_error, "prelude parse error: #{message}")}
+      {:error, {:parse_error, message, position}} ->
+        {:error,
+         ValidationError.new(:parse_error, "prelude parse error: #{message}",
+           span: parse_position_span(position)
+         )}
     end
   end
+
+  defp parse_position_span(position) when is_integer(position) and position >= 0,
+    do: {position, 0}
+
+  defp parse_position_span(_position), do: nil
 
   # Multiple top-level forms parse to `{:program, forms}`; a single top-level
   # form parses to the bare form. Normalize both to `{:program, forms}`.
@@ -776,19 +784,26 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # kept pointing at the shadowed definition.
   defp reject_duplicate_refs(specs) do
     specs
-    |> Enum.map(&ref(&1.namespace, &1.symbol))
-    |> Enum.frequencies()
-    |> Enum.find(fn {_ref, count} -> count > 1 end)
+    |> Enum.reduce_while(MapSet.new(), fn spec, seen ->
+      key = {spec.namespace, spec.symbol}
+
+      if MapSet.member?(seen, key),
+        do: {:halt, key},
+        else: {:cont, MapSet.put(seen, key)}
+    end)
     |> case do
-      nil ->
+      %MapSet{} ->
         :ok
 
-      {ref, _} ->
+      {namespace, symbol} ->
+        duplicate_ref = ref(namespace, symbol)
+
         {:error,
          ValidationError.new(
            :duplicate_ref,
-           "duplicate prelude definition `#{ref}` (names must be unique within a namespace)",
-           ref: ref
+           "duplicate prelude definition `#{duplicate_ref}` (names must be unique within a namespace)",
+           ref: duplicate_ref,
+           details: %{duplicate_namespace: namespace, duplicate_name: symbol}
          )}
     end
   end
@@ -1637,7 +1652,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         {:error,
          ValidationError.new(
            :unbound_var,
-           "prelude body references undefined variable(s): #{Enum.join(vars, ", ")}"
+           "prelude body references undefined variable(s): #{Enum.join(vars, ", ")}",
+           details: %{unbound_names: vars}
          )}
     end
   end

@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   """
 
   alias PtcRunner.Kernel.BoundedWorker
+  alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.FrozenBundle
@@ -235,6 +236,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
               reason: :component_compile_error,
               id: component.id,
               compile_reason: compile_reason(error),
+              compile_details: compile_details(error),
               details: error_message(error),
               span_locator: span_locator(error)
             }}}
@@ -300,7 +302,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   end
 
   defp component_namespaces(source) do
-    case Parser.parse(source) do
+    case Parser.parse_with_position(source) do
       {:ok, ast} ->
         namespaces = ast |> top_level_forms() |> Enum.flat_map(&namespace_form/1) |> Enum.uniq()
 
@@ -308,10 +310,15 @@ defmodule PtcRunner.Kernel.BundleCompiler do
           do: {:error, "component declares no namespace"},
           else: {:ok, namespaces}
 
-      {:error, {:parse_error, message}} ->
-        {:error, %{reason: :parse_error, message: message}}
+      {:error, {:parse_error, message, position}} ->
+        {:error, ValidationError.new(:parse_error, message, span: parse_position_span(position))}
     end
   end
+
+  defp parse_position_span(position) when is_integer(position) and position >= 0,
+    do: {position, 0}
+
+  defp parse_position_span(_position), do: nil
 
   defp top_level_forms({:program, forms}), do: forms
   defp top_level_forms(form), do: [form]
@@ -367,13 +374,22 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   defp compile_reason(%{reason: reason}) when reason in @public_compile_reasons, do: reason
   defp compile_reason(_error), do: nil
 
+  defp compile_details(%ValidationError{reason: reason, details: details}) do
+    case CompileDiagnostic.bounded_details(reason, details) do
+      {:ok, bounded} -> bounded
+      :error -> nil
+    end
+  end
+
+  defp compile_details(_error), do: nil
+
   # The locator crosses the diagnostic-size gate before being consumed. Strip
   # the source-derived message and bound the remaining namespace/ref strings so
   # this private payload cannot displace the primary compile classification.
   # A form index is sufficient on its own; otherwise an oversized locator is
   # dropped and the public failure keeps its null span.
   defp span_locator(%ValidationError{} = error) do
-    locator = %{error | message: "", span: nil}
+    locator = %{error | message: "", details: nil}
 
     cond do
       :erlang.external_size(locator) <= @max_span_locator_bytes ->

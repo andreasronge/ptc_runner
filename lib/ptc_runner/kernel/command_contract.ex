@@ -712,7 +712,7 @@ defmodule PtcRunner.Kernel.CommandContract do
       %{
         "phase" => %{"const" => Atom.to_string(row.phase)},
         "code" => %{"const" => Atom.to_string(row.code)},
-        "message" => %{"const" => row.message},
+        "message" => diagnostic_message_schema(row, source),
         "source" => source,
         "path" => path,
         "span" => span,
@@ -743,6 +743,9 @@ defmodule PtcRunner.Kernel.CommandContract do
       "name" => name_schema
     })
   end
+
+  defp diagnostic_message_schema(row, %{"type" => "null"}), do: %{"const" => row.message}
+  defp diagnostic_message_schema(row, _source_schema), do: DiagnosticCatalog.message_schema(row)
 
   defp path_schema(row, kind) do
     case DiagnosticCatalog.path_policy(row.phase, row.code, kind) do

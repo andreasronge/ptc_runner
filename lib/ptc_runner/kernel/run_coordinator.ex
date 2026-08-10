@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.Deadline
@@ -258,7 +259,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
          diagnostic(
            :bundle,
            compile_diagnostic_code(Map.get(failure, :compile_reason)),
-           source_opts(failure, components)
+           compile_diagnostic_opts(failure, components)
          )
 
   defp bundle_diagnostic(failure, components),
@@ -272,6 +273,28 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   end
 
   defp source_opts(_failure, _components), do: []
+
+  defp compile_diagnostic_opts(failure, components),
+    do: source_opts(failure, components) ++ compile_message_opts(failure, components)
+
+  defp compile_message_opts(
+         %{id: id, compile_reason: reason, compile_details: details},
+         components
+       )
+       when is_binary(id) do
+    case Enum.find(components, &match?(%Component{id: ^id}, &1)) do
+      %Component{source: source} when is_binary(source) ->
+        case CompileDiagnostic.rebuild(reason, details, source) do
+          {:ok, message} -> [message: message]
+          :error -> []
+        end
+
+      _missing ->
+        []
+    end
+  end
+
+  defp compile_message_opts(_failure, _components), do: []
 
   defp compile_diagnostic_code(:parse_error), do: :syntax_invalid
   defp compile_diagnostic_code(:unbound_var), do: :undefined_variable

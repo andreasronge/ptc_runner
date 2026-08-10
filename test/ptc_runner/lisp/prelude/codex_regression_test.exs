@@ -400,6 +400,7 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
       assert {:error, err} = Compiler.compile(source)
       assert err.reason == :unbound_var
       assert err.message =~ "typo"
+      assert err.details == %{unbound_names: ["typo"]}
     end
 
     test "forward references to siblings are allowed" do
