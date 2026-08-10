@@ -64,9 +64,23 @@ done
 cp "$project_root/mix.lock" "$package_tmp_dir/source/mix.lock"
 mkdir -p "$package_tmp_dir/build/lib"
 
-active_build_lib="$project_root/_build/${MIX_ENV:-dev}/lib"
-test -d "$active_build_lib"
-test -d "$active_build_lib/jason"
+# The packaged source is compiled at `prod` below, so its dependency beams
+# must come from the project's own `prod` build — and this script has to build
+# that itself. Ambient MIX_ENV must not choose it: `mix precommit` runs at
+# `test` and `mix cmd` exports no MIX_ENV, so `_build/${MIX_ENV:-dev}` checked
+# whichever environment the caller's shell happened to have compiled, and in a
+# worktree that had only ever run the gate it failed with no diagnosis.
+# `verify_standalone_release.sh` builds the same tree next, so this is paid
+# once.
+build_env=prod
+MIX_ENV="$build_env" mix deps.compile
+
+active_build_lib="$project_root/_build/$build_env/lib"
+
+if [[ ! -d "$active_build_lib/jason" ]]; then
+  echo "no compiled $build_env dependencies at $active_build_lib" >&2
+  exit 1
+fi
 
 for dependency in "$active_build_lib"/*; do
   name="$(basename "$dependency")"
