@@ -13,13 +13,22 @@ end
 # - :clojure tests require Babashka and are excluded by default, run with --include clojure
 # - :soak tests are long-running memory soak tests, excluded by default.
 #   Run with: `mix test --only soak` (see test/soak/README.md)
-# - :slow tests cost seconds each because they compile a project or drive a
-#   real subprocess. They are excluded by default and run in the nightly
-#   `Slow` workflow with `mix slow`. Excluding them here rather than only in
-#   the pre-commit hook is what lets the per-PR suite run in parallel: the
-#   suite is 69% `async: false`, so its wall clock is a serial floor, and
-#   three `:slow` files were 40% of that floor.
-exclusions = [:skip, :e2e, :clojure, :soak, :slow]
+# - :nightly tests are excluded by default and run only in the `Nightly`
+#   workflow via `mix nightly`. Reserve the tag for tests whose cost is
+#   measured in tens of seconds: today the downstream-consumer build (61.1 s)
+#   and the benchmark task (25.5 s), which together were 40% of the CI suite's
+#   177.8 s `async: false` serial floor.
+#
+#   `:nightly` is deliberately NOT `:slow`. `:slow` means only "skip on the
+#   fast pre-commit path" and is consumed solely by `.githooks/pre-commit`;
+#   those tests still run in `precommit`, pre-push, and CI. Excluding `:slow`
+#   globally removed ten correctness tests -- cross-runtime append leases,
+#   hard-link lease aliasing, concurrent same-path appends, input-size
+#   bounding, and the pre-push gate's own tests -- from every PR gate to save
+#   14.2 s in total. That is the wrong trade, and it is why the two tags are
+#   separate: a tag that means "expensive" must not silently also mean
+#   "unverified on pull requests".
+exclusions = [:skip, :e2e, :clojure, :soak, :nightly]
 
 # Run clojure conformance tests: mix test --include clojure
 #

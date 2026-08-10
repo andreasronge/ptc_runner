@@ -73,11 +73,18 @@ how it was verified.
   ExUnit concurrency.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`;
   the MCP tests also require the local server described below).
-- `mix slow` — the `:slow` tests, excluded from `mix test` by default because
-  each compiles a project or drives a real subprocess. The nightly `Slow`
-  workflow runs them; run it locally when you touch a Mix task, the git hooks,
-  or the stdio transport. Never add `--trace` (or `--slowest`, which implies
-  it) to a suite you want to finish quickly: it pins `--max-cases` to 1.
+- `mix nightly` — the `:nightly` tests, excluded from `mix test` by default.
+  The `Nightly` workflow runs them daily; run it locally when you touch the
+  `mix ptc run` downstream path or the benchmark task. Never add `--trace` (or
+  `--slowest`, which implies it) to a suite you want to finish quickly: it
+  pins `--max-cases` to 1.
+- Two tags, two meanings, and they must not be conflated. `:nightly` means
+  "costs tens of seconds; excluded everywhere but the `Nightly` workflow" —
+  apply it sparingly, because it removes a test from every PR gate. `:slow`
+  means only "skip on the fast pre-commit path" and is read solely by
+  `.githooks/pre-commit`; those tests still run in `precommit`, pre-push, and
+  CI. Excluding `:slow` globally once dropped ten correctness tests from every
+  PR to save 14.2 s.
 - Fix all failures before committing/pushing.
 
 ### Fresh worktree setup

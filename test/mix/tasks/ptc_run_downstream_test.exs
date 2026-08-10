@@ -11,13 +11,14 @@ defmodule Mix.Tasks.Ptc.RunDownstreamTest do
   # recompile it whenever the library sources change.
   @build_path Path.join(@root, "_build/downstream_consumer")
 
-  # `:slow` because the assertion is only observable through a real `mix ptc run`
-  # in a separate OS process against a real prod build. The cached build above
-  # holds a warm run to ~5.5 s, but the cache is per-worktree and PtcRunner is a
-  # path dependency, so a fresh clone or any library change pays the full
-  # compile: 36.4 s measured on a cold `_build/downstream_consumer`.
+  # `:nightly` because the assertion is only observable through a real
+  # `mix ptc run` in a separate OS process against a real prod build. The cached
+  # build above holds a warm run to ~5.5 s, but the cache is per-worktree and
+  # PtcRunner is a path dependency, so a fresh clone or any library change pays
+  # the full compile: 61.1 s measured on CI, where the cache misses on every
+  # library change. That is the single most expensive test in the suite.
   @tag :tmp_dir
-  @tag :slow
+  @tag :nightly
   test "starts only the PtcRunner core when a downstream project depends on req_llm", %{
     tmp_dir: dir
   } do

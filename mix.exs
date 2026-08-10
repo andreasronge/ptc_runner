@@ -87,7 +87,7 @@ defmodule PtcRunner.MixProject do
         prepush: :test,
         coverage: :test,
         soak: :test,
-        slow: :test
+        nightly: :test
       ]
     ]
   end
@@ -214,13 +214,13 @@ defmodule PtcRunner.MixProject do
       coverage: [
         "test --cover"
       ],
-      # Tests that compile a project or drive a real subprocess. Excluded from
-      # `mix test` by default (test/test_helper.exs) because a handful of them
-      # dominated the suite's serial wall clock; the nightly `Slow` workflow
-      # runs them. `--trace` is retained here: these tests exceed the default
-      # 60 s per-test timeout, and trace mode sets the timeout to `:infinity`.
-      slow: [
-        "test --only slow --trace"
+      # Tests costing tens of seconds each. Excluded from `mix test` by default
+      # (test/test_helper.exs); the `Nightly` workflow runs them. `--trace` is
+      # retained here and only here: these tests exceed the default 60 s
+      # per-test timeout, and trace mode sets the timeout to `:infinity`.
+      # Everywhere else `--trace` is a bug -- it pins `--max-cases` to 1.
+      nightly: [
+        "test --only nightly --trace"
       ],
       # Memory-leak soak suite. Excluded from `mix test` by default
       # (test/test_helper.exs) because it is long-running and its signal is a
