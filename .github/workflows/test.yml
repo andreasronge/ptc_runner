@@ -282,12 +282,14 @@ jobs:
       # suite single-threaded on a 4-vCPU runner for 259 s. `--slowest` and
       # `--slowest-modules` imply `--trace` too, so they are not a substitute
       # for the per-test timings this drops; get those from a local run or the
-      # nightly `Slow` workflow.
+      # `Nightly` workflow.
       #
       # Dropping `--trace` also restores the default 60 s per-test timeout,
-      # which trace mode had set to `:infinity`. That is why the `:slow`
-      # exclusion in `test/test_helper.exs` is part of the same change: the
-      # slowest test took 61.3 s and would now time out here.
+      # which trace mode had set to `:infinity`. That is what the `:nightly`
+      # exclusion in `test/test_helper.exs` pairs with: the slowest test takes
+      # 61.1 s and would otherwise time out here. `:nightly` is a narrow tag --
+      # do not reach for it to make this step faster, because every test it
+      # covers stops being verified on pull requests.
       - name: Run tests
         run: mix test --max-failures 1 --warnings-as-errors
 
