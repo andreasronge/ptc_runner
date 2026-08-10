@@ -514,7 +514,14 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp diagnostic_pair_allowed?({:doctor, :connect}, :internal, :internal_error), do: true
   defp diagnostic_pair_allowed?(:run_unclassified, :internal, :internal_error), do: true
 
-  defp diagnostic_pair_allowed?(:init, :publication, :initialization_failed), do: true
+  defp diagnostic_pair_allowed?(:init, :publication, code)
+       when code in [
+              :initialization_target_exists,
+              :initialization_parent_missing,
+              :initialization_parent_unusable,
+              :initialization_failed
+            ],
+       do: true
 
   defp diagnostic_pair_allowed?(mode, :host, code)
        when mode in [:validate, :models, :doctor, {:doctor, :connect}, :run_unclassified] and

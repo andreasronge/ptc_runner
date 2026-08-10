@@ -69,6 +69,11 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   defp projection(_role, :unknown_properties), do: {:schema_violation, []}
   defp projection(_role, :reference_missing), do: {:reference_missing, nil}
   defp projection(_role, :invalid_logical_name), do: {:reference_missing, nil}
+  defp projection(:application, :not_found), do: {:application_not_found, nil}
+
+  defp projection(:application, {:installed_limit_exceeded, requested, ceiling})
+       when is_integer(requested) and is_integer(ceiling) and requested > ceiling,
+       do: {:installed_limit_exceeded, nil}
 
   defp projection(_role, reason)
        when reason in [:document_limit_exceeded, :json_depth_exceeded, :json_node_limit_exceeded],
@@ -104,7 +109,6 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
               :invalid_application_source,
               :application_source_unavailable,
               :outside_application_source,
-              :not_found,
               :not_regular,
               :symlink_escape
             ],

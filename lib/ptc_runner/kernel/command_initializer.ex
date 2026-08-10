@@ -66,6 +66,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
          :ok <- validate_scaffold(),
          {:ok, anchored_target} <- PrivateDirectory.anchor(target),
          anchored_target = trim_trailing_separators(anchored_target),
+         :ok <- preflight_target(anchored_target),
          :ok <- PrivateDirectory.preflight(anchored_target),
          {:ok, state} <- create_staging(anchored_target),
          result <- assemble_and_publish(state, anchored_target, publisher, fault_hook) do
@@ -76,9 +77,13 @@ defmodule PtcRunner.Kernel.CommandInitializer do
         {:error, failed_state} ->
           cleanup(failed_state)
           initialization_error(run_ref)
+
+        {:error, reason, failed_state} ->
+          cleanup(failed_state)
+          initialization_error(run_ref, reason)
       end
     else
-      _failure -> initialization_error(run_ref)
+      failure -> initialization_error(run_ref, failure)
     end
   rescue
     _exception -> initialization_error(run_ref)
@@ -88,6 +93,23 @@ defmodule PtcRunner.Kernel.CommandInitializer do
 
   def initialize(_target, run_ref, _opts) when is_binary(run_ref),
     do: initialization_error(run_ref)
+
+  defp preflight_target(target) do
+    case File.lstat(target) do
+      {:ok, _stat} -> {:error, :initialization_target_exists}
+      {:error, :enoent} -> preflight_parent(Path.dirname(target))
+      {:error, _reason} -> {:error, :initialization_parent_unusable}
+    end
+  end
+
+  defp preflight_parent(parent) do
+    case File.stat(parent) do
+      {:ok, %File.Stat{type: :directory}} -> :ok
+      {:ok, _not_directory} -> {:error, :initialization_parent_unusable}
+      {:error, :enoent} -> {:error, :initialization_parent_missing}
+      {:error, _reason} -> {:error, :initialization_parent_unusable}
+    end
+  end
 
   defp options(opts) do
     keys = Keyword.keys(opts)
@@ -169,7 +191,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
       case invoke_publisher(publisher, state.path, target) do
         :ok -> :ok
         {:error, :publication_status_unknown} -> recover_publication_status(state, target)
-        {:error, _reason} -> {:error, state}
+        {:error, reason} -> {:error, reason, state}
       end
     else
       _failure -> {:error, state}
@@ -309,6 +331,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
     case publisher.(staging, target) do
       :ok -> :ok
       {:error, :publication_status_unknown} = unknown -> unknown
+      {:error, :collision} = collision -> collision
       _failure -> {:error, :publication_failed}
     end
   rescue
@@ -361,8 +384,23 @@ defmodule PtcRunner.Kernel.CommandInitializer do
   defp identity(stat),
     do: {stat.major_device, stat.minor_device, stat.inode, stat.uid}
 
-  defp initialization_error(run_ref) do
-    diagnostic = CommandDiagnostic.new!(:publication, :initialization_failed)
+  defp initialization_error(run_ref, reason \\ nil) do
+    diagnostic = CommandDiagnostic.new!(:publication, initialization_code(reason))
     {:error, CommandOutcome.error(:init, run_ref, diagnostic)}
   end
+
+  defp initialization_code({:error, reason}), do: initialization_code(reason)
+  defp initialization_code(:initialization_target_exists), do: :initialization_target_exists
+  defp initialization_code(:collision), do: :initialization_target_exists
+  defp initialization_code(:initialization_parent_missing), do: :initialization_parent_missing
+
+  defp initialization_code(reason)
+       when reason in [
+              :initialization_parent_unusable,
+              :private_directory_parent_unavailable,
+              :private_directory_parent_unsafe
+            ],
+       do: :initialization_parent_unusable
+
+  defp initialization_code(_reason), do: :initialization_failed
 end

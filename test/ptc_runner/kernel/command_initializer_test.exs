@@ -59,9 +59,23 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
     sentinel = Path.join(target, "keep.txt")
     File.write!(sentinel, "existing")
 
-    assert_initialization_failed(CommandEngine.dispatch(["init", target]))
+    assert_initialization_error(
+      CommandEngine.dispatch(["init", target]),
+      "initialization_target_exists"
+    )
+
     assert File.read!(sentinel) == "existing"
     assert File.ls!(target) == ["keep.txt"]
+
+    file_target = Path.join(directory, "existing-file")
+    File.write!(file_target, "existing")
+
+    assert_initialization_error(
+      CommandEngine.dispatch(["init", file_target]),
+      "initialization_target_exists"
+    )
+
+    assert File.read!(file_target) == "existing"
     assert staging_entries(directory) == []
   end
 
@@ -74,7 +88,11 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
     File.write!(sentinel, "existing")
     File.ln_s!(destination, target)
 
-    assert_initialization_failed(CommandEngine.dispatch(["init", target]))
+    assert_initialization_error(
+      CommandEngine.dispatch(["init", target]),
+      "initialization_target_exists"
+    )
+
     assert {:ok, %File.Stat{type: :symlink}} = File.lstat(target)
     assert File.read!(sentinel) == "existing"
     assert staging_entries(directory) == []
@@ -92,9 +110,32 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
 
     sentinel = Path.join(target, "keep.txt")
     File.write!(sentinel, "existing")
-    assert_initialization_failed(CommandEngine.dispatch(["init", target <> "//"]))
+
+    assert_initialization_error(
+      CommandEngine.dispatch(["init", target <> "//"]),
+      "initialization_target_exists"
+    )
+
     assert File.read!(sentinel) == "existing"
     assert staging_entries(directory) == []
+  end
+
+  @tag :tmp_dir
+  test "init distinguishes a missing parent from an unusable parent", %{tmp_dir: directory} do
+    missing_parent_target = Path.join([directory, "missing", "application"])
+
+    assert_initialization_error(
+      CommandEngine.dispatch(["init", missing_parent_target]),
+      "initialization_parent_missing"
+    )
+
+    unusable_parent = Path.join(directory, "not-a-directory")
+    File.write!(unusable_parent, "existing")
+
+    assert_initialization_error(
+      CommandEngine.dispatch(["init", Path.join(unusable_parent, "application")]),
+      "initialization_parent_unusable"
+    )
   end
 
   @tag :tmp_dir
@@ -187,6 +228,22 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
   end
 
   @tag :tmp_dir
+  test "a target that appears at the publication commit is classified as existing", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "application")
+    publisher = fn _staging, _target -> {:error, :collision} end
+
+    assert_initialization_error(
+      CommandInitializer.initialize(target, @run_ref, publisher: publisher),
+      "initialization_target_exists"
+    )
+
+    refute File.exists?(target)
+    assert staging_entries(directory) == []
+  end
+
+  @tag :tmp_dir
   test "a committed publication survives an indeterminate launcher status", %{
     tmp_dir: directory
   } do
@@ -251,9 +308,12 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
     assert staging_entries(directory) == []
   end
 
-  defp assert_initialization_failed({:error, %CommandOutcome{} = outcome}) do
+  defp assert_initialization_failed(result),
+    do: assert_initialization_error(result, "initialization_failed")
+
+  defp assert_initialization_error({:error, %CommandOutcome{} = outcome}, code) do
     assert outcome.envelope["error"]["phase"] == "publication"
-    assert outcome.envelope["error"]["code"] == "initialization_failed"
+    assert outcome.envelope["error"]["code"] == code
     assert outcome.envelope["error"]["provider_activity"] == false
     assert outcome.envelope["error"]["path"] == nil
     assert outcome.envelope["error"]["source"] == nil

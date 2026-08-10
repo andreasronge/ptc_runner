@@ -53,8 +53,10 @@ stable contract:
 The complete scaffold is validated in memory and assembled in an owner-only
 sibling directory. Publication uses an atomic no-replace rename, so an
 existing directory or symlink is never merged, overwritten, or removed. A
-failed initialization returns the path-free `initialization_failed` diagnostic;
-a clean pre-publication failure can be retried.
+failed initialization remains path-free, but distinguishes an existing target,
+a missing parent directory, and an unusable parent directory. Other staging or
+publication failures return `initialization_failed`; a clean pre-publication
+failure can be retried.
 
 ## Run the example
 

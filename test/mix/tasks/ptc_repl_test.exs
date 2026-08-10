@@ -296,6 +296,14 @@ defmodule PtcRunner.ReplFrontendTest do
     refute output =~ File.cwd!()
   end
 
+  test "unknown profiles report the accepted profile ids" do
+    assert_raise Mix.Error,
+                 ~r/unsupported session profile; accepted: inspection-analysis-v2, log-analysis-v2/,
+                 fn ->
+                   run_repl(["--describe-profile", "missing-profile"])
+                 end
+  end
+
   test "private profile frontend policy fails before opening declared sources" do
     missing_resources = [
       "--profile",

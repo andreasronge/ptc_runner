@@ -193,7 +193,7 @@ defmodule PtcRunner.ReplFrontend do
       true ->
         case AnalysisProfileRegistry.fetch(opts[:describe_profile]) do
           {:ok, _recipe} -> {:ok, :describe}
-          {:error, _reason} -> {:error, "unsupported session profile"}
+          {:error, _reason} -> {:error, unsupported_profile_message()}
         end
     end
   end
@@ -220,7 +220,7 @@ defmodule PtcRunner.ReplFrontend do
            }) do
       {:ok, :profile}
     else
-      {:error, :unsupported_analysis_profile} -> {:error, "unsupported session profile"}
+      {:error, :unsupported_analysis_profile} -> {:error, unsupported_profile_message()}
       {:error, reason} when is_atom(reason) -> {:error, profile_frontend_error(reason)}
     end
   end
@@ -235,6 +235,9 @@ defmodule PtcRunner.ReplFrontend do
       info(formatted)
     end
   end
+
+  defp unsupported_profile_message,
+    do: "unsupported session profile; accepted: #{Enum.join(AnalysisProfileRegistry.ids(), ", ")}"
 
   defp validate_profile_combinations(recipe, opts, arguments, evals, resources, format) do
     cond do

@@ -19,11 +19,14 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:host, :installation_revision_missing, 3, false,
      "an installed provider is missing its behavior revision"},
     {:application, :application_unavailable, 3, false, "the application is unavailable"},
+    {:application, :application_not_found, 3, false, "the application manifest does not exist"},
     {:application, :invalid_json, 3, false, "an application document is not valid JSON"},
     {:application, :duplicate_property, 3, false,
      "an application document contains a duplicate property"},
     {:application, :schema_violation, 3, false,
      "the application manifest does not satisfy its schema"},
+    {:application, :installed_limit_exceeded, 3, false,
+     "an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling"},
     {:application, :required_property_missing, 3, false,
      "the application manifest is missing a required property"},
     {:application, :reference_missing, 3, false,
@@ -149,6 +152,12 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:publication, :recovery_cleanup_failed, 7, false, "private result recovery cleanup failed"},
     {:publication, :destination_collision, 7, false,
      "an artifact destination appeared before publication"},
+    {:publication, :initialization_target_exists, 7, false,
+     "the initialization target already exists"},
+    {:publication, :initialization_parent_missing, 7, false,
+     "the initialization target's parent directory does not exist"},
+    {:publication, :initialization_parent_unusable, 7, false,
+     "the initialization target's parent directory is unusable"},
     {:publication, :initialization_failed, 7, false, "project initialization failed"},
     {:internal, :internal_error, 70, false, "the command failed internally"}
   ]
@@ -392,7 +401,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def source_kinds(:application, code)
       when code in [
              :application_unavailable,
+             :application_not_found,
              :schema_violation,
+             :installed_limit_exceeded,
              :required_property_missing,
              :event_identity_conflict
            ],
@@ -479,6 +490,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
              :invalid_json,
              :duplicate_property,
              :schema_violation,
+             :installed_limit_exceeded,
              :required_property_missing,
              :contract_invalid,
              :input_contract_failed,

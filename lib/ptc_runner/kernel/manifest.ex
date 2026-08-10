@@ -783,10 +783,11 @@ defmodule PtcRunner.Kernel.Manifest do
     ceilings = Map.from_struct(installed_limits)
     defaults = Limits.defaults() |> Map.from_struct()
     manifest_rows = LimitCatalog.rows(:manifest_narrowable)
-    names = Map.new(manifest_rows, &{&1.name, &1.field})
 
-    ceilings_by_name =
-      Map.new(manifest_rows, &{&1.name, Map.fetch!(ceilings, &1.field)})
+    bounds_by_name =
+      Map.new(manifest_rows, fn row ->
+        {row.name, {row.field, Map.fetch!(ceilings, row.field), row.maximum}}
+      end)
 
     requested =
       Map.new(LimitCatalog.rows(), fn row ->
@@ -806,20 +807,27 @@ defmodule PtcRunner.Kernel.Manifest do
       value
       |> Map.to_list()
       |> Enum.sort_by(&elem(&1, 0))
-      |> normalize_limits(names, ceilings_by_name, requested)
+      |> normalize_limits(bounds_by_name, requested)
     end
   end
 
   defp limits(_value, _installed_limits),
     do: manifest_value_error([{:property, "limits"}], :invalid_limits)
 
-  defp normalize_limits([], _names, _ceilings, normalized), do: Limits.new(normalized)
+  defp normalize_limits([], _bounds, normalized), do: Limits.new(normalized)
 
-  defp normalize_limits([{key, number} | rest], names, ceilings, normalized) do
-    case {Map.fetch(names, key), Map.fetch(ceilings, key), number} do
-      {{:ok, name}, {:ok, ceiling}, number}
+  defp normalize_limits([{key, number} | rest], bounds, normalized) do
+    case {Map.fetch(bounds, key), number} do
+      {{:ok, {name, ceiling, _maximum}}, number}
       when is_integer(number) and number > 0 and number <= ceiling ->
-        normalize_limits(rest, names, ceilings, Map.put(normalized, name, number))
+        normalize_limits(rest, bounds, Map.put(normalized, name, number))
+
+      {{:ok, {_name, ceiling, maximum}}, number}
+      when is_integer(number) and number > ceiling and number <= maximum ->
+        manifest_value_error(
+          [{:property, "limits"}, {:property, key}],
+          {:installed_limit_exceeded, number, ceiling}
+        )
 
       _invalid ->
         manifest_value_error(
