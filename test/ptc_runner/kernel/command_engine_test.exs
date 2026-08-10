@@ -4616,7 +4616,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         %{"main.clj" => "(ns app) ("}
       )
 
-    component = assert_error(["validate", invalid_component], "bundle", "compile_failed")
+    component = assert_error(["validate", invalid_component], "bundle", "syntax_invalid")
 
     assert component.envelope["error"]["source"] == %{
              "kind" => "component",
@@ -4675,6 +4675,83 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  result_projection: :json
                )
     end
+  end
+
+  @tag :tmp_dir
+  test "compile diagnostics classify safe reasons without exposing compiler details", %{
+    tmp_dir: directory
+  } do
+    cases = [
+      {"syntax", "(ns app) (", "syntax_invalid", "the component source is not valid PTC-Lisp",
+       nil, nil},
+      {"undefined", "(ns app) (defn run [input] (return missing-value))", "undefined_variable",
+       "the component source contains an undefined variable reference", "missing-value", nil},
+      {"duplicate", "(ns app) (defn run [input] input) (defn run [input] input)",
+       "duplicate_definition", "the component bundle defines the same name more than once",
+       "app/run", "(defn run [input] input)"}
+    ]
+
+    for {name, source, code, message, private_detail, spanned_form} <- cases do
+      path =
+        write_application(directory, "compile-#{name}", valid_manifest(), %{
+          "main.clj" => source
+        })
+
+      diagnostic = assert_error(["validate", path], "bundle", code).envelope["error"]
+
+      assert diagnostic["message"] == message
+      assert diagnostic["source"] == %{"kind" => "component", "name" => "main.clj"}
+
+      if private_detail do
+        refute diagnostic["message"] =~ private_detail
+      end
+
+      case {spanned_form, diagnostic["span"]} do
+        {nil, nil} ->
+          :ok
+
+        {form, %{"start_byte" => start_byte, "end_byte" => end_byte}} ->
+          assert binary_part(source, start_byte, end_byte - start_byte) == form
+      end
+    end
+  end
+
+  @tag :tmp_dir
+  test "a locatable compile failure carries the offending form's byte span", %{
+    tmp_dir: directory
+  } do
+    source = """
+    (ns app)
+
+    (defn run [input] (return input))
+
+    (defn broken)
+    """
+
+    path =
+      write_application(directory, "located-compile-failure", valid_manifest(), %{
+        "main.clj" => source
+      })
+
+    outcome = assert_error(["validate", path], "bundle", "compile_failed")
+
+    assert %{"start_byte" => start_byte, "end_byte" => end_byte} =
+             outcome.envelope["error"]["span"]
+
+    # The offsets are only worth emitting if they cut the source at the form a
+    # reader has to fix, so slice rather than assert the numbers.
+    assert binary_part(source, start_byte, end_byte - start_byte) == "(defn broken)"
+
+    # A component whose failure cannot be attributed to one form keeps the
+    # null span every envelope carried before spans had producers.
+    unlocatable =
+      write_application(directory, "unlocatable-compile-failure", valid_manifest(), %{
+        "main.clj" => "(ns app) ("
+      })
+
+    assert assert_error(["validate", unlocatable], "bundle", "syntax_invalid").envelope["error"][
+             "span"
+           ] == nil
   end
 
   @tag :tmp_dir

@@ -13,6 +13,8 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude.Compiler
+  alias PtcRunner.Lisp.Prelude.ErrorSpan
+  alias PtcRunner.Lisp.Prelude.ValidationError
 
   @bundle_hash_domain <<"ptc.frozen-bundle.v2", 0>>
   @max_components 128
@@ -20,8 +22,12 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   @max_source_bytes 2_000_000
   @compile_timeout_ms 5_000
   @compile_heap_words 8_000_000
+  @span_timeout_ms 1_000
+  @span_heap_words 2_000_000
+  @max_span_locator_bytes 4_096
   @max_artifact_bytes 4_000_000
   @max_diagnostic_bytes 65_536
+  @public_compile_reasons [:parse_error, :unbound_var, :duplicate_ref]
 
   @spec compile([Component.t()]) :: {:ok, FrozenBundle.t()} | {:error, map()}
   @doc "Compiles and attests a bounded closed component set."
@@ -43,7 +49,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
            timeout_ms: @compile_timeout_ms,
            max_heap_words: @compile_heap_words
          ) do
-      {:ok, result} -> result
+      {:ok, result} -> finalize_failure_span(result, components)
       {:error, :timeout} -> {:error, %{reason: :bundle_compile_timeout}}
       {:error, :heap_exceeded} -> {:error, %{reason: :bundle_compile_heap_exceeded}}
       {:error, :worker_failed} -> {:error, %{reason: :bundle_compile_failed}}
@@ -207,7 +213,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
            namespace_deps =
              Map.new(namespaces, &{&1, dependency_namespaces(dependencies)}),
            {:ok, prelude} <-
-             Compiler.compile(component.source,
+             Compiler.compile_unlocated(component.source,
                deps: Enum.map(dependencies, & &1.prelude),
                namespace_deps: namespace_deps
              ) do
@@ -228,7 +234,9 @@ defmodule PtcRunner.Kernel.BundleCompiler do
             %{
               reason: :component_compile_error,
               id: component.id,
-              details: error_message(error)
+              compile_reason: compile_reason(error),
+              details: error_message(error),
+              span_locator: span_locator(error)
             }}}
       end
     end)
@@ -255,7 +263,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
     namespace_deps = namespace_dependencies(compiled)
     source = Enum.map_join(components, "\n", & &1.source)
 
-    Compiler.compile(source, namespace_deps: namespace_deps)
+    Compiler.compile_unlocated(source, namespace_deps: namespace_deps)
     |> case do
       {:ok, prelude} ->
         metadata =
@@ -266,7 +274,12 @@ defmodule PtcRunner.Kernel.BundleCompiler do
         {:ok, %{prelude | metadata: Map.put(prelude.metadata, :components, metadata)}}
 
       {:error, error} ->
-        {:error, %{reason: :bundle_compile_error, details: error_message(error)}}
+        {:error,
+         %{
+           reason: :bundle_compile_error,
+           compile_reason: compile_reason(error),
+           details: error_message(error)
+         }}
     end
   end
 
@@ -295,8 +308,8 @@ defmodule PtcRunner.Kernel.BundleCompiler do
           do: {:error, "component declares no namespace"},
           else: {:ok, namespaces}
 
-      {:error, error} ->
-        {:error, inspect(error, limit: 10, printable_limit: 1_000)}
+      {:error, {:parse_error, message}} ->
+        {:error, %{reason: :parse_error, message: message}}
     end
   end
 
@@ -344,4 +357,81 @@ defmodule PtcRunner.Kernel.BundleCompiler do
     do: String.slice(message, 0, 4_096)
 
   defp error_message(error), do: inspect(error, limit: 10, printable_limit: 4_096)
+
+  # Only reasons with fixed, catalog-owned public projections cross the bundle
+  # boundary. Every other compiler reason deliberately retains the generic
+  # compile-failure classification.
+  defp compile_reason(%ValidationError{reason: reason}) when reason in @public_compile_reasons,
+    do: reason
+
+  defp compile_reason(%{reason: reason}) when reason in @public_compile_reasons, do: reason
+  defp compile_reason(_error), do: nil
+
+  # The locator crosses the diagnostic-size gate before being consumed. Strip
+  # the source-derived message and bound the remaining namespace/ref strings so
+  # this private payload cannot displace the primary compile classification.
+  # A form index is sufficient on its own; otherwise an oversized locator is
+  # dropped and the public failure keeps its null span.
+  defp span_locator(%ValidationError{} = error) do
+    locator = %{error | message: "", span: nil}
+
+    cond do
+      :erlang.external_size(locator) <= @max_span_locator_bytes ->
+        locator
+
+      is_integer(error.form_index) ->
+        %{locator | namespace: nil, ref: nil}
+
+      true ->
+        nil
+    end
+  end
+
+  defp span_locator(_error), do: nil
+
+  # Span attribution is optional diagnostic work, so it runs only after the
+  # bounded compilation result is final. A costly scan can therefore lose its
+  # span, but it cannot turn a compile error into a timeout or heap failure.
+  defp finalize_failure_span(
+         {:error, %{reason: :component_compile_error, id: id, span_locator: locator} = failure},
+         components
+       ) do
+    source =
+      case Enum.find(components, &match?(%Component{id: ^id}, &1)) do
+        %Component{source: source} when is_binary(source) -> source
+        _missing -> nil
+      end
+
+    span = resolve_failure_span(locator, source)
+
+    {:error,
+     failure
+     |> Map.delete(:span_locator)
+     |> Map.put(:span, span)}
+  end
+
+  defp finalize_failure_span(result, _components), do: result
+
+  defp resolve_failure_span(%ValidationError{} = error, source) when is_binary(source) do
+    case BoundedWorker.run(fn -> ErrorSpan.resolve(error, source) end,
+           timeout_ms: @span_timeout_ms,
+           max_heap_words: @span_heap_words
+         ) do
+      {:ok, resolved} -> failure_span(resolved, source)
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp resolve_failure_span(_error, _source), do: nil
+
+  # The byte range of the top-level form the compiler blamed, in the exclusive
+  # end-offset form command diagnostics carry. Bounded against the component's
+  # own source so a diagnostic can never claim a range the source cannot hold;
+  # anything unlocatable stays `nil`, exactly as before.
+  defp failure_span(%ValidationError{span: {offset, length}}, source)
+       when is_binary(source) and offset >= 0 and length >= 0 and
+              offset + length <= byte_size(source),
+       do: %{start_byte: offset, end_byte: offset + length}
+
+  defp failure_span(_error, _source), do: nil
 end

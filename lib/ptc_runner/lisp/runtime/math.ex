@@ -463,6 +463,18 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   end
 
   @spec numeric_type_error!(String.t(), term(), term()) :: no_return()
+  defp numeric_type_error!(name, x, y) when name in ["<", "<=", ">", ">="] do
+    actual_types = [Helpers.describe_type(x), Helpers.describe_type(y)]
+
+    message =
+      "#{name}: expected number arguments, got #{Enum.join(actual_types, ", ")}"
+
+    HostContext.error!(
+      {:type_error, message,
+       {:safe_diagnostic, %{operator: name, expected: "number", actual_types: actual_types}}}
+    )
+  end
+
   defp numeric_type_error!(name, x, y) do
     message =
       "#{name}: expected number arguments, got #{Helpers.describe_type(x)}, " <>

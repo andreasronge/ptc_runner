@@ -121,6 +121,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
             {:error, {:type_error, message, args}, _context} when is_list(args) ->
               hof_callback_error!(sort_key_error_message(item, message))
 
+            {:error, {:type_error, message, {:safe_diagnostic, _diagnostic}}, _context}
+            when is_binary(message) ->
+              hof_callback_error!(sort_key_error_message(item, message))
+
             {:error, {@hof_callback_error, message}, _context} when is_binary(message) ->
               hof_callback_error!(sort_key_error_message(item, message))
 

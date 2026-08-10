@@ -36,6 +36,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   alias PtcRunner.Lisp.Eval
   alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude
+  alias PtcRunner.Lisp.Prelude.ErrorSpan
   alias PtcRunner.Lisp.Prelude.Export
   alias PtcRunner.Lisp.Prelude.Spec
   alias PtcRunner.Lisp.Prelude.ValidationError
@@ -75,6 +76,21 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   def compile(source, opts \\ [])
 
   def compile(source, opts) when is_binary(source) and is_list(opts) do
+    case compile_unlocated(source, opts) do
+      {:ok, prelude} -> {:ok, prelude}
+      {:error, %ValidationError{} = error} -> {:error, ErrorSpan.resolve(error, source)}
+    end
+  end
+
+  @doc false
+  @spec compile_unlocated(String.t(), keyword()) ::
+          {:ok, Prelude.t()} | {:error, ValidationError.t()}
+  def compile_unlocated(source, opts \\ [])
+
+  def compile_unlocated(source, opts) when is_binary(source) and is_list(opts),
+    do: compile_source(source, opts)
+
+  defp compile_source(source, opts) do
     with {:ok, {:program, forms}} <- parse(source),
          {:ok, specs, ns_meta} <- collect_specs(forms),
          :ok <- validate_spec_effects(specs),
@@ -362,13 +378,18 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # namespace" and accumulated namespace metadata. Returns specs in source
   # order plus a namespace-name => namespace-meta map.
   defp collect_specs(forms) do
-    initial = %{current_ns: nil, ns_meta: %{}, specs: []}
+    initial = %{current_ns: nil, ns_meta: %{}, specs: [], form_index: nil}
 
+    # Tagging the offending form's position HERE, rather than at each of the
+    # ~30 error sites below, is what lets `ErrorSpan` turn any walk-phase
+    # failure into a byte span without every site knowing its own position.
     forms
-    |> Enum.reduce_while({:ok, initial}, fn form, {:ok, acc} ->
-      case handle_form(form, acc) do
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, initial}, fn {form, index}, {:ok, acc} ->
+      case handle_form(form, %{acc | form_index: index}) do
         {:ok, acc2} -> {:cont, {:ok, acc2}}
-        {:error, _} = err -> {:halt, err}
+        {:error, %ValidationError{} = error} -> {:halt, {:error, %{error | form_index: index}}}
+        {:error, _other} = err -> {:halt, err}
       end
     end)
     |> case do
@@ -583,6 +604,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         doc: doc,
         metadata: metadata,
         metadata_form: metadata_form,
+        form_index: acc.form_index,
         params_form: params_ast,
         body_form: body
       }
@@ -603,6 +625,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         doc: doc,
         metadata: metadata,
         metadata_form: metadata_form,
+        form_index: acc.form_index,
         params_form: nil,
         body_form: [value_ast]
       }
@@ -731,8 +754,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
           {:ok, export} ->
             {:cont, {:ok, Map.put(refs, export.ref, export), Map.put(lkp, export.ref, export)}}
 
-          {:error, _} = err ->
-            {:halt, err}
+          {:error, %ValidationError{} = error} ->
+            {:halt, {:error, with_form_index(error, spec)}}
         end
       end)
       |> case do
@@ -1479,11 +1502,17 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp validate_spec_effects(specs) do
     Enum.reduce_while(specs, :ok, fn spec, :ok ->
       case validate_effect(Map.get(spec.metadata, "effect")) do
-        {:ok, _effect} -> {:cont, :ok}
-        {:error, _reason} = error -> {:halt, error}
+        {:ok, _effect} ->
+          {:cont, :ok}
+
+        {:error, %ValidationError{} = error} ->
+          {:halt, {:error, with_form_index(error, spec)}}
       end
     end)
   end
+
+  defp with_form_index(%ValidationError{} = error, %Spec{form_index: index}),
+    do: %{error | form_index: index}
 
   defp effect_atom(name) do
     Enum.find(@valid_effects, fn e -> Atom.to_string(e) == name end)
@@ -1607,7 +1636,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
       vars ->
         {:error,
          ValidationError.new(
-           :compile_error,
+           :unbound_var,
            "prelude body references undefined variable(s): #{Enum.join(vars, ", ")}"
          )}
     end

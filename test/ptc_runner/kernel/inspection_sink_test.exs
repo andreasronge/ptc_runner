@@ -814,20 +814,8 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     inspection_path = Path.join(dir, "run.inspection.jsonl")
     File.write!(manifest_path, Jason.encode!(checkpoint_manifest()))
 
-    {:ok, registry} = ProviderRegistry.new(%{})
-
     assert {:error, %PtcRunner.Kernel.Error{kind: :workflow_failed}} =
-             manifest_path
-             |> ApplicationPackage.request_directory(
-               inspection_capture: true,
-               result_projection: :json,
-               installed_limits: registry.installed_limits
-             )
-             |> RunLifecycle.build(registry,
-               trace_path: trace_path,
-               inspect: inspection_path
-             )
-             |> RunLifecycle.execute()
+             execute_checkpoint(manifest_path, trace_path, inspection_path)
 
     assert {:ok, records} = InspectionArtifact.load(inspection_path)
 
@@ -944,7 +932,44 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              prints_record["correlation"]["evaluation_id"]
   end
 
-  defp checkpoint_manifest do
+  @tag :tmp_dir
+  test "a normal workflow inspection retains a safe prelude type error", %{tmp_dir: dir} do
+    File.write!(
+      Path.join(dir, "workflow.clj"),
+      ~S|(ns app) (defn run [input] (> (get input "missing") 1))|
+    )
+
+    manifest_path = Path.join(dir, "ptc.json")
+    trace_path = Path.join(dir, "run.jsonl")
+    inspection_path = Path.join(dir, "run.inspection.jsonl")
+    File.write!(manifest_path, Jason.encode!(checkpoint_manifest("normal")))
+
+    assert {:error, %PtcRunner.Kernel.Error{kind: :workflow_failed}} =
+             execute_checkpoint(manifest_path, trace_path, inspection_path)
+
+    assert {:ok, records} = InspectionArtifact.load(inspection_path)
+    error_record = Enum.find(records, &(&1["record_type"] == "execution-error"))
+
+    assert error_record["payload"]["details"]["message"] ==
+             "type_error: app/run: >: expected number arguments, got nil, number"
+
+    refute trace_path |> File.read!() |> String.contains?("expected number arguments")
+  end
+
+  defp execute_checkpoint(manifest_path, trace_path, inspection_path) do
+    {:ok, registry} = ProviderRegistry.new(%{})
+
+    manifest_path
+    |> ApplicationPackage.request_directory(
+      inspection_capture: true,
+      result_projection: :json,
+      installed_limits: registry.installed_limits
+    )
+    |> RunLifecycle.build(registry, trace_path: trace_path, inspect: inspection_path)
+    |> RunLifecycle.execute()
+  end
+
+  defp checkpoint_manifest(event_policy \\ "private") do
     %{
       "version" => 1,
       "workflow" => %{
@@ -952,7 +977,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
         "entry" => "app/run"
       },
       "input" => %{"value" => %{"seen" => "checkpoint-input"}},
-      "events" => %{"policy" => "private"}
+      "events" => %{"policy" => event_policy}
     }
   end
 

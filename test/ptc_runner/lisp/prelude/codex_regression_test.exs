@@ -398,7 +398,7 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
       """
 
       assert {:error, err} = Compiler.compile(source)
-      assert err.reason == :compile_error
+      assert err.reason == :unbound_var
       assert err.message =~ "typo"
     end
 

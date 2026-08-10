@@ -254,21 +254,34 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   defp bundle_diagnostic(%{reason: reason} = failure, components)
        when reason in [:component_compile_error, :bundle_compile_error, :bundle_compile_failed],
-       do: diagnostic(:bundle, :compile_failed, source_opts(failure, components))
+       do:
+         diagnostic(
+           :bundle,
+           compile_diagnostic_code(Map.get(failure, :compile_reason)),
+           source_opts(failure, components)
+         )
 
   defp bundle_diagnostic(failure, components),
     do: diagnostic(:bundle, :bundle_invalid, source_opts(failure, components))
 
-  defp source_opts(%{id: id}, components) when is_binary(id) do
+  defp source_opts(%{id: id} = failure, components) when is_binary(id) do
     case Enum.find(components, &match?(%Component{id: ^id}, &1)) do
-      %Component{} = component -> component_source_opts(component)
+      %Component{} = component -> component_source_opts(component, Map.get(failure, :span))
       nil -> []
     end
   end
 
   defp source_opts(_failure, _components), do: []
 
-  defp component_source_opts(%Component{id: id, origin: origin}) do
+  defp compile_diagnostic_code(:parse_error), do: :syntax_invalid
+  defp compile_diagnostic_code(:unbound_var), do: :undefined_variable
+  defp compile_diagnostic_code(:duplicate_ref), do: :duplicate_definition
+  defp compile_diagnostic_code(_reason), do: :compile_failed
+
+  # Provenance is bound to the exact component bytes the compiler read, which
+  # is what admits a span at all: `CommandDiagnostic` refuses one whose end
+  # offset exceeds the source's attested byte bound.
+  defp component_source_opts(%Component{id: id, origin: origin, source: bytes}, span) do
     name =
       cond do
         ApplicationSource.valid_name?(origin) -> origin
@@ -281,10 +294,17 @@ defmodule PtcRunner.Kernel.RunCoordinator do
         []
 
       safe_name ->
-        {:ok, source} = CommandSource.new(:component, safe_name)
-        [source: source]
+        source = CommandSource.with_bytes(:component, safe_name, bytes)
+        [source: source] ++ span_opts(span, bytes)
     end
   end
+
+  defp span_opts(%{start_byte: start_byte, end_byte: end_byte}, bytes)
+       when is_integer(start_byte) and is_integer(end_byte) and start_byte >= 0 and
+              end_byte >= start_byte and end_byte <= byte_size(bytes),
+       do: [span: %{start_byte: start_byte, end_byte: end_byte}]
+
+  defp span_opts(_span, _bytes), do: []
 
   @doc false
   @spec validate_entry(PtcRunner.Kernel.FrozenBundle.t(), binary()) ::
