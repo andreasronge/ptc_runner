@@ -4,10 +4,13 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   Capture is host-enabled and fail-closed. Version 1 accepts capability-input,
   capability-output, subordinate evaluation-source, and prelude-source.
-  Version 2 adds correlated exact MCP request and response bodies. It
-  normalizes atom keys and enum values to JSON strings, assigns the run
-  identity, sequence, and UTC timestamp, and rejects a record before retention
-  when either its retained or encoded size exceeds the installed bounds.
+  Version 2 adds correlated exact MCP request and response bodies. Version 3
+  adds workflow execution-phase diagnostics — `execution-prints` and
+  `execution-error`, correlated by the workflow `evaluation_id` — captured only
+  when the top-level workflow evaluation fails. It normalizes atom keys and
+  enum values to JSON strings, assigns the run identity, sequence, and UTC
+  timestamp, and rejects a record before retention when either its retained or
+  encoded size exceeds the installed bounds.
 
   This sink is independent of Logger, Telemetry, EventSink policy, manifests,
   and Lisp. Records remain private until the host explicitly persists them as
@@ -16,6 +19,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   use GenServer
 
+  alias PtcRunner.Kernel.InspectionRecordTypes
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.OwnerHandoff
@@ -23,8 +27,6 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   @default_record_bytes 2_000_000
   @default_total_bytes 16_000_000
-  @record_types_v1 ~w(capability-input capability-output evaluation-source prelude-source)
-  @record_types_v2 @record_types_v1 ++ ~w(mcp-request mcp-response)
   @stop_timeout_ms 5_000
 
   @enforce_keys [:pid, :token]
@@ -50,7 +52,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
     max_record_bytes = Keyword.get(opts, :max_record_bytes, @default_record_bytes)
     max_total_bytes = Keyword.get(opts, :max_total_bytes, @default_total_bytes)
 
-    if Keyword.keys(opts) -- allowed == [] and schema_version in [1, 2] and valid_id?(run_id) and
+    if Keyword.keys(opts) -- allowed == [] and schema_version in [1, 2, 3] and valid_id?(run_id) and
          valid_id?(trace_id) and
          is_integer(max_record_bytes) and max_record_bytes > 0 and
          max_record_bytes <= @default_record_bytes and is_integer(max_total_bytes) and
@@ -107,6 +109,17 @@ defmodule PtcRunner.Kernel.InspectionSink do
           {:ok, %{run_id: binary(), trace_id: binary()}} | {:error, :inspection_sink_error}
   def identity(sink), do: call(sink, :identity)
 
+  @spec schema_version(t()) :: {:ok, 1 | 2 | 3} | {:error, :inspection_sink_error}
+  @doc """
+  Returns the sink's negotiated schema version.
+
+  A caller emitting a record type introduced after V1 should check this first
+  and skip emission entirely on an older sink, the same as it would for a `nil`
+  sink — the record's vocabulary is a version the sink predates, not a runtime
+  failure worth failing the run closed over.
+  """
+  def schema_version(sink), do: call(sink, :schema_version)
+
   @doc false
   @spec stop_timeout_ms() :: pos_integer()
   def stop_timeout_ms, do: @stop_timeout_ms
@@ -160,6 +173,9 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   def handle_call({token, :identity}, _from, %{token: token} = state),
     do: {:reply, {:ok, Map.take(state, [:run_id, :trace_id])}, state}
+
+  def handle_call({token, :schema_version}, _from, %{token: token} = state),
+    do: {:reply, {:ok, state.schema_version}, state}
 
   def handle_call({token, :owner?}, {caller, _tag}, %{token: token} = state),
     do: {:reply, caller == state.owner, state}
@@ -337,6 +353,26 @@ defmodule PtcRunner.Kernel.InspectionSink do
     ok_or_error(valid?)
   end
 
+  defp shape("execution-prints", %{"evaluation_id" => id}, payload) do
+    valid? =
+      exact_payload(payload, ~w(environment prints truncated)) and valid_id?(id) and
+        payload["environment"] == "workflow" and
+        is_list(payload["prints"]) and Enum.all?(payload["prints"], &is_binary/1) and
+        is_boolean(payload["truncated"])
+
+    ok_or_error(valid?)
+  end
+
+  defp shape("execution-error", %{"evaluation_id" => id}, payload) do
+    valid? =
+      exact_payload(payload, ~w(environment kind reason details)) and valid_id?(id) and
+        payload["environment"] == "workflow" and
+        valid_id?(payload["kind"]) and valid_id?(payload["reason"]) and
+        is_map(payload["details"])
+
+    ok_or_error(valid?)
+  end
+
   defp shape(_record_type, _correlation, _payload), do: {:error, :invalid_record}
 
   defp exact_payload(payload, keys) do
@@ -348,8 +384,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
       valid_id?(payload["name"]) and is_map(payload[value_key])
   end
 
-  defp record_types(1), do: @record_types_v1
-  defp record_types(2), do: @record_types_v2
+  defp record_types(schema_version), do: InspectionRecordTypes.for_schema_version(schema_version)
   defp valid_request_id?(id), do: is_integer(id) and id > 0
 
   defp ok_or_error(true), do: :ok

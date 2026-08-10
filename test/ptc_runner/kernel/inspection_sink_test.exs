@@ -132,6 +132,69 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert response_record["payload"]["body"] == response
   end
 
+  test "V3 retains correlated execution-prints and execution-error records while V2 rejects them" do
+    {:ok, v2} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 2)
+
+    assert {:error, :inspection_sink_error} =
+             InspectionSink.emit(
+               v2,
+               "execution-prints",
+               %{evaluation_id: "eval-1"},
+               %{environment: :workflow, prints: ["CHECKPOINT"], truncated: false}
+             )
+
+    {:ok, v3} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 3)
+
+    assert :ok =
+             InspectionSink.emit(
+               v3,
+               "execution-prints",
+               %{evaluation_id: "eval-1"},
+               %{environment: :workflow, prints: ["CHECKPOINT"], truncated: false}
+             )
+
+    assert :ok =
+             InspectionSink.emit(
+               v3,
+               "execution-error",
+               %{evaluation_id: "eval-1"},
+               %{
+                 environment: :workflow,
+                 kind: :workflow_failed,
+                 reason: :invalid_result_projection,
+                 details: %{result_projection: true, projection_error: "some inspected reason"}
+               }
+             )
+
+    assert {:ok, [prints_record, error_record]} = InspectionSink.records(v3)
+    assert prints_record["schema_version"] == 3
+    assert prints_record["correlation"] == %{"evaluation_id" => "eval-1"}
+
+    assert prints_record["payload"] == %{
+             "environment" => "workflow",
+             "prints" => ["CHECKPOINT"],
+             "truncated" => false
+           }
+
+    assert error_record["payload"] == %{
+             "environment" => "workflow",
+             "kind" => "workflow_failed",
+             "reason" => "invalid_result_projection",
+             "details" => %{
+               "result_projection" => true,
+               "projection_error" => "some inspected reason"
+             }
+           }
+
+    assert {:error, :inspection_sink_error} =
+             InspectionSink.emit(
+               v3,
+               "execution-prints",
+               %{evaluation_id: "eval-2"},
+               %{environment: :mission, prints: ["nope"], truncated: false}
+             )
+  end
+
   test "enforces installed per-record and aggregate encoded byte ceilings" do
     {:ok, record_limited} =
       InspectionSink.start(
