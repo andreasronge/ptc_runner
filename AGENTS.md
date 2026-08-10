@@ -63,8 +63,10 @@ how it was verified.
   `precommit`, and are repeated here because an ordinary push does not run
   `precommit` — without them a `lib/` edit can clear every local gate and still
   fail CI on an artifact you were never prompted to regenerate. When one fires,
-  run `mix regen` and stage the result. Do not run `mix prepush` immediately
-  before an ordinary push;
+  run its matching write form — `mix ptc.gen_docs` for generated docs and
+  schemas, or `mix ptc.conformance_report --write-inventory` for
+  `conformance_inventory.json` — then stage the result. Do not run `mix prepush`
+  immediately before an ordinary push;
   invoke it directly only for diagnosis or when hooks are unavailable. PR CI
   runs the same checks as individual steps. On a resource-constrained machine,
   `PTC_PRE_PUSH_MAX_CASES=2 git push` keeps every gate enabled while reducing
