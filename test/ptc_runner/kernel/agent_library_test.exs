@@ -888,7 +888,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                caller: :kernel
              )
 
-    assert message =~ "private prelude evaluation failed with a type error"
+    assert message =~ "agent.core/run: prelude function failed with a type error"
   end
 
   test "an intermediate result on the final turn commits before turn-limit failure" do

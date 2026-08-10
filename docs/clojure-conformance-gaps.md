@@ -1460,7 +1460,15 @@ recoverable type-preserving refusal above.
 
 Round-trip (§4.3) holds for string-keyed data only. Integer keys were already a documented carve-out that does not round-trip (`{1 "a"}` parses back as `%{"1" => "a"}`); keyword keys join them (`{:a 1}` parses back as `%{"a" => 1}`).
 
-**Note.** Inside a private prelude the encoder's message is generalized to `private prelude evaluation failed with a type error` by the prelude-privacy boundary, and a private *session* collapses it further via `PtcRunner.Kernel.PrivateDiagnostic`. The position detail reaches ordinary programs only.
+**Note.** At the prelude-privacy boundary, a type error retains detail only
+when the producer supplies an allowlisted structured diagnostic that can be
+rebuilt without forwarding argument values. Other type errors become
+`<public-export>: prelude function failed with a type error` for a direct
+export call. A closure returned from a prelude no longer carries that export
+reference, so its public namespace is the fallback diagnostic frame. A private
+*session* may collapse either message further via
+`PtcRunner.Kernel.PrivateDiagnostic`. The position detail reaches ordinary
+programs only.
 
 ### GAP-S08: `even?`/`odd?` handle floats gracefully
 

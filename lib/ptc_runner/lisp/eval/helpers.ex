@@ -5,8 +5,10 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   Provides type error formatting and type description utilities.
   """
 
+  alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Env.Builtin
+  alias PtcRunner.Lisp.Format.SymbolRef
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
   alias PtcRunner.Lisp.Java.Time.Duration, as: JavaDuration
@@ -16,6 +18,23 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @stable_parallel_errors [:memory_exceeded, :timeout, :parallel_capacity_exceeded]
+  @safe_type_names [
+    "boolean",
+    "function",
+    "invalid Java value",
+    "java.time.Duration",
+    "java.time.Instant",
+    "java.time.LocalDate",
+    "java.util.Date",
+    "keyword",
+    "list",
+    "map",
+    "nil",
+    "number",
+    "set",
+    "string",
+    "unknown"
+  ]
 
   @doc """
   Generates a type error tuple for FunctionClauseError in builtins.
@@ -283,6 +302,9 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   @doc false
   @spec sanitize_private_error(term()) :: term()
+  def sanitize_private_error({:type_error, _message, {:safe_diagnostic, _diagnostic}} = reason),
+    do: sanitize_private_error(reason, nil)
+
   def sanitize_private_error({reason, _message, nil}) when reason in @stable_parallel_errors,
     do: {reason, stable_parallel_error_message(reason), nil}
 
@@ -294,7 +316,7 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
       do: {:tool_call_limit_exceeded, limit}
 
   def sanitize_private_error({:type_error, _message, _callback_args}),
-    do: {:type_error, "private prelude evaluation failed with a type error", nil}
+    do: {:type_error, "prelude function failed with a type error", nil}
 
   def sanitize_private_error({:destructure_error, _message}),
     do: {:destructure_error, "private prelude evaluation failed during destructuring"}
@@ -333,6 +355,43 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   def sanitize_private_error(_reason),
     do: {:private_prelude_error, "private prelude evaluation failed"}
+
+  @doc false
+  @spec sanitize_private_error(term(), term()) :: term()
+  def sanitize_private_error(
+        {:type_error, _message,
+         {:safe_diagnostic,
+          %{
+            operator: operator,
+            expected: "number",
+            actual_types: [left_type, right_type]
+          } = diagnostic}},
+        origin
+      )
+      when map_size(diagnostic) == 3 and operator in ["<", "<=", ">", ">="] and
+             left_type in @safe_type_names and right_type in @safe_type_names do
+    message =
+      diagnostic_prefix(origin) <>
+        "#{operator}: expected number arguments, got #{left_type}, #{right_type}"
+
+    {:type_error, message, {:safe_diagnostic, diagnostic}}
+  end
+
+  def sanitize_private_error({:type_error, _message, _private_args}, origin),
+    do:
+      {:type_error, diagnostic_prefix(origin) <> "prelude function failed with a type error", nil}
+
+  def sanitize_private_error(reason, _origin), do: sanitize_private_error(reason)
+
+  defp diagnostic_prefix(%{ref: ref}) when is_binary(ref) do
+    if CoreAST.valid_prelude_ref?(ref), do: ref <> ": ", else: ""
+  end
+
+  defp diagnostic_prefix(%{namespace: namespace}) when is_binary(namespace) do
+    if SymbolRef.valid_name?(namespace), do: namespace <> ": ", else: ""
+  end
+
+  defp diagnostic_prefix(_origin), do: ""
 
   defp stable_parallel_error_message(:memory_exceeded),
     do: "a parallel worker exceeded its per-worker heap cap"

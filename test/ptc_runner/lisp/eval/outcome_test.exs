@@ -327,7 +327,7 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
                opts
              )
 
-    assert message == "private prelude evaluation failed with a type error"
+    assert message == "api/bad: prelude function failed with a type error"
     refute inspect(reason) =~ "PRIVATE_PRELUDE"
     assert_restored_public_context(final_context)
   end
@@ -346,8 +346,84 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
                opts
              )
 
-    assert message == "private prelude evaluation failed with a type error"
+    assert message == "api/bad: prelude function failed with a type error"
     refute inspect(reason) =~ "PRIVATE_PRELUDE"
+    assert_restored_public_context(final_context)
+  end
+
+  test "prelude numeric type errors retain a safe diagnostic and public export frame" do
+    {ast, opts} = analyze!("(api/compare nil)", numeric_error_prelude!())
+
+    assert {:error, {:type_error, message, safe_detail} = reason, final_context} =
+             Eval.eval_with_context(
+               ast,
+               %{},
+               %{"memory" => 1},
+               Env.initial(),
+               fn _, _ -> nil end,
+               [],
+               opts
+             )
+
+    assert message == "api/compare: >: expected number arguments, got nil, number"
+
+    assert safe_detail ==
+             {:safe_diagnostic,
+              %{actual_types: ["nil", "number"], expected: "number", operator: ">"}}
+
+    refute inspect(reason) =~ "PRIVATE"
+    assert_restored_public_context(final_context)
+  end
+
+  test "other comparison operators rebuild their fixed operand types" do
+    {ast, opts} = analyze!("(api/compare-types)", numeric_error_prelude!())
+
+    assert {:error, {:type_error, message, _safe_detail}, _final_context} =
+             Eval.eval_with_context(
+               ast,
+               %{},
+               %{"memory" => 1},
+               Env.initial(),
+               fn _, _ -> nil end,
+               [],
+               opts
+             )
+
+    assert message == "api/compare-types: <=: expected number arguments, got string, map"
+  end
+
+  test "non-comparison numeric functions retain the generic prelude diagnostic" do
+    {ast, opts} = analyze!("(api/max-value nil)", numeric_error_prelude!())
+
+    assert {:error, {:type_error, message, nil}, _final_context} =
+             Eval.eval_with_context(
+               ast,
+               %{},
+               %{"memory" => 1},
+               Env.initial(),
+               fn _, _ -> nil end,
+               [],
+               opts
+             )
+
+    assert message == "api/max-value: prelude function failed with a type error"
+  end
+
+  test "returned prelude closures use their public namespace as the diagnostic frame" do
+    {ast, opts} = analyze!("((api/make-compare) nil)", numeric_error_prelude!())
+
+    assert {:error, {:type_error, message, _safe_detail}, final_context} =
+             Eval.eval_with_context(
+               ast,
+               %{},
+               %{"memory" => 1},
+               Env.initial(),
+               fn _, _ -> nil end,
+               [],
+               opts
+             )
+
+    assert message == "api: >: expected number arguments, got nil, number"
     assert_restored_public_context(final_context)
   end
 
@@ -476,6 +552,19 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
   test "private prelude error sanitization fails closed for unknown error shapes" do
     assert {:private_prelude_error, "private prelude evaluation failed"} =
              Eval.Helpers.sanitize_private_error({:unexpected, "PRIVATE_UNKNOWN_SECRET"})
+  end
+
+  test "private prelude type diagnostics fail closed for unrecognized safe detail" do
+    reason =
+      {:type_error, "PRIVATE_MESSAGE",
+       {:safe_diagnostic,
+        %{operator: ">", expected: "number", actual_types: ["PRIVATE_TYPE", "number"]}}}
+
+    assert {:type_error, message, nil} =
+             Eval.Helpers.sanitize_private_error(reason, %{ref: "api/compare"})
+
+    assert message == "api/compare: prelude function failed with a type error"
+    refute message =~ "PRIVATE"
   end
 
   test "private prelude error sanitization retains safe limit reasons" do
@@ -626,6 +715,20 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
       (defn bad [x]
         (let [private "PRIVATE_PRELUDE_SECRET"]
           (private x)))
+      """)
+
+    prelude
+  end
+
+  defp numeric_error_prelude! do
+    {:ok, prelude} =
+      Compiler.compile("""
+      (ns api "API" {:visibility :prompt})
+      (defn- compare-value [x] (> x 1))
+      (defn compare [x] (compare-value x))
+      (defn make-compare [] compare-value)
+      (defn compare-types [] (<= "x" {}))
+      (defn max-value [x] (max x 1))
       """)
 
     prelude

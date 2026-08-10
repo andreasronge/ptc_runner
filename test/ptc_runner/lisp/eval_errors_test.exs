@@ -333,6 +333,18 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
       assert msg == ~S|bit-not: expected an integer, got string "x"|
     end
 
+    test "sort-by contextualizes structured comparison failures from its key function" do
+      env = Env.initial()
+      closure = {:fn, [{:var, :x}], {:call, {:var, :>}, [{:var, :x}, 1]}}
+      ast = {:call, {:var, :"sort-by"}, [closure, {:vector, [nil, 2]}]}
+
+      assert {:error, {:type_error, msg, _detail}} =
+               Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+
+      assert msg ==
+               "sort-by key function failed for item nil: >: expected number arguments, got nil, number"
+    end
+
     test "sort-by contextualizes ordinary closure failures from its key function" do
       env = Env.initial()
 
