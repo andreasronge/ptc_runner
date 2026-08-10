@@ -4823,6 +4823,33 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "Clojure case dispatch distinguishes Character and String constants; PTC-Lisp currently treats them as equal."
       ),
       div_case(
+        "core/compare-char-string-div-001",
+        "clojure.core",
+        ["compare"],
+        ~S|(compare \a "a")|,
+        "GAP-S120",
+        0,
+        "Clojure rejects Character/String comparison; PTC-Lisp has one string value type for both forms."
+      ),
+      div_case(
+        "core/sort-char-string-div-001",
+        "clojure.core",
+        ["sort"],
+        ~S|(sort [\b "a"])|,
+        "GAP-S120",
+        ["a", "b"],
+        "Clojure rejects mixed Character/String sorting; PTC-Lisp has one string value type for both forms."
+      ),
+      div_case(
+        "core/sort-by-char-string-div-001",
+        "clojure.core",
+        ["sort-by"],
+        ~S|(sort-by identity [\b "a"])|,
+        "GAP-S120",
+        ["a", "b"],
+        "Clojure rejects mixed Character/String keys; PTC-Lisp has one string value type for both forms."
+      ),
+      div_case(
         "core/seqable-char-bug-001",
         "clojure.core",
         ["seqable?"],
@@ -7437,203 +7464,236 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         {:error, :type_error},
         "Direct positional map access raises; use seq/entries/keys/vals for ordered map views."
       ),
-      div_case(
-        "div/lt-mixed-scalar-001",
+      regression_case(
+        "core/lt-mixed-scalar-001",
         "clojure.core",
         ["<"],
         ~S|(< "a" 1)|,
-        "DIV-30",
-        false,
-        "Ordering predicates use PTC's recoverable total term ordering instead of raising."
+        [
+          "DIV-30"
+        ],
+        [
+          :edge,
+          :error_semantics
+        ]
       ),
-      div_case(
-        "div/lt-string-scalar-001",
+      regression_case(
+        "core/lt-string-scalar-001",
         "clojure.core",
         ["<"],
         ~S|(< "a" "b")|,
-        "DIV-30",
-        true,
-        "Ordering predicates use PTC's recoverable total term ordering for nonnumeric scalar values."
+        [
+          "DIV-30"
+        ],
+        [
+          :edge,
+          :error_semantics
+        ]
       ),
-      div_case(
-        "div/lte-char-scalar-001",
+      regression_case(
+        "core/lte-char-scalar-001",
         "clojure.core",
         ["<="],
         ~S|(<= \a \a)|,
-        "DIV-30",
-        true,
-        "Ordering predicates use PTC's recoverable total term ordering for character values."
+        [
+          "DIV-30"
+        ],
+        [
+          :edge,
+          :error_semantics
+        ]
       ),
-      div_case(
-        "div/gt-string-scalar-001",
+      regression_case(
+        "core/gt-string-scalar-001",
         "clojure.core",
         [">"],
         ~S|(> "b" "a")|,
-        "DIV-30",
-        true,
-        "Ordering predicates use PTC's recoverable total term ordering for nonnumeric scalar values."
+        [
+          "DIV-30"
+        ],
+        [
+          :edge,
+          :error_semantics
+        ]
       ),
-      div_case(
-        "div/gte-char-scalar-001",
+      regression_case(
+        "core/gte-char-scalar-001",
         "clojure.core",
         [">="],
         ~S|(>= \b \a)|,
-        "DIV-30",
-        true,
-        "Ordering predicates use PTC's recoverable total term ordering for character values."
+        [
+          "DIV-30"
+        ],
+        [
+          :edge,
+          :error_semantics
+        ]
       ),
-      div_case(
-        "div/sort-mixed-scalar-001",
+      regression_case(
+        "core/sort-mixed-scalar-001",
         "clojure.core",
         ["sort"],
         ~S|(sort [1 "a"])|,
-        "DIV-30",
-        [1, "a"],
-        "sort uses PTC's recoverable total term ordering for mixed scalar data."
+        ["DIV-30"],
+        [:edge, :error_semantics]
       ),
-      div_case(
-        "div/sort-nil-001",
+      regression_case(
+        "core/sort-nil-001",
         "clojure.core",
         ["sort"],
         "(sort [1 nil])",
-        "DIV-30",
-        [1, nil],
-        "nil sorts according to PTC's total term ordering, not Clojure's nil-first compare."
+        ["DIV-30"],
+        [:edge]
       ),
-      div_case(
-        "div/sort-by-nil-key-001",
+      regression_case(
+        "core/sort-by-nil-key-001",
         "clojure.core",
         ["sort-by"],
         "(sort-by :a [{:a nil} {:a 1}])",
-        "DIV-30",
-        [%{"a" => 1}, %{"a" => nil}],
-        "sort-by uses PTC's total term ordering for transformed nil values."
+        ["DIV-30"],
+        [:edge]
       ),
-      div_case(
-        "div/compare-nil-001",
+      regression_case(
+        "core/compare-nil-001",
         "clojure.core",
         ["compare"],
         "(compare nil 1)",
-        "DIV-30",
-        1,
-        "compare uses PTC's total term ordering for nil and mixed values."
+        ["DIV-30"],
+        [:edge]
       ),
-      div_case(
-        "div/compare-map-001",
+      regression_case(
+        "core/compare-map-001",
         "clojure.core",
         ["compare"],
         "(compare {:a 1} {:a 2})",
-        "DIV-30",
-        -1,
-        "compare uses PTC's total term ordering for maps instead of Clojure's Comparable-only behavior."
+        ["DIV-30"],
+        [:edge, :error_semantics]
       ),
-      div_case(
-        "div/compare-string-keyword-001",
+      regression_case(
+        "core/compare-string-keyword-001",
         "clojure.core",
         ["compare"],
         ~S|(compare "a" :a)|,
-        "DIV-30",
-        1,
-        "compare uses PTC's total term ordering for mixed scalar values instead of Clojure's Comparable-only behavior."
+        ["DIV-30"],
+        [:edge, :error_semantics]
       ),
-      div_case(
-        "div/compare-string-number-001",
+      regression_case(
+        "core/compare-string-number-001",
         "clojure.core",
         ["compare"],
         ~S|(compare "a" 1)|,
-        "DIV-30",
-        1,
-        "compare uses PTC's total term ordering for mixed scalar values instead of Clojure's Comparable-only behavior."
+        ["DIV-30"],
+        [:edge, :error_semantics]
       ),
-      div_case(
-        "div/max-nil-001",
+      regression_case(
+        "core/max-nil-001",
         "clojure.core",
         ["max"],
         "(max nil 1)",
-        "DIV-30",
-        nil,
-        "max uses PTC's total term ordering for nil instead of Clojure's numeric-only behavior."
+        [
+          "DIV-30"
+        ],
+        [
+          :edge,
+          :error_semantics
+        ]
       ),
-      div_case(
-        "div/min-nil-001",
+      regression_case(
+        "core/min-nil-001",
         "clojure.core",
         ["min"],
         "(min nil 1)",
-        "DIV-30",
-        1,
-        "min uses PTC's total term ordering for nil instead of Clojure's numeric-only behavior."
+        [
+          "DIV-30"
+        ],
+        [
+          :edge,
+          :error_semantics
+        ]
       ),
-      div_case(
-        "div/max-string-number-001",
+      regression_case(
+        "core/max-string-number-001",
         "clojure.core",
         ["max"],
         ~S|(max "a" 1)|,
-        "DIV-30",
-        "a",
-        "max uses PTC's total term ordering for mixed scalar values instead of Clojure's numeric-only behavior."
+        [
+          "DIV-30"
+        ],
+        [
+          :edge,
+          :error_semantics
+        ]
       ),
-      div_case(
-        "div/min-string-number-001",
+      regression_case(
+        "core/min-string-number-001",
         "clojure.core",
         ["min"],
         ~S|(min "a" 1)|,
-        "DIV-30",
-        1,
-        "min uses PTC's total term ordering for mixed scalar values instead of Clojure's numeric-only behavior."
+        [
+          "DIV-30"
+        ],
+        [
+          :edge,
+          :error_semantics
+        ]
       ),
-      div_case(
-        "div/min-boolean-001",
+      regression_case(
+        "core/min-boolean-001",
         "clojure.core",
         ["min"],
         "(min true false)",
-        "DIV-30",
-        false,
-        "min uses PTC's total term ordering for nonnumeric values instead of Clojure's numeric-only behavior."
+        [
+          "DIV-30"
+        ],
+        [
+          :edge,
+          :error_semantics
+        ]
       ),
-      div_case(
-        "div/max-keyword-001",
+      regression_case(
+        "core/max-keyword-001",
         "clojure.core",
         ["max"],
         "(max :a :b)",
-        "DIV-30",
-        "b",
-        "max uses PTC's total term ordering for nonnumeric values instead of Clojure's numeric-only behavior."
+        [
+          "DIV-30"
+        ],
+        [
+          :edge,
+          :error_semantics
+        ]
       ),
-      div_case(
-        "div/min-key-boolean-001",
+      regression_case(
+        "core/min-key-boolean-001",
         "clojure.core",
         ["min-key"],
         "(min-key identity true false)",
-        "DIV-30",
-        false,
-        "min-key uses PTC's total term ordering for transformed nonnumeric values instead of Clojure's numeric-only behavior."
+        ["DIV-30"],
+        [:edge, :error_semantics]
       ),
-      div_case(
-        "div/max-key-keyword-001",
+      regression_case(
+        "core/max-key-keyword-001",
         "clojure.core",
         ["max-key"],
         "(max-key identity :a :b)",
-        "DIV-30",
-        "b",
-        "max-key uses PTC's total term ordering for transformed nonnumeric values instead of Clojure's numeric-only behavior."
+        ["DIV-30"],
+        [:edge, :error_semantics]
       ),
-      div_case(
-        "div/max-key-nil-key-001",
+      regression_case(
+        "core/max-key-nil-key-001",
         "clojure.core",
         ["max-key"],
         "(max-key :a {:a nil} {:a 1})",
-        "DIV-30",
-        %{"a" => nil},
-        "max-key uses PTC's total term ordering for transformed nil values instead of Clojure's numeric-only behavior."
+        ["DIV-30"],
+        [:edge, :error_semantics]
       ),
-      div_case(
-        "div/min-key-nil-key-001",
+      regression_case(
+        "core/min-key-nil-key-001",
         "clojure.core",
         ["min-key"],
         "(min-key :a {:a nil} {:a 1})",
-        "DIV-30",
-        %{"a" => 1},
-        "min-key uses PTC's total term ordering for transformed nil values instead of Clojure's numeric-only behavior."
+        ["DIV-30"],
+        [:edge, :error_semantics]
       ),
       div_case(
         "div/zero-predicate-nil-001",
@@ -7803,6 +7863,22 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "(compare ##NaN ##NaN)",
         "DIV-33",
         "PTC-Lisp treats NaN as unordered even for self-comparison."
+      ),
+      bug_case(
+        "div/sort-nan-001",
+        "clojure.core",
+        ["sort"],
+        "(sort [##NaN 1])",
+        "DIV-33",
+        "PTC-Lisp default sorting raises when comparison reaches NaN instead of retaining Clojure's compare result."
+      ),
+      bug_case(
+        "div/sort-by-nan-001",
+        "clojure.core",
+        ["sort-by"],
+        "(sort-by identity [##NaN 1])",
+        "DIV-33",
+        "PTC-Lisp default key sorting raises when comparison reaches NaN instead of retaining Clojure's compare result."
       ),
       div_case(
         "div/seq-map-sorted-001",

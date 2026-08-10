@@ -1530,16 +1530,23 @@ Use `get-in` (or sequential `(:b (:a item))`) for nested fields:
 
 ```clojure
 (filter (fn [u] (= (get-in u [:profile :verified]) true)) users)
-(filter (fn [i] (> (get-in i [:user :age]) 18)) items)
+(filter (fn [i]
+          (let [age (get-in i [:user :age])]
+            (and (number? age) (> age 18))))
+        items)
 ```
 
 ### 7.4 Nil Handling in Predicates
 
-Ordering comparisons (`>`, `<`, `>=`, `<=`) are recoverable predicates: they return booleans for `nil` and mixed scalar values instead of raising. PTC-Lisp uses the runtime's total term ordering for non-NaN values, which can be surprising for missing fields. **`nil` orders above every finite number** (but below `##Inf`, and any comparison touching `##NaN` is false — DIV-30), so `(> (:age missing-user) 18)` returns `true` rather than the exception Clojure raises — a typo'd or missing key silently satisfies a "greater than" check instead of failing loudly. Guard explicitly when missing values should be excluded:
+Ordering comparisons (`>`, `<`, `>=`, `<=`) are numeric predicates, matching
+Clojure. With two or more arguments, every pair that is reached must contain
+numbers; `nil`, strings, keywords, maps, and Java temporal values signal a
+structured `:type_error`. Validate dynamic fields explicitly when malformed
+input should be skipped rather than fail the evaluation:
 
 ```clojure
-;; Safe: filter out users without :age first
-(filter (fn [u] (and (some? (:age u)) (> (:age u) 18))) users)
+;; Safe: compare only numeric ages
+(filter (fn [u] (and (number? (:age u)) (> (:age u) 18))) users)
 ```
 
 For equality checks `nil` is well-defined:
@@ -1776,13 +1783,17 @@ as a `[key value]` pair passed to the predicate. They return a **vector** of
 | `sort-by` | `(sort-by keyfn comp coll)` | Sort with comparator |
 | `reverse` | `(reverse coll)` | Reverse order |
 
-**Sortable types:** All ordinary values use the runtime's deterministic total
-term order, including mixed values and `nil`. Numbers therefore use numeric
-order and strings use lexicographic (alphabetical) order. Two validated native
-Java temporal values use their natural Java order when they belong to the same
-admitted class (`LocalDate`, `Instant`, `Duration`, or `Date`); cross-class
-temporal values fall back to the ordinary total term order. Malformed Java
-wrappers raise a recoverable invalid-value error.
+**Sortable types:** Default `sort` and `sort-by` use the same comparison contract
+as Clojure's `compare` where PTC has the same value types: `nil` sorts first;
+numbers use numeric order; strings,
+keywords, booleans, and vectors use their natural order; and same-class
+validated Java temporal values use their Java natural order. Incompatible
+types, maps used as comparison values, cross-class temporal values, and
+malformed Java wrappers signal structured errors. Direct maps remain accepted
+as collections and are sorted as `[key value]` entry vectors. PTC character
+literals are one-character strings, so they compare and sort with strings;
+Clojure instead has a distinct `Character` type and rejects mixed
+Character/String ordering (GAP-S120).
 
 ```clojure
 (sort [3 1 2])                ; => [1 2 3]
@@ -1799,7 +1810,13 @@ wrappers raise a recoverable invalid-value error.
 (reverse [1 2 3])             ; => [3 2 1]
 ```
 
-**Note:** `sort`, `sort-by`, and the explicit comparison operators (`>`, `<`, `>=`, `<=`) support strings and mixed scalar values using recoverable runtime term ordering. Prefer numeric-only data when numeric ordering is required.
+Heterogeneous values without a shared natural order fail rather than inheriting
+an implementation-specific type precedence. Normalize the data or pass an
+explicit domain comparator when mixed representations are intentional.
+
+```clojure
+(sort [1 "a"]) ; => TYPE ERROR
+```
 
 **Map support:** The one-argument `sort` form and both `sort-by` forms accept
 maps, treating each entry as a `[key value]` pair. They return a **vector** of
@@ -2399,9 +2416,9 @@ out-of-bounds vector indices.
 | `sqrt` | `(sqrt x)` | Square root (returns float; `##NaN` for negatives) |
 | `pow` | `(pow x y)` | Exponentiation (returns float) |
 | `trunc` | `(trunc x)` | Truncate toward zero |
-| `compare` | `(compare x y)` | Numeric comparison: `-1` if `x < y`, `0` if `x == y`, `1` if `x > y`. Only supports numbers in PTC-Lisp. |
-| `max` | `(max x y ...)` | Maximum value |
-| `min` | `(min x y ...)` | Minimum value |
+| `compare` | `(compare x y)` | Clojure-like natural comparison: nil first, natural order within compatible types, and an error for incompatible values. |
+| `max` | `(max x y ...)` | Maximum number; a unary call returns its argument, while reached non-numeric comparisons fail. |
+| `min` | `(min x y ...)` | Minimum number; a unary call returns its argument, while reached non-numeric comparisons fail. |
 | `floor` | `(floor x)` | Round toward -∞ |
 | `ceil` | `(ceil x)` | Round toward +∞ |
 | `round` | `(round x)` | Round to nearest integer |
@@ -3091,9 +3108,10 @@ DateTime, and mixed-class arguments are type errors. This is the bounded
 `Temporal`-profile divergence recorded as DIV-52. Partial units in toDays
 truncate according to Java Duration semantics.
 
-Ordinary comparison, min/max selection, and natural sorting compare two values
-of the same admitted temporal class by their Java temporal value, never by the
-field order of the native wrapper.
+Ordinary `compare` and natural sorting compare two values of the same admitted
+temporal class by their Java temporal value, never by the field order of the
+native wrapper. Numeric `min`, `max`, `min-key`, and `max-key` reject temporal
+values; the PTC `min-by` and `max-by` data helpers retain natural ordering.
 
 Date(long) always means milliseconds. It performs no seconds-versus-milliseconds
 heuristic. Host temporal structs are not accepted as constructor arguments.
@@ -3705,41 +3723,54 @@ Filter by nested field:
 (= 5 nil)                    ; => false
 (nil? nil)                   ; => true
 
-;; Ordering comparisons with nil are recoverable term-order predicates
-(> 5 nil)                    ; => false
-(< nil 10)                   ; => false
+;; Numeric ordering rejects a missing value
+(> 5 nil)                    ; => TYPE ERROR
+(< nil 10)                   ; => TYPE ERROR
 
 ;; filter/map handle nil gracefully
 (filter (fn [m] (= (:x m) nil)) [{:x nil} {:x 1}])  ; => [{:x nil}]
 ```
 
-### 11.3 Recoverable Ordered Comparisons
+### 11.3 Numeric Predicates and Default Comparison
 
-Ordering comparisons (`>`, `<`, `>=`, `<=`) are recoverable in PTC-Lisp. They
-return booleans rather than raising for `nil`, strings, keywords, maps, and mixed
-scalar values. Same-class validated Java temporal values use their Java natural
-order; other non-NaN values, including cross-class temporal values, use the
-runtime's total term ordering. `NaN` comparisons return false, and malformed
-Java wrappers raise a recoverable invalid-value error.
+The ordering predicates (`>`, `<`, `>=`, `<=`), `min`, `max`, `min-key`, and
+`max-key` accept numeric operands, matching their Clojure contracts. A reached
+non-numeric operand signals `:type_error`; comparisons with `NaN` return false.
+The one-argument predicate forms return true without inspecting the argument,
+also matching Clojure. Unary `min`/`max` return their sole argument, and unary
+`min-key`/`max-key` return the sole value without invoking the key function;
+numeric validation begins only when a comparison is reached.
+
+`compare`, default `sort`, and default `sort-by` are distinct from the numeric
+predicates. They use Clojure-like natural comparison: `nil` sorts before every
+non-nil comparable value, and incompatible types fail rather than inheriting a
+BEAM term order. Same-class validated Java temporal values retain their Java
+natural comparison as a PTC interoperability extension.
 
 ```clojure
 ;; Numeric comparisons
 (> 5 3)                      ; => true
 (< 1.5 2.0)                  ; => true
 
-;; Recoverable term-order comparisons
-(> "b" "a")                  ; => true
-(< 1 nil)                    ; => true
-(<= nil nil)                 ; => true
+;; Non-numeric predicates fail
+(> "b" "a")                  ; => TYPE ERROR
+(< 1 nil)                    ; => TYPE ERROR
+(<= nil nil)                 ; => TYPE ERROR
 (< Double/NaN 0.0)           ; => false
+
+;; Natural comparison is nil-first and rejects incompatible values
+(compare nil 1)              ; => -1
+(sort [1 nil])               ; => [nil 1]
+(sort [1 "a"])              ; => TYPE ERROR
+
+;; PTC has no distinct Character type (GAP-S120)
+(compare \a "a")             ; => 0
+(sort [\b "a"])              ; => ["a" "b"]
 ```
 
-**Note on sorting:** The `sort` and `sort-by` functions use related internal comparison behavior that supports both numbers and strings:
-
-```clojure
-(sort ["b" "a" "c"])         ; => ["a" "b" "c"]
-(sort-by :name users)        ; sorts alphabetically
-```
+Heterogeneous values without a shared natural order produce a type error. A
+workflow that intentionally accepts mixed representations must normalize them
+or supply an explicit domain comparator.
 
 ### 11.4 Aggregation with Missing/Nil Fields
 

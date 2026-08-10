@@ -37,12 +37,12 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `.` | ❌ not_relevant | Java member access and method calls | Java interop |
 | `..` | ❌ not_relevant | Chains member access operations | Java interop |
 | `/` | ✅ supported | Divides numbers |  |
-| `<` | ✅ supported | Returns true if numbers monotonically increase | DIV-30: ordering predicates use PTC's recoverable total term ordering |
-| `<=` | ✅ supported | Returns true if numbers non-decreasing | DIV-30: ordering predicates use PTC's recoverable total term ordering |
+| `<` | ✅ supported | Returns true if numbers monotonically increase |  |
+| `<=` | ✅ supported | Returns true if numbers non-decreasing |  |
 | `=` | ✅ supported | Equality comparison | DIV-32: numeric equality is type-independent. BUG GAP-S120: character literals compare equal to one-character strings |
 | `==` | ✅ supported | Type-independent numeric equality | alias for numeric equality; BUG GAP-S120: character literals compare equal to strings |
-| `>` | ✅ supported | Returns true if numbers monotonically decrease | DIV-30: ordering predicates use PTC's recoverable total term ordering |
-| `>=` | ✅ supported | Returns true if numbers non-increasing | DIV-30: ordering predicates use PTC's recoverable total term ordering |
+| `>` | ✅ supported | Returns true if numbers monotonically decrease |  |
+| `>=` | ✅ supported | Returns true if numbers non-increasing |  |
 | `NaN?` | ✅ supported | Returns true if number is NaN | DIV-31: returns false for nil/non-numeric inputs instead of raising |
 | `abs` | ✅ supported | Returns absolute value of number | DIV-37: uses PTC-Lisp arbitrary-precision integers instead of JVM Long/MIN_VALUE overflow |
 | `accessor` | ❌ not_relevant | Returns function accessing structmap value at key | legacy structmap helper; structmaps are not supported |
@@ -120,7 +120,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `commute` | ❌ not_relevant | Sets ref value via commutative function | mutable state primitive (refs) |
 | `comp` | ✅ supported | Composes functions right-to-left | BUG GAP-S71: map/set/vector callables are rejected in composed function position. A nil composed function raises when called (not callable), matching Clojure |
 | `comparator` | 🔲 candidate | Returns Comparator from predicate | pure function to create a comparison function |
-| `compare` | ✅ supported | Compares values returning neg/zero/pos | DIV-30: uses PTC's recoverable total term ordering for nil, maps, and mixed values; DIV-33: NaN is unordered and raises |
+| `compare` | ✅ supported | Compares values returning neg/zero/pos | DIV-33: NaN is unordered and raises. GAP-S120: character literals compare as one-character strings |
 | `compare-and-set!` | ❌ not_relevant | Atomically sets atom if current equals old | operates on mutable state (atoms) |
 | `compile` | ❌ not_relevant | Compiles namespace into classfiles | compilation and class generation |
 | `complement` | ✅ supported | Returns function with opposite truth value | BUG GAP-S71: map/set callables are rejected in predicate position |
@@ -315,16 +315,16 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `map?` | ✅ supported | Returns true if map |  |
 | `mapcat` | ✅ supported | Maps then concatenates results | BUG GAP-S49: multiple input collections, nil results, and string results currently raise. BUG GAP-S71: map callables are rejected in function position |
 | `mapv` | ✅ supported | Returns vector from mapping function | BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
-| `max` | ✅ supported | Returns greatest number | DIV-30: uses PTC's recoverable total term ordering for nil and mixed values |
-| `max-key` | ✅ supported | Returns item with greatest function value | DIV-30: key comparison uses PTC's recoverable total term ordering for nil and mixed values. BUG GAP-S47: ties currently return the first maximum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions |
+| `max` | ✅ supported | Returns greatest number |  |
+| `max-key` | ✅ supported | Returns item with greatest function value | BUG GAP-S47: ties currently return the first maximum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions |
 | `memfn` | ❌ not_relevant | Returns function calling Java method | relies on Java interop |
 | `memoize` | ❌ not_relevant | Caches function results by arguments | relies on mutable state for caching |
 | `merge` | ✅ supported | Merges maps | BUG GAP-S54: zero-arity and single nil forms return an empty map instead of nil; A single non-map collection is returned unchanged (Clojure semantics). BUG GAP-S90: vector targets are rejected. BUG GAP-S100: direct vector map-entry sources are rejected |
 | `merge-with` | ✅ supported | Merges maps with combining function | BUG GAP-S54: no-map and single nil forms return an empty map instead of nil. A single non-map collection is returned unchanged (Clojure semantics). BUG GAP-S90: vector targets are rejected |
 | `meta` | ❌ not_relevant | Returns metadata | relies on metadata support |
 | `methods` | ❌ not_relevant | Returns multimethod implementations | relies on multimethods |
-| `min` | ✅ supported | Returns least number | DIV-30: uses PTC's recoverable total term ordering for nil and mixed values |
-| `min-key` | ✅ supported | Returns item with least function value | DIV-30: key comparison uses PTC's recoverable total term ordering for nil and mixed values. BUG GAP-S47: ties currently return the first minimum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions |
+| `min` | ✅ supported | Returns least number |  |
+| `min-key` | ✅ supported | Returns item with least function value | BUG GAP-S47: ties currently return the first minimum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions |
 | `mod` | ✅ supported | Returns modulo | BUG GAP-S138: non-finite operands return NaN instead of matching Clojure/JVM behavior |
 | `name` | ✅ supported | Returns name string of symbol/keyword | DIV-19: inert quoted-symbol references are not accepted by name and symbol? remains false. BUG GAP-S129: character literals return strings instead of raising |
 | `namespace` | ❌ not_relevant | Returns namespace of symbol/keyword | relies on namespace support |
@@ -463,8 +463,8 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `some->>` | ✅ supported | Threads as last arg while non-nil | GAP-S128 fixed: nil thread targets raise once reached |
 | `some-fn` | ✅ supported | Returns pred true if any fn truthy | BUG GAP-S71: map/set/vector callables are rejected in predicate position |
 | `some?` | ✅ supported | Returns true if not nil |  |
-| `sort` | ✅ supported | Returns sorted sequence | DIV-30: uses PTC's recoverable total term ordering for nil and mixed values; BUG GAP-S20: nil input currently raises instead of returning an empty seq; BUG GAP-S46: nil comparator currently raises instead of using default compare; BUG GAP-S107: boolean comparator functions are not honored with Clojure ordering semantics |
-| `sort-by` | ✅ supported | Returns seq sorted by function result | DIV-30: uses PTC's recoverable total term ordering for nil and mixed values; BUG GAP-S71: map/vector callables are rejected as key functions; BUG GAP-S107: boolean comparator functions are not honored with Clojure ordering semantics |
+| `sort` | ✅ supported | Returns sorted sequence | DIV-33: default sorting raises when comparison reaches NaN. GAP-S120: character literals sort as one-character strings. BUG GAP-S46: nil comparator currently raises instead of using default compare; BUG GAP-S107: boolean comparator functions are not honored with Clojure ordering semantics |
+| `sort-by` | ✅ supported | Returns seq sorted by function result | DIV-33: default key sorting raises when comparison reaches NaN. GAP-S120: character-literal keys sort as one-character strings. BUG GAP-S71: map/vector callables are rejected as key functions; BUG GAP-S107: boolean comparator functions are not honored with Clojure ordering semantics |
 | `sorted-map` | 🔲 candidate | Creates sorted map from pairs | pure collection construction |
 | `sorted-map-by` | 🔲 candidate | Creates sorted map with comparator | pure collection construction with custom comparator |
 | `sorted-set` | 🔲 candidate | Creates sorted set from items | pure collection construction |

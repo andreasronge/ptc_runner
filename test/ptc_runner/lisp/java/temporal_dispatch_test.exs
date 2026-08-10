@@ -181,20 +181,24 @@ defmodule PtcRunner.Lisp.Java.TemporalDispatchTest do
              Lisp.run(~S|(.plusDays date 1)|, memory: first.memory)
   end
 
-  test "ordinary ordering compares Duration values by total length" do
+  test "natural comparison orders Duration values while numeric predicates reject them" do
     source = ~S"""
     (let [epoch (Instant/parse "1970-01-01T00:00:00Z")
           shorter (Duration/between epoch (Instant/parse "1970-01-01T00:00:00.999999999Z"))
           longer (Duration/between epoch (Instant/parse "1970-01-01T00:00:01Z"))]
       [(compare shorter longer)
-       (< shorter longer)
        (sort [longer shorter])
        (min-by identity longer shorter)
        (max-by identity shorter longer)])
     """
 
-    assert {:ok, %{return: [-1, true, ["PT0.999999999S", "PT1S"], "PT0.999999999S", "PT1S"]}} =
+    assert {:ok, %{return: [-1, ["PT0.999999999S", "PT1S"], "PT0.999999999S", "PT1S"]}} =
              Lisp.run(source)
+
+    assert {:error, %{fail: %{reason: :type_error}}} =
+             Lisp.run(~S|(let [epoch (Instant/parse "1970-01-01T00:00:00Z")]
+                     (< (Duration/between epoch (Instant/parse "1970-01-01T00:00:01Z"))
+                        (Duration/between epoch (Instant/parse "1970-01-01T00:00:02Z"))))|)
   end
 
   test "natural sorting preserves Java primitive infinity ordering" do
@@ -254,11 +258,11 @@ defmodule PtcRunner.Lisp.Java.TemporalDispatchTest do
                    (type (java.util.Date. 0))]|)
   end
 
-  test "cross-class temporal sorting uses the ordinary total term order" do
+  test "cross-class temporal sorting is rejected" do
     {:ok, local_date} = LocalDate.parse(["2024-01-02"])
     {:ok, instant} = Instant.parse(["2024-01-02T00:00:00Z"])
 
-    assert {:ok, %{return: [nil, ^local_date, ^instant]}} =
+    assert {:error, %{fail: %{reason: :type_error}}} =
              Lisp.run_native("(sort [instant nil local-date])",
                memory: %{"instant" => instant, "local-date" => local_date}
              )

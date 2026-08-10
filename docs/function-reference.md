@@ -105,12 +105,12 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `-` | `(- x y ...)` | Subtraction |
 | `-'` | `(-' x y ...)` | Arbitrary precision subtraction alias — Alias for `-`; BEAM integers are already arbitrary precision. |
 | `/` | `(/ x y)` | Division (always returns float) |
-| `<` | `(< x), (< x y & more)` | Less than — Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30). |
-| `<=` | `(<= x), (<= x y & more)` | Less or equal — Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30). |
+| `<` | `(< x), (< x y & more)` | Numeric less than; a reached non-number signals :type_error — Numeric only; a reached non-numeric operand signals :type_error. |
+| `<=` | `(<= x), (<= x y & more)` | Numeric less or equal; a reached non-number signals :type_error — Numeric only; a reached non-numeric operand signals :type_error. |
 | `=` | `(= x), (= x y & more)` | Equality |
 | `==` | `(== x), (== x y & more)` | Type-independent numeric equality — Alias for PTC-Lisp `=` numeric equality. |
-| `>` | `(> x), (> x y & more)` | Greater than — Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30). |
-| `>=` | `(>= x), (>= x y & more)` | Greater or equal — Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30). |
+| `>` | `(> x), (> x y & more)` | Numeric greater than; a reached non-number signals :type_error — Numeric only; a reached non-numeric operand signals :type_error. |
+| `>=` | `(>= x), (>= x y & more)` | Numeric greater or equal; a reached non-number signals :type_error — Numeric only; a reached non-numeric operand signals :type_error. |
 | `NaN?` | `(NaN? ...)` |  |
 | `apply` | `(apply f coll)` | Applies function `f` to the argument sequence `coll` |
 | `array-map` | `(array-map & kvs)` | Create map from alternating key-value pairs — Alias for `hash-map`; PTC-Lisp does not expose Clojure's small-map implementation detail. |
@@ -126,7 +126,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `coll?` | `(coll? ...)` |  |
 | `combinations` * | `(combinations coll n)` | Generate all n-combinations |
 | `comp` | `(comp f1 f2 ...)` | Returns a function composing fns right-to-left; `(comp)` returns `identity` |
-| `compare` | `(compare x y)` | Total comparison: `-1` if `x < y`, `0` if `x == y`, `1` if `x > y`; same-class Java temporal values use their Java natural order, and NaN is unordered. |
+| `compare` | `(compare x y)` | Clojure-like comparison: `-1` if `x < y`, `0` if `x == y`, `1` if `x > y`; nil sorts first, incompatible types fail, and NaN is unordered. — Uses Clojure-like nil-first natural comparison; NaN remains unordered. PTC character literals are one-character strings, so their ordering follows strings rather than Clojure Character semantics. |
 | `complement` | `(complement f)` | Returns a function with the opposite truth value (always boolean) |
 | `concat` | `(concat coll1 coll2 ...)` | Join collections |
 | `conj` | `(conj), (conj coll x ...)` | Add elements to collection |
@@ -195,11 +195,11 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `mapcat` | `(mapcat f coll)` | Apply f to each item, concatenate results |
 | `mapv` | `(mapv f coll), (mapv f c1 c2), (mapv f c1 c2 c3)` | Like map with three collections |
 | `max-by` * | `(max-by f x), (max-by f x y & more)` | Item with maximum field |
-| `max-key` | `(max-key f x), (max-key f x y & more)` | Return x for which (f x) is greatest |
+| `max-key` | `(max-key f x), (max-key f x y & more)` | Return x with the greatest numeric (f x); reached non-numeric comparisons signal :type_error — With one value, returns it without invoking f. Once comparison is reached, f must return numbers or :type_error is signaled. |
 | `merge` | `(merge m1 m2 ...)` | Merge maps (later wins) |
 | `merge-with` | `(merge-with f m1 m2 ...)` | Merge maps with combining function for duplicates |
 | `min-by` * | `(min-by f x), (min-by f x y & more)` | Item with minimum field |
-| `min-key` | `(min-key f x), (min-key f x y & more)` | Return x for which (f x) is least |
+| `min-key` | `(min-key f x), (min-key f x y & more)` | Return x with the least numeric (f x); reached non-numeric comparisons signal :type_error — With one value, returns it without invoking f. Once comparison is reached, f must return numbers or :type_error is signaled. |
 | `mod` | `(mod x y)` | Modulo (floored division, result sign matches divisor) |
 | `nat-int?` | `(nat-int? ...)` |  |
 | `neg-int?` | `(neg-int? ...)` |  |
@@ -249,8 +249,8 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `some` | `(some :key coll)` | First truthy `:key` value, or nil |
 | `some-fn` | `(some-fn f1 f2 ...)` | Returns a function that returns the first truthy result from any fn |
 | `some?` | `(some? ...)` |  |
-| `sort` | `(sort coll), (sort comparator coll)` | Sort by natural order |
-| `sort-by` | `(sort-by keyfn coll), (sort-by keyfn comparator coll)` | Sort with comparator |
+| `sort` | `(sort coll), (sort comparator coll)` | Sort by Clojure-like nil-first natural order; incompatible values fail — Default order is Clojure-like and nil-first; incompatible values signal :type_error. PTC character literals sort as one-character strings. Use an explicit comparator when a domain needs a different order. |
+| `sort-by` | `(sort-by keyfn coll), (sort-by keyfn comparator coll)` | Sort by key with Clojure-like nil-first natural order or an explicit comparator — Default key order is Clojure-like and nil-first; incompatible keys signal :type_error. PTC character-literal keys sort as one-character strings. Use an explicit comparator when a domain needs a different key order. |
 | `sorted?` | `(sorted? ...)` |  |
 | `split-at` | `(split-at n coll)` | Split into `[(take n coll) (drop n coll)]` |
 | `split-with` | `(split-with pred coll)` | Split into `[(take-while pred coll) (drop-while pred coll)]` |
@@ -412,8 +412,8 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `float` | `(float x)` | Alias for double (Clojure compat) |
 | `floor` | `(floor x)` | Round toward -∞ |
 | `int` | `(int x)` | Type coercion (to integer) |
-| `max` | `(max x y ...)` | Maximum value |
-| `min` | `(min x y ...)` | Minimum value |
+| `max` | `(max x y ...)` | Maximum number; reached non-numeric comparisons signal :type_error — A unary call returns its argument unchanged. Once comparison is reached, operands must be numeric or :type_error is signaled. |
+| `min` | `(min x y ...)` | Minimum number; reached non-numeric comparisons signal :type_error — A unary call returns its argument unchanged. Once comparison is reached, operands must be numeric or :type_error is signaled. |
 | `pow` | `(pow ...)` |  |
 | `quot` | `(quot x y)` | Integer division (truncated toward zero) |
 | `round` | `(round x)` | Round to nearest integer |

@@ -377,11 +377,12 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
       assert result == [%{price: 30}, %{price: 20}, %{price: 10}]
     end
 
-    test "sort-by with 3 arguments using < comparator" do
+    test "sort-by with 3 arguments using compare comparator" do
       env = Env.initial()
       data = [%{name: "Bob"}, %{name: "Alice"}, %{name: "Charlie"}]
 
-      call_ast = {:call, {:var, :"sort-by"}, [{:keyword, :name}, {:var, :<}, {:var, :data}]}
+      call_ast =
+        {:call, {:var, :"sort-by"}, [{:keyword, :name}, {:var, :compare}, {:var, :data}]}
 
       assert {:ok, result, %{}} =
                Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{data: data}), &dummy_tool/2)
@@ -506,11 +507,11 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
       env = Env.initial()
 
       # Tests that {:normal, &Kernel.>/2} gets unwrapped to &Kernel.>/2
-      call_ast = {:call, {:var, :reduce}, [{:var, :>}, 0, {:vector, [1, 5, 3]}]}
+      call_ast = {:call, {:var, :reduce}, [{:var, :>}, 0, {:vector, [1]}]}
 
       # With Clojure argument order (f acc elem):
-      # (> 0 1) = false, (> false 5) = true, (> true 3) = true
-      assert {:ok, true, %{}} = Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+      # (> 0 1) = false
+      assert {:ok, false, %{}} = Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
     end
 
     test "passing + as accumulator function to reduce" do

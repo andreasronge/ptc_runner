@@ -35,14 +35,15 @@ defmodule PtcRunner.ReplFrontendTest do
     assert output =~ "Goodbye!"
   end
 
-  test "empty stdin is a successful empty script" do
-    assert "" = capture_io("", fn -> run_repl(["-"]) end)
+  test ":doc exposes numeric comparison failures" do
+    output = capture_io(":doc >\n", fn -> run_repl([]) end)
+
+    assert output =~ "(> x y & more)"
+    assert output =~ "Numeric only; a reached non-numeric operand signals :type_error."
   end
 
-  test ":doc surfaces the nil-ordering divergence note for comparison operators" do
-    output = capture_io(":doc >\n", fn -> run_repl([]) end)
-    assert output =~ "nil` orders above every finite number"
-    assert output =~ "DIV-30"
+  test "empty stdin is a successful empty script" do
+    assert "" = capture_io("", fn -> run_repl(["-"]) end)
   end
 
   test "manifest-only host authority is rejected by direct mode" do
