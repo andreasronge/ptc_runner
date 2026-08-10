@@ -19,8 +19,13 @@ defmodule PtcRunner.Lisp.Prelude.ErrorSpan do
        parsed forms the compiler walked. That check is what makes indexing by
        position safe.
     2. `ref` (`"namespace/symbol"`) — for failures raised after the walk, when
-       only the offending definition is known. Resolved to the first `def`,
-       `defn`, or `defn-` form with that name under that namespace.
+       only the offending definition is known. Resolved to the `def`, `defn`,
+       or `defn-` form with that name under that namespace, but only when
+       exactly one form matches: a name is unique only once duplicates have
+       been rejected, and some ref-carrying failures are raised before that
+       check runs. `:duplicate_ref` is the one exception, because it IS the
+       duplicate report — it resolves to the last matching form, the
+       redefinition that collided.
     3. `namespace` — resolved to the `(ns ...)` form that declares it.
 
   Resolution is best-effort and always fails OPEN to `nil`: a source this
@@ -53,16 +58,20 @@ defmodule PtcRunner.Lisp.Prelude.ErrorSpan do
   defp locatable?(%ValidationError{form_index: index, ref: ref, namespace: namespace}),
     do: not is_nil(index) or not is_nil(ref) or not is_nil(namespace)
 
-  defp locate(%ValidationError{form_index: index}, forms) when is_integer(index) do
+  # `Enum.at/2` counts a negative index from the END of the list, which would
+  # turn a nonsense index into a valid-looking span for an unrelated form.
+  defp locate(%ValidationError{form_index: index}, forms) when is_integer(index) and index >= 0 do
     case Enum.at(forms, index) do
       %{span: span} -> span
       nil -> nil
     end
   end
 
-  defp locate(%ValidationError{ref: ref, namespace: namespace}, forms) do
+  defp locate(%ValidationError{form_index: index}, _forms) when is_integer(index), do: nil
+
+  defp locate(%ValidationError{reason: reason, ref: ref, namespace: namespace}, forms) do
     case split_ref(ref) do
-      {ref_namespace, symbol} -> definition_span(forms, ref_namespace, symbol)
+      {ref_namespace, symbol} -> definition_span(reason, forms, ref_namespace, symbol)
       nil -> namespace_span(forms, namespace)
     end
   end
@@ -78,21 +87,32 @@ defmodule PtcRunner.Lisp.Prelude.ErrorSpan do
 
   defp split_ref(_ref), do: nil
 
+  # A ref names a definition, and a name is only unique once the compiler has
+  # rejected duplicates — a check that runs AFTER some ref-carrying failures.
+  # So resolve a ref only when it matches exactly one definition. The one
+  # exception is the duplicate itself: `:duplicate_ref` exists precisely
+  # because the name was redefined, and the redefinition is the later form.
+  defp definition_span(reason, forms, namespace, symbol) do
+    case definition_spans(forms, namespace, symbol) do
+      [span] -> span
+      [_first | _rest] = spans when reason == :duplicate_ref -> List.last(spans)
+      _ambiguous_or_missing -> nil
+    end
+  end
+
   # Definitions belong to the namespace opened by the closest preceding
   # `(ns ...)` form, mirroring the compiler's `current_ns` walk.
-  defp definition_span(forms, namespace, symbol) do
+  defp definition_spans(forms, namespace, symbol) do
     forms
-    |> Enum.reduce_while(nil, fn form, current_ns ->
+    |> Enum.reduce({nil, []}, fn form, {current_ns, spans} ->
       cond do
-        form.head == "ns" -> {:cont, form.name}
-        current_ns == namespace and definition?(form, symbol) -> {:halt, form.span}
-        true -> {:cont, current_ns}
+        form.head == "ns" -> {form.name, spans}
+        current_ns == namespace and definition?(form, symbol) -> {current_ns, [form.span | spans]}
+        true -> {current_ns, spans}
       end
     end)
-    |> case do
-      {_offset, _length} = span -> span
-      _unresolved -> nil
-    end
+    |> elem(1)
+    |> Enum.reverse()
   end
 
   defp definition?(%{head: head, name: name}, symbol),

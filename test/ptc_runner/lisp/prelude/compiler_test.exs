@@ -4,6 +4,7 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler
+  alias PtcRunner.Lisp.Prelude.ErrorSpan
   alias PtcRunner.Lisp.Prelude.Export
 
   # ============================================================
@@ -872,6 +873,54 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
 
       assert error.reason == :parse_error
       assert error.span == nil
+    end
+
+    test "a duplicate definition spans the redefinition that collided" do
+      source = """
+      (ns crm "doc")
+      (defn a [] 1)
+      (defn a [] 2)
+      """
+
+      assert {error, slice} = failing_slice(source)
+      assert error.reason == :duplicate_ref
+      assert slice == "(defn a [] 2)"
+    end
+
+    test "an ambiguous ref resolves to no span rather than an innocent namesake" do
+      # `dep_ref_in_def` is raised BEFORE duplicate names are rejected, so its
+      # ref matches two forms here and only the second one is at fault. A span
+      # on the first would send a reader to code that is not the problem.
+      source = """
+      (ns audit "doc")
+      (def a 1)
+      (def a (base/helper 1))
+      """
+
+      assert {:error, %Prelude.ValidationError{} = error} =
+               Compiler.compile(source,
+                 deps: [dep_base()],
+                 namespace_deps: %{"audit" => ["base"]}
+               )
+
+      assert error.reason == :dep_ref_in_def
+      assert error.ref == "audit/a"
+      assert error.span == nil
+    end
+
+    test "a negative form index resolves to no span rather than the last form" do
+      source = """
+      (ns crm "doc")
+      (defn a [] 1)
+      """
+
+      error = %Prelude.ValidationError{
+        reason: :compile_error,
+        message: "synthetic",
+        form_index: -1
+      }
+
+      assert ErrorSpan.resolve(error, source).span == nil
     end
 
     test "a successful compile is unaffected by span resolution" do
