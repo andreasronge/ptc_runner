@@ -679,7 +679,12 @@ Failures after the sync boundary retain the complete recovery value; if the
 recovery name cannot be proven reachable, the state is
 `finalization_uncertain`. Failure before a valid result, including provider
 cleanup failure, never materializes result bytes and removes the empty
-reservation only after verifying its captured identity.
+reservation only after verifying its captured identity. That identity check is
+trustworthy exactly once: staging and reservation names are derived from the
+destination, so a later run reserves the same names — and, on filesystems that
+recycle inode numbers, the same identities. Each handle owner therefore removes
+those names at most once and afterwards only releases its descriptor, so
+teardown of an abandoned run can never reclaim a reservation a later run holds.
 
 If identity verification or unlinking fails while removing an empty or partial
 reservation, the publisher leaves the name untouched, reports result state

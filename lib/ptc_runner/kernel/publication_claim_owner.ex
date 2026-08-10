@@ -130,9 +130,7 @@ defmodule PtcRunner.Kernel.PublicationClaimOwner do
   defp cleanup_handles(handles) do
     results =
       Enum.map(handles, fn {_identity, handle} ->
-        result = PublicationHandle.discard(handle)
-        _ = PublicationHandle.close(handle)
-        result
+        PublicationHandle.discard(handle)
       end)
 
     if Enum.all?(results, &(&1 == :ok)), do: :ok, else: {:error, :publication_cleanup_failed}

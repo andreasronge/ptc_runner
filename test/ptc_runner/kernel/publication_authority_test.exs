@@ -163,6 +163,27 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   end
 
   @tag :tmp_dir
+  test "a removed handle never reclaims a reservation reserved again", %{tmp_dir: dir} do
+    target = Path.join(dir, "reused-reservation.jsonl")
+
+    # Reservation names are derived from the destination, so a later reservation
+    # for the same target reuses the name — and, on filesystems that recycle
+    # inode numbers, the identity — of the one just removed. Teardown of the
+    # earlier handle must not reach the later handle's reservation.
+    for _attempt <- 1..20 do
+      assert {:ok, removed} = PublicationHandle.reserve(target, :trace, 0o600)
+      assert :ok = PublicationHandle.remove(removed)
+
+      assert {:ok, reserved} = PublicationHandle.reserve(target, :trace, 0o600)
+      assert :ok = PublicationHandle.close(removed)
+
+      assert :ok = PublicationHandle.verify(reserved)
+      assert :ok = PublicationHandle.remove(reserved)
+      assert :ok = PublicationHandle.close(reserved)
+    end
+  end
+
+  @tag :tmp_dir
   test "exclusive handle operations remain owned across caller processes", %{tmp_dir: dir} do
     target = Path.join(dir, "cross-process.jsonl")
     assert {:ok, handle} = PublicationHandle.reserve(target, :trace, 0o600)

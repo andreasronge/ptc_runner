@@ -32,7 +32,12 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
   @impl GenServer
   def init(controller) do
     {:ok,
-     %{controller_ref: Process.monitor(controller), handle: nil, preserve_on_cleanup?: false}}
+     %{
+       controller_ref: Process.monitor(controller),
+       handle: nil,
+       preserve_on_cleanup?: false,
+       removed?: false
+     }}
   end
 
   @impl GenServer
@@ -104,13 +109,26 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
 
   defp operation_reply(:discard, handle, %{preserve_on_cleanup?: true} = state) do
     _ = PublicationHandle.owner_execute(handle, :close)
-    {:reply, :ok, %{state | handle: nil}}
+    {:stop, :normal, :ok, %{state | handle: nil}}
   end
 
   defp operation_reply(:discard, handle, state) do
     result = PublicationHandle.owner_execute(handle, :remove)
-    _ = PublicationHandle.owner_execute(handle, :close)
-    {:reply, result, %{state | handle: nil}}
+    _ = PublicationHandle.owner_execute(handle, close_after(result))
+    {:stop, :normal, result, %{state | handle: nil}}
+  end
+
+  defp operation_reply(operation, %PublicationHandle{} = handle, state)
+       when operation in [:remove, :unlink] do
+    case PublicationHandle.owner_execute(handle, operation) do
+      :ok -> {:reply, :ok, %{state | removed?: true}}
+      result -> {:reply, result, state}
+    end
+  end
+
+  defp operation_reply(:close, %PublicationHandle{} = handle, %{removed?: true} = state) do
+    _ = PublicationHandle.owner_execute(handle, :close_device)
+    {:stop, :normal, :ok, %{state | handle: nil}}
   end
 
   defp operation_reply(operation, handle, state) do
@@ -141,23 +159,43 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
 
   @impl GenServer
   def handle_info({:DOWN, ref, :process, _controller, _reason}, %{controller_ref: ref} = state) do
-    _ = cleanup(state.handle, state.preserve_on_cleanup?)
+    _ = cleanup(state.handle, state)
     {:stop, :normal, %{state | handle: nil}}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl GenServer
-  def terminate(_reason, %{handle: handle, preserve_on_cleanup?: preserve?}),
-    do: cleanup(handle, preserve?)
+  def terminate(_reason, %{handle: handle} = state), do: cleanup(handle, state)
 
-  defp cleanup(nil, _preserve?), do: :ok
+  defp cleanup(nil, _state), do: :ok
 
-  defp cleanup(handle, preserve?) do
-    unless preserve?, do: _ = PublicationHandle.owner_execute(handle, :remove)
+  defp cleanup(handle, %{preserve_on_cleanup?: true}) do
     _ = PublicationHandle.owner_execute(handle, :close)
     :ok
   rescue
     _exception -> :ok
   end
+
+  defp cleanup(handle, %{removed?: true}) do
+    _ = PublicationHandle.owner_execute(handle, :close_device)
+    :ok
+  rescue
+    _exception -> :ok
+  end
+
+  defp cleanup(handle, _state) do
+    result = PublicationHandle.owner_execute(handle, :remove)
+    _ = PublicationHandle.owner_execute(handle, close_after(result))
+    :ok
+  rescue
+    _exception -> :ok
+  end
+
+  # A successful removal already released the staging and reservation names.
+  # Both are derived from the destination and are reserved again by the next
+  # handle for that destination, so closing must not identity-check and remove
+  # them a second time.
+  defp close_after(:ok), do: :close_device
+  defp close_after(_result), do: :close
 end

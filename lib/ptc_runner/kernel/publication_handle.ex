@@ -285,6 +285,15 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     :close
   end
 
+  # Releases the device without touching the filesystem. Staging and
+  # reservation names are reused by later handles for the same destination, so
+  # a handle whose removal already succeeded must never identity-check and
+  # remove those names a second time.
+  defp direct_execute(handle, :close_device) do
+    _ = :file.close(handle.device)
+    :close
+  end
+
   defp direct_write(%__MODULE__{} = handle, bytes) do
     with {:ok, bytes} <- binary_iodata(bytes),
          :ok <- direct_verify(handle),
