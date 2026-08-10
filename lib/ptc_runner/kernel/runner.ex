@@ -544,12 +544,15 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp maybe_put_failure_taxonomy(
          stopped_data,
-         {:error, %Error{reason: :explicit_failure, details: details}}
-       ) do
-    Map.merge(
-      stopped_data,
-      Map.take(details, [:failure_kind, :failure_kind_fingerprint])
-    )
+         {:error, %Error{reason: reason, details: details}}
+       )
+       when reason in [:explicit_failure, :pmap_error, :pcalls_error] do
+    taxonomy =
+      details
+      |> Map.take([:failure_kind, :failure_kind_fingerprint])
+      |> SafeMetadata.retain_failure_taxonomy()
+
+    Map.merge(stopped_data, taxonomy)
   end
 
   defp maybe_put_failure_taxonomy(stopped_data, _result), do: stopped_data

@@ -1729,6 +1729,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                 details: %{failure_kind: "evaluation-unavailable"}
               } = error} = Kernel.run(source, config)
 
+      assert %{type: "run-stopped", data: %{failure_kind: "evaluation-unavailable"}} =
+               List.last(EventSink.events(sink))
+
       refute inspect(error) =~ secret
       refute EventSink.events(sink) |> inspect() |> String.contains?(secret)
     end)
