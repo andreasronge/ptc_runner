@@ -22,7 +22,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
   An MCP installation containing any write mapping requires an explicit,
   nonempty manifest `allow` list before preflight, credential resolution, or
   transport acquisition. Omitting `allow` is permitted only for an all-read
-  installation.
+  installation. Every stdio MCP child receives `LC_ALL=C.UTF-8`, independent
+  of ambient locale and `inherit_environment`, so locale-sensitive servers
+  encode protocol frames as UTF-8.
 
   Every public provider snapshot separates the safe declaration projection
   from bounded runtime-captured acquisition facts. `acquisition_identity_hash`
@@ -57,7 +59,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.TraceCapability
   alias PtcRunner.Kernel.TraceSnapshot
 
-  @compatibility_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
+  @inherited_compatibility_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
+  @stdio_locale_environment %{"LC_ALL" => "C.UTF-8"}
   @max_credential_bytes 65_536
   @max_executable_bytes 268_435_456
   @max_launcher_bytes 16_777_216
@@ -1405,22 +1408,26 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end)
   end
 
-  defp compatibility_environment(false), do: {:ok, %{}}
+  defp compatibility_environment(false), do: {:ok, @stdio_locale_environment}
 
   defp compatibility_environment(true) do
-    Enum.reduce_while(@compatibility_environment, {:ok, %{}}, fn name, {:ok, environment} ->
-      case System.get_env(name) do
-        nil ->
-          {:cont, {:ok, environment}}
+    Enum.reduce_while(
+      @inherited_compatibility_environment,
+      {:ok, @stdio_locale_environment},
+      fn name, {:ok, environment} ->
+        case System.get_env(name) do
+          nil ->
+            {:cont, {:ok, environment}}
 
-        value ->
-          if shell_function?(value) or not valid_secret?(value) do
-            {:halt, {:error, :invalid_compatibility_environment}}
-          else
-            {:cont, {:ok, Map.put(environment, name, value)}}
-          end
+          value ->
+            if shell_function?(value) or not valid_secret?(value) do
+              {:halt, {:error, :invalid_compatibility_environment}}
+            else
+              {:cont, {:ok, Map.put(environment, name, value)}}
+            end
+        end
       end
-    end)
+    )
   end
 
   defp shell_function?(value),

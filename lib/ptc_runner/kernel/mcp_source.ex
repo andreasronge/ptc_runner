@@ -90,8 +90,10 @@ defmodule PtcRunner.Kernel.MCPSource do
       Optional stdio fields are `:args` (default `[]`), `:env` (default `%{}`),
       `:grace_ms` (default `250`, maximum `5_000`), `:stderr_bytes` (default
       `65_536`, maximum `1_048_576`), and `:start_timeout_ms` (default `5_000`,
-      maximum `60_000`). At most 256 arguments and 256 environment bindings
-      are accepted; every configuration string is at most 131,072 bytes.
+      maximum `60_000`). At most 256 arguments are accepted. The transport
+      always overwrites `LC_ALL` with `C.UTF-8`; its final environment accepts
+      at most 256 bindings, so a caller that omits `LC_ALL` may supply at most
+      255. Every configuration string is at most 131,072 bytes.
       Streamable HTTP may instead receive one validated
       `PtcRunner.Kernel.MCPOAuth.TokenManager`; dynamic OAuth and caller
       headers remain mutually exclusive at the host layer. Strings are UTF-8

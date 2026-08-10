@@ -327,8 +327,13 @@ A `stdio` transport launches a local executable:
 `command` is required. A relative `cwd` resolves against the host document.
 `env` injects credentials by binding name rather than value, so the secret never
 appears in the document. Environment names must be portable identifiers and may
-not shadow the compatibility set `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, or
-`USER`. Startup, shutdown grace, and captured stderr are all bounded.
+not shadow the compatibility set `HOME`, `LC_ALL`, `LOGNAME`, `PATH`, `SHELL`,
+`TERM`, or `USER`. The runtime always pins `LC_ALL=C.UTF-8` so locale-sensitive
+servers encode MCP frames as UTF-8. `inherit_environment` controls only the
+remaining compatibility names; it never inherits the caller's locale. Startup,
+shutdown grace, and captured stderr are all bounded. `env` accepts at most 249
+bindings, reserving space within the launcher's 256-entry limit for the seven
+runtime compatibility names.
 
 A `streamable_http` transport reaches a remote server:
 

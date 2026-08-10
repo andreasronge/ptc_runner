@@ -32,6 +32,55 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
     |> System.halt()
   end
 
+  def main([marker, "mcp-unicode"]) do
+    marker
+    |> mcp_loop()
+    |> System.halt()
+  end
+
+  defp mcp_loop(marker) do
+    case IO.read(:stdio, :line) do
+      :eof ->
+        0
+
+      {:error, _reason} ->
+        1
+
+      line when is_binary(line) ->
+        handle_mcp_request(extract_id(line), extract_method(line), marker)
+        mcp_loop(marker)
+    end
+  end
+
+  defp handle_mcp_request(id, "server/discover", marker) when is_integer(id) do
+    File.write!(marker, "server/discover\n", [:append])
+
+    IO.write(
+      :stdio,
+      ~s({"jsonrpc":"2.0","id":#{id},"result":{"resultType":"complete","supportedVersions":["2026-07-28"],"capabilities":{"tools":{}},"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"unicode-fixture","version":"1.0"}},"ttlMs":0,"cacheScope":"private"}}\n)
+    )
+  end
+
+  defp handle_mcp_request(id, "tools/list", marker) when is_integer(id) do
+    File.write!(marker, "tools/list\n", [:append])
+
+    IO.write(
+      :stdio,
+      ~s({"jsonrpc":"2.0","id":#{id},"result":{"resultType":"complete","tools":[{"name":"unicode","description":"Return non-ASCII text.","inputSchema":{"type":"object","properties":{}}}],"ttlMs":0,"cacheScope":"private"}}\n)
+    )
+  end
+
+  defp handle_mcp_request(id, "tools/call", marker) when is_integer(id) do
+    File.write!(marker, "tools/call\n", [:append])
+
+    IO.write(
+      :stdio,
+      ~s({"jsonrpc":"2.0","id":#{id},"result":{"resultType":"complete","content":[{"type":"text","text":"behaviour — correct"}]}}\n)
+    )
+  end
+
+  defp handle_mcp_request(_id, _method, _marker), do: System.halt(65)
+
   defp loop(marker) do
     case IO.read(:stdio, :line) do
       :eof ->

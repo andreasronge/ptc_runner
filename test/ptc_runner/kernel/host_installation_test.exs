@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.HostInstallationTest do
   use ExUnit.Case, async: false
 
+  @stdio_fixture Path.expand("../../support/mcp_stdio_fixture.exs", __DIR__)
+
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
 
   alias PtcRunner.Kernel.ApplicationPackage
@@ -1047,6 +1049,43 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert {:ok, %{"token" => "test-secret"}} =
              ProviderRegistry.resolve_credentials(registry, ["token"])
+  end
+
+  @tag :tmp_dir
+  test "stdio compatibility environment pins UTF-8 for locale-sensitive servers", %{
+    tmp_dir: dir
+  } do
+    {:ok, launcher} = PtcRunnerLauncher.executable_path()
+    marker = Path.join(dir, "unicode-server-methods")
+
+    config =
+      stdio_config(System.find_executable("elixir"))
+      |> put_in(["runtime", "stdio_launcher"], launcher)
+      |> put_in(["install", "workspace", "transport", "args"], [
+        @stdio_fixture,
+        marker,
+        "mcp-unicode"
+      ])
+      |> put_in(["install", "workspace", "transport", "inherit_environment"], true)
+      |> put_in(["install", "workspace", "tools"], %{
+        "unicode" => %{"as" => "workspace.unicode", "effect" => "read"}
+      })
+
+    host = load_host(dir, config)
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(host)
+             |> then(fn {:ok, catalog} ->
+               HostInstallation.runtime_registry(host, catalog)
+             end)
+
+    assert {:ok, %{capabilities: [capability], close: close}} =
+             ProviderRegistry.build(registry, "workspace", %{}, context(dir, :mission))
+
+    on_exit(fn -> close.() end)
+
+    assert {:ok, %{"text" => ["behaviour — correct"]}} = capability.callback.(%{}, nil)
+    assert File.read!(marker) =~ "tools/call"
   end
 
   @tag :tmp_dir
