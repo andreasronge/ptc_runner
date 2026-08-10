@@ -73,6 +73,11 @@ how it was verified.
   ExUnit concurrency.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`;
   the MCP tests also require the local server described below).
+- `mix slow` — the `:slow` tests, excluded from `mix test` by default because
+  each compiles a project or drives a real subprocess. The nightly `Slow`
+  workflow runs them; run it locally when you touch a Mix task, the git hooks,
+  or the stdio transport. Never add `--trace` (or `--slowest`, which implies
+  it) to a suite you want to finish quickly: it pins `--max-cases` to 1.
 - Fix all failures before committing/pushing.
 
 ### Fresh worktree setup
