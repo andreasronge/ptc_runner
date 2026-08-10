@@ -11,7 +11,8 @@ changes skip the expensive gate. Unknown paths select every gate, and
 `FORCE_FULL_PRE_PUSH=1` explicitly forces the complete gate.
 
 For an ordinary push, run `git push` and let the hook execute the complete gate
-once. Run `mix prepush` directly only to diagnose that portion of the gate or
+once. "Complete" excludes `:nightly` tests, which cost tens of seconds each and
+run in the `Nightly` workflow instead; everything else runs. Run `mix prepush` directly only to diagnose that portion of the gate or
 when hooks are unavailable; do not run it immediately before a normal
 `git push`.
 

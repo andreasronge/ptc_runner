@@ -403,7 +403,10 @@ run_project_gates() {
     return 0
   fi
 
-  echo "  ⏳ Running full test suite..."
+  # "except `:nightly`" is not a hedge: `:nightly` tests cost tens of seconds
+  # each and run in the `Nightly` workflow instead. Every other tag this hook
+  # would otherwise skip still runs here.
+  echo "  ⏳ Running the test suite (all but :nightly)..."
   local test_start=$SECONDS
   if ! mix test --exclude clojure "${TEST_OPTIONS[@]}" 2>&1; then
     echo "  ❌ Tests failed in $label. Re-run: (cd $proj && mix test --exclude clojure ${TEST_OPTIONS[*]})"
