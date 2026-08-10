@@ -459,9 +459,12 @@ The known failure kinds are `invalid-input`, `invalid-prompt`,
 
 So `(fail "the invoice total did not balance")` publishes nothing, while
 `(fail {:kind "assertion-failed" :detail "the invoice total did not balance"})`
-publishes `assertion-failed`. Prefer the second shape. It costs one key and it
-is the difference between a caller knowing what class of thing went wrong and
-knowing only that something did.
+publishes only `failure_kind: "assertion-failed"`. Prefer the second shape. It
+costs one key and it is the difference between a caller knowing what class of
+thing went wrong and knowing only that something did. The same projection
+survives when `pmap` or `pcalls` rejects a worker's `fail` control signal; the
+parallel error remains the terminal reason while its safe failure taxonomy
+identifies the underlying framework failure.
 
 **When provider-backed detail is needed**, rerun with `--inspect`:
 

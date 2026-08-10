@@ -63,10 +63,14 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
   end
 
   test "four concurrent agent loops do not retry against a held evaluation lease" do
+    parent = self()
     {:ok, counter} = Agent.start_link(fn -> 0 end)
+    barrier = start_barrier(4)
 
     requester = fn _request ->
-      Agent.update(counter, &(&1 + 1))
+      request_number = Agent.get_and_update(counter, fn count -> {count + 1, count + 1} end)
+      send(parent, {:agent_request, request_number})
+      await_barrier(barrier)
 
       {:ok,
        %{
@@ -111,9 +115,41 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
 
     assert {:error, error} = Kernel.run(source, config)
     assert error.kind == :workflow_failed
+    assert error.reason == :pcalls_error
+    assert error.details[:failure_kind] == "evaluation-unavailable"
 
-    assert Agent.get(counter, & &1) <= 4,
-           "each agent may ask the model once; contention must not buy extra turns"
+    assert Agent.get(counter, & &1) == 4,
+           "each agent must ask once and contention must not buy a fifth request"
+
+    assert_received {:agent_request, 1}
+    assert_received {:agent_request, 2}
+    assert_received {:agent_request, 3}
+    assert_received {:agent_request, 4}
+    refute_received {:agent_request, 5}
+  end
+
+  defp start_barrier(expected) do
+    spawn_link(fn -> collect_barrier_waiters(expected, []) end)
+  end
+
+  defp collect_barrier_waiters(0, waiters) do
+    Enum.each(waiters, fn {caller, ref} -> send(caller, {:barrier_released, ref}) end)
+  end
+
+  defp collect_barrier_waiters(remaining, waiters) do
+    receive do
+      {:barrier_arrive, caller, ref} ->
+        collect_barrier_waiters(remaining - 1, [{caller, ref} | waiters])
+    end
+  end
+
+  defp await_barrier(barrier) do
+    ref = make_ref()
+    send(barrier, {:barrier_arrive, self(), ref})
+
+    receive do
+      {:barrier_released, ^ref} -> :ok
+    end
   end
 
   defp build_config(requester, mission_capabilities, limit_overrides) do

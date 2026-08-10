@@ -665,11 +665,13 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp workflow_error_details(fail, _timeout_ms, _limits, sink)
        when not is_nil(sink) do
-    case EventSink.policy(sink) do
-      :normal -> :normal
-      _private_or_unavailable -> :private
-    end
-    |> workflow_error_details_for_class(fail)
+    details =
+      case EventSink.policy(sink) do
+        :normal -> workflow_error_details_for_class(:normal, fail)
+        _private_or_unavailable -> workflow_error_details_for_class(:private, fail)
+      end
+
+    Map.merge(details, SafeMetadata.retain_failure_taxonomy(fail.details))
   end
 
   defp workflow_error_details_for_class(:private, _fail),

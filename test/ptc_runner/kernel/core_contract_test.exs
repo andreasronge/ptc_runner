@@ -1693,6 +1693,69 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     refute inspect(taxonomy) =~ "PRIVATE"
   end
 
+  test "parallel fail retains only bounded safe taxonomy" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    secret = "PRIVATE_PARALLEL_FAILURE_DETAIL"
+
+    cases = [
+      {:pcalls, :pcalls_error,
+       ~s|(pcalls #(fail {:kind :evaluation-unavailable :reason "#{secret}"}))|},
+      {:pmap, :pmap_error,
+       ~s|(pmap (fn [_] (fail {:kind :evaluation-unavailable :reason "#{secret}"})) [1])|},
+      {:nested, :pcalls_error,
+       ~s|(pcalls #(pmap (fn [_] (fail {:kind :evaluation-unavailable :reason "#{secret}"})) [1]))|},
+      {:ordinary_hof, :pcalls_error,
+       ~s|(map (fn [_] (pcalls #(fail {:kind :evaluation-unavailable :reason "#{secret}"}))) [1])|}
+    ]
+
+    Enum.each(cases, fn {name, reason, source} ->
+      {:ok, sink} =
+        EventSink.start(:normal, limits, run_id: "parallel-failure-taxonomy-#{name}")
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          mission_environment: mission,
+          input: %{},
+          limits: limits,
+          event_sink: sink
+        )
+
+      assert {:error,
+              %{
+                reason: ^reason,
+                details: %{failure_kind: "evaluation-unavailable"}
+              } = error} = Kernel.run(source, config)
+
+      refute inspect(error) =~ secret
+      refute EventSink.events(sink) |> inspect() |> String.contains?(secret)
+    end)
+  end
+
+  test "parallel non-fail controls do not publish failure taxonomy" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "parallel-return-control")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:error, %{reason: :pcalls_error, details: details}} =
+             Kernel.run(~S|(pcalls #(return {:kind :assertion-failed}))|, config)
+
+    refute Map.has_key?(details, :failure_kind)
+    refute Map.has_key?(details, :failure_kind_fingerprint)
+  end
+
   test "new Kernel workflow routes only granted capabilities through the dispatcher" do
     {:ok, add} =
       Capability.new(

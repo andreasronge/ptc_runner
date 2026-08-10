@@ -8,6 +8,7 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
   deadlines, cancellation, and monitor cleanup belong to `ParallelRunner`.
   """
 
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.ChildResult
   alias PtcRunner.Lisp.Eval.Abort
   alias PtcRunner.Lisp.Eval.Apply
@@ -221,8 +222,8 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
     |> classify_runner_error(type, index)
   end
 
-  defp classify_worker_failure({:worker_control, signal}, type, index),
-    do: parallel_worker_error(type, index, "#{signal} called inside #{type}")
+  defp classify_worker_failure({:worker_control, signal, taxonomy}, type, index),
+    do: parallel_worker_error(type, index, "#{signal} called inside #{type}", taxonomy)
 
   defp classify_worker_failure(reason, type, index),
     do: classify_runner_error(reason, type, index)
@@ -262,7 +263,9 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
        do: error
 
   defp classify_runner_error({:pmap_error, _} = error, _type, _index), do: error
+  defp classify_runner_error({:pmap_error, _, %{}} = error, _type, _index), do: error
   defp classify_runner_error({:pcalls_error, _, _} = error, _type, _index), do: error
+  defp classify_runner_error({:pcalls_error, _, _, %{}} = error, _type, _index), do: error
 
   defp classify_runner_error(other, type, _index),
     do: {parallel_error_type(type), inspect(other)}
@@ -290,10 +293,17 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
 
   defp captured_failure(
          :error,
+         %Abort{outcome: {:control, :fail, value, _context}},
+         _stacktrace
+       ),
+       do: {:worker_control, :fail, SafeMetadata.failure_taxonomy(value)}
+
+  defp captured_failure(
+         :error,
          %Abort{outcome: {:control, signal, _value, _context}},
          _stacktrace
        ),
-       do: {:worker_control, signal}
+       do: {:worker_control, signal, %{}}
 
   defp captured_failure(:error, error, stacktrace),
     do: {:unexpected_raise, :error, error, stacktrace}
@@ -312,6 +322,22 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
        when is_binary(message),
        do: parallel_worker_error(type, index, message)
 
+  defp parallel_abort_error(
+         {:pmap_error, message, taxonomy},
+         type,
+         index
+       )
+       when is_binary(message) and is_map(taxonomy),
+       do: parallel_worker_error(type, index, message, taxonomy)
+
+  defp parallel_abort_error(
+         {:pcalls_error, _inner_index, message, taxonomy},
+         type,
+         index
+       )
+       when is_binary(message) and is_map(taxonomy),
+       do: parallel_worker_error(type, index, message, taxonomy)
+
   defp parallel_abort_error({_reason, message, _data}, type, index) when is_binary(message),
     do: parallel_worker_error(type, index, message)
 
@@ -323,6 +349,15 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
 
   defp parallel_worker_error(:pmap, _index, message), do: {:pmap_error, message}
   defp parallel_worker_error(:pcalls, index, message), do: {:pcalls_error, index, message}
+
+  defp parallel_worker_error(type, index, message, taxonomy) when map_size(taxonomy) == 0,
+    do: parallel_worker_error(type, index, message)
+
+  defp parallel_worker_error(:pmap, _index, message, taxonomy),
+    do: {:pmap_error, message, taxonomy}
+
+  defp parallel_worker_error(:pcalls, index, message, taxonomy),
+    do: {:pcalls_error, index, message, taxonomy}
 
   defp parallel_error_type(:pmap), do: :pmap_error
   defp parallel_error_type(:pcalls), do: :pcalls_error

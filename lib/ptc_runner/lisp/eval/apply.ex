@@ -1102,6 +1102,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     case reason do
       {kind, _detail} -> kind in passthrough_hof_error_kinds()
       {kind, _detail, _data} -> kind in passthrough_hof_error_kinds()
+      {kind, _index, _detail, _data} -> kind in passthrough_hof_error_kinds()
       _other -> false
     end
   end
