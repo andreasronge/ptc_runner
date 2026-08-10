@@ -593,7 +593,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     assert {:error,
             {:manifest_path, [{:property, "limits"}, {:property, "evaluation_timeout_ms"}],
-             :invalid_limits}} = Manifest.load(path, lower_ceiling)
+             {:installed_limit_exceeded, 20_000, 500}}} = Manifest.load(path, lower_ceiling)
 
     manifest = put_in(manifest, ["limits"], %{})
     File.write!(path, Jason.encode!(manifest))

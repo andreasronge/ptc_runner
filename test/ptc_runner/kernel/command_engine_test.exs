@@ -2760,8 +2760,27 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_error(
       ["validate", missing_application],
       "application",
-      "application_unavailable"
+      "application_not_found"
     )
+
+    over_ceiling =
+      write_application(
+        directory,
+        "over-installed-limit",
+        valid_manifest(%{"limits" => %{"mission_capability_calls" => 512}})
+      )
+
+    limit =
+      assert_error(
+        ["validate", over_ceiling],
+        "application",
+        "installed_limit_exceeded"
+      )
+
+    assert limit.envelope["error"]["message"] ==
+             "an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling"
+
+    assert limit.envelope["error"]["path"] == "/limits/mission_capability_calls"
 
     missing_required =
       write_application(directory, "missing-required", Jason.encode!(%{"version" => 1}))

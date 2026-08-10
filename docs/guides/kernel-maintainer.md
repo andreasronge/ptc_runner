@@ -420,9 +420,10 @@ replaced or otherwise uncertain staging entry is left untouched. The native
 companion performs only the final no-replace directory rename, using
 `renameat2(RENAME_NOREPLACE)` on Linux or `renamex_np(RENAME_EXCL)` on macOS.
 That rename is the commit point. No later branch deletes or rolls back the
-published target, and collision, symlink, unsupported-filesystem, staging, and
-publication failures all project the same path-free
-`publication/initialization_failed` diagnostic.
+published target, and failures remain path-free. Target collisions project
+`publication/initialization_target_exists`; preflight distinguishes
+`initialization_parent_missing` from `initialization_parent_unusable`; and
+failures without a safe public cause use `publication/initialization_failed`.
 
 `PtcRunner.Kernel.RunBuilder` remains the shared environment assembly and
 cleanup boundary.
@@ -623,7 +624,10 @@ is always rebuilt from the catalog and never forwards a compiler string.
 `notes` stays pinned to the empty list. The published V1 schema fixes it as
 `{"const": []}`, so any populated array makes an envelope invalid for a strict
 V1 consumer; a diagnostic that has to report a rejected value against its bound
-needs a later envelope version, not a relaxed V1.
+needs a later envelope version, not a relaxed V1. Manifest limits that are valid
+under the application schema but exceed the installed ceiling therefore use
+`application/installed_limit_exceeded` with the limit's manifest path and a
+fixed remediation message; the requested value and ceiling remain internal.
 The command-specific host loader preserves closed phase-2 causes instead of
 projecting every failure to `host_invalid`: inaccessible files are
 `host_unavailable`, invalid bytes/JSON are `host_invalid`, structural failures
@@ -633,6 +637,9 @@ authorized by the generated host schema. Duplicate properties are structural
 host failures. The command loader retains
 their schema-authorized parent pointer (the empty pointer for a root duplicate)
 instead of collapsing them into an unlocated JSON failure.
+At the application source boundary, a missing manifest is
+`application/application_not_found`; other access, type, and confinement
+failures remain `application/application_unavailable`.
 Non-null diagnostic paths require a non-null source and are admitted only for
 the catalog's phase/code/source-kind combinations; source-less provider
 diagnostics therefore cannot carry a path. Finished execution records have two

@@ -129,7 +129,7 @@ failed_envelope_status=$?
 set -e
 test "$failed_envelope_status" -eq 3
 test ! -s "$release_tmp_dir/failed-envelope.stdout"
-grep -q 'application/application_unavailable' "$release_tmp_dir/failed-envelope.stderr"
+grep -q 'application/application_not_found' "$release_tmp_dir/failed-envelope.stderr"
 "$release_root/bin/ptc_runner" eval '
   [path] = System.argv()
   envelope = path |> File.read!() |> Jason.decode!()
