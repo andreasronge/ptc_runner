@@ -73,7 +73,7 @@ how it was verified.
   ExUnit concurrency.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`;
   the MCP tests also require the local server in the
-  [development setup guide](docs/guides/development-setup.md)).
+  [development setup guide](docs/development-setup.md)).
 - `mix nightly` — the `:nightly` tests, excluded from `mix test` by default.
   The `Nightly` workflow runs them daily; run it locally when you touch the
   `mix ptc run` downstream path or the benchmark task. Never add `--trace` (or
@@ -103,7 +103,7 @@ a rebuildable cache. Run it before creating a new one.
 
 Setting up a fresh clone or worktree — toolchain, dependencies, git hooks,
 Dialyzer PLT, and the local MCP E2E server — is covered once in the
-[development setup guide](docs/guides/development-setup.md). Two rules from it
+[development setup guide](docs/development-setup.md). Two rules from it
 that bite mid-task: never regenerate `priv/semantic_build_projection.json` on a
 feature branch, and never hand-merge its hashes.
 
