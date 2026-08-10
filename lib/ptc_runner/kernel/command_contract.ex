@@ -422,7 +422,6 @@ defmodule PtcRunner.Kernel.CommandContract do
        }) do
     String.ends_with?(name, [
       "/selection",
-      "/credentials",
       "/authorization",
       "/connectivity"
     ])

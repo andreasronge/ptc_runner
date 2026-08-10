@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
@@ -318,7 +319,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert_receive {:execution_result, {:error, %CommandDiagnostic{} = diagnostic}}, 5_000
     assert diagnostic.phase == :active_preflight
     assert diagnostic.code == :credential_unavailable
-    assert diagnostic.provider_activity
+    refute diagnostic.provider_activity
 
     # Attribution is per alias, not per occurrence: the catalogue forbids an
     # occurrence on this pair, and the resolver answers for the whole batch
@@ -332,6 +333,45 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     refute_received {:provider_phase, :preflight}
     refute_received {:provider_phase, :acquire}
     refute_received {:provider_root, _root, _registration}
+  end
+
+  test "a credential failure after active selection validation preserves provider activity" do
+    parent = self()
+
+    fixture =
+      provider_fixture(
+        credential_names: ["fixture-key"],
+        credential_resolver: fn _names -> {:error, :credential_unavailable} end,
+        selection_validation: :active,
+        selection_validator: fn _selection, _context ->
+          send(parent, :selection_validated)
+          :ok
+        end
+      )
+
+    _started = start_owned_execution(fixture)
+
+    assert_receive {:execution_result, {:error, %CommandDiagnostic{} = diagnostic}}, 5_000
+    assert diagnostic.code == :credential_unavailable
+    assert diagnostic.provider_activity
+    assert_received :selection_validated
+    refute_received {:provider_phase, :prepare}
+  end
+
+  test "an explicit nil provider application does not create credential activity" do
+    fixture =
+      provider_fixture(
+        credential_names: ["fixture-key"],
+        credential_resolver: fn _names -> {:error, :credential_unavailable} end,
+        provider_application: nil,
+        provider_application_mode: :command_vm
+      )
+
+    _started = start_owned_execution(fixture)
+
+    assert_receive {:execution_result, {:error, %CommandDiagnostic{} = diagnostic}}, 5_000
+    assert diagnostic.code == :credential_unavailable
+    refute diagnostic.provider_activity
   end
 
   test "a run refuses a builder asking for a credential its declaration omits" do
@@ -426,6 +466,36 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert_session_closes_before_registry(fixture, :connect)
   end
 
+  test "connectivity registry activation timeout preserves the attempted prefix" do
+    parent = self()
+
+    for {selection_validation, expected_activity} <- [
+          {:declarative, false},
+          {:active, true}
+        ] do
+      activation = fn ->
+        send(parent, {:registry_activation_started, selection_validation})
+        block_forever()
+      end
+
+      fixture =
+        provider_fixture(
+          activation: activation,
+          doctor_connectivity_timeout_ms: 100,
+          selection_validation: selection_validation,
+          selection_validator: fn _selection, _context -> :ok end
+        )
+
+      _started = start_owned_execution(fixture, :connect)
+      assert_receive {:registry_activation_started, ^selection_validation}, 5_000
+
+      assert_receive {:execution_result, {:error, %CommandDiagnostic{} = diagnostic}}, 5_000
+      assert diagnostic.phase == :active_preflight
+      assert diagnostic.code == :connectivity_timeout
+      assert diagnostic.provider_activity == expected_activity
+    end
+  end
+
   test "an execution from another catalog leaves the prepared run reusable" do
     fixture = provider_fixture()
     other = provider_fixture(installation_revision: "other-v1")
@@ -455,8 +525,10 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert :ok = PreparedRun.close(other.prepared)
   end
 
-  defp start_owned_execution(fixture) do
+  defp start_owned_execution(fixture, operation \\ :run) do
     parent = self()
+
+    notifier = if operation == :connect, do: nil, else: &never_notify/1
 
     caller =
       spawn(fn ->
@@ -466,7 +538,8 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
             fixture.authority,
             self(),
             fixture.execution,
-            &never_notify/1
+            notifier,
+            operation
           )
 
         send(parent, {:execution_owner, owner})
@@ -706,15 +779,31 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     end
 
     implementation =
-      case Keyword.get(opts, :selection_validator) do
-        nil -> %{builder: builder}
-        validator -> %{builder: builder, selection_validator: validator}
+      if selection_validation == :active do
+        Map.put(
+          %{builder: builder},
+          :selection_validator,
+          Keyword.fetch!(opts, :selection_validator)
+        )
+      else
+        %{builder: builder}
+      end
+
+    implementation =
+      case Keyword.fetch(opts, :provider_application) do
+        {:ok, application} -> Map.put(implementation, :provider_application, application)
+        :error -> implementation
       end
 
     registration = %{descriptor: descriptor, implementation: implementation, authority: nil}
 
+    {:ok, installed_limits} =
+      Limits.installed(%{
+        doctor_connectivity_timeout_ms: Keyword.get(opts, :doctor_connectivity_timeout_ms, 10_000)
+      })
+
     {:ok, catalog} =
-      InstallationCatalog.new(%{"selected" => registration})
+      InstallationCatalog.new(%{"selected" => registration}, installed_limits: installed_limits)
 
     default_resolver = fn names ->
       send(parent, {:resolved_credentials, names})
@@ -723,7 +812,9 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
 
     {:ok, services} =
       ProviderRuntimeServices.new(
-        credential_resolver: Keyword.get(opts, :credential_resolver, default_resolver)
+        activation: Keyword.get(opts, :activation, fn -> {:ok, nil} end),
+        credential_resolver: Keyword.get(opts, :credential_resolver, default_resolver),
+        provider_application_mode: Keyword.get(opts, :provider_application_mode, :host_owned)
       )
 
     {:ok, execution} = ProviderExecution.new(catalog, services, [])
@@ -748,7 +839,10 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     }
 
     {:ok, request} =
-      ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+      ApplicationPackage.request_memory("ptc.json", documents,
+        result_projection: :json,
+        installed_limits: installed_limits
+      )
 
     {:ok, prepared} = RunCoordinator.prepare(request, catalog)
     on_exit(fn -> InstallationCatalog.close(catalog) end)

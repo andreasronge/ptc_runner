@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.ConnectivityProbe
   alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DoctorEnvironment
@@ -46,6 +47,27 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
 
     refute_received {:builder_invoked, _name}
     refute_received {:probe_invoked, _name}
+    refute ConnectivityResult.provider_activity(result)
+  end
+
+  test "an expired probe budget before the first callback reports no activity" do
+    %{prepared: prepared, catalog: catalog, services: services} =
+      fixture(%{"probe" => [destination: :workflow, connectivity_mode: :probe]})
+
+    expired = Deadline.from_expires_at(System.monotonic_time(:millisecond) - 1)
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             ConnectivityProbe.run(prepared, catalog, services, expired, %{}, false)
+
+    assert diagnostic.code == :connectivity_timeout
+    refute diagnostic.provider_activity
+    refute_received {:probe_invoked, _name}
+
+    assert {:error, %CommandDiagnostic{} = after_earlier_work} =
+             ConnectivityProbe.run(prepared, catalog, services, expired, %{}, true)
+
+    assert after_earlier_work.provider_activity
+    refute_received {:probe_invoked, _name}
   end
 
   test "connect resolves the credential of an occurrence no closure reaches" do
@@ -78,7 +100,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
     assert diagnostic.phase == :active_preflight
     assert diagnostic.code == :credential_unavailable
-    assert diagnostic.provider_activity
+    refute diagnostic.provider_activity
     assert diagnostic.subject.name == "inert"
     assert diagnostic.subject.operation == :credentials
     assert diagnostic.subject.occurrence == nil
@@ -139,12 +161,11 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     assert_received {:builder_invoked, "inert"}
   end
 
-  test "activity is marked before connectivity completes" do
-    # Connectivity runs behind the phase-8 marker like a run, so anything that
-    # fails inside the completion reports activity true. The marker itself is
-    # not readable afterwards — the activity owner stops with the operation —
-    # so the diagnostic is the observation, and it is also the contract-visible
-    # one. Phase 7 failing false is asserted in the local-preflight regressions.
+  test "a dispatched connectivity callback reports activity" do
+    # The probe callback is actually dispatched, so its failure reports true.
+    # The diagnostic is the contract-visible observation after the activity
+    # owner stops with the operation; the no-dispatch timeout regression above
+    # pins the contrasting false case.
     %{prepared: prepared, execution: execution} =
       fixture(%{
         "reachable" => [destination: :workflow, connectivity_mode: :probe, probe: :unavailable]
@@ -497,7 +518,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
 
   test "an unverified failure reports its closed code with activity true" do
     # `local_preflight` spans the marker: the phase keeps its codes and the
-    # activity flag carries which side of the marker the check ran on.
+    # activity flag carries whether its callback was dispatched.
     %{prepared: prepared, execution: execution} =
       fixture(%{
         "custom" => [
@@ -752,7 +773,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
 
       assert diagnostic.phase == :active_preflight
       assert diagnostic.code == :authorization_required
-      assert diagnostic.provider_activity
+      refute diagnostic.provider_activity
       assert diagnostic.subject.name == "authorized"
       assert diagnostic.subject.operation == :authorization
 
@@ -1006,7 +1027,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     prepared = prepared(catalog, specifications, limit_overrides, installed)
     on_exit(fn -> InstallationCatalog.close(catalog) end)
 
-    %{prepared: prepared, catalog: catalog, execution: execution}
+    %{prepared: prepared, catalog: catalog, execution: execution, services: services}
   end
 
   # The descriptor's fingerprint comes from the authority it is bound to, so an

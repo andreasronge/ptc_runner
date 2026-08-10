@@ -33,6 +33,13 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
   # trusted from the producer, on the same terms as the doctor plan's settled
   # outcomes: a value that cannot express an unknown result cannot smuggle one
   # into a rendered row.
+  #
+  # `provider_activity` is cumulative attempted-work evidence from the active
+  # prefix, acquisition targets, and probes. It is sealed beside the entries so
+  # doctor cannot replace a no-op success with the lifecycle marker. Construction
+  # also rejects `false` when the sealed declarations or reached entries prove
+  # work happened; `true` remains admissible for command-owned application
+  # startup, which these fields cannot independently derive.
 
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.InstallationCatalog
@@ -45,7 +52,7 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @max_entries 128
 
-  @enforce_keys [:prepared_attestation, :catalog_attestation, :entries]
+  @enforce_keys [:prepared_attestation, :catalog_attestation, :entries, :provider_activity]
   defstruct @enforce_keys ++ [attestation: nil]
   @field_keys Enum.sort([:__struct__, :attestation | @enforce_keys])
 
@@ -61,20 +68,23 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
           prepared_attestation: binary(),
           catalog_attestation: binary(),
           entries: [entry()],
+          provider_activity: boolean(),
           attestation: binary() | nil
         }
 
-  @spec new(PreparedRun.t(), InstallationCatalog.t(), [entry()]) ::
+  @spec new(PreparedRun.t(), InstallationCatalog.t(), [entry()], boolean()) ::
           {:ok, t()} | {:error, :invalid_connectivity_result}
   @doc false
-  def new(%PreparedRun{} = prepared, %InstallationCatalog{} = catalog, entries)
-      when is_list(entries) and length(entries) <= @max_entries do
+  def new(%PreparedRun{} = prepared, %InstallationCatalog{} = catalog, entries, provider_activity)
+      when is_list(entries) and length(entries) <= @max_entries and is_boolean(provider_activity) do
     if bound_pair?(prepared, catalog) and entries_valid?(entries) and
-         answers_for?(entries, prepared, catalog) do
+         answers_for?(entries, prepared, catalog) and
+         activity_consistent?(provider_activity, entries, prepared, catalog) do
       result = %__MODULE__{
         prepared_attestation: prepared.attestation,
         catalog_attestation: catalog.attestation,
-        entries: entries
+        entries: entries,
+        provider_activity: provider_activity
       }
 
       {:ok, %{result | attestation: Attestation.attest(__MODULE__, payload(result))}}
@@ -83,14 +93,16 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
     end
   end
 
-  def new(_prepared, _catalog, _entries), do: {:error, :invalid_connectivity_result}
+  def new(_prepared, _catalog, _entries, _provider_activity),
+    do: {:error, :invalid_connectivity_result}
 
   @spec valid?(term()) :: boolean()
   @doc false
   def valid?(%__MODULE__{attestation: attestation} = result),
     do:
       Enum.sort(Map.keys(result)) == @field_keys and is_binary(result.prepared_attestation) and
-        is_binary(result.catalog_attestation) and entries_valid?(result.entries) and
+        is_binary(result.catalog_attestation) and is_boolean(result.provider_activity) and
+        entries_valid?(result.entries) and activity_covers_entries?(result) and
         Attestation.valid?(__MODULE__, payload(result), attestation)
 
   def valid?(_result), do: false
@@ -114,7 +126,8 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
     valid?(result) and bound_pair?(prepared, catalog) and
       result.prepared_attestation == prepared.attestation and
       result.catalog_attestation == catalog.attestation and
-      answers_for?(result.entries, prepared, catalog)
+      answers_for?(result.entries, prepared, catalog) and
+      activity_consistent?(result.provider_activity, result.entries, prepared, catalog)
   end
 
   def bound_to?(_result, _prepared, _catalog), do: false
@@ -122,6 +135,10 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
   @spec entries(t()) :: [entry()]
   @doc false
   def entries(%__MODULE__{entries: entries}), do: entries
+
+  @spec provider_activity(t()) :: boolean()
+  @doc false
+  def provider_activity(%__MODULE__{provider_activity: provider_activity}), do: provider_activity
 
   # The preparation's lifecycle state is its caller's business — it is consumed
   # while the operation runs and closed afterwards — but its seal is not. A
@@ -134,12 +151,31 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
   end
 
   defp payload(result),
-    do: {result.prepared_attestation, result.catalog_attestation, result.entries}
+    do:
+      {result.prepared_attestation, result.catalog_attestation, result.entries,
+       result.provider_activity}
 
   defp entries_valid?(entries) when is_list(entries) and length(entries) <= @max_entries,
     do: Enum.all?(entries, &valid_entry?/1)
 
   defp entries_valid?(_entries), do: false
+
+  defp activity_covers_entries?(%{provider_activity: true}), do: true
+
+  defp activity_covers_entries?(%{provider_activity: false, entries: entries}),
+    do: Enum.all?(entries, &(&1.mode == :none))
+
+  defp activity_consistent?(true, _entries, _prepared, _catalog), do: true
+
+  defp activity_consistent?(false, entries, prepared, catalog) do
+    activity_covers_entries?(%{provider_activity: false, entries: entries}) and
+      Enum.all?(prepared.provider_declarations, fn declaration ->
+        descriptor = Map.fetch!(catalog.descriptors, declaration.name)
+
+        declaration.validation_state != :active_required and
+          descriptor.local_preflight != :unverified
+      end)
+  end
 
   defp valid_entry?(%{} = entry) when not is_struct(entry) do
     Enum.sort(Map.keys(entry)) == Enum.sort(@entry_keys) and

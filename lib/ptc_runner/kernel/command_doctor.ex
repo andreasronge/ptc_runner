@@ -6,9 +6,11 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.DoctorEnvironment
   alias PtcRunner.Kernel.DoctorPlan
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderRuntimeServices
@@ -181,12 +183,18 @@ defmodule PtcRunner.Kernel.CommandDoctor do
     case RunCoordinator.connect(prepared, authority, execution) do
       {:ok, result} ->
         case DoctorPlan.settle_connect(rows, result, prepared, catalog) do
-          {:ok, settled} -> connect_projection(settled, true)
-          {:error, _reason} -> {:error, active_diagnostic(:internal, :internal_error)}
+          {:ok, settled} ->
+            connect_projection(settled, ConnectivityResult.provider_activity(result))
+
+          {:error, _reason} ->
+            {:error, active_diagnostic(:internal, :internal_error)}
         end
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
         {:error, diagnostic}
+
+      {:error, %OwnerFailure{} = failure} ->
+        {:error, connect_failure_diagnostic(failure)}
 
       {:error, reason} ->
         {:error, operation_diagnostic(reason)}
@@ -203,6 +211,17 @@ defmodule PtcRunner.Kernel.CommandDoctor do
     do: active_diagnostic(:internal, :internal_error)
 
   defp operation_diagnostic(_reason), do: diagnostic(:internal, :internal_error)
+
+  @doc false
+  @spec connect_failure_diagnostic(term()) :: CommandDiagnostic.t()
+  def connect_failure_diagnostic(failure) do
+    {_reason, provider_activity, _stage} =
+      OwnerFailure.evidence_or_unknown(failure, :internal_error, :incomplete)
+
+    if provider_activity,
+      do: active_diagnostic(:internal, :internal_error),
+      else: diagnostic(:internal, :internal_error)
+  end
 
   defp connect_projection(rows, provider_activity) do
     case DoctorPlan.checks(rows) do

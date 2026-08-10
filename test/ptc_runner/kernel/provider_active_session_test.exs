@@ -135,6 +135,63 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     send(lifecycle_owner, :stop)
   end
 
+  test "a rejected session handoff reports no provider activity" do
+    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end, ["first"])
+    assert {:ok, _inputs} = owned_inputs(prepared)
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             ProviderActiveSession.open_consumed_setup(
+               prepared,
+               catalog,
+               services(),
+               self(),
+               fn _session -> {:error, :handoff_rejected} end
+             )
+
+    assert diagnostic.code == :internal_error
+    refute diagnostic.provider_activity
+    assert :ok = PreparedRun.close(prepared)
+  end
+
+  test "a session lost before begin preserves only application activity" do
+    for {application, services, expected_activity, revision} <- [
+          {nil, services(), false, "lost-inert-v1"},
+          {:req_llm, services(:command_vm), true, "lost-application-v1"}
+        ] do
+      if application do
+        restore_provider_applications_on_exit()
+        stop_provider_applications()
+      end
+
+      {:ok, prepared, catalog} =
+        fixture(
+          fn _selection, _context -> :ok end,
+          ["first"],
+          nil,
+          revision,
+          application
+        )
+
+      assert {:ok, session} = open_owned_setup(prepared, catalog, services)
+      session_ref = Process.monitor(session.pid)
+      Process.exit(session.pid, :kill)
+      assert_receive {:DOWN, ^session_ref, :process, _pid, :killed}, 1_000
+
+      assert {:error, %CommandDiagnostic{} = diagnostic} =
+               ProviderActiveSession.begin_owned_operation(
+                 session,
+                 prepared,
+                 catalog,
+                 services,
+                 :run
+               )
+
+      assert diagnostic.code == :internal_error
+      assert diagnostic.provider_activity == expected_activity
+      assert :ok = PreparedRun.close(prepared)
+    end
+  end
+
   test "execution worker builds against sinks owned by the fixed lifecycle owner" do
     {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end, ["first"])
     assert {:ok, authority} = PublicationAuthority.new([])
@@ -166,7 +223,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
                  ),
                {:ok, registry} <- active_registry(),
                {:ok, credentials} <-
-                 ProviderCredentials.resolve(prepared, catalog, registry, session),
+                 ProviderCredentials.resolve(prepared, catalog, registry, session, true),
                {:ok, built} <-
                  RunBuilder.build_active_owned(
                    prepared,
@@ -775,6 +832,32 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     refute Process.alive?(worker)
   end
 
+  test "a deadline spent at the validator dispatch fence reports no activity" do
+    {:ok, prepared, _catalog} = fixture(fn _selection, _context -> :ok end)
+
+    assert {:error,
+            %CommandDiagnostic{
+              code: :selection_validation_timeout,
+              provider_activity: false
+            }} = dispatch_after_expiry(prepared, false)
+
+    refute_received :unexpected_validator_dispatch
+    assert :ok = PreparedRun.close(prepared)
+  end
+
+  test "a deadline spent at a later validator dispatch fence preserves earlier activity" do
+    {:ok, prepared, _catalog} = fixture(fn _selection, _context -> :ok end)
+
+    assert {:error,
+            %CommandDiagnostic{
+              code: :selection_validation_timeout,
+              provider_activity: true
+            }} = dispatch_after_expiry(prepared, true)
+
+    refute_received :unexpected_validator_dispatch
+    assert :ok = PreparedRun.close(prepared)
+  end
+
   test "a queued success is rejected after the absolute deadline" do
     parent = self()
 
@@ -920,7 +1003,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
             %CommandDiagnostic{
               phase: :active_preflight,
               code: :provider_application_unavailable,
-              provider_activity: true
+              provider_activity: false
             } = diagnostic} =
              open_owned(prepared, catalog, services(:host_owned))
 
@@ -991,7 +1074,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
       fixture(fn _selection, _context -> :ok end, ["first"], nil, "command-v1", :req_llm)
 
     assert {:error,
-            %CommandDiagnostic{code: :provider_application_unavailable, provider_activity: true}} =
+            %CommandDiagnostic{code: :provider_application_unavailable, provider_activity: false}} =
              open_owned(
                command_prepared,
                command_catalog,
@@ -1005,6 +1088,30 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
              open_owned(host_prepared, host_catalog, services(:host_owned))
 
     close(session, host_prepared)
+  end
+
+  test "command VM startup failures preserve attempted provider activity" do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+    previous_pool_size = Application.get_env(:req_llm, :stream_pool_size)
+    Application.put_env(:req_llm, :stream_pool_size, 0, persistent: true)
+
+    on_exit(fn ->
+      if previous_pool_size,
+        do:
+          Application.put_env(:req_llm, :stream_pool_size, previous_pool_size, persistent: true),
+        else: Application.delete_env(:req_llm, :stream_pool_size, persistent: true)
+    end)
+
+    {:ok, prepared, catalog} =
+      fixture(fn _selection, _context -> :ok end, ["first"], nil, "command-v1", :req_llm)
+
+    assert {:error,
+            %CommandDiagnostic{code: :provider_application_unavailable, provider_activity: true}} =
+             open_owned(prepared, catalog, services(:command_vm))
+
+    assert ProviderActivity.value(prepared.provider_activity) == true
+    assert :ok = PreparedRun.close(prepared)
   end
 
   # The sealed descriptor is what phase-8 step 5 derives its union from, so a
@@ -1185,6 +1292,49 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     end
   end
 
+  defp dispatch_after_expiry(prepared, provider_activity) do
+    parent = self()
+    declaration = hd(prepared.provider_declarations)
+
+    owner =
+      spawn(fn ->
+        deadline = Deadline.new(100)
+        send(parent, {:dispatch_fenced, self(), deadline})
+
+        receive do
+          :release_dispatch ->
+            dispatch = fn _timeout_ms ->
+              send(parent, :unexpected_validator_dispatch)
+              {:ok, :ok}
+            end
+
+            result =
+              ProviderActiveSession.dispatch_validator(
+                deadline,
+                dispatch,
+                declaration,
+                provider_activity
+              )
+
+            send(parent, {:dispatch_result, self(), result})
+        end
+      end)
+
+    monitor = Process.monitor(owner)
+
+    try do
+      assert_receive {:dispatch_fenced, ^owner, deadline}, 1_000
+      wait_until_expired(deadline)
+      send(owner, :release_dispatch)
+      assert_receive {:dispatch_result, ^owner, result}, 1_000
+      assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 1_000
+      result
+    after
+      if Process.alive?(owner), do: Process.exit(owner, :kill)
+      Process.demonitor(monitor, [:flush])
+    end
+  end
+
   defp resume_if_suspended(pid) do
     if Process.alive?(pid), do: :erlang.resume_process(pid)
   catch
@@ -1260,7 +1410,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   # rather than handing over a literal map is what keeps these tests pinned to
   # the shipped derivation instead of one this file invented.
   defp build_owned(prepared, catalog, registry, session, opts) do
-    case ProviderCredentials.resolve(prepared, catalog, registry, session) do
+    case ProviderCredentials.resolve(prepared, catalog, registry, session, true) do
       {:ok, credentials} ->
         build_owned(
           owned_inputs!(prepared),
