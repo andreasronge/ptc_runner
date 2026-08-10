@@ -150,6 +150,18 @@
                                next-prompt-state
                                closing?))
                       (subject-failure :turn-limit :intermediate-result))
+
+                    ;; A refused admission is a host condition, not something
+                    ;; the model wrote: either another caller holds the run's
+                    ;; single evaluation lease, or the run has spent its
+                    ;; evaluation budget. Correcting the program cannot clear
+                    ;; either one, so this fails the outer workflow rather than
+                    ;; spending a turn and a model call on feedback the model
+                    ;; cannot act on.
+                    (:busy :limit_exceeded)
+                    (fail (result/error :evaluation-unavailable
+                                        (get evaluation :reason)))
+
                     (if (false? (get evaluation :retryable?))
                       ;; An unsafe failure forbids repeating the program, not
                       ;; salvaging the run. Spend one closing turn asking for a
