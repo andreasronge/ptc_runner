@@ -583,6 +583,31 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
     end
   end
 
+  test "private prelude parallel failures retain only bounded safe taxonomy" do
+    {:ok, prelude} =
+      Compiler.compile("""
+      (ns api "API" {:visibility :prompt})
+      (defn classified-pcalls []
+        (pcalls #(fail {:kind :evaluation-unavailable
+                        :reason "PRIVATE_PARALLEL_FAILURE"})))
+      (defn classified-pmap []
+        (pmap (fn [_]
+                (fail {:kind :evaluation-unavailable
+                       :reason "PRIVATE_PARALLEL_FAILURE"}))
+              [1]))
+      """)
+
+    for {source, reason} <- [
+          {"(api/classified-pcalls)", :pcalls_error},
+          {"(api/classified-pmap)", :pmap_error}
+        ] do
+      assert {:error, step} = Lisp.run(source, prelude: prelude)
+      assert step.fail.reason == reason
+      assert step.fail.details == %{failure_kind: "evaluation-unavailable"}
+      refute inspect(step.fail) =~ "PRIVATE_PARALLEL_FAILURE"
+    end
+  end
+
   test "private prelude adapters preserve stable resource classifications" do
     prelude = private_parallel_limit_prelude!()
 

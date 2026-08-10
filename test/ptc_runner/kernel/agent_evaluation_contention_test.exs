@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.Lisp.Eval.Context, as: LispContext
 
   test "an exhausted evaluation budget fails the workflow instead of spending another turn" do
     {:ok, counter} = Agent.start_link(fn -> 0 end)
@@ -65,7 +66,8 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
   test "four concurrent agent loops do not retry against a held evaluation lease" do
     parent = self()
     {:ok, counter} = Agent.start_link(fn -> 0 end)
-    barrier = start_barrier(4)
+    expected_requests = min(4, LispContext.default_pmap_max_concurrency())
+    barrier = start_barrier(expected_requests)
 
     requester = fn _request ->
       request_number = Agent.get_and_update(counter, fn count -> {count + 1, count + 1} end)
@@ -118,14 +120,15 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
     assert error.reason == :pcalls_error
     assert error.details[:failure_kind] == "evaluation-unavailable"
 
-    assert Agent.get(counter, & &1) == 4,
-           "each agent must ask once and contention must not buy a fifth request"
+    assert Agent.get(counter, & &1) == expected_requests,
+           "each started agent must ask once and contention must not buy another request"
 
-    assert_received {:agent_request, 1}
-    assert_received {:agent_request, 2}
-    assert_received {:agent_request, 3}
-    assert_received {:agent_request, 4}
-    refute_received {:agent_request, 5}
+    for request_number <- 1..expected_requests do
+      assert_received {:agent_request, ^request_number}
+    end
+
+    unexpected_request = expected_requests + 1
+    refute_received {:agent_request, ^unexpected_request}
   end
 
   defp start_barrier(expected) do
