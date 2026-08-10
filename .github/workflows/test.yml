@@ -271,8 +271,19 @@ jobs:
       - name: Check stable CLI transitional callers
         run: mix run --no-start scripts/check_stable_cli_transition.exs
 
+      # No `--trace` here, and none may be reintroduced: it sets `--max-cases`
+      # to 1 (`Mix.Tasks.Test` docs; `ExUnit.max_cases/1`), which ran this
+      # suite single-threaded on a 4-vCPU runner for 259 s. `--slowest` and
+      # `--slowest-modules` imply `--trace` too, so they are not a substitute
+      # for the per-test timings this drops; get those from a local run or the
+      # nightly `Slow` workflow.
+      #
+      # Dropping `--trace` also restores the default 60 s per-test timeout,
+      # which trace mode had set to `:infinity`. That is why the `:slow`
+      # exclusion in `test/test_helper.exs` is part of the same change: the
+      # slowest test took 61.3 s and would now time out here.
       - name: Run tests
-        run: mix test --max-failures 1 --trace --warnings-as-errors
+        run: mix test --max-failures 1 --warnings-as-errors
 
       - name: Verify core release package
         run: bash scripts/verify_core_package.sh

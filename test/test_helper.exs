@@ -13,7 +13,13 @@ end
 # - :clojure tests require Babashka and are excluded by default, run with --include clojure
 # - :soak tests are long-running memory soak tests, excluded by default.
 #   Run with: `mix test --only soak` (see test/soak/README.md)
-exclusions = [:skip, :e2e, :clojure, :soak]
+# - :slow tests cost seconds each because they compile a project or drive a
+#   real subprocess. They are excluded by default and run in the nightly
+#   `Slow` workflow with `mix slow`. Excluding them here rather than only in
+#   the pre-commit hook is what lets the per-PR suite run in parallel: the
+#   suite is 69% `async: false`, so its wall clock is a serial floor, and
+#   three `:slow` files were 40% of that floor.
+exclusions = [:skip, :e2e, :clojure, :soak, :slow]
 
 # Run clojure conformance tests: mix test --include clojure
 #

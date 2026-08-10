@@ -99,8 +99,11 @@ run_project_gates() {
   fi
 
   # Scoped tests for changed test files — a single `mix test` invocation for
-  # all of them. `:slow` (heavy subprocess/integration) tests are skipped on
-  # the fast pre-commit path; they still run in `mix precommit`, pre-push, and CI.
+  # all of them. `:slow` (heavy subprocess/integration) tests are now excluded
+  # by `test/test_helper.exs` for every entry point, so `--exclude slow` below
+  # is redundant but kept explicit, matching `--exclude clojure`. They run in
+  # the nightly `Slow` workflow (`mix slow`), not in `precommit`, pre-push, or
+  # the per-PR CI suite.
   local changed_tests
   if [ "$proj" = "." ]; then
     changed_tests=$(echo "$staged" | grep -E '^test/.*_test\.exs$' || true)

@@ -1,6 +1,12 @@
 defmodule Mix.Tasks.Bench.CheckTest do
   use ExUnit.Case, async: false
 
+  # `:slow` because both tests execute the real benchmark task rather than a
+  # stub: even at `--samples 1 --warmup 0` the module cost 24.0 s of the CI
+  # suite's 177.8 s serial floor, second only to the downstream-consumer
+  # build. The nightly `Slow` workflow runs it.
+  @moduletag :slow
+
   alias Mix.Tasks.Bench.Check
 
   setup do
