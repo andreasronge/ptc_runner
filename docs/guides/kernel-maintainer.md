@@ -608,13 +608,18 @@ exclusive end offset is within that retained byte bound.
 Component compilation is the one producer of that span. When the prelude
 compiler can attribute a failure to a single top-level form,
 `PtcRunner.Lisp.Prelude.ErrorSpan` resolves that form's byte range from the raw
-component text, and `bundle/compile_failed` carries it against provenance bound
-to the same bytes. That resolution runs in its own bounded worker after the
-primary compile result is final, so optional attribution cannot reclassify a
-compile error as a bundle timeout or heap failure. Failures no single form owns
+component text, and the resulting bundle diagnostic carries it against
+provenance bound to the same bytes. That resolution runs in its own bounded
+worker after the primary compile result is final, so optional attribution cannot
+reclassify a compile error as a bundle timeout or heap failure. Failures no single form owns
 — parse errors, whole-bundle limits — keep the null span. Spans are best-effort
 by design: an unresolvable one is dropped rather than guessed, because a wrong
 range points a reader at innocent code.
+Compiler details remain private inputs to an explicit reason allowlist. Only
+`:parse_error`, `:unbound_var`, and `:duplicate_ref` become the fixed public
+`syntax_invalid`, `undefined_variable`, and `duplicate_definition` catalog
+rows; every other compiler reason becomes `compile_failed`. The public message
+is always rebuilt from the catalog and never forwards a compiler string.
 `notes` stays pinned to the empty list. The published V1 schema fixes it as
 `{"const": []}`, so any populated array makes an envelope invalid for a strict
 V1 consumer; a diagnostic that has to report a rejected value against its bound

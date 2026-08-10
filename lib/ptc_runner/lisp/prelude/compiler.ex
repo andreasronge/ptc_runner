@@ -1636,7 +1636,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
       vars ->
         {:error,
          ValidationError.new(
-           :compile_error,
+           :unbound_var,
            "prelude body references undefined variable(s): #{Enum.join(vars, ", ")}"
          )}
     end

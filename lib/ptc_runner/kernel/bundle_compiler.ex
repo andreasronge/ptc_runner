@@ -27,6 +27,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   @max_span_locator_bytes 4_096
   @max_artifact_bytes 4_000_000
   @max_diagnostic_bytes 65_536
+  @public_compile_reasons [:parse_error, :unbound_var, :duplicate_ref]
 
   @spec compile([Component.t()]) :: {:ok, FrozenBundle.t()} | {:error, map()}
   @doc "Compiles and attests a bounded closed component set."
@@ -233,6 +234,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
             %{
               reason: :component_compile_error,
               id: component.id,
+              compile_reason: compile_reason(error),
               details: error_message(error),
               span_locator: span_locator(error)
             }}}
@@ -272,7 +274,12 @@ defmodule PtcRunner.Kernel.BundleCompiler do
         {:ok, %{prelude | metadata: Map.put(prelude.metadata, :components, metadata)}}
 
       {:error, error} ->
-        {:error, %{reason: :bundle_compile_error, details: error_message(error)}}
+        {:error,
+         %{
+           reason: :bundle_compile_error,
+           compile_reason: compile_reason(error),
+           details: error_message(error)
+         }}
     end
   end
 
@@ -301,8 +308,8 @@ defmodule PtcRunner.Kernel.BundleCompiler do
           do: {:error, "component declares no namespace"},
           else: {:ok, namespaces}
 
-      {:error, error} ->
-        {:error, inspect(error, limit: 10, printable_limit: 1_000)}
+      {:error, {:parse_error, message}} ->
+        {:error, %{reason: :parse_error, message: message}}
     end
   end
 
@@ -350,6 +357,15 @@ defmodule PtcRunner.Kernel.BundleCompiler do
     do: String.slice(message, 0, 4_096)
 
   defp error_message(error), do: inspect(error, limit: 10, printable_limit: 4_096)
+
+  # Only reasons with fixed, catalog-owned public projections cross the bundle
+  # boundary. Every other compiler reason deliberately retains the generic
+  # compile-failure classification.
+  defp compile_reason(%ValidationError{reason: reason}) when reason in @public_compile_reasons,
+    do: reason
+
+  defp compile_reason(%{reason: reason}) when reason in @public_compile_reasons, do: reason
+  defp compile_reason(_error), do: nil
 
   # The locator crosses the diagnostic-size gate before being consumed. Strip
   # the source-derived message and bound the remaining namespace/ref strings so

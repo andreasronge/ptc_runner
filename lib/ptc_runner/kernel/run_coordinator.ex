@@ -254,7 +254,12 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   defp bundle_diagnostic(%{reason: reason} = failure, components)
        when reason in [:component_compile_error, :bundle_compile_error, :bundle_compile_failed],
-       do: diagnostic(:bundle, :compile_failed, source_opts(failure, components))
+       do:
+         diagnostic(
+           :bundle,
+           compile_diagnostic_code(Map.get(failure, :compile_reason)),
+           source_opts(failure, components)
+         )
 
   defp bundle_diagnostic(failure, components),
     do: diagnostic(:bundle, :bundle_invalid, source_opts(failure, components))
@@ -267,6 +272,11 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   end
 
   defp source_opts(_failure, _components), do: []
+
+  defp compile_diagnostic_code(:parse_error), do: :syntax_invalid
+  defp compile_diagnostic_code(:unbound_var), do: :undefined_variable
+  defp compile_diagnostic_code(:duplicate_ref), do: :duplicate_definition
+  defp compile_diagnostic_code(_reason), do: :compile_failed
 
   # Provenance is bound to the exact component bytes the compiler read, which
   # is what admits a span at all: `CommandDiagnostic` refuses one whose end

@@ -488,9 +488,11 @@ mix ptc repl -m ptc.json
 ```
 
 The `-l`/`--load` option dynamically evaluates a setup file and cannot load the
-component-only `ns` and `defn-` forms. Manifest setup currently reports a
-compile failure as `ptc repl setup failed: compile_failed`; it does not expose
-the underlying compiler explanation.
+component-only `ns` and `defn-` forms. Manifest setup distinguishes malformed
+syntax (`syntax_invalid`), undefined variables (`undefined_variable`), and
+duplicate definitions (`duplicate_definition`). Other compiler rejections keep
+the `compile_failed` fallback. These fixed public classifications do not expose
+the underlying compiler explanation or offending name.
 
 **To find the artifacts**, use the run reference. It appears in the command
 envelope, and every artifact is named from it: `<run_ref>.jsonl` for a normal
