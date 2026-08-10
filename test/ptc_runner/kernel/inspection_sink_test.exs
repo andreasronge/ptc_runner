@@ -809,20 +809,10 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
       ~S|(ns app) (defn run [input] (println "CHECKPOINT" {:seen input}) #{1 2 3})|
     )
 
-    manifest = %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [%{"id" => "app", "path" => "workflow.clj"}],
-        "entry" => "app/run"
-      },
-      "input" => %{"value" => %{"seen" => "checkpoint-input"}},
-      "events" => %{"policy" => "private"}
-    }
-
     manifest_path = Path.join(dir, "ptc.json")
     trace_path = Path.join(dir, "run.private.jsonl")
     inspection_path = Path.join(dir, "run.inspection.jsonl")
-    File.write!(manifest_path, Jason.encode!(manifest))
+    File.write!(manifest_path, Jason.encode!(checkpoint_manifest()))
 
     {:ok, registry} = ProviderRegistry.new(%{})
 
@@ -896,6 +886,74 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert %{"records" => viewed_records} = Jason.decode!(response.resp_body)
     assert Enum.any?(viewed_records, &(&1["record_type"] == "execution-prints"))
     assert Enum.any?(viewed_records, &(&1["record_type"] == "execution-error"))
+  end
+
+  @tag :tmp_dir
+  test "a provider-free execution success still captures its println output",
+       %{tmp_dir: dir} do
+    File.write!(
+      Path.join(dir, "workflow.clj"),
+      ~S|(ns app) (defn run [input] (println "CHECKPOINT" {:seen input}) (return {"ok" true}))|
+    )
+
+    manifest_path = Path.join(dir, "ptc.json")
+    trace_path = Path.join(dir, "run.private.jsonl")
+    inspection_path = Path.join(dir, "run.inspection.jsonl")
+    result_path = Path.join(dir, "run.result.json")
+    File.write!(manifest_path, Jason.encode!(checkpoint_manifest()))
+
+    {:ok, registry} = ProviderRegistry.new(%{})
+
+    assert {:ok, %PtcRunner.Kernel.Result{value: %{"ok" => true}}} =
+             manifest_path
+             |> ApplicationPackage.request_directory(
+               inspection_capture: true,
+               result_projection: :json,
+               installed_limits: registry.installed_limits
+             )
+             |> RunLifecycle.build(registry,
+               trace_path: trace_path,
+               inspect: inspection_path,
+               private_output: result_path
+             )
+             |> RunLifecycle.execute()
+
+    assert {:ok, records} = InspectionArtifact.load(inspection_path)
+
+    prints_record = Enum.find(records, &(&1["record_type"] == "execution-prints"))
+    refute Enum.any?(records, &(&1["record_type"] == "execution-error"))
+
+    assert prints_record["payload"] == %{
+             "environment" => "workflow",
+             "prints" => [~S|CHECKPOINT {:seen {"seen" "checkpoint-input"}}|],
+             "truncated" => false
+           }
+
+    trace_lines = trace_path |> File.read!() |> String.split("\n", trim: true)
+    refute Enum.any?(trace_lines, &String.contains?(&1, "CHECKPOINT"))
+    refute Enum.any?(trace_lines, &String.contains?(&1, "checkpoint-input"))
+
+    evaluation_started =
+      trace_lines
+      |> Enum.map(&Jason.decode!/1)
+      |> Enum.find(
+        &(&1["type"] == "evaluation-started" and &1["data"]["environment"] == "workflow")
+      )
+
+    assert evaluation_started["data"]["evaluation_id"] ==
+             prints_record["correlation"]["evaluation_id"]
+  end
+
+  defp checkpoint_manifest do
+    %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "app", "path" => "workflow.clj"}],
+        "entry" => "app/run"
+      },
+      "input" => %{"value" => %{"seen" => "checkpoint-input"}},
+      "events" => %{"policy" => "private"}
+    }
   end
 
   defp emit_small(sink, capability_id) do

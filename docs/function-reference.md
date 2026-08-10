@@ -32,12 +32,12 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `def` | `(def ...)` |  |
-| `defn` | `(defn ...)` |  |
+| `defn` | `(defn ...)` |  — DIV-01: self-recursion is subject to the iteration cap (default 1000, configurable up to 10000). DIV-15: no multi-arity head form ([x] x ([x y] ...)). DIV-16: no :pre/:post conditions. See docs/clojure-conformance-gaps.md. |
 | `defonce` | `(defonce ...)` |  |
 | `fn` | `(fn ...)` |  |
 | `let` | `(let ...)` |  |
-| `loop` | `(loop ...)` |  |
-| `recur` | `(recur ...)` |  |
+| `loop` | `(loop ...)` |  — DIV-01: enforces a 1000-iteration default cap (configurable up to 10000) for sandbox safety. See docs/clojure-conformance-gaps.md. |
+| `recur` | `(recur ...)` |  — DIV-01: enforces a 1000-iteration default cap (configurable up to 10000) for sandbox safety. See docs/clojure-conformance-gaps.md. |
 
 
 
@@ -49,12 +49,12 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `cond` | `(cond ...)` |  |
 | `condp` | `(condp ...)` |  |
 | `if` | `(if ...)` |  |
-| `if-let` | `(if-let ...)` |  |
+| `if-let` | `(if-let ...)` |  — DIV-14: only single-symbol bindings supported, no destructuring. See docs/clojure-conformance-gaps.md. |
 | `if-not` | `(if-not ...)` |  |
 | `if-some` | `(if-some ...)` |  |
 | `when` | `(when ...)` |  |
 | `when-first` | `(when-first ...)` |  |
-| `when-let` | `(when-let ...)` |  |
+| `when-let` | `(when-let ...)` |  — DIV-14: only single-symbol bindings supported, no destructuring. See docs/clojure-conformance-gaps.md. |
 | `when-not` | `(when-not ...)` |  |
 | `when-some` | `(when-some ...)` |  |
 
@@ -99,21 +99,21 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `*` | `(* x y ...)` | Multiplication |
-| `*'` | `(*' x y ...)` | Arbitrary precision multiplication alias |
+| `*'` | `(*' x y ...)` | Arbitrary precision multiplication alias — Alias for `*`; BEAM integers are already arbitrary precision. |
 | `+` | `(+ x y ...)` | Addition |
-| `+'` | `(+' x y ...)` | Arbitrary precision addition alias |
+| `+'` | `(+' x y ...)` | Arbitrary precision addition alias — Alias for `+`; BEAM integers are already arbitrary precision. |
 | `-` | `(- x y ...)` | Subtraction |
-| `-'` | `(-' x y ...)` | Arbitrary precision subtraction alias |
+| `-'` | `(-' x y ...)` | Arbitrary precision subtraction alias — Alias for `-`; BEAM integers are already arbitrary precision. |
 | `/` | `(/ x y)` | Division (always returns float) |
-| `<` | `(< x), (< x y & more)` | Less than |
-| `<=` | `(<= x), (<= x y & more)` | Less or equal |
+| `<` | `(< x), (< x y & more)` | Less than — Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30). |
+| `<=` | `(<= x), (<= x y & more)` | Less or equal — Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30). |
 | `=` | `(= x), (= x y & more)` | Equality |
-| `==` | `(== x), (== x y & more)` | Type-independent numeric equality |
-| `>` | `(> x), (> x y & more)` | Greater than |
-| `>=` | `(>= x), (>= x y & more)` | Greater or equal |
+| `==` | `(== x), (== x y & more)` | Type-independent numeric equality — Alias for PTC-Lisp `=` numeric equality. |
+| `>` | `(> x), (> x y & more)` | Greater than — Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30). |
+| `>=` | `(>= x), (>= x y & more)` | Greater or equal — Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30). |
 | `NaN?` | `(NaN? ...)` |  |
 | `apply` | `(apply f coll)` | Applies function `f` to the argument sequence `coll` |
-| `array-map` | `(array-map & kvs)` | Create map from alternating key-value pairs |
+| `array-map` | `(array-map & kvs)` | Create map from alternating key-value pairs — Alias for `hash-map`; PTC-Lisp does not expose Clojure's small-map implementation detail. |
 | `assoc` | `(assoc m key val)` | Add/update key |
 | `assoc-in` | `(assoc-in m path val)` | Add/update nested |
 | `associative?` | `(associative? ...)` |  |
@@ -135,12 +135,12 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `count` | `(count coll)` | Number of items |
 | `counted?` | `(counted? ...)` |  |
 | `dec` | `(dec x)` | Subtract 1 |
-| `dec'` | `(dec' x)` | Arbitrary precision decrement alias |
-| `decimal?` | `(decimal? ...)` |  |
+| `dec'` | `(dec' x)` | Arbitrary precision decrement alias — Alias for `dec`; BEAM integers are already arbitrary precision. |
+| `decimal?` | `(decimal? ...)` |  — DIV-20: always returns false; BEAM has no BigDecimal type. See docs/clojure-conformance-gaps.md. |
 | `dedupe` | `(dedupe coll)` | Remove consecutive duplicates |
-| `describe` * | `(describe x), (describe x opts)` | Summarize data shape, types, key coverage, examples, and optional nested paths. |
+| `describe` * | `(describe x), (describe x opts)` | Summarize data shape, types, key coverage, examples, and optional nested paths. — Options map supports `:depth` (1-5), `:paths true`, and `:sample` (1-3). Output is capped; `:truncated true` and `:caps_hit` identify traversal caps. For capped root vectors, `:count_capped true` means `:count` is the scanned count. The summary is keyword-keyed, and those keys encode, so `(json/generate-string (describe x))` works for JSON-native data. `:examples` and `:sample` hold values verbatim, so describing data that itself contains keywords or ##Inf/##NaN yields a positioned type_error rather than coercing them and misreporting the type the summary just named. |
 | `dissoc` | `(dissoc m key)` | Remove key |
-| `distinct` | `(distinct coll)` | Remove duplicates |
+| `distinct` | `(distinct coll)` | Remove duplicates — DIV-29: direct map input raises; use seq/entries/keys/vals for an explicit ordered map view. |
 | `distinct-by` * | `(distinct-by key coll)` | Items with unique field values |
 | `distinct?` | `(distinct? x y ...)` | True if all arguments are distinct |
 | `double?` | `(double? ...)` |  |
@@ -150,14 +150,14 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `empty` | `(empty coll)` | Return empty collection of same type |
 | `empty?` | `(empty? coll)` | True if empty or nil |
 | `entries` | `(entries m)` | Get all `[key value]` pairs as a vector |
-| `even?` | `(even? ...)` |  |
+| `even?` | `(even? ...)` |  — GAP-S08: accepts whole-number floats (returns true/false) instead of raising IllegalArgumentException. Non-whole floats and non-numbers return false. See docs/clojure-conformance-gaps.md. |
 | `every-pred` | `(every-pred p1 p2 ...)` | Returns a predicate true when all preds are satisfied (always boolean) |
 | `every?` | `(every? :key coll)` | True if all have truthy `:key` |
 | `false?` | `(false? ...)` |  |
 | `ffirst` | `(ffirst coll)` | First of first |
 | `filter` | `(filter pred coll)` | Keep items where pred is truthy |
 | `filterv` | `(filterv pred coll)` | Same as filter (vectors are the default) |
-| `find` | `(find coll key)` | Returns the [key value] entry for a key in a map (or [index value] for a vector index), else nil |
+| `find` | `(find coll key)` | Returns the [key value] entry for a key in a map (or [index value] for a vector index), else nil — Associative lookup, not a predicate search. Distinguishes a present nil value from a missing key: (find {:a nil} :a) => [:a nil]. Out-of-range/negative vector indices and a nil collection return nil. |
 | `first` | `(first coll)` | First item or nil |
 | `flatten` | `(flatten coll)` | Flatten nested collections |
 | `float?` | `(float? ...)` |  |
@@ -168,11 +168,11 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `get` | `(get m key), (get m key default)` | Get with default |
 | `get-in` | `(get-in m path), (get-in m path default)` | Get nested with default |
 | `group-by` | `(group-by keyfn coll)` | Group items by key |
-| `hash-map` | `(hash-map & kvs)` | Create map from alternating key-value pairs |
+| `hash-map` | `(hash-map & kvs)` | Create map from alternating key-value pairs — Requires an even number of arguments. Equivalent to map literal `{:a 1 :b 2}`. |
 | `identity` | `(identity x)` | Returns argument unchanged |
 | `ifn?` | `(ifn? ...)` |  |
 | `inc` | `(inc x)` | Add 1 |
-| `inc'` | `(inc' x)` | Arbitrary precision increment alias |
+| `inc'` | `(inc' x)` | Arbitrary precision increment alias — Alias for `inc`; BEAM integers are already arbitrary precision. |
 | `indexed?` | `(indexed? ...)` |  |
 | `infinite?` | `(infinite? ...)` |  |
 | `int?` | `(int? ...)` |  |
@@ -187,7 +187,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `keyword` | `(keyword x)` | Type coercion (string to keyword) |
 | `keyword?` | `(keyword? ...)` |  |
 | `last` | `(last coll)` | Last item or nil |
-| `list` | `(list & args)` | Create a vector from arguments — alias for `vector` (PTC-Lisp is vector-first) |
+| `list` | `(list & args)` | Create a vector from arguments — alias for `vector` (PTC-Lisp is vector-first) — Returns a vector, not a Clojure list — PTC-Lisp has no separate list type. See docs/clojure-conformance-gaps.md. |
 | `map` | `(map f coll), (map f c1 c2), (map f c1 c2 c3)` | Apply f to triples |
 | `map-entry?` | `(map-entry? ...)` |  |
 | `map-indexed` | `(map-indexed f coll)` | Apply f to index and item |
@@ -214,10 +214,10 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `not-every?` | `(not-every? :key coll)` | True if not all have truthy `:key` |
 | `not=` | `(not= x), (not= x y & more)` | Inequality |
 | `nth` | `(nth coll idx), (nth coll idx not-found)` | Item at index or nil |
-| `nthnext` | `(nthnext coll n)` | Drop n items and return seq or nil |
-| `nthrest` | `(nthrest coll n)` | Drop n items |
+| `nthnext` | `(nthnext coll n)` | Drop n items and return seq or nil — Equivalent to `(seq (drop n coll))`. |
+| `nthrest` | `(nthrest coll n)` | Drop n items — Alias for `drop`. |
 | `number?` | `(number? ...)` |  |
-| `odd?` | `(odd? ...)` |  |
+| `odd?` | `(odd? ...)` |  — GAP-S08: accepts whole-number floats (returns true/false) instead of raising IllegalArgumentException. Non-whole floats and non-numbers return false. See docs/clojure-conformance-gaps.md. |
 | `partial` | `(partial f arg1 ...)` | Returns a function with some arguments pre-filled |
 | `partition` | `(partition n coll), (partition n step coll), (partition n step pad coll)` | Sliding window with pad collection for incomplete groups |
 | `partition-all` | `(partition-all n coll), (partition-all n step coll)` | Sliding window chunks (incomplete included) |
@@ -229,10 +229,10 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `postwalk` * | `(postwalk f form)` | Transform tree bottom-up (post-order traversal) |
 | `prewalk` * | `(prewalk f form)` | Transform tree top-down (pre-order traversal) |
 | `println` | `(println ...)` | Records spaced arguments in the evaluation result's bounded `prints` list. Returns `nil`. |
-| `quote` | `(quote symbol)` | Return a symbolic reference without resolving it |
-| `range` | `(range end), (range start end), (range start end step)` | Returns sequence with specific step |
-| `ratio?` | `(ratio? ...)` |  |
-| `rational?` | `(rational? ...)` |  |
+| `quote` | `(quote symbol)` | Return a symbolic reference without resolving it — Only symbols are supported in this phase; quoted collections remain unsupported. |
+| `range` | `(range end), (range start end), (range start end step)` | Returns sequence with specific step — DIV-02: zero-arity (range) (infinite lazy seq) is not supported — bounds must be specified. Direct zero-step ranges raise unless consumed by bounded take. PTC-Lisp has no lazy sequences. See docs/clojure-conformance-gaps.md. |
+| `ratio?` | `(ratio? ...)` |  — DIV-20: always returns false; BEAM has no ratio type. See docs/clojure-conformance-gaps.md. |
+| `rational?` | `(rational? ...)` |  — DIV-20: returns true only for integers (BEAM has no ratio type, so the only BEAM rationals are integers). See docs/clojure-conformance-gaps.md. |
 | `reduce` | `(reduce f coll), (reduce f init coll)` | Fold collection |
 | `reduce-kv` | `(reduce-kv f init m)` | Reduce map with f receiving (acc, key, val) |
 | `rem` | `(rem x y)` | Remainder (truncated division, result sign matches dividend) |
@@ -258,7 +258,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `subvec` | `(subvec v start), (subvec v start end)` |  |
 | `sum` * | `(sum coll)` | Sum of numbers |
 | `sum-by` * | `(sum-by key coll)` | Sum field values |
-| `symbol?` | `(symbol? ...)` |  |
+| `symbol?` | `(symbol? ...)` |  — DIV-19: always returns false; inert quoted-symbol references are not first-class Clojure symbols. See docs/clojure-conformance-gaps.md. |
 | `take` | `(take n coll)` | First n items |
 | `take-last` | `(take-last n coll)` | Last n items |
 | `take-while` | `(take-while pred coll)` | Take while pred is true |
@@ -302,7 +302,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 |----------|-----------|-------------|
 | `juxt` | `(juxt f1 f2 ...)` | Returns a function that applies all functions and returns a vector of results |
 | `pcalls` * | `(pcalls f1 f2 ...)` | Execute thunks in parallel |
-| `pmap` * | `(pmap f coll), (pmap f c1 c2 ...)` | Apply f to each (zipped) item in parallel |
+| `pmap` * | `(pmap f coll), (pmap f c1 c2 ...)` | Apply f to each (zipped) item in parallel — Shares map's finite seqable contract: nil -> empty, strings map over graphemes, and multiple collections zip element-wise truncating to the shortest. Runs under bounded parallel limits (per-worker heap, worker budget, shared deadline). |
 
 
 
@@ -324,24 +324,24 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `ends-with?` | `(ends-with? s suffix)` | Check if string ends with suffix |
 | `extract` * | `(extract pattern s), (extract pattern s n)` | Extract capture group n (0 = full match) |
 | `extract-int` * | `(extract-int pattern s), (extract-int pattern s n), (extract-int pattern s n default)` | Extract group n, parse as int, return default on failure |
-| `format` * | `(format fmt-string & args)` | Java-style format string |
+| `format` * | `(format fmt-string & args)` | Java-style format string — DIV-21: renders nil as "" (not "null"), consistent with (str nil) → "". See docs/clojure-conformance-gaps.md. |
 | `includes?` | `(includes? s substring)` | Check if string contains substring |
 | `index-of` | `(index-of s value), (index-of s value from-index)` | Index of first occurrence from position |
 | `join` | `(join coll), (join separator coll)` | Join collection elements (no separator) |
 | `last-index-of` | `(last-index-of s value), (last-index-of s value from-index)` | Index of last occurrence up to position |
 | `lower-case` | `(lower-case ...)` |  |
 | `name` | `(name x)` | Returns name string of keyword or string |
-| `parse-boolean` | `(parse-boolean s)` | Parse string to boolean |
-| `parse-double` | `(parse-double ...)` |  |
-| `parse-int` | `(parse-int ...)` |  |
-| `parse-long` | `(parse-long ...)` |  |
+| `parse-boolean` | `(parse-boolean s)` | Parse string to boolean — Returns nil for values other than "true" or "false". |
+| `parse-double` | `(parse-double ...)` |  — The Java-named `Double/parseDouble` and `Float/parseFloat` functions are distinct: they preserve primitive identity and use Java grammar, rounding, and failure semantics. |
+| `parse-int` | `(parse-int ...)` |  — Alias for `parse-long`. The Java-named `Integer/parseInt` and `Long/parseLong` functions are distinct and use Java primitive ranges and failure semantics. |
+| `parse-long` | `(parse-long ...)` |  — The Java-named `Integer/parseInt` and `Long/parseLong` functions are distinct: they preserve primitive identity and use Java primitive ranges and failure semantics. |
 | `pr-str` | `(pr-str ...)` | Readable string representation (strings quoted, nil as "nil", space-separated) |
 | `replace` | `(replace smap coll), (replace s pattern replacement)` | Seq replace via smap (arity 2) or string replace (arity 3) |
-| `split` | `(split s re-or-char)` | Split string on a regex delimiter; a single-character string delimiter is accepted, a multi-character string delimiter signals :type_error (use a regex literal like #"--") |
+| `split` | `(split s re-or-char)` | Split string on a regex delimiter; a single-character string delimiter is accepted, a multi-character string delimiter signals :type_error (use a regex literal like #"--") — Clojure requires a regex Pattern delimiter. A single-character string is accepted (chars are one-character strings); a multi-character string delimiter is rejected with a :type_error signal — use a regex, e.g. (split s #"---\n"). |
 | `split-lines` | `(split-lines s)` | Split string into lines (\n or \r\n) |
 | `starts-with?` | `(starts-with? s prefix)` | Check if string starts with prefix |
 | `str` | `(str ...)` | Convert and concatenate to string |
-| `subs` | `(subs s start), (subs s start end)` | Substring from start to end |
+| `subs` | `(subs s start), (subs s start end)` | Substring from start to end — Negative start returns "" (signal value, not whole string). Out-of-bounds end truncates. (subs s 0 100) on a short string returns the full string — the "first N chars" idiom is preserved. |
 | `trim` | `(trim s)` | Remove leading/trailing whitespace |
 | `trim-newline` | `(trim-newline s)` | Remove trailing newline or carriage return characters |
 | `triml` | `(triml s)` | Remove leading whitespace |
@@ -364,7 +364,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `contains?` | `(contains? coll key)` | True if key/element exists (maps, sets, vectors) |
 | `difference` | `(clojure.set/difference & sets)` | Returns the difference of one or more sets |
 | `disj` | `(disj set x ...)` | Remove elements from set |
-| `hash-set` | `(hash-set & items)` | Create set from arguments |
+| `hash-set` | `(hash-set & items)` | Create set from arguments — Constructs a PTC-Lisp set from variadic arguments. |
 | `intersection` | `(clojure.set/intersection & sets)` | Returns the intersection of one or more sets |
 | `set` | `(set coll)` | Convert collection to set |
 | `set?` | `(set? x)` | Returns true if x is a set |
@@ -396,17 +396,17 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `abs` | `(abs x)` | Absolute value |
-| `bit-and` | `(bit-and x y & more)` | Bitwise AND of integers |
-| `bit-and-not` | `(bit-and-not x y & more)` | Bitwise AND of `x` with the complement of each subsequent argument |
-| `bit-clear` | `(bit-clear x n)` | Clear bit `n` of `x` (set it to 0) |
-| `bit-flip` | `(bit-flip x n)` | Flip bit `n` of `x` |
-| `bit-not` | `(bit-not x)` | Bitwise complement (two's complement) of an integer |
-| `bit-or` | `(bit-or x y & more)` | Bitwise OR of integers |
-| `bit-set` | `(bit-set x n)` | Set bit `n` of `x` to 1 |
-| `bit-shift-left` | `(bit-shift-left x n)` | Shift `x` left by `n` bits |
-| `bit-shift-right` | `(bit-shift-right x n)` | Arithmetic shift `x` right by `n` bits (sign-extending) |
-| `bit-test` | `(bit-test x n)` | Return true if bit `n` of `x` is set |
-| `bit-xor` | `(bit-xor x y & more)` | Bitwise exclusive OR of integers |
+| `bit-and` | `(bit-and x y & more)` | Bitwise AND of integers — Integers only — raises a type error on non-integer arguments. |
+| `bit-and-not` | `(bit-and-not x y & more)` | Bitwise AND of `x` with the complement of each subsequent argument — Integers only — raises a type error on non-integer arguments. |
+| `bit-clear` | `(bit-clear x n)` | Clear bit `n` of `x` (set it to 0) — Integers only; `n` must be a non-negative integer. |
+| `bit-flip` | `(bit-flip x n)` | Flip bit `n` of `x` — Integers only; `n` must be a non-negative integer. |
+| `bit-not` | `(bit-not x)` | Bitwise complement (two's complement) of an integer — Integers only — raises a type error on non-integer arguments. |
+| `bit-or` | `(bit-or x y & more)` | Bitwise OR of integers — Integers only — raises a type error on non-integer arguments. |
+| `bit-set` | `(bit-set x n)` | Set bit `n` of `x` to 1 — Integers only; `n` must be a non-negative integer. |
+| `bit-shift-left` | `(bit-shift-left x n)` | Shift `x` left by `n` bits — Integers only; `n` must be a non-negative integer. Unlike Clojure/JVM, BEAM integers are arbitrary-precision: the shift amount is not taken modulo 64 and the result can grow without bound. |
+| `bit-shift-right` | `(bit-shift-right x n)` | Arithmetic shift `x` right by `n` bits (sign-extending) — Integers only; `n` must be a non-negative integer. Unlike Clojure/JVM, BEAM integers are arbitrary-precision: the shift amount is not taken modulo 64. `unsigned-bit-shift-right` is not provided because it has no defined meaning without a fixed integer width. |
+| `bit-test` | `(bit-test x n)` | Return true if bit `n` of `x` is set — Integers only; `n` must be a non-negative integer. |
+| `bit-xor` | `(bit-xor x y & more)` | Bitwise exclusive OR of integers — Integers only — raises a type error on non-integer arguments. |
 | `ceil` | `(ceil x)` | Round toward +∞ |
 | `double` | `(double x)` | Type coercion (to float) |
 | `float` | `(float x)` | Alias for double (Clojure compat) |
@@ -426,46 +426,46 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `.after` | `(.after date other-date)` | Return true when a legacy Date follows another |
-| `.before` | `(.before date other-date)` | Return true when a legacy Date precedes another |
+| `.after` | `(.after date other-date)` | Return true when a legacy Date follows another — Owned only by java.util.Date. |
+| `.before` | `(.before date other-date)` | Return true when a legacy Date precedes another — Owned only by java.util.Date. |
 | `.contains` | `(.contains s substr)` | Returns true if string contains substring |
 | `.endsWith` | `(.endsWith s suffix)` | Returns true if string ends with suffix |
-| `.getTime` | `(.getTime date)` | Return exact epoch milliseconds from a legacy Date |
-| `.indexOf` | `(.indexOf s substr), (.indexOf s substr from)` | Index of first occurrence starting from position |
-| `.isAfter` | `(.isAfter a b)` | Compare native LocalDate or Instant values within their owning class |
-| `.isBefore` | `(.isBefore a b)` | Compare native LocalDate or Instant values within their owning class |
-| `.lastIndexOf` | `(.lastIndexOf s substr)` | Index of last occurrence, or -1 if not found |
-| `.length` | `(.length s)` | Return the UTF-16 code-unit length of a string |
-| `.minusDays` | `(.minusDays local-date n)` | Subtract days from a LocalDate |
-| `.plusDays` | `(.plusDays local-date n)` | Add days to a LocalDate |
+| `.getTime` | `(.getTime date)` | Return exact epoch milliseconds from a legacy Date — Owned only by java.util.Date. |
+| `.indexOf` | `(.indexOf s substr), (.indexOf s substr from)` | Index of first occurrence starting from position — Returns Java UTF-16 code-unit indexes. |
+| `.isAfter` | `(.isAfter a b)` | Compare native LocalDate or Instant values within their owning class — Mixed Java classes and raw host temporal structs are rejected. |
+| `.isBefore` | `(.isBefore a b)` | Compare native LocalDate or Instant values within their owning class — Mixed Java classes and raw host temporal structs are rejected. |
+| `.lastIndexOf` | `(.lastIndexOf s substr)` | Index of last occurrence, or -1 if not found — Returns Java UTF-16 code-unit indexes. |
+| `.length` | `(.length s)` | Return the UTF-16 code-unit length of a string — Uses Java UTF-16 code units; ordinary PTC `count` remains grapheme-based. |
+| `.minusDays` | `(.minusDays local-date n)` | Subtract days from a LocalDate — Works on LocalDate values returned by `LocalDate/parse`; Java long coercion applies. |
+| `.plusDays` | `(.plusDays local-date n)` | Add days to a LocalDate — Works on LocalDate values returned by `LocalDate/parse`; Java long coercion applies. |
 | `.startsWith` | `(.startsWith s prefix)` | Returns true if string starts with prefix |
-| `.substring` | `(.substring s start), (.substring s start end)` | Extract a substring by UTF-16 code-unit index |
-| `.toDays` | `(.toDays duration)` | Return duration length in whole days |
-| `.toEpochDay` | `(.toEpochDay local-date)` | Return LocalDate epoch-day integer |
-| `.toEpochMilli` | `(.toEpochMilli instant)` | Return epoch milliseconds from an Instant |
-| `.toMillis` | `(.toMillis duration)` | Return duration length in milliseconds |
-| `.trim` | `(.trim s)` | Remove Java String.trim boundary code units |
-| `Boolean/parseBoolean` | `(Boolean/parseBoolean s)` | Java-compatible boolean string parser; returns true only for case-insensitive "true" |
+| `.substring` | `(.substring s start), (.substring s start end)` | Extract a substring by UTF-16 code-unit index — Uses Java UTF-16 code-unit indexes. A range containing an unpaired surrogate returns invalid_java_string because PTC strings require valid UTF-8. |
+| `.toDays` | `(.toDays duration)` | Return duration length in whole days — Works on Duration values returned by `Duration/between`; partial days truncate toward zero. |
+| `.toEpochDay` | `(.toEpochDay local-date)` | Return LocalDate epoch-day integer — Works on LocalDate values returned by `LocalDate/parse`. |
+| `.toEpochMilli` | `(.toEpochMilli instant)` | Return epoch milliseconds from an Instant — Raises when the result exceeds Java long. |
+| `.toMillis` | `(.toMillis duration)` | Return duration length in milliseconds — Works on Duration values returned by `Duration/between`. |
+| `.trim` | `(.trim s)` | Remove Java String.trim boundary code units — Removes leading and trailing UTF-16 code units from U+0000 through U+0020; clojure.string/trim uses Character.isWhitespace instead. |
+| `Boolean/parseBoolean` | `(Boolean/parseBoolean s)` | Java-compatible boolean string parser; returns true only for case-insensitive "true" — Matches java.lang.Boolean.parseBoolean: nil/null and every string other than case-insensitive "true" return false; non-string, non-nil inputs raise. |
 | `Double/NEGATIVE_INFINITY` | `Double/NEGATIVE_INFINITY` | Java negative-infinity double field |
 | `Double/NaN` | `Double/NaN` | Java not-a-number double field |
 | `Double/POSITIVE_INFINITY` | `Double/POSITIVE_INFINITY` | Java positive-infinity double field |
-| `Double/parseDouble` | `(Double/parseDouble s)` | Java-compatible double parser |
-| `Duration/between` | `(Duration/between start-instant end-instant), (java.time.Duration/between start-instant end-instant)` | Return a native Duration between two Instants |
-| `Float/parseFloat` | `(Float/parseFloat s)` | Java-compatible float parser |
-| `Instant/parse` | `(Instant/parse iso-string), (java.time.Instant/parse iso-string)` | Parse strict ISO-8601 instant text to a native Instant |
-| `Integer/parseInt` | `(Integer/parseInt s)` | Java-compatible decimal int parser |
-| `LocalDate/parse` | `(LocalDate/parse date-str), (java.time.LocalDate/parse date-str)` | Parse strict ISO-8601 local-date text to a native LocalDate |
-| `Long/parseLong` | `(Long/parseLong s)` | Java-compatible decimal long parser |
-| `Math/abs` | `(Math/abs x)` | Java primitive absolute value |
-| `Math/ceil` | `(Math/ceil x)` | Java double ceiling |
-| `Math/floor` | `(Math/floor x)` | Java double floor |
-| `Math/max` | `(Math/max x y)` | Java two-argument primitive maximum |
-| `Math/min` | `(Math/min x y)` | Java two-argument primitive minimum |
-| `Math/pow` | `(Math/pow base exponent)` | Java double exponentiation |
-| `Math/round` | `(Math/round x)` | Java float/double rounding to int/long |
-| `Math/sqrt` | `(Math/sqrt x)` | Java double square root |
+| `Double/parseDouble` | `(Double/parseDouble s)` | Java-compatible double parser — Matches Java syntax, whitespace, range, rounding, and bounded NumberFormatException/NullPointerException semantics. |
+| `Duration/between` | `(Duration/between start-instant end-instant), (java.time.Duration/between start-instant end-instant)` | Return a native Duration between two Instants — Requires native Instant values; other temporal classes are rejected. |
+| `Float/parseFloat` | `(Float/parseFloat s)` | Java-compatible float parser — Matches Java syntax, whitespace, range, direct float rounding, and bounded NumberFormatException/NullPointerException semantics. |
+| `Instant/parse` | `(Instant/parse iso-string), (java.time.Instant/parse iso-string)` | Parse strict ISO-8601 instant text to a native Instant — An explicit UTC or numeric offset is required; nanoseconds are retained. |
+| `Integer/parseInt` | `(Integer/parseInt s)` | Java-compatible decimal int parser — Matches Java decimal syntax, int range, and bounded NumberFormatException semantics. |
+| `LocalDate/parse` | `(LocalDate/parse date-str), (java.time.LocalDate/parse date-str)` | Parse strict ISO-8601 local-date text to a native LocalDate — Date-time strings are rejected; the bare `parse` alias was removed. |
+| `Long/parseLong` | `(Long/parseLong s)` | Java-compatible decimal long parser — Matches Java decimal syntax, long range, and bounded NumberFormatException semantics. |
+| `Math/abs` | `(Math/abs x)` | Java primitive absolute value — Preserves the selected Java primitive kind and minimum-value overflow. |
+| `Math/ceil` | `(Math/ceil x)` | Java double ceiling — Returns a Java double rather than the integer returned by bare `ceil`. |
+| `Math/floor` | `(Math/floor x)` | Java double floor — Returns a Java double rather than the integer returned by bare `floor`. |
+| `Math/max` | `(Math/max x y)` | Java two-argument primitive maximum — Requires one admitted primitive overload; bare `max` remains variadic. |
+| `Math/min` | `(Math/min x y)` | Java two-argument primitive minimum — Requires one admitted primitive overload; bare `min` remains variadic. |
+| `Math/pow` | `(Math/pow base exponent)` | Java double exponentiation — Uses Java's IEEE 754 `double` special-case table. |
+| `Math/round` | `(Math/round x)` | Java float/double rounding to int/long — Ties go toward positive infinity; NaN and infinities use Java saturation. |
+| `Math/sqrt` | `(Math/sqrt x)` | Java double square root — Uses Java double signed-zero, NaN, and infinity behavior. |
 | `System/currentTimeMillis` | `(System/currentTimeMillis)` | Return current time in milliseconds since epoch |
-| `java.util.Date.` | `(java.util.Date.), (java.util.Date. epoch-milliseconds), (java.util.Date. legacy-date-string)` | Construct a native legacy Date with exact Java millisecond identity |
+| `java.util.Date.` | `(java.util.Date.), (java.util.Date. epoch-milliseconds), (java.util.Date. legacy-date-string)` | Construct a native legacy Date with exact Java millisecond identity — Numeric input is always milliseconds; raw host temporal structs are not promoted. |
 
 ```clojure
 (Math/abs -7)
@@ -509,9 +509,9 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `json/generate-string` | `(json/generate-string v)` | Encode a value as a JSON string; type_error on non-encodable input. |
-| `json/parse-lines` * | `(json/parse-lines s)` | Parse line-delimited JSON into a vector; blank lines are skipped. |
-| `json/parse-string` | `(json/parse-string s)` | Parse a JSON string into a value; nil on failure. |
+| `json/generate-string` | `(json/generate-string v)` | Encode a value as a JSON string; type_error on non-encodable input. — Never returns nil. Keyword keys encode as their name verbatim ({:max-turns 3} -> {"max-turns":3}) and integer keys as decimal text. Keyword values, sets, tuples, PIDs, references, functions, and ##Inf/##NaN are refused with a type_error naming the position, e.g. at ["config" 0 :port]. Two keys that would encode to the same JSON key are refused rather than emitted as a duplicate. |
+| `json/parse-lines` * | `(json/parse-lines s)` | Parse line-delimited JSON into a vector; blank lines are skipped. — Splits on newlines, skips blank/whitespace-only lines, and parses each remaining line with `json/parse-string`. Malformed lines and valid JSON literal `null` lines both produce nil. |
+| `json/parse-string` | `(json/parse-string s)` | Parse a JSON string into a value; nil on failure. — Map keys decode as strings (no atom keys). Returns nil on invalid JSON, nil input, or non-binary input — never raises (DIV-23). |
 
 ```clojure
 (json/parse-lines "{\"a\":1}\n[2,3]\n")
@@ -524,10 +524,10 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `apropos` * | `(apropos query)` | Searches the attached prelude's public exports, returning matching refs. |
-| `dir` * | `(dir), (dir namespace)` | Lists namespaces in the attached prelude, or the public export refs of one namespace. |
-| `doc` * | `(doc ref)` | Prints documentation for a public prelude export and returns `nil`. |
-| `export-meta` * | `(export-meta ref)` | Returns structured metadata for a public prelude export, or `nil` when unknown. |
+| `apropos` * | `(apropos query)` | Searches the attached prelude's public exports, returning matching refs. — Case-insensitive substring match over each export's ref and docstring; an export without a docstring is matched on its ref alone. A blank query returns an empty vector rather than every export. |
+| `dir` * | `(dir), (dir namespace)` | Lists namespaces in the attached prelude, or the public export refs of one namespace. — Only namespaces holding at least one visible public export are listed; a namespace of private `defn-` helpers does not appear. An unknown namespace returns an empty vector. |
+| `doc` * | `(doc ref)` | Prints documentation for a public prelude export and returns `nil`. — Prints rather than returns, so documentation is charged to the print budget instead of the result channel and is subject to print truncation. Use `export-meta` for the same information as data. A miss prints a not-found line and still returns `nil`. |
+| `export-meta` * | `(export-meta ref)` | Returns structured metadata for a public prelude export, or `nil` when unknown. — Reports the calling contract — `:ref`, `:namespace`, `:symbol`, `:kind`, `:call`, `:doc`, `:visibility`, `:effect`, plus `:arity`/`:params` for functions and `:signature` or `:type` when declared. Capability wiring is not reported, and `:effect` is conservative: an export reaching a capability is never reported as `:read`, since only the mission inventory can resolve installed effects. This is not `clojure.core/meta`, which takes an object rather than a reference string and is not implemented. |
 
 
 
@@ -535,4 +535,4 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `program` * | `(program form...)` | Capture static subordinate source without resolving workflow symbols |
+| `program` * | `(program form...)` | Capture static subordinate source without resolving workflow symbols — Produces an opaque Program value for the embedded kernel-eval route. |

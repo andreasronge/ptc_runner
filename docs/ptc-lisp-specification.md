@@ -1535,7 +1535,7 @@ Use `get-in` (or sequential `(:b (:a item))`) for nested fields:
 
 ### 7.4 Nil Handling in Predicates
 
-Ordering comparisons (`>`, `<`, `>=`, `<=`) are recoverable predicates: they return booleans for `nil` and mixed scalar values instead of raising. PTC-Lisp uses the runtime's total term ordering for non-NaN values, which can be surprising for missing fields. Guard explicitly when missing values should be excluded:
+Ordering comparisons (`>`, `<`, `>=`, `<=`) are recoverable predicates: they return booleans for `nil` and mixed scalar values instead of raising. PTC-Lisp uses the runtime's total term ordering for non-NaN values, which can be surprising for missing fields. **`nil` orders above every finite number** (but below `##Inf`, and any comparison touching `##NaN` is false — DIV-30), so `(> (:age missing-user) 18)` returns `true` rather than the exception Clojure raises — a typo'd or missing key silently satisfies a "greater than" check instead of failing loudly. Guard explicitly when missing values should be excluded:
 
 ```clojure
 ;; Safe: filter out users without :age first

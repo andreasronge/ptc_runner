@@ -274,7 +274,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
       |> Enum.map_join("\n", fn entry ->
         sigs = Enum.join(entry.signatures, ", ")
         ext = if entry.ptc_extension?, do: " *", else: ""
-        "| `#{entry.name}`#{ext} | `#{sigs}` | #{entry.description} |"
+        "| `#{entry.name}`#{ext} | `#{sigs}` | #{description_cell(entry)} |"
       end)
 
     examples =
@@ -303,6 +303,11 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     #{rows}
     #{example_block}
     """
+  end
+
+  defp description_cell(entry) do
+    caveat = entry[:notes] || entry[:divergences]
+    if caveat, do: "#{entry.description} — #{caveat}", else: entry.description
   end
 
   defp generate_audit(

@@ -17,7 +17,7 @@ rendering paths.
 | `mix ptc run MANIFEST --host-config HOST.json` | Install the provider aliases a provider-bearing manifest selects |
 | `mix ptc run MANIFEST --input INPUT.json` | Run with a confined alternate input object |
 | `mix ptc run MANIFEST --output VALUE.json` | Write only the validated result value |
-| `mix ptc run MANIFEST --trace-dir DIR` | Persist bounded canonical events under the command run reference |
+| `mix ptc run MANIFEST --trace-dir DIR` | Persist bounded canonical events under the command run reference (`DIR` must already exist) |
 | `mix ptc run MANIFEST --inspect RUN.inspection.jsonl` | Also write the owner-only private artifact |
 | `mix ptc run MANIFEST --envelope ENVELOPE.json` | Atomically publish the machine-readable V1 command envelope |
 | `mix ptc run MANIFEST --component-override-descriptor D.json` | Compile one selected component from verified replacement source |
@@ -51,7 +51,11 @@ so task chaining and `iex -S mix` do not require restarting the VM.
 
 ## Run a manifest
 
+`--trace-dir` writes into an existing directory; it does not create one. Create
+it first:
+
 ```console
+mkdir -p traces
 mix ptc run ptc.json
 mix ptc run ptc.json --trace-dir traces
 mix ptc run ptc.json \
@@ -459,11 +463,13 @@ mix ptc run ptc.json --trace-dir traces --inspect traces/run.inspection.jsonl
 ```
 
 Every inspection artifact holds the exact frozen component source in
-`prelude-source` records. Provider-backed activity may add prompts, normalized
-model responses, generated subordinate source, capability arguments and
-results, and MCP request and response bodies. A provider-free workflow adds no
-run-time record beyond `prelude-source`: its `println` output and detailed error
-fields are not retained. The artifact is owner-only and sensitive: read it, do
+`prelude-source` records. If the workflow calls `println`, its output lands in
+an `execution-prints` record, whether the run succeeds or fails. Provider-backed
+activity may add prompts, normalized model responses, generated subordinate
+source, capability arguments and results, and MCP request and response bodies.
+A failing run also adds an `execution-error` record with the detailed failure
+fields; a provider-free success with no `println` calls adds no run-time record
+beyond `prelude-source`. The artifact is owner-only and sensitive: read it, do
 not publish it beside a normal trace, and see [Use private inspection
 deliberately](#use-private-inspection-deliberately).
 
