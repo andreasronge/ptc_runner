@@ -22,6 +22,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   alias PtcRunner.Kernel.AnalysisAssembly
   alias PtcRunner.Kernel.AnalysisProfileRegistry
   alias PtcRunner.Kernel.AnalysisResources
+  alias PtcRunner.Kernel.BoundedPrints
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.EventSink
@@ -451,26 +452,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
     end
   end
 
-  defp bounded_prints(prints) when is_list(prints) do
-    {bounded, _count, _encoded_bytes, truncated?} =
-      Enum.reduce_while(prints, {[], 0, 2, false}, fn print,
-                                                      {acc, count, encoded_bytes, _truncated?} ->
-        print = if is_binary(print) and String.valid?(print), do: print, else: ""
-        {:ok, encoded_print} = Jason.encode(print)
-        separator_bytes = if count == 0, do: 0, else: 1
-        next_bytes = encoded_bytes + separator_bytes + byte_size(encoded_print)
-
-        if count < @prints_count and next_bytes <= @prints_bytes do
-          {:cont, {[print | acc], count + 1, next_bytes, false}}
-        else
-          {:halt, {acc, count, encoded_bytes, true}}
-        end
-      end)
-
-    {Enum.reverse(bounded), truncated?}
-  end
-
-  defp bounded_prints(_prints), do: {[], true}
+  defp bounded_prints(prints), do: BoundedPrints.bound(prints, @prints_count, @prints_bytes)
 
   defp error_projection(%{outcome: outcome}, _state, _source)
        when outcome in [:continued, :returned],
