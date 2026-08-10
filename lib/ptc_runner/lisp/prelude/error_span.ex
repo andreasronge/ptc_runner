@@ -28,10 +28,11 @@ defmodule PtcRunner.Lisp.Prelude.ErrorSpan do
        redefinition that collided.
     3. `namespace` — resolved to the `(ns ...)` form that declares it.
 
-  Resolution is best-effort and always fails OPEN to `nil`: a source this
-  module cannot scan, an out-of-range index, or an unresolvable name leaves
-  the error exactly as it was. A diagnostic without a span is the status quo;
-  a diagnostic with a WRONG span would point a reader at innocent code.
+  Top-level-form resolution is best-effort and fails OPEN: a source this module
+  cannot scan, an out-of-range index, or an unresolvable name leaves the error
+  exactly as it was. That also preserves an explicit parser-position span,
+  which does not depend on a successful form scan. A diagnostic without a span
+  is safer than one with a WRONG span pointing at innocent code.
   """
 
   alias PtcRunner.Lisp.Prelude.FormScanner

@@ -2,10 +2,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   @moduledoc """
   Closed privacy-safe command diagnostic.
 
-  Construction accepts only a catalog pair and typed safe provenance.
+  Construction accepts only a catalog pair, a catalog-authorized message, and
+  typed safe provenance.
   Contract-authorized paths must also match the sealed contract authority bound
   to their source classification. Rendering never inspects a lower-level
-  reason or rejected value.
+  reason or rejected value. The two catalog-authorized compile message shapes
+  contain only fixed literals plus bounded PTC-Lisp symbol names and require
+  component-source provenance; every other message is the catalog literal.
 
   `notes` is reserved and always empty: the published V1 envelope schema pins
   it to `{"const": []}`, so a populated array would invalidate the envelope for
@@ -54,19 +57,22 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   def new(phase, code, opts \\ [])
 
   def new(phase, code, opts) when is_list(opts) do
-    allowed = [:source, :path, :span, :subject, :provider_activity]
+    allowed = [:message, :source, :path, :span, :subject, :provider_activity]
 
     with true <- Keyword.keyword?(opts),
          keys = Keyword.keys(opts),
          true <- keys -- allowed == [] and length(keys) == MapSet.size(MapSet.new(keys)),
          {:ok, row} <- DiagnosticCatalog.fetch(phase, code),
+         message <- Keyword.get(opts, :message, row.message),
          source <- Keyword.get(opts, :source),
          path <- Keyword.get(opts, :path),
          span <- Keyword.get(opts, :span),
          subject <- Keyword.get(opts, :subject),
          activity <- Keyword.get(opts, :provider_activity, false),
+         true <- DiagnosticCatalog.valid_message?(phase, code, message),
          true <- valid_source?(source),
          true <- valid_source_for_row?(source, row),
+         true <- valid_message_source?(message, row, source),
          true <- valid_path?(path),
          true <- valid_path_for_row?(path, source, row),
          true <- valid_span?(span, source),
@@ -77,7 +83,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
        %__MODULE__{
          phase: row.phase,
          code: row.code,
-         message: row.message,
+         message: message,
          source: source,
          path: path,
          span: span,
@@ -103,6 +109,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   @spec valid?(term()) :: boolean()
   def valid?(%__MODULE__{} = diagnostic) do
     opts = [
+      message: diagnostic.message,
       source: diagnostic.source,
       path: diagnostic.path,
       span: diagnostic.span,
@@ -278,4 +285,16 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
            end_byte >= start_byte and is_integer(byte_size) and end_byte <= byte_size
 
   defp valid_span?(_span, _source), do: false
+
+  defp valid_message_source?(message, %{message: message}, _source), do: true
+
+  defp valid_message_source?(
+         _message,
+         %{phase: :bundle, code: code},
+         %CommandSource{kind: :component}
+       )
+       when code in [:undefined_variable, :duplicate_definition],
+       do: true
+
+  defp valid_message_source?(_message, _row, _source), do: false
 end

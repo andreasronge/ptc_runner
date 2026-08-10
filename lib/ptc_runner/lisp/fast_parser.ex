@@ -13,16 +13,28 @@ defmodule PtcRunner.Lisp.FastParser do
             when c in ?a..?z or c in ?A..?Z or
                    c in [?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%, ?., ?&]
 
-  @spec parse(String.t()) :: {:ok, AST.t() | {:program, [AST.t()]} | nil} | {:error, String.t()}
+  @type parse_result :: {:ok, AST.t() | {:program, [AST.t()]} | nil}
+  @type positioned_error :: {:error, String.t(), non_neg_integer() | nil}
+
+  @spec parse(String.t()) :: parse_result() | {:error, String.t()}
   def parse(source) when is_binary(source) do
+    case parse_with_position(source) do
+      {:ok, ast} -> {:ok, ast}
+      {:error, message, _position} -> {:error, message}
+    end
+  end
+
+  @doc false
+  @spec parse_with_position(String.t()) :: parse_result() | positioned_error()
+  def parse_with_position(source) when is_binary(source) do
     case parse_program({source, 0, 1, 1}, []) do
       {:ok, [], _cursor} -> {:ok, nil}
       {:ok, [ast], _cursor} -> {:ok, ast}
       {:ok, asts, _cursor} -> {:ok, {:program, asts}}
-      {:error, message} -> {:error, message}
+      {:error, _message, _position} = error -> error
     end
   rescue
-    e in ArgumentError -> {:error, e.message}
+    e in ArgumentError -> {:error, e.message, nil}
   end
 
   defp parse_program(cursor, acc) do
@@ -39,7 +51,7 @@ defmodule PtcRunner.Lisp.FastParser do
 
   defp parse_expr(cursor, depth) do
     if depth > @max_nesting_depth do
-      {:error, "nesting depth exceeds limit of #{@max_nesting_depth}"}
+      parse_error(cursor, "nesting depth exceeds limit of #{@max_nesting_depth}")
     else
       do_parse_expr(cursor, depth)
     end
@@ -51,7 +63,10 @@ defmodule PtcRunner.Lisp.FastParser do
 
     case cursor do
       {"", _offset, line, column} ->
-        {:error, "syntax error: could not parse expression at line #{line}, column #{column}"}
+        parse_error(
+          cursor,
+          "syntax error: could not parse expression at line #{line}, column #{column}"
+        )
 
       {"(" <> rest, offset, line, column} ->
         parse_sequence({rest, offset + 1, line, column + 1}, ?), :list, [], depth)
@@ -137,7 +152,7 @@ defmodule PtcRunner.Lisp.FastParser do
         build_sequence(type, elements, cursor)
 
       {"", _offset, line, column} ->
-        {:error, "unclosed #{sequence_name(type)} at line #{line}, column #{column}"}
+        parse_error(cursor, "unclosed #{sequence_name(type)} at line #{line}, column #{column}")
 
       _ ->
         with {:ok, ast, cursor} <- parse_expr(cursor, depth + 1) do
@@ -160,7 +175,7 @@ defmodule PtcRunner.Lisp.FastParser do
 
       {:ok, {:map, pairs}, cursor}
     else
-      {:error, "Map literal requires even number of forms, got #{length(elements)}"}
+      parse_error(cursor, "Map literal requires even number of forms, got #{length(elements)}")
     end
   end
 
@@ -196,7 +211,10 @@ defmodule PtcRunner.Lisp.FastParser do
         parse_string({rest, offset + 2, line, column + 2}, tag, ["\r" | acc])
 
       <<c, _rest::binary>> when c in [?\n, ?\r] ->
-        {:error, "unclosed string at line #{line}, column #{column}"}
+        parse_error(
+          {rest, offset, line, column},
+          "unclosed string at line #{line}, column #{column}"
+        )
 
       <<c::utf8, rest::binary>> ->
         parse_string({rest, offset + byte_size(<<c::utf8>>) + 1, line, column + 2}, tag, [
@@ -204,7 +222,10 @@ defmodule PtcRunner.Lisp.FastParser do
         ])
 
       "" ->
-        {:error, "unclosed string at line #{line}, column #{column}"}
+        parse_error(
+          {rest, offset, line, column},
+          "unclosed string at line #{line}, column #{column}"
+        )
     end
   end
 
@@ -216,8 +237,8 @@ defmodule PtcRunner.Lisp.FastParser do
     parse_string({rest, offset + bytes, line, column + 1}, tag, [<<c::utf8>> | acc])
   end
 
-  defp parse_string({"", _offset, line, column}, _tag, _acc),
-    do: {:error, "unclosed string at line #{line}, column #{column}"}
+  defp parse_string({"", _offset, line, column} = cursor, _tag, _acc),
+    do: parse_error(cursor, "unclosed string at line #{line}, column #{column}")
 
   defp parse_char(cursor) do
     named = [
@@ -239,7 +260,7 @@ defmodule PtcRunner.Lisp.FastParser do
             {:ok, {:string, <<c::utf8>>}, advance(cursor, byte_size(<<c::utf8>>))}
 
           {"", _offset, line, column} ->
-            {:error, "invalid character literal at line #{line}, column #{column}"}
+            parse_error(cursor, "invalid character literal at line #{line}, column #{column}")
         end
     end
   end
@@ -248,7 +269,10 @@ defmodule PtcRunner.Lisp.FastParser do
     {name, cursor} = take_while({rest, offset + 1, line, column + 1}, &keyword_char?/1)
 
     if name == "" do
-      {:error, "syntax error: could not parse keyword at line #{line}, column #{column}"}
+      parse_error(
+        {rest, offset, line, column},
+        "syntax error: could not parse keyword at line #{line}, column #{column}"
+      )
     else
       {:ok, {:keyword, SourceAtoms.intern(name)}, cursor}
     end
@@ -261,7 +285,7 @@ defmodule PtcRunner.Lisp.FastParser do
         {:ok, {:var, SourceAtoms.intern(name)}, cursor}
 
       {_rest, _offset, line, column} ->
-        {:error, "syntax error: could not parse var at line #{line}, column #{column}"}
+        parse_error(cursor, "syntax error: could not parse var at line #{line}, column #{column}")
     end
   end
 
@@ -272,11 +296,16 @@ defmodule PtcRunner.Lisp.FastParser do
         {:ok, {:quoted_symbol, name}, cursor}
 
       {<<c, _rest::binary>>, _offset, line, column} when c in [?(, ?[, ?{] ->
-        {:error,
-         "quoted collections are not supported; only quoted symbols like 'github are allowed at line #{line}, column #{column}"}
+        parse_error(
+          cursor,
+          "quoted collections are not supported; only quoted symbols like 'github are allowed at line #{line}, column #{column}"
+        )
 
       {_rest, _offset, line, column} ->
-        {:error, "syntax error: could not parse quoted symbol at line #{line}, column #{column}"}
+        parse_error(
+          cursor,
+          "syntax error: could not parse quoted symbol at line #{line}, column #{column}"
+        )
     end
   end
 
@@ -287,7 +316,10 @@ defmodule PtcRunner.Lisp.FastParser do
         {:ok, AST.symbol(name), cursor}
 
       {_rest, _offset, line, column} ->
-        {:error, "syntax error: could not parse expression at line #{line}, column #{column}"}
+        parse_error(
+          cursor,
+          "syntax error: could not parse expression at line #{line}, column #{column}"
+        )
     end
   end
 
@@ -305,7 +337,7 @@ defmodule PtcRunner.Lisp.FastParser do
         parse_symbol(cursor)
 
       byte_size(int) > @max_integer_digits ->
-        {:error, "integer literal exceeds #{@max_integer_digits} digit limit"}
+        parse_error(cursor, "integer literal exceeds #{@max_integer_digits} digit limit")
 
       match_fraction?(cursor) ->
         {fraction, cursor} = take_fraction(cursor)
@@ -418,8 +450,10 @@ defmodule PtcRunner.Lisp.FastParser do
 
   defp skip_comment({"", offset, line, column}), do: {"", offset, line, column}
 
-  defp skip_comment({<<_c::utf8, rest::binary>>, offset, line, column}),
-    do: skip_comment({rest, offset + 1, line, column + 1})
+  defp skip_comment({<<c::utf8, rest::binary>>, offset, line, column}) do
+    bytes = byte_size(<<c::utf8>>)
+    skip_comment({rest, offset + bytes, line, column + 1})
+  end
 
   defp advance(cursor, 0), do: cursor
 
@@ -445,4 +479,7 @@ defmodule PtcRunner.Lisp.FastParser do
     do:
       c in ?a..?z or c in ?A..?Z or c in ?0..?9 or
         c in [?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%, ?., ?&, ?']
+
+  defp parse_error({_rest, offset, _line, _column}, message),
+    do: {:error, message, offset}
 end

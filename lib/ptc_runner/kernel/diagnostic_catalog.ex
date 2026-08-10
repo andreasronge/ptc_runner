@@ -7,6 +7,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   lower-level reasons never add a public code.
   """
 
+  alias PtcRunner.Kernel.CompileDiagnostic
+
   @rows [
     {:arguments, :invalid_command, 2, false, "use one of the supported commands"},
     {:arguments, :invalid_arguments, 2, false, "use the documented arguments for this command"},
@@ -210,6 +212,21 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   @spec fetch!(phase(), atom()) :: row()
   def fetch!(phase, code), do: Map.fetch!(@catalog, {phase, code})
+
+  @doc false
+  @spec valid_message?(phase(), atom(), term()) :: boolean()
+  def valid_message?(phase, code, message) do
+    case fetch(phase, code) do
+      {:ok, %{message: ^message}} -> true
+      {:ok, _row} -> CompileDiagnostic.valid_message?(code, message)
+      :error -> false
+    end
+  end
+
+  @doc false
+  @spec message_schema(row()) :: map()
+  def message_schema(%{code: code, message: fallback}),
+    do: CompileDiagnostic.message_schema(code, fallback)
 
   @spec rows() :: [row()]
   def rows do

@@ -241,6 +241,15 @@ defmodule PtcRunner.Lisp.ParserTest do
   end
 
   describe "error cases" do
+    test "detailed parsing retains the byte position of an EOF syntax failure" do
+      source = "; λ 🚀\n(ns app) ("
+
+      assert {:error, {:parse_error, _message, position}} =
+               Parser.parse_with_position(source)
+
+      assert position == byte_size(source)
+    end
+
     test "unclosed vector" do
       assert {:error, {:parse_error, _}} = Parser.parse("[1 2 3")
     end

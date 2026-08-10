@@ -613,14 +613,22 @@ component text, and the resulting bundle diagnostic carries it against
 provenance bound to the same bytes. That resolution runs in its own bounded
 worker after the primary compile result is final, so optional attribution cannot
 reclassify a compile error as a bundle timeout or heap failure. Failures no single form owns
-— parse errors, whole-bundle limits — keep the null span. Spans are best-effort
-by design: an unresolvable one is dropped rather than guessed, because a wrong
-range points a reader at innocent code.
+may still carry a parser position: malformed syntax uses a zero-length byte span
+at the parser's proven offset, including end-of-file for an unclosed form.
+Unsupported-pattern preflight failures and whole-bundle limits keep the null
+span. Spans are best-effort by design: an unresolvable one is dropped rather
+than guessed, because a wrong range points a reader at innocent code.
 Compiler details remain private inputs to an explicit reason allowlist. Only
-`:parse_error`, `:unbound_var`, and `:duplicate_ref` become the fixed public
+`:parse_error`, `:unbound_var`, and `:duplicate_ref` become the public
 `syntax_invalid`, `undefined_variable`, and `duplicate_definition` catalog
-rows; every other compiler reason becomes `compile_failed`. The public message
-is always rebuilt from the catalog and never forwards a compiler string.
+rows; every other compiler reason becomes `compile_failed`. Syntax uses the
+fixed catalog message. Undefined-variable and duplicate-definition messages may
+be rebuilt from exact bounded detail shapes, but only after every symbol is
+validated against the PTC-Lisp name grammar and found verbatim in the submitted
+component source. Dynamic messages require component-source provenance and the
+published schema admits only their closed literal-plus-symbol forms. Malformed,
+oversized, absent, or ambiguous detail retains the fixed catalog message. No
+path forwards a compiler-rendered string.
 `notes` stays pinned to the empty list. The published V1 schema fixes it as
 `{"const": []}`, so any populated array makes an envelope invalid for a strict
 V1 consumer; a diagnostic that has to report a rejected value against its bound

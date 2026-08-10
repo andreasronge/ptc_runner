@@ -892,13 +892,13 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
       assert slice == ~S[(ns crm "doc")]
     end
 
-    test "a parse error carries no span, because no form can be blamed" do
+    test "a parse error carries its provable EOF position" do
       unbalanced = "(ns crm \"doc\") (defn a [] (+ 1)"
 
       assert {:error, %Prelude.ValidationError{} = error} = Compiler.compile(unbalanced)
 
       assert error.reason == :parse_error
-      assert error.span == nil
+      assert error.span == {byte_size(unbalanced), 0}
     end
 
     test "a duplicate definition spans the redefinition that collided" do
@@ -910,6 +910,7 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
 
       assert {error, slice} = failing_slice(source)
       assert error.reason == :duplicate_ref
+      assert error.details == %{duplicate_namespace: "crm", duplicate_name: "a"}
       assert slice == "(defn a [] 2)"
     end
 

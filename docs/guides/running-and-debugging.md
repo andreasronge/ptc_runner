@@ -491,8 +491,12 @@ The `-l`/`--load` option dynamically evaluates a setup file and cannot load the
 component-only `ns` and `defn-` forms. Manifest setup distinguishes malformed
 syntax (`syntax_invalid`), undefined variables (`undefined_variable`), and
 duplicate definitions (`duplicate_definition`). Other compiler rejections keep
-the `compile_failed` fallback. These fixed public classifications do not expose
-the underlying compiler explanation or offending name.
+the `compile_failed` fallback. Undefined-variable and duplicate-definition
+messages name only bounded symbols found verbatim in the submitted component;
+they are rebuilt from structured compiler detail rather than forwarded compiler
+text. Malformed syntax carries the parser's byte position when one is provable,
+including a zero-length span at end-of-file for an unclosed form. Other details
+retain the fixed catalog message and a null span.
 
 **To find the artifacts**, use the run reference. It appears in the command
 envelope, and every artifact is named from it: `<run_ref>.jsonl` for a normal

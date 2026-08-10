@@ -2099,6 +2099,50 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_schema_invalid(impossible_span)
   end
 
+  test "rebuilt compile messages require component-source provenance" do
+    message = "Undefined variable: missing-value"
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:bundle, :undefined_variable, message: message)
+
+    source = CommandSource.with_bytes(:component, "main.clj", "missing-value")
+
+    assert {:ok, %CommandDiagnostic{message: ^message}} =
+             CommandDiagnostic.new(:bundle, :undefined_variable,
+               message: message,
+               source: source
+             )
+  end
+
+  test "compile message schema enforces producer name and count bounds" do
+    source = CommandSource.with_bytes(:component, "main.clj", "(ns app)")
+    run_ref = CommandRunRef.encode(@zero_entropy)
+
+    for {code, message} <- [
+          {:undefined_variable, "Undefined variable: #{String.duplicate("x", 128)}"},
+          {:undefined_variable,
+           "Undefined variables: " <> Enum.map_join(1..8, ", ", &"name#{&1}")},
+          {:duplicate_definition, "Duplicate definition: app/#{String.duplicate("x", 128)}"}
+        ] do
+      {:ok, diagnostic} =
+        CommandDiagnostic.new(:bundle, code, message: message, source: source)
+
+      assert_schema_valid(CommandOutcome.error(:validate, run_ref, diagnostic).envelope)
+    end
+
+    for {code, message} <- [
+          {:undefined_variable,
+           "Undefined variables: " <> Enum.map_join(1..9, ", ", &"name#{&1}")},
+          {:undefined_variable, "Undefined variable: #{String.duplicate("x", 129)}"},
+          {:duplicate_definition, "Duplicate definition: app/#{String.duplicate("x", 129)}"}
+        ] do
+      {:ok, diagnostic} = CommandDiagnostic.new(:bundle, code, source: source)
+      envelope = CommandOutcome.error(:validate, run_ref, diagnostic).envelope
+
+      assert_schema_invalid(put_in(envelope, ["error", "message"], message))
+    end
+  end
+
   test "host diagnostics admit only host-schema-authorized paths" do
     assert {:ok, host_path} =
              CommandPath.host([
@@ -4702,12 +4746,15 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   } do
     cases = [
       {"syntax", "(ns app) (", "syntax_invalid", "the component source is not valid PTC-Lisp",
-       nil, nil},
+       nil, :eof},
+      {"syntax-unicode-comment", "; λ 🚀\n(ns app) (", "syntax_invalid",
+       "the component source is not valid PTC-Lisp", nil, :eof},
       {"undefined", "(ns app) (defn run [input] (return missing-value))", "undefined_variable",
-       "the component source contains an undefined variable reference", "missing-value", nil},
+       "Undefined variable: missing-value", nil, nil},
+      {"undefined-many", "(ns app) (defn run [input] (+ missing-left missing-right))",
+       "undefined_variable", "Undefined variables: missing-left, missing-right", nil, nil},
       {"duplicate", "(ns app) (defn run [input] input) (defn run [input] input)",
-       "duplicate_definition", "the component bundle defines the same name more than once",
-       "app/run", "(defn run [input] input)"}
+       "duplicate_definition", "Duplicate definition: app/run", nil, "(defn run [input] input)"}
     ]
 
     for {name, source, code, message, private_detail, spanned_form} <- cases do
@@ -4729,10 +4776,31 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         {nil, nil} ->
           :ok
 
+        {:eof, %{"start_byte" => start_byte, "end_byte" => end_byte}} ->
+          assert start_byte == byte_size(source)
+          assert end_byte == byte_size(source)
+
         {form, %{"start_byte" => start_byte, "end_byte" => end_byte}} ->
           assert binary_part(source, start_byte, end_byte - start_byte) == form
       end
     end
+  end
+
+  @tag :tmp_dir
+  test "compile diagnostics retain fixed fallbacks when structured position is unavailable", %{
+    tmp_dir: directory
+  } do
+    source = "(ns app) #_ (defn run [input] input)"
+
+    path =
+      write_application(directory, "unlocated-syntax", valid_manifest(), %{
+        "main.clj" => source
+      })
+
+    diagnostic = assert_error(["validate", path], "bundle", "syntax_invalid").envelope["error"]
+
+    assert diagnostic["message"] == "the component source is not valid PTC-Lisp"
+    assert diagnostic["span"] == nil
   end
 
   @tag :tmp_dir
@@ -4760,17 +4828,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     # The offsets are only worth emitting if they cut the source at the form a
     # reader has to fix, so slice rather than assert the numbers.
     assert binary_part(source, start_byte, end_byte - start_byte) == "(defn broken)"
-
-    # A component whose failure cannot be attributed to one form keeps the
-    # null span every envelope carried before spans had producers.
-    unlocatable =
-      write_application(directory, "unlocatable-compile-failure", valid_manifest(), %{
-        "main.clj" => "(ns app) ("
-      })
-
-    assert assert_error(["validate", unlocatable], "bundle", "syntax_invalid").envelope["error"][
-             "span"
-           ] == nil
   end
 
   @tag :tmp_dir

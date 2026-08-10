@@ -24,6 +24,9 @@ defmodule PtcRunner.Lisp.Prelude.ValidationError do
       `:prelude_attach_failed`.
     * `message` — human-readable detail naming the offending namespace,
       symbol, or value. Must not contain secrets.
+    * `details` — bounded structured compiler detail for allowlisted public
+      diagnostic rebuilding, else `nil`. Renderers must never forward
+      `message` as a substitute for this field.
     * `namespace` — the declaring namespace when known, else `nil`.
     * `ref` — the offending export ref when known, else `nil`.
     * `form_index` — zero-based position of the offending TOP-LEVEL form in
@@ -31,11 +34,13 @@ defmodule PtcRunner.Lisp.Prelude.ValidationError do
       The top-level walk records it directly on walk failures and carries it on
       definition specs for later validation phases.
     * `span` — `{offset, length}` byte span of that offending top-level form
-      in the compiled source, or `nil` when the failure cannot be attributed
-      to one form (parse errors, whole-bundle failures). Resolved once, at the
-      compile boundary, by `PtcRunner.Lisp.Prelude.ErrorSpan`. Bundle
-      compilation resolves it in a separate bounded worker so optional
-      attribution cannot change the primary compile result.
+      in the compiled source. A parser failure may instead carry a zero-length
+      position span such as `{byte_size(source), 0}` for EOF. Other failures
+      keep `nil` when no position can be proved. Top-level form spans are
+      resolved once, at the compile boundary, by
+      `PtcRunner.Lisp.Prelude.ErrorSpan`. Bundle compilation resolves them in a
+      separate bounded worker so optional attribution cannot change the
+      primary compile result.
   """
 
   @type reason ::
@@ -62,6 +67,7 @@ defmodule PtcRunner.Lisp.Prelude.ValidationError do
   @type t :: %__MODULE__{
           reason: reason(),
           message: String.t(),
+          details: map() | nil,
           namespace: String.t() | nil,
           ref: String.t() | nil,
           form_index: non_neg_integer() | nil,
@@ -71,6 +77,7 @@ defmodule PtcRunner.Lisp.Prelude.ValidationError do
   @enforce_keys [:reason, :message]
   defstruct reason: nil,
             message: nil,
+            details: nil,
             namespace: nil,
             ref: nil,
             form_index: nil,
@@ -82,8 +89,11 @@ defmodule PtcRunner.Lisp.Prelude.ValidationError do
     %__MODULE__{
       reason: reason,
       message: message,
+      details: Keyword.get(opts, :details),
       namespace: Keyword.get(opts, :namespace),
-      ref: Keyword.get(opts, :ref)
+      ref: Keyword.get(opts, :ref),
+      form_index: Keyword.get(opts, :form_index),
+      span: Keyword.get(opts, :span)
     }
   end
 end
