@@ -99,11 +99,15 @@ run_project_gates() {
   fi
 
   # Scoped tests for changed test files — a single `mix test` invocation for
-  # all of them. `:slow` (heavy subprocess/integration) tests are now excluded
-  # by `test/test_helper.exs` for every entry point, so `--exclude slow` below
-  # is redundant but kept explicit, matching `--exclude clojure`. They run in
-  # the nightly `Slow` workflow (`mix slow`), not in `precommit`, pre-push, or
-  # the per-PR CI suite.
+  # all of them.
+  #
+  # `--exclude slow` below is load-bearing, not decoration: this hook is the
+  # only consumer of the `:slow` tag. Those ten tests (25 s) deliberately still
+  # run in `precommit`, pre-push, and CI, so deleting the flag would slow this
+  # fast path down rather than tighten any gate. `--exclude clojure` beside it
+  # *is* redundant with `test/test_helper.exs`, and is kept only for symmetry.
+  #
+  # `:nightly` needs no flag here: `test/test_helper.exs` excludes it globally.
   local changed_tests
   if [ "$proj" = "." ]; then
     changed_tests=$(echo "$staged" | grep -E '^test/.*_test\.exs$' || true)
