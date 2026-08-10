@@ -29,6 +29,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     turn-limit
     model-program-failed
     non-retryable-evaluation
+    evaluation-unavailable
     llm-provider-error
     protocol-error
     provider-error

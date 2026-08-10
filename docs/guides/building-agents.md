@@ -155,6 +155,14 @@ the workflow. This distinction prevents a candidate crash from disappearing
 while also preventing a provider outage from being scored against a candidate.
 `run-value` retains its existing fail-on-subject-failure behavior.
 
+A subordinate evaluation that is never admitted is one of those host failures.
+A run holds a single evaluation lease, so a second concurrent
+`kernel/eval-source` is refused while the first is running, as is any
+evaluation once `subordinate_evaluations` is spent. The loop fails the workflow
+as `evaluation-unavailable` and does not spend a turn or another model call on
+it — the model cannot rewrite its program to clear either condition. Agent
+loops running concurrently under `pcalls` therefore fail fast on contention.
+
 ### The prompt is a separate policy seam
 
 `agent.prompt` owns the system text independently of the retry and evaluation

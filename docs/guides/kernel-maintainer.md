@@ -963,6 +963,20 @@ mission capability, and mutate no continuation. Source is bounded before it is
 hashed; an oversized request exposes only its byte count. The trusted-tool
 ledger likewise retains only source identity for accepted-size requests.
 
+A run holds exactly one evaluation lease. `RunState.reserve_evaluation/1`
+refuses admission with `:busy` while another caller holds it, and with
+`:limit_exceeded` once `subordinate_evaluations` is spent; a refusal charges no
+budget. Both are host conditions rather than anything a generated program did,
+so callers must not present them to a model as a correctable program error.
+The shipped `agent.core` loop fails the outer workflow as
+`evaluation-unavailable` instead of spending a turn. That makes concurrent
+agent loops under `pcalls` fail fast on contention rather than serialize: the
+provider call happens outside the lease, so branches overlap freely until they
+reach `kernel/eval-source`. Admission is deliberately not queued — queuing
+requires an absolute caller deadline that `reserve_evaluation/1` does not yet
+receive, and without one a queued branch would spend the parallel deadline
+waiting.
+
 Each `PtcRunner.Kernel.Capability` freezes its public identity, effect,
 visibility, bounded schemas, validator, and trusted callback. Environment
 membership grants authority; descriptions and remote annotations do not.
