@@ -5625,6 +5625,16 @@ predicates over nil, maps, and mixed values, using the runtime's total term
 ordering for deterministic data pipelines. Clojure's exception behavior is less
 useful in a sandbox without `try`/`catch`.
 
+**Direction:** `nil` sorts above every finite number — `(> nil 240)` is `true`,
+`(< nil 240)` is `false`, and `(max nil 1)` returns `nil`. A missing or
+mistyped map key therefore satisfies a "greater than" check silently instead
+of raising, which is easy to miss when the comparison sits inside a larger
+predicate (e.g. an SLA-breach filter). Two exceptions: `nil` sorts *below*
+positive infinity (`(> nil ##Inf)` is `false`), and any comparison touching
+`##NaN` is `false`, same as `##NaN` compared to itself. See
+`docs/function-reference.md` and `:doc` for `<`/`<=`/`>`/`>=`, which now carry
+this note.
+
 ### DIV-31: Numeric predicates return false for nil and non-numeric inputs
 
 | Field | Value |

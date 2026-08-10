@@ -123,10 +123,12 @@
       section: "Core",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
+      notes:
+        "Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30).",
       see_also: [],
       clojure_var: "<",
-      divergences: nil
+      divergences:
+        "DIV-30: Clojure raises ClassCastException comparing incompatible types (e.g. numbers vs strings) or nil; PTC-Lisp uses a recoverable total term ordering where `nil` sorts above every finite number (but below `##Inf`), and any comparison touching `##NaN` returns false rather than raising."
     },
     %{
       name: "<=",
@@ -139,10 +141,12 @@
       section: "Core",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
+      notes:
+        "Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30).",
       see_also: [],
       clojure_var: "<=",
-      divergences: nil
+      divergences:
+        "DIV-30: Clojure raises ClassCastException comparing incompatible types (e.g. numbers vs strings) or nil; PTC-Lisp uses a recoverable total term ordering where `nil` sorts above every finite number (but below `##Inf`), and any comparison touching `##NaN` returns false rather than raising."
     },
     %{
       name: "=",
@@ -188,10 +192,12 @@
       section: "Core",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
+      notes:
+        "Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30).",
       see_also: [],
       clojure_var: ">",
-      divergences: nil
+      divergences:
+        "DIV-30: Clojure raises ClassCastException comparing incompatible types (e.g. numbers vs strings) or nil; PTC-Lisp uses a recoverable total term ordering where `nil` sorts above every finite number (but below `##Inf`), and any comparison touching `##NaN` returns false rather than raising."
     },
     %{
       name: ">=",
@@ -204,10 +210,12 @@
       section: "Core",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
+      notes:
+        "Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30).",
       see_also: [],
       clojure_var: ">=",
-      divergences: nil
+      divergences:
+        "DIV-30: Clojure raises ClassCastException comparing incompatible types (e.g. numbers vs strings) or nil; PTC-Lisp uses a recoverable total term ordering where `nil` sorts above every finite number (but below `##Inf`), and any comparison touching `##NaN` returns false rather than raising."
     },
     %{
       name: "NaN?",

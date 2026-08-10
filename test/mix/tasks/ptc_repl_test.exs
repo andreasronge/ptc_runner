@@ -39,6 +39,12 @@ defmodule PtcRunner.ReplFrontendTest do
     assert "" = capture_io("", fn -> run_repl(["-"]) end)
   end
 
+  test ":doc surfaces the nil-ordering divergence note for comparison operators" do
+    output = capture_io(":doc >\n", fn -> run_repl([]) end)
+    assert output =~ "nil` orders above every finite number"
+    assert output =~ "DIV-30"
+  end
+
   test "manifest-only host authority is rejected by direct mode" do
     assert_raise Mix.Error, ~r/arguments\/invalid_arguments/, fn ->
       run_repl(["--host-config", "missing-host.json", "-e", "42"])

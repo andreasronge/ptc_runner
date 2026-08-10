@@ -229,6 +229,7 @@ defmodule PtcRunner.Kernel.Runner do
              {:ok, value} <- project_result(value, config.result_projection) do
           if terminal_result_within_limit?(value, config.limits.terminal_result_bytes) do
             value = RetainedSize.detach_binaries(value)
+            :ok = capture_execution_prints(config, state, evaluation_id, step.prints)
 
             {:ok,
              %Result{
@@ -323,6 +324,23 @@ defmodule PtcRunner.Kernel.Runner do
     {:error, error}
   end
 
+  # A successful workflow's `step.prints` are as diagnostically valuable as a
+  # failing one's — they are the first thing anyone adds to see why a run
+  # returned the wrong value — so this applies the same private-artifact-only
+  # capture and fail-closed-on-sink-error rule `capture_execution_failure/5`
+  # applies on the error paths.
+  defp capture_execution_prints(config, state, evaluation_id, prints) do
+    case with_v3_sink(config.inspection_sink, fn sink ->
+           emit_execution_prints(sink, evaluation_id, prints)
+         end) do
+      :ok ->
+        :ok
+
+      {:error, :inspection_sink_error} ->
+        :ok = RunState.fail(state, :inspection_sink_error, :inspection_sink_error)
+    end
+  end
+
   defp emit_execution_diagnostics(nil, _evaluation_id, _prints, _error), do: :ok
 
   # A sink built before V3 does not understand these record types. A workflow
@@ -330,11 +348,19 @@ defmodule PtcRunner.Kernel.Runner do
   # every run eventually fails one — so an older sink skips capture the same
   # as a `nil` sink would, instead of failing every such run closed.
   defp emit_execution_diagnostics(sink, evaluation_id, prints, error) do
+    with_v3_sink(sink, fn sink ->
+      with :ok <- emit_execution_prints(sink, evaluation_id, prints) do
+        emit_execution_error(sink, evaluation_id, error)
+      end
+    end)
+  end
+
+  defp with_v3_sink(nil, _fun), do: :ok
+
+  defp with_v3_sink(sink, fun) do
     case InspectionSink.schema_version(sink) do
       {:ok, schema_version} when schema_version >= 3 ->
-        with :ok <- emit_execution_prints(sink, evaluation_id, prints) do
-          emit_execution_error(sink, evaluation_id, error)
-        end
+        fun.(sink)
 
       {:ok, _older_schema_version} ->
         :ok

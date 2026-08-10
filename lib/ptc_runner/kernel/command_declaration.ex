@@ -94,7 +94,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :trace_dir,
           type: :string,
           syntax: ["--trace-dir DIRECTORY"],
-          description: "directory for the run-reference trace artifact"
+          description: "existing directory for the run-reference trace artifact"
         },
         %{
           key: :output,

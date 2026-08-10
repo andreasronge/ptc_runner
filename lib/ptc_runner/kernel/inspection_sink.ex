@@ -5,9 +5,11 @@ defmodule PtcRunner.Kernel.InspectionSink do
   Capture is host-enabled and fail-closed. Version 1 accepts capability-input,
   capability-output, subordinate evaluation-source, and prelude-source.
   Version 2 adds correlated exact MCP request and response bodies. Version 3
-  adds workflow execution-phase diagnostics — `execution-prints` and
-  `execution-error`, correlated by the workflow `evaluation_id` — captured only
-  when the top-level workflow evaluation fails. It normalizes atom keys and
+  adds workflow execution-phase diagnostics, correlated by the workflow
+  `evaluation_id`: `execution-prints`, captured whenever the top-level
+  workflow evaluation produces `println` output, whether it succeeds or
+  fails; and `execution-error`, captured only when it fails with non-empty
+  error details. It normalizes atom keys and
   enum values to JSON strings, assigns the run identity, sequence, and UTC
   timestamp, and rejects a record before retention when either its retained or
   encoded size exceeds the installed bounds.

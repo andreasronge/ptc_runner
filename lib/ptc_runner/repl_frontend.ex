@@ -1254,7 +1254,7 @@ defmodule PtcRunner.ReplFrontend do
   defp handle_command("doc " <> name, _session) do
     case Registry.doc(String.trim(name)) do
       nil -> info("No documentation found for: #{String.trim(name)}")
-      entry -> info(Enum.join(entry.signatures, "\n") <> "\n  " <> entry.description)
+      entry -> info(format_doc(entry))
     end
   end
 
@@ -1269,6 +1269,13 @@ defmodule PtcRunner.ReplFrontend do
 
   defp handle_command(_command, _session),
     do: info("Unknown command. Available: :doc <name>, :find <pattern>, :help")
+
+  defp format_doc(entry) do
+    header = Enum.join(entry.signatures, "\n") <> "\n  " <> entry.description
+    caveat = entry[:notes] || entry[:divergences]
+
+    if caveat, do: header <> "\n  " <> caveat, else: header
+  end
 
   defp info(message), do: IO.puts(message)
   defp error(message), do: IO.puts(:stderr, message)
