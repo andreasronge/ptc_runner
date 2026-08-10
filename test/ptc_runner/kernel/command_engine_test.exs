@@ -4678,6 +4678,44 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "a locatable compile failure carries the offending form's byte span", %{
+    tmp_dir: directory
+  } do
+    source = """
+    (ns app)
+
+    (defn run [input] (return input))
+
+    (defn broken)
+    """
+
+    path =
+      write_application(directory, "located-compile-failure", valid_manifest(), %{
+        "main.clj" => source
+      })
+
+    outcome = assert_error(["validate", path], "bundle", "compile_failed")
+
+    assert %{"start_byte" => start_byte, "end_byte" => end_byte} =
+             outcome.envelope["error"]["span"]
+
+    # The offsets are only worth emitting if they cut the source at the form a
+    # reader has to fix, so slice rather than assert the numbers.
+    assert binary_part(source, start_byte, end_byte - start_byte) == "(defn broken)"
+
+    # A component whose failure cannot be attributed to one form keeps the
+    # null span every envelope carried before spans had producers.
+    unlocatable =
+      write_application(directory, "unlocatable-compile-failure", valid_manifest(), %{
+        "main.clj" => "(ns app) ("
+      })
+
+    assert assert_error(["validate", unlocatable], "bundle", "compile_failed").envelope["error"][
+             "span"
+           ] == nil
+  end
+
+  @tag :tmp_dir
   test "application failures retain safe external-input and override provenance", %{
     tmp_dir: directory
   } do

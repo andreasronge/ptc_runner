@@ -1326,6 +1326,32 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              Kernel.compile_bundle([first, malformed])
   end
 
+  test "span attribution metadata cannot displace a large compile diagnostic" do
+    signature = String.duplicate("x", 70_000)
+
+    {:ok, component} =
+      Component.new(
+        id: "invalid-signature",
+        source: ~s|(ns invalid-signature) (defn bad {:signature "#{signature}"} [] 1)|
+      )
+
+    assert {:error, %{reason: :component_compile_error, id: "invalid-signature"}} =
+             Kernel.compile_bundle([component])
+  end
+
+  test "an oversized ref locator cannot displace a compile diagnostic" do
+    symbol = "f" <> String.duplicate("x", 70_000)
+
+    {:ok, component} =
+      Component.new(
+        id: "duplicate-long-ref",
+        source: "(ns duplicate-long-ref) (defn #{symbol} [] 1) (defn #{symbol} [] 2)"
+      )
+
+    assert {:error, %{reason: :component_compile_error, id: "duplicate-long-ref"}} =
+             Kernel.compile_bundle([component])
+  end
+
   test "bundle compilation returns diagnostics for malformed component terms" do
     assert {:error, %{reason: :invalid_components}} = Kernel.compile_bundle([%{}])
 

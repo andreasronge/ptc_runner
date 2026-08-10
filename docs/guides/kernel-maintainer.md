@@ -605,6 +605,20 @@ retain their workflow or mission occurrence.
 A non-null byte span is admitted only when its
 `CommandSource` was constructed with the exact trusted source bytes and the
 exclusive end offset is within that retained byte bound.
+Component compilation is the one producer of that span. When the prelude
+compiler can attribute a failure to a single top-level form,
+`PtcRunner.Lisp.Prelude.ErrorSpan` resolves that form's byte range from the raw
+component text, and `bundle/compile_failed` carries it against provenance bound
+to the same bytes. That resolution runs in its own bounded worker after the
+primary compile result is final, so optional attribution cannot reclassify a
+compile error as a bundle timeout or heap failure. Failures no single form owns
+— parse errors, whole-bundle limits — keep the null span. Spans are best-effort
+by design: an unresolvable one is dropped rather than guessed, because a wrong
+range points a reader at innocent code.
+`notes` stays pinned to the empty list. The published V1 schema fixes it as
+`{"const": []}`, so any populated array makes an envelope invalid for a strict
+V1 consumer; a diagnostic that has to report a rejected value against its bound
+needs a later envelope version, not a relaxed V1.
 The command-specific host loader preserves closed phase-2 causes instead of
 projecting every failure to `host_invalid`: inaccessible files are
 `host_unavailable`, invalid bytes/JSON are `host_invalid`, structural failures

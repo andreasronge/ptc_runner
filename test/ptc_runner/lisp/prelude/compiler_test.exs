@@ -4,6 +4,7 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler
+  alias PtcRunner.Lisp.Prelude.ErrorSpan
   alias PtcRunner.Lisp.Prelude.Export
 
   # ============================================================
@@ -809,6 +810,147 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
                )
 
       assert error.message =~ "provided both"
+    end
+  end
+
+  # ============================================================
+  # Failure spans
+  # ============================================================
+
+  describe "compile/2 failure spans" do
+    # The oracle everywhere below is the SLICE, never the offsets: a span is
+    # only useful if cutting the source at it yields the form a reader should
+    # be looking at.
+    defp failing_slice(source, opts \\ []) do
+      assert {:error, %Prelude.ValidationError{} = error} = Compiler.compile(source, opts)
+      {offset, length} = error.span
+      {error, binary_part(source, offset, length)}
+    end
+
+    test "a failure raised while walking a top-level form spans that form" do
+      source = """
+      (ns crm "doc")
+
+      (defn fine [x] x)
+
+      (defn broken)
+      """
+
+      assert {error, slice} = failing_slice(source)
+      assert error.reason == :invalid_signature
+      assert slice == "(defn broken)"
+    end
+
+    test "post-walk export validation spans the offending definition" do
+      cases = [
+        {~S|(defn bad {:effect :network} [] 1)|, :invalid_metadata},
+        {~S|(defn bad {:requires ["not-a-tool"]} [] 1)|, :invalid_requires},
+        {~S|(defn bad {:signature "[:int -> :int]"} [] 1)|, :invalid_signature}
+      ]
+
+      for {definition, reason} <- cases do
+        source = "(ns crm \"doc\")\n(defn fine [] 1)\n#{definition}\n"
+
+        assert {error, slice} = failing_slice(source)
+        assert error.reason == reason
+        assert slice == definition
+      end
+    end
+
+    test "the bundle-facing compile path retains a locator without resolving it" do
+      source = "(ns crm \"doc\")\n(defn fine [] 1)\n(defn broken)\n"
+
+      assert {:error, %Prelude.ValidationError{} = error} =
+               Compiler.compile_unlocated(source)
+
+      assert error.form_index == 2
+      assert error.span == nil
+    end
+
+    test "a failure raised after the walk spans the definition its ref names" do
+      source = """
+      (ns cfg "doc")
+      (def fine 1)
+      (def answer {:type ":int"} "forty-two")
+      """
+
+      assert {error, slice} = failing_slice(source)
+      assert error.ref == "cfg/answer"
+      assert slice == ~S[(def answer {:type ":int"} "forty-two")]
+    end
+
+    test "a namespace-level failure spans the declaring (ns ...) form" do
+      source = """
+      (ns first-ns "doc")
+      (defn a [] 1)
+      (ns crm "doc")
+      (defn b [] 2)
+      """
+
+      assert {error, slice} = failing_slice(source, namespace_deps: %{"crm" => ["missing"]})
+      assert error.reason == :unknown_dependency
+      assert slice == ~S[(ns crm "doc")]
+    end
+
+    test "a parse error carries no span, because no form can be blamed" do
+      unbalanced = "(ns crm \"doc\") (defn a [] (+ 1)"
+
+      assert {:error, %Prelude.ValidationError{} = error} = Compiler.compile(unbalanced)
+
+      assert error.reason == :parse_error
+      assert error.span == nil
+    end
+
+    test "a duplicate definition spans the redefinition that collided" do
+      source = """
+      (ns crm "doc")
+      (defn a [] 1)
+      (defn a [] 2)
+      """
+
+      assert {error, slice} = failing_slice(source)
+      assert error.reason == :duplicate_ref
+      assert slice == "(defn a [] 2)"
+    end
+
+    test "an ambiguous ref resolves to no span rather than an innocent namesake" do
+      # `dep_ref_in_def` is raised BEFORE duplicate names are rejected, so its
+      # ref matches two forms here and only the second one is at fault. A span
+      # on the first would send a reader to code that is not the problem.
+      source = """
+      (ns audit "doc")
+      (def a 1)
+      (def a (base/helper 1))
+      """
+
+      assert {:error, %Prelude.ValidationError{} = error} =
+               Compiler.compile(source,
+                 deps: [dep_base()],
+                 namespace_deps: %{"audit" => ["base"]}
+               )
+
+      assert error.reason == :dep_ref_in_def
+      assert error.ref == "audit/a"
+      assert error.span == nil
+    end
+
+    test "a negative form index resolves to no span rather than the last form" do
+      source = """
+      (ns crm "doc")
+      (defn a [] 1)
+      """
+
+      error = %Prelude.ValidationError{
+        reason: :compile_error,
+        message: "synthetic",
+        form_index: -1
+      }
+
+      assert ErrorSpan.resolve(error, source).span == nil
+    end
+
+    test "a successful compile is unaffected by span resolution" do
+      assert {:ok, %Prelude{}} = Compiler.compile("(ns crm \"doc\") (defn a [] 1)")
     end
   end
 end

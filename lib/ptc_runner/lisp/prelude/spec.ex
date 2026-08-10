@@ -9,6 +9,10 @@ defmodule PtcRunner.Lisp.Prelude.Spec do
   (`params_form`, `body_form`) that the compiler needs to both build export
   metadata and reconstruct definition forms for env capture.
 
+  `form_index` is the definition's zero-based top-level source position. It
+  lets validation phases after the initial AST walk retain precise diagnostic
+  attribution without teaching each validation helper about source text.
+
   `metadata_form` is the **raw** `{:map, pairs}` parser node captured from a
   `def`, `defn`, or `defn-` before `normalize_meta/1` flattens it into the (lossy,
   order-destroying) `metadata` map. It exists so `source` discovery can render
@@ -25,11 +29,21 @@ defmodule PtcRunner.Lisp.Prelude.Spec do
           doc: String.t() | nil,
           metadata: map(),
           metadata_form: {:map, [term()]} | nil,
+          form_index: non_neg_integer(),
           params_form: term() | nil,
           body_form: [term()]
         }
 
-  @enforce_keys [:namespace, :symbol, :private?, :arity, :doc, :metadata, :body_form]
+  @enforce_keys [
+    :namespace,
+    :symbol,
+    :private?,
+    :arity,
+    :doc,
+    :metadata,
+    :form_index,
+    :body_form
+  ]
   defstruct namespace: nil,
             symbol: nil,
             private?: false,
@@ -37,6 +51,7 @@ defmodule PtcRunner.Lisp.Prelude.Spec do
             doc: nil,
             metadata: %{},
             metadata_form: nil,
+            form_index: nil,
             params_form: nil,
             body_form: []
 end
