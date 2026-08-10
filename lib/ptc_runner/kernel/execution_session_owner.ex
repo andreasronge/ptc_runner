@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.ExecutionSessionResources
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
@@ -166,8 +167,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       worker_ref: nil,
       waiter: nil,
       result: nil,
-      authority_handed_off?: false,
-      handoff_waiting?: false
+      handoff_waiting?: false,
+      held_resources: ExecutionSessionResources.new([:prepared, :authority])
     }
 
     case RunBuilder.open_prepared_sinks(prepared, authority, self()) do
@@ -191,6 +192,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         next =
           initial
           |> Map.put(:opened_sinks, opened_sinks)
+          |> hold_resource(:sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
           |> abort_authority()
@@ -200,9 +202,14 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
       {:error, reason} ->
         failure = execution_failure(initial, reason, :not_started)
-        close_prepared(prepared)
-        _ = PublicationAuthority.abort(authority)
-        {:ok, %{initial | prepared: nil, result: {:error, failure}}}
+
+        next =
+          initial
+          |> close_owned_inputs()
+          |> abort_authority()
+          |> put_result({:error, failure})
+
+        {:ok, next}
     end
   end
 
@@ -236,7 +243,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
            self(),
            :execution_session_unavailable
          ) do
-      {:ok, next} -> {:reply, :ok, next}
+      {:ok, next} -> {:reply, :ok, track_provider_resource(next, action, kind)}
       {:error, _reason} = error -> {:reply, error, state}
     end
   end
@@ -262,6 +269,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       state
       |> Map.put(:worker_pid, nil)
       |> Map.put(:worker_ref, nil)
+      |> forget_resource(:worker)
       |> maybe_finalize_failed_execution(result)
       |> close_owned_inputs()
       |> maybe_abort_authority(result)
@@ -287,6 +295,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       state
       |> Map.put(:worker_pid, nil)
       |> Map.put(:worker_ref, nil)
+      |> forget_resource(:worker)
       |> abort()
       |> put_result({:error, failure})
 
@@ -297,7 +306,10 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         {token, :handoff_ack},
         %{token: token, handoff_waiting?: true} = state
       ) do
-    {:stop, :normal, %{state | authority_handed_off?: true, handoff_waiting?: false}}
+    {:stop, :normal,
+     state
+     |> Map.put(:handoff_waiting?, false)
+     |> forget_resource(:authority)}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -343,15 +355,18 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
             send(owner, {token, :execution_result, self(), execution_result})
           end)
 
-        {:ok,
-         %{
-           initial
-           | registry: registry,
-             built: built,
-             opened_sinks: opened_sinks,
-             worker_pid: worker_pid,
-             worker_ref: worker_ref
-         }}
+        next =
+          %{
+            initial
+            | registry: registry,
+              built: built,
+              opened_sinks: opened_sinks,
+              worker_pid: worker_pid,
+              worker_ref: worker_ref
+          }
+          |> hold_resources([:registry, :sinks, :worker])
+
+        {:ok, next}
 
       {:error, reason, registry} ->
         failure = execution_failure(initial, reason, :not_started)
@@ -360,6 +375,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           initial
           |> Map.put(:registry, registry)
           |> Map.put(:opened_sinks, opened_sinks)
+          |> hold_resources([:registry, :sinks])
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
           |> abort_authority()
@@ -373,6 +389,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         next =
           initial
           |> Map.put(:opened_sinks, opened_sinks)
+          |> hold_resource(:sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
           |> abort_authority()
@@ -425,13 +442,16 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       :ok ->
         send(worker_pid, {token, :start_execution})
 
-        {:ok,
-         %{
-           initial
-           | opened_sinks: opened_sinks,
-             worker_pid: worker_pid,
-             worker_ref: worker_ref
-         }}
+        next =
+          %{
+            initial
+            | opened_sinks: opened_sinks,
+              worker_pid: worker_pid,
+              worker_ref: worker_ref
+          }
+          |> hold_resources([:sinks, :worker])
+
+        {:ok, next}
 
       {:error, _reason} ->
         Process.exit(worker_pid, :kill)
@@ -445,6 +465,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         next =
           initial
           |> Map.put(:opened_sinks, opened_sinks)
+          |> hold_resource(:sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
           |> abort_authority()
@@ -468,18 +489,20 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     {:reply, result, %{state | handoff_waiting?: true}}
   end
 
-  defp abort(state) do
-    state
-    |> stop_worker()
-    |> close_runtime_resources()
-    |> finalize_aborted_sinks()
-    |> close_owned_inputs()
-    |> abort_authority()
-  end
+  defp abort(state),
+    do:
+      release(state, [
+        :worker,
+        :session,
+        :listener,
+        :registry,
+        :memory,
+        :sinks,
+        :prepared,
+        :authority
+      ])
 
-  defp stop_worker(%{worker_pid: nil} = state), do: state
-
-  defp stop_worker(%{worker_pid: worker_pid, worker_ref: worker_ref} = state) do
+  defp release_worker(%{worker_pid: worker_pid, worker_ref: worker_ref} = state) do
     Process.exit(worker_pid, :kill)
 
     receive do
@@ -489,18 +512,15 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     %{state | worker_pid: nil, worker_ref: nil}
   end
 
-  defp finalize_aborted_sinks(%{built: %{config: config}} = state) do
+  defp release_sinks(%{built: %{config: config}} = state) do
     finalize_and_stop_sinks(config.event_sink, config.inspection_sink)
-    state
-  end
-
-  defp finalize_aborted_sinks(%{opened_sinks: opened_sinks} = state)
-       when is_map(opened_sinks) do
-    finalize_and_stop_sinks(opened_sinks.event_sink, opened_sinks.inspection_sink)
     %{state | opened_sinks: nil}
   end
 
-  defp finalize_aborted_sinks(state), do: state
+  defp release_sinks(%{opened_sinks: opened_sinks} = state) do
+    finalize_and_stop_sinks(opened_sinks.event_sink, opened_sinks.inspection_sink)
+    %{state | opened_sinks: nil}
+  end
 
   defp finalize_and_stop_sinks(event_sink, inspection_sink) do
     if Process.alive?(event_sink.pid) do
@@ -516,48 +536,49 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     EventSink.stop(event_sink)
   end
 
-  defp close_owned_inputs(state) do
-    state = close_runtime_resources(state)
-    close_prepared(state.prepared)
-    %{state | prepared: nil}
-  end
+  defp finalize_aborted_sinks(state), do: release(state, [:sinks])
+
+  defp close_owned_inputs(state),
+    do: release(state, [:session, :listener, :registry, :memory, :prepared])
 
   defp maybe_abort_authority(state, {:ok, _result}), do: state
   defp maybe_abort_authority(state, _result), do: abort_authority(state)
 
-  defp abort_authority(%{authority_handed_off?: true, result: {:ok, _result}} = state),
-    do: state
-
-  defp abort_authority(%{authority: authority} = state) do
+  defp release_authority(%{authority: authority} = state) do
     _ = PublicationAuthority.abort(authority)
-    state
+    %{state | authority: nil}
   end
 
-  # The session closes first because its committed closers belong to the
-  # runtime that acquired them: one may still release an admission, persist a
-  # token response, or reach the authority the registry holds. Only once that
-  # cleanup has settled do the resources it depended on unwind, in the reverse
-  # of the order the worker opened them: listener, registry, then the OAuth
-  # store. Closing the registry before its backing store keeps terminal OAuth
-  # persistence available for that last step.
-  defp close_runtime_resources(state) do
+  # A committed session closer may still use the listener, registry, OAuth
+  # store, or publication authority. The registry likewise needs its backing
+  # store alive while terminal OAuth persistence settles.
+  defp release_provider_session(state) do
     cleanup =
-      if state.provider_session && ProviderSession.alive?(state.provider_session),
+      if ProviderSession.alive?(state.provider_session),
         do: ProviderSession.close(state.provider_session),
         else: :ok
 
-    if state.oauth_listener, do: LoopbackListener.close(state.oauth_listener)
-    close_registry(state.registry)
-    if state.oauth_memory, do: Memory.close(state.oauth_memory)
+    %{state | provider_session: nil, cleanup: merge_cleanup(state.cleanup, cleanup)}
+  end
 
-    %{
-      state
-      | provider_session: nil,
-        registry: nil,
-        oauth_memory: nil,
-        oauth_listener: nil,
-        cleanup: merge_cleanup(state.cleanup, cleanup)
-    }
+  defp release_listener(state) do
+    LoopbackListener.close(state.oauth_listener)
+    %{state | oauth_listener: nil}
+  end
+
+  defp release_registry(state) do
+    close_registry(state.registry)
+    %{state | registry: nil}
+  end
+
+  defp release_memory(state) do
+    Memory.close(state.oauth_memory)
+    %{state | oauth_memory: nil}
+  end
+
+  defp release_prepared(state) do
+    close_prepared(state.prepared)
+    %{state | prepared: nil}
   end
 
   # A run whose provider session could not be closed is not a clean run, so the
@@ -595,10 +616,44 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   defp provider_activity(_state), do: false
 
   defp maybe_finalize_failed_execution(state, {:ok, _outcome}),
-    do: %{state | opened_sinks: nil}
+    do:
+      state
+      |> Map.put(:opened_sinks, nil)
+      |> forget_resource(:sinks)
 
   defp maybe_finalize_failed_execution(state, {:error, _reason}),
     do: finalize_aborted_sinks(state)
+
+  defp abort_authority(state), do: release(state, [:authority])
+
+  defp release(state, resources) do
+    {held_resources, released} =
+      ExecutionSessionResources.release(state.held_resources, resources)
+
+    state = %{state | held_resources: held_resources}
+    Enum.reduce(released, state, &release_held_resource(&2, &1))
+  end
+
+  defp release_held_resource(state, :worker), do: release_worker(state)
+  defp release_held_resource(state, :session), do: release_provider_session(state)
+  defp release_held_resource(state, :listener), do: release_listener(state)
+  defp release_held_resource(state, :registry), do: release_registry(state)
+  defp release_held_resource(state, :memory), do: release_memory(state)
+  defp release_held_resource(state, :sinks), do: release_sinks(state)
+  defp release_held_resource(state, :prepared), do: release_prepared(state)
+  defp release_held_resource(state, :authority), do: release_authority(state)
+
+  defp hold_resources(state, resources),
+    do: Map.update!(state, :held_resources, &ExecutionSessionResources.hold(&1, resources))
+
+  defp hold_resource(state, resource),
+    do: Map.update!(state, :held_resources, &ExecutionSessionResources.hold(&1, resource))
+
+  defp forget_resource(state, resource),
+    do: Map.update!(state, :held_resources, &ExecutionSessionResources.forget(&1, resource))
+
+  defp track_provider_resource(state, :put, kind), do: hold_resource(state, kind)
+  defp track_provider_resource(state, :drop, kind), do: forget_resource(state, kind)
 
   defp close_registry(nil), do: :ok
 

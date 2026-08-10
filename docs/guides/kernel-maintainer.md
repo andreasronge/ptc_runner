@@ -41,11 +41,13 @@ canonical `EventSink`, the optional `InspectionSink`, and — only for
 provider-bearing runs — one provider session, which is the sole owner of
 active provider work. Acquired resources register their close operation on one
 LIFO stack through `PtcRunner.Kernel.ResourceRegistrar` as they are created.
-Normal close, timeout, and caller death all converge on the same bounded
-reverse-order cleanup under a single absolute deadline, so no path can orphan
-a provider process or finalize a sink twice. A REPL takes the same owner handle
-and runs repeated evaluations against it rather than opening a session per
-evaluation.
+The execution owner separately records every resource it still holds and
+removes that ownership on worker close or successful handoff. Normal close,
+timeout, caller death, and termination re-entry all consult that set while
+following the same bounded reverse-order cleanup under a single absolute
+deadline, so no path can orphan a provider process or release a resource twice.
+A REPL takes the same owner handle and runs repeated evaluations against it
+rather than opening a session per evaluation.
 
 Reading the layers top to bottom: frontends enter through a shared command
 surface (1) and seal their inputs (2); `RunCoordinator` splits pure preparation
