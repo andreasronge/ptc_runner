@@ -55,6 +55,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the selected providers do not admit the effective data class"},
     {:destination, :invalid_destination, 7, false, "an artifact destination is invalid"},
     {:destination, :invalid_trace_destination, 7, false, "the trace destination is invalid"},
+    {:destination, :trace_directory_missing, 7, false,
+     "--trace-dir must be an existing normal directory"},
     {:destination, :trace_destination_unavailable, 7, false,
      "the trace destination is unavailable"},
     {:destination, :trace_destination_unsafe, 7, false, "the trace destination is unsafe"},

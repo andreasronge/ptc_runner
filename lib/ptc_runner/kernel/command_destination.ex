@@ -165,6 +165,9 @@ defmodule PtcRunner.Kernel.CommandDestination do
   defp destination_diagnostic({:trace_destination_unavailable, :trace}),
     do: {:destination, :trace_destination_unavailable}
 
+  defp destination_diagnostic({:trace_directory_missing, :trace}),
+    do: {:destination, :trace_directory_missing}
+
   defp destination_diagnostic({:trace_destination_unsafe, :trace}),
     do: {:destination, :trace_destination_unsafe}
 

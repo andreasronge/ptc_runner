@@ -479,12 +479,18 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   test "command authorization names the failing artifact and destination cause", %{tmp_dir: dir} do
     application = application!(dir, "destination-diagnostics")
     trace_file = Path.join(dir, "not-a-trace-directory")
+    trace_stat_failure = Path.join(dir, "trace-stat-failure")
     File.write!(trace_file, "occupied")
+    File.ln_s!(Path.basename(trace_stat_failure), trace_stat_failure)
 
     cases = [
       {[
          "--trace-dir",
          Path.join(dir, "missing-trace-directory")
+       ], "trace_directory_missing", "--trace-dir must be an existing normal directory"},
+      {[
+         "--trace-dir",
+         trace_stat_failure
        ], "trace_destination_unavailable", "the trace destination is unavailable"},
       {["--trace-dir", trace_file], "invalid_trace_destination",
        "the trace destination is invalid"},
