@@ -37,6 +37,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   @owner_lifecycle_timeout_ms 30_000
   @max_logical_result_bytes 1_048_576
   @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
+  @unicode_stdio_fixture Path.expand("../../support/mcp_stdio_fixture.exs", __DIR__)
   @root Path.expand("../../..", __DIR__)
   @inherited_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
 
@@ -626,6 +627,49 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                {5, "tools/call"},
                {6, "tools/call"}
              ]
+  end
+
+  @tag :tmp_dir
+  test "direct stdio sources pin UTF-8 for locale-sensitive servers", %{tmp_dir: dir} do
+    {:ok, launcher} = PtcRunnerLauncher.executable_path()
+    executable = System.find_executable("elixir")
+    marker = Path.join(dir, "direct-unicode-server-methods")
+
+    builder =
+      MCPSource.builder(
+        transport:
+          {:stdio,
+           launcher: launcher,
+           executable: executable,
+           executable_sha256: executable |> File.read!() |> then(&:crypto.hash(:sha256, &1)),
+           cwd: @root,
+           args: [@unicode_stdio_fixture, marker, "mcp-unicode"],
+           env: inherited_environment()},
+        tools: %{"unicode" => %{as: "remote.unicode", effect: :read}},
+        timeout_ms: 5_000
+      )
+
+    {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
+    {:ok, limits} = Limits.new()
+
+    assert {:ok, %{capabilities: [capability], close: close}} =
+             ProviderRegistry.build(
+               registry,
+               "fixture-mcp",
+               %{"allow" => ["remote.unicode"]},
+               %{
+                 application_content_digest: String.duplicate("0", 64),
+                 destination: :mission,
+                 limits: limits,
+                 installed_limits: limits,
+                 owner: self()
+               }
+             )
+
+    on_exit(fn -> close.() end)
+
+    assert {:ok, %{"text" => ["behaviour — correct"]}} = capability.callback.(%{}, nil)
+    assert File.read!(marker) =~ "tools/call"
   end
 
   @tag :tmp_dir

@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   @max_response_bytes 2_097_152
   @max_arguments 256
   @max_environment 256
+  @stdio_locale_environment {"LC_ALL", "C.UTF-8"}
   @max_config_string 131_072
   @max_start_timeout_ms 60_000
   @max_request_timeout_ms 300_000
@@ -447,8 +448,11 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
          args when is_list(args) and length(args) <= @max_arguments <-
            Keyword.get(opts, :args, []),
          true <- Enum.all?(args, &valid_string?/1),
-         env when is_map(env) and not is_struct(env) and map_size(env) <= @max_environment <-
+         env when is_map(env) and not is_struct(env) <-
            Keyword.get(opts, :env, %{}),
+         env =
+           Map.put(env, elem(@stdio_locale_environment, 0), elem(@stdio_locale_environment, 1)),
+         true <- map_size(env) <= @max_environment,
          true <- valid_environment?(env),
          grace_ms when is_integer(grace_ms) and grace_ms in 1..5_000 <-
            Keyword.get(opts, :grace_ms, @default_grace_ms),

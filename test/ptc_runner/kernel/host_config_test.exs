@@ -361,6 +361,11 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       ),
       put_in(
         valid_config(),
+        ["install", "workspace", "transport", "env"],
+        %{"LC_ALL" => %{"binding" => "server_token"}}
+      ),
+      put_in(
+        valid_config(),
         ["install", "workspace", "transport", "shell"],
         true
       ),
@@ -522,6 +527,30 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     assert {:ok, _validated} = JSV.validate(dangling_llm, root, cast: false)
     assert {:error, :invalid_host_config} = HostConfig.decode(dangling_llm, "/tmp")
+  end
+
+  test "stdio credential environment reserves the complete compatibility budget" do
+    root = JSV.build!(HostConfig.schema(), atoms: false, formats: false, warnings: :silent)
+
+    environment =
+      Map.new(1..249, fn index ->
+        {"PTC_VALUE_#{index}", %{"binding" => "server_token"}}
+      end)
+
+    at_limit = put_in(valid_config(), ["install", "workspace", "transport", "env"], environment)
+
+    assert {:ok, _host} = HostConfig.decode(at_limit, "/tmp")
+    assert {:ok, _validated} = JSV.validate(at_limit, root, cast: false)
+
+    over_limit =
+      put_in(
+        at_limit,
+        ["install", "workspace", "transport", "env", "PTC_VALUE_250"],
+        %{"binding" => "server_token"}
+      )
+
+    assert {:error, :invalid_host_config} = HostConfig.decode(over_limit, "/tmp")
+    assert {:error, _details} = JSV.validate(over_limit, root, cast: false)
   end
 
   defp valid_config do

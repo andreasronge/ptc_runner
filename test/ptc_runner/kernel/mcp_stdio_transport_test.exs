@@ -590,6 +590,29 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     assert :ok = MCPStdioTransport.close(transport)
   end
 
+  @tag :tmp_dir
+  test "validation reserves the bounded environment for the UTF-8 locale", %{tmp_dir: tmp_dir} do
+    caller_environment = Map.new(1..255, &{"NAME_#{&1}", "value"})
+    options = Keyword.put(launch_options(tmp_dir), :env, caller_environment)
+
+    assert {:ok, %{env: environment}} = MCPStdioTransport.validate_options(options)
+    assert map_size(environment) == 256
+    assert environment["LC_ALL"] == "C.UTF-8"
+
+    assert {:error, :invalid_mcp_stdio_launch} =
+             options
+             |> Keyword.put(:env, Map.put(caller_environment, "OVER_CAPACITY", "value"))
+             |> MCPStdioTransport.validate_options()
+
+    assert {:ok, %{env: overwritten}} =
+             options
+             |> Keyword.put(:env, Map.put(caller_environment, "LC_ALL", "POSIX"))
+             |> MCPStdioTransport.validate_options()
+
+    assert map_size(overwritten) == 256
+    assert overwritten["LC_ALL"] == "C.UTF-8"
+  end
+
   defp request(transport, method, max_bytes \\ 8_192, timeout_ms \\ 1_000),
     do: MCPStdioTransport.request(transport, method, %{}, %{}, max_bytes, timeout_ms)
 

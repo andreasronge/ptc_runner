@@ -29,6 +29,8 @@ defmodule PtcRunner.Kernel.HostConfig do
   Every installation requires a public, non-secret `installation_revision`
   matching `\\A[a-z][a-z0-9._-]{0,127}\\z`; command decoding reports its
   absence before generic schema failure, including for unselected aliases.
+  Stdio MCP transports always run with the runtime-owned `LC_ALL=C.UTF-8`;
+  credential environment bindings cannot replace that protocol locale.
 
   `schema/0` is the canonical structural description shipped for editor and
   human feedback. Runtime decoding remains authoritative for semantic checks
@@ -49,6 +51,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   @max_credentials 128
   @max_installations 128
   @max_tools 128
+  @max_stdio_credential_environment 249
   @max_string_bytes 131_072
   @max_secret_bytes 65_536
   @max_result_bytes 1_048_576
@@ -68,7 +71,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   @installation_revision @name
   @environment_name ~r/\A[A-Za-z_][A-Za-z0-9_]*\z/
   @header_name ~r/\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/
-  @reserved_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
+  @reserved_environment ~w(HOME LC_ALL LOGNAME PATH SHELL TERM USER)
   @reserved_headers ~w(
     authorization
     connection
@@ -901,7 +904,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp environment_bindings(value, credentials)
-       when is_map(value) and map_size(value) <= 256 do
+       when is_map(value) and map_size(value) <= @max_stdio_credential_environment do
     Enum.reduce_while(value, {:ok, %{}}, fn {name, binding}, {:ok, normalized} ->
       result =
         with true <- is_binary(name) and name =~ @environment_name,
@@ -1426,7 +1429,7 @@ defmodule PtcRunner.Kernel.HostConfig do
         },
         "env" => %{
           "type" => "object",
-          "maxProperties" => 256,
+          "maxProperties" => @max_stdio_credential_environment,
           "propertyNames" => environment_name_schema(),
           "additionalProperties" => required_object(%{"binding" => name_schema()}, ["binding"]),
           "default" => %{}
