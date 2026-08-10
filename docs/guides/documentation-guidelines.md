@@ -12,6 +12,14 @@ plans. `AGENTS.md` remains the canonical repository instruction file.
 - **Plans** describe unimplemented direction, tradeoffs, non-goals, triggers,
   and acceptance gates. Always label planned behavior as planned.
 
+ExDoc publishes to Hex for people *using* PtcRunner, so the `extras` list in
+`mix.exs` is user-facing documentation plus the maintainer guides that explain
+the codebase and its gates. Instructions for operating a checkout — environment
+setup, release steps — document this repository rather than PtcRunner, and
+belong in `docs/` but outside `extras`: `docs/development-setup.md` and
+`docs/RELEASING.md`. Reference them from `AGENTS.md`, and from published pages
+as plain paths rather than links, which would dangle on HexDocs.
+
 Keep one canonical explanation and link to it instead of copying contracts
 between files. Do not present speculative APIs as current behavior. Git history
 records removed 0.x designs, so current documentation does not need migration

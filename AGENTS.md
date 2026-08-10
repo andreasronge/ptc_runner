@@ -48,36 +48,40 @@ how it was verified.
 
 ## Commands
 
-- `mix precommit` — comprehensive local quality gate (format, compile, credo, schema, spec,
-  root/Viewer tests, assembled standalone release verification, and launcher
-  package/conformance/archive verification);
-  run before every commit. This is intentionally much broader than the fast,
-  staged-file Git pre-commit hook and can take a few minutes in a fresh worktree.
+- `mix precommit` — comprehensive local quality gate (format, compile, compile
+  cycles, stable-CLI callers, credo, duplication, spec, generated-artifact
+  staleness, root/Viewer/launcher tests, core-package and standalone release
+  verification); run before every commit. Much broader than the fast,
+  staged-file Git pre-commit hook; takes a few minutes in a fresh worktree.
 - `MIX_ENV=dev mix docs --warnings-as-errors` — ExDoc reference and rendering
   gate; run when changing user-facing documentation. Generated-artifact
   staleness is checked separately, by both `mix precommit` and `mix prepush`.
 - `git push` — the tracked pre-push hook classifies pushed and dirty paths and
   runs the relevant root, Viewer, launcher, or documentation gates. Root
-  changes run the root tests and `mix prepush` (generated-artifact staleness,
-  upstream API audit, Dialyzer, unused-deps). The staleness checks are also in
-  `precommit`, and are repeated here because an ordinary push does not run
-  `precommit` — without them a `lib/` edit can clear every local gate and still
-  fail CI on an artifact you were never prompted to regenerate. When one fires,
-  run its matching write form — `mix ptc.gen_docs` for generated docs and
-  schemas, or `mix ptc.conformance_report --write-inventory` for
-  `conformance_inventory.json` — then stage the result. Do not run `mix prepush`
-  immediately before an ordinary push;
+  changes run the root tests and `mix prepush` (credo, generated-artifact
+  staleness, upstream API audit, Dialyzer, unused-deps). Credo and the staleness
+  checks are also in `precommit`, and are repeated here because an ordinary push
+  does not run `precommit` — without them a `lib/` edit can clear every local
+  gate and still fail CI on an artifact you were never prompted to regenerate.
+  When one fires, run its matching write form — `mix ptc.gen_docs` for
+  generated docs and schemas, or `mix ptc.conformance_report --write-inventory`
+  for `conformance_inventory.json` — then stage the result. Do not run
+  `mix prepush` immediately before an ordinary push;
   invoke it directly only for diagnosis or when hooks are unavailable. PR CI
   runs the same checks as individual steps. On a resource-constrained machine,
   `PTC_PRE_PUSH_MAX_CASES=2 git push` keeps every gate enabled while reducing
   ExUnit concurrency.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`;
-  the MCP tests also require the local server described below).
+  the MCP tests also require the local server in the
+  [development setup guide](docs/development-setup.md)).
 - `mix nightly` — the `:nightly` tests, excluded from `mix test` by default.
   The `Nightly` workflow runs them daily; run it locally when you touch the
   `mix ptc run` downstream path or the benchmark task. Never add `--trace` (or
   `--slowest`, which implies it) to a suite you want to finish quickly: it
   pins `--max-cases` to 1.
+- `mix soak` — the `:soak` memory-leak suite; the scheduled `Soak` workflow
+  runs it. `:soak`, `:e2e`, `:nightly`, and `:clojure` are all excluded from
+  `mix test` by default (`:clojure` needs Babashka).
 - Two tags, two meanings, and they must not be conflated. `:nightly` means
   "costs tens of seconds; excluded everywhere but the `Nightly` workflow" —
   apply it sparingly, because it removes a test from every PR gate. `:slow`
@@ -87,69 +91,26 @@ how it was verified.
   PR to save 14.2 s.
 - Fix all failures before committing/pushing.
 
-### Fresh worktree setup
+### Worktrees
 
-Tool versions are pinned in `mise.toml`. From a new worktree, install the
-toolchain and dependencies before running tests:
+Never start work in the shared checkout — create a worktree before the first
+edit, even for a plan-only document. `scripts/worktree.sh new <branch> [issue]`
+branches from `origin/main`, and with an issue number claims it: assign,
+comment, refuse one already taken. `scripts/worktree.sh gc` removes worktrees
+merged into `origin/main` that are clean and a day idle (`--yes` to act); it
+never deletes a branch, because the branch is the artifact and the checkout is
+a rebuildable cache. Run it before creating a new one.
 
-```bash
-mise install
-mix deps.get
-(cd ptc_viewer && mix deps.get)
-(cd ptc_runner_launcher && mix deps.get)
-mix compile
-```
-
-Run `./scripts/install-hooks.sh` once per clone. Linked worktrees share the
-clone's installed hook wrappers, so they do not need to reinstall them. It also
-registers the merge driver for `priv/semantic_build_projection.json`. Never
-regenerate that projection on a feature branch and never hand-merge its hashes;
-only the release gate checks it, so run `mix regen` on main before tagging.
-`.gitattributes` explains why.
-Outside CI, the Dialyzer core PLT lives under `~/.cache/ptc_runner/` and is
-shared across every worktree, so only the very first Dialyzer run on a
-machine builds it from scratch; each worktree still keeps its own
-project-specific `priv/plts/project.plt`.
+Setting up a fresh clone or worktree — toolchain, dependencies, git hooks,
+Dialyzer PLT, and the local MCP E2E server — is covered once in the
+[development setup guide](docs/development-setup.md). Two rules from it
+that bite mid-task: never regenerate `priv/semantic_build_projection.json` on a
+feature branch, and never hand-merge its hashes.
 
 If a timing-sensitive test fails only in the full suite, rerun the exact file
 and line reported by ExUnit. Do not bypass the hook; use
 `PTC_PRE_PUSH_MAX_CASES=2 git push` to confirm the complete gate under lower
 scheduler pressure, and fix reproducible failures.
-
-### Local MCP E2E server
-
-The MCP E2E tests use the stateless harness in
-`test/support/mcp_go_stateless`. Its `go.mod` pins the official Go SDK
-protocol implementation. Start it in one terminal:
-
-```bash
-mcp_server_dir="$(mktemp -d)"
-go -C test/support/mcp_go_stateless build \
-  -o "$mcp_server_dir/ptc-mcp-http-server" .
-"$mcp_server_dir/ptc-mcp-http-server" -host 127.0.0.1 -port 8000
-```
-
-The credential-free interoperability test runs as a dedicated PR check and can
-be run from another terminal:
-
-```bash
-PTC_TEST_MCP_2026_ENDPOINT=http://127.0.0.1:8000 \
-  mix test test/ptc_runner/kernel/mcp_remote_e2e_test.exs \
-    --include e2e --trace
-```
-
-The credential-free OAuth authorization/interoperability test starts the same
-official SDK server behind its deterministic OAuth harness:
-
-```bash
-PTC_TEST_MCP_OAUTH=1 \
-  bash test/support/mcp_go_stateless/with_server.sh \
-    mix test test/ptc_runner/kernel/mcp_oauth_remote_e2e_test.exs \
-      --include e2e --trace
-```
-
-The scheduled/manual model-driven test uses the same server and additionally
-loads `OPENROUTER_API_KEY` and the optional `PTC_TEST_MODEL` from `.env`.
 
 ## Project Structure
 
@@ -162,6 +123,13 @@ loads `OPENROUTER_API_KEY` and the optional `PTC_TEST_MODEL` from `.env`.
 - `ptc_viewer/` — separate nested Mix project and canonical trace viewer. Root
   `mix precommit` runs its tests but not its formatter; format Viewer edits
   from that directory.
+- `examples/` — runnable example manifests. Their tests use the `:native`
+  projection while the CLI forces `:json`, so a green suite does not prove
+  `mix ptc run` works.
+- `bench/` — benchmarks (`mix bench.check`, `mix bench.heap`) with committed
+  baselines in `bench/baselines/`.
+- `repo-analyst/` — the repo-analysis manifest suite PtcRunner dogfoods; its
+  host configs and fixtures are `repo-analyst*.json` at the repo root.
 
 ## Conventions
 
