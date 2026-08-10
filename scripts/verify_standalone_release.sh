@@ -30,7 +30,7 @@ cat > "$application_root/ptc.json" <<'EOF'
     "components": [{"id": "smoke.main", "path": "main.clj"}],
     "entry": "smoke.main/run"
   },
-  "input": {"value": {"smoke": true}},
+  "input": {"value": {"city": "Malmö", "note": "café — 5 €"}},
   "providers": {"workflow": [], "mission": []}
 }
 EOF
@@ -90,6 +90,7 @@ grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' "$release_tmp_dir/version.stdout"
 
 "$command_bin" help > "$release_tmp_dir/help.stdout"
 grep -q '^Usage:$' "$release_tmp_dir/help.stdout"
+grep -Fqx '  --help    — show root help' "$release_tmp_dir/help.stdout"
 for command in init validate run doctor models repl; do
   grep -q "ptc $command" "$release_tmp_dir/help.stdout"
   "$command_bin" help "$command" > "$release_tmp_dir/help-$command.stdout"
@@ -103,7 +104,7 @@ grep -qx 'created main.clj, ptc.json' "$release_tmp_dir/init.stdout"
 grep -q '"provider_activity":false' "$release_tmp_dir/validate.stdout"
 
 "$command_bin" run "$application_root/ptc.json" > "$release_tmp_dir/run.stdout"
-printf '%s\n' '{"smoke":true}' > "$release_tmp_dir/run.expected"
+printf '%s\n' '{"city":"Malmö","note":"café — 5 €"}' > "$release_tmp_dir/run.expected"
 cmp "$release_tmp_dir/run.expected" "$release_tmp_dir/run.stdout"
 
 envelope_path="$release_tmp_dir/run-envelope.json"

@@ -21,8 +21,8 @@ defmodule PtcRunner.StandaloneCLI do
   @spec main([binary()]) :: no_return()
   def main(argv) do
     presentation = execute(argv)
-    if presentation.stdout != "", do: IO.binwrite(:stdio, presentation.stdout)
-    if presentation.stderr != "", do: IO.binwrite(:stderr, presentation.stderr)
+    if presentation.stdout != "", do: IO.write(:stdio, presentation.stdout)
+    if presentation.stderr != "", do: IO.write(:stderr, presentation.stderr)
     System.halt(presentation.exit_status)
   end
 end

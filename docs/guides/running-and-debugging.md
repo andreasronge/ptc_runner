@@ -284,6 +284,12 @@ suppresses, or replaces the command's normal terminal rendering.
 
 ### Stable standalone process contract
 
+One-shot stdout and stderr are UTF-8 streams. The runtime-included release
+writes their rendered text through its Unicode-mode terminal devices, so
+non-ASCII help, diagnostics, and JSON result strings retain their exact bytes.
+This presentation contract does not change the raw-byte treatment required by
+child stdio transports.
+
 When `--envelope` names a destination, the standalone `ptc` command additionally
 writes one V1 JSON command envelope there. When the arguments parse, every
 ordinary or caught path produces exactly one envelope — except a failure to
