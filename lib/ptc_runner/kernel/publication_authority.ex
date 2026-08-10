@@ -563,6 +563,7 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
       {:ok, Path.join(directory, run_ref <> trace_suffix(private?))}
     else
       {:error, :invalid_destination} -> {:error, {:invalid_destination, :trace}}
+      {:error, :enoent} -> {:error, {:trace_directory_missing, :trace}}
       {:error, _reason} -> {:error, {:destination_unavailable, :trace}}
       _other -> {:error, {:invalid_destination, :trace}}
     end

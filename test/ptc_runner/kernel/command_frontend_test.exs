@@ -513,8 +513,9 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
       end)
 
     assert presentation.exit_status == 7
-    assert presentation.outcome.envelope["error"]["code"] == "trace_destination_unavailable"
-    assert presentation.stderr =~ "destination/trace_destination_unavailable"
+    assert presentation.outcome.envelope["error"]["code"] == "trace_directory_missing"
+    assert presentation.stderr =~ "destination/trace_directory_missing"
+    assert presentation.stderr =~ "--trace-dir must be an existing normal directory"
     refute presentation.stderr =~ "two destinations name the same file"
     refute presentation.stderr =~ traces
   end
