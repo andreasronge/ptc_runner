@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude.Compiler
+  alias PtcRunner.Lisp.Prelude.ValidationError
 
   @bundle_hash_domain <<"ptc.frozen-bundle.v2", 0>>
   @max_components 128
@@ -228,7 +229,8 @@ defmodule PtcRunner.Kernel.BundleCompiler do
             %{
               reason: :component_compile_error,
               id: component.id,
-              details: error_message(error)
+              details: error_message(error),
+              span: failure_span(error, component.source)
             }}}
       end
     end)
@@ -344,4 +346,15 @@ defmodule PtcRunner.Kernel.BundleCompiler do
     do: String.slice(message, 0, 4_096)
 
   defp error_message(error), do: inspect(error, limit: 10, printable_limit: 4_096)
+
+  # The byte range of the top-level form the compiler blamed, in the exclusive
+  # end-offset form command diagnostics carry. Bounded against the component's
+  # own source so a diagnostic can never claim a range the source cannot hold;
+  # anything unlocatable stays `nil`, exactly as before.
+  defp failure_span(%ValidationError{span: {offset, length}}, source)
+       when is_binary(source) and offset >= 0 and length >= 0 and
+              offset + length <= byte_size(source),
+       do: %{start_byte: offset, end_byte: offset + length}
+
+  defp failure_span(_error, _source), do: nil
 end

@@ -811,4 +811,71 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
       assert error.message =~ "provided both"
     end
   end
+
+  # ============================================================
+  # Failure spans
+  # ============================================================
+
+  describe "compile/2 failure spans" do
+    # The oracle everywhere below is the SLICE, never the offsets: a span is
+    # only useful if cutting the source at it yields the form a reader should
+    # be looking at.
+    defp failing_slice(source, opts \\ []) do
+      assert {:error, %Prelude.ValidationError{} = error} = Compiler.compile(source, opts)
+      {offset, length} = error.span
+      {error, binary_part(source, offset, length)}
+    end
+
+    test "a failure raised while walking a top-level form spans that form" do
+      source = """
+      (ns crm "doc")
+
+      (defn fine [x] x)
+
+      (defn broken)
+      """
+
+      assert {error, slice} = failing_slice(source)
+      assert error.reason == :invalid_signature
+      assert slice == "(defn broken)"
+    end
+
+    test "a failure raised after the walk spans the definition its ref names" do
+      source = """
+      (ns cfg "doc")
+      (def fine 1)
+      (def answer {:type ":int"} "forty-two")
+      """
+
+      assert {error, slice} = failing_slice(source)
+      assert error.ref == "cfg/answer"
+      assert slice == ~S[(def answer {:type ":int"} "forty-two")]
+    end
+
+    test "a namespace-level failure spans the declaring (ns ...) form" do
+      source = """
+      (ns first-ns "doc")
+      (defn a [] 1)
+      (ns crm "doc")
+      (defn b [] 2)
+      """
+
+      assert {error, slice} = failing_slice(source, namespace_deps: %{"crm" => ["missing"]})
+      assert error.reason == :unknown_dependency
+      assert slice == ~S[(ns crm "doc")]
+    end
+
+    test "a parse error carries no span, because no form can be blamed" do
+      unbalanced = "(ns crm \"doc\") (defn a [] (+ 1)"
+
+      assert {:error, %Prelude.ValidationError{} = error} = Compiler.compile(unbalanced)
+
+      assert error.reason == :parse_error
+      assert error.span == nil
+    end
+
+    test "a successful compile is unaffected by span resolution" do
+      assert {:ok, %Prelude{}} = Compiler.compile("(ns crm \"doc\") (defn a [] 1)")
+    end
+  end
 end

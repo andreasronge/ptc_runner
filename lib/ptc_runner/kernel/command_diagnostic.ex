@@ -6,6 +6,11 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   Contract-authorized paths must also match the sealed contract authority bound
   to their source classification. Rendering never inspects a lower-level
   reason or rejected value.
+
+  `notes` is reserved and always empty: the published V1 envelope schema pins
+  it to `{"const": []}`, so a populated array would invalidate the envelope for
+  every strict V1 consumer. Reporting a rejected value against the bound it
+  broke is a later-version change, not a producer-side one.
   """
 
   alias PtcRunner.Kernel.CommandPath

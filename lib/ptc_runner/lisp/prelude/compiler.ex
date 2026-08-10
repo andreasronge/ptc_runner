@@ -36,6 +36,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   alias PtcRunner.Lisp.Eval
   alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude
+  alias PtcRunner.Lisp.Prelude.ErrorSpan
   alias PtcRunner.Lisp.Prelude.Export
   alias PtcRunner.Lisp.Prelude.Spec
   alias PtcRunner.Lisp.Prelude.ValidationError
@@ -75,6 +76,13 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   def compile(source, opts \\ [])
 
   def compile(source, opts) when is_binary(source) and is_list(opts) do
+    case compile_source(source, opts) do
+      {:ok, prelude} -> {:ok, prelude}
+      {:error, %ValidationError{} = error} -> {:error, ErrorSpan.resolve(error, source)}
+    end
+  end
+
+  defp compile_source(source, opts) do
     with {:ok, {:program, forms}} <- parse(source),
          {:ok, specs, ns_meta} <- collect_specs(forms),
          :ok <- validate_spec_effects(specs),
@@ -364,11 +372,16 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp collect_specs(forms) do
     initial = %{current_ns: nil, ns_meta: %{}, specs: []}
 
+    # Tagging the offending form's position HERE, rather than at each of the
+    # ~30 error sites below, is what lets `ErrorSpan` turn any walk-phase
+    # failure into a byte span without every site knowing its own position.
     forms
-    |> Enum.reduce_while({:ok, initial}, fn form, {:ok, acc} ->
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, initial}, fn {form, index}, {:ok, acc} ->
       case handle_form(form, acc) do
         {:ok, acc2} -> {:cont, {:ok, acc2}}
-        {:error, _} = err -> {:halt, err}
+        {:error, %ValidationError{} = error} -> {:halt, {:error, %{error | form_index: index}}}
+        {:error, _other} = err -> {:halt, err}
       end
     end)
     |> case do
