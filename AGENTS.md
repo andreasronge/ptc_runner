@@ -93,7 +93,20 @@ how it was verified.
   PR to save 14.2 s.
 - Fix all failures before committing/pushing.
 
-### Fresh worktree setup
+### Worktrees
+
+Never start work in the shared checkout — create a worktree before the first
+edit, including for a plan-only document. `scripts/worktree.sh new <branch>
+[issue]` does that from `origin/main`; with an issue number it also refuses a
+branch that does not carry that number, checks the issue is open and
+unassigned, then assigns it and posts a claim comment. Assignment is advisory,
+not a lock, so re-read it if two agents may have started together.
+
+`scripts/worktree.sh gc` reports every worktree already merged into
+`origin/main` that holds no uncommitted work and has been idle for a day, and
+removes them with `--yes`. It never deletes a branch: the branch is the durable
+artifact, the checkout is a rebuildable cache. Run it before creating a new
+worktree.
 
 Tool versions are pinned in `mise.toml`. From a new worktree, install the
 toolchain and dependencies before running tests:

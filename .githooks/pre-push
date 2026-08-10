@@ -453,4 +453,12 @@ ELAPSED=$((END_TIME - START_TIME))
 
 echo ""
 echo "✅ All pre-push checks passed in ${ELAPSED}s"
+
+# Advisory only, and never a reason to fail a push: merging happens on GitHub,
+# so no local hook fires when a branch lands, and worktrees accumulate silently.
+# `--no-fetch` keeps this off the network; a stale origin/main only undercounts.
+if [ -x scripts/worktree.sh ]; then
+  scripts/worktree.sh gc --quiet --no-fetch --no-issues 2>/dev/null || true
+fi
+
 echo ""

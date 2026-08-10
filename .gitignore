@@ -6,7 +6,7 @@ _build/
 /cover/
 
 # The directory Mix downloads your dependencies sources to.
-/deps/
+/deps
 examples/*/deps/
 examples/*/_build/
 examples/*/mix.lock
