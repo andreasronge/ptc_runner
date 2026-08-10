@@ -106,7 +106,8 @@ defmodule PtcRunner.Lisp.Runtime.CollectionOpsTest do
     end
 
     test "over a map passes each [k v] pair to the function and flattens" do
-      assert eval!("(sort (mapcat (fn [kv] kv) {:a 1 :b 2}))") == [1, 2, "a", "b"]
+      assert eval!("(mapcat (fn [kv] kv) {:a 1 :b 2})") |> Enum.frequencies() ==
+               %{1 => 1, 2 => 1, "a" => 1, "b" => 1}
     end
   end
 

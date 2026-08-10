@@ -114,7 +114,7 @@
     },
     %{
       name: "<",
-      description: "Less than",
+      description: "Numeric less than; a reached non-number signals :type_error",
       binding: :collect,
       category: :core,
       dispatch: :env,
@@ -123,16 +123,14 @@
       section: "Core",
       ptc_extension?: false,
       examples: [],
-      notes:
-        "Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30).",
-      see_also: [],
+      notes: "Numeric only; a reached non-numeric operand signals :type_error.",
+      see_also: ["compare"],
       clojure_var: "<",
-      divergences:
-        "DIV-30: Clojure raises ClassCastException comparing incompatible types (e.g. numbers vs strings) or nil; PTC-Lisp uses a recoverable total term ordering where `nil` sorts above every finite number (but below `##Inf`), and any comparison touching `##NaN` returns false rather than raising."
+      divergences: nil
     },
     %{
       name: "<=",
-      description: "Less or equal",
+      description: "Numeric less or equal; a reached non-number signals :type_error",
       binding: :collect,
       category: :core,
       dispatch: :env,
@@ -141,12 +139,10 @@
       section: "Core",
       ptc_extension?: false,
       examples: [],
-      notes:
-        "Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30).",
-      see_also: [],
+      notes: "Numeric only; a reached non-numeric operand signals :type_error.",
+      see_also: ["compare"],
       clojure_var: "<=",
-      divergences:
-        "DIV-30: Clojure raises ClassCastException comparing incompatible types (e.g. numbers vs strings) or nil; PTC-Lisp uses a recoverable total term ordering where `nil` sorts above every finite number (but below `##Inf`), and any comparison touching `##NaN` returns false rather than raising."
+      divergences: nil
     },
     %{
       name: "=",
@@ -183,7 +179,7 @@
     },
     %{
       name: ">",
-      description: "Greater than",
+      description: "Numeric greater than; a reached non-number signals :type_error",
       binding: :collect,
       category: :core,
       dispatch: :env,
@@ -192,16 +188,14 @@
       section: "Core",
       ptc_extension?: false,
       examples: [],
-      notes:
-        "Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30).",
-      see_also: [],
+      notes: "Numeric only; a reached non-numeric operand signals :type_error.",
+      see_also: ["compare"],
       clojure_var: ">",
-      divergences:
-        "DIV-30: Clojure raises ClassCastException comparing incompatible types (e.g. numbers vs strings) or nil; PTC-Lisp uses a recoverable total term ordering where `nil` sorts above every finite number (but below `##Inf`), and any comparison touching `##NaN` returns false rather than raising."
+      divergences: nil
     },
     %{
       name: ">=",
-      description: "Greater or equal",
+      description: "Numeric greater or equal; a reached non-number signals :type_error",
       binding: :collect,
       category: :core,
       dispatch: :env,
@@ -210,12 +204,10 @@
       section: "Core",
       ptc_extension?: false,
       examples: [],
-      notes:
-        "Recoverable over `nil` and mixed types and never raises; `nil` orders above every finite number, but below `##Inf`, and any comparison touching `##NaN` is false (DIV-30).",
-      see_also: [],
+      notes: "Numeric only; a reached non-numeric operand signals :type_error.",
+      see_also: ["compare"],
       clojure_var: ">=",
-      divergences:
-        "DIV-30: Clojure raises ClassCastException comparing incompatible types (e.g. numbers vs strings) or nil; PTC-Lisp uses a recoverable total term ordering where `nil` sorts above every finite number (but below `##Inf`), and any comparison touching `##NaN` returns false rather than raising."
+      divergences: nil
     },
     %{
       name: "NaN?",
@@ -654,7 +646,7 @@
     %{
       name: "compare",
       description:
-        "Total comparison: `-1` if `x < y`, `0` if `x == y`, `1` if `x > y`; same-class Java temporal values use their Java natural order, and NaN is unordered.",
+        "Clojure-like comparison: `-1` if `x < y`, `0` if `x == y`, `1` if `x > y`; nil sorts first, incompatible types fail, and NaN is unordered.",
       binding: :normal,
       category: :core,
       dispatch: :env,
@@ -663,10 +655,12 @@
       section: "Core",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
-      see_also: [],
+      notes:
+        "Uses Clojure-like nil-first natural comparison; NaN remains unordered. PTC character literals are one-character strings, so their ordering follows strings rather than Clojure Character semantics.",
+      see_also: ["sort", "sort-by"],
       clojure_var: "compare",
-      divergences: nil
+      divergences:
+        "GAP-S120: character literals and one-character strings share one PTC value type and compare as strings."
     },
     %{
       name: "complement",
@@ -2144,7 +2138,7 @@
     },
     %{
       name: "max",
-      description: "Maximum value",
+      description: "Maximum number; reached non-numeric comparisons signal :type_error",
       binding: :variadic_nonempty,
       category: :math,
       dispatch: :env,
@@ -2153,8 +2147,9 @@
       section: "Math Functions",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
-      see_also: [],
+      notes:
+        "A unary call returns its argument unchanged. Once comparison is reached, operands must be numeric or :type_error is signaled.",
+      see_also: ["min"],
       clojure_var: "max",
       divergences: nil
     },
@@ -2176,7 +2171,8 @@
     },
     %{
       name: "max-key",
-      description: "Return x for which (f x) is greatest",
+      description:
+        "Return x with the greatest numeric (f x); reached non-numeric comparisons signal :type_error",
       binding: :collect,
       category: :core,
       dispatch: :env,
@@ -2185,8 +2181,9 @@
       section: "Core",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
-      see_also: [],
+      notes:
+        "With one value, returns it without invoking f. Once comparison is reached, f must return numbers or :type_error is signaled.",
+      see_also: ["min-key", "max-by"],
       clojure_var: "max-key",
       divergences: nil
     },
@@ -2224,7 +2221,7 @@
     },
     %{
       name: "min",
-      description: "Minimum value",
+      description: "Minimum number; reached non-numeric comparisons signal :type_error",
       binding: :variadic_nonempty,
       category: :math,
       dispatch: :env,
@@ -2233,8 +2230,9 @@
       section: "Math Functions",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
-      see_also: [],
+      notes:
+        "A unary call returns its argument unchanged. Once comparison is reached, operands must be numeric or :type_error is signaled.",
+      see_also: ["max"],
       clojure_var: "min",
       divergences: nil
     },
@@ -2256,7 +2254,8 @@
     },
     %{
       name: "min-key",
-      description: "Return x for which (f x) is least",
+      description:
+        "Return x with the least numeric (f x); reached non-numeric comparisons signal :type_error",
       binding: :collect,
       category: :core,
       dispatch: :env,
@@ -2265,8 +2264,9 @@
       section: "Core",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
-      see_also: [],
+      notes:
+        "With one value, returns it without invoking f. Once comparison is reached, f must return numbers or :type_error is signaled.",
+      see_also: ["max-key", "min-by"],
       clojure_var: "min-key",
       divergences: nil
     },
@@ -3410,7 +3410,7 @@
     },
     %{
       name: "sort",
-      description: "Sort by natural order",
+      description: "Sort by Clojure-like nil-first natural order; incompatible values fail",
       binding: :multi_arity,
       category: :core,
       dispatch: :env,
@@ -3419,14 +3419,17 @@
       section: "Core",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
-      see_also: [],
+      notes:
+        "Default order is Clojure-like and nil-first; incompatible values signal :type_error. PTC character literals sort as one-character strings. Use an explicit comparator when a domain needs a different order.",
+      see_also: ["compare", "sort-by"],
       clojure_var: "sort",
-      divergences: nil
+      divergences:
+        "GAP-S120: character literals and one-character strings share one PTC value type and sort together as strings. DIV-33: default sorting raises when it reaches NaN because NaN remains unordered."
     },
     %{
       name: "sort-by",
-      description: "Sort with comparator",
+      description:
+        "Sort by key with Clojure-like nil-first natural order or an explicit comparator",
       binding: :multi_arity,
       category: :core,
       dispatch: :env,
@@ -3435,10 +3438,12 @@
       section: "Core",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
-      see_also: [],
+      notes:
+        "Default key order is Clojure-like and nil-first; incompatible keys signal :type_error. PTC character-literal keys sort as one-character strings. Use an explicit comparator when a domain needs a different key order.",
+      see_also: ["compare", "sort"],
       clojure_var: "sort-by",
-      divergences: nil
+      divergences:
+        "GAP-S120: character literals and one-character strings share one PTC value type and sort together as strings. DIV-33: default key sorting raises when it reaches NaN because NaN remains unordered."
     },
     %{
       name: "sorted?",

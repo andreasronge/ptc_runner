@@ -381,13 +381,29 @@ defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
       assert_lisp("(apply < [1 3 2])", false)
     end
 
-    test "ordered comparisons are recoverable for nil and mixed scalar values" do
-      assert_lisp("(< 1 nil)", true)
-      assert_lisp("(> 1 nil)", false)
-      assert_lisp(~S[(< 1 "2")], true)
-      assert_lisp(~S[(> "b" "a")], true)
-      assert_lisp("(<= nil nil)", true)
-      assert_lisp("(< :a :b)", true)
+    test "ordered comparisons reject nil and non-numeric operands" do
+      for source <- [
+            "(< 1 nil)",
+            "(> nil 240)",
+            ~S[(< 1 "2")],
+            ~S[(> "b" "a")],
+            "(<= nil nil)",
+            "(< :a :b)"
+          ] do
+        assert_lisp_error(source, :type_error, "expected number")
+      end
+    end
+
+    test "max and min reject nil and non-numeric operands" do
+      for source <- [
+            "(max nil 1)",
+            "(min nil 1)",
+            "(max nil Double/NaN)",
+            ~S[(max "a" 1)],
+            "(min true false)"
+          ] do
+        assert_lisp_error(source, :type_error, "expected number")
+      end
     end
 
     test "NaN ordered comparisons return false" do

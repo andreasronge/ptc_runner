@@ -32,9 +32,9 @@ defmodule PtcRunner.Lisp.Integration.FunctionOpsTest do
       assert Enum.map(result, & &1.name) == ["Laptop", "Phone", "Book"]
     end
 
-    test "sort-by with < comparator for ascending order" do
+    test "sort-by with compare comparator for ascending string order" do
       source = ~S"""
-      (sort-by :name < data/users)
+      (sort-by :name compare data/users)
       """
 
       ctx = %{

@@ -70,13 +70,13 @@
       name: "<",
       status: :supported,
       description: "Returns true if numbers monotonically increase",
-      notes: "DIV-30: ordering predicates use PTC's recoverable total term ordering"
+      notes: ""
     },
     %{
       name: "<=",
       status: :supported,
       description: "Returns true if numbers non-decreasing",
-      notes: "DIV-30: ordering predicates use PTC's recoverable total term ordering"
+      notes: ""
     },
     %{
       name: "=",
@@ -96,13 +96,13 @@
       name: ">",
       status: :supported,
       description: "Returns true if numbers monotonically decrease",
-      notes: "DIV-30: ordering predicates use PTC's recoverable total term ordering"
+      notes: ""
     },
     %{
       name: ">=",
       status: :supported,
       description: "Returns true if numbers non-increasing",
-      notes: "DIV-30: ordering predicates use PTC's recoverable total term ordering"
+      notes: ""
     },
     %{
       name: "abs",
@@ -574,7 +574,7 @@
       status: :supported,
       description: "Compares values returning neg/zero/pos",
       notes:
-        "DIV-30: uses PTC's recoverable total term ordering for nil, maps, and mixed values; DIV-33: NaN is unordered and raises"
+        "DIV-33: NaN is unordered and raises. GAP-S120: character literals compare as one-character strings"
     },
     %{
       name: "compare-and-set!",
@@ -1748,14 +1748,14 @@
       name: "max",
       status: :supported,
       description: "Returns greatest number",
-      notes: "DIV-30: uses PTC's recoverable total term ordering for nil and mixed values"
+      notes: ""
     },
     %{
       name: "max-key",
       status: :supported,
       description: "Returns item with greatest function value",
       notes:
-        "DIV-30: key comparison uses PTC's recoverable total term ordering for nil and mixed values. BUG GAP-S47: ties currently return the first maximum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions"
+        "BUG GAP-S47: ties currently return the first maximum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions"
     },
     %{
       name: "memfn",
@@ -1799,14 +1799,14 @@
       name: "min",
       status: :supported,
       description: "Returns least number",
-      notes: "DIV-30: uses PTC's recoverable total term ordering for nil and mixed values"
+      notes: ""
     },
     %{
       name: "min-key",
       status: :supported,
       description: "Returns item with least function value",
       notes:
-        "DIV-30: key comparison uses PTC's recoverable total term ordering for nil and mixed values. BUG GAP-S47: ties currently return the first minimum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions"
+        "BUG GAP-S47: ties currently return the first minimum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions"
     },
     %{
       name: "mod",
@@ -2638,14 +2638,14 @@
       status: :supported,
       description: "Returns sorted sequence",
       notes:
-        "DIV-30: uses PTC's recoverable total term ordering for nil and mixed values; BUG GAP-S20: nil input currently raises instead of returning an empty seq; BUG GAP-S46: nil comparator currently raises instead of using default compare; BUG GAP-S107: boolean comparator functions are not honored with Clojure ordering semantics"
+        "DIV-33: default sorting raises when comparison reaches NaN. GAP-S120: character literals sort as one-character strings. BUG GAP-S46: nil comparator currently raises instead of using default compare; BUG GAP-S107: boolean comparator functions are not honored with Clojure ordering semantics"
     },
     %{
       name: "sort-by",
       status: :supported,
       description: "Returns seq sorted by function result",
       notes:
-        "DIV-30: uses PTC's recoverable total term ordering for nil and mixed values; BUG GAP-S71: map/vector callables are rejected as key functions; BUG GAP-S107: boolean comparator functions are not honored with Clojure ordering semantics"
+        "DIV-33: default key sorting raises when comparison reaches NaN. GAP-S120: character-literal keys sort as one-character strings. BUG GAP-S71: map/vector callables are rejected as key functions; BUG GAP-S107: boolean comparator functions are not honored with Clojure ordering semantics"
     },
     %{
       name: "sorted-map",

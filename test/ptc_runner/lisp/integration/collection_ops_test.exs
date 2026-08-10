@@ -2086,6 +2086,70 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   # ============================================================
 
   describe "sort and sort-by on maps" do
+    test "default ordering follows Clojure nil-first comparison" do
+      assert {:ok, %Step{return: [nil, 1]}} = Lisp.run("(sort [1 nil])")
+
+      assert {:ok, %Step{return: [%{"a" => nil}, %{"a" => 1}]}} =
+               Lisp.run("(sort-by :a [{:a 1} {:a nil}])")
+
+      assert {:ok, %Step{return: -1}} = Lisp.run("(compare nil 1)")
+      assert {:ok, %Step{return: 1}} = Lisp.run("(compare 1 nil)")
+
+      assert {:ok, %Step{return: [[nil, 0], [1, 0]]}} =
+               Lisp.run("(sort {nil 0 1 0})")
+    end
+
+    test "default comparison rejects values Clojure cannot compare" do
+      for source <- [
+            ~S|(sort [1 "a"])|,
+            ~S|(compare "a" :a)|,
+            ~S|(compare "a" 1)|,
+            "(compare {:a 1} {:a 2})",
+            "(compare {:a 1} {:a 1})",
+            ~S|(sort {1 0 "a" 0})|
+          ] do
+        assert {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run(source)
+      end
+    end
+
+    test "natural comparison unwraps Java primitives nested in vectors" do
+      assert {:ok, %Step{return: -1}} =
+               Lisp.run(~S|(compare [(Integer/parseInt "1")] [2])|)
+    end
+
+    test "natural string order uses Java UTF-16 code units" do
+      assert {:ok, %Step{return: -1}} = Lisp.run(~S|(compare "𐀀" "")|)
+      assert {:ok, %Step{return: ["𐀀", ""]}} = Lisp.run(~S|(sort ["" "𐀀"])|)
+      assert {:ok, %Step{return: ["𐀀", ""]}} = Lisp.run(~S|(sort "𐀀")|)
+
+      assert {:ok, %Step{return: -1}} =
+               Lisp.run_native("(compare supplementary bmp)",
+                 memory: %{"supplementary" => :"𐀀", "bmp" => :""}
+               )
+    end
+
+    test "default sort and sort-by retain the documented unordered NaN error" do
+      for source <- [
+            "(sort [Double/NaN 1])",
+            "(sort-by identity [Double/NaN 1])"
+          ] do
+        assert {:error, %Step{fail: %{reason: :type_error, message: message}}} = Lisp.run(source)
+        assert message =~ "unordered comparison with NaN"
+      end
+    end
+
+    test "Clojure min-key and max-key require numeric key values" do
+      for source <- [
+            "(min-key identity true false)",
+            "(max-key identity :a :b)",
+            "(max-key :a {:a nil} {:a 1})",
+            "(min-key :a {:a nil} {:a 1})"
+          ] do
+        assert {:error, %Step{fail: %{reason: :type_error, message: message}}} = Lisp.run(source)
+        assert message =~ "expected number"
+      end
+    end
+
     test "sort on map returns sorted list of pairs" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(sort {:b 2 :a 1})|)
       assert result == [["a", 1], ["b", 2]]

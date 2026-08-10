@@ -5178,7 +5178,7 @@ but that representation should not leak through type predicates.
 |-------|-------|
 | **Priority** | P2 |
 | **Status** | **by design (DIV)** |
-| **Source** | Manual conformance cases `core/equality-char-string-bug-001`, `core/equality-char-string-multi-bug-001`, `core/not-equality-char-string-bug-001`, `core/numeric-equality-char-string-bug-001`, `core/case-char-string-bug-001` |
+| **Source** | Manual conformance cases `core/equality-char-string-bug-001`, `core/equality-char-string-multi-bug-001`, `core/not-equality-char-string-bug-001`, `core/numeric-equality-char-string-bug-001`, `core/case-char-string-bug-001`, `core/compare-char-string-div-001`, `core/sort-char-string-div-001`, `core/sort-by-char-string-div-001` |
 
 **Reclassified (2026-06-01 classification audit):** BUG → **DIV** — char≡one-char-string value model (rule 3 exception; DIV-35/40/41).
 
@@ -5189,6 +5189,9 @@ but that representation should not leak through type predicates.
 (not= \a "a")  ;=> true
 (== \a "a")    ;=> ClassCastException
 (case \a "a" :string :char) ;=> :char
+(compare \a "a") ;=> ClassCastException
+(sort [\b "a"]) ;=> ClassCastException
+(sort-by identity [\b "a"]) ;=> ClassCastException
 
 ;; PTC-Lisp current behavior
 (= \a "a")     ;=> true
@@ -5196,13 +5199,17 @@ but that representation should not leak through type predicates.
 (not= \a "a")  ;=> false
 (== \a "a")    ;=> true
 (case \a "a" :string :char) ;=> :string
+(compare \a "a") ;=> 0
+(sort [\b "a"]) ;=> ["a" "b"]
+(sort-by identity [\b "a"]) ;=> ["a" "b"]
 ```
 
-**Decision:** BUG. Equality, `not=`, and `==` are supported Clojure-named
-predicates. PTC-Lisp may expose string sequence elements as one-character
-strings under `DIV-36`, but direct Character-vs-String equality in Clojure keeps
-the runtime types distinct. Treating them as equal also leaks into ordinary
-finite data comparisons outside string sequence traversal.
+**Decision:** By design. PTC-Lisp has no distinct Character value type;
+character literals and one-character strings are the same immutable value.
+Preserving source provenance only so equality or ordering can raise would make
+identical runtime strings behave differently. This divergence therefore also
+applies to `compare`, default `sort`, and default `sort-by`; their otherwise
+Clojure-like natural ordering cannot reproduce mixed Character/String errors.
 
 ### GAP-S125: `seqable?` reports character literals as seqable
 
@@ -5562,13 +5569,13 @@ maps and points callers toward explicit ordered views: `seq`, `entries`,
 `keys`, or `vals`. This avoids accidental dependence on host map iteration
 order while preserving an explicit escape hatch.
 
-### DIV-30: Ordering uses PTC's recoverable total term ordering
+### DIV-30: Ordering previously used PTC's recoverable total term ordering
 
 | Field | Value |
 |-------|-------|
 | **Priority** | n/a |
-| **Status** | by design |
-| **Source** | Manual conformance cases `div/lt-mixed-scalar-001`, `div/lt-string-scalar-001`, `div/lte-char-scalar-001`, `div/gt-string-scalar-001`, `div/gte-char-scalar-001`, `div/sort-mixed-scalar-001`, `div/sort-nil-001`, `div/sort-by-nil-key-001`, `div/compare-nil-001`, `div/compare-map-001`, `div/compare-string-keyword-001`, `div/compare-string-number-001`, `div/max-nil-001`, `div/min-nil-001`, `div/max-string-number-001`, `div/min-string-number-001`, `div/min-boolean-001`, `div/max-keyword-001`, `div/min-key-boolean-001`, `div/max-key-keyword-001`, `div/max-key-nil-key-001`, `div/min-key-nil-key-001` |
+| **Status** | **fixed** |
+| **Source** | Manual regression cases `core/lt-mixed-scalar-001`, `core/lt-string-scalar-001`, `core/lte-char-scalar-001`, `core/gt-string-scalar-001`, `core/gte-char-scalar-001`, `core/sort-mixed-scalar-001`, `core/sort-nil-001`, `core/sort-by-nil-key-001`, `core/compare-nil-001`, `core/compare-map-001`, `core/compare-string-keyword-001`, `core/compare-string-number-001`, `core/max-nil-001`, `core/min-nil-001`, `core/max-string-number-001`, `core/min-string-number-001`, `core/min-boolean-001`, `core/max-keyword-001`, `core/min-key-boolean-001`, `core/max-key-keyword-001`, `core/max-key-nil-key-001`, `core/min-key-nil-key-001` |
 
 ```clojure
 ;; Clojure
@@ -5595,7 +5602,7 @@ order while preserving an explicit escape hatch.
 (max-key :a {:a nil} {:a 1}) ;=> NullPointerException
 (min-key :a {:a nil} {:a 1}) ;=> NullPointerException
 
-;; PTC-Lisp
+;; PTC-Lisp before the fix
 (< "a" 1)       ;=> false
 (< "a" "b")     ;=> true
 (<= \a \a)      ;=> true
@@ -5620,20 +5627,23 @@ order while preserving an explicit escape hatch.
 (min-key :a {:a nil} {:a 1}) ;=> {:a 1}
 ```
 
-**Rationale:** PTC-Lisp documents ordering comparisons as recoverable
-predicates over nil, maps, and mixed values, using the runtime's total term
-ordering for deterministic data pipelines. Clojure's exception behavior is less
-useful in a sandbox without `try`/`catch`.
+**Decision:** Fixed for the shared PTC value types. Numeric predicates and extrema now reject non-numeric
+operands with a structured type error. Default compare, sort, and sort-by now
+follow Clojure's nil-first ordering and reject incompatible values. The lack of
+in-language exception recovery does not justify silently turning malformed
+numeric operands into business decisions; the outer agent loop receives the
+structured failure and can repair the program.
 
-**Direction:** `nil` sorts above every finite number — `(> nil 240)` is `true`,
-`(< nil 240)` is `false`, and `(max nil 1)` returns `nil`. A missing or
-mistyped map key therefore satisfies a "greater than" check silently instead
-of raising, which is easy to miss when the comparison sits inside a larger
-predicate (e.g. an SLA-breach filter). Two exceptions: `nil` sorts *below*
-positive infinity (`(> nil ##Inf)` is `false`), and any comparison touching
-`##NaN` is `false`, same as `##NaN` compared to itself. See
-`docs/function-reference.md` and `:doc` for `<`/`<=`/`>`/`>=`, which now carry
-this note.
+The intentional character-literal/string value-model divergence remains under
+GAP-S120: PTC has no distinct Character type, so those values compare and sort
+as strings instead of producing Clojure's mixed Character/String error.
+
+~~~clojure
+(> nil 240)                   ;=> TYPE ERROR
+(compare nil 1)               ;=> -1
+(sort [1 nil])                ;=> [nil 1]
+(sort [1 "a"])               ;=> TYPE ERROR
+~~~
 
 ### DIV-31: Numeric predicates return false for nil and non-numeric inputs
 
@@ -5713,7 +5723,7 @@ distinctions.
 |-------|-------|
 | **Priority** | n/a |
 | **Status** | **open** |
-| **Source** | Manual conformance cases `div/compare-nan-001`, `div/compare-nan-self-001` |
+| **Source** | Manual conformance cases `div/compare-nan-001`, `div/compare-nan-self-001`, `div/sort-nan-001`, `div/sort-by-nan-001` |
 
 **Reclassified (2026-06-01 classification audit):** DIV → **BUG**. No design rule justifies the divergence, so "by design" does not hold — this is a behavioral bug, not an intentional divergence.
 
@@ -5721,14 +5731,20 @@ distinctions.
 ;; Clojure
 (compare ##NaN 1)   ;=> 0
 (compare ##NaN ##NaN) ;=> 0
+(sort [##NaN 1]) ;=> [##NaN 1]
+(sort-by identity [##NaN 1]) ;=> [##NaN 1]
 
 ;; PTC-Lisp
 (compare ##NaN 1)   ;=> type_error
 (compare ##NaN ##NaN) ;=> type_error
+(sort [##NaN 1]) ;=> type_error
+(sort-by identity [##NaN 1]) ;=> type_error
 ```
 
 **Rationale:** PTC-Lisp follows IEEE-style unordered NaN semantics for numeric
-comparisons. Returning `0` would incorrectly imply equality.
+comparisons. Returning `0` would incorrectly imply equality. Default `sort`
+and `sort-by` use the same natural comparison and therefore raise if sorting
+reaches a NaN pair.
 
 ### DIV-38: Map sequence views are sorted by key
 

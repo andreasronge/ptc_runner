@@ -11,6 +11,7 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   alias PtcRunner.Lisp.Java.Ordering, as: JavaOrdering
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.JavaMathSemantics
+  alias PtcRunner.Lisp.Runtime.Ordering
   alias PtcRunner.Lisp.Runtime.SpecialValues
 
   def add(args) when is_list(args) do
@@ -211,17 +212,21 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   end
 
   def max(x, y) do
+    numeric_arguments!("max", x, y)
+
     cond do
       SpecialValues.nan?(x) or SpecialValues.nan?(y) -> :nan
-      compare(x, y) >= 0 -> x
+      gte(x, y) -> x
       true -> y
     end
   end
 
   def min(x, y) do
+    numeric_arguments!("min", x, y)
+
     cond do
       SpecialValues.nan?(x) or SpecialValues.nan?(y) -> :nan
-      compare(x, y) <= 0 -> x
+      lte(x, y) -> x
       true -> y
     end
   end
@@ -423,74 +428,12 @@ defmodule PtcRunner.Lisp.Runtime.Math do
     end
   end
 
-  def lt(x, y) do
-    case JavaOrdering.compare(x, y) do
-      {:ok, comparison} -> comparison == :lt
-      {:error, :invalid_java_value} -> invalid_java_ordering!()
-      :not_java -> ordinary_lt(x, y)
-    end
-  end
+  def lt(x, y), do: numeric_predicate!("<", x, y, :lt)
+  def gt(x, y), do: numeric_predicate!(">", x, y, :gt)
+  def lte(x, y), do: numeric_predicate!("<=", x, y, [:lt, :eq])
+  def gte(x, y), do: numeric_predicate!(">=", x, y, [:gt, :eq])
 
-  def gt(x, y), do: lt(y, x)
-
-  def lte(x, y) do
-    case JavaOrdering.compare(x, y) do
-      {:ok, comparison} ->
-        comparison != :gt
-
-      {:error, :invalid_java_value} ->
-        invalid_java_ordering!()
-
-      :not_java ->
-        if SpecialValues.nan?(x) or SpecialValues.nan?(y),
-          do: false,
-          else: not ordinary_lt(y, x)
-    end
-  end
-
-  def gte(x, y) do
-    case JavaOrdering.compare(x, y) do
-      {:ok, comparison} ->
-        comparison != :lt
-
-      {:error, :invalid_java_value} ->
-        invalid_java_ordering!()
-
-      :not_java ->
-        if SpecialValues.nan?(x) or SpecialValues.nan?(y),
-          do: false,
-          else: not ordinary_lt(x, y)
-    end
-  end
-
-  def compare(x, y) do
-    case JavaOrdering.compare(x, y) do
-      {:ok, :lt} ->
-        -1
-
-      {:ok, :eq} ->
-        0
-
-      {:ok, :gt} ->
-        1
-
-      {:error, :invalid_java_value} ->
-        invalid_java_ordering!()
-
-      :not_java when x == :nan or y == :nan ->
-        # Standard IEEE 754: comparison with NaN is false/unordered.
-        # but compare/2 usually returns -1, 0, 1.
-        # For sort consistency, we raise.
-        raise "type_error: compare: unordered comparison with NaN"
-
-      :not_java ->
-        cond do
-          ordinary_eq(x, y) -> 0
-          ordinary_lt(x, y) -> -1
-          true -> 1
-        end
-    end
-  end
+  def compare(x, y), do: Ordering.compare(x, y)
 
   defp ordinary_eq(x, y) do
     cond do
@@ -505,15 +448,27 @@ defmodule PtcRunner.Lisp.Runtime.Math do
     end
   end
 
-  defp ordinary_lt(x, y) do
-    cond do
-      SpecialValues.nan?(x) or SpecialValues.nan?(y) -> false
-      SpecialValues.neg_infinite?(x) -> not SpecialValues.neg_infinite?(y)
-      SpecialValues.pos_infinite?(y) -> not SpecialValues.pos_infinite?(x)
-      SpecialValues.pos_infinite?(x) -> false
-      SpecialValues.neg_infinite?(y) -> false
-      true -> x < y
+  defp numeric_predicate!(name, x, y, accepted) do
+    numeric_arguments!(name, x, y)
+    Ordering.numeric_compare(x, y) in List.wrap(accepted)
+  end
+
+  defp numeric?(value), do: is_number(value) or SpecialValues.special?(value)
+
+  defp numeric_arguments!(name, x, y) do
+    case JavaOrdering.compare(x, y) do
+      {:error, :invalid_java_value} -> invalid_java_ordering!()
+      _comparison -> unless numeric?(x) and numeric?(y), do: numeric_type_error!(name, x, y)
     end
+  end
+
+  @spec numeric_type_error!(String.t(), term(), term()) :: no_return()
+  defp numeric_type_error!(name, x, y) do
+    message =
+      "#{name}: expected number arguments, got #{Helpers.describe_type(x)}, " <>
+        Helpers.describe_type(y)
+
+    HostContext.error!({:type_error, message, [x, y]})
   end
 
   @spec invalid_java_ordering!() :: no_return()

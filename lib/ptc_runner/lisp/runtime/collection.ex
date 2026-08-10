@@ -25,6 +25,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   alias PtcRunner.Lisp.Runtime.Collection.Transform
   alias PtcRunner.Lisp.Runtime.FlexAccess
   alias PtcRunner.Lisp.Runtime.Math
+  alias PtcRunner.Lisp.Runtime.Ordering
 
   @hof_callback_error :__ptc_hof_callback_error__
 
@@ -185,23 +186,23 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def sort(nil), do: []
   def sort(coll) when is_list(coll), do: Enum.sort(coll, &default_sort_before?/2)
-  def sort(coll) when is_binary(coll), do: Enum.sort(Normalize.graphemes(coll))
-  def sort(coll) when is_map(coll) and not is_struct(coll), do: Enum.sort(Normalize.to_seq(coll))
+
+  def sort(coll) when is_binary(coll),
+    do: Enum.sort(Normalize.graphemes(coll), &default_sort_before?/2)
+
+  def sort(coll) when is_map(coll) and not is_struct(coll),
+    do: Enum.sort(Normalize.to_seq(coll), &default_sort_before?/2)
 
   defp default_sort_before?(left, right) do
-    case {ordinary_sort_value(left), ordinary_sort_value(right)} do
-      {{left_value, true}, {right_value, _primitive?}} -> Math.lte(left_value, right_value)
-      {{left_value, _primitive?}, {right_value, true}} -> Math.lte(left_value, right_value)
-      {{left_value, false}, {right_value, false}} -> natural_lte?(left_value, right_value)
-    end
+    {left_value, _left_primitive?} = ordinary_sort_value(left)
+    {right_value, _right_primitive?} = ordinary_sort_value(right)
+    natural_lte?(left_value, right_value)
   end
 
   defp default_sort_after?(left, right) do
-    case {ordinary_sort_value(left), ordinary_sort_value(right)} do
-      {{left_value, true}, {right_value, _primitive?}} -> Math.gte(left_value, right_value)
-      {{left_value, _primitive?}, {right_value, true}} -> Math.gte(left_value, right_value)
-      {{left_value, false}, {right_value, false}} -> natural_gte?(left_value, right_value)
-    end
+    {left_value, _left_primitive?} = ordinary_sort_value(left)
+    {right_value, _right_primitive?} = ordinary_sort_value(right)
+    natural_gte?(left_value, right_value)
   end
 
   defp ordinary_sort_value(%JavaPrimitive{} = primitive) do
@@ -1122,7 +1123,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def max_key_variadic([_f, x]), do: x
 
   def max_key_variadic([f | args]) when args != [] do
-    max_by_ordered(args, &ordinary_numeric_value!(Callable.call(f, [&1])))
+    max_by_numeric(args, &ordinary_numeric_value!(Callable.call(f, [&1])))
   end
 
   @doc """
@@ -1140,14 +1141,16 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def min_key_variadic([_f, x]), do: x
 
   def min_key_variadic([f | args]) when args != [] do
-    min_by_ordered(args, &ordinary_numeric_value!(Callable.call(f, [&1])))
+    min_by_numeric(args, &ordinary_numeric_value!(Callable.call(f, [&1])))
   end
 
   defp min_by_ordered(values, key_fun), do: Enum.min_by(values, key_fun, &natural_lte?/2)
   defp max_by_ordered(values, key_fun), do: Enum.max_by(values, key_fun, &natural_gte?/2)
+  defp min_by_numeric(values, key_fun), do: Enum.min_by(values, key_fun, &Math.lte/2)
+  defp max_by_numeric(values, key_fun), do: Enum.max_by(values, key_fun, &Math.gte/2)
 
-  defp natural_lte?(left, right), do: Math.lte(left, right)
-  defp natural_gte?(left, right), do: Math.gte(left, right)
+  defp natural_lte?(left, right), do: Ordering.compare(left, right) <= 0
+  defp natural_gte?(left, right), do: Ordering.compare(left, right) >= 0
 
   @doc """
   Variadic version of max-by that supports both (max-by key coll)
