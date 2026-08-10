@@ -18,6 +18,11 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   results expose those hashes with the `sha256:` algorithm prefix required by
   trusted component-override descriptors, so an effective-prelude result can
   be copied into `base_source_hash` without reinterpretation.
+
+  V3 execution-phase diagnostics (`execution-prints`, `execution-error`) are
+  counted in each `list_runs` row's `counts` but are not an independent
+  collection: a raw artifact load remains the way to read their bounded
+  `prints` list and `details` map for one `evaluation_id`.
   """
 
   @default_limit 100
@@ -101,7 +106,9 @@ defmodule PtcRunner.Kernel.InspectionQuery do
         "capability_calls" => length(capability_calls),
         "generated_sources" => length(generated_sources),
         "effective_preludes" => length(effective_preludes),
-        "provider_exchanges" => length(provider_pairs)
+        "provider_exchanges" => length(provider_pairs),
+        "execution_prints" => length(records_of_type(records, "execution-prints")),
+        "execution_errors" => length(records_of_type(records, "execution-error"))
       }
 
       {:ok,

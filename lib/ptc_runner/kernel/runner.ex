@@ -7,10 +7,12 @@ defmodule PtcRunner.Kernel.Runner do
   projection, and terminal error normalization.
   """
 
+  alias PtcRunner.Kernel.BoundedPrints
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.RunConfig
@@ -21,6 +23,11 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.RetainedSize
+
+  # Matches the bound `PtcRunner.Kernel.AnalysisSession` already applies when
+  # projecting `prints` into a caller-facing result.
+  @execution_prints_count 128
+  @execution_prints_bytes 65_536
 
   @spec run(binary(), RunConfig.t()) :: {:ok, Result.t()} | {:error, Error.t()}
   @doc "Executes one validated run configuration and always tears down run state."
@@ -167,7 +174,9 @@ defmodule PtcRunner.Kernel.Runner do
            environment: :workflow
          }) do
       :ok ->
-        result = execute_workflow(entry_source, config, state, timeout_ms, deadline_ms)
+        result =
+          execute_workflow(entry_source, config, state, timeout_ms, deadline_ms, evaluation_id)
+
         _ = maybe_emit_workflow_limit(state, config.event_sink, result)
 
         _ =
@@ -185,7 +194,7 @@ defmodule PtcRunner.Kernel.Runner do
     end
   end
 
-  defp execute_workflow(entry_source, config, state, timeout_ms, deadline_ms) do
+  defp execute_workflow(entry_source, config, state, timeout_ms, deadline_ms, evaluation_id) do
     opts = [
       context: config.input,
       tools: workflow_tools(config, state),
@@ -200,14 +209,19 @@ defmodule PtcRunner.Kernel.Runner do
     ]
 
     case Lisp.run_native(entry_source, opts) do
-      {:ok, %{return: {:__ptc_fail__, value}}} ->
-        {:error,
-         %Error{
-           kind: :workflow_failed,
-           reason: :explicit_failure,
-           details: SafeMetadata.failure_taxonomy(value),
-           usage: RunState.usage(state)
-         }}
+      {:ok, %{return: {:__ptc_fail__, value}} = step} ->
+        capture_execution_failure(
+          config,
+          state,
+          evaluation_id,
+          step,
+          %Error{
+            kind: :workflow_failed,
+            reason: :explicit_failure,
+            details: SafeMetadata.failure_taxonomy(value),
+            usage: RunState.usage(state)
+          }
+        )
 
       {:ok, step} ->
         with {:ok, value} <-
@@ -223,52 +237,142 @@ defmodule PtcRunner.Kernel.Runner do
                evaluation_memory: RunState.evaluation_memory_summary(state)
              }}
           else
-            {:error,
-             %Error{
-               kind: :limit_exceeded,
-               reason: :terminal_result_exceeded,
-               details: %{},
-               usage: RunState.usage(state)
-             }}
+            capture_execution_failure(
+              config,
+              state,
+              evaluation_id,
+              step,
+              %Error{
+                kind: :limit_exceeded,
+                reason: :terminal_result_exceeded,
+                details: %{},
+                usage: RunState.usage(state)
+              }
+            )
           end
         else
           {:error, :invalid_result_projection} ->
-            {:error,
-             %Error{
-               kind: :workflow_failed,
-               reason: :invalid_result_projection,
-               details: %{result_projection: true},
-               usage: RunState.usage(state)
-             }}
+            capture_execution_failure(
+              config,
+              state,
+              evaluation_id,
+              step,
+              %Error{
+                kind: :workflow_failed,
+                reason: :invalid_result_projection,
+                details: %{result_projection: true},
+                usage: RunState.usage(state)
+              }
+            )
 
           {:error, reason} ->
-            {:error,
-             %Error{
-               kind: :workflow_failed,
-               reason: ProjectionError.kind(reason),
-               details: %{
-                 result_projection: true,
-                 projection_error: inspect(reason, limit: 10)
-               },
-               usage: RunState.usage(state)
-             }}
+            capture_execution_failure(
+              config,
+              state,
+              evaluation_id,
+              step,
+              %Error{
+                kind: :workflow_failed,
+                reason: ProjectionError.kind(reason),
+                details: %{
+                  result_projection: true,
+                  projection_error: inspect(reason, limit: 10)
+                },
+                usage: RunState.usage(state)
+              }
+            )
         end
 
       {:error, step} ->
-        {:error,
-         %Error{
-           kind: workflow_error_kind(step.fail.reason),
-           reason: step.fail.reason,
-           details:
-             workflow_error_details(
-               step.fail,
-               timeout_ms,
-               config.limits,
-               config.event_sink
-             ),
-           usage: RunState.usage(state)
-         }}
+        capture_execution_failure(
+          config,
+          state,
+          evaluation_id,
+          step,
+          %Error{
+            kind: workflow_error_kind(step.fail.reason),
+            reason: step.fail.reason,
+            details:
+              workflow_error_details(
+                step.fail,
+                timeout_ms,
+                config.limits,
+                config.event_sink
+              ),
+            usage: RunState.usage(state)
+          }
+        )
     end
+  end
+
+  # Routes `step.prints` and the built `%Error{}.details` into the private
+  # inspection artifact, correlated by the workflow `evaluation_id`. Neither
+  # ever reaches the public envelope or canonical trace: the sink is the
+  # `0600` artifact, not an event. A capture failure fails the run closed the
+  # same way a capability's inspection capture does, by marking `RunState` so
+  # `apply_terminal_failure/2` replaces the result after this returns.
+  defp capture_execution_failure(config, state, evaluation_id, step, %Error{} = error) do
+    case emit_execution_diagnostics(config.inspection_sink, evaluation_id, step.prints, error) do
+      :ok ->
+        :ok
+
+      {:error, :inspection_sink_error} ->
+        :ok = RunState.fail(state, :inspection_sink_error, :inspection_sink_error)
+    end
+
+    {:error, error}
+  end
+
+  defp emit_execution_diagnostics(nil, _evaluation_id, _prints, _error), do: :ok
+
+  # A sink built before V3 does not understand these record types. A workflow
+  # failure is not an opt-in feature the way selecting an MCP provider is —
+  # every run eventually fails one — so an older sink skips capture the same
+  # as a `nil` sink would, instead of failing every such run closed.
+  defp emit_execution_diagnostics(sink, evaluation_id, prints, error) do
+    case InspectionSink.schema_version(sink) do
+      {:ok, schema_version} when schema_version >= 3 ->
+        with :ok <- emit_execution_prints(sink, evaluation_id, prints) do
+          emit_execution_error(sink, evaluation_id, error)
+        end
+
+      {:ok, _older_schema_version} ->
+        :ok
+
+      {:error, :inspection_sink_error} = error ->
+        error
+    end
+  end
+
+  defp emit_execution_prints(_sink, _evaluation_id, []), do: :ok
+
+  defp emit_execution_prints(sink, evaluation_id, prints) do
+    {bounded, truncated?} =
+      BoundedPrints.bound(prints, @execution_prints_count, @execution_prints_bytes)
+
+    InspectionSink.emit(
+      sink,
+      "execution-prints",
+      %{evaluation_id: evaluation_id},
+      %{environment: :workflow, prints: bounded, truncated: truncated?}
+    )
+  end
+
+  defp emit_execution_error(_sink, _evaluation_id, %Error{details: details})
+       when map_size(details) == 0,
+       do: :ok
+
+  defp emit_execution_error(sink, evaluation_id, %Error{
+         kind: kind,
+         reason: reason,
+         details: details
+       }) do
+    InspectionSink.emit(
+      sink,
+      "execution-error",
+      %{evaluation_id: evaluation_id},
+      %{environment: :workflow, kind: kind, reason: reason, details: details}
+    )
   end
 
   defp project_result(value, :native), do: {:ok, value}

@@ -501,6 +501,15 @@ IDs for the record's environment. V1 record types and payloads are:
 | `evaluation-source` | `evaluation_id` | `environment`, `program_kind`, `source`, `source_hash`, `source_bytes` |
 | `prelude-source` | `component_id` | `environment`, `source`, `source_hash`, `source_bytes` |
 
+V3 adds two workflow execution-phase diagnostics, correlated by the top-level
+workflow evaluation's `evaluation_id` rather than a capability or subordinate
+evaluation:
+
+| Record type | Correlation | Exact payload fields |
+| --- | --- | --- |
+| `execution-prints` | `evaluation_id` | `environment`, `prints`, `truncated` |
+| `execution-error` | `evaluation_id` | `environment`, `kind`, `reason`, `details` |
+
 Enums and map keys are normalized to JSON strings before retention. `result` is
 the bounded Dispatcher envelope returned to Lisp, so `llm-request` input/output
 records contain the provider-neutral model request and normalized response, and
@@ -510,7 +519,13 @@ increment. Its hash and byte count must equal the corresponding canonical
 `evaluation-started` fields. `prelude-source` records carry the exact
 effective source of every frozen workflow and mission component, one record
 per component in frozen order, emitted by the manifest-backed builder before
-execution begins.
+execution begins. `execution-prints` and `execution-error` are emitted only
+when the top-level workflow evaluation fails: `prints` is the run's bounded
+`println` output (at most 128 entries and 65,536 encoded bytes, matching
+`PtcRunner.Kernel.AnalysisSession`'s result projection) and `details` is the
+Kernel `Error.details` map computed for that failure. Their `environment` is
+always `"workflow"`, and their `evaluation_id` must match a canonical
+`evaluation-started` event with `environment: "workflow"` for the same run.
 
 The input record is accepted before the callback starts, and the source record
 is accepted before evaluation starts. The output record is accepted after
@@ -528,7 +543,9 @@ output is valid only as an interrupted attempt. Private capability name and
 environment must match the canonical `capability-started` event carrying the
 same ID, and canonical capability-start IDs must themselves be unique. Browser
 indexing also refuses to overwrite a prior identity defensively, but server
-validation is authoritative.
+validation is authoritative. There may likewise be at most one
+`execution-prints` and one `execution-error` for a given `evaluation_id`; a run
+that never reaches an execution-phase failure emits neither.
 
 The host enables capture independently of manifest event policy and selects a
 fixed exact destination. The destination is restricted to `0600` before content

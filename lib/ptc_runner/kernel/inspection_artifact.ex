@@ -15,9 +15,11 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   whose bytes must match. It rejects symlinks,
   changed files, content above 16 MB, any record above 2,000,000 encoded bytes,
   excessive structural depth, malformed lines, mixed identities or schema
-  versions, non-contiguous sequences, and records outside the exact V1 or V2
-  vocabulary. V2 adds paired MCP request/response bodies correlated to an
-  existing capability attempt.
+  versions, non-contiguous sequences, and records outside the exact V1, V2, or
+  V3 vocabulary. V2 adds paired MCP request/response bodies correlated to an
+  existing capability attempt. V3 adds `execution-prints` and `execution-error`,
+  correlated by a canonical workflow `evaluation-started` event's
+  `evaluation_id` rather than a capability attempt.
 
   Secure publication is supported on Unix hosts with POSIX-compatible `mkdir`
   and `id` executables available on `PATH`; persistence fails closed when those
@@ -29,6 +31,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   """
 
   alias Jason.OrderedObject
+  alias PtcRunner.Kernel.InspectionRecordTypes
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.PublicationHandle
@@ -36,8 +39,6 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   @max_bytes 16_000_000
   @max_record_bytes 2_000_000
   @suffix ".inspection.jsonl"
-  @record_types_v1 ~w(capability-input capability-output evaluation-source prelude-source)
-  @record_types_v2 @record_types_v1 ++ ~w(mcp-request mcp-response)
   @envelope_keys ~w(schema_version run_id trace_id sequence timestamp record_type correlation payload)
 
   @spec preflight_destination(term()) ::
@@ -324,7 +325,9 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       mcp_requests: %{},
       mcp_responses: MapSet.new(),
       evaluations: MapSet.new(),
-      preludes: MapSet.new()
+      preludes: MapSet.new(),
+      execution_prints: MapSet.new(),
+      execution_errors: MapSet.new()
     }
 
     records
@@ -417,6 +420,18 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
        ),
        do: unique_record(state, :preludes, {environment, id})
 
+  defp validate_record_join(
+         %{"record_type" => "execution-prints", "correlation" => %{"evaluation_id" => id}},
+         state
+       ),
+       do: unique_record(state, :execution_prints, id)
+
+  defp validate_record_join(
+         %{"record_type" => "execution-error", "correlation" => %{"evaluation_id" => id}},
+         state
+       ),
+       do: unique_record(state, :execution_errors, id)
+
   defp invalid_record_join, do: {:halt, {:error, :invalid_inspection_artifact}}
 
   defp unique_record(state, field, key) do
@@ -432,7 +447,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   defp valid_record?(record, run_id, trace_id, schema_version, sequence) do
     MCPProtocol.within_inspection_document_depth?(record) and
       is_map(record) and Map.keys(record) |> Enum.sort() == Enum.sort(@envelope_keys) and
-      schema_version in [1, 2] and record["schema_version"] == schema_version and
+      schema_version in [1, 2, 3] and record["schema_version"] == schema_version and
       record["run_id"] == run_id and
       record["trace_id"] == trace_id and is_binary(run_id) and is_binary(trace_id) and
       record["sequence"] == sequence and valid_timestamp?(record["timestamp"]) and
@@ -507,6 +522,28 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       payload["source_hash"] == sha256(payload["source"])
   end
 
+  defp valid_shape?(%{
+         "record_type" => "execution-prints",
+         "correlation" => %{"evaluation_id" => id},
+         "payload" => payload
+       }) do
+    exact_keys?(payload, ~w(environment prints truncated)) and
+      valid_id?(id) and payload["environment"] == "workflow" and
+      is_list(payload["prints"]) and Enum.all?(payload["prints"], &is_binary/1) and
+      is_boolean(payload["truncated"])
+  end
+
+  defp valid_shape?(%{
+         "record_type" => "execution-error",
+         "correlation" => %{"evaluation_id" => id},
+         "payload" => payload
+       }) do
+    exact_keys?(payload, ~w(environment kind reason details)) and
+      valid_id?(id) and payload["environment"] == "workflow" and
+      valid_id?(payload["kind"]) and valid_id?(payload["reason"]) and
+      is_map(payload["details"])
+  end
+
   defp valid_shape?(_record), do: false
 
   @spec validate_correlations([map()], [map()]) :: :ok | {:error, :inspection_correlation_missing}
@@ -537,6 +574,16 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
           |> merge_prelude_ids("mission", event_data(event, :mission_prelude))
         end)
 
+      workflow_evaluation_ids =
+        events
+        |> Enum.filter(fn event ->
+          event_value(event, :type) == "evaluation-started" and
+            event_data(event, :environment) |> string_value() == "workflow"
+        end)
+        |> Enum.map(&event_data(&1, :evaluation_id))
+        |> Enum.filter(&is_binary/1)
+        |> MapSet.new()
+
       if Enum.all?(records, fn
            %{
              "correlation" => %{"capability_id" => id},
@@ -556,6 +603,13 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
              "payload" => %{"source_hash" => hash, "source_bytes" => bytes}
            } ->
              Map.get(evaluations, id) == {hash, bytes}
+
+           %{
+             "record_type" => record_type,
+             "correlation" => %{"evaluation_id" => id}
+           }
+           when record_type in ["execution-prints", "execution-error"] ->
+             MapSet.member?(workflow_evaluation_ids, id)
 
            %{
              "correlation" => %{"component_id" => id},
@@ -802,8 +856,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     do: match?({:ok, _datetime, 0}, DateTime.from_iso8601(timestamp))
 
   defp valid_timestamp?(_timestamp), do: false
-  defp record_types(1), do: @record_types_v1
-  defp record_types(2), do: @record_types_v2
+  defp record_types(schema_version), do: InspectionRecordTypes.for_schema_version(schema_version)
   defp valid_request_id?(id), do: is_integer(id) and id > 0
   defp valid_id?(id), do: is_binary(id) and byte_size(id) in 1..256 and String.valid?(id)
   defp sha256(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)

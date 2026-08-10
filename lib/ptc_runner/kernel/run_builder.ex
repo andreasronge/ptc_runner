@@ -1321,7 +1321,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
           InspectionSink.start(
             run_id: identity.run_id,
             trace_id: identity.trace_id,
-            schema_version: 2,
+            schema_version: 3,
             owner: owner
           )
         end

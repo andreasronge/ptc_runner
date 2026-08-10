@@ -132,6 +132,69 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert response_record["payload"]["body"] == response
   end
 
+  test "V3 retains correlated execution-prints and execution-error records while V2 rejects them" do
+    {:ok, v2} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 2)
+
+    assert {:error, :inspection_sink_error} =
+             InspectionSink.emit(
+               v2,
+               "execution-prints",
+               %{evaluation_id: "eval-1"},
+               %{environment: :workflow, prints: ["CHECKPOINT"], truncated: false}
+             )
+
+    {:ok, v3} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 3)
+
+    assert :ok =
+             InspectionSink.emit(
+               v3,
+               "execution-prints",
+               %{evaluation_id: "eval-1"},
+               %{environment: :workflow, prints: ["CHECKPOINT"], truncated: false}
+             )
+
+    assert :ok =
+             InspectionSink.emit(
+               v3,
+               "execution-error",
+               %{evaluation_id: "eval-1"},
+               %{
+                 environment: :workflow,
+                 kind: :workflow_failed,
+                 reason: :invalid_result_projection,
+                 details: %{result_projection: true, projection_error: "some inspected reason"}
+               }
+             )
+
+    assert {:ok, [prints_record, error_record]} = InspectionSink.records(v3)
+    assert prints_record["schema_version"] == 3
+    assert prints_record["correlation"] == %{"evaluation_id" => "eval-1"}
+
+    assert prints_record["payload"] == %{
+             "environment" => "workflow",
+             "prints" => ["CHECKPOINT"],
+             "truncated" => false
+           }
+
+    assert error_record["payload"] == %{
+             "environment" => "workflow",
+             "kind" => "workflow_failed",
+             "reason" => "invalid_result_projection",
+             "details" => %{
+               "result_projection" => true,
+               "projection_error" => "some inspected reason"
+             }
+           }
+
+    assert {:error, :inspection_sink_error} =
+             InspectionSink.emit(
+               v3,
+               "execution-prints",
+               %{evaluation_id: "eval-2"},
+               %{environment: :mission, prints: ["nope"], truncated: false}
+             )
+  end
+
   test "enforces installed per-record and aggregate encoded byte ceilings" do
     {:ok, record_limited} =
       InspectionSink.start(
@@ -736,6 +799,103 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     assert response.status == 200
     assert %{"records" => ^records} = Jason.decode!(response.resp_body)
+  end
+
+  @tag :tmp_dir
+  test "a provider-free execution failure captures prints and error detail outside canonical trace",
+       %{tmp_dir: dir} do
+    File.write!(
+      Path.join(dir, "workflow.clj"),
+      ~S|(ns app) (defn run [input] (println "CHECKPOINT" {:seen input}) #{1 2 3})|
+    )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "app", "path" => "workflow.clj"}],
+        "entry" => "app/run"
+      },
+      "input" => %{"value" => %{"seen" => "checkpoint-input"}},
+      "events" => %{"policy" => "private"}
+    }
+
+    manifest_path = Path.join(dir, "ptc.json")
+    trace_path = Path.join(dir, "run.private.jsonl")
+    inspection_path = Path.join(dir, "run.inspection.jsonl")
+    File.write!(manifest_path, Jason.encode!(manifest))
+
+    {:ok, registry} = ProviderRegistry.new(%{})
+
+    assert {:error, %PtcRunner.Kernel.Error{kind: :workflow_failed}} =
+             manifest_path
+             |> ApplicationPackage.request_directory(
+               inspection_capture: true,
+               result_projection: :json,
+               installed_limits: registry.installed_limits
+             )
+             |> RunLifecycle.build(registry,
+               trace_path: trace_path,
+               inspect: inspection_path
+             )
+             |> RunLifecycle.execute()
+
+    assert {:ok, records} = InspectionArtifact.load(inspection_path)
+
+    prints_record = Enum.find(records, &(&1["record_type"] == "execution-prints"))
+    error_record = Enum.find(records, &(&1["record_type"] == "execution-error"))
+
+    assert prints_record["payload"] == %{
+             "environment" => "workflow",
+             "prints" => [~S|CHECKPOINT {:seen {"seen" "checkpoint-input"}}|],
+             "truncated" => false
+           }
+
+    assert error_record["payload"]["environment"] == "workflow"
+    assert error_record["payload"]["kind"] == "workflow_failed"
+    assert is_map(error_record["payload"]["details"])
+    assert map_size(error_record["payload"]["details"]) > 0
+
+    trace_lines = trace_path |> File.read!() |> String.split("\n", trim: true)
+    refute Enum.any?(trace_lines, &String.contains?(&1, "CHECKPOINT"))
+    refute Enum.any?(trace_lines, &String.contains?(&1, "checkpoint-input"))
+
+    evaluation_started =
+      trace_lines
+      |> Enum.map(&Jason.decode!/1)
+      |> Enum.find(
+        &(&1["type"] == "evaluation-started" and &1["data"]["environment"] == "workflow")
+      )
+
+    assert evaluation_started["data"]["evaluation_id"] ==
+             prints_record["correlation"]["evaluation_id"]
+
+    assert evaluation_started["data"]["evaluation_id"] ==
+             error_record["correlation"]["evaluation_id"]
+
+    assert {:ok, inspection_source} =
+             ViewerAdapter.pin_inspection(inspection_path, {:private_file, trace_path})
+
+    {:ok, inspection_store} = PtcViewer.InspectionStore.start(inspection_source)
+
+    on_exit(fn ->
+      if Process.alive?(inspection_store), do: PtcViewer.InspectionStore.stop(inspection_store)
+    end)
+
+    viewer_opts = [
+      trace_dir: dir,
+      kernel_trace_adapter: ViewerAdapter,
+      inspection_store: inspection_store,
+      inspection_adapter: ViewerAdapter
+    ]
+
+    response =
+      Plug.Test.conn(:get, "/api/inspection/runs/#{evaluation_started["run_id"]}")
+      |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
+
+    assert response.status == 200
+    assert %{"records" => viewed_records} = Jason.decode!(response.resp_body)
+    assert Enum.any?(viewed_records, &(&1["record_type"] == "execution-prints"))
+    assert Enum.any?(viewed_records, &(&1["record_type"] == "execution-error"))
   end
 
   defp emit_small(sink, capability_id) do
