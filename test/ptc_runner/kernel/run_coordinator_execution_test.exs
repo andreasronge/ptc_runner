@@ -39,6 +39,44 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     assert :ok = InstallationCatalog.close(catalog)
   end
 
+  test "successful handoff performs no owner-driven sink release or authority abort" do
+    {prepared, catalog} = prepared_run("(return 42)")
+    assert {:ok, authority} = PublicationAuthority.new([])
+
+    release_patterns = [
+      {EventSink, :finalize_and_events, 2},
+      {EventSink, :stop, 1},
+      {PublicationAuthority, :abort, 1}
+    ]
+
+    Enum.each([EventSink, PublicationAuthority], &Code.ensure_loaded!/1)
+    Enum.each(release_patterns, &assert(:erlang.trace_pattern(&1, true, [:local]) == 1))
+    on_exit(fn -> Enum.each(release_patterns, &:erlang.trace_pattern(&1, false, [:local])) end)
+
+    assert {:ok, owner} = ExecutionSessionOwner.start(prepared, authority, self())
+    owner_pid = ExecutionSessionOwner.pid(owner)
+    owner_ref = Process.monitor(owner_pid)
+    assert :erlang.trace(owner_pid, true, [:call]) == 1
+
+    try do
+      assert {:ok, %ExecutionOutcome{}} = ExecutionSessionOwner.await(owner)
+      assert_receive {:DOWN, ^owner_ref, :process, ^owner_pid, :normal}, 5_000
+
+      delivered = :erlang.trace_delivered(owner_pid)
+      assert_receive {:trace_delivered, ^owner_pid, ^delivered}
+
+      refute_received {:trace, ^owner_pid, :call, {EventSink, :finalize_and_events, _arguments}}
+      refute_received {:trace, ^owner_pid, :call, {EventSink, :stop, _arguments}}
+      refute_received {:trace, ^owner_pid, :call, {PublicationAuthority, :abort, _arguments}}
+    after
+      stop_trace(owner_pid)
+    end
+
+    assert PublicationAuthority.authorized?(authority)
+    assert :ok = PublicationAuthority.abort(authority)
+    assert :ok = InstallationCatalog.close(catalog)
+  end
+
   test "provider-backed execution uses the one-shot owner and returns sealed evidence" do
     {prepared, catalog, services} = provider_prepared_run()
     assert {:ok, execution} = ProviderExecution.new(catalog, services, [])
@@ -487,8 +525,14 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     assert {:ok, ^owner_pid} = InspectionSink.owner(inspection_sink)
     assert_eventually(fn -> run_started?(event_sink) end)
 
-    Code.ensure_loaded!(EventSink)
-    assert :erlang.trace_pattern({EventSink, :finalize_and_events, 2}, true, [:local]) == 1
+    release_patterns = [
+      {EventSink, :finalize_and_events, 2},
+      {EventSink, :stop, 1},
+      {PublicationAuthority, :abort, 1}
+    ]
+
+    Enum.each([EventSink, PublicationAuthority], &Code.ensure_loaded!/1)
+    Enum.each(release_patterns, &assert(:erlang.trace_pattern(&1, true, [:local]) == 1))
 
     # Registered immediately: this is a VM-global trace pattern, so ANY
     # later failure in this test -- including the five `Process.monitor/1`
@@ -496,7 +540,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     # contaminating every later test in the suite. `on_exit` always runs,
     # unlike the `try/after` below which only protects its own block.
     on_exit(fn ->
-      :erlang.trace_pattern({EventSink, :finalize_and_events, 2}, false, [:local])
+      Enum.each(release_patterns, &:erlang.trace_pattern(&1, false, [:local]))
     end)
 
     owner_ref = Process.monitor(owner_pid)
@@ -535,6 +579,17 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       assert_receive {:DOWN, ^event_sink_ref, :process, _pid, :normal}, 5_000
       assert_receive {:DOWN, ^activity_ref, :process, _pid, :normal}, 5_000
       assert_receive {:DOWN, ^owner_ref, :process, ^owner_pid, :normal}, 5_000
+
+      delivered = :erlang.trace_delivered(owner_pid)
+      assert_receive {:trace_delivered, ^owner_pid, ^delivered}
+
+      assert_receive {:trace, ^owner_pid, :call, {EventSink, :stop, [^event_sink]}}
+      refute_received {:trace, ^owner_pid, :call, {EventSink, :stop, [^event_sink]}}
+
+      assert_receive {:trace, ^owner_pid, :call, {PublicationAuthority, :abort, [^authority]}}
+
+      refute_received {:trace, ^owner_pid, :call, {PublicationAuthority, :abort, [^authority]}}
+
       refute_received {:execution_result, _result}
     rescue
       e in ArgumentError ->
