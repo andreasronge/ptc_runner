@@ -48,21 +48,23 @@ how it was verified.
 
 ## Commands
 
-- `mix precommit` — comprehensive local quality gate (format, compile, credo, schema, spec,
-  root/Viewer tests, assembled standalone release verification, and launcher
-  package/conformance/archive verification);
-  run before every commit. This is intentionally much broader than the fast,
-  staged-file Git pre-commit hook and can take a few minutes in a fresh worktree.
+- `mix precommit` — comprehensive local quality gate (format, compile,
+  compile-cycle and stable-CLI checks, credo, duplication, spec, generated-doc
+  and conformance staleness, root/Viewer/launcher tests, and core-package plus
+  assembled standalone release verification); run before every commit. This is
+  intentionally much broader than the fast, staged-file Git pre-commit hook and
+  can take a few minutes in a fresh worktree.
 - `MIX_ENV=dev mix docs --warnings-as-errors` — ExDoc reference and rendering
   gate; run when changing user-facing documentation. Generated-artifact
   staleness is checked separately, by both `mix precommit` and `mix prepush`.
 - `git push` — the tracked pre-push hook classifies pushed and dirty paths and
   runs the relevant root, Viewer, launcher, or documentation gates. Root
-  changes run the root tests and `mix prepush` (generated-artifact staleness,
-  upstream API audit, Dialyzer, unused-deps). The staleness checks are also in
-  `precommit`, and are repeated here because an ordinary push does not run
-  `precommit` — without them a `lib/` edit can clear every local gate and still
-  fail CI on an artifact you were never prompted to regenerate. When one fires,
+  changes run the root tests and `mix prepush` (credo, generated-artifact
+  staleness, upstream API audit, Dialyzer, unused-deps). Credo and the
+  staleness checks are also in `precommit`, and are repeated here because an
+  ordinary push does not run `precommit` — without them a `lib/` edit can
+  clear every local gate and still fail CI on an artifact you were never
+  prompted to regenerate. When one fires,
   run its matching write form — `mix ptc.gen_docs` for generated docs and
   schemas, or `mix ptc.conformance_report --write-inventory` for
   `conformance_inventory.json` — then stage the result. Do not run `mix prepush`
@@ -78,6 +80,10 @@ how it was verified.
   `mix ptc run` downstream path or the benchmark task. Never add `--trace` (or
   `--slowest`, which implies it) to a suite you want to finish quickly: it
   pins `--max-cases` to 1.
+- `mix soak` — the `:soak` memory-leak suite, also excluded by default; the
+  scheduled `Soak` workflow runs it at `PTC_SOAK_ITERATIONS=3000`. The other
+  default-excluded tags are `:e2e`, `:nightly`, and `:clojure`, which needs
+  Babashka (`mix test --include clojure`).
 - Two tags, two meanings, and they must not be conflated. `:nightly` means
   "costs tens of seconds; excluded everywhere but the `Nightly` workflow" —
   apply it sparingly, because it removes a test from every PR gate. `:slow`
@@ -162,6 +168,14 @@ loads `OPENROUTER_API_KEY` and the optional `PTC_TEST_MODEL` from `.env`.
 - `ptc_viewer/` — separate nested Mix project and canonical trace viewer. Root
   `mix precommit` runs its tests but not its formatter; format Viewer edits
   from that directory.
+- `examples/` — runnable example manifests. Their tests use the `:native`
+  result projection while the CLI forces `:json`, so a green example suite does
+  not prove `mix ptc run` still works; smoke the CLI separately.
+- `bench/` — benchmarks (`mix bench.check`, `mix bench.heap`) with committed
+  baselines under `bench/baselines/`; re-baseline deliberately, never to make a
+  gate pass.
+- `repo-analyst/` — the repo-analysis manifest suite PtcRunner dogfoods, with
+  its host configs and fixtures in `repo-analyst*.json` at the repo root.
 
 ## Conventions
 
