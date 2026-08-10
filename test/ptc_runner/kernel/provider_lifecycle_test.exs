@@ -1210,9 +1210,21 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
       )
 
     case PtcRunner.Kernel.run("(tool/slow {})", config) do
-      {:error, %{reason: :timeout}} -> :ok
-      {:ok, %{value: %{status: :error, kind: :timeout, reason: :provider_timeout}}} -> :ok
-      other -> flunk("expected evaluator or provider timeout, got: #{inspect(other)}")
+      {:error, %{reason: :timeout}} ->
+        :ok
+
+      {:ok,
+       %{
+         value: %{
+           "status" => "error",
+           "kind" => "timeout",
+           "reason" => "provider_timeout"
+         }
+       }} ->
+        :ok
+
+      other ->
+        flunk("expected evaluator or provider timeout, got: #{inspect(other)}")
     end
 
     assert_receive {:resource_closed, false}

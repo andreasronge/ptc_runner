@@ -252,7 +252,7 @@ defmodule PtcRunner.Kernel.Runner do
             )
           end
         else
-          {:error, :invalid_result_projection} ->
+          {:error, {:invalid_result_projection, projection_error}} ->
             capture_execution_failure(
               config,
               state,
@@ -263,7 +263,8 @@ defmodule PtcRunner.Kernel.Runner do
                 reason: :invalid_result_projection,
                 details: %{result_projection: true},
                 usage: RunState.usage(state)
-              }
+              },
+              %{projection_error: inspect(projection_error, limit: 10)}
             )
 
           {:error, reason} ->
@@ -313,7 +314,26 @@ defmodule PtcRunner.Kernel.Runner do
   # same way a capability's inspection capture does, by marking `RunState` so
   # `apply_terminal_failure/2` replaces the result after this returns.
   defp capture_execution_failure(config, state, evaluation_id, step, %Error{} = error) do
-    case emit_execution_diagnostics(config.inspection_sink, evaluation_id, step.prints, error) do
+    capture_execution_failure(config, state, evaluation_id, step, error, %{})
+  end
+
+  defp capture_execution_failure(
+         config,
+         state,
+         evaluation_id,
+         step,
+         %Error{} = public_error,
+         private_details
+       )
+       when is_map(private_details) do
+    private_error = %{public_error | details: Map.merge(public_error.details, private_details)}
+
+    case emit_execution_diagnostics(
+           config.inspection_sink,
+           evaluation_id,
+           step.prints,
+           private_error
+         ) do
       :ok ->
         :ok
 
@@ -321,7 +341,7 @@ defmodule PtcRunner.Kernel.Runner do
         :ok = RunState.fail(state, :inspection_sink_error, :inspection_sink_error)
     end
 
-    {:error, error}
+    {:error, public_error}
   end
 
   # A successful workflow's `step.prints` are as diagnostically valuable as a
@@ -404,9 +424,9 @@ defmodule PtcRunner.Kernel.Runner do
   defp project_result(value, :native), do: {:ok, value}
 
   defp project_result(value, :json) do
-    case StrictJSON.admit(value) do
+    case StrictJSON.admit_with_locations(value) do
       {:ok, projected} -> {:ok, projected}
-      {:error, _reason} -> {:error, :invalid_result_projection}
+      {:error, reason} -> {:error, {:invalid_result_projection, reason}}
     end
   end
 

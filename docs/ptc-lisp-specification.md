@@ -382,12 +382,15 @@ Key-value associations:
 
 **Map keys:** Keywords and strings are the standard map key types — keywords are preferred for their readability and self-documenting nature. Other key types (numbers, vectors) evaluate without error inside a program, but you should not rely on them for outputs because the serialization boundaries treat them inconsistently:
 
-- **Direct `PtcRunner.Lisp.run/2` and `PtcRunner.Kernel.run/2` results:** preserve numeric and
-  vector map-key types. Source keyword keys use the bounded public keyword
-  representation (a known atom or otherwise a string). The Kernel rejects
-  projection collisions, but its terminal return value is not itself restricted
-  to JSON object keys. A non-JSON-encodable result has no event `result_hash`,
-  and explicit JSON result-artifact persistence rejects it.
+- **Direct `PtcRunner.Lisp.run/2` results:** preserve numeric and vector map-key
+  types. Source keyword keys use the bounded public keyword representation (a
+  known atom or otherwise a string).
+- **`PtcRunner.Kernel.run/2` results:** project every keyword key and value to
+  its name string before either native or JSON result handling. The Kernel
+  rejects projection collisions rather than silently choosing between a
+  keyword and string with the same name. Native projection can retain other
+  non-JSON values; JSON projection rejects them. `mix ptc run` always selects
+  JSON projection, whether or not it publishes a result artifact.
 - **Tool-call arguments:** keys are recursively normalized to strings (e.g.
   `1` → `"1"`, `[:a :b]` → its inspected form). A projection collision or an
   invalid native Java value is rejected rather than silently losing data.

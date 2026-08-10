@@ -1445,6 +1445,15 @@ The `nil` return for both real JSON `null` and parse failure is a known ambiguit
 
 **Rationale — values.** Silently auto-stringifying a keyword *value* would erode PTC-Lisp's type signal at the wire boundary: `:fs` and `"fs"` are different values and JSON can express the difference nowhere. So a keyword value is refused, and the refusal names the position (`at ["server"]`) and the conversion that fixes it.
 
+The Kernel terminal boundary deliberately differs: every keyword leaf projects
+to its name before native or JSON result handling. Subordinate evaluation
+responses contain host status keywords, so refusing keyword values there would
+make otherwise valid `(return (kernel/eval ...))` results unrepresentable. The
+same projection already stringified non-interned keyword names; applying it to
+the bounded atom vocabulary removes a parser-table-dependent result shape.
+`json/generate-string` remains an explicit language operation and keeps the
+recoverable type-preserving refusal above.
+
 **Rationale — keys.** A JSON object key is *always* a string, so there is no key type for stringification to erode; refusing keyword keys bought no type signal and cost a silent trap, because `describe` emits keyword keys and `(json/generate-string (describe x))` therefore produced `nil` (#1165). Keyword keys now encode as their name. The name is used **verbatim** — `KeyNormalizer.normalize_key/1`'s hyphen-to-underscore rewriting belongs to the tool boundary, and renaming a caller's key mid-encode would replace one silent trap with another. Keys that would collide after encoding (`{:a 1 "a" 2}`, `{1 "a" "1" "b"}`) are refused rather than emitted as a duplicate JSON key.
 
 **Rationale — raising rather than signalling `nil`.** Spec rule 4: properties of input data may signal; properties of the program raise. `parse-string` consumes external text, so bad input signals `nil` (DIV-23). `generate-string` is handed a value the program itself constructed, so a value with no JSON encoding is a program fault. A bare `nil` was indistinguishable from an encoded empty value once `str` concatenated it, which is what #1165 cost. The refusal is a classified `type_error`, recoverable in the agent loop in the same sense as DIV-48's `find`, not an uncatchable crash.

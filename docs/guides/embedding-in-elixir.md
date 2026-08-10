@@ -74,7 +74,11 @@ when an application wants the standard strict manifest contract. Do not build
 a parallel loader or another provider and event path in a web controller or
 job worker. Both embedding paths default to the native result projection;
 JSON-emitting commands select the JSON projection explicitly, while the REPL
-selects native continuation values explicitly.
+selects native continuation values explicitly. Before that choice, the Kernel
+projects every PTC-Lisp keyword key and value to its name string, so native
+Kernel results no longer depend on whether the parser interned a particular
+keyword name. Native projection still permits other non-JSON values that JSON
+projection rejects.
 
 A separately acquired request must use the same installed ceilings as the
 `ProviderRegistry` passed to `RunBuilder.build/3`. The builder rejects a

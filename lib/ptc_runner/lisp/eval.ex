@@ -694,14 +694,13 @@ defmodule PtcRunner.Lisp.Eval do
     # Evaluate all arguments
     case eval_all(arg_asts, eval_ctx) do
       {:ok, arg_vals, eval_ctx2} ->
-        # Convert args list to map for tool executor.
-        case build_args_map(arg_vals, tool_name) do
-          {:ok, args_map} ->
-            # Convert to string for backward compatibility with tool_exec
-            tool_name_str = to_string(tool_name)
-            # Check if this tool has caching enabled
-            tool_meta = Map.get(eval_ctx2.tools_meta, tool_name_str, %{})
+        tool_name_str = to_string(tool_name)
+        tool_meta = Map.get(eval_ctx2.tools_meta, tool_name_str, %{})
 
+        # Convert args list to map for tool executor.
+        case build_args_map(arg_vals, tool_name, tool_meta) do
+          {:ok, args_map} ->
+            # Check if this tool has caching enabled
             cacheable? =
               Map.get(tool_meta, :cache) == true and Map.get(tool_meta, :visibility) != :private
 
@@ -739,12 +738,16 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp prepare_tool_args(args_map, tool_meta, tool_name) do
-    case Format.externalize_symbol_refs(args_map) do
-      {:ok, public_args} ->
-        project_tool_args(public_args, tool_meta, tool_name)
+    if Map.get(tool_meta, :argument_projection) == :raw do
+      {:ok, args_map}
+    else
+      case Format.externalize_symbol_refs(args_map) do
+        {:ok, public_args} ->
+          project_tool_args(public_args, tool_meta, tool_name)
 
-      {:error, _reason} = error ->
-        error
+        {:error, _reason} = error ->
+          error
+      end
     end
   end
 
@@ -1097,9 +1100,18 @@ defmodule PtcRunner.Lisp.Eval do
   # - Keyword-style list [:key1, val1, :key2, val2]: convert to map with string keys
   # - Other cases: error (positional arguments not allowed)
   #
-  # All maps are converted to string keys at the tool boundary to:
+  # Ordinary tool maps are converted to string keys at the tool boundary to:
   # - Prevent atom memory leaks from LLM-generated keywords
   # - Match JSON conventions (like Phoenix params)
+  # One trusted internal tool may request `:raw` projection when it must apply
+  # another bounded host projection itself. That route still requires exactly
+  # one map argument and is never exposed by the ordinary tool constructors.
+  defp build_args_map([arg], _tool_name, %{argument_projection: :raw})
+       when is_map(arg) and not is_struct(arg),
+       do: {:ok, arg}
+
+  defp build_args_map(args, tool_name, _tool_meta), do: build_args_map(args, tool_name)
+
   defp build_args_map([], _tool_name), do: {:ok, %{}}
 
   defp build_args_map([{:symbol_ref, ref}, args], tool_name)

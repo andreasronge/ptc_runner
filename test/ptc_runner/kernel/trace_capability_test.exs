@@ -145,7 +145,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
         event_sink: run_sink
       )
 
-    assert {:ok, %{value: %{outcome: :returned, value: %{"items" => [metadata]}}}} =
+    assert {:ok, %{value: %{"outcome" => "returned", "value" => %{"items" => [metadata]}}}} =
              Kernel.run(
                "(return (kernel/eval (program (return (log/runs {\"limit\" 1})))))",
                config

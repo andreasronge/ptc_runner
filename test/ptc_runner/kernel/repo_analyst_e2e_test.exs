@@ -53,7 +53,11 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
 
     assert [provider_snapshot] = built.config.connector_snapshots
     assert {:ok, result} = PtcRunner.Kernel.run(built.entry_source, built.config)
-    assert %{status: :ok, value: %{outcome: :returned, value: value}} = result.value
+
+    assert %{
+             "status" => "ok",
+             "value" => %{"outcome" => "returned", "value" => value}
+           } = result.value
 
     # The literal is in every file, so page one is full and cannot contain the
     # last match. Finding it at all means the cursor was followed.
@@ -203,7 +207,10 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
              |> RunLifecycle.build(registry)
              |> RunLifecycle.execute()
 
-    assert %{status: :ok, value: %{outcome: :returned, value: value}} = result.value
+    assert %{
+             "status" => "ok",
+             "value" => %{"outcome" => "returned", "value" => value}
+           } = result.value
 
     info = value["info"]
     assert info["file_count"] > 300, "the include set should reach most of the source tree"

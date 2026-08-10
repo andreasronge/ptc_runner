@@ -239,7 +239,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert List.last(second_request["messages"])["content"] =~ "minLength"
   end
 
-  test "agent.main rejects keyword-keyed candidates instead of normalizing them past a contract" do
+  test "agent.main validates keyword-keyed candidates through the kernel JSON projection" do
     keyword_keyed = %{
       content: nil,
       tool_calls: [
@@ -247,17 +247,6 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
           id: "keyword-result",
           name: "run_ptc_lisp",
           args: %{"program" => ~S|(return {:when 42})|}
-        }
-      ]
-    }
-
-    corrected = %{
-      content: nil,
-      tool_calls: [
-        %{
-          id: "string-result",
-          name: "run_ptc_lisp",
-          args: %{"program" => ~S|(return {"when" 42})|}
         }
       ]
     }
@@ -273,12 +262,12 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     input = %{
       "input" => %{
         "task" => "Return one application value",
-        "agent" => %{"max_turns" => 2}
+        "agent" => %{"max_turns" => 1}
       }
     }
 
     {:ok, config} =
-      agent_config([keyword_keyed, corrected], [],
+      agent_config([keyword_keyed], [],
         agent_main: true,
         input: input,
         result_contract: result_contract
@@ -287,9 +276,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert {:ok, %{value: %{"when" => 42}}} =
              Kernel.run("(agent.main/run data/input)", config)
 
-    assert_receive {:agent_request, _first_request}
-    assert_receive {:agent_request, second_request}
-    assert List.last(second_request["messages"])["content"] =~ ":json_value false"
+    assert_receive {:agent_request, _request}
+    refute_receive {:agent_request, _second_request}
   end
 
   test "agent.main accepts quoted symbols through the result contract JSON projection" do

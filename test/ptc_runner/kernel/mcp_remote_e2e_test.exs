@@ -90,10 +90,16 @@ defmodule PtcRunner.Kernel.MCPRemoteE2ETest do
     source =
       ~S|(return (tool/kernel-eval {"kind" :source "source" "(return (tool/time.city {\"city\" \"nyc\"}))"}))|
 
-    assert {:ok, %{value: %{status: :ok, value: %{outcome: :returned, value: value}}}} =
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "ok",
+                "value" => %{"outcome" => "returned", "value" => value}
+              }
+            }} =
              Kernel.run(source, config)
 
-    assert %{status: :ok, value: %{"text" => [entry | _]}} = value
+    assert %{"status" => "ok", "value" => %{"text" => [entry | _]}} = value
     assert is_binary(entry) and entry != ""
   end
 end

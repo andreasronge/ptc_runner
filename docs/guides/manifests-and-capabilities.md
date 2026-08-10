@@ -195,12 +195,23 @@ without repeating the run under private inspection. The command reports it as:
     ]}}}
 ```
 
-One common failure has nothing to do with your schema. Before any schema
-keyword runs, the value must be JSON-like, and a PTC-Lisp map with keyword keys
-is not — so a workflow returning `{:decision "no-change"}` instead of
-`{"decision" "no-change"}` fails this guard. That rejection produces no
-violations at all, which is how you recognize it: `json_value: false` with an
-empty `violations` list means keyword keys, not a schema mismatch.
+Before schema validation, the Kernel applies the same terminal projection used
+for successful results: keyword keys and values become their name strings, and
+projection collisions are rejected. A candidate such as
+`{:decision :no-change}` therefore validates against the JSON shape
+`{"decision" "no-change"}`. Other non-JSON values can still fail before a
+schema keyword runs; that rejection carries `json_value: false` and an empty
+`violations` list without disclosing the rejected value.
+
+The reserved validator preserves the candidate across its internal call until
+that projection runs. In particular, it does not apply the ordinary
+tool-argument convention that rewrites hyphens to underscores, so validation
+and the terminal result see the same property names.
+
+Quoted symbol references retain the existing DIV-19 carve-out: candidate
+validation uses their inert display strings, while strict JSON terminal
+admission can still reject a symbol-reference struct. That pre-existing
+difference is intentionally narrower than the keyword rule.
 
 `violations` locates each failure by schema keyword and a typed property/index
 segment list within the branch the discriminator selected; branches it did not

@@ -57,14 +57,17 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
              |> RunLifecycle.build(registry)
              |> RunLifecycle.execute()
 
-    assert %{status: :ok, value: %{outcome: :returned, value: values}} = result.value
+    assert %{
+             "status" => "ok",
+             "value" => %{"outcome" => "returned", "value" => values}
+           } = result.value
 
     assert %{
-             "info" => %{status: :ok, value: info},
-             "listed" => %{status: :ok, value: listed},
-             "found" => %{status: :ok, value: found},
-             "matches" => %{status: :ok, value: matches},
-             "read" => %{status: :ok, value: read}
+             "info" => %{"status" => "ok", "value" => info},
+             "listed" => %{"status" => "ok", "value" => listed},
+             "found" => %{"status" => "ok", "value" => found},
+             "matches" => %{"status" => "ok", "value" => matches},
+             "read" => %{"status" => "ok", "value" => read}
            } = values
 
     snapshot_hash = info["snapshot_hash"]

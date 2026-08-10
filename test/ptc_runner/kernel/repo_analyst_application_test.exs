@@ -294,7 +294,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
           ] do
         Agent.update(calls, fn _previous -> [] end)
 
-        assert {:ok, %{value: %{outcome: :returned, value: value}}} =
+        assert {:ok, %{value: %{"outcome" => "returned", "value" => value}}} =
                  Kernel.run(
                    "(return (kernel/eval (program (return #{function}))))",
                    run_config(mission)
@@ -365,7 +365,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       {:ok, mission} =
         MissionEnvironment.new(bundle: bundle, capabilities: stubs(granted, calls, values))
 
-      assert {:ok, %{value: %{outcome: :returned, value: value}}} =
+      assert {:ok, %{value: %{"outcome" => "returned", "value" => value}}} =
                Kernel.run(
                  ~S|(return (kernel/eval (program (return (runs/review-seed "run-1")))))|,
                  run_config(mission)
@@ -446,7 +446,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
             {~S|(runs/effective-prelude "run-1" "agent.retry")|, "private-history",
              "sha256:inspection", "run-1", [9]}
           ] do
-        assert {:ok, %{value: %{outcome: :returned, value: value}}} =
+        assert {:ok, %{value: %{"outcome" => "returned", "value" => value}}} =
                  Kernel.run(
                    "(return (kernel/eval (program (return #{expression}))))",
                    run_config(mission)
@@ -476,7 +476,13 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
       assert {:ok, mission} = MissionEnvironment.new(bundle: bundle, capabilities: stubs(granted))
 
-      assert {:ok, %{value: %{outcome: :returned, value: %{"provider" => "workspace"}}}} =
+      assert {:ok,
+              %{
+                value: %{
+                  "outcome" => "returned",
+                  "value" => %{"provider" => "workspace"}
+                }
+              }} =
                Kernel.run(
                  ~S|(return (kernel/eval (program (return (repo/ls "" nil)))))|,
                  run_config(mission)
