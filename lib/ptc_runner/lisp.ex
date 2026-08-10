@@ -50,6 +50,7 @@ defmodule PtcRunner.Lisp do
   }
 
   alias PtcRunner.Kernel.Program
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.Eval.Helpers
@@ -1473,6 +1474,12 @@ defmodule PtcRunner.Lisp do
   defp error_details({:prelude_contract_error, _message, details}) when is_map(details),
     do: details
 
+  defp error_details({:pmap_error, _message, taxonomy}) when is_map(taxonomy),
+    do: SafeMetadata.retain_failure_taxonomy(taxonomy)
+
+  defp error_details({:pcalls_error, _index, _message, taxonomy}) when is_map(taxonomy),
+    do: SafeMetadata.retain_failure_taxonomy(taxonomy)
+
   defp error_details({category, _message, details})
        when category in [
               :unsupported_java_class,
@@ -1599,6 +1606,13 @@ defmodule PtcRunner.Lisp do
   end
 
   def format_error({:runtime_error, msg}), do: "Runtime error: #{msg}"
+
+  def format_error({:pmap_error, msg, _taxonomy}) when is_binary(msg),
+    do: format_error({:pmap_error, msg})
+
+  def format_error({:pcalls_error, index, msg, _taxonomy})
+      when is_integer(index) and is_binary(msg),
+      do: format_error({:pcalls_error, index, msg})
 
   def format_error({:tool_error, name, reason}),
     do: UntrustedRenderer.tool_failure(name, reason)

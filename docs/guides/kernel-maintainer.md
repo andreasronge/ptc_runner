@@ -1009,7 +1009,10 @@ provider call happens outside the lease, so branches overlap freely until they
 reach `kernel/eval-source`. Admission is deliberately not queued — queuing
 requires an absolute caller deadline that `reserve_evaluation/1` does not yet
 receive, and without one a queued branch would spend the parallel deadline
-waiting.
+waiting. `pmap` and `pcalls` still reject `fail` as a worker control signal, but
+they retain its bounded, payload-free failure taxonomy. A concurrent agent
+admission refusal therefore remains publicly classifiable as
+`evaluation-unavailable` without exposing the failure value.
 
 Each `PtcRunner.Kernel.Capability` freezes its public identity, effect,
 visibility, bounded schemas, validator, and trusted callback. Environment

@@ -544,12 +544,15 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp maybe_put_failure_taxonomy(
          stopped_data,
-         {:error, %Error{reason: :explicit_failure, details: details}}
-       ) do
-    Map.merge(
-      stopped_data,
-      Map.take(details, [:failure_kind, :failure_kind_fingerprint])
-    )
+         {:error, %Error{reason: reason, details: details}}
+       )
+       when reason in [:explicit_failure, :pmap_error, :pcalls_error] do
+    taxonomy =
+      details
+      |> Map.take([:failure_kind, :failure_kind_fingerprint])
+      |> SafeMetadata.retain_failure_taxonomy()
+
+    Map.merge(stopped_data, taxonomy)
   end
 
   defp maybe_put_failure_taxonomy(stopped_data, _result), do: stopped_data
@@ -665,11 +668,13 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp workflow_error_details(fail, _timeout_ms, _limits, sink)
        when not is_nil(sink) do
-    case EventSink.policy(sink) do
-      :normal -> :normal
-      _private_or_unavailable -> :private
-    end
-    |> workflow_error_details_for_class(fail)
+    details =
+      case EventSink.policy(sink) do
+        :normal -> workflow_error_details_for_class(:normal, fail)
+        _private_or_unavailable -> workflow_error_details_for_class(:private, fail)
+      end
+
+    Map.merge(details, SafeMetadata.retain_failure_taxonomy(fail.details))
   end
 
   defp workflow_error_details_for_class(:private, _fail),

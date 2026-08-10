@@ -442,10 +442,13 @@ text — but it means a workflow that fails on purpose reports
 `execution/workflow_failed`, "the workflow failed", and no trace of whatever the
 workflow was trying to say.
 
-**Your `fail` value decides how much survives.** The value passes through a
-failure taxonomy that keeps a classification and discards everything else:
+**Your `fail` value decides how much survives in the Kernel API and canonical
+trace.** The command envelope remains the fixed `execution/workflow_failed`
+diagnostic described above. `PtcRunner.Kernel.run/2` and the canonical
+`run-stopped` event instead pass the value through a failure taxonomy that
+keeps a classification and discards everything else:
 
-| `(fail …)` value | What the envelope carries |
+| `(fail …)` value | What `Kernel.Error.details` and `run-stopped` carry |
 | --- | --- |
 | a string, or any non-map | nothing |
 | a map with a `kind` naming a known failure kind | that kind, readable |
@@ -459,9 +462,12 @@ The known failure kinds are `invalid-input`, `invalid-prompt`,
 
 So `(fail "the invoice total did not balance")` publishes nothing, while
 `(fail {:kind "assertion-failed" :detail "the invoice total did not balance"})`
-publishes `assertion-failed`. Prefer the second shape. It costs one key and it
-is the difference between a caller knowing what class of thing went wrong and
-knowing only that something did.
+publishes only `failure_kind: "assertion-failed"`. Prefer the second shape. It
+costs one key and it is the difference between a caller knowing what class of
+thing went wrong and knowing only that something did. The same projection
+survives when `pmap` or `pcalls` rejects a worker's `fail` control signal; the
+parallel error remains the terminal reason while its safe failure taxonomy
+identifies the underlying framework failure.
 
 **When provider-backed detail is needed**, rerun with `--inspect`:
 

@@ -5,6 +5,7 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   Provides type error formatting and type description utilities.
   """
 
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Env.Builtin
@@ -308,6 +309,13 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   def sanitize_private_error({reason, _message, nil}) when reason in @stable_parallel_errors,
     do: {reason, stable_parallel_error_message(reason), nil}
 
+  def sanitize_private_error({:pmap_error, _message, taxonomy}) when is_map(taxonomy),
+    do: sanitize_private_parallel_failure(:pmap_error, nil, taxonomy)
+
+  def sanitize_private_error({:pcalls_error, index, _message, taxonomy})
+      when is_integer(index) and is_map(taxonomy),
+      do: sanitize_private_parallel_failure(:pcalls_error, index, taxonomy)
+
   def sanitize_private_error({:loop_limit_exceeded, limit}) when is_integer(limit),
     do: {:loop_limit_exceeded, limit}
 
@@ -401,6 +409,21 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   defp stable_parallel_error_message(:parallel_capacity_exceeded),
     do: "the parallel worker budget is exhausted; reduce nesting or collection size"
+
+  defp sanitize_private_parallel_failure(reason, index, taxonomy) do
+    case SafeMetadata.retain_failure_taxonomy(taxonomy) do
+      retained when map_size(retained) == 1 ->
+        message = "fail called inside #{if(reason == :pmap_error, do: "pmap", else: "pcalls")}"
+
+        case reason do
+          :pmap_error -> {:pmap_error, message, retained}
+          :pcalls_error -> {:pcalls_error, index, message, retained}
+        end
+
+      _invalid_or_empty ->
+        {:private_prelude_error, "private prelude evaluation failed"}
+    end
+  end
 
   defp sanitize_private_validation_details(details) when is_binary(details) do
     details
