@@ -165,7 +165,7 @@ defmodule PtcRunner.Lisp do
           {:ok, term()} | {:error, term()}
   def project_boundary_value(value, boundary) when boundary in [:public, :kernel_json] do
     with {:ok, projected_java} <- JavaProject.project(value, boundary),
-         projected = externalize_lisp_values(projected_java),
+         projected = externalize_lisp_values(projected_java, boundary),
          :ok <- validate_externalized_symbol_refs(projected),
          :ok <- validate_projection_collisions(projected, boundary) do
       {:ok, projected}
@@ -819,6 +819,7 @@ defmodule PtcRunner.Lisp do
              cache: tool.cache,
              visibility: tool.visibility,
              signature: tool.signature,
+             argument_projection: tool.argument_projection,
              ledger_arguments: tool.ledger_arguments
            }}
         end)
@@ -1844,88 +1845,115 @@ defmodule PtcRunner.Lisp do
   # externalized representation no longer depends on VM state (#964), and it
   # matches the parser's canonicalization and the string-keyed component
   # signature boundary.
-  defp externalize_lisp_values(%Program{} = program) do
-    %{program?: true, byte_size: program.byte_size, digest: program.digest}
+  defp externalize_lisp_values(value, boundary \\ :public)
+
+  defp externalize_lisp_values(%Program{} = program, boundary) do
+    externalize_lisp_values(
+      %{program?: true, byte_size: program.byte_size, digest: program.digest},
+      boundary
+    )
   end
 
-  defp externalize_lisp_values(%Step{memory: memory} = step) when is_map(memory),
+  defp externalize_lisp_values(%Step{memory: memory} = step, _boundary) when is_map(memory),
     do: project_native_result({:ok, step}) |> elem(1)
 
-  defp externalize_lisp_values(%Step{} = step),
+  defp externalize_lisp_values(%Step{} = step, _boundary),
     do: public_result({:ok, %{step | memory: externalize_lisp_values(step.memory)}}) |> elem(1)
 
-  defp externalize_lisp_values(%{__struct__: LispKeyword} = keyword) do
+  defp externalize_lisp_values(%{__struct__: LispKeyword} = keyword, :kernel_json) do
+    if LispKeyword.valid?(keyword), do: keyword.name, else: keyword
+  end
+
+  defp externalize_lisp_values(%{__struct__: LispKeyword} = keyword, :public) do
     if LispKeyword.valid?(keyword), do: SourceAtoms.intern(keyword.name), else: keyword
   end
 
-  defp externalize_lisp_values({:closure, _params, _body, _env, _turn_history, _metadata}),
-    do: %Format.Fn{params: "..."}
+  defp externalize_lisp_values(
+         {:closure, _params, _body, _env, _turn_history, _metadata},
+         _boundary
+       ),
+       do: %Format.Fn{params: "..."}
 
-  defp externalize_lisp_values(%EnvBuiltin{}), do: %Format.Builtin{}
+  defp externalize_lisp_values(%EnvBuiltin{}, _boundary), do: %Format.Builtin{}
 
-  defp externalize_lisp_values(%RuntimeCallable{} = callable) do
+  defp externalize_lisp_values(%RuntimeCallable{} = callable, _boundary) do
     RuntimeCallable.label(callable)
   end
 
-  defp externalize_lisp_values(value) when is_function(value), do: %Format.Fn{params: "..."}
+  defp externalize_lisp_values(value, _boundary) when is_function(value),
+    do: %Format.Fn{params: "..."}
 
-  defp externalize_lisp_values(%Var{name: name} = var) when is_binary(name) do
+  defp externalize_lisp_values(%Var{name: name} = var, _boundary) when is_binary(name) do
     %{var | name: SourceAtoms.intern(name)}
   end
 
-  defp externalize_lisp_values({:var, name}) when is_binary(name),
+  defp externalize_lisp_values({:var, name}, _boundary) when is_binary(name),
     do: %Var{name: SourceAtoms.intern(name)}
 
-  defp externalize_lisp_values({:var, name}) when is_atom(name), do: %Var{name: name}
+  defp externalize_lisp_values({:var, name}, _boundary) when is_atom(name),
+    do: %Var{name: name}
 
-  defp externalize_lisp_values({:symbol_ref, name}) when is_binary(name),
+  defp externalize_lisp_values({:symbol_ref, name}, _boundary) when is_binary(name),
     do: %Format.SymbolRef{name: name}
 
-  defp externalize_lisp_values({:__ptc_return__, inner}) do
-    {:__ptc_return__, externalize_lisp_values(inner)}
+  defp externalize_lisp_values({:__ptc_return__, inner}, boundary) do
+    {:__ptc_return__, externalize_lisp_values(inner, boundary)}
   end
 
-  defp externalize_lisp_values({:__ptc_fail__, inner}) do
-    {:__ptc_fail__, externalize_lisp_values(inner)}
+  defp externalize_lisp_values({:__ptc_fail__, inner}, boundary) do
+    {:__ptc_fail__, externalize_lisp_values(inner, boundary)}
   end
 
-  defp externalize_lisp_values({:normal, function}) when is_function(function),
+  defp externalize_lisp_values({:normal, function}, _boundary) when is_function(function),
     do: %Format.Builtin{}
 
   # Context-dispatched builtins (`println`, `apply`, the introspection forms).
   # Without this the raw binding tuple escapes as the step's return value.
-  defp externalize_lisp_values({:special, name}) when is_atom(name),
+  defp externalize_lisp_values({:special, name}, _boundary) when is_atom(name),
     do: %Format.Builtin{}
 
-  defp externalize_lisp_values({:variadic, function, _identity}) when is_function(function),
-    do: %Format.Builtin{}
+  defp externalize_lisp_values({:variadic, function, _identity}, _boundary)
+       when is_function(function),
+       do: %Format.Builtin{}
 
-  defp externalize_lisp_values({:variadic_nonempty, name, function})
+  defp externalize_lisp_values({:variadic_nonempty, name, function}, _boundary)
        when is_atom(name) and is_function(function),
        do: %Format.Builtin{}
 
-  defp externalize_lisp_values({:multi_arity, name, functions})
+  defp externalize_lisp_values({:multi_arity, name, functions}, _boundary)
        when is_atom(name) and is_tuple(functions),
        do: %Format.Builtin{}
 
-  defp externalize_lisp_values({:collect, function}) when is_function(function),
+  defp externalize_lisp_values({:collect, function}, _boundary) when is_function(function),
     do: %Format.Fn{params: "..."}
 
-  defp externalize_lisp_values({:juxt_fn, _fns}), do: %Format.Fn{params: "..."}
-  defp externalize_lisp_values({:partial_fn, _f, _fixed}), do: %Format.Fn{params: "..."}
-  defp externalize_lisp_values({:comp_fn, _fns}), do: %Format.Fn{params: "..."}
-  defp externalize_lisp_values({:complement_fn, _f}), do: %Format.Fn{params: "..."}
-  defp externalize_lisp_values({:constantly_fn, _value}), do: %Format.Fn{params: "..."}
-  defp externalize_lisp_values({:every_pred_fn, _preds}), do: %Format.Fn{params: "..."}
-  defp externalize_lisp_values({:some_fn, _fns}), do: %Format.Fn{params: "..."}
-  defp externalize_lisp_values({:fnil_fn, _f, _default}), do: %Format.Fn{params: "..."}
+  defp externalize_lisp_values({:juxt_fn, _fns}, _boundary), do: %Format.Fn{params: "..."}
 
-  defp externalize_lisp_values(value) when is_list(value) do
-    Enum.map(value, &externalize_lisp_values/1)
+  defp externalize_lisp_values({:partial_fn, _f, _fixed}, _boundary),
+    do: %Format.Fn{params: "..."}
+
+  defp externalize_lisp_values({:comp_fn, _fns}, _boundary), do: %Format.Fn{params: "..."}
+
+  defp externalize_lisp_values({:complement_fn, _f}, _boundary),
+    do: %Format.Fn{params: "..."}
+
+  defp externalize_lisp_values({:constantly_fn, _value}, _boundary),
+    do: %Format.Fn{params: "..."}
+
+  defp externalize_lisp_values({:every_pred_fn, _preds}, _boundary),
+    do: %Format.Fn{params: "..."}
+
+  defp externalize_lisp_values({:some_fn, _fns}, _boundary), do: %Format.Fn{params: "..."}
+
+  defp externalize_lisp_values({:fnil_fn, _f, _default}, _boundary),
+    do: %Format.Fn{params: "..."}
+
+  defp externalize_lisp_values(value, boundary) when is_list(value) do
+    Enum.map(value, &externalize_lisp_values(&1, boundary))
   end
 
-  defp externalize_lisp_values(%MapSet{} = set) do
-    items = Enum.map(set, &externalize_lisp_values/1)
+  defp externalize_lisp_values(%MapSet{} = set, boundary) do
+    items = Enum.map(set, &externalize_lisp_values(&1, boundary))
     frequencies = Enum.frequencies(items)
     next_ordinal = next_collision_ordinal(items, :set)
 
@@ -1941,12 +1969,12 @@ defmodule PtcRunner.Lisp do
     |> MapSet.new()
   end
 
-  defp externalize_lisp_values(value) when is_map(value) and not is_struct(value) do
+  defp externalize_lisp_values(value, boundary) when is_map(value) and not is_struct(value) do
     pairs =
       Enum.map(value, fn {key, item} ->
-        externalized_key = externalize_lisp_values(key)
+        externalized_key = externalize_lisp_values(key, boundary)
         display_key = if match?(%LispKeyword{}, key), do: key, else: externalized_key
-        {externalized_key, display_key, externalize_lisp_values(item)}
+        {externalized_key, display_key, externalize_lisp_values(item, boundary)}
       end)
 
     frequencies = Enum.frequencies_by(pairs, &elem(&1, 0))
@@ -1968,23 +1996,27 @@ defmodule PtcRunner.Lisp do
     |> Map.new()
   end
 
-  defp externalize_lisp_values(value) when is_tuple(value) do
+  defp externalize_lisp_values(value, boundary) when is_tuple(value) do
     value
     |> Tuple.to_list()
-    |> Enum.map(&externalize_lisp_values/1)
+    |> Enum.map(&externalize_lisp_values(&1, boundary))
     |> List.to_tuple()
   end
 
-  defp externalize_lisp_values(value) when is_struct(value) do
+  defp externalize_lisp_values(value, boundary) when is_struct(value) do
     fields =
       value
       |> Map.from_struct()
-      |> Map.new(fn {field, item} -> {field, externalize_lisp_values(item)} end)
+      |> Map.new(fn {field, item} -> {field, externalize_lisp_values(item, boundary)} end)
 
     struct(value.__struct__, fields)
   end
 
-  defp externalize_lisp_values(value), do: value
+  defp externalize_lisp_values(atom, :kernel_json) when is_atom(atom) do
+    if LispKeyword.keyword?(atom), do: Atom.to_string(atom), else: atom
+  end
+
+  defp externalize_lisp_values(value, _boundary), do: value
 
   defp next_collision_ordinal(values, collection) do
     values

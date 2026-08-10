@@ -180,6 +180,13 @@ defmodule PtcRunner.Kernel.RuntimeTools do
            ledger_arguments: kernel_check_source_ledger_arguments(limits)
          }}
 
+      {"kernel-result-contract" = name, callback} ->
+        {name,
+         %TrustedTool{
+           function: callback,
+           argument_projection: :raw
+         }}
+
       {name, callback} ->
         {name, %TrustedTool{function: callback}}
     end)
@@ -231,7 +238,8 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   end
 
   defp normalize_params(params, max_bytes) do
-    with {:ok, projected} <- Lisp.project_boundary_value(params, :kernel_json),
+    with false <- contains_program?(params),
+         {:ok, projected} <- Lisp.project_boundary_value(params, :kernel_json),
          true <- JSONValue.value?(projected),
          bytes when is_integer(bytes) and bytes <= max_bytes <-
            RetainedSize.bytes_with_cap(projected, max_bytes) do
@@ -240,6 +248,20 @@ defmodule PtcRunner.Kernel.RuntimeTools do
       _other -> {:error, :invalid_params}
     end
   end
+
+  defp contains_program?(%Program{}), do: true
+
+  defp contains_program?(value) when is_map(value) and not is_struct(value) do
+    Enum.any?(value, fn {key, item} -> contains_program?(key) or contains_program?(item) end)
+  end
+
+  defp contains_program?(value) when is_list(value), do: Enum.any?(value, &contains_program?/1)
+
+  defp contains_program?(value) when is_tuple(value) do
+    value |> Tuple.to_list() |> Enum.any?(&contains_program?/1)
+  end
+
+  defp contains_program?(_value), do: false
 
   defp project_kernel_eval_arguments(arguments, limits) when is_map(arguments) do
     %{}
@@ -324,7 +346,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   @doc "Builds the workflow-only application-result contract callback."
   def result_contract(nil) do
     fn
-      %{"value" => _value, "json_value" => json_value?} when is_boolean(json_value?) ->
+      %{"value" => _value} = arguments when map_size(arguments) == 1 ->
         %{status: :ok, value: %{enforced?: false, valid?: true}}
 
       _arguments ->
@@ -334,30 +356,27 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
   def result_contract(%ValueContract{} = contract) do
     fn
-      %{"value" => value, "json_value" => json_value?} when is_boolean(json_value?) ->
-        validate_result_contract(contract, value, json_value?)
+      %{"value" => value} = arguments when map_size(arguments) == 1 ->
+        validate_result_contract(contract, value)
 
       _arguments ->
         %{status: :error, kind: :protocol_error, reason: :invalid_result_contract_request}
     end
   end
 
-  defp validate_result_contract(contract, value, true) do
-    case ValueContract.json_value(value) do
-      {:ok, json_value} ->
-        if ValueContract.valid?(contract, json_value) do
-          %{status: :ok, value: %{enforced?: true, valid?: true}}
-        else
-          invalid_result_contract(ValueContract.classify(contract, json_value))
-        end
-
+  defp validate_result_contract(contract, value) do
+    with {:ok, projected} <- Lisp.project_boundary_value(value, :kernel_json),
+         {:ok, json_value} <- ValueContract.json_value(projected) do
+      if ValueContract.valid?(contract, json_value) do
+        %{status: :ok, value: %{enforced?: true, valid?: true}}
+      else
+        invalid_result_contract(ValueContract.classify(contract, json_value))
+      end
+    else
       {:error, _reason} ->
         invalid_json_result_contract(contract, value)
     end
   end
-
-  defp validate_result_contract(contract, value, false),
-    do: invalid_json_result_contract(contract, value)
 
   defp invalid_json_result_contract(contract, value) do
     details =

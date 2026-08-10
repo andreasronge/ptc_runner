@@ -46,23 +46,26 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
     assert {:ok, result} =
              "05-signature-feedback"
              |> path()
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> ApplicationPackage.request_directory(
+               installed_limits: registry.installed_limits,
+               result_projection: :json
+             )
              |> RunLifecycle.build(registry)
              |> RunLifecycle.execute()
 
     assert %{
              "invalid_evaluation" => %{
-               kind: :prelude_contract_error,
-               outcome: :evaluation_error,
-               retryable?: true,
-               details: %{
-                 ref: "tutorial.signatures/double",
-                 phase: :input,
-                 path: ["value"]
+               "kind" => "prelude_contract_error",
+               "outcome" => "evaluation_error",
+               "retryable?" => true,
+               "details" => %{
+                 "ref" => "tutorial.signatures/double",
+                 "phase" => "input",
+                 "path" => ["value"]
                }
              },
              "model_feedback" => feedback,
-             "corrected_evaluation" => %{outcome: :returned, value: 42}
+             "corrected_evaluation" => %{"outcome" => "returned", "value" => 42}
            } = result.value
 
     assert feedback =~ "tutorial.signatures/double input value: expected int, got string"

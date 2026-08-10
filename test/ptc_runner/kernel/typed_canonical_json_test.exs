@@ -65,4 +65,9 @@ defmodule PtcRunner.Kernel.TypedCanonicalJSONTest do
     ordered = %Jason.OrderedObject{values: [{"key", 1}]}
     assert {:error, :invalid_json} = StrictJSON.admit(%{"nested" => ordered})
   end
+
+  test "located admission identifies an invalid UTF-8 object key" do
+    assert {:error, {:invalid_json, [{:map_key, 0}], :invalid_utf8}} =
+             StrictJSON.admit_with_locations(%{<<255>> => true})
+  end
 end

@@ -13,12 +13,13 @@ defmodule PtcRunner.Lisp.Tool do
     :expose,
     :native_result,
     argument_collisions: :reject,
+    argument_projection: :tool,
     visibility: :public,
     cache: false,
     ledger_arguments: :full
   ]
 
-  @fields ~w(name function signature description type expose native_result visibility cache ledger_arguments)a
+  @fields ~w(name function signature description type expose native_result visibility cache ledger_arguments argument_projection)a
 
   @type t :: %__MODULE__{
           name: binary(),
@@ -30,6 +31,7 @@ defmodule PtcRunner.Lisp.Tool do
           native_result: keyword() | nil,
           ledger_arguments: :full | (map() -> map()),
           argument_collisions: :reject | :pass,
+          argument_projection: :tool | :raw,
           visibility: :public | :private,
           cache: boolean()
         }
@@ -38,12 +40,20 @@ defmodule PtcRunner.Lisp.Tool do
   def new(name, %__MODULE__{} = tool) when is_binary(name),
     do: validate(%{tool | name: tool.name || name, argument_collisions: :reject})
 
-  def new(name, %TrustedTool{function: function, ledger_arguments: ledger_arguments})
+  def new(
+        name,
+        %TrustedTool{
+          function: function,
+          argument_projection: argument_projection,
+          ledger_arguments: ledger_arguments
+        }
+      )
       when is_binary(name) and is_function(function, 1),
       do:
         validate(%__MODULE__{
           name: name,
           function: function,
+          argument_projection: argument_projection,
           ledger_arguments: ledger_arguments,
           type: :native,
           argument_collisions: :pass
@@ -120,12 +130,14 @@ defmodule PtcRunner.Lisp.Tool do
            function: function,
            visibility: visibility,
            cache: cache,
+           argument_projection: argument_projection,
            ledger_arguments: ledger_arguments,
            argument_collisions: collisions
          } = tool
        )
        when is_function(function) and visibility in [:public, :private] and is_boolean(cache) and
               collisions in [:reject, :pass] and
+              argument_projection in [:tool, :raw] and
               (ledger_arguments == :full or is_function(ledger_arguments, 1)),
        do: {:ok, tool}
 

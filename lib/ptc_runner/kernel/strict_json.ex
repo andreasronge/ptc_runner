@@ -23,6 +23,15 @@ defmodule PtcRunner.Kernel.StrictJSON do
           | :json_depth_exceeded
           | :json_node_limit_exceeded
 
+  @type located_error ::
+          error()
+          | {:invalid_json, [binary() | non_neg_integer() | {:map_key, non_neg_integer()}],
+             :improper_list
+             | :invalid_object_key
+             | :invalid_utf8
+             | :non_finite_float
+             | :unsupported_value}
+
   @spec decode(binary(), keyword()) :: {:ok, term()} | {:error, error()}
   @doc """
   Decodes one JSON value under the shared structural admission limits.
@@ -73,12 +82,34 @@ defmodule PtcRunner.Kernel.StrictJSON do
           limits
           |> Map.put(:ordered_objects?, false)
           |> Map.put(:duplicate_locations?, false)
+          |> Map.put(:error_locations?, false)
         )
       end)
     end
   end
 
   def admit(_value, _opts), do: {:error, :invalid_json}
+
+  @doc false
+  @spec admit_with_locations(term(), keyword()) ::
+          {:ok, term()} | {:error, located_error()}
+  def admit_with_locations(value, opts \\ [])
+
+  def admit_with_locations(value, opts) when is_list(opts) do
+    with {:ok, limits} <- limits(opts) do
+      bounded(fn ->
+        admit_value(
+          value,
+          limits
+          |> Map.put(:ordered_objects?, false)
+          |> Map.put(:duplicate_locations?, true)
+          |> Map.put(:error_locations?, true)
+        )
+      end)
+    end
+  end
+
+  def admit_with_locations(_value, _opts), do: {:error, :invalid_json}
 
   defp decode_bounded(source, limits) do
     bounded(fn ->
@@ -166,7 +197,7 @@ defmodule PtcRunner.Kernel.StrictJSON do
         {:error, _reason} = error -> error
       end
     else
-      {:error, :invalid_json}
+      invalid_error(limits, path, :improper_list)
     end
   end
 
@@ -174,26 +205,29 @@ defmodule PtcRunner.Kernel.StrictJSON do
        when is_nil(value) or is_boolean(value) or is_integer(value),
        do: count_scalar(value, nodes, limits)
 
-  defp value(value, _depth, nodes, limits, _path) when is_float(value) do
+  defp value(value, _depth, nodes, limits, path) when is_float(value) do
     if finite_float?(value),
       do: count_scalar(value, nodes, limits),
-      else: {:error, :invalid_json}
+      else: invalid_error(limits, path, :non_finite_float)
   end
 
-  defp value(value, _depth, nodes, limits, _path) when is_binary(value) do
+  defp value(value, _depth, nodes, limits, path) when is_binary(value) do
     if String.valid?(value),
       do: count_scalar(value, nodes, limits),
-      else: {:error, :invalid_json}
+      else: invalid_error(limits, path, :invalid_utf8)
   end
 
-  defp value(_value, _depth, _nodes, _limits, _path), do: {:error, :invalid_json}
+  defp value(_value, _depth, _nodes, limits, path),
+    do: invalid_error(limits, path, :unsupported_value)
 
   defp object(pairs, depth, nodes, limits, path) do
-    Enum.reduce_while(pairs, {:ok, %{}, nodes}, fn
-      {key, item}, {:ok, admitted, count} when is_binary(key) ->
+    pairs
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, %{}, nodes}, fn
+      {{key, item}, index}, {:ok, admitted, count} when is_binary(key) ->
         cond do
           not String.valid?(key) ->
-            {:halt, {:error, :invalid_json}}
+            {:halt, invalid_error(limits, path ++ [{:map_key, index}], :invalid_utf8)}
 
           count >= limits.max_nodes ->
             {:halt, {:error, :json_node_limit_exceeded}}
@@ -208,10 +242,15 @@ defmodule PtcRunner.Kernel.StrictJSON do
             end
         end
 
-      _pair, _acc ->
-        {:halt, {:error, :invalid_json}}
+      {{_key, _item}, index}, _acc ->
+        {:halt, invalid_error(limits, path ++ [{:map_key, index}], :invalid_object_key)}
     end)
   end
+
+  defp invalid_error(%{error_locations?: true}, path, reason),
+    do: {:error, {:invalid_json, path, reason}}
+
+  defp invalid_error(_limits, _path, _reason), do: {:error, :invalid_json}
 
   defp duplicate_error(%{duplicate_locations?: true}, path),
     do: {:error, {:duplicate_json_key, path}}

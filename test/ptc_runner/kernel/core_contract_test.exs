@@ -1159,7 +1159,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     refute_receive :resource_closed
 
     send(provider, :continue)
-    assert {:ok, %{value: %{status: :ok, value: 42}}} = Task.await(first)
+    assert {:ok, %{value: %{"status" => "ok", "value" => 42}}} = Task.await(first)
     assert_receive :resource_closed
 
     assert Enum.count(EventSink.events(sink), &(&1.type == "run-started")) == 1
@@ -1223,7 +1223,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     refute_receive :winner_resource_closed
 
     send(provider, :continue)
-    assert {:ok, %{value: %{status: :ok, value: 42}}} = Task.await(winner)
+    assert {:ok, %{value: %{"status" => "ok", "value" => 42}}} = Task.await(winner)
     assert_receive :winner_resource_closed
   end
 
@@ -1689,7 +1689,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         event_sink: sink
       )
 
-    assert {:ok, %{value: %{status: :ok, value: %{"sum" => 42}}}} =
+    assert {:ok, %{value: %{"status" => "ok", "value" => %{"sum" => 42}}}} =
              Kernel.run("(return (tool/add {:left 40 :right 2}))", config)
 
     assert [started, stopped] =
@@ -1728,7 +1728,14 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         event_sink: sink
       )
 
-    assert {:ok, %{value: %{status: :error, kind: :protocol_error, reason: :ambiguous_arguments}}} =
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "error",
+                "kind" => "protocol_error",
+                "reason" => "ambiguous_arguments"
+              }
+            }} =
              Kernel.run(
                ~S|(return (tool/capture {"outer" {"path" "a" :path "b"}}))|,
                config
@@ -1753,7 +1760,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, mission} = MissionEnvironment.new(capabilities: [capability])
     {:ok, state} = RunState.start(Limits.defaults())
 
-    assert %{outcome: :returned, value: %{kind: :protocol_error, reason: :ambiguous_arguments}} =
+    assert %{
+             outcome: :returned,
+             value: %{"kind" => "protocol_error", "reason" => "ambiguous_arguments"}
+           } =
              Evaluation.evaluate_source(
                state,
                mission,
@@ -1861,7 +1871,11 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                capability_activity?: true,
                capability_failure?: true,
                retryable?: ^retryable?,
-               value: %{status: :error, kind: :provider_error, reason: :not_found}
+               value: %{
+                 "status" => "error",
+                 "kind" => "provider_error",
+                 "reason" => "not_found"
+               }
              } =
                Evaluation.evaluate_source(
                  state,
@@ -2322,7 +2336,13 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         event_sink: sink
       )
 
-    assert {:ok, %{value: %{status: :ok, value: %{outcome: :returned, value: 42}}}} =
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "ok",
+                "value" => %{"outcome" => "returned", "value" => 42}
+              }
+            }} =
              Kernel.run(
                "(return (tool/kernel-eval {:kind :source :source \"(return 42)\"}))",
                config
@@ -2425,7 +2445,13 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         event_sink: sink
       )
 
-    assert {:ok, %{value: %{status: :ok, value: %{outcome: :returned, value: 42}}}} =
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "ok",
+                "value" => %{"outcome" => "returned", "value" => 42}
+              }
+            }} =
              Kernel.run(
                "(return (tool/kernel-eval {:kind :embedded :program (program (return (+ 40 2)))}))",
                config
@@ -2461,10 +2487,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:ok,
             %{
               value: [
-                %{outcome: :continued, value: 2},
-                %{outcome: :continued, value: 4},
-                %{outcome: :returned, value: 6},
-                %{outcome: :failed, value: 7}
+                %{"outcome" => "continued", "value" => 2},
+                %{"outcome" => "continued", "value" => 4},
+                %{"outcome" => "returned", "value" => 6},
+                %{"outcome" => "failed", "value" => 7}
               ]
             }} = Kernel.run(source, config)
   end
@@ -2484,7 +2510,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         event_sink: sink
       )
 
-    assert {:ok, %{value: %{program?: true, byte_size: 7, digest: digest}}} =
+    assert {:ok, %{value: %{"program?" => true, "byte_size" => 7, "digest" => digest}}} =
              Kernel.run("(return (program (+ 1 2)))", config)
 
     assert is_binary(digest)
@@ -2506,7 +2532,15 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       )
 
     assert {:ok,
-            %{value: %{status: :ok, value: %{outcome: :evaluation_error, kind: :unbound_var}}}} =
+            %{
+              value: %{
+                "status" => "ok",
+                "value" => %{
+                  "outcome" => "evaluation_error",
+                  "kind" => "unbound_var"
+                }
+              }
+            }} =
              Kernel.run(
                "(let [x 42] (return (tool/kernel-eval {:kind :embedded :program (program (return x))})))",
                config
@@ -2536,7 +2570,8 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       (return (kernel/eval (program (return (+ retained 2))))))
     """
 
-    assert {:ok, %{value: %{outcome: :returned, value: 42}}} = Kernel.run(source, config)
+    assert {:ok, %{value: %{"outcome" => "returned", "value" => 42}}} =
+             Kernel.run(source, config)
 
     {:ok, second_sink} = EventSink.start(:normal, limits, run_id: "kernel-library-invalid")
 
@@ -2549,7 +2584,13 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         event_sink: second_sink
       )
 
-    assert {:ok, %{value: %{kind: :protocol_error, reason: :invalid_kernel_eval_request}}} =
+    assert {:ok,
+            %{
+              value: %{
+                "kind" => "protocol_error",
+                "reason" => "invalid_kernel_eval_request"
+              }
+            }} =
              Kernel.run("(return (kernel/eval \"(return 42)\"))", second_config)
   end
 
@@ -2715,17 +2756,27 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     """
 
     assert {:ok, %{value: [valid, invalid, usage]}} = Kernel.run(source, config)
-    assert %{outcome: :valid, source_bytes: valid_bytes, source_hash: "sha256:" <> _} = valid
+
+    assert %{
+             "outcome" => "valid",
+             "source_bytes" => valid_bytes,
+             "source_hash" => "sha256:" <> _
+           } = valid
+
     assert valid_bytes == byte_size("(return (tool/lookup {}))")
 
     assert %{
-             outcome: :invalid,
-             diagnostic: %{kind: :unknown_tool, message: diagnostic, details: %{}}
+             "outcome" => "invalid",
+             "diagnostic" => %{
+               "kind" => "unknown_tool",
+               "message" => diagnostic,
+               "details" => %{}
+             }
            } = invalid
 
     assert is_binary(diagnostic)
-    assert usage.subordinate_source_checks == 2
-    assert usage.subordinate_evaluations == 0
+    assert usage["subordinate_source_checks"] == 2
+    assert usage["subordinate_evaluations"] == 0
     refute_received :source_check_executed_capability
   end
 
@@ -2918,8 +2969,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:ok, %{value: value}} = Kernel.run(source, config)
     assert is_integer(value["remaining"])
     assert is_map(value["usage"])
-    assert [%{name: "search"}] = value["capabilities"]
-    assert %{name: "search", description: "Search a fixed fixture"} = value["search"]
+    assert [%{"name" => "search"}] = value["capabilities"]
+
+    assert %{"name" => "search", "description" => "Search a fixed fixture"} =
+             value["search"]
 
     assert %{type: "workflow-annotation", data: %{annotation_type: "progress"}} =
              Enum.find(EventSink.events(sink), &(&1.type == "workflow-annotation"))
@@ -2945,9 +2998,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:ok,
             %{
               value: %{
-                status: :error,
-                kind: :invalid_annotation,
-                reason: :invalid_workflow_annotation
+                "status" => "error",
+                "kind" => "invalid_annotation",
+                "reason" => "invalid_workflow_annotation"
               }
             }} =
              Kernel.run(
@@ -2962,9 +3015,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:ok,
             %{
               value: %{
-                status: :error,
-                kind: :invalid_annotation,
-                reason: :invalid_workflow_annotation
+                "status" => "error",
+                "kind" => "invalid_annotation",
+                "reason" => "invalid_workflow_annotation"
               }
             }} =
              Kernel.run(
@@ -2977,9 +3030,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:ok,
             %{
               value: %{
-                status: :error,
-                kind: :protocol_error,
-                reason: :invalid_workflow_annotation
+                "status" => "error",
+                "kind" => "protocol_error",
+                "reason" => "invalid_workflow_annotation"
               }
             }} =
              Kernel.run(
@@ -2994,7 +3047,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         ~s|(workflow.event/annotate "progress" {"source" "private"})|
       end)
 
-    assert {:ok, %{value: %{closed?: false, protocol_errors: 0}}} =
+    assert {:ok, %{value: %{"closed?" => false, "protocol_errors" => 0}}} =
              Kernel.run(
                """
                (do

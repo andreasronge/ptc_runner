@@ -190,7 +190,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           parallel_budget: PtcRunner.Lisp.Eval.ParallelBudget.t() | nil,
           tool_activity: :atomics.atomics_ref(),
           effects: Effects.t(),
-          tools_meta: %{String.t() => %{cache: boolean()}},
+          tools_meta: %{String.t() => %{optional(atom()) => term()}},
           strict_data: boolean(),
           strict_transitive_calls: boolean(),
           direct_namespaces: MapSet.t(String.t()),

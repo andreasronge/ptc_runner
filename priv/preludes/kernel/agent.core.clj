@@ -56,9 +56,9 @@
     (and (true? (get evaluation :capability-failure?))
          (true? (get evaluation :retryable?))
          (map? error)
-         (= :error (get error :status))
-         (keyword? (get error :kind))
-         (keyword? (get error :reason))
+         (= "error" (get error :status))
+         (string? (get error :kind))
+         (string? (get error :reason))
          (or (true? (get error :retryable?))
              (false? (get error :retryable?))))))
 

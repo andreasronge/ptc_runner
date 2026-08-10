@@ -434,21 +434,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
-    assert %{
-             status: :ok,
-             value: %{
-               outcome: :returned,
-               value: %{
-                 "failed" => %{
-                   kind: :provider_error,
-                   reason: :domain_error,
-                   status: :error
-                 },
-                 "structured" => %{status: :ok, value: %{"value" => 42}},
-                 "text" => %{status: :ok, value: %{"text" => ["hello"]}}
-               }
-             }
-           } = result.value
+    assert_common_call_result(result.value)
 
     events = EventSink.events(built.config.event_sink)
     started = Enum.find(events, &(&1.type == "run-started"))
@@ -510,15 +496,15 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
     assert %{
-             status: :error,
-             kind: :provider_error,
-             reason: :domain_error,
-             details: ^feedback,
-             retryable?: false
-           } = get_in(result.value, [:value, :value, "first"])
+             "status" => "error",
+             "kind" => "provider_error",
+             "reason" => "domain_error",
+             "details" => ^feedback,
+             "retryable?" => false
+           } = get_in(result.value, ["value", "value", "first"])
 
-    assert %{status: :ok, value: %{"text" => ["recovered"]}} =
-             get_in(result.value, [:value, :value, "second"])
+    assert %{"status" => "ok", "value" => %{"text" => ["recovered"]}} =
+             get_in(result.value, ["value", "value", "second"])
 
     events = EventSink.events(built.config.event_sink)
     refute inspect(events) =~ feedback
@@ -620,17 +606,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert :ok = RunBuilder.close(http_built)
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
-    assert %{
-             status: :ok,
-             value: %{
-               outcome: :returned,
-               value: %{
-                 "failed" => %{kind: :provider_error, reason: :domain_error, status: :error},
-                 "structured" => %{status: :ok, value: %{"value" => 42}},
-                 "text" => %{status: :ok, value: %{"text" => ["hello"]}}
-               }
-             }
-           } = result.value
+    assert_common_call_result(result.value)
 
     EventSink.stop(built.config.event_sink)
 
@@ -675,7 +651,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              built.config.connector_snapshots |> hd() |> Map.fetch!("tools")
 
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
-    assert %{status: :ok, value: %{"value" => 42}} = get_in(result.value, [:value, :value])
+
+    assert %{"status" => "ok", "value" => %{"value" => 42}} =
+             get_in(result.value, ["value", "value"])
+
     EventSink.stop(built.config.event_sink)
     assert File.read!(marker) =~ "tools/call"
   end
@@ -756,14 +735,14 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
       case expected_status do
         :ok ->
-          assert %{status: :ok, value: %{"text" => [returned_text]}} =
-                   get_in(result.value, [:value, :value, "text"])
+          assert %{"status" => "ok", "value" => %{"text" => [returned_text]}} =
+                   get_in(result.value, ["value", "value", "text"])
 
           assert returned_text == text
 
         :error ->
-          assert %{status: :error, reason: :invalid_result} =
-                   get_in(result.value, [:value, :value, "text"])
+          assert %{"status" => "error", "reason" => "invalid_result"} =
+                   get_in(result.value, ["value", "value", "text"])
       end
 
       EventSink.stop(built.config.event_sink)
@@ -838,20 +817,20 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
       assert %{
-               status: :ok,
-               value: %{
-                 outcome: :returned,
-                 value: %{
+               "status" => "ok",
+               "value" => %{
+                 "outcome" => "returned",
+                 "value" => %{
                    "structured" => structured,
                    "text" => %{
-                     status: :error,
-                     reason: :transport_error,
-                     retryable?: false
+                     "status" => "error",
+                     "reason" => "transport_error",
+                     "retryable?" => false
                    },
                    "failed" => %{
-                     status: :error,
-                     reason: :transport_error,
-                     retryable?: false
+                     "status" => "error",
+                     "reason" => "transport_error",
+                     "retryable?" => false
                    }
                  }
                }
@@ -859,10 +838,14 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
       case mode do
         "exit-before-response" ->
-          assert %{status: :error, reason: :transport_error, retryable?: false} = structured
+          assert %{
+                   "status" => "error",
+                   "reason" => "transport_error",
+                   "retryable?" => false
+                 } = structured
 
         "exit-after-response" ->
-          assert %{status: :ok, value: %{"value" => 42}} = structured
+          assert %{"status" => "ok", "value" => %{"value" => 42}} = structured
       end
 
       EventSink.stop(built.config.event_sink)
@@ -961,7 +944,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
-    assert %{status: :ok, value: %{"value" => 42}} = get_in(result.value, [:value, :value])
+    assert %{"status" => "ok", "value" => %{"value" => 42}} =
+             get_in(result.value, ["value", "value"])
 
     EventSink.stop(built.config.event_sink)
   end
@@ -1106,15 +1090,17 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                |> RunLifecycle.build()
 
       assert {:ok, result} = Kernel.run(built.entry_source, built.config)
-      failure = get_in(result.value, [:value, :value])
+      failure = get_in(result.value, ["value", "value"])
 
       assert %{
-               status: :error,
-               kind: :provider_error,
-               reason: ^reason,
-               details: ^details,
-               retryable?: false
+               "status" => "error",
+               "kind" => "provider_error",
+               "reason" => expected_reason,
+               "details" => ^details,
+               "retryable?" => false
              } = failure
+
+      assert expected_reason == Atom.to_string(reason)
 
       assert_effect_state(failure, effect)
       EventSink.stop(built.config.event_sink)
@@ -1249,9 +1235,12 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                |> RunLifecycle.build()
 
       assert {:ok, result} = Kernel.run(built.entry_source, built.config)
-      failure = get_in(result.value, [:value, :value])
+      failure = get_in(result.value, ["value", "value"])
 
-      assert %{status: :error, kind: :provider_error, reason: ^reason} = failure
+      assert %{"status" => "error", "kind" => "provider_error", "reason" => failure_reason} =
+               failure
+
+      assert failure_reason == Atom.to_string(reason)
 
       if reason == :timeout do
         assert_receive {:mcp_blocked, worker}
@@ -1259,11 +1248,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       end
 
       if effect == :read do
-        assert failure.retryable?
-        refute Map.has_key?(failure, :mutation_state)
+        assert failure["retryable?"]
+        refute Map.has_key?(failure, "mutation_state")
       else
-        refute failure.retryable?
-        assert failure.mutation_state == :indeterminate
+        refute failure["retryable?"]
+        assert failure["mutation_state"] == "indeterminate"
       end
 
       EventSink.stop(built.config.event_sink)
@@ -1300,16 +1289,16 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       assert_receive {:mcp_request, "tools/list", _headers}
 
       assert {:ok, result} = Kernel.run(built.entry_source, built.config)
-      failure = get_in(result.value, [:value, :value])
+      failure = get_in(result.value, ["value", "value"])
 
       assert %{
-               status: :error,
-               kind: :provider_error,
-               reason: :invalid_result,
-               retryable?: false
+               "status" => "error",
+               "kind" => "provider_error",
+               "reason" => "invalid_result",
+               "retryable?" => false
              } = failure
 
-      refute Map.has_key?(failure, :mutation_state)
+      refute Map.has_key?(failure, "mutation_state")
       refute_receive {:mcp_request, "tools/call", _headers}
       EventSink.stop(built.config.event_sink)
     end
@@ -1477,11 +1466,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
     assert %{
-             status: :error,
-             kind: :provider_error,
-             reason: :invalid_result,
-             details: "mcp_unsupported_result"
-           } = get_in(result.value, [:value, :value, "structured"])
+             "status" => "error",
+             "kind" => "provider_error",
+             "reason" => "invalid_result",
+             "details" => "mcp_unsupported_result"
+           } = get_in(result.value, ["value", "value", "structured"])
 
     EventSink.stop(built.config.event_sink)
   end
@@ -1809,8 +1798,12 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
-    assert %{status: :error, kind: :provider_error, reason: :domain_error, retryable?: false} =
-             get_in(result.value, [:value, :value, "structured"])
+    assert %{
+             "status" => "error",
+             "kind" => "provider_error",
+             "reason" => "domain_error",
+             "retryable?" => false
+           } = get_in(result.value, ["value", "value", "structured"])
 
     EventSink.stop(built.config.event_sink)
 
@@ -1826,8 +1819,12 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
-    assert %{status: :error, kind: :provider_error, reason: :invalid_result, retryable?: false} =
-             get_in(result.value, [:value, :value, "structured"])
+    assert %{
+             "status" => "error",
+             "kind" => "provider_error",
+             "reason" => "invalid_result",
+             "retryable?" => false
+           } = get_in(result.value, ["value", "value", "structured"])
 
     EventSink.stop(built.config.event_sink)
   end
@@ -1849,8 +1846,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
-    assert %{status: :error, kind: :provider_error, reason: :invalid_result} =
-             get_in(result.value, [:value, :value, "structured"])
+    assert %{
+             "status" => "error",
+             "kind" => "provider_error",
+             "reason" => "invalid_result"
+           } = get_in(result.value, ["value", "value", "structured"])
 
     EventSink.stop(built.config.event_sink)
   end
@@ -2154,8 +2154,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert {:ok, invalid_result} = Kernel.run(invalid.entry_source, invalid.config)
 
-    assert %{kind: :provider_error, reason: :invalid_result, status: :error} =
-             get_in(invalid_result.value, [:value, :value, "structured"])
+    assert %{
+             "kind" => "provider_error",
+             "reason" => "invalid_result",
+             "status" => "error"
+           } = get_in(invalid_result.value, ["value", "value", "structured"])
 
     EventSink.stop(invalid.config.event_sink)
 
@@ -2170,8 +2173,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert {:ok, large_result} = Kernel.run(large.entry_source, large.config)
 
-    assert %{kind: :provider_error, reason: :invalid_result, status: :error} =
-             get_in(large_result.value, [:value, :value, "text"])
+    assert %{
+             "kind" => "provider_error",
+             "reason" => "invalid_result",
+             "status" => "error"
+           } = get_in(large_result.value, ["value", "value", "text"])
 
     EventSink.stop(large.config.event_sink)
 
@@ -2503,11 +2509,29 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     ~s|(return (tool/#{public_name} {"query" #{Jason.encode!(query)}}))|
   end
 
+  defp assert_common_call_result(result_value) do
+    assert %{
+             "status" => "ok",
+             "value" => %{
+               "outcome" => "returned",
+               "value" => %{
+                 "failed" => %{
+                   "kind" => "provider_error",
+                   "reason" => "domain_error",
+                   "status" => "error"
+                 },
+                 "structured" => %{"status" => "ok", "value" => %{"value" => 42}},
+                 "text" => %{"status" => "ok", "value" => %{"text" => ["hello"]}}
+               }
+             }
+           } = result_value
+  end
+
   defp assert_effect_state(failure, :read),
-    do: refute(Map.has_key?(failure, :mutation_state))
+    do: refute(Map.has_key?(failure, "mutation_state"))
 
   defp assert_effect_state(failure, :write),
-    do: assert(failure.mutation_state == :indeterminate)
+    do: assert(failure["mutation_state"] == "indeterminate")
 
   defp input_required_state_only do
     %{

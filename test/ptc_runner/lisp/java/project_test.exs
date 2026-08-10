@@ -412,6 +412,26 @@ defmodule PtcRunner.Lisp.Java.ProjectTest do
              Lisp.project_boundary_value(result, :kernel_json)
   end
 
+  test "kernel JSON projection gives every keyword one string representation" do
+    assert {:ok, "count"} = Lisp.project_boundary_value(:count, :kernel_json)
+
+    assert {:ok, "count"} =
+             Lisp.project_boundary_value(%Keyword{name: "count"}, :kernel_json)
+
+    assert {:ok, "novel"} =
+             Lisp.project_boundary_value(%Keyword{name: "novel"}, :kernel_json)
+
+    assert {:ok, :count} = Lisp.project_boundary_value(:count, :public)
+    assert {:ok, :count} = Lisp.project_boundary_value(%Keyword{name: "count"}, :public)
+
+    for special <- [nil, true, false, :infinity, :negative_infinity, :nan] do
+      assert {:ok, ^special} = Lisp.project_boundary_value(special, :kernel_json)
+    end
+
+    assert {:error, {:public_projection_collision, _path, :set}} =
+             Lisp.project_boundary_value(MapSet.new([:count, "count"]), :kernel_json)
+  end
+
   test "public projection rejects malformed symbol-reference outputs" do
     for malformed_native <- [
           {:symbol_ref, <<255>>},
