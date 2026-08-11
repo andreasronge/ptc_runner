@@ -49,7 +49,13 @@ endpoint-bearing `openai-compat:` selectors remain omitted.
 A fresh Mix invocation safely configures and starts a selected optional
 provider application only after the active provider lifecycle begins. A later `ptc run`
 invocation in the same VM reuses an already-running application as host-owned,
-so task chaining and `iex -S mix` do not require restarting the VM.
+so task chaining and `iex -S mix` do not require restarting the VM. For ReqLLM,
+the fresh command-owned start configures its default HTTP/1 Finch pool as one
+shard sized from the installed `live_provider_tasks` ceiling. A manifest may
+narrow its own effective limit but does not resize that VM-lifetime pool. Later
+host-owned commands keep the already-running application's configuration, so
+an embedding that changes installed ceilings in one VM owns the corresponding
+aggregate pool-capacity policy.
 
 ## Run a manifest
 

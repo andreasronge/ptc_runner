@@ -389,7 +389,17 @@ the constructor directly. Such provider-bearing values are presently
 continuation state for the staged command pipeline. `RunBuilder.build_prepared/3`
 rejects them; the execution-session owner consumes one when it opens its
 sinks, `ProviderActiveSession` then marks the active lifecycle and opens the
-session. That marker proves consumption and lifecycle position, not by itself
+session. During application admission, a command-owned VM configures ReqLLM's
+default HTTP/1 Finch pool before starting it: one shard sized from the sealed
+catalog's installed `live_provider_tasks` ceiling. It deliberately does not use
+the prepared run's manifest-narrowed effective value, because ReqLLM constructs
+one VM-lifetime Finch tree at application startup. Explicit full Finch pools or
+a non-HTTP/1 protocol configuration keep ReqLLM's own precedence. Host-owned
+mode changes neither application configuration nor lifecycle. A later same-VM
+command therefore does not resize an already-running pool; matching that pool
+to changed host ceilings or concurrent runs belongs to the embedding host's
+aggregate-capacity contract. That marker proves consumption and
+lifecycle position, not by itself
 that provider-facing work was attempted. Active producers carry cumulative
 attempted-work evidence separately. The runtime registry, lifecycle value, and
 that same session are passed to

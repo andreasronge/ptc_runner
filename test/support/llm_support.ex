@@ -9,6 +9,8 @@ defmodule PtcRunner.TestSupport.LLMSupport do
   - API key validation
   """
 
+  alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.ProviderApplicationGate
   alias PtcRunner.LLM.Registry
   alias PtcRunner.LLM.ReqLLMAdapter
 
@@ -23,14 +25,52 @@ defmodule PtcRunner.TestSupport.LLMSupport do
   The core application starts no provider dependency, and a run normally admits
   one through `PtcRunner.Kernel.ProviderApplicationGate`. Tests that drive
   `ProviderRegistry` or `RunBuilder` without that gate must admit it here, and
-  disable both dependency dotenv readers exactly as the command-owned gate
-  branch does, so no unchosen `.env` is read.
+  apply the same dependency dotenv and installed-default pool configuration as
+  the command-owned gate, so no unchosen `.env` is read and live contention
+  exercises the production geometry.
   """
   @spec admit_provider_application!() :: :ok
   def admit_provider_application! do
-    Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
-    Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+    stop_provider_applications()
+    :ok = ProviderApplicationGate.configure_command_vm_req_llm(Limits.installed_defaults())
     {:ok, _started} = Application.ensure_all_started(:req_llm)
+    :ok
+  end
+
+  @doc false
+  def snapshot_provider_applications do
+    %{
+      running: Application.started_applications() |> MapSet.new(&elem(&1, 0)),
+      req_llm_env: snapshot_application_env(:req_llm, req_llm_env_keys()),
+      llm_db_env: snapshot_application_env(:llm_db, [:load_dotenv])
+    }
+  end
+
+  @doc false
+  def stop_provider_applications do
+    running = Application.started_applications() |> MapSet.new(&elem(&1, 0))
+
+    if MapSet.member?(running, :req_llm), do: Application.stop(:req_llm)
+    if MapSet.member?(running, :llm_db), do: Application.stop(:llm_db)
+    :ok
+  end
+
+  @doc false
+  def restore_provider_applications(%{
+        running: initially_running,
+        req_llm_env: req_llm_env,
+        llm_db_env: llm_db_env
+      }) do
+    :ok = stop_provider_applications()
+    restore_application_env(:req_llm, req_llm_env)
+    restore_application_env(:llm_db, llm_db_env)
+
+    if MapSet.member?(initially_running, :llm_db),
+      do: Application.ensure_all_started(:llm_db)
+
+    if MapSet.member?(initially_running, :req_llm),
+      do: Application.ensure_all_started(:req_llm)
+
     :ok
   end
 
@@ -101,6 +141,19 @@ defmodule PtcRunner.TestSupport.LLMSupport do
     |> String.replace(opening_pattern, "")
     |> String.replace(~r/\s*```$/i, "")
     |> String.trim()
+  end
+
+  defp req_llm_env_keys,
+    do: [:finch, :load_dotenv, :stream_pool_count, :stream_pool_protocols, :stream_pool_size]
+
+  defp snapshot_application_env(application, keys),
+    do: Map.new(keys, &{&1, Application.fetch_env(application, &1)})
+
+  defp restore_application_env(application, snapshot) do
+    Enum.each(snapshot, fn
+      {key, {:ok, value}} -> Application.put_env(application, key, value, persistent: true)
+      {key, :error} -> Application.delete_env(application, key, persistent: true)
+    end)
   end
 
   @doc """

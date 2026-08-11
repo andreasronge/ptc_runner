@@ -21,6 +21,8 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.SelectionRules
+  alias PtcRunner.TestSupport.LLMSupport
+  alias PtcRunner.TestSupport.MCPHTTPFixture
 
   test "active validators run in declaration order after activity is marked" do
     parent = self()
@@ -1063,11 +1065,154 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     end)
   end
 
+  test "command VM sizes one ReqLLM pool from the installed provider ceiling" do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+    Application.delete_env(:req_llm, :finch, persistent: true)
+    Application.delete_env(:req_llm, :stream_pool_protocols, persistent: true)
+
+    {:ok, installed_limits} = Limits.installed(live_provider_tasks: 6)
+
+    {:ok, prepared, catalog} =
+      fixture(
+        fn _selection, _context -> :ok end,
+        ["first"],
+        installed_limits,
+        "installed-pool-v1",
+        :req_llm,
+        [],
+        %{"live_provider_tasks" => 2}
+      )
+
+    assert prepared.request.package.limits.live_provider_tasks == 2
+    assert catalog.installed_limits.live_provider_tasks == 6
+    assert {:ok, session} = open_owned(prepared, catalog, services(:command_vm))
+
+    assert Application.get_env(:req_llm, :stream_pool_count) == 1
+    assert Application.get_env(:req_llm, :stream_pool_size) == 6
+
+    assert %{default: default_pool} =
+             ReqLLM.Application.get_finch_config() |> Keyword.fetch!(:pools)
+
+    assert Keyword.fetch!(default_pool, :count) == 1
+    assert Keyword.fetch!(default_pool, :size) == 6
+
+    close(session, prepared)
+  end
+
+  test "one command-owned ReqLLM pool admits eight simultaneously held requests" do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+    Application.delete_env(:req_llm, :finch, persistent: true)
+    Application.delete_env(:req_llm, :stream_pool_protocols, persistent: true)
+
+    {:ok, prepared, catalog} =
+      fixture(fn _selection, _context -> :ok end, ["first"], nil, "pool-contention-v1", :req_llm)
+
+    assert {:ok, session} = open_owned(prepared, catalog, services(:command_vm))
+
+    parent = self()
+    release_gate = spawn(fn -> receive do: (:release -> :ok) end)
+
+    server =
+      MCPHTTPFixture.start(fn _request ->
+        release_ref = Process.monitor(release_gate)
+        send(parent, {:held_finch_request, self()})
+
+        receive do
+          {:DOWN, ^release_ref, :process, ^release_gate, _reason} -> {200, [], "ok"}
+        end
+      end)
+
+    start_ref = make_ref()
+    shared_hash_key = make_ref()
+
+    requesters =
+      Enum.map(1..8, fn _index ->
+        spawn_monitor(fn ->
+          send(parent, {:finch_request_ready, self()})
+
+          receive do
+            {:start_finch_request, ^start_ref} ->
+              request = Finch.build(:get, server.endpoint)
+
+              result =
+                Finch.request(request, ReqLLM.Finch,
+                  pool_strategy: {Finch.Pool.Strategy.Hash, shared_hash_key},
+                  pool_timeout: 2_000,
+                  receive_timeout: 2_000
+                )
+
+              send(parent, {:finch_request_result, self(), result})
+          end
+        end)
+      end)
+
+    try do
+      requester_pids = Enum.map(requesters, &elem(&1, 0))
+
+      Enum.each(requester_pids, fn requester ->
+        assert_receive {:finch_request_ready, ^requester}
+      end)
+
+      Enum.each(requester_pids, &send(&1, {:start_finch_request, start_ref}))
+
+      held = collect_held_finch_requests(8, Deadline.new(1_000), [])
+      assert length(held) == 8
+
+      send(release_gate, :release)
+
+      Enum.each(requester_pids, fn requester ->
+        assert_receive {:finch_request_result, ^requester, {:ok, %Finch.Response{status: 200}}},
+                       2_000
+      end)
+    after
+      if Process.alive?(release_gate), do: Process.exit(release_gate, :kill)
+      server.close.()
+
+      Enum.each(requesters, fn {pid, monitor} ->
+        if Process.alive?(pid), do: Process.exit(pid, :kill)
+        Process.demonitor(monitor, [:flush])
+      end)
+
+      close(session, prepared)
+    end
+  end
+
+  test "command VM preserves an explicit HTTP/2 ReqLLM pool" do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+    Application.delete_env(:req_llm, :finch, persistent: true)
+    Application.put_env(:req_llm, :stream_pool_protocols, [:http2], persistent: true)
+    Application.put_env(:req_llm, :stream_pool_count, 3, persistent: true)
+    Application.put_env(:req_llm, :stream_pool_size, 4, persistent: true)
+
+    {:ok, prepared, catalog} =
+      fixture(fn _selection, _context -> :ok end, ["first"], nil, "http2-pool-v1", :req_llm)
+
+    assert {:ok, session} = open_owned(prepared, catalog, services(:command_vm))
+    assert Application.get_env(:req_llm, :stream_pool_protocols) == [:http2]
+    assert Application.get_env(:req_llm, :stream_pool_count) == 3
+    assert Application.get_env(:req_llm, :stream_pool_size) == 4
+
+    assert %{default: default_pool} =
+             ReqLLM.Application.get_finch_config() |> Keyword.fetch!(:pools)
+
+    assert Keyword.fetch!(default_pool, :protocols) == [:http2]
+    assert Keyword.fetch!(default_pool, :count) == 3
+    assert Keyword.fetch!(default_pool, :size) == 4
+
+    close(session, prepared)
+  end
+
   test "command VM mode rejects a prestarted target while host-owned mode accepts it" do
     restore_provider_applications_on_exit()
     stop_provider_applications()
     Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
     Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+    Application.put_env(:req_llm, :stream_pool_count, 3, persistent: true)
+    Application.put_env(:req_llm, :stream_pool_size, 4, persistent: true)
+    Application.put_env(:req_llm, :finch, [name: ReqLLM.Finch], persistent: true)
     assert {:ok, _started} = Application.ensure_all_started(:req_llm)
 
     {:ok, command_prepared, command_catalog} =
@@ -1081,27 +1226,46 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
                services(:command_vm)
              )
 
+    assert Application.get_env(:req_llm, :stream_pool_count) == 3
+    assert Application.get_env(:req_llm, :stream_pool_size) == 4
+    assert Application.get_env(:req_llm, :finch) == [name: ReqLLM.Finch]
+
     {:ok, host_prepared, host_catalog} =
       fixture(fn _selection, _context -> :ok end, ["first"], nil, "host-v1", :req_llm)
 
     assert {:ok, session} =
              open_owned(host_prepared, host_catalog, services(:host_owned))
 
+    assert Application.get_env(:req_llm, :stream_pool_count) == 3
+    assert Application.get_env(:req_llm, :stream_pool_size) == 4
+    assert Application.get_env(:req_llm, :finch) == [name: ReqLLM.Finch]
+
     close(session, host_prepared)
+  end
+
+  test "provider-free command VM admission leaves ReqLLM configuration unchanged" do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+    Application.put_env(:req_llm, :stream_pool_count, 3, persistent: true)
+    Application.put_env(:req_llm, :stream_pool_size, 4, persistent: true)
+    Application.put_env(:req_llm, :finch, [name: ReqLLM.Finch], persistent: true)
+
+    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
+    assert {:ok, session} = open_owned(prepared, catalog, services(:command_vm))
+
+    assert Application.get_env(:req_llm, :stream_pool_count) == 3
+    assert Application.get_env(:req_llm, :stream_pool_size) == 4
+    assert Application.get_env(:req_llm, :finch) == [name: ReqLLM.Finch]
+    refute :req_llm in started_applications()
+
+    close(session, prepared)
   end
 
   test "command VM startup failures preserve attempted provider activity" do
     restore_provider_applications_on_exit()
     stop_provider_applications()
-    previous_pool_size = Application.get_env(:req_llm, :stream_pool_size)
-    Application.put_env(:req_llm, :stream_pool_size, 0, persistent: true)
-
-    on_exit(fn ->
-      if previous_pool_size,
-        do:
-          Application.put_env(:req_llm, :stream_pool_size, previous_pool_size, persistent: true),
-        else: Application.delete_env(:req_llm, :stream_pool_size, persistent: true)
-    end)
+    Application.delete_env(:req_llm, :finch, persistent: true)
+    Application.put_env(:req_llm, :stream_pool_protocols, [:invalid], persistent: true)
 
     {:ok, prepared, catalog} =
       fixture(fn _selection, _context -> :ok end, ["first"], nil, "command-v1", :req_llm)
@@ -1110,6 +1274,8 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
             %CommandDiagnostic{code: :provider_application_unavailable, provider_activity: true}} =
              open_owned(prepared, catalog, services(:command_vm))
 
+    assert Application.get_env(:req_llm, :stream_pool_count) == nil
+    assert Application.get_env(:req_llm, :stream_pool_size) == nil
     assert ProviderActivity.value(prepared.provider_activity) == true
     assert :ok = PreparedRun.close(prepared)
   end
@@ -1135,7 +1301,8 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
          limits \\ nil,
          revision \\ "custom-v1",
          provider_application \\ nil,
-         credential_names \\ []
+         credential_names \\ [],
+         manifest_limits \\ %{}
        ) do
     limits = limits || Limits.installed_defaults()
     {:ok, rules} = rules()
@@ -1200,7 +1367,8 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
             %{"name" => name, "config" => %{"mode" => mode}}
           end),
         "mission" => []
-      }
+      },
+      "limits" => manifest_limits
     }
 
     documents = %{
@@ -1449,26 +1617,29 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     do: Application.started_applications() |> Enum.map(&elem(&1, 0))
 
   defp stop_provider_applications do
-    running = started_applications()
-
-    if :req_llm in running, do: Application.stop(:req_llm)
-    if :llm_db in running, do: Application.stop(:llm_db)
+    LLMSupport.stop_provider_applications()
   end
 
   defp restore_provider_applications_on_exit do
-    initially_running = MapSet.new(started_applications())
+    snapshot = LLMSupport.snapshot_provider_applications()
+    on_exit(fn -> LLMSupport.restore_provider_applications(snapshot) end)
+  end
 
-    on_exit(fn ->
-      stop_provider_applications()
-      Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
-      Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+  defp collect_held_finch_requests(0, _deadline, held), do: held
 
-      if MapSet.member?(initially_running, :llm_db),
-        do: Application.ensure_all_started(:llm_db)
+  defp collect_held_finch_requests(remaining, deadline, held) do
+    case Deadline.remaining(deadline) do
+      0 ->
+        held
 
-      if MapSet.member?(initially_running, :req_llm),
-        do: Application.ensure_all_started(:req_llm)
-    end)
+      timeout_ms ->
+        receive do
+          {:held_finch_request, holder} ->
+            collect_held_finch_requests(remaining - 1, deadline, [holder | held])
+        after
+          timeout_ms -> held
+        end
+    end
   end
 
   defp restore_env(key, nil), do: Application.delete_env(:ptc_runner, key)

@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.MCPHTTPFixture
 
   test "OAuth setup and each requested target use their exact independent deadlines" do
@@ -501,26 +502,9 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   end
 
   defp isolate_provider_applications do
-    initially_started =
-      Application.started_applications()
-      |> MapSet.new(&elem(&1, 0))
-
-    if MapSet.member?(initially_started, :req_llm), do: Application.stop(:req_llm)
-    if MapSet.member?(initially_started, :llm_db), do: Application.stop(:llm_db)
-
-    on_exit(fn ->
-      if :req_llm in Enum.map(Application.started_applications(), &elem(&1, 0)),
-        do: Application.stop(:req_llm)
-
-      if :llm_db in Enum.map(Application.started_applications(), &elem(&1, 0)),
-        do: Application.stop(:llm_db)
-
-      if MapSet.member?(initially_started, :llm_db),
-        do: Application.ensure_all_started(:llm_db)
-
-      if MapSet.member?(initially_started, :req_llm),
-        do: Application.ensure_all_started(:req_llm)
-    end)
+    snapshot = LLMSupport.snapshot_provider_applications()
+    :ok = LLMSupport.stop_provider_applications()
+    on_exit(fn -> LLMSupport.restore_provider_applications(snapshot) end)
   end
 
   test "one unauthorized selection refuses before another one's interaction opens" do

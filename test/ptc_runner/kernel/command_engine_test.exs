@@ -35,6 +35,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractClassification
+  alias PtcRunner.TestSupport.LLMSupport
 
   @zero_entropy <<0::128>>
   @stdio_root Path.expand("../../..", __DIR__)
@@ -732,10 +733,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     previous_environment = System.get_env(environment_name)
     System.delete_env(environment_name)
 
-    initially_running =
-      Application.started_applications()
-      |> Enum.map(&elem(&1, 0))
-      |> MapSet.new()
+    provider_applications = LLMSupport.snapshot_provider_applications()
 
     previous =
       for key <- [
@@ -747,8 +745,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           into: %{},
           do: {key, Application.fetch_env(:ptc_runner, key)}
 
-    if MapSet.member?(initially_running, :req_llm), do: Application.stop(:req_llm)
-    if MapSet.member?(initially_running, :llm_db), do: Application.stop(:llm_db)
+    :ok = LLMSupport.stop_provider_applications()
 
     Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
     Application.put_env(:ptc_runner, :host_llm_test_owner, self())
@@ -762,22 +759,12 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         do: System.put_env(environment_name, previous_environment),
         else: System.delete_env(environment_name)
 
-      if :req_llm in Enum.map(Application.started_applications(), &elem(&1, 0)),
-        do: Application.stop(:req_llm)
-
-      if :llm_db in Enum.map(Application.started_applications(), &elem(&1, 0)),
-        do: Application.stop(:llm_db)
-
       Enum.each(previous, fn
         {key, {:ok, value}} -> Application.put_env(:ptc_runner, key, value)
         {key, :error} -> Application.delete_env(:ptc_runner, key)
       end)
 
-      if MapSet.member?(initially_running, :llm_db),
-        do: Application.ensure_all_started(:llm_db)
-
-      if MapSet.member?(initially_running, :req_llm),
-        do: Application.ensure_all_started(:req_llm)
+      LLMSupport.restore_provider_applications(provider_applications)
     end)
 
     host_path =
