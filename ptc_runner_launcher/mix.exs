@@ -35,6 +35,10 @@ defmodule PtcRunnerLauncher.MixProject do
       # source-vs-binary mtime check is the staleness authority here, and a
       # fresh binary makes it a no-op.
       make_force_build: force_build?(),
+      # Forced checkout builds still run for every Mix subprocess. Respect
+      # Mix's quiet contract so make's up-to-date message cannot corrupt a
+      # machine-readable stdout stream such as `ptc repl --format jsonl`.
+      make_args: make_args(),
       make_env: %{"MACOSX_DEPLOYMENT_TARGET" => @release_config.macos_deployment_target},
       cc_precompiler: [
         compilers: precompiled_targets()
@@ -62,6 +66,10 @@ defmodule PtcRunnerLauncher.MixProject do
       "0" -> false
       _unset -> File.exists?(Path.expand("../.git", __DIR__))
     end
+  end
+
+  defp make_args do
+    if System.get_env("MIX_QUIET") == "1", do: ["-s"], else: []
   end
 
   defp deps do

@@ -34,7 +34,9 @@ this rule only because repository checkouts force elixir_make's build path
 (`force_build?/0` in `ptc_runner_launcher/mix.exs`): the precompiler flow
 otherwise trusts any artifact already present in priv, which once let a
 seeded pre-change binary answer `--publish-directory-noreplace` with a usage
-error through every warm build. The seeded PLT's dialyxir hash file is
+error through every warm build. Forced make runs honor `MIX_QUIET=1`, keeping
+machine-readable command stdout free of make's up-to-date chatter. The seeded
+PLT's dialyxir hash file is
 deliberately not copied (the first `mix dialyzer` run must re-check the PLT
 instead of trusting the hash), and each copied PLT must fully decode as an
 external term before promotion, so a torn copy taken while a concurrent
