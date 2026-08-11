@@ -354,6 +354,90 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     release!(next, next_lease)
   end
 
+  test "a stale evaluation's malformed calls cannot spend protocol-error budget" do
+    alias PtcRunner.Kernel.Capability
+    alias PtcRunner.Kernel.Dispatcher
+    alias PtcRunner.Lisp.AmbiguousArguments
+
+    state = start_state()
+    holder = start_worker(state)
+    {:ok, stale_lease} = reserve!(holder)
+
+    holder_monitor = Process.monitor(holder)
+    Process.exit(holder, :kill)
+    assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :killed}, 1_000
+
+    next = start_worker(state)
+    assert {:ok, next_lease} = reserve!(next, :block)
+
+    {:ok, strict} =
+      Capability.new(
+        name: "strict",
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{"required" => %{"type" => "boolean"}},
+          "required" => ["required"]
+        },
+        callback: fn _arguments -> {:ok, nil} end
+      )
+
+    environment = %{capabilities: %{"strict" => strict}}
+    usage_before = RunState.usage(state)
+
+    # Invalid arguments from the dead evaluation are turned away before
+    # validation can classify them as a protocol error of the current run.
+    assert %{status: :error, kind: :capability_denied, reason: :stale_evaluation} =
+             Dispatcher.dispatch_with_lease(
+               state,
+               :mission,
+               environment,
+               "strict",
+               %{},
+               100,
+               {nil, nil, stale_lease}
+             )
+
+    assert %{status: :error, kind: :capability_denied, reason: :stale_evaluation} =
+             Dispatcher.dispatch_with_lease(
+               state,
+               :mission,
+               environment,
+               "strict",
+               %AmbiguousArguments{},
+               100,
+               {nil, nil, stale_lease}
+             )
+
+    usage_after = RunState.usage(state)
+    assert usage_after.protocol_errors == usage_before.protocol_errors
+    refute usage_after.closed?
+
+    release!(next, next_lease)
+  end
+
+  test "a block request that overspent its bound in the mailbox is refused despite a free lease" do
+    state = start_state()
+
+    stale_request =
+      System.monotonic_time(:millisecond) -
+        RunState.limits(state).evaluation_admission_timeout_ms - 1
+
+    reply_ref = make_ref()
+
+    send(
+      state.pid,
+      {:"$gen_call", {self(), reply_ref},
+       {state.token, {:reserve_evaluation, :block, stale_request}}}
+    )
+
+    assert_receive {^reply_ref, {:error, :admission_timeout}}, 1_000
+
+    # The refusal must not have consumed the free lease.
+    late = start_worker(state)
+    assert {:ok, lease} = reserve!(late)
+    release!(late, lease)
+  end
+
   test "fail-fast reserve and source checks stay :busy while the queue holds the lease" do
     state = start_state()
     holder = start_worker(state)
@@ -681,7 +765,8 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
 
     send(
       state.pid,
-      {:"$gen_call", {self(), reply_ref}, {state.token, {:reserve_evaluation, :block}}}
+      {:"$gen_call", {self(), reply_ref},
+       {state.token, {:reserve_evaluation, :block, System.monotonic_time(:millisecond)}}}
     )
 
     await_queued(state, 1)
@@ -703,7 +788,8 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
 
     send(
       state.pid,
-      {:"$gen_call", {self(), reply_ref}, {state.token, {:reserve_evaluation, :block}}}
+      {:"$gen_call", {self(), reply_ref},
+       {state.token, {:reserve_evaluation, :block, System.monotonic_time(:millisecond)}}}
     )
 
     await_queued(state, 1)

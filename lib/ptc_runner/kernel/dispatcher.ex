@@ -134,10 +134,17 @@ defmodule PtcRunner.Kernel.Dispatcher do
         _name,
         %AmbiguousArguments{},
         _timeout_ms,
-        {event_sink, _inspection_sink, _lease}
+        {event_sink, _inspection_sink, lease}
       )
       when environment in [:workflow, :mission] do
-    protocol_error(state, event_sink, :ambiguous_arguments)
+    # Authenticated before protocol accounting: a stale evaluation's
+    # malformed call must not spend the current run's shared protocol-error
+    # budget.
+    if authenticated?(state, environment, lease) do
+      protocol_error(state, event_sink, :ambiguous_arguments)
+    else
+      stale_evaluation_error()
+    end
   end
 
   def dispatch_with_lease(
@@ -151,7 +158,11 @@ defmodule PtcRunner.Kernel.Dispatcher do
       )
       when environment in [:workflow, :mission] and is_binary(name) and is_map(arguments) and
              is_integer(timeout_ms) do
-    with %Capability{} = capability <- Map.get(capabilities, name),
+    # Advisory pre-authentication keeps a dead evaluation's lingering call
+    # away from validators and protocol accounting; reserve_capability/4
+    # atomically re-checks the same lease.
+    with true <- authenticated?(state, environment, lease),
+         %Capability{} = capability <- Map.get(capabilities, name),
          :ok <- validate(capability, arguments),
          :ok <- validate_size(arguments, capability_argument_limit(state)),
          :ok <- RunState.reserve_capability(state, environment, name, lease) do
@@ -183,17 +194,29 @@ defmodule PtcRunner.Kernel.Dispatcher do
       {:error, :reservation_held} ->
         limit_error(state, event_sink, :reservation_held)
 
+      false ->
+        stale_evaluation_error()
+
       {:error, :stale_evaluation} ->
-        %{
-          status: :error,
-          kind: :capability_denied,
-          reason: :stale_evaluation,
-          retryable?: false
-        }
+        stale_evaluation_error()
 
       {:error, :run_closed} ->
         limit_error(state, event_sink, :run_closed)
     end
+  end
+
+  defp authenticated?(_state, :workflow, _lease), do: true
+
+  defp authenticated?(state, :mission, lease),
+    do: RunState.mission_lease_current?(state, lease)
+
+  defp stale_evaluation_error do
+    %{
+      status: :error,
+      kind: :capability_denied,
+      reason: :stale_evaluation,
+      retryable?: false
+    }
   end
 
   defp invoke_with_events(

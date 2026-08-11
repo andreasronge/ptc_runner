@@ -668,10 +668,17 @@ defmodule PtcRunner.Kernel.Runner do
         }
 
       reason == :timeout and parallel_message?(fail, Helpers.parallel_run_deadline_message()) ->
+        # The cap is min(workflow_timeout_ms, remaining run duration), so
+        # the binding limit is whichever produced this evaluation's window.
+        limit =
+          if timeout_ms == limits.workflow_timeout_ms,
+            do: :workflow_timeout_ms,
+            else: :run_duration_ms
+
         %{
-          message: "run deadline expired during a parallel operation",
-          limit: :run_duration_ms,
-          limit_ms: limits.run_duration_ms,
+          message: "#{limit} expired during a parallel operation",
+          limit: limit,
+          limit_ms: timeout_ms,
           phase: :execution
         }
 

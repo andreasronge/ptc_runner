@@ -74,6 +74,25 @@ defmodule PtcRunner.Kernel.ParallelTimeoutLimitTest do
            "the narrowed deadline must fire well before the old 5s floor, took #{elapsed}ms"
   end
 
+  test "a cap bound by a shorter workflow_timeout_ms is attributed to it" do
+    started = System.monotonic_time(:millisecond)
+
+    assert {:error, error} =
+             run_park_workflow(10_000,
+               workflow_timeout_ms: 300,
+               run_duration_ms: 60_000,
+               parallel_timeout_ms: 30_000
+             )
+
+    elapsed = System.monotonic_time(:millisecond) - started
+    assert error.kind == :limit_exceeded
+
+    assert error.details[:limit] == :workflow_timeout_ms,
+           "the binding limit was workflow_timeout_ms, got #{inspect(error.details)}"
+
+    assert elapsed < 5_000, "the 300ms cap must fire fast, took #{elapsed}ms"
+  end
+
   test "the narrowed limit reaches REPL parallel operations" do
     {:ok, config} =
       park_config(10_000, parallel_timeout_ms: 200, evaluation_timeout_ms: 5_000)

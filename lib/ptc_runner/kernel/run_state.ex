@@ -153,6 +153,18 @@ defmodule PtcRunner.Kernel.RunState do
   def reserve_capability(state, environment, name),
     do: reserve_capability(state, environment, name, nil)
 
+  @doc """
+  Checks whether a mission lease is still the current evaluation lease.
+
+  Advisory pre-authentication for dispatch: a stale evaluation's call is
+  turned away before it can run argument validators or spend the shared
+  protocol-error budget. The atomic recheck inside `reserve_capability/4`
+  remains authoritative.
+  """
+  @spec mission_lease_current?(t(), reference() | nil) :: boolean()
+  def mission_lease_current?(state, lease),
+    do: safe_call(state, {:mission_lease_current?, lease}, false)
+
   @spec attach_provider(t(), pid()) :: :ok | {:error, :closed | :provider_down}
   @doc "Attaches the caller's live provider process to its capability reservation."
   def attach_provider(%__MODULE__{} = state, provider) when is_pid(provider) do
@@ -222,7 +234,14 @@ defmodule PtcRunner.Kernel.RunState do
   @spec reserve_evaluation(t(), :fail_fast | :block) ::
           {:ok, map(), [term()], reference()} | {:error, atom()}
   def reserve_evaluation(state, :fail_fast), do: call(state, :reserve_evaluation)
-  def reserve_evaluation(state, :block), do: call_blocking(state, {:reserve_evaluation, :block})
+
+  # The admission wait is bounded from the moment the caller asks, not the
+  # moment the owner processes the request — time in the owner's mailbox
+  # counts against the bound.
+  def reserve_evaluation(state, :block) do
+    requested_at = System.monotonic_time(:millisecond)
+    call_blocking(state, {:reserve_evaluation, :block, requested_at})
+  end
 
   @doc false
   @spec reserve_source_check(t()) :: {:ok, map(), non_neg_integer()} | {:error, atom()}
@@ -427,6 +446,9 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
+  def handle_call({token, {:mission_lease_current?, lease}}, _from, %{token: token} = state),
+    do: {:reply, current_mission_lease?(state, lease), state}
+
   def handle_call({token, {:attach_provider, provider}}, {caller, _tag}, %{token: token} = state) do
     if unavailable?(state) do
       Process.exit(provider, :kill)
@@ -517,16 +539,25 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   def handle_call(
-        {token, {:reserve_evaluation, :block}},
+        {token, {:reserve_evaluation, :block, requested_at}},
         {caller, _tag} = from,
         %{token: token} = state
-      ) do
+      )
+      when is_integer(requested_at) do
+    admission_deadline = admission_deadline(state, requested_at)
+
     cond do
       state.closed? ->
         {:reply, {:error, :run_closed}, state}
 
       deadline_expired?(state) ->
         {:reply, {:error, :deadline_expired}, state}
+
+      # The bound counts from the caller's request, so a message that sat in
+      # the owner's mailbox past its whole admission window is refused even
+      # when the lease happens to be free.
+      System.monotonic_time(:millisecond) >= admission_deadline ->
+        {:reply, {:error, :admission_timeout}, state}
 
       state.evaluations >= state.limits.subordinate_evaluations ->
         {:reply, {:error, :limit_exceeded}, state}
@@ -547,7 +578,8 @@ defmodule PtcRunner.Kernel.RunState do
         # admit_from_queue self-heals the (unreachable by invariant) state of
         # a grantable lease behind a non-empty queue: the FIFO head is
         # admitted, which may be this caller.
-        {:noreply, admit_from_queue(enqueue_admission_waiter(state, from, caller))}
+        {:noreply,
+         admit_from_queue(enqueue_admission_waiter(state, from, caller, admission_deadline))}
     end
   end
 
@@ -1097,17 +1129,19 @@ defmodule PtcRunner.Kernel.RunState do
     end)
   end
 
-  defp enqueue_admission_waiter(state, from, caller) do
+  # The admission bound counts from the caller's request time and is capped
+  # by the run deadline.
+  defp admission_deadline(state, requested_at) do
+    min(
+      requested_at + state.limits.evaluation_admission_timeout_ms,
+      state.deadline_ms
+    )
+  end
+
+  defp enqueue_admission_waiter(state, from, caller, deadline_mono) do
     monitor_ref = Process.monitor(caller)
-    now = System.monotonic_time(:millisecond)
-
-    timeout =
-      min(
-        state.limits.evaluation_admission_timeout_ms,
-        max(state.deadline_ms - now, 0)
-      )
-
-    timer_ref = Process.send_after(self(), {:admission_deadline, monitor_ref}, timeout)
+    delay = max(deadline_mono - System.monotonic_time(:millisecond), 0)
+    timer_ref = Process.send_after(self(), {:admission_deadline, monitor_ref}, delay)
 
     # The absolute deadline is authoritative; the timer is only its wake-up.
     # A lease release already ahead of the timer message in the mailbox must
@@ -1117,7 +1151,7 @@ defmodule PtcRunner.Kernel.RunState do
       caller: caller,
       monitor_ref: monitor_ref,
       timer_ref: timer_ref,
-      deadline_mono: now + timeout
+      deadline_mono: deadline_mono
     }
 
     %{state | admission_queue: :queue.in(waiter, state.admission_queue)}

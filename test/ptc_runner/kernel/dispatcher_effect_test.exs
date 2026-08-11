@@ -244,10 +244,19 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
       {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
       {:ok, state} = RunState.start(Limits.defaults())
+      {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state)
 
       assert %{status: :error, kind: :protocol_error, reason: :invalid_arguments} =
                result =
-               Dispatcher.dispatch(state, :mission, environment, capability.name, %{}, 100)
+               Dispatcher.dispatch_with_lease(
+                 state,
+                 :mission,
+                 environment,
+                 capability.name,
+                 %{},
+                 100,
+                 {nil, nil, lease}
+               )
 
       refute Map.has_key?(result, :mutation_state)
       refute_received {:unexpected_callback, ^effect}

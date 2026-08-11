@@ -109,26 +109,35 @@ ignore, the waiter was already resolved):
 - Admission → `Process.cancel_timer` + tolerate an already-in-flight
   `{:admission_deadline, ref}` message (the ref lookup fails; ignored).
 
-**Absolute admission deadline.** Each waiter stores `deadline_mono`; the
-timer is only its wake-up. Every grant re-checks the deadline, so a lease
-release already ahead of the timer message in the mailbox cannot grant an
-expired waiter.
+**Absolute admission deadline.** The bound counts from the caller's request
+time (sent with the call), not from when the owner processes it — mailbox
+time is included, and a request that overspent its whole window is refused
+even against a free lease. Each waiter stores `deadline_mono`; the timer is
+only its wake-up. Every grant re-checks the deadline, so a lease release
+already ahead of the timer message in the mailbox cannot grant an expired
+waiter.
 
 **Lease-authenticated mission reservations.** A mission capability call
 carries the lease of the evaluation whose tool grant issued it
-(`mission_tools` → `ToolGrant` → `Dispatcher` → `reserve_capability/4`); a
-lease that is no longer current is rejected as `:stale_evaluation`. This
-closes the window where a dead evaluation's lingering sandbox reserves
-after the next evaluation was admitted and has its late call attributed to
-the new lease (or to none), bypassing the stale-reservation gate.
+(`mission_tools` → `ToolGrant` → `Dispatcher.dispatch_with_lease/8` →
+`reserve_capability/4`); a lease that is no longer current is rejected as
+`:stale_evaluation`. Authentication happens *before* argument validation
+and protocol accounting (advisory `mission_lease_current?/2`, with the
+atomic recheck inside `reserve_capability/4` staying authoritative), so a
+stale evaluation's malformed call can neither spend the current run's
+shared protocol-error budget nor close it. This closes the window where a
+dead evaluation's lingering sandbox reserves after the next evaluation was
+admitted and has its late call attributed to the new lease (or to none),
+bypassing the stale-reservation gate.
 
 **Deadline-cause taxonomy.** `parallel_deadline/1` records whether
 `pmap_timeout` or the absolute cap bound the operation; a cap-bound timeout
 carries the stable "run deadline expired during a parallel operation"
 message (preserved by the sanitizer as a known constant), and the Runner
-attributes it to `run_duration_ms` instead of claiming `parallel_timeout_ms`
-fired. Inherited deadlines keep the generic message — their cause belongs
-to the outer operation.
+attributes it to whichever limit produced the evaluation's window —
+`workflow_timeout_ms` or `run_duration_ms` — instead of claiming
+`parallel_timeout_ms` fired. Inherited deadlines keep the generic message —
+their cause belongs to the outer operation.
 
 **Invariant (review target):** every enqueued waiter receives exactly one
 reply, or its caller is known dead. No state transition may drop a `from`.
