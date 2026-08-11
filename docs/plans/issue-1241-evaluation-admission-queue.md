@@ -76,13 +76,19 @@ through `release_reservation/2` after the lease is already gone. Admission
   `:close`, `:close_and_drain`, protocol-error closure, event-sink closure) —
   where it drains the whole queue with typed errors.
 
-**Admission gate.** A waiter is admitted only when the lease is free **and no
+**Admission gate — applies to every grant path.** An evaluation grant
+(blocking *or* fail-fast) is issued only when the lease is free **and no
 capability reservation still carries a non-nil mission `evaluation_lease`**.
 The lease-owner `:DOWN` path clears the lease while the dead evaluation's
 provider tasks may still be live; their reservations reference the old lease
-ref, and admitting before they drain would overlap a new evaluation with the
-old one's external effects. `release_reservation/2` firing for the last such
-reservation is what finally admits the next waiter.
+ref, and granting before they drain would overlap a new evaluation with the
+old one's external effects. Fail-fast callers meeting this condition get
+`{:error, :busy}`, exactly as if the lease were held. `reserve_source_check/1`
+uses the same gate **and additionally answers `:busy` while the admission
+queue is non-empty** — otherwise the declared queue-priority policy would be
+violated by a source check slipping in between handoffs.
+`release_reservation/2` firing for the last stale reservation is what
+finally admits the next waiter.
 
 **Admission loop.** `admit_from_queue/1` pops waiters until it either grants
 one or empties the queue. A popped waiter is re-checked against the same
@@ -121,20 +127,32 @@ waiter without replying (`clear_evaluation` while parked; the lease-mismatch
 `_other` branch). The parked caller then dies on the default 5 s
 `GenServer.call` timeout — the best current lead on the unreproduced live
 hang in #1241. Rework so that every path either keeps the waiter parked or
-replies. On closure paths the reply stays `{:ok, evaluation_status(state)}` —
-**not** an error — because `Evaluation.release_failure/5` hard-matches
-`{:ok, status}` and only needs the terminal-provider-failure bit; run closure
-is reported to that caller through its own result path. The close/fail path
-(`closed?: true, reservations: %{}`) must reply to a parked waiter, not
-merely clear it.
+replies. The reply stays `{:ok, evaluation_status(state)}` — **not** an
+error — because `Evaluation.release_failure/5` hard-matches `{:ok, status}`
+and only needs the terminal-provider-failure bit; run closure is reported to
+that caller through its own result path.
+
+Ordering on closure, made explicit: closure drains **admission** waiters
+immediately (they hold no lease and no provenance), but a parked
+**release-status** waiter stays parked until its lease-scoped provider
+reservations drain — closure kills the providers, their `:DOWN`s release the
+reservations, and only then does the waiter receive `{:ok, status}` with
+`terminal_provider_failure?` intact. `close_and_drain` (which empties
+`reservations` synchronously) completes the parked waiter in the same
+transition. The lease-mismatch `_other` branch replies immediately — its
+lease is already gone, so there is no pending provenance to wait for.
 
 ### Evaluation path
 
-`Evaluation.evaluate_source/7` already threads an `opts` keyword
-(`:projection_boundary`, `:params`, `:after_started_hook`); it gains
-`admission: :block | :fail_fast` there (default `:fail_fast`, so every
-existing caller is unchanged). `RuntimeTools.kernel_eval/5`'s tool callback
-passes `admission: :block`. New failure mapping: `{:error,
+The opts keyword lives on `evaluate_source_detailed/7`, not on
+`evaluate_source/7` (whose seventh argument is `params`). `admission: :block
+| :fail_fast` (default `:fail_fast`) is added to `evaluate_source_detailed`'s
+opts and validated like `:projection_boundary` — an invalid value raises
+`ArgumentError` rather than falling into a function-clause crash.
+`RuntimeTools`' private `evaluate_source`/`evaluate_source_with` helpers move
+to `evaluate_source_detailed` + the existing legacy projection (or an
+equivalent wrapper), passing `admission: :block` — the embedded-program
+(`kernel/eval`) path gets the same treatment. New failure mapping: `{:error,
 :admission_timeout}` → `failure(:busy, :admission_timeout)`. Because the
 kind stays `:busy`,
 `agent.core`'s existing `(:busy :limit_exceeded)` branch already converts it
@@ -158,6 +176,11 @@ today; admission waiting spends only run time and the admission bound.
   `run_deadline_ms`; `Parallel.parallel_deadline/1` computes
   `min(now + pmap_timeout, absolute deadline cap)` from a new
   `EvalContext` field carrying that cap (populated from `run_deadline_ms`).
+  The cap must survive every context reconstruction: `Lisp` run params →
+  `Context.new`, **and both closure-invocation sites in `apply.ex` that
+  build fresh contexts and hand-copy `pmap_timeout`/`pmap_deadline`** —
+  omitting it there would silently unclamp any parallel operation started
+  inside a prelude closure. A unit test pins each site.
 - `Context.@default_pmap_timeout` (5 000) remains as the library-level
   fallback for direct `Lisp.run` users; Kernel runs always pass the option.
 - Nested parallel calls keep inheriting the outer absolute deadline.
@@ -196,9 +219,10 @@ pins the policy.
 1. **Headline behavior:** N=4 (and N=8) `agent.core/run-value` loops under
    `pcalls`, stub requester with a barrier forcing simultaneous
    `kernel/eval-source` — the workflow now **succeeds** with all N values.
-   Barriers wait on `min(N, Context.default_pmap_max_concurrency())`
-   requests, as the existing test does, or the test deadlocks on hosts with
-   a small scheduling window. The existing 4-agent contention test is
+   The barrier releases after `min(N, Context.default_pmap_max_concurrency())`
+   arrivals **and answers every later arrival immediately** — a one-shot
+   barrier sized to the first scheduling window deadlocks any worker
+   scheduled after it terminates. The existing 4-agent contention test is
    rewritten: with the 30 s `tool/hold` park and a narrowed
    `evaluation_admission_timeout_ms`, it now pins the admission-timeout path
    (`failure_kind "evaluation-unavailable"`, no extra model calls) instead of
@@ -206,9 +230,11 @@ pins the policy.
 2. **Always-reply invariant:** RunState-level tests that a parked
    `release_evaluation_status` caller and queued admission waiters each get
    exactly one reply across every lease-ending path (commit, release, caller
-   death, run close, terminal failure). Assertions inspect RunState state
-   (queue emptied, waiter slot cleared) in addition to caller-observed
-   replies, since call aliases absorb duplicate replies.
+   death, run close, terminal failure). Because `GenServer.call` aliases
+   absorb duplicate replies, the riskiest race (timer expiry vs admission)
+   additionally uses a raw `:"$gen_call"` send with a plain ref, collecting
+   every `{ref, reply}` message — two replies would both be observed. State
+   inspection (queue emptied, waiter slot cleared) covers cleanup.
 3. **Queue mechanics:** FIFO order across ≥3 waiters; head admission-timeout
    followed by next-waiter admission; multiple simultaneous timer
    expirations; a stale `{:admission_deadline, ref}` arriving after
@@ -223,9 +249,11 @@ pins the policy.
    (the lease-owner-death overlap case).
 5. **Parallel deadline:** manifest narrowing `parallel_timeout_ms` to a small
    value fails a long `pcalls` at that deadline with the stable timeout
-   taxonomy; a parallel op started *late* in the run is clamped by the run
-   deadline (absolute-cap check, distinguishing parallel-timeout taxonomy
-   from sandbox kill); nested ops inherit the outer absolute deadline;
+   taxonomy. The late-started-operation clamp is pinned at the
+   `Parallel`/`Context` unit level (construct a context whose cap is near,
+   assert the timeout taxonomy) — an integration version would race the
+   sandbox kill on the same absolute deadline and flake. Nested ops
+   inheriting the outer absolute deadline;
    a `:slow`-tagged test proves an op surviving past the old 5 s ceiling
    under the new default (park a capability ~5.5 s via `receive after`, no
    `Process.sleep`).
