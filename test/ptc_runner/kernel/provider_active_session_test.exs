@@ -1140,7 +1140,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
                 Finch.request(request, ReqLLM.Finch,
                   pool_strategy: {Finch.Pool.Strategy.Hash, shared_hash_key},
                   pool_timeout: 2_000,
-                  receive_timeout: 2_000
+                  receive_timeout: 10_000
                 )
 
               send(parent, {:finch_request_result, self(), result})
@@ -1157,7 +1157,11 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
 
       Enum.each(requester_pids, &send(&1, {:start_finch_request, start_ref}))
 
-      held = collect_held_finch_requests(8, Deadline.new(1_000), [])
+      # The observation window deliberately exceeds the pool checkout timeout:
+      # the old eight-by-one geometry can admit only one request for this shared
+      # hash key before its seven waiters time out, while the one-by-eight pool
+      # admits all eight even on a loaded CI scheduler.
+      held = collect_held_finch_requests(8, Deadline.new(5_000), [])
       assert length(held) == 8
 
       send(release_gate, :release)
@@ -1264,8 +1268,8 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   test "command VM startup failures preserve attempted provider activity" do
     restore_provider_applications_on_exit()
     stop_provider_applications()
-    Application.delete_env(:req_llm, :finch, persistent: true)
-    Application.put_env(:req_llm, :stream_pool_protocols, [:invalid], persistent: true)
+    Application.put_env(:req_llm, :finch, %{}, persistent: true)
+    Application.delete_env(:req_llm, :stream_pool_protocols, persistent: true)
 
     {:ok, prepared, catalog} =
       fixture(fn _selection, _context -> :ok end, ["first"], nil, "command-v1", :req_llm)

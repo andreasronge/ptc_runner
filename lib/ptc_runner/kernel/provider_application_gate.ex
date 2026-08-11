@@ -152,7 +152,7 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
     protocols = Application.get_env(:req_llm, :stream_pool_protocols, [:http1])
     finch = Application.get_env(:req_llm, :finch, [])
 
-    protocols == [:http1] and not Keyword.has_key?(finch, :pools)
+    protocols == [:http1] and Keyword.keyword?(finch) and not Keyword.has_key?(finch, :pools)
   end
 
   defp start_requirements(requirements) do
