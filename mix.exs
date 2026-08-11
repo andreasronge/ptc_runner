@@ -162,8 +162,15 @@ defmodule PtcRunner.MixProject do
     end
   end
 
+  # The sentinel is the companion's own version file rather than its directory:
+  # `ptc_runner_launcher/mix.exs` evaluates `release_config.exs` while it is
+  # being loaded, so a directory holding only the mix file is an unloadable
+  # path dependency. Tooling that reconstructs a project from the mix files it
+  # fetched — Dependabot's Hex updater does exactly this — produces precisely
+  # that tree, and pointing at it fails the whole run before any dependency is
+  # resolved.
   defp local_launcher_checkout?(launcher_path) do
-    File.dir?(launcher_path) and
+    File.regular?(Path.join(launcher_path, "release_config.exs")) and
       (Mix.env() in [:dev, :test] or Enum.any?(System.argv(), &(&1 == "release")))
   end
 
