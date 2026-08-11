@@ -456,7 +456,8 @@ keeps a classification and discards everything else:
 
 The known failure kinds are `invalid-input`, `invalid-prompt`,
 `invalid-transcript`, `transcript-limit`, `turn-limit`, `model-program-failed`,
-`non-retryable-evaluation`, `evaluation-unavailable`, `llm-provider-error`,
+`non-retryable-evaluation`, `evaluation-unavailable`, `capability-unavailable`,
+`llm-provider-error`,
 `protocol-error`, `provider-error`, `capability-error`, `assertion-failed`, and
 `unknown-action`.
 

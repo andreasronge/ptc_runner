@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.ToolGrant
+  alias PtcRunner.Kernel.WorkflowEnvironment
 
   @input_schema %{"type" => "object", "additionalProperties" => false}
 
@@ -34,7 +35,16 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
       for n <- [1, 10, 50], into: %{} do
         environment = environment_with(Enum.map(1..n, &capability("cap-#{&1}")))
         {:ok, state} = RunState.start(Limits.defaults())
-        grant = ToolGrant.capability_callbacks(state, :mission, environment, 1_000, nil, nil)
+
+        grant =
+          ToolGrant.capability_callbacks(
+            state,
+            :mission,
+            environment,
+            dispatch_context(),
+            nil,
+            nil
+          )
 
         one_callback_words = grant |> Map.fetch!("cap-1") |> flat_words()
         total_words = flat_words(grant)
@@ -67,7 +77,16 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
 
     environment = environment_with(capabilities)
     {:ok, state} = RunState.start(Limits.defaults())
-    grant = ToolGrant.capability_callbacks(state, :mission, environment, 1_000, nil, nil)
+
+    grant =
+      ToolGrant.capability_callbacks(
+        state,
+        :mission,
+        environment,
+        dispatch_context(),
+        nil,
+        nil
+      )
 
     # The pre-fix baseline for this profile's shape measured 552,708 words
     # (~4.4 MB) before evaluation started at all. A narrowed grant for the
@@ -76,15 +95,116 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
     assert flat_words(grant) < 20_000
   end
 
+  test "a workflow grant can validate under the evaluator heap ceiling" do
+    {:ok, checked} =
+      Capability.new(
+        name: "checked",
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{"value" => %{"type" => "integer"}}
+        },
+        callback: fn _arguments -> flunk("validation exhaustion must prevent callback entry") end
+      )
+
+    {:ok, environment} = WorkflowEnvironment.new(capabilities: [checked])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    # REPL callbacks have workflow authority, but run inside an evaluation
+    # sandbox. The explicit ceiling must therefore win over the authority's
+    # much larger workflow heap.
+    grant =
+      ToolGrant.capability_callbacks(
+        state,
+        :workflow,
+        environment,
+        dispatch_context(validation_heap_words: 233),
+        nil,
+        nil
+      )
+
+    assert %{
+             status: :error,
+             kind: :capability_unavailable,
+             reason: :input_validation_unavailable
+           } = grant["checked"].(%{"value" => 1})
+  end
+
+  test "validation deadline reserves time to persist terminal host provenance" do
+    {:ok, checked} =
+      Capability.new(
+        name: "checked",
+        effect: :read,
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{
+            "rows" => %{
+              "type" => "array",
+              "items" => %{"type" => "integer", "minimum" => 1}
+            }
+          }
+        },
+        callback: fn _arguments -> flunk("validator timeout must prevent callback entry") end
+      )
+
+    {:ok, environment} = MissionEnvironment.new(capabilities: [checked])
+    {:ok, state} = RunState.start(Limits.defaults())
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
+
+    grant =
+      ToolGrant.capability_callbacks(
+        state,
+        :mission,
+        environment,
+        dispatch_context(
+          validation_heap_words: 100_000_000,
+          evaluation_lease: lease,
+          validation_deadline_ms: System.monotonic_time(:millisecond) + 30
+        ),
+        nil,
+        nil
+      )
+
+    assert %{
+             status: :error,
+             kind: :capability_unavailable,
+             reason: :input_validation_unavailable
+           } = grant["checked"].(%{"rows" => List.duplicate(0, 10_000)})
+
+    assert {:ok, %{terminal_host_failure?: true}} =
+             RunState.release_evaluation_status(state, lease)
+  end
+
   defp callback_words(environment, name) do
     {:ok, state} = RunState.start(Limits.defaults())
-    grant = ToolGrant.capability_callbacks(state, :mission, environment, 1_000, nil, nil)
+
+    grant =
+      ToolGrant.capability_callbacks(
+        state,
+        :mission,
+        environment,
+        dispatch_context(),
+        nil,
+        nil
+      )
+
     grant |> Map.fetch!(name) |> flat_words()
   end
 
   defp environment_with(capabilities) do
     {:ok, environment} = MissionEnvironment.new(capabilities: capabilities)
     environment
+  end
+
+  defp dispatch_context(overrides \\ []) do
+    Map.merge(
+      %{
+        timeout_ms: 1_000,
+        validation_heap_words: Limits.defaults().evaluation_heap_words,
+        evaluation_lease: nil,
+        validation_deadline_ms: nil
+      },
+      Map.new(overrides)
+    )
   end
 
   defp capability(name, opts \\ []) do

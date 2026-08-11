@@ -204,12 +204,43 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{status: :error, kind: :provider_error, reason: :denied} =
              Task.await(dispatch, 2_000)
 
-    assert_receive {:evaluation_released, {:ok, %{terminal_provider_failure?: true}}}
+    assert_receive {:evaluation_released,
+                    {:ok,
+                     %{
+                       terminal_provider_failure?: true,
+                       terminal_host_failure?: false
+                     }}}
 
     assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state)
 
-    assert {:ok, %{terminal_provider_failure?: false}} =
+    assert {:ok,
+            %{
+              terminal_provider_failure?: false,
+              terminal_host_failure?: false
+            }} =
              RunState.release_evaluation_status(state, next_lease)
+  end
+
+  test "evaluation host-failure status is scoped to the exact active lease" do
+    {:ok, state} = RunState.start(Limits.defaults())
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
+
+    assert :ok = RunState.mark_evaluation_terminal_host_failure(state, make_ref())
+
+    assert {:ok,
+            %{
+              terminal_provider_failure?: false,
+              terminal_host_failure?: false
+            }} = RunState.release_evaluation_status(state, lease)
+
+    assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state)
+    assert :ok = RunState.mark_evaluation_terminal_host_failure(state, next_lease)
+
+    assert {:ok,
+            %{
+              terminal_provider_failure?: false,
+              terminal_host_failure?: true
+            }} = RunState.release_evaluation_status(state, next_lease)
   end
 
   test "continuation commit applies separate memory and exact-history ceilings atomically" do
@@ -2416,6 +2447,43 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              outcome: :evaluation_error,
              retryable?: true,
              terminal_provider_failure?: true
+           } = result
+
+    assert result.kind in [:timeout, :memory_exceeded]
+  end
+
+  test "sandbox kills retain input-validation unavailability outside the evaluator" do
+    {:ok, unstable} =
+      Capability.new(
+        name: "unstable",
+        effect: :read,
+        input_schema: @input_schema,
+        callback: fn _ -> flunk("unavailable validation must prevent callback entry") end
+      )
+
+    unstable = %{unstable | input_validator: :forced_validator_failure}
+    {:ok, mission} = MissionEnvironment.new(capabilities: [unstable])
+
+    {:ok, limits} =
+      Limits.new(
+        evaluation_timeout_ms: 500,
+        evaluation_heap_words: 100_000_000
+      )
+
+    {:ok, state} = RunState.start(limits)
+
+    result =
+      Evaluation.evaluate_source(
+        state,
+        mission,
+        ~S|(do (tool/unstable {}) (reduce + (range 0 100000000)))|,
+        500
+      )
+
+    assert %{
+             outcome: :evaluation_error,
+             retryable?: true,
+             terminal_host_failure?: true
            } = result
 
     assert result.kind in [:timeout, :memory_exceeded]

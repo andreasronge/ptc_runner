@@ -330,7 +330,8 @@ defmodule PtcRunner.Kernel.Evaluation do
           timeout_ms,
           capture.event_sink,
           capture.inspection_sink,
-          lease
+          lease,
+          deadline_ms
         ),
       prelude: bundle_prelude(environment),
       timeout: timeout_ms,
@@ -361,14 +362,17 @@ defmodule PtcRunner.Kernel.Evaluation do
           projection_boundary
         )
         |> put_terminal_provider_failure(step)
+        |> put_terminal_host_failure(step)
 
       {:ok, step} ->
         commit_result(state, lease, history, step, projection_boundary)
         |> put_terminal_provider_failure(step)
+        |> put_terminal_host_failure(step)
 
       {:error, step} ->
         release_failure(state, environment, lease, step, mission_calls_before)
         |> put_terminal_provider_failure(step)
+        |> put_terminal_host_failure(step)
     end
   end
 
@@ -543,8 +547,13 @@ defmodule PtcRunner.Kernel.Evaluation do
         nil -> result
       end
 
-    if evaluation_status.terminal_provider_failure?,
-      do: Map.put(result, :terminal_provider_failure?, true),
+    result =
+      if evaluation_status.terminal_provider_failure?,
+        do: Map.put(result, :terminal_provider_failure?, true),
+        else: result
+
+    if evaluation_status.terminal_host_failure?,
+      do: Map.put(result, :terminal_host_failure?, true),
       else: result
   end
 
@@ -658,6 +667,31 @@ defmodule PtcRunner.Kernel.Evaluation do
     end)
   end
 
+  defp put_terminal_host_failure(result, step) do
+    if terminal_host_failure?(step),
+      do: Map.put(result, :terminal_host_failure?, true),
+      else: result
+  end
+
+  defp terminal_host_failure?(step) do
+    step
+    |> Map.get(:tool_calls, [])
+    |> List.wrap()
+    |> Enum.any?(fn
+      %{
+        result: %{
+          status: :error,
+          kind: :capability_unavailable,
+          reason: :input_validation_unavailable
+        }
+      } ->
+        true
+
+      _call ->
+        false
+    end)
+  end
+
   defp mission_capability_call_count(state), do: call_total(mission_capability_calls(state))
 
   defp mission_capability_calls(state) do
@@ -688,15 +722,29 @@ defmodule PtcRunner.Kernel.Evaluation do
   end
 
   @doc false
-  def mission_tools(environment, state, timeout_ms, event_sink, inspection_sink, lease \\ nil) do
+  def mission_tools(
+        environment,
+        state,
+        timeout_ms,
+        event_sink,
+        inspection_sink,
+        evaluation_lease \\ nil,
+        validation_deadline_ms \\ nil
+      ) do
+    limits = RunState.limits(state)
+
     state
     |> ToolGrant.capability_callbacks(
       :mission,
       environment,
-      timeout_ms,
+      %{
+        timeout_ms: timeout_ms,
+        validation_heap_words: limits.evaluation_heap_words,
+        evaluation_lease: evaluation_lease,
+        validation_deadline_ms: validation_deadline_ms
+      },
       event_sink,
-      inspection_sink,
-      lease: lease
+      inspection_sink
     )
     |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
   end

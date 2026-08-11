@@ -1152,6 +1152,35 @@ before connector cleanup. Providers are trusted host extensions: the Kernel
 contains ordinary faults and bounded results, but it is not a security
 sandbox for malicious BEAM code.
 
+When a model-authored call fails the capability's compiled input schema before
+callback entry, Dispatcher retains at most three correction facts for the agent
+loop: the schema-declared argument path, the violated keyword, and a small
+declared numeric, string-length, or item-count bound when one fits. Enum and
+const literals are always omitted. Paths are resolved through the frozen
+schema, the root is `$`, array positions are rendered as `[]`, and
+non-identifier names use JSON-quoted bracket notation so punctuation and
+controls cannot alter path structure. The bounded candidate set is sorted
+before the first three facts are retained. Explanations are omitted when the
+submitted structure or raw error set exceeds its fixed work budget.
+
+Dispatcher enforces `capability_argument_bytes` before entering JSV. Validation
+and bounded projection then run in one worker whose timeout is the minimum of
+the requested call timeout, remaining run time, the authority environment's
+timeout, and the enclosing execution deadline after a small result-handoff
+reserve. The execution context supplies the heap ceiling: ordinary workflow
+runs use the workflow heap, while mission evaluation and REPL execution use
+the evaluation heap even though REPL capabilities retain workflow authority.
+Proven invalidity is distinct from timeout, heap exhaustion, a validator crash,
+or an unrecognized validator result. Those operational failures return
+`capability_unavailable/input_validation_unavailable` without reserving a
+capability call, charging `protocol_errors`, invoking the callback, or emitting
+capability lifecycle events. The evaluator records that result's host
+provenance privately so `agent.core` fails the outer workflow without a
+correction turn. The low-level cause is not public. Submitted values,
+undeclared property names, and enum or const literals never enter feedback or
+canonical events. A capability's custom semantic validator remains opaque
+because its rejection reason is not a schema-authored fact.
+
 Limits are host-enforced ceilings. `PtcRunner.Kernel.LimitCatalog` is the
 checked-in authority for every field's public name, scope, compiled and
 installed defaults, inclusive range, and effective-identity participation.

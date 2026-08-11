@@ -18,6 +18,14 @@ defmodule PtcRunner.Kernel.Dispatcher do
   Before a mission provider publishes a terminal policy failure, its monitored
   callback records that classification in RunState so a subsequent evaluator
   kill cannot make the agent repeat the call.
+
+  A pre-callback input-schema rejection may add up to three schema-authored
+  argument violations to the Lisp error envelope. The rejected arguments,
+  undeclared property names, and opaque semantic-validator reasons remain
+  withheld. Enum and const literals are never included. If bounded schema
+  validation itself becomes unavailable, Dispatcher returns the distinct
+  `capability_unavailable/input_validation_unavailable` category without
+  charging protocol or capability-call budgets or emitting capability events.
   """
 
   alias PtcRunner.Kernel.Capability
@@ -30,6 +38,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Lisp.AmbiguousArguments
   alias PtcRunner.Lisp.RetainedSize
+
+  @validation_handoff_ms 25
 
   @doc "Dispatches one environment-local capability with optional event collection."
   @spec dispatch(RunState.t(), :workflow | :mission, map(), binary(), map(), non_neg_integer()) ::
@@ -86,6 +96,53 @@ defmodule PtcRunner.Kernel.Dispatcher do
   def dispatch(
         state,
         environment,
+        %{capabilities: capabilities},
+        name,
+        arguments,
+        %{
+          timeout_ms: timeout_ms,
+          validation_heap_words: validation_heap_words,
+          evaluation_lease: evaluation_lease,
+          validation_deadline_ms: validation_deadline_ms
+        } = dispatch_context,
+        event_sink,
+        inspection_sink
+      )
+      when environment in [:workflow, :mission] and is_binary(name) and is_map(arguments) and
+             not is_struct(arguments, AmbiguousArguments) and
+             is_integer(timeout_ms) and is_integer(validation_heap_words) and
+             validation_heap_words > 0 and
+             (is_reference(evaluation_lease) or is_nil(evaluation_lease)) and
+             (is_integer(validation_deadline_ms) or is_nil(validation_deadline_ms)) do
+    dispatch_with_context(
+      state,
+      environment,
+      capabilities,
+      name,
+      arguments,
+      dispatch_context,
+      event_sink,
+      inspection_sink
+    )
+  end
+
+  def dispatch(
+        state,
+        environment,
+        %{capabilities: _capabilities},
+        _name,
+        %AmbiguousArguments{},
+        %{evaluation_lease: evaluation_lease},
+        event_sink,
+        _inspection_sink
+      )
+      when environment in [:workflow, :mission] do
+    protocol_error(state, event_sink, :ambiguous_arguments, environment, evaluation_lease)
+  end
+
+  def dispatch(
+        state,
+        environment,
         %{capabilities: _capabilities},
         _name,
         %AmbiguousArguments{},
@@ -106,7 +163,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
         timeout_ms,
         event_sink,
         inspection_sink
-      ) do
+      )
+      when is_integer(timeout_ms) do
     dispatch_with_lease(
       state,
       environment,
@@ -151,14 +209,57 @@ defmodule PtcRunner.Kernel.Dispatcher do
       )
       when environment in [:workflow, :mission] and is_binary(name) and is_map(arguments) and
              is_integer(timeout_ms) do
+    limits = state_limits(state)
+
+    dispatch(
+      state,
+      environment,
+      %{capabilities: capabilities},
+      name,
+      arguments,
+      %{
+        timeout_ms: timeout_ms,
+        validation_heap_words: validation_heap_words(limits, environment),
+        evaluation_lease: lease,
+        validation_deadline_ms: nil
+      },
+      event_sink,
+      inspection_sink
+    )
+  end
+
+  defp dispatch_with_context(
+         state,
+         environment,
+         capabilities,
+         name,
+         arguments,
+         %{
+           timeout_ms: timeout_ms,
+           validation_heap_words: validation_heap_words,
+           evaluation_lease: evaluation_lease,
+           validation_deadline_ms: validation_deadline_ms
+         },
+         event_sink,
+         inspection_sink
+       ) do
     # Advisory pre-authentication keeps a dead evaluation's lingering call
     # away from validators and protocol accounting; reserve_capability/4
     # atomically re-checks the same lease.
-    with true <- authenticated?(state, environment, lease),
+    with true <- authenticated?(state, environment, evaluation_lease),
          %Capability{} = capability <- Map.get(capabilities, name),
-         :ok <- validate(capability, arguments),
          :ok <- validate_size(arguments, capability_argument_limit(state)),
-         :ok <- RunState.reserve_capability(state, environment, name, lease) do
+         :ok <-
+           validate(
+             capability,
+             arguments,
+             state,
+             environment,
+             timeout_ms,
+             validation_heap_words,
+             validation_deadline_ms
+           ),
+         :ok <- RunState.reserve_capability(state, environment, name, evaluation_lease) do
       invoke_with_events(
         state,
         capability,
@@ -172,11 +273,34 @@ defmodule PtcRunner.Kernel.Dispatcher do
       nil ->
         %{status: :error, kind: :capability_denied, reason: :capability_absent, retryable?: false}
 
+      {:error, :invalid_arguments, []} ->
+        protocol_error(state, event_sink, :invalid_arguments, environment, evaluation_lease)
+
+      {:error, :invalid_arguments, violations} ->
+        protocol_error(
+          state,
+          event_sink,
+          :invalid_arguments,
+          environment,
+          evaluation_lease,
+          violations
+        )
+
       {:error, :invalid_arguments} ->
-        protocol_error(state, event_sink, :invalid_arguments, environment, lease)
+        protocol_error(state, event_sink, :invalid_arguments, environment, evaluation_lease)
+
+      {:error, :input_validation_unavailable} ->
+        _ = mark_terminal_host_failure(state, environment, evaluation_lease)
+
+        %{
+          status: :error,
+          kind: :capability_unavailable,
+          reason: :input_validation_unavailable,
+          retryable?: false
+        }
 
       {:error, :argument_exceeded} ->
-        protocol_error(state, event_sink, :argument_exceeded, environment, lease)
+        protocol_error(state, event_sink, :argument_exceeded, environment, evaluation_lease)
 
       {:error, :limit_exceeded} ->
         limit_error(state, event_sink, :capability_quota)
@@ -565,11 +689,66 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp terminal_provider_failure?(_result), do: false
 
-  defp validate(%Capability{} = capability, arguments) do
-    if JSONSchema.valid?(capability.input_validator, arguments),
-      do: semantic_validate(capability, arguments),
-      else: {:error, :invalid_arguments}
+  defp validate(
+         %Capability{} = capability,
+         arguments,
+         state,
+         environment,
+         requested_timeout_ms,
+         validation_heap_words,
+         validation_deadline_ms
+       ) do
+    limits = state_limits(state)
+
+    dispatch_timeout_ms =
+      min(
+        requested_timeout_ms,
+        min(validation_timeout_ms(limits, environment), RunState.remaining_ms(state))
+      )
+
+    validation_timeout_ms =
+      validation_worker_timeout_ms(dispatch_timeout_ms, validation_deadline_ms)
+
+    cond do
+      dispatch_timeout_ms <= 0 ->
+        {:error, :run_closed}
+
+      validation_timeout_ms <= 0 ->
+        {:error, :input_validation_unavailable}
+
+      true ->
+        case JSONSchema.validate(
+               capability.input_validator,
+               capability.input_schema,
+               arguments,
+               validation_timeout_ms,
+               validation_heap_words
+             ) do
+          :ok -> semantic_validate(capability, arguments)
+          {:invalid, violations} -> {:error, :invalid_arguments, violations}
+          {:unavailable, _internal_cause} -> {:error, :input_validation_unavailable}
+        end
+    end
   end
+
+  defp validation_timeout_ms(limits, :workflow), do: limits.workflow_timeout_ms
+  defp validation_timeout_ms(limits, :mission), do: limits.evaluation_timeout_ms
+
+  defp validation_worker_timeout_ms(timeout_ms, nil), do: timeout_ms
+
+  defp validation_worker_timeout_ms(timeout_ms, deadline_ms) when is_integer(deadline_ms) do
+    remaining_ms = deadline_ms - System.monotonic_time(:millisecond) - @validation_handoff_ms
+    min(timeout_ms, max(remaining_ms, 0))
+  end
+
+  defp validation_heap_words(limits, :workflow), do: limits.workflow_heap_words
+  defp validation_heap_words(limits, :mission), do: limits.evaluation_heap_words
+
+  defp mark_terminal_host_failure(state, :mission, evaluation_lease)
+       when is_reference(evaluation_lease),
+       do: RunState.mark_evaluation_terminal_host_failure(state, evaluation_lease)
+
+  defp mark_terminal_host_failure(_state, _environment, _evaluation_lease), do: :ok
 
   defp semantic_validate(%Capability{validate: nil}, _arguments), do: :ok
 
@@ -589,19 +768,33 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp validate_size(value, cap) do
     case RetainedSize.bytes_with_cap(value, cap) do
-      bytes when is_integer(bytes) and bytes <= cap -> :ok
-      _ -> {:error, :argument_exceeded}
+      bytes when is_integer(bytes) and bytes <= cap ->
+        :ok
+
+      :oversized ->
+        if json_value?(value),
+          do: {:error, :argument_exceeded},
+          else: {:error, :invalid_arguments}
+
+      _ ->
+        {:error, :argument_exceeded}
     end
   end
 
   # Authentication and accounting are one atomic owner operation: a mission
   # call whose evaluation died mid-validation must not spend the next
   # evaluation's shared protocol-error budget.
-  defp protocol_error(state, event_sink, reason, environment, lease) do
+  defp protocol_error(state, event_sink, reason, environment, lease, details \\ nil) do
     case RunState.protocol_error(state, environment, lease) do
-      :ok -> %{status: :error, kind: :protocol_error, reason: reason, retryable?: false}
-      {:error, :stale_evaluation} -> stale_evaluation_error()
-      {:error, :protocol_error_limit} -> limit_error(state, event_sink, :protocol_errors)
+      :ok ->
+        result = %{status: :error, kind: :protocol_error, reason: reason, retryable?: false}
+        if is_nil(details), do: result, else: Map.put(result, :details, details)
+
+      {:error, :stale_evaluation} ->
+        stale_evaluation_error()
+
+      {:error, :protocol_error_limit} ->
+        limit_error(state, event_sink, :protocol_errors)
     end
   end
 
@@ -623,5 +816,9 @@ defmodule PtcRunner.Kernel.Dispatcher do
   defp capability_result_limit(state), do: state_limits(state).capability_result_bytes
   defp state_limits(state), do: RunState.limits(state)
 
-  defp json_value?(value), do: JSONValue.value?(value)
+  defp json_value?(value) do
+    JSONValue.value?(value)
+  rescue
+    _exception -> false
+  end
 end

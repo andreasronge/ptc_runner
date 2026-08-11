@@ -20,6 +20,46 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
 
+  test "workflow-authorized REPL tools validate under the evaluation heap" do
+    {:ok, checked} =
+      Capability.new(
+        name: "checked",
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{"value" => %{"type" => "integer"}},
+          "required" => ["value"]
+        },
+        callback: fn %{"value" => value} -> {:ok, %{"accepted" => value}} end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [checked])
+    {:ok, mission} = MissionEnvironment.new([])
+
+    # The deliberately tiny workflow ceiling makes the old authority-derived
+    # validator worker fail. REPL Lisp and its tool validation both belong to
+    # the evaluation resource class and must use that larger ceiling.
+    {:ok, limits} = Limits.new(workflow_heap_words: 233)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-validation-heap")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+
+    assert {:ok, step, session} =
+             ReplSession.eval(session, ~S|(tool/checked {"value" 1})|)
+
+    assert step.return == %{status: :ok, value: %{"accepted" => 1}}
+
+    assert {:ok, _events} = ReplSession.close(session)
+  end
+
   test "manifest sessions grant the Runner's workflow runtime tools" do
     # A reused manifest bundle must mean the same thing in the REPL as in the
     # Runner: shipped preludes require runtime tools (workflow-annotate,

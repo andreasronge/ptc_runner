@@ -1231,6 +1231,54 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute feedback =~ "private provider detail"
   end
 
+  test "agent.core receives a declared bound after rejecting capability arguments" do
+    parent = self()
+
+    rejected_call = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "oversized-page",
+          name: "run_ptc_lisp",
+          args: %{
+            "program" =>
+              ~S|(let [response (tool/paged_lookup {"limit" 700})] (if (= :ok (get response :status)) (get response :value) (fail response)))|
+          }
+        }
+      ]
+    }
+
+    {:ok, paged_lookup} =
+      Capability.new(
+        name: "paged_lookup",
+        effect: :read,
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{
+            "limit" => %{"type" => "integer", "minimum" => 1, "maximum" => 50}
+          }
+        },
+        callback: fn _arguments ->
+          send(parent, :unexpected_paged_lookup)
+          {:ok, nil}
+        end
+      )
+
+    {:ok, config} =
+      agent_config([rejected_call, @recovered], [], mission_capabilities: [paged_lookup])
+
+    assert {:ok, %{value: %{"ok" => true, "value" => "ok"}}} =
+             Kernel.run(~S|(agent.core/run "Correct the paged lookup" {"max_turns" 3})|, config)
+
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, second}
+    refute_received :unexpected_paged_lookup
+
+    feedback = second["messages"] |> List.last() |> Map.fetch!("content")
+    assert feedback =~ "limit violates maximum 50"
+    refute feedback =~ "700"
+  end
+
   test "agent.core does not correct a capability failure after an unsafe effect" do
     parent = self()
 
@@ -1638,6 +1686,112 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              model_context["entries"],
              &(&1["form"] == ~S|(tool/raw-search {"query" query})|)
            )
+  end
+
+  test "facade correction feedback omits enum and const literals" do
+    invalid = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "invalid-facade-arguments",
+          name: "run_ptc_lisp",
+          args: %{
+            "program" => ~S|(api/choose "submitted-enum-sentinel" "submitted-const-sentinel")|
+          }
+        }
+      ]
+    }
+
+    corrected = %{
+      content: nil,
+      tool_calls: [
+        %{id: "corrected", name: "run_ptc_lisp", args: %{"program" => ~S|(return 1)|}}
+      ]
+    }
+
+    mission_source = """
+    (ns api "Mission facade" {:visibility :prompt})
+    (defn choose
+      {:signature "(mode :string, version :string) -> :map" :effect :read}
+      [mode version]
+      (fail (tool/raw-choice {"mode" mode "version" version})))
+    """
+
+    {:ok, raw_choice} =
+      Capability.new(
+        name: "raw-choice",
+        effect: :read,
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{
+            "mode" => %{"type" => "string", "enum" => ["enum-schema-sentinel"]},
+            "version" => %{"type" => "string", "const" => "const-schema-sentinel"}
+          },
+          "required" => ["mode", "version"]
+        },
+        callback: fn _ -> flunk("invalid arguments must not reach the callback") end
+      )
+
+    {:ok, config} =
+      agent_config([invalid, corrected], [],
+        mission_source: mission_source,
+        mission_capabilities: [raw_choice]
+      )
+
+    assert {:ok, %{value: %{"ok" => true, "value" => 1}}} =
+             Kernel.run(~S|(agent.core/run "Choose safely" {"max_turns" 2})|, config)
+
+    assert_receive {:agent_request, first}
+    first_visible = Jason.encode!(first)
+    refute first_visible =~ "tool/raw-choice"
+    refute first_visible =~ "enum-schema-sentinel"
+    refute first_visible =~ "const-schema-sentinel"
+
+    assert_receive {:agent_request, second}
+    correction = List.last(second["messages"])["content"]
+    assert correction =~ "mode violates enum"
+    assert correction =~ "version violates const"
+    refute correction =~ "enum-schema-sentinel"
+    refute correction =~ "const-schema-sentinel"
+    refute correction =~ "submitted-enum-sentinel"
+    refute correction =~ "submitted-const-sentinel"
+  end
+
+  test "agent.core fails validation unavailability without another provider turn" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "validator-unavailable",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(fail (tool/unstable {"value" 1}))|}
+        }
+      ]
+    }
+
+    {:ok, unstable} =
+      Capability.new(
+        name: "unstable",
+        effect: :read,
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{"value" => %{"type" => "integer"}}
+        },
+        callback: fn _ -> flunk("unavailable validation must not invoke the callback") end
+      )
+
+    unstable = %{unstable | input_validator: :forced_validator_failure}
+    {:ok, config} = agent_config([response, @recovered], [], mission_capabilities: [unstable])
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :explicit_failure,
+              details: %{failure_kind: "capability-unavailable"}
+            }} = Kernel.run(~S|(agent.core/run "Read once" {"max_turns" 3})|, config)
+
+    assert_receive {:agent_request, _first}
+    refute_receive {:agent_request, _second}
   end
 
   test "default prompt renders nested direct-capability schema documentation" do

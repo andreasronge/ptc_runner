@@ -577,17 +577,18 @@ defmodule PtcRunner.Kernel.ReplSession do
   defp run_lisp(session, memory, history, source) do
     limits = session.config.limits
     timeout_ms = min(limits.evaluation_timeout_ms, RunState.remaining_ms(session.state))
+    deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
 
     Lisp.run_native(source,
       caller: :repl,
       context: session.config.input,
       memory: memory,
       turn_history: history,
-      tools: tools(session),
+      tools: tools(session, deadline_ms),
       prelude: prelude(session.config.workflow_environment),
       timeout: timeout_ms,
       compile_timeout: timeout_ms,
-      run_deadline_ms: System.monotonic_time(:millisecond) + timeout_ms,
+      run_deadline_ms: deadline_ms,
       pmap_timeout: limits.parallel_timeout_ms,
       max_heap: limits.evaluation_heap_words,
       max_parallel_workers: limits.live_provider_tasks,
@@ -599,14 +600,19 @@ defmodule PtcRunner.Kernel.ReplSession do
     )
   end
 
-  defp tools(session) do
+  defp tools(session, validation_deadline_ms) do
     timeout_ms = session.config.limits.evaluation_timeout_ms
 
     ToolGrant.capability_callbacks(
       session.state,
       :workflow,
       session.config.workflow_environment,
-      timeout_ms,
+      %{
+        timeout_ms: timeout_ms,
+        validation_heap_words: session.config.limits.evaluation_heap_words,
+        evaluation_lease: nil,
+        validation_deadline_ms: validation_deadline_ms
+      },
       session.config.event_sink,
       session.config.inspection_sink
     )

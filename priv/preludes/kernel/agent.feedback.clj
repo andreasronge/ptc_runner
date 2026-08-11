@@ -41,10 +41,26 @@
          (if message (str "; message=" message) "")
          ". Send one corrected run_ptc_lisp call.")))
 
+(defn- argument-violation [violation]
+  (str (get violation :argument) " violates " (get violation :constraint)
+       (if (contains? violation :expected)
+         (str " " (pr-str (get violation :expected)))
+         "")))
+
+(defn- argument-violation-feedback [error]
+  (let [violations (if (and (= "protocol_error" (get error :kind))
+                            (= "invalid_arguments" (get error :reason)))
+                     (get error :details)
+                     nil)]
+    (if (seq violations)
+      (str "; violations=" (join "; " (map argument-violation violations)))
+      "")))
+
 (defn capability-error [evaluation]
   (let [error (get evaluation :value)]
     (str "The capability call failed without an unsafe effect. "
          "kind=" (get error :kind) "; reason=" (get error :reason)
+         (argument-violation-feedback error)
          ". Send one corrected run_ptc_lisp call with corrected capability arguments.")))
 
 (defn non-retryable [evaluation]

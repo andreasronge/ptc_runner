@@ -34,6 +34,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     protocol-error
     provider-error
     capability-error
+    capability-unavailable
     assertion-failed
     unknown-action
   )
