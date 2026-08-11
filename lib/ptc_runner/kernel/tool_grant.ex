@@ -73,6 +73,6 @@ defmodule PtcRunner.Kernel.ToolGrant do
 
       {name, callback}
     end)
-    |> Map.merge(RuntimeTools.tools(state, environment, event_sink, kind))
+    |> Map.merge(RuntimeTools.tools(state, environment, event_sink, kind, lease: lease))
   end
 end

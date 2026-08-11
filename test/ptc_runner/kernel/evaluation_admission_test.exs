@@ -438,6 +438,45 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     release!(next, next_lease)
   end
 
+  test "a stale evaluation's runtime-tool calls fail closed without events or accounting" do
+    alias PtcRunner.Kernel.MissionEnvironment
+    alias PtcRunner.Kernel.ToolGrant
+
+    state = start_state()
+    holder = start_worker(state)
+    {:ok, stale_lease} = reserve!(holder)
+
+    {:ok, mission} = MissionEnvironment.new(capabilities: [])
+
+    stale_tools =
+      ToolGrant.capability_callbacks(state, :mission, mission, 1_000, nil, nil,
+        lease: stale_lease
+      )
+
+    holder_monitor = Process.monitor(holder)
+    Process.exit(holder, :kill)
+    assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :killed}, 1_000
+
+    next = start_worker(state)
+    assert {:ok, next_lease} = reserve!(next, :block)
+    usage_before = RunState.usage(state)
+
+    # Valid-shaped and malformed calls alike are turned away; neither may
+    # read current state, emit events, or spend protocol-error budget.
+    assert %{status: :error, kind: :capability_denied, reason: :stale_evaluation} =
+             stale_tools["runtime-usage"].(%{})
+
+    assert %{status: :error, kind: :capability_denied, reason: :stale_evaluation} =
+             stale_tools["runtime-usage"].(%{"bad" => true})
+
+    assert %{status: :error, kind: :capability_denied, reason: :stale_evaluation} =
+             stale_tools["cap-describe"].(%{"unexpected" => 1})
+
+    assert RunState.usage(state).protocol_errors == usage_before.protocol_errors
+
+    release!(next, next_lease)
+  end
+
   test "a block request that overspent its bound in the mailbox is refused despite a free lease" do
     state = start_state()
 

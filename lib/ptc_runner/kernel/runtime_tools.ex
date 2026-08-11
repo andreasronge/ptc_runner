@@ -41,8 +41,18 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     }
   end
 
-  @doc "Builds the reserved runtime-tool map for one environment."
-  def tools(state, environment, event_sink, kind) when kind in [:workflow, :mission] do
+  @doc """
+  Builds the reserved runtime-tool map for one environment.
+
+  Mission grants carry the constructing evaluation's lease via
+  `opts[:lease]`: a stale call fails closed before instrumentation (no
+  events, no state read), and malformed-call accounting authenticates the
+  lease atomically so a dead evaluation cannot spend the next one's
+  protocol-error budget through a runtime route.
+  """
+  def tools(state, environment, event_sink, kind, opts \\ [])
+      when kind in [:workflow, :mission] do
+    lease = Keyword.get(opts, :lease)
     # cap-list/cap-describe are the discovery routes that legitimately need
     # every capability; runtime-usage/runtime-remaining ignore this argument.
     # Narrowing here (rather than per-route) keeps the whole environment from
@@ -50,11 +60,29 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     view = Environment.capability_view(environment)
 
     @mission_routes
-    |> Map.new(fn {name, route} -> {name, route_callback(route, state, view)} end)
+    |> Map.new(fn {name, route} -> {name, route_callback(route, state, view, kind, lease)} end)
     |> maybe_put_annotation(state, event_sink, kind)
     |> Map.new(fn {name, callback} ->
-      {name, instrument(state, event_sink, kind, name, callback)}
+      instrumented = instrument(state, event_sink, kind, name, callback)
+      {name, authenticate_mission_route(instrumented, state, kind, lease)}
     end)
+  end
+
+  defp authenticate_mission_route(callback, _state, :workflow, _lease), do: callback
+
+  defp authenticate_mission_route(callback, state, :mission, lease) do
+    fn arguments ->
+      if RunState.mission_lease_current?(state, lease) do
+        callback.(arguments)
+      else
+        %{
+          status: :error,
+          kind: :capability_denied,
+          reason: :stale_evaluation,
+          retryable?: false
+        }
+      end
+    end
   end
 
   @doc "Builds the workflow-only frozen mission-inventory callback."
@@ -441,41 +469,59 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
-  defp usage(state, arguments) when is_map(arguments) and map_size(arguments) == 0,
+  defp usage(state, arguments, _scope) when is_map(arguments) and map_size(arguments) == 0,
     do: RunState.usage(state)
 
-  defp usage(state, _arguments), do: protocol_error(state, :invalid_runtime_usage_request)
+  defp usage(state, _arguments, scope),
+    do: scoped_protocol_error(state, :invalid_runtime_usage_request, scope)
 
-  defp remaining(state, arguments) when is_map(arguments) and map_size(arguments) == 0,
+  defp remaining(state, arguments, _scope) when is_map(arguments) and map_size(arguments) == 0,
     do: RunState.remaining_ms(state)
 
-  defp remaining(state, _arguments), do: protocol_error(state, :invalid_runtime_remaining_request)
+  defp remaining(state, _arguments, scope),
+    do: scoped_protocol_error(state, :invalid_runtime_remaining_request, scope)
 
-  defp capability_list(_state, environment, arguments)
+  defp capability_list(_state, environment, arguments, _scope)
        when is_map(arguments) and map_size(arguments) == 0,
        do: Environment.metadata(environment)
 
-  defp capability_list(state, _environment, _arguments),
-    do: protocol_error(state, :invalid_capability_list_request)
+  defp capability_list(state, _environment, _arguments, scope),
+    do: scoped_protocol_error(state, :invalid_capability_list_request, scope)
 
-  defp capability_description(_state, environment, %{"name" => name}) when is_binary(name) do
+  defp capability_description(_state, environment, %{"name" => name}, _scope)
+       when is_binary(name) do
     Enum.find(Environment.metadata(environment), &(&1.name == name))
   end
 
-  defp capability_description(state, _environment, _arguments),
-    do: protocol_error(state, :invalid_capability_description_request)
+  defp capability_description(state, _environment, _arguments, scope),
+    do: scoped_protocol_error(state, :invalid_capability_description_request, scope)
 
-  defp route_callback(:usage, state, _environment),
-    do: fn arguments -> usage(state, arguments) end
+  defp route_callback(:usage, state, _environment, kind, lease),
+    do: fn arguments -> usage(state, arguments, {kind, lease}) end
 
-  defp route_callback(:remaining, state, _environment),
-    do: fn arguments -> remaining(state, arguments) end
+  defp route_callback(:remaining, state, _environment, kind, lease),
+    do: fn arguments -> remaining(state, arguments, {kind, lease}) end
 
-  defp route_callback(:capability_list, state, environment),
-    do: fn arguments -> capability_list(state, environment, arguments) end
+  defp route_callback(:capability_list, state, environment, kind, lease),
+    do: fn arguments -> capability_list(state, environment, arguments, {kind, lease}) end
 
-  defp route_callback(:capability_description, state, environment),
-    do: fn arguments -> capability_description(state, environment, arguments) end
+  defp route_callback(:capability_description, state, environment, kind, lease),
+    do: fn arguments -> capability_description(state, environment, arguments, {kind, lease}) end
+
+  # Malformed-call accounting for a mission route authenticates the lease in
+  # the same owner operation that records the error.
+  defp scoped_protocol_error(state, reason, {kind, lease}) do
+    case RunState.protocol_error(state, kind, lease) do
+      :ok ->
+        %{status: :error, kind: :protocol_error, reason: reason}
+
+      {:error, :stale_evaluation} ->
+        %{status: :error, kind: :capability_denied, reason: :stale_evaluation, retryable?: false}
+
+      {:error, :protocol_error_limit} ->
+        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors}
+    end
+  end
 
   defp maybe_put_annotation(tools, state, event_sink, :workflow) do
     Map.put(tools, "workflow-annotate", fn arguments ->
