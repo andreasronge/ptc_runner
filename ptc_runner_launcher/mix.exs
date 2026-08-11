@@ -25,7 +25,16 @@ defmodule PtcRunnerLauncher.MixProject do
       make_precompiler_url: precompiled_url(),
       make_precompiler_filename: "ptc_runner_launcher",
       make_precompiler_priv_paths: ["ptc_runner_launcher"],
-      make_force_build: System.get_env("PTC_RUNNER_LAUNCHER_BUILD_FROM_SOURCE") == "1",
+      # Hex consumers restore the checksum-pinned precompiled artifact; a
+      # repository checkout must always take the make path instead. The
+      # precompiler skip trusts any artifact already present in priv
+      # regardless of age, which let a binary compiled before an Aug 2026
+      # c_src change satisfy every warm build: `mix compile` kept vending a
+      # launcher that answered `--publish-directory-noreplace` with a usage
+      # error while the test suite blamed publication. make's own
+      # source-vs-binary mtime check is the staleness authority here, and a
+      # fresh binary makes it a no-op.
+      make_force_build: force_build?(),
       make_env: %{"MACOSX_DEPLOYMENT_TARGET" => @release_config.macos_deployment_target},
       cc_precompiler: [
         compilers: precompiled_targets()
@@ -39,6 +48,15 @@ defmodule PtcRunnerLauncher.MixProject do
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_env), do: ["lib"]
+
+  # True for any git checkout of this repository — a linked worktree carries
+  # a `.git` file rather than a directory, hence exists?/1 and not dir?/1.
+  # The Hex tarball ships without `../.git`, so package consumers keep the
+  # precompiled-restore path.
+  defp force_build? do
+    System.get_env("PTC_RUNNER_LAUNCHER_BUILD_FROM_SOURCE") == "1" or
+      File.exists?(Path.expand("../.git", __DIR__))
+  end
 
   defp deps do
     [
