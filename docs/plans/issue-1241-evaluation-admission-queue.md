@@ -256,8 +256,14 @@ pins the policy.
    late-started-operation clamp is pinned at the `Parallel`/`Context` unit
    level (a near cap beats a generous `pmap_timeout`) — an integration
    version would race the sandbox kill on the same absolute deadline and
-   flake. Nested operations inheriting the outer absolute deadline is
-   pre-existing behavior pinned by the existing parallel-limits suite. A
+   flake. Nested-deadline behavior is pinned where it is observable: the
+   runner spawns zero workers for an already-expired inherited deadline
+   (`parallel_runner_test`), and the cap propagation through both closure
+   reconstruction sites has direct tests. The `pmap_deadline` copy in the
+   closure sites itself has no independently Lisp-observable outcome — the
+   outer runner kills its workers at the same deadline regardless, and the
+   absolute cap bounds even a hypothetically reset inner deadline — so it
+   carries no dedicated test. A
    `:slow`-tagged test proves an op surviving past the old 5 s ceiling
    under the new default (park a capability ~5.5 s via `receive after`, no
    `Process.sleep`). A REPL test proves the configured limit reaches REPL
