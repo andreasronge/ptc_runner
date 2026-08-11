@@ -31,13 +31,15 @@ and `_build/` against `mix.lock` and source digests, and dialyxir revalidates
 the project PLT against the module set, so a stale seed costs a rebuild
 rather than a wrong answer. The seeded PLT's dialyxir hash file is
 deliberately not copied (the first `mix dialyzer` run must re-check the PLT
-instead of trusting the hash), and each copied PLT is byte-compared against
-its source after the clone, so a PLT caught mid-rewrite by a concurrent
-dialyzer run is discarded rather than promoted. Copies are staged under a
-per-process gitignored directory and promoted with an atomic rename — an
-interrupted seed leaves nothing half-copied — and each worktree owns its
-copies, so concurrent gates never share a writable artifact. Copies use
-copy-on-write clones where the filesystem supports it (APFS/btrfs).
+instead of trusting the hash), and each copied PLT must fully decode as an
+external term before promotion, so a torn copy taken while a concurrent
+dialyzer run was rewriting the source is discarded rather than promoted.
+Copies are staged under a per-process gitignored directory and promoted with
+atomic no-replace renames — neither an interrupted seed nor two concurrent
+ones can leave a half-copied artifact that later runs mistake for a built
+one — and each worktree owns its copies, so concurrent gates never share a
+writable artifact. Copies use copy-on-write clones where the filesystem
+supports it (APFS/btrfs).
 
 The one thing the seed takes on faith is dependency *fidelity*: it copies the
 main checkout's `deps/` trees as they are, so a locally edited dependency

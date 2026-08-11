@@ -217,12 +217,12 @@ seed_worktree() {
       echo "   ⏭️  $artifact — already present"
     elif mkdir -p "$staging" "$(dirname "$dst/$artifact")" &&
       clone_tree "$src/$artifact" "$tmp" &&
-      scrub_seed_artifact "$artifact" "$src/$artifact" "$tmp" &&
-      [ ! -e "$dst/$artifact" ] && mv "$tmp" "$dst/$artifact"; then
+      scrub_seed_artifact "$artifact" "$tmp" &&
+      promote_seed_artifact "$tmp" "$dst/$artifact"; then
       echo "   🌱 $artifact"
       seeded=$((seeded + 1))
     else
-      echo "   ⚠️  $artifact — copy failed or source changed mid-copy; nothing promoted"
+      echo "   ⚠️  $artifact — not promoted (copy failed, torn PLT, or lost a race)"
     fi
   done
 
@@ -238,18 +238,47 @@ seed_worktree() {
 #    dialyzer run in the new worktree always revalidates the copied PLT.
 # 2. A PLT cloned while the main checkout's dialyzer is rewriting it can be
 #    a torn copy, and dialyxir raises on an invalid PLT rather than
-#    rebuilding it. Byte-compare each staged PLT against its source after
-#    the clone: any concurrent write makes them diverge and the artifact is
-#    discarded — the worktree then simply builds its PLT the normal way.
+#    rebuilding it — each staged PLT must prove it decodes before promotion.
 scrub_seed_artifact() {
-  local artifact="$1" src_tree="$2" tmp_tree="$3" plt
+  local artifact="$1" tmp_tree="$2" plt
   if [ "$artifact" = "priv/plts" ]; then
     rm -f "$tmp_tree"/*.hash
     for plt in "$tmp_tree"/*.plt; do
       [ -e "$plt" ] || continue
-      cmp -s "$src_tree/$(basename "$plt")" "$plt" || return 1
+      plt_decodes "$plt" || return 1
     done
   fi
+}
+
+# A PLT file is a single external term (#file_plt{}), and binary_to_term
+# rejects both truncation and trailing garbage, so a successful decode of the
+# staged copy proves the snapshot is complete regardless of what the source's
+# writer was doing. Needs erl on PATH; without it the artifact is not seeded.
+plt_decodes() {
+  PTC_SEED_PLT="$1" erl -noshell -eval '
+    P = os:getenv("PTC_SEED_PLT"),
+    R = case file:read_file(P) of
+          {ok, Bin} -> try binary_to_term(Bin) of _ -> 0 catch _:_ -> 1 end;
+          _ -> 1
+        end,
+    halt(R).' 2>/dev/null
+}
+
+# Promotion must be a no-replace operation: a bare `mv` whose destination
+# sprang into existence (a concurrent seed) would move the staged tree
+# *inside* it and report success. `mkdir` is the atomic claim — it fails on
+# any existing entry, symlinks included — and each top-level entry then moves
+# in with an atomic same-volume rename. An interruption mid-promotion leaves
+# only whole top-level units (whole dep dirs, whole build envs, whole PLTs),
+# which Mix and dialyxir treat as merely not-yet-built.
+promote_seed_artifact() {
+  local tmp="$1" final="$2" entry
+  mkdir "$final" 2>/dev/null || return 1
+  for entry in "$tmp"/* "$tmp"/.[!.]* "$tmp"/..?*; do
+    { [ -e "$entry" ] || [ -L "$entry" ]; } || continue
+    mv "$entry" "$final/" || return 1
+  done
+  rmdir "$tmp"
 }
 
 cmd_seed() {

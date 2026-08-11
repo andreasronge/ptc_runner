@@ -13,7 +13,7 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
 
     write!(main, "deps/jason/mix.exs", "jason\n")
     write!(main, "_build/test/lib/ptc_runner/ebin/x.beam", "beam\n")
-    write!(main, "priv/plts/project.plt", "plt\n")
+    write!(main, "priv/plts/project.plt", plt_binary())
     write!(main, "ptc_viewer/_build/test/marker", "viewer\n")
 
     {output, 0} = seed(main, worktree)
@@ -23,29 +23,17 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     assert output =~ "🌱 priv/plts"
     assert output =~ ~r/Seeded 4 artifact\(s\)/
     assert File.read!(Path.join(worktree, "deps/jason/mix.exs")) == "jason\n"
-    assert File.read!(Path.join(worktree, "priv/plts/project.plt")) == "plt\n"
+    assert File.read!(Path.join(worktree, "priv/plts/project.plt")) == plt_binary()
     assert File.read!(Path.join(worktree, "ptc_viewer/_build/test/marker")) == "viewer\n"
 
     assert output =~ "ptc_runner_launcher/deps — not built in the main checkout"
     assert Path.wildcard(Path.join(worktree, ".worktree-seed-tmp*")) == []
   end
 
-  test "discards a PLT whose source diverged from the copy" do
-    %{main: main, worktree: worktree} = repo_with_worktree()
-
-    write!(main, "priv/plts/project.plt", "plt\n")
-    fake_cmp = fake_cmp_reporting_divergence!(main)
-
-    {output, 0} = seed(main, worktree, env: [{"PATH", fake_cmp}])
-
-    assert output =~ "priv/plts — copy failed or source changed mid-copy"
-    refute File.exists?(Path.join(worktree, "priv/plts"))
-  end
-
   test "does not seed dialyxir's PLT hash file" do
     %{main: main, worktree: worktree} = repo_with_worktree()
 
-    write!(main, "priv/plts/project.plt", "plt\n")
+    write!(main, "priv/plts/project.plt", plt_binary())
     write!(main, "priv/plts/project.plt.hash", "hash\n")
 
     {output, 0} = seed(main, worktree)
@@ -53,6 +41,18 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     assert output =~ "🌱 priv/plts"
     assert File.exists?(Path.join(worktree, "priv/plts/project.plt"))
     refute File.exists?(Path.join(worktree, "priv/plts/project.plt.hash"))
+  end
+
+  test "discards a torn PLT copy instead of promoting it" do
+    %{main: main, worktree: worktree} = repo_with_worktree()
+
+    truncated = binary_part(plt_binary(), 0, byte_size(plt_binary()) - 3)
+    write!(main, "priv/plts/project.plt", truncated)
+
+    {output, 0} = seed(main, worktree)
+
+    assert output =~ "priv/plts — not promoted"
+    refute File.exists?(Path.join(worktree, "priv/plts"))
   end
 
   test "treats a dangling destination symlink as present rather than replacing it" do
@@ -126,33 +126,17 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     %{main: main, worktree: worktree}
   end
 
-  defp seed(main, worktree, opts \\ []) do
+  defp seed(main, worktree) do
     System.cmd("bash", [@script, "seed", worktree],
       cd: main,
-      env: @git_env ++ Keyword.get(opts, :env, []),
+      env: @git_env,
       stderr_to_stdout: true
     )
   end
 
-  # A PATH whose `cmp` reports divergence for .plt files only, standing in
-  # for a PLT that a concurrent dialyzer run rewrote while it was cloned.
-  # Every other cmp call (the seed's lockfile guard) passes through.
-  defp fake_cmp_reporting_divergence!(root) do
-    bin = Path.join(root, "fake-bin")
-    File.mkdir_p!(bin)
-    fake_cmp = Path.join(bin, "cmp")
-
-    File.write!(fake_cmp, """
-    #!/bin/sh
-    case "$*" in
-      *.plt*) exit 1 ;;
-      *) exec /usr/bin/cmp "$@" ;;
-    esac
-    """)
-
-    File.chmod!(fake_cmp, 0o755)
-    bin <> ":" <> System.fetch_env!("PATH")
-  end
+  # Real PLTs are one external term; the seed proves a staged copy decodes
+  # before promoting it, so fixture PLTs must decode too.
+  defp plt_binary, do: :erlang.term_to_binary({:file_plt, :fixture})
 
   defp write!(repo, path, contents) do
     full_path = Path.join(repo, path)
