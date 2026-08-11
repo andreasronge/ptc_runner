@@ -34,6 +34,10 @@ deliberately not copied (the first `mix dialyzer` run must re-check the PLT
 instead of trusting the hash), and each copied PLT must fully decode as an
 external term before promotion, so a torn copy taken while a concurrent
 dialyzer run was rewriting the source is discarded rather than promoted.
+The decode proves the copy is whole, not that the PLT is current: a project
+PLT left stale by a toolchain bump seeds as-is and fails in the worktree
+exactly as it would have in the main checkout — the remedy in the section
+above applies unchanged.
 Copies are staged under a per-process gitignored directory and promoted with
 atomic no-replace renames — neither an interrupted seed nor two concurrent
 ones can leave a half-copied artifact that later runs mistake for a built
