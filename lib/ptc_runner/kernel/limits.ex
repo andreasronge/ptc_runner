@@ -18,7 +18,9 @@ defmodule PtcRunner.Kernel.Limits do
     the run deadline;
   - `workflow_heap_words`, `evaluation_heap_words`, and
     `provider_heap_words` are per-process heap ceilings;
-  - `live_provider_tasks` bounds concurrent provider callback processes;
+  - `live_provider_tasks` bounds concurrent provider callback processes and is
+    passed to Kernel-owned Lisp evaluations as their global `pmap`/`pcalls`
+    worker capacity;
   - `workflow_capability_calls` and `mission_capability_calls` are total call
     quotas, with matching `*_per_name` quotas;
   - `subordinate_evaluations`, `subordinate_source_checks`, and

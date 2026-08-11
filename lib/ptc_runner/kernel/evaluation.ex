@@ -339,6 +339,7 @@ defmodule PtcRunner.Kernel.Evaluation do
       run_deadline_ms: deadline_ms,
       pmap_timeout: limits.parallel_timeout_ms,
       max_heap: limits.evaluation_heap_words,
+      max_parallel_workers: limits.live_provider_tasks,
       max_program_bytes: limits.subordinate_source_bytes,
       filter_context: false,
       caller: :kernel,

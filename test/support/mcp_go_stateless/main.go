@@ -30,7 +30,8 @@ import (
 )
 
 type cityTimeParams struct {
-	City string `json:"city" jsonschema:"City to get time for (nyc, sf, or boston)"`
+	City    string `json:"city" jsonschema:"City to get time for (nyc, sf, or boston)"`
+	DelayMS int    `json:"delay_ms,omitempty" jsonschema:"Optional bounded response delay in milliseconds (0 to 1000)"`
 }
 
 type oauthHarness struct {
@@ -307,10 +308,24 @@ func writeJSON(response http.ResponseWriter, value any) {
 }
 
 func cityTime(
-	_ context.Context,
+	ctx context.Context,
 	_ *mcp.CallToolRequest,
 	params *cityTimeParams,
 ) (*mcp.CallToolResult, any, error) {
+	if params.DelayMS < 0 || params.DelayMS > 1000 {
+		return nil, nil, fmt.Errorf("delay_ms must be between 0 and 1000")
+	}
+	if params.DelayMS > 0 {
+		timer := time.NewTimer(time.Duration(params.DelayMS) * time.Millisecond)
+		defer timer.Stop()
+
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+
 	locations := map[string]string{
 		"nyc":    "America/New_York",
 		"sf":     "America/Los_Angeles",

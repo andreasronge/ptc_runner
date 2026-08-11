@@ -205,6 +205,7 @@ defmodule PtcRunner.Kernel.Runner do
       run_deadline_ms: deadline_ms,
       pmap_timeout: config.limits.parallel_timeout_ms,
       max_heap: config.limits.workflow_heap_words,
+      max_parallel_workers: config.limits.live_provider_tasks,
       max_program_bytes: config.limits.entry_source_bytes,
       filter_context: false,
       caller: :kernel

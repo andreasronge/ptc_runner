@@ -937,6 +937,44 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "doctor --connect preserves a provider-bearing no-op result", %{tmp_dir: directory} do
+    trace_directory = Path.join(directory, "traces")
+    File.mkdir_p!(trace_directory)
+
+    host_path =
+      write_host_config(directory, "connect-no-op", %{
+        "install" => %{
+          "history" => %{
+            "source" => "ptc_trace_snapshot",
+            "installation_revision" => "history-v1",
+            "directory" => trace_directory,
+            "ceilings" => %{
+              "max_source_bytes" => 2_000_000,
+              "max_result_bytes" => 250_000
+            }
+          }
+        }
+      })
+
+    application = doctor_application(directory, "selects-no-op", mission: ["history"])
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    checks = outcome.envelope["result"]["checks"]
+    assert Enum.any?(checks, &(&1["name"] == "provider/history/local"))
+    assert outcome.envelope["result"]["provider_activity"] == false
+    assert_schema_valid(outcome.envelope)
+    assert CommandContract.valid_success_result?(:doctor, outcome.envelope["result"])
+  end
+
+  @tag :tmp_dir
   test "an internal failure before the marker reports no provider activity", %{
     tmp_dir: directory
   } do
@@ -2318,17 +2356,19 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     {:ok, application_subject} =
       CommandSubject.provider("safe", :application, nil)
 
-    assert {:error, :invalid_command_diagnostic} =
-             CommandDiagnostic.new(:active_preflight, :provider_application_unavailable,
-               subject: application_subject,
-               provider_activity: false
-             )
+    for activity <- [false, true] do
+      assert {:ok, %CommandDiagnostic{provider_activity: ^activity}} =
+               CommandDiagnostic.new(:active_preflight, :provider_application_unavailable,
+                 subject: application_subject,
+                 provider_activity: activity
+               )
+    end
 
-    assert {:ok, active_diagnostic} =
-             CommandDiagnostic.new(:active_preflight, :provider_application_unavailable,
-               subject: application_subject,
-               provider_activity: true
-             )
+    {:ok, active_diagnostic} =
+      CommandDiagnostic.new(:active_preflight, :provider_application_unavailable,
+        subject: application_subject,
+        provider_activity: true
+      )
 
     active_outcome =
       CommandOutcome.error(
@@ -2337,7 +2377,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         active_diagnostic
       )
 
-    assert_schema_invalid(put_in(active_outcome.envelope, ["error", "provider_activity"], false))
+    assert_schema_valid(put_in(active_outcome.envelope, ["error", "provider_activity"], false))
 
     {:ok, acquisition_subject} =
       CommandSubject.provider("safe", :acquisition, %{destination: :workflow, index: 0})

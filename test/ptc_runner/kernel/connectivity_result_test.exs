@@ -12,10 +12,31 @@ defmodule PtcRunner.Kernel.ConnectivityResultTest do
   test "a result is bound to the exact preparation and catalog it answers for" do
     %{prepared: prepared, catalog: catalog} = fixture()
 
-    assert {:ok, result} = ConnectivityResult.new(prepared, catalog, entries())
+    assert {:ok, result} = ConnectivityResult.new(prepared, catalog, entries(), false)
     assert ConnectivityResult.valid?(result)
     assert ConnectivityResult.bound_to?(result, prepared, catalog)
     assert ConnectivityResult.entries(result) == entries()
+  end
+
+  test "false activity cannot contradict work proven by the sealed operation" do
+    for options <- [
+          [connectivity_mode: :probe],
+          [connectivity_mode: :acquisition],
+          [selection_validation: :active],
+          [local_preflight: :unverified]
+        ] do
+      %{prepared: prepared, catalog: catalog} = fixture(options)
+      mode = Keyword.get(options, :connectivity_mode, :none)
+      outcome = if mode == :none, do: :skipped, else: :reachable
+
+      assert {:error, :invalid_connectivity_result} =
+               ConnectivityResult.new(prepared, catalog, entries(mode, outcome), false)
+
+      assert {:ok, result} =
+               ConnectivityResult.new(prepared, catalog, entries(mode, outcome), true)
+
+      assert ConnectivityResult.bound_to?(result, prepared, catalog)
+    end
   end
 
   test "a result cannot be reused against another catalog installing the same alias" do
@@ -24,12 +45,12 @@ defmodule PtcRunner.Kernel.ConnectivityResultTest do
     %{prepared: prepared, catalog: catalog} = fixture()
     %{catalog: foreign} = fixture(revision: "foreign-v1")
 
-    assert {:ok, result} = ConnectivityResult.new(prepared, catalog, entries())
+    assert {:ok, result} = ConnectivityResult.new(prepared, catalog, entries(), false)
     assert catalog.attestation != foreign.attestation
     refute ConnectivityResult.bound_to?(result, prepared, foreign)
 
     assert {:error, :invalid_connectivity_result} =
-             ConnectivityResult.new(prepared, foreign, entries())
+             ConnectivityResult.new(prepared, foreign, entries(), false)
   end
 
   test "every entry must report the mode its own sealed descriptor declares" do
@@ -39,9 +60,14 @@ defmodule PtcRunner.Kernel.ConnectivityResultTest do
 
     for mode <- [:probe, :acquisition] do
       assert {:error, :invalid_connectivity_result} =
-               ConnectivityResult.new(prepared, catalog, [
-                 %{hd(entries()) | mode: mode, outcome: :reachable}
-               ])
+               ConnectivityResult.new(
+                 prepared,
+                 catalog,
+                 [
+                   %{hd(entries()) | mode: mode, outcome: :reachable}
+                 ],
+                 false
+               )
     end
   end
 
@@ -49,30 +75,51 @@ defmodule PtcRunner.Kernel.ConnectivityResultTest do
     %{prepared: prepared, catalog: catalog} = fixture()
 
     assert {:error, :invalid_connectivity_result} =
-             ConnectivityResult.new(prepared, catalog, [
-               %{hd(entries()) | outcome: :reachable}
-             ])
+             ConnectivityResult.new(
+               prepared,
+               catalog,
+               [
+                 %{hd(entries()) | outcome: :reachable}
+               ],
+               false
+             )
 
     assert {:error, :invalid_connectivity_result} =
-             ConnectivityResult.new(prepared, catalog, [%{hd(entries()) | outcome: :invented}])
+             ConnectivityResult.new(
+               prepared,
+               catalog,
+               [%{hd(entries()) | outcome: :invented}],
+               false
+             )
   end
 
   test "the entries must be exactly the selected occurrences, in declaration order" do
     %{prepared: prepared, catalog: catalog} = fixture()
 
-    assert {:error, :invalid_connectivity_result} = ConnectivityResult.new(prepared, catalog, [])
+    assert {:error, :invalid_connectivity_result} =
+             ConnectivityResult.new(prepared, catalog, [], false)
 
     assert {:error, :invalid_connectivity_result} =
-             ConnectivityResult.new(prepared, catalog, entries() ++ entries())
+             ConnectivityResult.new(prepared, catalog, entries() ++ entries(), false)
 
     assert {:error, :invalid_connectivity_result} =
-             ConnectivityResult.new(prepared, catalog, [%{hd(entries()) | index: 1}])
+             ConnectivityResult.new(prepared, catalog, [%{hd(entries()) | index: 1}], false)
 
     assert {:error, :invalid_connectivity_result} =
-             ConnectivityResult.new(prepared, catalog, [%{hd(entries()) | destination: :mission}])
+             ConnectivityResult.new(
+               prepared,
+               catalog,
+               [%{hd(entries()) | destination: :mission}],
+               false
+             )
 
     assert {:error, :invalid_connectivity_result} =
-             ConnectivityResult.new(prepared, catalog, [%{hd(entries()) | name: "other"}])
+             ConnectivityResult.new(
+               prepared,
+               catalog,
+               [%{hd(entries()) | name: "other"}],
+               false
+             )
   end
 
   test "an entry must carry exactly the occurrence identity fields" do
@@ -81,13 +128,13 @@ defmodule PtcRunner.Kernel.ConnectivityResultTest do
 
     for forged <- [Map.delete(entry, :index), Map.put(entry, :extra, true), :entry, nil] do
       assert {:error, :invalid_connectivity_result} =
-               ConnectivityResult.new(prepared, catalog, [forged])
+               ConnectivityResult.new(prepared, catalog, [forged], false)
     end
   end
 
   test "a tampered result no longer validates" do
     %{prepared: prepared, catalog: catalog} = fixture()
-    assert {:ok, result} = ConnectivityResult.new(prepared, catalog, entries())
+    assert {:ok, result} = ConnectivityResult.new(prepared, catalog, entries(), false)
 
     forged = %{result | entries: [%{hd(entries()) | outcome: :reachable}]}
     refute ConnectivityResult.valid?(forged)
@@ -112,9 +159,9 @@ defmodule PtcRunner.Kernel.ConnectivityResultTest do
     assert forged.attestation == prepared.attestation
 
     assert {:error, :invalid_connectivity_result} =
-             ConnectivityResult.new(forged, catalog, entries())
+             ConnectivityResult.new(forged, catalog, entries(), false)
 
-    assert {:ok, result} = ConnectivityResult.new(prepared, catalog, entries())
+    assert {:ok, result} = ConnectivityResult.new(prepared, catalog, entries(), false)
     refute ConnectivityResult.bound_to?(result, forged, catalog)
   end
 
@@ -123,12 +170,15 @@ defmodule PtcRunner.Kernel.ConnectivityResultTest do
     refute ConnectivityResult.bound_to?(:not_a_result, nil, nil)
   end
 
-  defp entries do
-    [%{name: "inert", destination: :workflow, index: 0, mode: :none, outcome: :skipped}]
+  defp entries(mode \\ :none, outcome \\ :skipped) do
+    [%{name: "inert", destination: :workflow, index: 0, mode: mode, outcome: outcome}]
   end
 
   defp fixture(options \\ []) do
     {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
+
+    selection_validation = Keyword.get(options, :selection_validation, :declarative)
+    local_preflight = Keyword.get(options, :local_preflight, :none)
 
     {:ok, descriptor} =
       ProviderDescriptor.new(
@@ -142,17 +192,50 @@ defmodule PtcRunner.Kernel.ConnectivityResultTest do
         provides: [],
         destinations: [:workflow],
         workflow_llm?: false,
-        connectivity_mode: :none,
-        probe_effect: nil,
-        selection_validation: :declarative,
+        connectivity_mode: Keyword.get(options, :connectivity_mode, :none),
+        probe_effect:
+          if(Keyword.get(options, :connectivity_mode, :none) == :probe,
+            do: :metadata,
+            else: nil
+          ),
+        selection_validation: selection_validation,
         selection_rules: rules,
         authority_fingerprint: nil,
-        local_preflight: :none
+        local_preflight: local_preflight
       )
+
+    implementation = %{
+      builder: fn _selection, _context -> {:ok, %{credential_names: []}} end
+    }
+
+    implementation =
+      if selection_validation == :active,
+        do: Map.put(implementation, :selection_validator, fn _selection, _context -> :ok end),
+        else: implementation
+
+    implementation =
+      if local_preflight == :unverified,
+        do:
+          Map.put(
+            implementation,
+            :local_preflight,
+            fn _selection, _context, _services -> :ok end
+          ),
+        else: implementation
+
+    implementation =
+      if Keyword.get(options, :connectivity_mode, :none) == :probe,
+        do:
+          Map.put(
+            implementation,
+            :connectivity_probe,
+            fn _selection, _context, _services -> :ok end
+          ),
+        else: implementation
 
     registration = %{
       descriptor: descriptor,
-      implementation: %{builder: fn _selection, _context -> {:ok, %{credential_names: []}} end},
+      implementation: implementation,
       authority: nil
     }
 

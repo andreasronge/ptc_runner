@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
 
   It contains no filesystem path, credential, endpoint, provider callback
   result, artifact destination, or arbitrary lower-level failure. Its creating
-  process owns the linked activity marker until single-use consumption
+  process owns the linked active-lifecycle marker until single-use consumption
   atomically transfers lifecycle ownership to the consumer.
   """
 
@@ -138,7 +138,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
 
   @doc false
   @spec inactive_valid?(term()) :: boolean()
-  # Phase 7 runs before the activity marker for every caller, but not in the
+  # Phase 7 runs before the active-lifecycle marker for every caller, but not in the
   # same consumption state: default doctor still holds a claimed preparation
   # while an execution owner has already consumed one. Neither of those is the
   # invariant the step depends on — that invariant is that the marker is unset,

@@ -267,6 +267,23 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
              )
   end
 
+  test "resolving credentials without provider work permits a no-activity connect success" do
+    catalog = catalog(%{"keyed" => [credential_names: ["token"]]})
+    prepared = prepared(catalog, ["keyed"])
+    assert {:ok, rows} = DoctorPlan.new(catalog, prepared, @environment, :connect)
+
+    assert {:ok, settled} =
+             DoctorPlan.settle_connect(
+               rows,
+               connectivity_result(prepared, catalog, false),
+               prepared,
+               catalog
+             )
+
+    assert {:ok, checks} = DoctorPlan.checks(settled)
+    assert_contract(checks, false)
+  end
+
   test "a connectivity row cannot be settled by a result that reached nothing" do
     # Alias names are not identity. Both catalogs install "shared", and only the
     # sealed descriptor says whether its connectivity row exists at all, so a
@@ -501,7 +518,7 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
   # selected occurrence, each reporting the mode its own sealed descriptor
   # declares. `ProviderConnectivityTest` drives the real operation end to end;
   # these cases are about what the plan does with the value it returns.
-  defp connectivity_result(prepared, catalog) do
+  defp connectivity_result(prepared, catalog, provider_activity \\ true) do
     entries =
       Enum.map(prepared.provider_declarations, fn declaration ->
         mode = catalog.descriptors[declaration.name].connectivity_mode
@@ -515,7 +532,7 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
         }
       end)
 
-    {:ok, result} = ConnectivityResult.new(prepared, catalog, entries)
+    {:ok, result} = ConnectivityResult.new(prepared, catalog, entries, provider_activity)
     result
   end
 

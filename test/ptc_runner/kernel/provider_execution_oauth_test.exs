@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.ExecutionSessionOwner
@@ -20,6 +21,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunCoordinator
@@ -165,6 +167,109 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
     refute_received {:oauth_request, "POST", "/token"}
     assert_received {:authorization_notice, _url}
     refute_received {:authorization_notice, _other}
+  end
+
+  test "a credential failure after authorization preserves provider activity" do
+    initially_started =
+      Application.started_applications()
+      |> MapSet.new(&elem(&1, 0))
+
+    {:ok, started} = Application.ensure_all_started(:req_llm)
+
+    on_exit(fn ->
+      started
+      |> Enum.reverse()
+      |> Enum.reject(&MapSet.member?(initially_started, &1))
+      |> Enum.each(&Application.stop/1)
+    end)
+
+    missing_env = "PTC_OAUTH_POST_AUTH_MISSING_CREDENTIAL"
+    previous_env = System.get_env(missing_env)
+    System.delete_env(missing_env)
+
+    on_exit(fn ->
+      if previous_env,
+        do: System.put_env(missing_env, previous_env),
+        else: System.delete_env(missing_env)
+    end)
+
+    parent = self()
+    server = start_server()
+
+    fixture =
+      provider_fixture(server, ["fixture", "credentialed"],
+        authorize: ["fixture"],
+        credential_alias: "credentialed",
+        credential_env: missing_env
+      )
+
+    {:ok, owner} =
+      ExecutionSessionOwner.start(
+        fixture.prepared,
+        fixture.authority,
+        self(),
+        fixture.execution,
+        &visit_authorization_url(parent, &1)
+      )
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             ExecutionSessionOwner.await(owner)
+
+    assert diagnostic.phase == :active_preflight
+    assert diagnostic.code == :credential_unavailable
+    assert diagnostic.provider_activity
+    assert diagnostic.subject.name == "credentialed"
+    assert_receive {:oauth_request, "POST", "/token"}, 5_000
+  end
+
+  test "authorization registry timeout preserves the attempted prefix" do
+    isolate_provider_applications()
+
+    server = start_server()
+
+    for {label, fixture_options, expected_activity} <- [
+          {:inactive, [], false},
+          {:application_started,
+           [
+             names: ["fixture", "model"],
+             credential_alias: "model",
+             credential_env: "PTC_OAUTH_UNUSED_CREDENTIAL",
+             provider_application_mode: :command_vm
+           ], true}
+        ] do
+      names = Keyword.get(fixture_options, :names, ["fixture"])
+
+      fixture =
+        provider_fixture(
+          server,
+          names,
+          fixture_options
+          |> Keyword.delete(:names)
+          |> Keyword.merge(
+            authorize: ["fixture"],
+            authorization_timeout_ms: 100,
+            activation_delay_ms: 150,
+            activation_label: label
+          )
+        )
+
+      assert {:error, %CommandDiagnostic{} = diagnostic} =
+               RunCoordinator.execute(
+                 fixture.prepared,
+                 fixture.authority,
+                 fixture.execution,
+                 fn _url -> flunk("registry timeout must precede operator interaction") end
+               )
+
+      assert_received {:registry_activation_started, ^label}
+      assert diagnostic.phase == :active_preflight
+      assert diagnostic.code == :authorization_unavailable
+
+      assert diagnostic.provider_activity == expected_activity,
+             "#{label} registry timeout reported unexpected provider activity"
+
+      refute_received {:oauth_request, _method, _path}
+    end
   end
 
   test "selected authorities share one execution-scoped OAuth context" do
@@ -355,18 +460,67 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
 
     assert diagnostic.phase == :active_preflight
     assert diagnostic.code == :authorization_required
-    assert diagnostic.provider_activity
+    refute diagnostic.provider_activity
     assert diagnostic.subject.name == "fixture"
     assert diagnostic.subject.operation == :authorization
     assert diagnostic.subject.occurrence == nil
 
-    # The refusal is past the marker rather than one of the pre-session ones:
-    # the preparation was consumed and is no longer reusable, unlike the
-    # unselected-target refusal below. That is what lets it report activity at
-    # all. It nevertheless reaches no OAuth endpoint — no discovery, no
-    # authorization URL, no token exchange.
+    # The refusal is past the lifecycle marker rather than one of the
+    # pre-session ones, but the marker is not activity evidence. The preparation
+    # was consumed and is no longer reusable while no OAuth endpoint — discovery,
+    # authorization URL, or token exchange — was reached.
     refute PreparedRun.valid?(fixture.prepared)
     refute_received {:oauth_request, _method, _path}
+  end
+
+  test "command-owned application startup is retained by an OAuth pre-refusal" do
+    isolate_provider_applications()
+
+    server = start_server()
+
+    fixture =
+      provider_fixture(server, ["fixture", "model"],
+        authorize: [],
+        credential_alias: "model",
+        credential_env: "PTC_OAUTH_UNUSED_CREDENTIAL",
+        provider_application_mode: :command_vm
+      )
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             RunCoordinator.execute(
+               fixture.prepared,
+               fixture.authority,
+               fixture.execution,
+               fn _url -> flunk("a refused selection must never open an interaction") end
+             )
+
+    assert diagnostic.code == :authorization_required
+    assert diagnostic.provider_activity
+    assert :req_llm in Enum.map(Application.started_applications(), &elem(&1, 0))
+    refute_received {:oauth_request, _method, _path}
+  end
+
+  defp isolate_provider_applications do
+    initially_started =
+      Application.started_applications()
+      |> MapSet.new(&elem(&1, 0))
+
+    if MapSet.member?(initially_started, :req_llm), do: Application.stop(:req_llm)
+    if MapSet.member?(initially_started, :llm_db), do: Application.stop(:llm_db)
+
+    on_exit(fn ->
+      if :req_llm in Enum.map(Application.started_applications(), &elem(&1, 0)),
+        do: Application.stop(:req_llm)
+
+      if :llm_db in Enum.map(Application.started_applications(), &elem(&1, 0)),
+        do: Application.stop(:llm_db)
+
+      if MapSet.member?(initially_started, :llm_db),
+        do: Application.ensure_all_started(:llm_db)
+
+      if MapSet.member?(initially_started, :req_llm),
+        do: Application.ensure_all_started(:req_llm)
+    end)
   end
 
   test "one unauthorized selection refuses before another one's interaction opens" do
@@ -529,9 +683,16 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
 
   defp provider_fixture(server, names \\ ["fixture"], opts \\ []) do
     installed = Keyword.get(opts, :installed, names)
-    host = host(server, installed)
+    credential_alias = Keyword.get(opts, :credential_alias)
+    host = host(server, installed, opts)
     {:ok, catalog} = HostInstallation.catalog(host)
-    {:ok, services} = HostInstallation.runtime_services(host)
+
+    {:ok, services} =
+      HostInstallation.runtime_services(host,
+        provider_application_mode: Keyword.get(opts, :provider_application_mode, :host_owned)
+      )
+
+    services = maybe_delay_activation(services, opts)
 
     {:ok, execution} =
       ProviderExecution.new(catalog, services, Keyword.get(opts, :authorize, names))
@@ -546,8 +707,14 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
       },
       "input" => %{"value" => %{}},
       "providers" => %{
-        "workflow" => [],
-        "mission" => Enum.map(names, &%{"name" => &1, "config" => %{}})
+        "workflow" =>
+          names
+          |> Enum.filter(&(&1 == credential_alias))
+          |> Enum.map(&%{"name" => &1, "config" => %{}}),
+        "mission" =>
+          names
+          |> Enum.reject(&(&1 == credential_alias))
+          |> Enum.map(&%{"name" => &1, "config" => %{}})
       }
     }
 
@@ -568,18 +735,22 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   # Host configuration deliberately refuses insecure loopback OAuth, so the
   # fixture decodes a normal HTTPS installation and then rebinds only the
   # transport endpoint and authority to the loopback server under test.
-  defp host(server, names) do
-    {:ok, decoded} = HostConfig.decode(host_document(names), "/tmp")
+  defp host(server, names, opts) do
+    {:ok, decoded} = HostConfig.decode(host_document(names, opts), "/tmp")
 
     install =
       Map.new(decoded.install, fn {name, installation} ->
-        transport = %{
-          installation.transport
-          | endpoint: server.endpoint,
-            oauth: authority(server.base, name)
-        }
+        if installation.source == :mcp do
+          transport = %{
+            installation.transport
+            | endpoint: server.endpoint,
+              oauth: authority(server.base, name, opts)
+          }
 
-        {name, %{installation | transport: transport}}
+          {name, %{installation | transport: transport}}
+        else
+          {name, installation}
+        end
       end)
 
     struct!(HostConfig,
@@ -592,11 +763,37 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
     )
   end
 
-  defp host_document(names) do
-    %{"install" => Map.new(names, &{&1, installation_document(&1)})}
+  defp host_document(names, opts) do
+    credential_alias = Keyword.get(opts, :credential_alias)
+    credential_env = Keyword.get(opts, :credential_env)
+
+    document = %{
+      "install" =>
+        Map.new(names, fn name ->
+          installation =
+            if name == credential_alias,
+              do: credentialed_installation_document(),
+              else: installation_document(name, opts)
+
+          {name, installation}
+        end)
+    }
+
+    if credential_alias,
+      do: Map.put(document, "credentials", %{"missing" => %{"env" => credential_env}}),
+      else: document
   end
 
-  defp installation_document(name) do
+  defp credentialed_installation_document do
+    %{
+      "source" => "llm",
+      "installation_revision" => "credentialed-v1",
+      "model" => "openrouter:deepseek/deepseek-v4-flash",
+      "credential" => "missing"
+    }
+  end
+
+  defp installation_document(name, opts) do
     %{
       "source" => "mcp",
       "installation_revision" => "fixture-v1",
@@ -608,6 +805,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
           "issuer" => "https://auth.example",
           "scope_ceiling" => ["read"],
           "default_scopes" => ["read"],
+          "authorization_timeout_ms" => Keyword.get(opts, :authorization_timeout_ms, 300_000),
           "client" => %{
             "registration" => "pre_registered",
             "client_id" => "fixture-client",
@@ -619,6 +817,42 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
       },
       "tools" => %{"echo" => %{"as" => name <> ".echo", "effect" => "read"}}
     }
+  end
+
+  defp maybe_delay_activation(services, opts) do
+    case Keyword.get(opts, :activation_delay_ms) do
+      nil ->
+        services
+
+      delay_ms ->
+        original = services.activation
+        label = Keyword.fetch!(opts, :activation_label)
+        parent = self()
+
+        activation = fn ->
+          result = original.()
+          send(parent, {:registry_activation_started, label})
+          yield_until(System.monotonic_time(:millisecond) + delay_ms)
+          result
+        end
+
+        reseal_services(%{services | activation: activation})
+    end
+  end
+
+  defp reseal_services(services) do
+    payload =
+      {services.activation, services.credential_resolver, services.provider_application_mode,
+       services.oauth_mode, services.runtime_binding, services.host_payload}
+
+    %{services | attestation: Attestation.attest(ProviderRuntimeServices, payload)}
+  end
+
+  defp yield_until(deadline_ms) do
+    if System.monotonic_time(:millisecond) < deadline_ms do
+      :erlang.yield()
+      yield_until(deadline_ms)
+    end
   end
 
   # Stands in for the operator opening the one-time authorization URL: the
@@ -662,7 +896,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
     :gen_tcp.close(socket)
   end
 
-  defp authority(base, name \\ "fixture") do
+  defp authority(base, name \\ "fixture", opts \\ []) do
     {:ok, authority} =
       Authority.from_host(
         %{
@@ -670,6 +904,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
           "issuer" => base <> "/mcp",
           "scope_ceiling" => ["read"],
           "default_scopes" => ["read"],
+          "authorization_timeout_ms" => Keyword.get(opts, :authorization_timeout_ms, 300_000),
           "network" => %{
             "additional_origins" => [],
             "private_network_origins" => [base]

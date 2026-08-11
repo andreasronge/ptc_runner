@@ -11,7 +11,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # host installation is a process-free decrypt of the sealed payload, not an
   # activation.
   #
-  # `run_unverified/4` is the only place an `:unverified` callback runs, and it
+  # `run_unverified/5` is the only place an `:unverified` callback runs, and it
   # is past the marker where none of those limits apply. The two steps are
   # described together under "The two steps" below.
   #
@@ -37,12 +37,12 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   #
   # A catalog still holds the callbacks of its `:unverified` declarations —
   # parity requires one — but they are active work, so `run/4` never invokes
-  # them and `run_unverified/4` is their only entry.
+  # them and `run_unverified/5` is their only entry.
   #
   # ## The two steps
   #
   # `run/4` is phase 7: audited-local only, before the marker, and the trust
-  # rules below bound what may declare it. `run_unverified/4` is phase 8:
+  # rules below bound what may declare it. `run_unverified/5` is phase 8:
   # `:unverified` only, after the marker, under the operation deadline its
   # caller anchored. Nothing bounds what an unverified callback may do, which is
   # exactly why it cannot run in phase 7 and why default doctor reports
@@ -50,10 +50,11 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   #
   # They share the local half of the translation below, because those are the
   # same conditions found at different times, and they differ in two ways. Every
-  # outcome of `run_unverified/4` carries `provider_activity`, which is a fact
-  # about the marker rather than about the check, so the flag is supplied rather
-  # than assumed. And the declaration half of the table does not survive the
-  # marker: see it for why.
+  # outcome of `run_unverified/5` carries cumulative `provider_activity`.
+  # Invoking an unverified callback sets it; a budget exhausted before dispatch
+  # preserves only evidence from earlier work. The flag is supplied to the
+  # shared translator rather than inferred from the marker. And the declaration
+  # half of the table does not survive the marker: see it for why.
   #
   # The prepared run, catalog, and runtime services must belong together. Alias
   # names are not identity: two catalogs can install the same alias over
@@ -177,6 +178,10 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   doctor reports `active_check_required` rather than calling this; runs and
   `doctor --connect` call it under the operation deadline their session anchored.
 
+  The final argument states whether an earlier step already attempted provider
+  work. It is preserved when the budget expires before the first callback and
+  becomes true as soon as an unverified callback is dispatched.
+
   There is no trust gate here, unlike `run/4`. `:unverified` is precisely the
   declaration that makes no trust claim, so there is nothing to verify — the
   marker, not the declaration, is what makes the call admissible.
@@ -185,17 +190,25 @@ defmodule PtcRunner.Kernel.LocalPreflight do
           PreparedRun.t(),
           InstallationCatalog.t(),
           ProviderRuntimeServices.t(),
-          ProviderSession.t()
+          ProviderSession.t(),
+          boolean()
         ) :: :ok | {:error, CommandDiagnostic.t()}
-  def run_unverified(prepared, catalog, services, session) do
+  def run_unverified(prepared, catalog, services, session, provider_activity) do
     deadline = ProviderSession.run_deadline(session)
 
     with true <- bound?(prepared, catalog, services, :active),
          true <- owns_operation?(session, prepared),
-         true <- Deadline.valid?(deadline) do
+         true <- Deadline.valid?(deadline),
+         true <- is_boolean(provider_activity) do
       catalog
       |> applicable(prepared, :unverified)
-      |> check_each(prepared, catalog, services, deadline, active_step(prepared, session))
+      |> check_each(
+        prepared,
+        catalog,
+        services,
+        deadline,
+        active_step(prepared, session, provider_activity)
+      )
     else
       _invalid -> {:error, internal_diagnostic(true)}
     end
@@ -212,9 +225,10 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # sealed `provider_heap_words` the rest of the operation is held to.
   defp audited_step, do: %{activity: false, session: nil, max_heap_words: @max_heap_words}
 
-  defp active_step(prepared, session),
+  defp active_step(prepared, session, provider_activity),
     do: %{
       activity: true,
+      prior_activity: provider_activity,
       session: session,
       max_heap_words: prepared.request.package.limits.provider_heap_words
     }
@@ -275,18 +289,24 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   defp check_each([], _prepared, _catalog, _services, _deadline, _step), do: :ok
 
   defp check_each(occurrences, prepared, catalog, services, deadline, step) do
-    Enum.reduce_while(occurrences, :ok, fn occurrence, :ok ->
-      case check(occurrence, prepared, catalog, services, deadline, step) do
-        :ok -> {:cont, :ok}
+    occurrences
+    |> Enum.reduce_while({:ok, Map.get(step, :prior_activity, false)}, fn occurrence,
+                                                                          {:ok, activity} ->
+      case check(occurrence, prepared, catalog, services, deadline, step, activity) do
+        {:ok, activity} -> {:cont, {:ok, activity}}
         {:error, _diagnostic} = error -> {:halt, error}
       end
     end)
+    |> case do
+      {:ok, _activity} -> :ok
+      {:error, _diagnostic} = error -> error
+    end
   end
 
-  defp check(occurrence, prepared, catalog, services, deadline, step) do
-    with {:ok, callback} <- callback(catalog, occurrence.name, step.activity),
+  defp check(occurrence, prepared, catalog, services, deadline, step, prior_activity) do
+    with {:ok, callback} <- callback(catalog, occurrence.name, prior_activity),
          {:ok, result} <-
-           scoped(step, prepared, occurrence, deadline, fn context ->
+           scoped(step, prepared, occurrence, deadline, prior_activity, fn context ->
              # The budget is measured after the scope is open, not before.
              # Opening and activating a registrar is a call into the session and
              # spends real time, so a timeout computed first can outlive the
@@ -296,16 +316,27 @@ defmodule PtcRunner.Kernel.LocalPreflight do
              # undo what the callback already did.
              case Deadline.remaining(deadline) do
                0 ->
-                 :timed_out
+                 {:timed_out, prior_activity}
 
                timeout_ms ->
-                 invoke(callback, occurrence.config, context, services, timeout_ms, step)
+                 activity = prior_activity or step.activity
+
+                 {:attempted, activity,
+                  invoke(callback, occurrence.config, context, services, timeout_ms, step)}
              end
            end) do
       case result do
-        :ok -> settled(deadline, occurrence, step.activity)
-        :timed_out -> {:error, local_diagnostic(:local_check_timeout, occurrence, step.activity)}
-        {:error, reason} -> {:error, diagnostic(reason, occurrence, step.activity)}
+        {:attempted, activity, :ok} ->
+          settled(deadline, occurrence, activity)
+
+        {:attempted, activity, :timed_out} ->
+          {:error, local_diagnostic(:local_check_timeout, occurrence, activity)}
+
+        {:attempted, activity, {:error, reason}} ->
+          {:error, diagnostic(reason, occurrence, activity)}
+
+        {:timed_out, activity} ->
+          {:error, local_diagnostic(:local_check_timeout, occurrence, activity)}
       end
     end
   end
@@ -318,19 +349,30 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   #
   # Phase 7 opens no scope because it has no session to open one from and its
   # callbacks may not start anything in the first place.
-  defp scoped(%{session: nil} = step, prepared, occurrence, _deadline, run),
+  defp scoped(%{session: nil} = step, prepared, occurrence, _deadline, _activity, run),
     do: {:ok, run.(context(prepared, occurrence, step, nil))}
 
-  defp scoped(step, prepared, occurrence, deadline, run) do
+  defp scoped(step, prepared, occurrence, deadline, prior_activity, run) do
     # Opening a scope is itself operation work and the session refuses to open
     # one past the deadline, so a budget already spent stops the step here
     # rather than surfacing that refusal as an internal error.
     if Deadline.expired?(deadline) do
-      {:ok, :timed_out}
+      {:ok, {:timed_out, prior_activity}}
     else
       case ProviderSession.open_registrar(step.session) do
-        {:ok, registrar} -> run_in_scope(registrar, step, prepared, occurrence, deadline, run)
-        {:error, _reason} -> {:ok, setup_failure(deadline)}
+        {:ok, registrar} ->
+          run_in_scope(
+            registrar,
+            step,
+            prepared,
+            occurrence,
+            deadline,
+            prior_activity,
+            run
+          )
+
+        {:error, _reason} ->
+          {:ok, setup_failure(deadline, prior_activity)}
       end
     end
   end
@@ -339,15 +381,17 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # was live at the precheck and expired while waiting on a busy session comes
   # back as an unavailable handle. That is the budget running out, not a defect,
   # and the module contract says an exhausted budget reports the timeout.
-  defp setup_failure(deadline) do
-    if Deadline.expired?(deadline), do: :timed_out, else: {:error, :internal}
+  defp setup_failure(deadline, prior_activity) do
+    if Deadline.expired?(deadline),
+      do: {:timed_out, prior_activity},
+      else: {:attempted, prior_activity, {:error, :internal}}
   end
 
-  defp run_in_scope(registrar, step, prepared, occurrence, deadline, run) do
+  defp run_in_scope(registrar, step, prepared, occurrence, deadline, prior_activity, run) do
     result =
       case ResourceRegistrar.activate(registrar) do
         :ok -> {:ok, run.(context(prepared, occurrence, step, registrar))}
-        {:error, _reason} -> {:ok, setup_failure(deadline)}
+        {:error, _reason} -> {:ok, setup_failure(deadline, prior_activity)}
       end
 
     case ResourceRegistrar.abort(registrar) do
@@ -374,7 +418,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   defp settled(deadline, occurrence, activity) do
     if Deadline.expired?(deadline),
       do: {:error, local_diagnostic(:local_check_timeout, occurrence, activity)},
-      else: :ok
+      else: {:ok, activity}
   end
 
   defp callback(catalog, name, activity) do
@@ -439,9 +483,9 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   defp declaration_diagnostic(_code, occurrence, true),
     do: subject_diagnostic(:active_preflight, :selection_rejected, :selection, occurrence, true)
 
-  # Activity is a fact about the marker rather than about the check, so it is
-  # supplied by the step that knows which side of the marker it runs on. The
-  # same condition reported before and after the marker differs only here.
+  # Activity is cumulative attempted-work evidence supplied by the step that
+  # knows what preceded this check. The same condition can therefore differ
+  # before and after callback dispatch without borrowing the lifecycle marker.
   defp subject_diagnostic(phase, code, operation, occurrence, activity) do
     site = %{destination: occurrence.destination, index: occurrence.index}
 

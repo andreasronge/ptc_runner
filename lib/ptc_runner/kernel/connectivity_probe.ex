@@ -46,9 +46,11 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
   # An exhausted budget reports `:active_preflight` / `:connectivity_timeout`
   # and carries no subject, because that budget belongs to the operation: it can
   # be spent before an occurrence is reached, and naming one would report a
-  # provider as unreachable when nothing had reached it. As in phase 7, the
-  # timeout is signalled out of band rather than through the `{:error, reason}`
-  # table, so a callback returning the timeout reason itself cannot forge it.
+  # provider as unreachable when nothing had reached it. Its activity value is
+  # cumulative evidence from earlier work until a probe callback is actually
+  # dispatched. As in phase 7, the timeout is signalled out of band rather than
+  # through the `{:error, reason}` table, so a callback returning the timeout
+  # reason itself cannot forge it.
   #
   # Anything else — an unknown reason, an unrecognised result shape, or a raise
   # — fails closed as an internal error. Translations are added with their
@@ -68,30 +70,32 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
   @doc """
   Probes every occurrence whose sealed descriptor declares `:probe`.
 
-  Returns `:ok` when none does, which is the only outcome available to an
-  operation whose selections all declare `:none` or `:acquisition`.
+  Returns the cumulative activity value when every applicable probe succeeds.
+  When none applies, the supplied earlier activity is returned unchanged.
   """
   @spec run(
           PreparedRun.t(),
           InstallationCatalog.t(),
           ProviderRuntimeServices.t(),
           Deadline.t(),
-          %{binary() => binary()}
-        ) :: :ok | {:error, CommandDiagnostic.t()}
-  def run(prepared, catalog, services, deadline, credentials) do
+          %{binary() => binary()},
+          boolean()
+        ) :: {:ok, boolean()} | {:error, CommandDiagnostic.t()}
+  def run(prepared, catalog, services, deadline, credentials, provider_activity) do
     with true <- bound?(prepared, catalog, services),
          true <- Deadline.valid?(deadline),
-         true <- is_map(credentials) and not is_struct(credentials) do
+         true <- is_map(credentials) and not is_struct(credentials),
+         true <- is_boolean(provider_activity) do
       catalog
       |> applicable(prepared)
-      |> probe_each(prepared, catalog, services, deadline, credentials)
+      |> probe_each(prepared, catalog, services, deadline, credentials, provider_activity)
     else
-      _invalid -> {:error, internal_diagnostic()}
+      _invalid -> {:error, internal_diagnostic(true)}
     end
   rescue
-    _exception -> {:error, internal_diagnostic()}
+    _exception -> {:error, internal_diagnostic(true)}
   catch
-    _kind, _reason -> {:error, internal_diagnostic()}
+    _kind, _reason -> {:error, internal_diagnostic(true)}
   end
 
   # One trio, one catalog. The preparation is consumed while its operation runs,
@@ -112,18 +116,43 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
     end)
   end
 
-  defp probe_each([], _prepared, _catalog, _services, _deadline, _credentials), do: :ok
+  defp probe_each(
+         [],
+         _prepared,
+         _catalog,
+         _services,
+         _deadline,
+         _credentials,
+         provider_activity
+       ),
+       do: {:ok, provider_activity}
 
-  defp probe_each(occurrences, prepared, catalog, services, deadline, credentials) do
-    Enum.reduce_while(occurrences, :ok, fn occurrence, :ok ->
-      case probe(occurrence, prepared, catalog, services, deadline, credentials) do
-        :ok -> {:cont, :ok}
+  defp probe_each(
+         occurrences,
+         prepared,
+         catalog,
+         services,
+         deadline,
+         credentials,
+         provider_activity
+       ) do
+    Enum.reduce_while(occurrences, {:ok, provider_activity}, fn occurrence, {:ok, activity} ->
+      case probe(occurrence, prepared, catalog, services, deadline, credentials, activity) do
+        {:ok, activity} -> {:cont, {:ok, activity}}
         {:error, _diagnostic} = error -> {:halt, error}
       end
     end)
   end
 
-  defp probe(occurrence, prepared, catalog, services, deadline, credentials) do
+  defp probe(
+         occurrence,
+         prepared,
+         catalog,
+         services,
+         deadline,
+         credentials,
+         provider_activity
+       ) do
     limits = prepared.request.package.limits
 
     context = %{
@@ -133,11 +162,11 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
       credentials: declared_credentials(catalog, occurrence.name, credentials)
     }
 
-    with {:ok, callback} <- callback(catalog, occurrence.name),
-         {:ok, timeout_ms} <- remaining(deadline) do
+    with {:ok, callback} <- callback(catalog, occurrence.name, provider_activity),
+         {:ok, timeout_ms} <- remaining(deadline, provider_activity) do
       case invoke(callback, occurrence.config, context, services, timeout_ms, limits) do
         :ok -> settled(deadline)
-        :timed_out -> {:error, timeout_diagnostic()}
+        :timed_out -> {:error, timeout_diagnostic(true)}
         {:error, reason} -> {:error, diagnostic(reason, occurrence)}
       end
     end
@@ -148,7 +177,9 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
   # the anchored cutoff. Accepting it would let the step outrun the deadline it
   # promises to spend, so success is confirmed against the absolute deadline.
   defp settled(deadline) do
-    if Deadline.expired?(deadline), do: {:error, timeout_diagnostic()}, else: :ok
+    if Deadline.expired?(deadline),
+      do: {:error, timeout_diagnostic(true)},
+      else: {:ok, true}
   end
 
   # Least privilege, and a fail-closed empty map rather than the whole union if
@@ -161,16 +192,16 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
     end
   end
 
-  defp callback(catalog, name) do
+  defp callback(catalog, name, provider_activity) do
     case Map.fetch(catalog.implementations, name) do
       {:ok, %{connectivity_probe: callback}} when is_function(callback, 3) -> {:ok, callback}
-      _missing -> {:error, internal_diagnostic()}
+      _missing -> {:error, internal_diagnostic(provider_activity)}
     end
   end
 
-  defp remaining(deadline) do
+  defp remaining(deadline, provider_activity) do
     case Deadline.remaining(deadline) do
-      0 -> {:error, timeout_diagnostic()}
+      0 -> {:error, timeout_diagnostic(provider_activity)}
       timeout_ms -> {:ok, timeout_ms}
     end
   end
@@ -197,15 +228,18 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
         )
 
       {:error, _reason} ->
-        internal_diagnostic()
+        internal_diagnostic(true)
     end
   end
 
-  defp diagnostic(_reason, _occurrence), do: internal_diagnostic()
+  defp diagnostic(_reason, _occurrence), do: internal_diagnostic(true)
 
-  defp timeout_diagnostic,
-    do: CommandDiagnostic.new!(:active_preflight, :connectivity_timeout, provider_activity: true)
+  defp timeout_diagnostic(provider_activity),
+    do:
+      CommandDiagnostic.new!(:active_preflight, :connectivity_timeout,
+        provider_activity: provider_activity
+      )
 
-  defp internal_diagnostic,
-    do: CommandDiagnostic.new!(:internal, :internal_error, provider_activity: true)
+  defp internal_diagnostic(provider_activity),
+    do: CommandDiagnostic.new!(:internal, :internal_error, provider_activity: provider_activity)
 end

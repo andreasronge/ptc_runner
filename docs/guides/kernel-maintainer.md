@@ -101,7 +101,7 @@ whether or not they select providers, and a provider-bearing invocation opens
 `ProviderActiveSession` inside that owner's subordinate worker rather than in
 the adapter. `doctor --connect` is a distinct active operation with its own
 closed result. Manifest REPL startup enters through `ManifestRepl`: it uses the
-same inert catalog, preparation, phase-7 checks, activity marker, and active
+same inert catalog, preparation, phase-7 checks, lifecycle marker, and active
 provider-session prefix as a one-shot run, but transfers the resulting opening
 handle and run state to `ReplSessionOwner` for repeated evaluations.
 Embedding frontends execute a sealed request through
@@ -212,8 +212,8 @@ validation records `active_required`; `validate` reports
 `provider_declaration/selection_unverifiable` without running it.
 
 `RunCoordinator.local_checks/3` is the only entry to phase 7 and the only place
-an `audited_local` callback runs. Every active command crosses it before
-provider activity is marked: run, `doctor --connect`, and manifest REPL opening
+an `audited_local` callback runs. Every active command crosses it before the
+active lifecycle begins: run, `doctor --connect`, and manifest REPL opening
 from `ProviderExecution` immediately before the session opens, and default
 doctor directly, because it opens no session. Applicability is derived from the sealed
 prepared/catalog/services trio rather than supplied, the coordinator anchors one
@@ -224,7 +224,7 @@ provider row: a failed check fails the whole command, and doctor settles its
 audited-local rows only after the step as a whole succeeded.
 
 `unverified` callbacks are the other half and never run there.
-`LocalPreflight.run_unverified/4` is their only entry, reached from the shared
+`LocalPreflight.run_unverified/5` is their only entry, reached from the shared
 operation prefix after the phase-8 marker and bounded by the operation deadline
 rather than by `local_preflight_timeout_ms`. Run and `doctor --connect` both
 cross it; default doctor does not, and reports
@@ -272,10 +272,15 @@ return them, and omitted one that a snapshot-identity build genuinely produces.
 ### Credential resolution
 
 Every active command resolves its ordinary credentials once, at phase-8 step 5,
-through `ProviderCredentials`. The step runs after the registry
-and OAuth context exist and before any provider callback below it, so a missing
-credential fails while every provider is still inert instead of partway through
-a preparation or an acquisition.
+through `ProviderCredentials`. The step runs after the registry and OAuth
+context exist and before any provider prepare, preflight, acquisition, or
+execution callback below it, so a missing credential fails while every provider
+is still inert instead of partway through a preparation or an acquisition.
+Active selection checks, unverified local checks, command-owned provider
+application startup, or an explicit OAuth exchange may already have run. The
+execution branch therefore supplies that evidence to the resolver: an ordinary
+failure before any such work reports `provider_activity: false`, while a failure
+after one of those boundaries preserves `true`.
 
 The required set is the union of `credential_names` over the sealed descriptor
 of *every* selected declaration — never what a prepare callback reported, on the
@@ -305,6 +310,19 @@ Failure attribution is per alias and never per occurrence:
 whole batch rather than naming which credential failed. The alias reported is
 the first in manifest order that declares a credential — deterministic, and
 independent of both resolver behaviour and the order providers are prepared in.
+
+The lifecycle marker is deliberately not used as the diagnostic answer here.
+It also admits active-only boundaries, so it is already set when a host-owned
+provider application is found missing or an ordinary credential resolver fails
+before any provider-facing work. `active_preflight` consequently accepts either
+activity value, and each producer states what actually ran. In particular, an
+inert application-availability rejection reports false: that includes a
+missing host-owned application and a command VM refusing an already-running
+target. A command-owned startup failure reports true because the gate attempted
+OTP application startup. An OAuth selection refused before interaction reports
+only any preceding command-owned startup; an actual authorization exchange,
+dispatched selection validation or connectivity callback, and post-authorization
+credential failure report true.
 
 Direct embedding is the one caller that still resolves inside acquisition. It
 has no sealed declarations to derive a union from before preparation and no
@@ -349,7 +367,7 @@ Input values/forms, paths, event IDs, credentials, raw selectors, and private
 OAuth authority/fingerprint are excluded. The final digest and derived classes
 are then added to each occurrence's path-free execution context.
 
-The returned `PreparedRun` owns its monotonic activity-marker process;
+The returned `PreparedRun` owns its monotonic lifecycle-marker process;
 construction atomically claims a fresh false marker, so an active or previously
 claimed marker cannot be shared by another prepared run. Its creating process
 must retain the marker link through construction. Consuming the prepared run
@@ -370,19 +388,25 @@ provider-bearing preparation cannot bypass declaration processing by calling
 the constructor directly. Such provider-bearing values are presently
 continuation state for the staged command pipeline. `RunBuilder.build_prepared/3`
 rejects them; the execution-session owner consumes one when it opens its
-sinks, `ProviderActiveSession` then marks activity and opens the session, and
-the runtime registry, active value, and that same session are passed to
+sinks, `ProviderActiveSession` then marks the active lifecycle and opens the
+session. That marker proves consumption and lifecycle position, not by itself
+that provider-facing work was attempted. Active producers carry cumulative
+attempted-work evidence separately. The runtime registry, lifecycle value, and
+that same session are passed to
 `RunBuilder`. A run does that inside the execution-session owner's subordinate
 worker, which calls `build_active_owned/7` with the owner-opened sinks, the
 catalog acquisition plans from, and the phase-8 step-5 credentials, then
 completes through `execute_built/1`. Manifest REPL opening consumes the same
-sealed preparation, opens its sinks before activity, and retains the acquired
-runtime registry and provider session behind one `ManifestReplOpening` handle.
+sealed preparation, opens its sinks before the active lifecycle, and retains the
+acquired runtime registry and provider session behind one `ManifestReplOpening`
+handle.
 It atomically adopts the completed `RunConfig`, run state, trace grant, and
 opening handle into `ReplSessionOwner` before exposing a process-affine
-session. On failure, the opening owner attests the marker's current activity
-before its terminal cleanup closes the preparation; the public failure
-projection consumes that captured evidence instead of racing owner teardown.
+session. On an untyped owner failure, the opening owner attests the lifecycle
+marker before its terminal cleanup closes the preparation; that is conservative
+evidence that the active boundary was entered, while typed diagnostics carry
+the exact attempted-work value. The public failure projection consumes the
+captured evidence instead of racing owner teardown.
 Provider-free manifests take the same opening and REPL-owner path but omit only
 the provider session. After application admission, an active session
 anchors one absolute run deadline shared by active selection, construction,
@@ -492,7 +516,7 @@ preparation proves that a selected LLM installation uses an environment
 credential. The Mix frontend may therefore load `.env`; the standalone
 frontend has no environment-setup callback. The runtime's provider-application
 mode then controls optional applications: `:command_vm` starts a selected
-application inside the marked provider session, while `:host_owned` requires
+application inside the active provider session, while `:host_owned` requires
 the application to be running already.
 Successful `models` is terminal as well. It loads one bounded host document,
 constructs its inert installation catalog, and projects
@@ -510,7 +534,7 @@ retained as plaintext or reopened by dispatch. `CommandRuntime` carries only
 frontend VM policy and callbacks. If inert preparation proves that a selected
 LLM installation uses an environment credential, dispatch invokes the sealed
 environment-setup callback before creating the execution owner or deadline.
-Selected optional applications are admitted inside the marked provider session
+Selected optional applications are admitted inside the active provider session
 before it opens a runtime registry. That registry owns the resulting private
 authority, and callers that retain it must use `ProviderRegistry.close/1` when
 the execution scope ends; closing revokes retained builders and credential
@@ -520,9 +544,9 @@ access.
 runs, omitting only `ProviderExecution` and its provider session. A
 provider-backed run creates one `ProviderExecution`, opens at most one provider
 session, and uses the same owner and publication path. Before that owner closes
-the prepared run's activity marker on any failure, it seals the marker value
-and whether execution had started into an internal failure value. Dispatch
-therefore never infers activity from provider declarations: a provider-bearing
+the prepared run's lifecycle marker on any untyped failure, it seals the marker
+value and whether execution had started into an internal failure value. Dispatch
+therefore never infers that fallback from provider declarations: a provider-bearing
 sink-opening failure remains inactive and `not_started`, while a later marked
 failure remains active and `incomplete`. Phase-12 projection
 narrows the Kernel's richer internal usage snapshot to the closed envelope
@@ -576,9 +600,10 @@ command, as exact pairs rather than whole phases. Static command modes require
 active doctor and provider-cleanup rows while retaining the public `"doctor"`
 command value. Successful default doctor outcomes require activity false and
 only local/declarative/skipped provider checks. Successful connect outcomes
-preserve the marker's actual activity value and admit only completed
+preserve cumulative attempted-work evidence and admit only completed
 local/declarative-or-active provider checks; an active pass requires activity
-true, while a provider-free connect can remain false. Default doctor also binds
+true, while a provider-free or provider-bearing no-op connect can remain false.
+Default doctor also binds
 provider rows to application presence: host-only groups require
 `application_required` and omit selection, while application-backed groups
 cannot use that skip. Because V1 has no public connect-mode field, the generated
@@ -592,14 +617,18 @@ The catalog also owns the phase/code-specific source kinds, provider-subject
 operations, operation-specific occurrence policy, and activity policy used by
 both constructors and the generated schema. Provider diagnostics cannot carry
 document provenance and non-provider diagnostics cannot carry provider
-subjects. Activity is fixed false through the phases that precede the marker,
-fixed true for active preflight and provider acquisition, and a plain boolean
-for local preflight alone, because that phase spans the marker: the
-audited-local step reports false and the post-marker `unverified` step reports
-true. Provider execution and provider
-cleanup codes also require true, while other later codes admit the marker's
-actual monotonic value. Occurrence indices use the manifest's closed `0..31`
-bound in both the typed subject constructor and the generated envelope schema.
+subjects. Activity is fixed false for inert phases. Local and active preflight
+diagnostics carry producer-supplied cumulative attempted-work evidence: an
+audited-local check is inert, while command-owned application startup, an active
+selection or unverified callback, OAuth work, and later connectivity work flip
+the value only once that work is attempted. Availability rejection, ordinary
+credential lookup, OAuth pre-refusal, and a pre-dispatch timeout can therefore
+remain false after the lifecycle marker. Provider acquisition, execution, and
+cleanup codes require true because reaching those operations is itself evidence
+of attempted work; other later untyped failures conservatively use the
+lifecycle marker when exact evidence was lost. Occurrence indices use the
+manifest's closed `0..31` bound in both the typed subject constructor and the
+generated envelope schema.
 Installation-declaration `dependency_invalid` diagnostics use operation
 `declaration` with a null occurrence; selection-specific declaration failures
 retain their workflow or mission occurrence.
@@ -772,9 +801,9 @@ Each `models` row preserves the host contract's required public
 `installation_revision`, matching exactly
 `^[a-z][a-z0-9._-]{0,127}$`. Host decoding reports a missing revision before
 generic schema failure, including for an unselected installation.
-Any successful active selection, credential, authorization, or connectivity
-check still requires `provider_activity: true`, and no provider check requires
-false.
+Any successful active selection, authorization, or connectivity check still
+requires `provider_activity: true`; resolving credentials alone does not prove
+provider-facing work. No provider check requires false.
 
 Public diagnostic paths originate as typed property/index segments.
 `PtcRunner.Kernel.ValueContract` is sealed at bounded compilation and retains a
@@ -1136,7 +1165,10 @@ diverge. `PtcRunner.Kernel.Limits`, `RunState`, `BoundedWorker`, and
 ordering. Mission compilation and source checking explicitly use
 `evaluation_heap_words` as `Lisp.run_native/2`'s `compile_max_heap`; callers
 that do not set it compile under their own `:max_heap`, so no ambient
-application default can move a sealed run's compile ceiling.
+application default can move a sealed run's compile ceiling. Workflow, mission,
+and REPL execution likewise pass the effective `live_provider_tasks` limit as
+Lisp's global `max_parallel_workers`, so `pmap` and `pcalls` batch at the same
+ceiling that bounds their concurrent provider callbacks.
 
 Standalone `PtcRunner.Kernel.ReplSession` is process-affine. Passing its public
 value does not transfer ownership. A product that needs transferable or

@@ -6,11 +6,14 @@ defmodule PtcRunner.Kernel.ProviderCredentials do
   #
   # Every active command — a run and `doctor --connect` — crosses
   # this step once, after the registry and OAuth context exist and before any
-  # provider callback runs. Resolving here rather than inside acquisition is
-  # what makes one credential model serve all three: acquisition answers for
-  # the closure it acquires, and a `:none` occurrence that declares a
-  # credential is inside no closure at all, so a connect that resolved only the
-  # remainder its closure missed would need a credential path of its own.
+  # provider prepare, preflight, acquisition, or execution callback runs.
+  # Active selection checks, unverified local checks, command-owned provider
+  # application startup, or OAuth authorization may already have run, so the
+  # caller supplies that activity evidence. Resolving here rather than inside
+  # acquisition is what makes one credential model serve all three: acquisition
+  # answers for the closure it acquires, and a `:none` occurrence that declares
+  # a credential is inside no closure at all, so a connect that resolved only
+  # the remainder its closure missed would need a credential path of its own.
   #
   # ## Required names
   #
@@ -56,20 +59,31 @@ defmodule PtcRunner.Kernel.ProviderCredentials do
   Resolves every credential the sealed selected declarations require.
 
   Returns `{:ok, %{}}` without calling the resolver when nothing declares one.
+  `provider_activity` states whether earlier work in this operation already
+  crossed a provider-facing boundary; a failure preserves that fact.
   """
   @spec resolve(
           PreparedRun.t(),
           InstallationCatalog.t(),
           ProviderRegistry.t(),
-          ProviderSession.t()
+          ProviderSession.t(),
+          boolean()
         ) :: {:ok, %{binary() => binary()}} | {:error, CommandDiagnostic.t()}
-  def resolve(prepared, catalog, registry, session) do
-    with true <- bound?(prepared, catalog, registry),
+  def resolve(prepared, catalog, registry, session, provider_activity) do
+    with true <- is_boolean(provider_activity),
+         true <- bound?(prepared, catalog, registry),
          {:ok, deadline} when not is_nil(deadline) <-
            ProviderSession.execution_deadline(session) do
       prepared
       |> required_names(catalog)
-      |> resolve_required(prepared, catalog, registry, session, deadline)
+      |> resolve_required(
+        prepared,
+        catalog,
+        registry,
+        session,
+        deadline,
+        provider_activity
+      )
     else
       _invalid -> {:error, internal_diagnostic()}
     end
@@ -102,9 +116,26 @@ defmodule PtcRunner.Kernel.ProviderCredentials do
 
   defp bound?(_prepared, _catalog, _registry), do: false
 
-  defp resolve_required([], _prepared, _catalog, _registry, _session, _deadline), do: {:ok, %{}}
+  defp resolve_required(
+         [],
+         _prepared,
+         _catalog,
+         _registry,
+         _session,
+         _deadline,
+         _provider_activity
+       ),
+       do: {:ok, %{}}
 
-  defp resolve_required(names, prepared, catalog, registry, session, deadline) do
+  defp resolve_required(
+         names,
+         prepared,
+         catalog,
+         registry,
+         session,
+         deadline,
+         provider_activity
+       ) do
     max_heap_words = prepared.request.package.limits.provider_heap_words
 
     result =
@@ -126,22 +157,22 @@ defmodule PtcRunner.Kernel.ProviderCredentials do
     # would let the step hand a credential to work the operation may no longer
     # do, so the deadline decides rather than the worker.
     if Deadline.expired?(deadline) do
-      unavailable(prepared, catalog)
+      unavailable(prepared, catalog, provider_activity)
     else
       case result do
         {:ok, {:ok, credentials}} -> {:ok, credentials}
-        _failure -> unavailable(prepared, catalog)
+        _failure -> unavailable(prepared, catalog, provider_activity)
       end
     end
   end
 
-  defp unavailable(prepared, catalog) do
+  defp unavailable(prepared, catalog, provider_activity) do
     with name when is_binary(name) <- attributed_alias(prepared, catalog),
          {:ok, subject} <- CommandSubject.provider(name, :credentials) do
       {:error,
        CommandDiagnostic.new!(:active_preflight, :credential_unavailable,
          subject: subject,
-         provider_activity: true
+         provider_activity: provider_activity
        )}
     else
       _invalid -> {:error, internal_diagnostic()}
