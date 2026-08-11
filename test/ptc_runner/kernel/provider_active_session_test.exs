@@ -1270,6 +1270,11 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     stop_provider_applications()
     Application.put_env(:req_llm, :finch, %{}, persistent: true)
     Application.delete_env(:req_llm, :stream_pool_protocols, persistent: true)
+    # Seeded rather than deleted: the subject is that a failed start leaves the
+    # pool geometry exactly as it found it, which an absent key cannot tell
+    # apart from a start that wrote the same value another test had left behind.
+    Application.put_env(:req_llm, :stream_pool_count, 5, persistent: true)
+    Application.put_env(:req_llm, :stream_pool_size, 6, persistent: true)
 
     {:ok, prepared, catalog} =
       fixture(fn _selection, _context -> :ok end, ["first"], nil, "command-v1", :req_llm)
@@ -1278,8 +1283,8 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
             %CommandDiagnostic{code: :provider_application_unavailable, provider_activity: true}} =
              open_owned(prepared, catalog, services(:command_vm))
 
-    assert Application.get_env(:req_llm, :stream_pool_count) == nil
-    assert Application.get_env(:req_llm, :stream_pool_size) == nil
+    assert Application.get_env(:req_llm, :stream_pool_count) == 5
+    assert Application.get_env(:req_llm, :stream_pool_size) == 6
     assert ProviderActivity.value(prepared.provider_activity) == true
     assert :ok = PreparedRun.close(prepared)
   end
