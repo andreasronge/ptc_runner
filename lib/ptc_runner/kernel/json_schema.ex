@@ -26,7 +26,10 @@ defmodule PtcRunner.Kernel.JSONSchema do
   JSV. Runtime validation delegates to the compiled JSV root. Input rejection
   may retain a small explanation containing only schema-declared paths,
   keywords, and bounds; submitted values and undeclared property names never
-  enter that explanation.
+  enter that explanation. Validation and explanation projection run together
+  in one time- and heap-bounded worker. Proven schema invalidity is distinct
+  from validator timeout, heap exhaustion, crashes, and malformed validator
+  results.
   """
 
   alias PtcRunner.Kernel.BoundedWorker
@@ -45,8 +48,8 @@ defmodule PtcRunner.Kernel.JSONSchema do
   @max_explanation_errors 64
   @max_argument_bytes 512
   @max_expected_bytes 256
-  @max_expected_members 8
   @simple_argument_segment ~r/\A[A-Za-z_][A-Za-z0-9_]*\z/
+  @expected_constraints ~w(minimum maximum minLength maxLength minItems maxItems)
 
   @constraint_keys %{
     type: "type",
@@ -103,41 +106,37 @@ defmodule PtcRunner.Kernel.JSONSchema do
 
   @doc "Validates a value and returns only bounded, schema-authored rejection facts."
   @spec validate(compiled(), map(), term(), pos_integer(), pos_integer()) ::
-          :ok | {:error, [violation()]}
+          :ok | {:invalid, [violation()]} | {:unavailable, atom()}
   def validate(root, schema, value, timeout_ms, max_heap_words)
       when is_map(schema) and not is_struct(schema) and is_integer(timeout_ms) and
              timeout_ms > 0 and is_integer(max_heap_words) and max_heap_words > 0 do
-    if match?({:ok, _remaining}, explanation_value_budget(value, @max_explanation_nodes)) do
-      validate_with_details(root, schema, value)
-    else
-      validate_without_details(root, value, timeout_ms, max_heap_words)
-    end
-  end
+    explain? = match?({:ok, _remaining}, explanation_value_budget(value, @max_explanation_nodes))
 
-  defp validate_with_details(root, schema, value) do
-    case JSV.validate(value, root, cast: false) do
-      {:ok, _validated} ->
-        :ok
-
-      {:error, %JSV.ValidationError{errors: errors}} ->
-        {:error, project_violations(errors, schema)}
-    end
-  rescue
-    _exception -> {:error, []}
-  end
-
-  # A large submitted value can make JSV's raw error term exceed the evaluator
-  # heap ceiling by itself. Validate such values in a separately bounded worker
-  # with enough headroom for the admitted capability-argument ceiling, and
-  # discard every diagnostic. Resource exhaustion fails closed as invalid.
-  defp validate_without_details(root, value, timeout_ms, max_heap_words) do
-    case BoundedWorker.run(fn -> valid?(root, value) end,
+    case BoundedWorker.run(fn -> validate_value(root, schema, value, explain?) end,
            timeout_ms: timeout_ms,
            max_heap_words: max_heap_words,
            cancel_with_caller: true
          ) do
-      {:ok, true} -> :ok
-      _invalid_or_exhausted -> {:error, []}
+      {:ok, :ok} -> :ok
+      {:ok, {:invalid, violations}} when is_list(violations) -> {:invalid, violations}
+      {:ok, {:unavailable, cause}} when is_atom(cause) -> {:unavailable, cause}
+      {:ok, _unexpected} -> {:unavailable, :unexpected_validator_result}
+      {:error, cause} -> {:unavailable, cause}
+    end
+  end
+
+  defp validate_value(root, schema, value, explain?) do
+    if JSONValue.value?(value) do
+      case JSV.validate(value, root, cast: false) do
+        {:ok, _validated} ->
+          :ok
+
+        {:error, %JSV.ValidationError{errors: errors}} ->
+          violations = if explain?, do: project_violations(errors, schema), else: []
+          {:invalid, violations}
+      end
+    else
+      {:invalid, []}
     end
   end
 
@@ -177,7 +176,8 @@ defmodule PtcRunner.Kernel.JSONSchema do
   # list: one invalid array element creates one formatted message, and a valid-
   # size argument can contain thousands of them. Refuse explanation work before
   # projecting any candidate when the raw cardinality exceeds the fixed budget.
-  # Otherwise select at most three safe schema facts with constant extra space.
+  # Otherwise canonicalize the bounded candidate set before selecting three,
+  # so upstream validator ordering cannot change the retained subset.
   defp project_violations(errors, schema) when is_list(errors) do
     if explanation_error_budget?(errors, @max_explanation_errors) do
       select_violations(errors, schema)
@@ -194,20 +194,11 @@ defmodule PtcRunner.Kernel.JSONSchema do
 
   defp select_violations(errors, schema) do
     errors
-    |> Enum.reduce_while([], fn error, violations ->
-      case project_violation(error, schema) do
-        nil ->
-          {:cont, violations}
-
-        violation ->
-          retained = if violation in violations, do: violations, else: [violation | violations]
-
-          if length(retained) == @max_violations,
-            do: {:halt, retained},
-            else: {:cont, retained}
-      end
-    end)
+    |> Enum.map(&project_violation(&1, schema))
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
     |> Enum.sort_by(&{&1.argument, &1.constraint})
+    |> Enum.take(@max_violations)
   end
 
   defp project_violation(error, schema) do
@@ -219,7 +210,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
          {:ok, declared} <- Map.fetch(node, constraint) do
       violation = %{argument: argument, constraint: constraint}
 
-      case project_expected(declared) do
+      case project_expected(constraint, declared) do
         {:ok, expected} -> Map.put(violation, :expected, expected)
         :omit -> violation
       end
@@ -286,13 +277,8 @@ defmodule PtcRunner.Kernel.JSONSchema do
     end
   end
 
-  defp project_expected(value) do
-    bounded_shape? =
-      scalar?(value) or
-        (is_list(value) and length(value) <= @max_expected_members and
-           Enum.all?(value, &scalar?/1))
-
-    with true <- bounded_shape?,
+  defp project_expected(constraint, value) when constraint in @expected_constraints do
+    with true <- is_number(value),
          {:ok, encoded} <- DeterministicJSON.encode(value),
          true <- byte_size(encoded) <= @max_expected_bytes do
       {:ok, value}
@@ -301,8 +287,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
     end
   end
 
-  defp scalar?(value),
-    do: is_nil(value) or is_boolean(value) or is_number(value) or is_binary(value)
+  defp project_expected(_constraint, _value), do: :omit
 
   defp normalize(_schema, depth) when depth > @max_depth, do: {:error, :invalid_schema}
 

@@ -22,6 +22,7 @@ defmodule PtcRunner.Kernel.ToolGrant do
 
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Environment
+  alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
 
   @doc """
@@ -35,11 +36,48 @@ defmodule PtcRunner.Kernel.ToolGrant do
           term(),
           :workflow | :mission,
           map(),
-          non_neg_integer(),
+          %{
+            timeout_ms: non_neg_integer(),
+            validation_heap_words: pos_integer(),
+            evaluation_lease: reference() | nil,
+            validation_deadline_ms: integer() | nil
+          },
           term(),
-          term(),
-          keyword()
+          term()
         ) :: %{binary() => (map() -> map())}
+  def capability_callbacks(
+        state,
+        kind,
+        environment,
+        dispatch_context,
+        event_sink,
+        inspection_sink
+      )
+      when kind in [:workflow, :mission] and is_map(dispatch_context) do
+    build_callbacks(
+      state,
+      kind,
+      environment,
+      dispatch_context,
+      event_sink,
+      inspection_sink
+    )
+  end
+
+  @doc false
+  def capability_callbacks(
+        state,
+        kind,
+        environment,
+        timeout_ms,
+        event_sink,
+        inspection_sink
+      )
+      when kind in [:workflow, :mission] and is_integer(timeout_ms) do
+    capability_callbacks(state, kind, environment, timeout_ms, event_sink, inspection_sink, [])
+  end
+
+  @doc false
   def capability_callbacks(
         state,
         kind,
@@ -47,32 +85,64 @@ defmodule PtcRunner.Kernel.ToolGrant do
         timeout_ms,
         event_sink,
         inspection_sink,
-        opts \\ []
+        opts
       )
-      when kind in [:workflow, :mission] do
+      when kind in [:workflow, :mission] and is_integer(timeout_ms) and is_list(opts) do
     # Mission grants carry the lease of the evaluation constructing them, so
     # a call surviving that evaluation's death is rejected as stale instead
     # of being attributed to the next admitted evaluation.
     lease = Keyword.get(opts, :lease)
+    limits = RunState.limits(state)
 
+    build_callbacks(
+      state,
+      kind,
+      environment,
+      %{
+        timeout_ms: timeout_ms,
+        validation_heap_words: validation_heap_words(limits, kind),
+        evaluation_lease: lease,
+        validation_deadline_ms: nil
+      },
+      event_sink,
+      inspection_sink
+    )
+  end
+
+  defp build_callbacks(
+         state,
+         kind,
+         environment,
+         dispatch_context,
+         event_sink,
+         inspection_sink
+       ) do
     environment.capabilities
     |> Map.new(fn {name, capability} ->
       view = Environment.capability_view(name, capability)
 
       callback = fn arguments ->
-        Dispatcher.dispatch_with_lease(
+        Dispatcher.dispatch(
           state,
           kind,
           view,
           name,
           arguments,
-          timeout_ms,
-          {event_sink, inspection_sink, lease}
+          dispatch_context,
+          event_sink,
+          inspection_sink
         )
       end
 
       {name, callback}
     end)
-    |> Map.merge(RuntimeTools.tools(state, environment, event_sink, kind, lease: lease))
+    |> Map.merge(
+      RuntimeTools.tools(state, environment, event_sink, kind,
+        lease: dispatch_context.evaluation_lease
+      )
+    )
   end
+
+  defp validation_heap_words(limits, :workflow), do: limits.workflow_heap_words
+  defp validation_heap_words(limits, :mission), do: limits.evaluation_heap_words
 end

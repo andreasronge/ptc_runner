@@ -40,10 +40,10 @@ defmodule PtcRunner.Kernel.RunState do
   budget, so exiting with the owner is the safe outcome and they stay unguarded.
   What is reported is the same for any exit, including a call timeout; a reply
   the owner actually sent is always passed through, so a mismatched token still
-  reaches the caller unchanged. A provider process atomically records terminal policy
-  classification against the active evaluation before publishing its result;
-  that evaluation-scoped bit therefore survives a later sandbox timeout or heap
-  kill and is cleared with the lease.
+  reaches the caller unchanged. Provider and pre-dispatch validation processes
+  atomically record terminal classifications against the active evaluation
+  before publishing their results; those evaluation-scoped bits therefore
+  survive a later sandbox timeout or heap kill and are cleared with the lease.
   """
   use GenServer
 
@@ -216,6 +216,11 @@ defmodule PtcRunner.Kernel.RunState do
   def mark_evaluation_terminal_provider_failure(state),
     do: safe_call(state, :mark_evaluation_terminal_provider_failure, :ok)
 
+  @doc false
+  @spec mark_evaluation_terminal_host_failure(t(), reference()) :: :ok | {:error, :closed}
+  def mark_evaluation_terminal_host_failure(state, evaluation_lease),
+    do: safe_call(state, {:mark_evaluation_terminal_host_failure, evaluation_lease}, :ok)
+
   @spec reserve_evaluation(t()) :: {:ok, map(), [term()], reference()} | {:error, atom()}
   @doc "Atomically reserves and returns native subordinate memory and turn history."
   def reserve_evaluation(state), do: reserve_evaluation(state, :fail_fast)
@@ -264,7 +269,12 @@ defmodule PtcRunner.Kernel.RunState do
 
   @doc false
   @spec release_evaluation_status(t(), reference()) ::
-          {:ok, %{terminal_provider_failure?: boolean()}} | {:error, atom()}
+          {:ok,
+           %{
+             terminal_provider_failure?: boolean(),
+             terminal_host_failure?: boolean()
+           }}
+          | {:error, atom()}
   def release_evaluation_status(state, lease),
     do: call(state, {:release_evaluation_status, lease})
 
@@ -419,6 +429,7 @@ defmodule PtcRunner.Kernel.RunState do
        evaluation_lease: nil,
        evaluation_release_waiter: nil,
        evaluation_terminal_provider_failure?: false,
+       evaluation_terminal_host_failure?: false,
        admission_queue: :queue.new(),
        reservations: %{}
      }}
@@ -524,6 +535,23 @@ defmodule PtcRunner.Kernel.RunState do
     {:reply, :ok, state}
   end
 
+  def handle_call(
+        {token, {:mark_evaluation_terminal_host_failure, evaluation_lease}},
+        _from,
+        %{token: token} = state
+      ) do
+    state =
+      case state.evaluation_lease do
+        {^evaluation_lease, _owner, _monitor_ref} when is_reference(evaluation_lease) ->
+          %{state | evaluation_terminal_host_failure?: true}
+
+        _other ->
+          state
+      end
+
+    {:reply, :ok, state}
+  end
+
   def handle_call({token, :reserve_evaluation}, {caller, _tag}, %{token: token} = state) do
     cond do
       state.closed? ->
@@ -547,7 +575,8 @@ defmodule PtcRunner.Kernel.RunState do
            | evaluations: state.evaluations + 1,
              evaluation_lease: lease,
              evaluation_release_waiter: nil,
-             evaluation_terminal_provider_failure?: false
+             evaluation_terminal_provider_failure?: false,
+             evaluation_terminal_host_failure?: false
          }}
     end
   end
@@ -1101,7 +1130,10 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   defp evaluation_status(state) do
-    %{terminal_provider_failure?: state.evaluation_terminal_provider_failure?}
+    %{
+      terminal_provider_failure?: state.evaluation_terminal_provider_failure?,
+      terminal_host_failure?: state.evaluation_terminal_host_failure?
+    }
   end
 
   defp maybe_complete_evaluation_release(%{evaluation_release_waiter: nil} = state), do: state
@@ -1137,7 +1169,12 @@ defmodule PtcRunner.Kernel.RunState do
   defp clear_evaluation(state) do
     state = resolve_release_waiter(state)
 
-    %{state | evaluation_lease: nil, evaluation_terminal_provider_failure?: false}
+    %{
+      state
+      | evaluation_lease: nil,
+        evaluation_terminal_provider_failure?: false,
+        evaluation_terminal_host_failure?: false
+    }
     |> admit_from_queue()
   end
 
@@ -1232,7 +1269,8 @@ defmodule PtcRunner.Kernel.RunState do
       | evaluations: state.evaluations + 1,
         evaluation_lease: lease,
         evaluation_release_waiter: nil,
-        evaluation_terminal_provider_failure?: false
+        evaluation_terminal_provider_failure?: false,
+        evaluation_terminal_host_failure?: false
     }
   end
 

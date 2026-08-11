@@ -510,8 +510,19 @@ value after an unrelated read is still terminal, as is any failure after a
 `write` or undeclared effect. Correction feedback always includes the bounded
 `kind` and `reason` classification. An input-schema rejection may additionally
 name up to three schema-declared argument paths, violated keywords, and small
-declared bounds or expected sets. Submitted values, undeclared property names,
-opaque semantic-validator reasons, and provider details remain withheld.
+declared numeric, string-length, or item-count bounds. Enum and const literals,
+submitted values, undeclared property names, opaque semantic-validator reasons,
+and provider details remain withheld. These bounded details are part of the
+ordinary `tool/...` error map, so plain PTC-Lisp workflows can inspect them too;
+they are not added to the canonical trace.
+
+If the bounded host validator times out, exhausts its heap, crashes, or returns
+an unrecognized result, the call instead returns
+`capability_unavailable/input_validation_unavailable`. This is not evidence
+that the model's arguments violate the schema: it charges neither a protocol
+error nor a capability call. The shipped agent loop uses evaluator-owned call
+provenance to fail the outer workflow immediately, without asking the model for
+a correction or spending another provider turn.
 
 When a failure is genuinely unsafe to retry, the shipped loop still does not
 repeat the program — but it no longer discards the run either. It spends one

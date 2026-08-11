@@ -103,13 +103,16 @@
                 ;; are not argument mistakes the model can correct. The Kernel
                 ;; derives this provenance from the private capability ledger,
                 ;; so it applies even when a later expression fails.
-                (if (true? (get evaluation :terminal-provider-failure?))
-                  (subject-failure
-                    :model-program-failed
-                    (if (= :failed (get evaluation :outcome))
-                      (get evaluation :value)
-                      :terminal-provider-failure))
-                  (case (get evaluation :outcome)
+                (if (true? (get evaluation :terminal-host-failure?))
+                  (fail (result/error :capability-unavailable
+                                      :input-validation-unavailable))
+                  (if (true? (get evaluation :terminal-provider-failure?))
+                    (subject-failure
+                      :model-program-failed
+                      (if (= :failed (get evaluation :outcome))
+                        (get evaluation :value)
+                        :terminal-provider-failure))
+                    (case (get evaluation :outcome)
                     :returned
                     (if validate-result?
                       (let [validation (kernel/validate-result (get evaluation :value))]
@@ -193,7 +196,7 @@
                                    (agent.feedback/evaluation-error evaluation))
                                  next-prompt-state
                                  closing?))
-                        (subject-failure :turn-limit :evaluation-error))))))
+                        (subject-failure :turn-limit :evaluation-error)))))))
 
               :protocol-error
               (if (agent.retry/retry? turn max-turns)

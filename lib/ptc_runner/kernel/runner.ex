@@ -198,7 +198,7 @@ defmodule PtcRunner.Kernel.Runner do
   defp execute_workflow(entry_source, config, state, timeout_ms, deadline_ms, evaluation_id) do
     opts = [
       context: config.input,
-      tools: workflow_tools(config, state),
+      tools: workflow_tools(config, state, deadline_ms),
       prelude: bundle_prelude(config.workflow_environment),
       timeout: timeout_ms,
       compile_timeout: timeout_ms,
@@ -433,12 +433,17 @@ defmodule PtcRunner.Kernel.Runner do
     end
   end
 
-  defp workflow_tools(config, state) do
+  defp workflow_tools(config, state, validation_deadline_ms) do
     state
     |> ToolGrant.capability_callbacks(
       :workflow,
       config.workflow_environment,
-      config.limits.workflow_timeout_ms,
+      %{
+        timeout_ms: config.limits.workflow_timeout_ms,
+        validation_heap_words: config.limits.workflow_heap_words,
+        evaluation_lease: nil,
+        validation_deadline_ms: validation_deadline_ms
+      },
       config.event_sink,
       config.inspection_sink
     )
