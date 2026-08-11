@@ -14,6 +14,10 @@ defmodule PtcRunner.Kernel.MCPOAuthRemoteE2ETest do
   @moduletag :e2e
   @moduletag timeout: 120_000
 
+  unless System.get_env("PTC_TEST_MCP_OAUTH") == "1" do
+    @moduletag skip: "requires the OAuth-enabled Go MCP harness"
+  end
+
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.EventSink

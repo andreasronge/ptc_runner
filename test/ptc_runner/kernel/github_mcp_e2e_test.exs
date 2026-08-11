@@ -34,10 +34,23 @@ defmodule PtcRunner.Kernel.GitHubMCPE2ETest do
         ])
       end)
 
-    assert run_output == ""
     envelope = envelope_path |> File.read!() |> Jason.decode!()
+    assert Jason.decode!(run_output) == envelope["result"]["value"]
     assert envelope["status"] == "ok"
-    assert envelope["result"]["value"] =~ "PtcRunner"
+
+    assert %{
+             "status" => "ok",
+             "value" => %{
+               "outcome" => "returned",
+               "value" => %{
+                 "status" => "ok",
+                 "value" => %{"resources" => [%{"text" => readme} | _]}
+               }
+             }
+           } = envelope["result"]["value"]
+
+    assert readme =~ "# PtcRunner"
+    refute run_output =~ token
     refute File.read!(envelope_path) =~ token
     trace = Path.join(Path.dirname(paths.trace), envelope["run_ref"] <> ".jsonl")
     refute File.read!(trace) =~ token

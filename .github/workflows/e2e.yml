@@ -78,6 +78,10 @@ jobs:
           if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.test_type }}" = "e2e" ]; then
             bash test/support/mcp_go_stateless/with_server.sh \
               mix test --include e2e --trace
+            PTC_TEST_MCP_OAUTH=1 \
+              bash test/support/mcp_go_stateless/with_server.sh \
+                mix test test/ptc_runner/kernel/mcp_oauth_remote_e2e_test.exs \
+                  --include e2e --trace
           else
             mix test --include integration --trace
           fi
