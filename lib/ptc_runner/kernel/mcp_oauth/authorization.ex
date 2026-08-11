@@ -232,7 +232,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
         end
 
       {:error, _reason} = error ->
-        cancel_consumed_flow(context, pending)
+        cancel_consumed_flow(context, pending, Deadline.terminalization(pending.deadline_ms))
         error
     end
   end
@@ -308,7 +308,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
               pending.key,
               lease.fence,
               :possibly_dispatched,
-              Deadline.new(max(remaining(pending.deadline_ms), 1))
+              Deadline.terminalization(pending.deadline_ms)
             )
 
           {:error, :authorization_failed}
@@ -320,7 +320,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
           pending.key,
           lease.fence,
           :possibly_dispatched,
-          Deadline.new(max(remaining(pending.deadline_ms), 1))
+          Deadline.terminalization(pending.deadline_ms)
         )
 
       {:error, :mcp_authorization_required}
@@ -344,32 +344,37 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
         pending.key,
         lease.fence,
         outcome,
-        Deadline.new(max(remaining(pending.deadline_ms), 1))
+        Deadline.terminalization(pending.deadline_ms)
       )
 
     {:error, closed_token_error(reason)}
   end
 
+  # One terminalization budget covers the whole cleanup: minting a second
+  # deadline for the flow cancellation would let an unresponsive store
+  # consume the floor twice for one terminal transition.
   defp fail_before_code_dispatch(context, pending, lease) do
+    deadline = Deadline.terminalization(pending.deadline_ms)
+
     _ =
       Store.fail_mutation(
         context.store,
         pending.key,
         lease.fence,
         :not_dispatched,
-        Deadline.new(max(remaining(pending.deadline_ms), 1))
+        deadline
       )
 
-    cancel_consumed_flow(context, pending)
+    cancel_consumed_flow(context, pending, deadline)
   end
 
-  defp cancel_consumed_flow(context, pending) do
+  defp cancel_consumed_flow(context, pending, deadline) do
     _ =
       Store.cancel_flow(
         context.store,
         pending.key,
         pending.flow_id,
-        Deadline.new(max(remaining(pending.deadline_ms), 1))
+        deadline
       )
 
     :ok

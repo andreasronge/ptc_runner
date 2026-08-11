@@ -559,7 +559,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
                 config.key,
                 lease.fence,
                 :possibly_dispatched,
-                Deadline.new(max(remaining(deadline_ms), 1))
+                Deadline.terminalization(deadline_ms)
               )
 
             {:error, :mcp_authorization_required}
@@ -572,7 +572,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
             config.key,
             lease.fence,
             :possibly_dispatched,
-            Deadline.new(max(remaining(deadline_ms), 1))
+            Deadline.terminalization(deadline_ms)
           )
 
         {:error, :mcp_authorization_required}
@@ -601,7 +601,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
         config.key,
         lease.fence,
         outcome,
-        Deadline.new(max(remaining(deadline_ms), 1))
+        Deadline.terminalization(deadline_ms)
       )
 
     {:error, close_reason(reason)}
@@ -722,7 +722,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
         config.key,
         lease.fence,
         :not_dispatched,
-        Deadline.new(max(remaining(deadline_ms), 1))
+        Deadline.terminalization(deadline_ms)
       )
 
     :ok

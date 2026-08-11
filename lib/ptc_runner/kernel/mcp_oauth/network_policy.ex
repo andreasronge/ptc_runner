@@ -53,7 +53,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.NetworkPolicy do
       )
 
     with true <- is_function(resolver, 1),
-         true <- is_integer(deadline_ms) and deadline_ms > System.monotonic_time(:millisecond),
+         true <- is_integer(deadline_ms),
+         :live <- deadline_state(deadline_ms),
          {:ok, target} <- target(url),
          true <- origin_allowed?(target.origin, authority),
          {:ok, addresses} <- safe_resolve(resolver, target.hostname, deadline_ms),
@@ -65,11 +66,21 @@ defmodule PtcRunner.Kernel.MCPOAuth.NetworkPolicy do
       {:ok, Map.put(target, :addresses, addresses)}
     else
       {:error, :resolution_failed} = error -> error
+      :expired -> {:error, :resolution_failed}
       _denied -> {:error, :egress_denied}
     end
   end
 
   def resolve(_url, _authority, _opts), do: {:error, :egress_denied}
+
+  # An already-expired deadline is a resolution-time failure, not an egress
+  # verdict: the clock running out before DNS is consulted is
+  # indistinguishable from resolution timing out one instruction later, and
+  # classifying it the same way keeps the error deterministic under
+  # scheduling delay instead of depending on where the caller was preempted.
+  defp deadline_state(deadline_ms) do
+    if deadline_ms > System.monotonic_time(:millisecond), do: :live, else: :expired
+  end
 
   @doc "Builds a connected-peer verifier for one approved DNS answer."
   @spec peer_verifier([address()]) :: (address() -> :ok | {:error, :peer_rejected})

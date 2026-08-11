@@ -47,6 +47,30 @@ defmodule PtcRunner.Kernel.Deadline do
       when is_integer(current_ms),
       do: current_ms >= expires_at_ms
 
+  # Matches TokenManager's @response_transition_timeout_ms: the allowance a
+  # response transition already gets once its caller's own budget is gone.
+  @terminalization_floor_ms 5_000
+
+  @doc """
+  Budget for recording an outcome that must outlive the caller's deadline.
+
+  A worker that crossed a dispatch fence has to report how the dispatch
+  ended even when it learns that outcome after the caller's cutoff.
+  Budgeting that report with `max(remaining, 1)` gave the store call one
+  millisecond once the deadline had passed; under load the call timed out,
+  the discarded report left the mutation lease `:dispatched`, and every
+  later acquire returned `:mutation_indeterminate`. The floor keeps any
+  longer live budget and never lets the report's allowance collapse with
+  the caller's.
+  """
+  @spec terminalization(integer()) :: t()
+  def terminalization(expires_at_ms) when is_integer(expires_at_ms) do
+    # One clock sample: computing "remaining" and re-anchoring with new/1
+    # would read the clock twice, and preemption between the reads extends
+    # a live absolute cutoff — the drift this module exists to forbid.
+    from_expires_at(max(expires_at_ms, now_ms() + @terminalization_floor_ms))
+  end
+
   @doc "Selects the earlier of two already-anchored deadlines."
   @spec earliest(t(), t()) :: t()
   def earliest(

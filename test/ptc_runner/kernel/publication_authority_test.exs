@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   use ExUnit.Case, async: false
 
+  import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPreparation
@@ -187,16 +189,15 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   test "exclusive handle operations remain owned across caller processes", %{tmp_dir: dir} do
     target = Path.join(dir, "cross-process.jsonl")
     assert {:ok, handle} = PublicationHandle.reserve(target, :trace, 0o600)
-    parent = self()
 
-    spawn(fn -> send(parent, {:write, PublicationHandle.write(handle, "[]\n")}) end)
-    assert_receive {:write, :ok}
+    # Each operation runs in its own process — that cross-process hop is the
+    # point of the test. Await completion rather than racing a receive
+    # deadline against fsync latency: this flaked in CI when `publish`'s
+    # fsync+rename exceeded the previous fire-and-forget window.
+    assert :ok = Task.async(fn -> PublicationHandle.write(handle, "[]\n") end) |> Task.await()
+    assert :ok = Task.async(fn -> PublicationHandle.sync(handle) end) |> Task.await()
+    assert :ok = Task.async(fn -> PublicationHandle.publish(handle) end) |> Task.await()
 
-    spawn(fn -> send(parent, {:sync, PublicationHandle.sync(handle)}) end)
-    assert_receive {:sync, :ok}
-
-    spawn(fn -> send(parent, {:publish, PublicationHandle.publish(handle)}) end)
-    assert_receive {:publish, :ok}
     assert File.read!(target) == "[]\n"
     assert :ok = PublicationHandle.close(handle)
   end
@@ -217,11 +218,18 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
                  )
 
         send(parent, {:authority, authority})
-        assert_receive :release
+
+        # A deadline here would make the *caller* die with an assertion
+        # failure if the parent is slow to claim, turning a scheduling
+        # hiccup into a bogus abnormal-exit for the :DOWN check below. The
+        # test's own timeout bounds this receive.
+        receive do
+          :release -> :ok
+        end
       end)
 
     caller_ref = Process.monitor(caller)
-    assert_receive {:authority, authority}, 1_000
+    assert_receive {:authority, authority}
 
     assert {:ok, lease} = PublicationAuthority.claim(authority)
     send(caller, :release)
@@ -386,9 +394,12 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
       end)
 
     creator_ref = Process.monitor(creator)
-    assert_receive :authorized, 1_000
+    assert_receive :authorized
     assert_receive {:DOWN, ^creator_ref, :process, ^creator, :normal}
-    refute File.exists?(target)
+
+    # Reclamation runs when the *owner* observes the creator's death; our own
+    # :DOWN above is delivered independently, so poll rather than racing it.
+    assert_eventually(fn -> not File.exists?(target) end)
 
     assert {:ok, authority} = authorize_after_creator_cleanup(target)
 
@@ -417,8 +428,11 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
     claimant_ref = Process.monitor(claimant)
     assert_receive :claimed
     assert_receive {:DOWN, ^claimant_ref, :process, ^claimant, :normal}
-    refute PublicationAuthority.authorized?(authority)
-    refute File.exists?(target)
+
+    # Cleanup is triggered by the owner's monitor on the claimant, which is
+    # not ordered against our own :DOWN — poll for the settled state.
+    assert_eventually(fn -> not PublicationAuthority.authorized?(authority) end)
+    assert_eventually(fn -> not File.exists?(target) end)
   end
 
   test "unreserved authority rejects duplicate destination keys before allocation" do
@@ -629,24 +643,15 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   defp restore_env(name, nil), do: System.delete_env(name)
   defp restore_env(name, value), do: System.put_env(name, value)
 
-  defp authorize_after_creator_cleanup(target, attempts \\ 100)
-
-  defp authorize_after_creator_cleanup(_target, 0),
-    do: {:error, :creator_cleanup_timeout}
-
-  defp authorize_after_creator_cleanup(target, attempts) do
-    case PublicationAuthority.authorize(
-           "creator-reuse-#{attempts}",
-           [trace: target],
-           :normal,
-           :normal
-         ) do
-      {:error, :destination_exists} ->
-        :erlang.yield()
-        authorize_after_creator_cleanup(target, attempts - 1)
-
-      result ->
-        result
-    end
+  # An attempt-counted yield loop expires in microseconds under scheduler
+  # load (the failure mode Eventually's moduledoc documents); the wall-clock
+  # poll returns the authorization as soon as the owner's reclamation lands.
+  defp authorize_after_creator_cleanup(target) do
+    assert_eventually(fn ->
+      case PublicationAuthority.authorize("creator-reuse", [trace: target], :normal, :normal) do
+        {:ok, authority} -> {:ok, authority}
+        {:error, :destination_exists} -> false
+      end
+    end)
   end
 end
