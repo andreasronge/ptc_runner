@@ -187,11 +187,14 @@ without repeating the run under private inspection. The command reports it as:
 ```text
 {:error,
  {:result_contract_failed,
-  %{value_kind: :object, discriminator: "decision", matched_branch: "no-change",
-    missing_required: [], undeclared_key_count: 0,
+  %{value_kind: :object, discriminator: "kind", matched_branch: "report",
     violations: [
-      %{segments: [{:property, "rationale"}], kind: :maxLength},
-      %{segments: [{:property, "evidence"}, {:index, 0}], kind: :required}
+      %{segments: [{:property, "timeline"}, {:index, 2}],
+        kind: :boolean_schema,
+        allowed_keys: ["citations", "observed_at", "statement"],
+        missing_required: ["observed_at", "statement"],
+        undeclared_key_count: 2},
+      %{segments: [{:property, "timeline"}, {:index, 2}], kind: :required}
     ]}}}
 ```
 
@@ -221,14 +224,37 @@ index. At the first undeclared or structurally inconsistent segment,
 classification stops at the safe parent, so caller-authored property names
 never enter the report.
 
-Every other name comes from the compiled schema too: the discriminator, the
-branch whose `const` the value carried, and that branch's unmet `required` keys
-as `missing_required`. The value contributes only its JSON kind and
-`undeclared_key_count`, a number. The rejected value and its field values stay
-out of the error entirely.
+Exactly one retained violation at each object path carries applicable local
+correction guidance. For a closed object schema, `allowed_keys` is its sorted
+property-name set and `undeclared_key_count` counts submitted keys outside that
+local set. When the rejected node is an object, `missing_required` lists its
+absent schema-required names. An explicitly open object can still report those
+missing names, but omits `allowed_keys` and the undeclared count because
+extension keys are valid. These facts are path-local; there are no root-only
+missing or undeclared summaries that can contradict a nested violation. A
+closed-object type mismatch still receives schema-only `allowed_keys`, but no
+missing or undeclared claim is made about a non-object value.
 
-Ordinary contracts are closed, bounded object schemas. The supported keywords
-are `type`, `title`, `description`, `properties`, `required`,
+Each allowed or missing list retains at most 32 names and at most 4,096 bytes in
+deterministic JSON encoding. When a sorted prefix is retained, the violation
+also carries `allowed_key_count`/`allowed_keys_truncated` or
+`missing_required_count`/`missing_required_truncated`. The complete
+model-facing structural-diagnostics rendering is separately capped at 32,768
+characters and ends with `(contract diagnostics truncated)` when necessary;
+the prospective encoded-request size check remains authoritative for a
+caller-narrowed or already-full transcript.
+
+Every published name comes from the compiled schema: the discriminator, the
+branch `const`, safe path properties, allowed keys, and missing required keys.
+The value contributes only its JSON kind, required-key absence, array indices,
+and numeric undeclared counts. The rejected value, its field values, and its
+undeclared field names stay out of the error entirely. The reserved result
+validator exposes only this bounded classification; it does not expose the
+whole contract or add a route for `ValueContract.describe/1`.
+
+Ordinary contracts are bounded object schemas and are closed by default;
+`additionalProperties: true` explicitly opens an object. The supported
+keywords are `type`, `title`, `description`, `properties`, `required`,
 `additionalProperties`, `items`, `enum`, `const`, numeric and length bounds.
 String schemas may additionally use the single asserted
 `"format": "sha256"` for an algorithm-qualified lowercase digest; arbitrary

@@ -1,13 +1,19 @@
 (ns agent.feedback "Bounded correction messages for agent workflows." {:visibility :prompt})
 
 (defn- observation-truncation-marker [] "\n... (observation truncated)")
+(defn- contract-diagnostic-truncation-marker [] "\n... (contract diagnostics truncated)")
+(defn- contract-diagnostic-max-chars [] 32768)
 
-(defn- cap-observation [body max-chars]
-  (let [marker (observation-truncation-marker)]
+(defn- cap-with-marker [body max-chars marker]
     (if (<= (count body) max-chars)
       body
-      (str (subs body 0 (- max-chars (count marker)))
-           marker))))
+      (if (<= max-chars (count marker))
+        (subs marker 0 max-chars)
+        (str (subs body 0 (- max-chars (count marker)))
+             marker))))
+
+(defn- cap-observation [body max-chars]
+  (cap-with-marker body max-chars (observation-truncation-marker)))
 
 (defn success [evaluation max-chars]
   (let [value-preview (pr-str (get evaluation :value))
@@ -71,6 +77,10 @@
        "you have already gathered, using return or fail on this turn."))
 
 (defn result-contract [validation]
-  (str "The returned value did not satisfy the application result contract. "
-       "Structural diagnostics: " (pr-str (get validation :details))
-       ". Send one corrected run_ptc_lisp call that returns a contract-valid value."))
+  (let [diagnostics (pr-str (get validation :details))
+        bounded (cap-with-marker diagnostics
+                                 (contract-diagnostic-max-chars)
+                                 (contract-diagnostic-truncation-marker))]
+    (str "The returned value did not satisfy the application result contract. "
+         "Structural diagnostics: " bounded
+         ". Send one corrected run_ptc_lisp call that returns a contract-valid value.")))

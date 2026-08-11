@@ -836,6 +836,17 @@ contract's sealed classification authority and are authorized only against the
 selected tagged-union branch that produced the classification. The public
 classification map omits the internal branch selector; separate attested
 evidence supplies the exact branch schema used to construct the authority.
+That same selected schema enriches at most one retained violation per object
+path with applicable local facts. An actual object can receive sorted, bounded
+missing names. A closed object schema additionally supplies sorted, bounded
+allowed names and a local undeclared-key count; an open schema never treats
+extension keys as undeclared. Enrichment walks only the already authorized
+typed path; it never creates a second raw-path channel. `ExecutionInput`
+therefore converts the enriched violation's segments into the same attested
+`CommandPath` and preserves the schema-derived facts on that record. Non-object
+values receive allowed-key guidance only for a closed object schema. The agent
+prelude independently caps the complete rendered correction diagnostic before
+adding it to model history.
 `ExecutionInput` carries that authority with the bounded rejection
 classification;
 `CommandEngine` binds that authority to the diagnostic source independently of

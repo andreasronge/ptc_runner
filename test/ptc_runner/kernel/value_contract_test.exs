@@ -62,8 +62,7 @@ defmodule PtcRunner.Kernel.ValueContractTest do
 
     assert %{
              value_kind: :object,
-             matched_branch: "propose-change",
-             missing_required: ["candidate"]
+             matched_branch: "propose-change"
            } =
              classified =
              ValueContract.classify(contract, %{
@@ -72,6 +71,15 @@ defmodule PtcRunner.Kernel.ValueContractTest do
              })
 
     refute Map.has_key?(classified, :branch_index)
+    refute Map.has_key?(classified, :missing_required)
+    refute Map.has_key?(classified, :undeclared_key_count)
+
+    assert Enum.any?(classified.violations, fn violation ->
+             violation[:segments] == [] and
+               violation[:allowed_keys] == ["candidate", "decision"] and
+               violation[:missing_required] == ["candidate"] and
+               violation[:undeclared_key_count] == 1
+           end)
 
     secret = "must-not-escape"
 
@@ -79,12 +87,15 @@ defmodule PtcRunner.Kernel.ValueContractTest do
       ValueContract.classify(contract, %{"decision" => "no-change", secret => secret})
 
     refute inspect(leaked) =~ secret
-    assert leaked.undeclared_key_count == 1
 
-    # An undeclared key is reported by keyword and location only. Its name is
-    # model-authored, so naming it would put caller content into a public error
-    # by the same route the rejected value is withheld from.
-    assert Enum.any?(leaked.violations, &(&1.segments == []))
+    # An undeclared key is reported by count, safe location, and the schema's
+    # allowed names. Its caller-authored name never enters the public error.
+    assert Enum.any?(leaked.violations, fn violation ->
+             violation[:segments] == [] and
+               violation[:allowed_keys] == ["decision", "reason"] and
+               violation[:missing_required] == ["reason"] and
+               violation[:undeclared_key_count] == 1
+           end)
   end
 
   # Keyword keys are the commonest authoring mistake in PTC-Lisp, and they fail
@@ -134,12 +145,185 @@ defmodule PtcRunner.Kernel.ValueContractTest do
       })
 
     assert classification.matched_branch == "no-change"
-    assert classification.missing_required == ["reason"]
+
+    assert Enum.any?(classification.violations, fn violation ->
+             violation[:segments] == [] and
+               violation[:allowed_keys] == ["decision", "reason"] and
+               violation[:missing_required] == ["reason"]
+           end)
 
     refute Enum.any?(
              classification.violations,
              &(&1.kind == :const and &1.segments == [{:property, "decision"}])
            )
+  end
+
+  test "reports nested object diagnostics without caller-authored keys or values" do
+    assert {:ok, contract} = ValueContract.compile(nested_report_schema())
+
+    caller_key_a = "submitted-timestamp"
+    caller_key_b = "submitted-description"
+    caller_value = "private-value"
+
+    classification =
+      ValueContract.classify(contract, %{
+        "kind" => "report",
+        "timeline" => [
+          %{
+            caller_key_a => caller_value,
+            caller_key_b => caller_value,
+            "citations" => []
+          },
+          %{
+            caller_key_a => caller_value,
+            "statement" => "second item",
+            "citations" => []
+          }
+        ]
+      })
+
+    refute Map.has_key?(classification, :missing_required)
+    refute Map.has_key?(classification, :undeclared_key_count)
+
+    diagnostics =
+      Enum.filter(classification.violations, &Map.has_key?(&1, :allowed_keys))
+
+    assert Enum.any?(diagnostics, fn violation ->
+             violation.segments == [{:property, "timeline"}, {:index, 0}] and
+               violation.allowed_keys == ["citations", "observed_at", "statement"] and
+               violation.missing_required == ["observed_at", "statement"] and
+               violation.undeclared_key_count == 2
+           end)
+
+    assert Enum.any?(diagnostics, fn violation ->
+             violation.segments == [{:property, "timeline"}, {:index, 1}] and
+               violation.allowed_keys == ["citations", "observed_at", "statement"] and
+               violation.missing_required == ["observed_at"] and
+               violation.undeclared_key_count == 1
+           end)
+
+    rendered = inspect(classification)
+    refute rendered =~ caller_key_a
+    refute rendered =~ caller_key_b
+    refute rendered =~ caller_value
+  end
+
+  test "does not call extension keys undeclared in an open root object" do
+    assert {:ok, contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "additionalProperties" => true,
+               "properties" => %{"required_key" => %{"type" => "string"}},
+               "required" => ["required_key"]
+             })
+
+    classification = ValueContract.classify(contract, %{"extension" => "private-value"})
+    diagnostic = Enum.find(classification.violations, &(&1.segments == []))
+
+    assert diagnostic.missing_required == ["required_key"]
+    refute Map.has_key?(diagnostic, :allowed_keys)
+    refute Map.has_key?(diagnostic, :undeclared_key_count)
+    refute inspect(classification) =~ "extension"
+    refute inspect(classification) =~ "private-value"
+  end
+
+  test "does not call extension keys undeclared in a nested open object" do
+    assert {:ok, contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "properties" => %{
+                 "payload" => %{
+                   "type" => "object",
+                   "additionalProperties" => true,
+                   "properties" => %{"required_key" => %{"type" => "string"}},
+                   "required" => ["required_key"]
+                 }
+               },
+               "required" => ["payload"]
+             })
+
+    classification =
+      ValueContract.classify(contract, %{
+        "payload" => %{"extension" => "private-value"}
+      })
+
+    diagnostic =
+      Enum.find(
+        classification.violations,
+        &(&1.segments == [{:property, "payload"}])
+      )
+
+    assert diagnostic.missing_required == ["required_key"]
+    refute Map.has_key?(diagnostic, :allowed_keys)
+    refute Map.has_key?(diagnostic, :undeclared_key_count)
+    refute inspect(classification) =~ "extension"
+    refute inspect(classification) =~ "private-value"
+  end
+
+  test "bounds sorted schema-name guidance by count and encoded bytes" do
+    short_names = for index <- 1..40, do: "field-#{String.pad_leading("#{index}", 2, "0")}"
+
+    assert {:ok, count_contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "properties" => Map.new(short_names, &{&1, %{"type" => "string"}}),
+               "required" => short_names
+             })
+
+    count_classification = ValueContract.classify(count_contract, %{"caller-only" => "hidden"})
+
+    count_diagnostic =
+      Enum.find(count_classification.violations, &Map.has_key?(&1, :allowed_keys))
+
+    assert count_diagnostic.allowed_keys == Enum.take(Enum.sort(short_names), 32)
+    assert count_diagnostic.allowed_key_count == 40
+    assert count_diagnostic.allowed_keys_truncated
+    assert count_diagnostic.missing_required == Enum.take(Enum.sort(short_names), 32)
+    assert count_diagnostic.missing_required_count == 40
+    assert count_diagnostic.missing_required_truncated
+    refute inspect(count_classification) =~ "caller-only"
+
+    long_names = ["a" <> String.duplicate("x", 2_999), "b" <> String.duplicate("y", 2_999)]
+
+    assert {:ok, byte_contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "properties" => Map.new(long_names, &{&1, %{"type" => "string"}})
+             })
+
+    byte_classification = ValueContract.classify(byte_contract, %{"caller-only" => "hidden"})
+    byte_diagnostic = Enum.find(byte_classification.violations, &Map.has_key?(&1, :allowed_keys))
+
+    assert byte_diagnostic.allowed_keys == [hd(long_names)]
+    assert byte_diagnostic.allowed_key_count == 2
+    assert byte_diagnostic.allowed_keys_truncated
+  end
+
+  test "object type failures carry only schema-derived allowed keys" do
+    assert {:ok, contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "properties" => %{
+                 "payload" => %{
+                   "type" => "object",
+                   "properties" => %{"answer" => %{"type" => "integer"}},
+                   "required" => ["answer"]
+                 }
+               },
+               "required" => ["payload"]
+             })
+
+    classification = ValueContract.classify(contract, %{"payload" => 42})
+
+    assert %{allowed_keys: ["answer"]} =
+             diagnostic =
+             Enum.find(classification.violations, fn violation ->
+               violation.kind == :type and
+                 violation.segments == [{:property, "payload"}]
+             end)
+
+    refute Map.has_key?(diagnostic, :missing_required)
+    refute Map.has_key?(diagnostic, :undeclared_key_count)
   end
 
   test "retains only locally declared path segments and RFC 6901-escapes them" do
@@ -251,6 +435,37 @@ defmodule PtcRunner.Kernel.ValueContractTest do
              ])
   end
 
+  test "nested object diagnostics retain the selected branch's attested path" do
+    schema = %{
+      "oneOf" => [
+        nested_branch("left", "left_value"),
+        nested_branch("right", "right_value")
+      ]
+    }
+
+    assert {:ok, contract} = ValueContract.compile(schema)
+
+    assert {:error, {:input_contract_failed, classification}} =
+             ExecutionInput.new(
+               %{
+                 "kind" => "left",
+                 "payload" => %{"caller-only" => "private-value"}
+               },
+               :normal,
+               contract
+             )
+
+    assert %{allowed_keys: ["left_value"], missing_required: ["left_value"]} =
+             diagnostic =
+             Enum.find(classification.violations, &Map.has_key?(&1, :allowed_keys))
+
+    assert CommandPath.to_pointer(diagnostic.path) == "/payload"
+    refute Map.has_key?(diagnostic, :segments)
+    refute inspect(classification) =~ "right_value"
+    refute inspect(classification) =~ "caller-only"
+    refute inspect(classification) =~ "private-value"
+  end
+
   test "rejects ambiguous, mismatched, repeated, open, and excessive union branches" do
     [no_change, propose] = decision_schema()["oneOf"]
 
@@ -348,6 +563,54 @@ defmodule PtcRunner.Kernel.ValueContractTest do
           "required" => ["decision", "candidate"]
         }
       ]
+    }
+  end
+
+  defp nested_report_schema do
+    %{
+      "oneOf" => [
+        %{
+          "type" => "object",
+          "required" => ["kind", "timeline"],
+          "properties" => %{
+            "kind" => %{"type" => "string", "const" => "report"},
+            "timeline" => %{
+              "type" => "array",
+              "items" => %{
+                "type" => "object",
+                "required" => ["observed_at", "statement", "citations"],
+                "properties" => %{
+                  "observed_at" => %{"type" => "string"},
+                  "statement" => %{"type" => "string"},
+                  "citations" => %{"type" => "array", "items" => %{"type" => "string"}}
+                }
+              }
+            }
+          }
+        },
+        %{
+          "type" => "object",
+          "properties" => %{
+            "kind" => %{"type" => "string", "const" => "withheld"}
+          },
+          "required" => ["kind"]
+        }
+      ]
+    }
+  end
+
+  defp nested_branch(kind, field) do
+    %{
+      "type" => "object",
+      "properties" => %{
+        "kind" => %{"type" => "string", "const" => kind},
+        "payload" => %{
+          "type" => "object",
+          "properties" => %{field => %{"type" => "integer"}},
+          "required" => [field]
+        }
+      },
+      "required" => ["kind", "payload"]
     }
   end
 
