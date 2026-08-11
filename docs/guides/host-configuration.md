@@ -184,6 +184,13 @@ output ceiling, disables retries and redirects, and uses the installed
 credential under `doctor_connectivity_timeout_ms`; provider errors and timeouts
 fail the check instead of being reported as availability.
 
+`ptc doctor` reports installed or selected workflow models in a
+`model_aliases` list, including alias, source, installation revision, default
+status, and whether the application selected it. `--show-model-selectors` adds
+safe configured selectors. Endpoint-bearing `openai-compat:` selectors are
+omitted even with that flag so doctor output cannot disclose URL credentials or
+deployment endpoints.
+
 ### Recorded models
 
 Evaluation needs a model whose answers do not move between a baseline run and a

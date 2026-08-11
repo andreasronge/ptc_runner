@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.LLMCapability do
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.LLMUsage
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Lisp.RetainedSize
 
@@ -94,10 +95,27 @@ defmodule PtcRunner.Kernel.LLMCapability do
     response = stringify_json(response)
     bytes = RetainedSize.bytes_with_cap(response, limit)
 
-    if JSONValue.map?(response) and is_integer(bytes) and bytes <= limit,
-      do: {:ok, RetainedSize.detach_binaries(response)},
-      else: {:error, ProviderError.new(:invalid_request, "LLM response exceeded its boundary")}
+    cond do
+      not (JSONValue.map?(response) and is_integer(bytes) and bytes <= limit) ->
+        {:error, ProviderError.new(:invalid_request, "LLM response exceeded its boundary")}
+
+      Map.has_key?(response, "tokens") ->
+        case LLMUsage.normalize(response["tokens"]) do
+          {:ok, usage} ->
+            {:ok, response |> Map.put("tokens", usage) |> RetainedSize.detach_binaries()}
+
+          {:error, :invalid_llm_usage} ->
+            invalid_usage()
+        end
+
+      true ->
+        {:ok, RetainedSize.detach_binaries(response)}
+    end
   end
+
+  defp invalid_usage,
+    do:
+      {:error, ProviderError.new(:invalid_request, "LLM response contained invalid token usage")}
 
   defp stringify_json(nil), do: nil
 

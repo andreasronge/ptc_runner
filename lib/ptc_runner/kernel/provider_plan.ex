@@ -12,7 +12,7 @@ defmodule PtcRunner.Kernel.ProviderPlan do
         ) :: {:ok, map()} | {:error, {:dependency_invalid | :data_policy_denied, map() | nil}}
   def derive(request, workflow_bundle, mission_bundle, declarations) do
     with :ok <- validate_dependencies(declarations),
-         :ok <- validate_single_workflow_llm(declarations),
+         :ok <- validate_workflow_llm_defaults(declarations),
          effective_data_class <- effective_data_class(request, declarations),
          :ok <- providers_accept(declarations, effective_data_class),
          effective_flow <- effective_flow(request, effective_data_class),
@@ -65,13 +65,15 @@ defmodule PtcRunner.Kernel.ProviderPlan do
     end
   end
 
-  defp validate_single_workflow_llm(declarations) do
+  defp validate_workflow_llm_defaults(declarations) do
     workflow_llms =
       Enum.filter(declarations, fn declaration ->
         declaration.destination == :workflow and declaration.descriptor.workflow_llm?
       end)
 
-    if length(workflow_llms) <= 1,
+    defaults = Enum.count(workflow_llms, &Map.get(&1.config, "default", false))
+
+    if defaults <= 1,
       do: :ok,
       else: {:error, {:dependency_invalid, List.first(workflow_llms)}}
   end

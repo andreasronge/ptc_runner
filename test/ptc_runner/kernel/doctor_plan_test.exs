@@ -539,7 +539,12 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
   # The contract, not this test, decides whether a row set is well formed: both
   # the generated schema and the ordering semantics it cannot express.
   defp assert_contract(checks, provider_activity) do
-    result = %{"checks" => checks, "provider_activity" => provider_activity}
+    result = %{
+      "checks" => checks,
+      "model_aliases" => [],
+      "provider_activity" => provider_activity
+    }
+
     assert CommandContract.valid_success_result?(:doctor, result)
     assert CommandContract.valid_success_semantics?(:doctor, result)
   end

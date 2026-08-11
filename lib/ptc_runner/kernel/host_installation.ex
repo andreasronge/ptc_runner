@@ -479,6 +479,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
           default: installation.ceilings.max_response_bytes,
           minimum: 1,
           maximum: installation.ceilings.max_response_bytes
+        },
+        "default" => %{
+          type: :boolean,
+          input: true,
+          default: false
         }
       },
       cross_rules: [
@@ -505,6 +510,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
           default: installation.ceilings.max_result_bytes,
           minimum: 1,
           maximum: installation.ceilings.max_result_bytes
+        },
+        "default" => %{
+          type: :boolean,
+          input: true,
+          default: false
         }
       },
       cross_rules: [
@@ -580,13 +590,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
     credential_names = [installation.credential]
 
     with :ok <- placement(installation, context.destination),
-         {:ok, _selected} <- llm_selection(installation, selection, context) do
+         {:ok, selected} <- llm_selection(installation, selection, context) do
       {:ok,
        %{
          credential_names: credential_names,
          data_class: installation.data_class,
          accepts_data: installation.accepts_data,
-         workflow_llm?: true
+         workflow_llm?: true,
+         workflow_llm_route: workflow_llm_route(installation, selected)
        }}
     end
   end
@@ -599,13 +610,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
          _oauth_runtime
        ) do
     with :ok <- placement(installation, context.destination),
-         {:ok, _selected} <- llm_replay_selection(installation, selection, context) do
+         {:ok, selected} <- llm_replay_selection(installation, selection, context) do
       {:ok,
        %{
          credential_names: [],
          data_class: installation.data_class,
          accepts_data: installation.accepts_data,
-         workflow_llm?: true
+         workflow_llm?: true,
+         workflow_llm_route: workflow_llm_route(installation, selected)
        }}
     end
   end
@@ -646,6 +658,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
          requires: [:canonical_trace_snapshot]
        }}
     end
+  end
+
+  defp workflow_llm_route(installation, selected) do
+    %{
+      source: Atom.to_string(installation.source),
+      installation_revision: installation.installation_revision,
+      default: selected.default
+    }
   end
 
   defp preflight(host, %{source: :mcp} = installation, selection, context, oauth_runtime) do

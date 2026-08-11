@@ -43,6 +43,8 @@ same per-command declarations the strict parser accepts.
 A provider-bearing manifest requires `--host-config`. Use the standalone
 `ptc doctor MANIFEST --host-config HOST.json --connect` operation when active
 provider connectivity must be checked without running the workflow.
+Use `--show-model-selectors` when doctor should also print safe model selectors;
+endpoint-bearing `openai-compat:` selectors remain omitted.
 
 A fresh Mix invocation safely configures and starts a selected optional
 provider application only after the active provider lifecycle begins. A later `ptc run`

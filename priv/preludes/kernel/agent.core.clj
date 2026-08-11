@@ -34,10 +34,13 @@
      "tool_call_id" (get action :tool-call-id)
      "content" content}))
 
-(defn- bounded-request [prompt-state messages max-transcript-chars]
-  (let [request {"system" (system-message prompt-state)
-                 "messages" messages
-                 "tools" [(agent.native/tool-schema)]}
+(defn- bounded-request [prompt-state messages cfg max-transcript-chars]
+  (let [base-request {"system" (system-message prompt-state)
+                      "messages" messages
+                      "tools" [(agent.native/tool-schema)]}
+        request (if (contains? cfg "model")
+                  (assoc base-request "model" (get cfg "model"))
+                  base-request)
         encoded (json/generate-string request)]
     (if (> (count encoded) max-transcript-chars)
       (fail (result/error :transcript-limit :request-too-large))
@@ -90,7 +93,7 @@
              closing? false]
         (if (>= turn max-turns)
           (subject-failure :turn-limit :turn-limit-exceeded)
-          (let [request (bounded-request prompt-state messages max-transcript-chars)
+          (let [request (bounded-request prompt-state messages effective-cfg max-transcript-chars)
                 response (llm/request request)
                 action (agent.native/normalize response max-program-chars)]
             (workflow.event/annotate
@@ -220,6 +223,7 @@
 (defn run-outcome
   "Runs the agent loop and distinguishes model-authored completion from a
   bounded subject-attributable failure."
+  {:signature "(task :string, cfg {model :string?}) -> :any"}
   [task cfg]
   (run-outcome* task cfg false))
 
@@ -230,6 +234,7 @@
 
   Subject failures retain the historical fail behavior. Evaluators that need
   to record those attempts use `run-outcome`."
+  {:signature "(task :string, cfg {model :string?}) -> :any"}
   [task cfg]
   (let [outcome (run-outcome task cfg)]
     (if (= :returned (get outcome :status))
@@ -239,6 +244,7 @@
 (defn run-result-value
   "Runs the agent loop and validates model-authored completion against the
   manifest result contract before returning it to the calling workflow."
+  {:signature "(task :string, cfg {model :string?}) -> :any"}
   [task cfg]
   (let [outcome (run-outcome* task cfg true)]
     (if (= :returned (get outcome :status))
@@ -251,6 +257,7 @@
   The default result is a success envelope. Set `result_envelope` to false for
   a raw application value. Use `run-value` when the caller must continue after
   the model-authored value returns."
+  {:signature "(task :string, cfg {model :string?}) -> :any"}
   [task cfg]
   (let [value (run-value task cfg)]
     (if (false? (get cfg "result_envelope"))

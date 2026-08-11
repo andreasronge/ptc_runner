@@ -286,7 +286,8 @@ already installed, by its public name plus JSON configuration:
 ```json
 "providers": {
   "workflow": [
-    {"name": "deepseek"}
+    {"name": "deepseek", "config": {"default": true}},
+    {"name": "sonnet"}
   ],
   "mission": [
     {
@@ -304,6 +305,12 @@ mappings behind that name live in the host JSON, so a manifest cannot reach past
 its selection to launch a command, supply a credential, or point a provider
 somewhere else. Placement is fixed too: LLM providers are workflow-only, MCP and
 native snapshot providers mission-only.
+
+Multiple live and replay LLM aliases may be selected together. At most one
+workflow LLM selection may set `"default": true`; invalid values and multiple
+defaults are rejected while providers are still inert. Calls select an alias
+with the provider-neutral request's `"model"` field. If it is omitted, a lone
+alias or the declared default is used. Selection never falls back implicitly.
 
 For MCP, `allow` selects installed public names without changing their
 operator-declared effects. An all-read installation may omit `allow` to select

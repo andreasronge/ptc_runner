@@ -87,7 +87,8 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
               "errors" => 0,
               "evaluations" => 1,
               "workflow_capability_calls" => 0,
-              "mission_capability_calls" => 0
+              "mission_capability_calls" => 0,
+              "llm_usage" => []
             }} = callbacks["trace-counters"].(%{"run_id" => "visible"})
 
     assert {:error, %{kind: :invalid_request}} =

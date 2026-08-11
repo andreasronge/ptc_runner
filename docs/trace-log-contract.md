@@ -387,6 +387,13 @@ discovery. Counters may include run status, errors, evaluations, and
 workflow/mission capability calls by bounded name. They are reproducible from
 the selected canonical events.
 
+For routed `llm-request` calls, `llm_usage` groups stopped events by model alias
+and installation revision. Each row reports total and successful calls, calls
+with valid usage, successful calls missing usage, and sums of the closed
+`input`, `output`, `cache_creation`, `cache_read`, and `total_cost` fields. A
+revision change creates a separate row rather than silently combining unlike
+deployments.
+
 ## Pagination, ordering, and bounds
 
 Every collection query has:

@@ -145,7 +145,9 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
       }
     },
     doctor: %{
-      usage: ["ptc doctor [ptc.json] [--host-config HOST.json] [--connect]"],
+      usage: [
+        "ptc doctor [ptc.json] [--host-config HOST.json] [--connect] [--show-model-selectors]"
+      ],
       options: [
         %{
           key: :host_config,
@@ -158,6 +160,12 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           type: :boolean,
           syntax: ["--connect"],
           description: "perform active provider checks"
+        },
+        %{
+          key: :show_model_selectors,
+          type: :boolean,
+          syntax: ["--show-model-selectors"],
+          description: "include safe configured model selectors"
         },
         %{
           key: :envelope,
