@@ -122,6 +122,26 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     queue |> :queue.to_list() |> Enum.map(& &1.monitor_ref)
   end
 
+  # Bounded receive-based poll until the owner's state satisfies `check` —
+  # proves RunState has processed its own monitor messages, where a negative
+  # assertion alone would race them.
+  defp await_owner_state(state, check, attempts \\ 200)
+
+  defp await_owner_state(_state, _check, 0), do: flunk("owner state never satisfied condition")
+
+  defp await_owner_state(state, check, attempts) do
+    if check.(:sys.get_state(state.pid)) do
+      :ok
+    else
+      receive do
+      after
+        5 -> :ok
+      end
+
+      await_owner_state(state, check, attempts - 1)
+    end
+  end
+
   test "waiters are admitted in FIFO order as the lease frees" do
     state = start_state()
     holder = start_worker(state)
@@ -514,11 +534,22 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     refute_receive {:release_status, ^holder, _result}, 100
 
     # The reservation belongs to the live dispatcher, not the provider: the
-    # waiter must stay parked through the provider's death.
-    provider_monitor = Process.monitor(provider)
+    # waiter must stay parked through the provider's death. Wait until the
+    # owner has processed the provider :DOWN (reservation retained with the
+    # provider detached, waiter still parked) before asserting no reply.
     Process.exit(provider, :kill)
-    assert_receive {:DOWN, ^provider_monitor, :process, ^provider, :killed}, 1_000
-    refute_receive {:release_status, ^holder, _result}, 100
+
+    await_owner_state(state, fn owner ->
+      match?(
+        %{
+          evaluation_release_waiter: {_from, _lease},
+          reservations: %{^dispatcher => %{provider: nil, provider_ref: nil}}
+        },
+        owner
+      )
+    end)
+
+    refute_receive {:release_status, ^holder, _result}, 50
 
     send(dispatcher, :finish_provider)
     assert_receive {:provider_finished, ^dispatcher, :ok}, 1_000
@@ -582,13 +613,15 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     release!(late, late_lease)
   end
 
-  test "raw-call seam observes exactly one reply under a timer/admission race" do
+  # A raw :"$gen_call" with a plain ref sees every reply the owner sends,
+  # where GenServer.call aliases would silently absorb a duplicate. Both
+  # orderings of the timer/admission race are pinned: admission first with a
+  # stale timer behind it, and timer first with the release behind it.
+  test "raw-call seam observes exactly one reply when admission beats the timer" do
     state = start_state()
     holder = start_worker(state)
     {:ok, lease} = reserve!(holder)
 
-    # A raw :"$gen_call" with a plain ref sees every reply the owner sends,
-    # where GenServer.call aliases would silently absorb a duplicate.
     reply_ref = make_ref()
 
     send(
@@ -604,5 +637,34 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
 
     assert_receive {^reply_ref, {:ok, _memory, _history, _lease}}, 1_000
     refute_receive {^reply_ref, _duplicate}, 100
+  end
+
+  test "raw-call seam observes exactly one reply when the timer beats admission" do
+    state = start_state()
+    holder = start_worker(state)
+    {:ok, lease} = reserve!(holder)
+
+    reply_ref = make_ref()
+
+    send(
+      state.pid,
+      {:"$gen_call", {self(), reply_ref}, {state.token, {:reserve_evaluation, :block}}}
+    )
+
+    await_queued(state, 1)
+    [waiter_ref] = queued_monitor_refs(state)
+
+    # Timer message first, then the release: the waiter must resolve as a
+    # timeout exactly once, and the later lease clear must not re-reply.
+    send(state.pid, {:admission_deadline, waiter_ref})
+    assert_receive {^reply_ref, {:error, :admission_timeout}}, 1_000
+
+    release!(holder, lease)
+    refute_receive {^reply_ref, _duplicate}, 100
+
+    await_owner_state(state, fn owner ->
+      :queue.is_empty(owner.admission_queue) and owner.evaluation_release_waiter == nil and
+        owner.evaluation_lease == nil
+    end)
   end
 end

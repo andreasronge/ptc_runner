@@ -248,6 +248,10 @@ defmodule PtcRunner.Lisp do
     - `:pmap_timeout` - Shared absolute deadline in milliseconds for each
       pmap/pcalls operation, including nested parallel calls (default: 5000).
       Increase for LLM-backed tools.
+    - `:parallel_deadline_cap` - Absolute monotonic-time ceiling in
+      milliseconds clamping every parallel deadline regardless of when the
+      operation starts (default: the `:run_deadline_ms` value). A parallel
+      operation started late in a run therefore cannot outlive the run.
     - `:pmap_max_concurrency` - Local pmap/pcalls scheduling window — max tasks one call keeps in flight (default: the build-time `System.schedulers_online() * 2`, frozen into the semantic revision). Reduce to avoid overflowing connection pools. The HARD aggregate cap is `:max_parallel_workers`.
     - `:max_heap` - Program heap budget in words ABOVE the measured
       environment baseline (default: 1_250_000). Host-provided data
@@ -766,6 +770,11 @@ defmodule PtcRunner.Lisp do
       # by process configuration outside the sealed request.
       compile_max_heap: Keyword.get(opts, :compile_max_heap, max_heap),
       run_deadline_ms: Keyword.get(opts, :run_deadline_ms),
+      # The absolute ceiling on every parallel deadline. Defaults to the run
+      # deadline; the separate option exists so the closure-propagation
+      # paths can be tested with a cap that expires well before the sandbox.
+      parallel_deadline_cap:
+        Keyword.get(opts, :parallel_deadline_cap, Keyword.get(opts, :run_deadline_ms)),
       turn_history: Keyword.get(opts, :turn_history, []),
       max_print_length: Keyword.get(opts, :max_print_length),
       filter_context: Keyword.get(opts, :filter_context, true),
@@ -1189,7 +1198,7 @@ defmodule PtcRunner.Lisp do
         worker_max_heap: worker_max_heap,
         parallel_budget: parallel_budget,
         pmap_timeout: pmap_timeout,
-        parallel_deadline_cap: Map.get(opts, :run_deadline_ms),
+        parallel_deadline_cap: Map.get(opts, :parallel_deadline_cap),
         pmap_max_concurrency: pmap_max_concurrency,
         tools_meta: tools_meta,
         tool_failure_token: Map.fetch!(opts, :tool_failure_token),
