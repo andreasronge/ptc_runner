@@ -160,10 +160,19 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
         end)
 
       {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
+      {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state)
 
       task =
         Task.async(fn ->
-          Dispatcher.dispatch(state, :mission, environment, capability.name, %{}, 3_000)
+          Dispatcher.dispatch_with_lease(
+            state,
+            :mission,
+            environment,
+            capability.name,
+            %{},
+            3_000,
+            {nil, nil, lease}
+          )
         end)
 
       # Unlike the timeout test above, this callback doesn't block forever
@@ -372,15 +381,18 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
     {:ok, capability} = capability(effect, callback, opts)
     {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
 
-    Dispatcher.dispatch(
+    # Mission dispatch only happens under an evaluation lease in production;
+    # the reservation is authenticated against it.
+    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state)
+
+    Dispatcher.dispatch_with_lease(
       state,
       :mission,
       environment,
       capability.name,
       %{},
       Keyword.get(opts, :timeout_ms, 100),
-      nil,
-      Keyword.get(opts, :inspection_sink)
+      {nil, Keyword.get(opts, :inspection_sink), lease}
     )
   end
 

@@ -49,14 +49,14 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
       started_at = System.monotonic_time(:millisecond)
       timestamp = DateTime.utc_now()
       arguments = pmap_arguments(collection_values)
-      deadline = parallel_deadline(eval_context)
+      {deadline, deadline_cause} = parallel_deadline(eval_context)
       worker_context = %{eval_context | pmap_deadline: deadline}
 
       run(
         :pmap,
         arguments,
         eval_context,
-        deadline,
+        {deadline, deadline_cause},
         started_at,
         timestamp,
         fn argument_list ->
@@ -79,7 +79,7 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
       when is_function(do_eval, 2) do
     started_at = System.monotonic_time(:millisecond)
     timestamp = DateTime.utc_now()
-    deadline = parallel_deadline(eval_context)
+    {deadline, deadline_cause} = parallel_deadline(eval_context)
     worker_context = %{eval_context | pmap_deadline: deadline}
 
     case build_pcalls_thunks(function_values, worker_context, do_eval) do
@@ -88,7 +88,7 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
           :pcalls,
           thunks,
           eval_context,
-          deadline,
+          {deadline, deadline_cause},
           started_at,
           timestamp,
           fn thunk -> capture_worker(worker_context, do_eval, thunk) end
@@ -103,7 +103,7 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
          type,
          work_items,
          %EvalContext{} = eval_context,
-         deadline,
+         {deadline, deadline_cause},
          started_at,
          timestamp,
          worker_fun
@@ -122,7 +122,8 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
       length(work_items),
       timestamp,
       System.monotonic_time(:millisecond) - started_at,
-      eval_context
+      eval_context,
+      deadline_cause
     )
   end
 
@@ -152,7 +153,8 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
          count,
          timestamp,
          duration_ms,
-         %EvalContext{} = eval_context
+         %EvalContext{} = eval_context,
+         deadline_cause
        )
        when status in [:ok, :error] and is_list(envelopes) do
     successful = Enum.filter(envelopes, &Envelope.success?/1)
@@ -196,12 +198,22 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
             reason =
               expected_reason
               |> classify_worker_failure(type, index)
+              |> apply_deadline_cause(deadline_cause)
               |> refresh_contract_capability_activity(final_context)
 
             Abort.error!(reason, final_context)
         end
     end
   end
+
+  # When the run-deadline cap — not pmap_timeout — bound this operation's
+  # deadline, a timeout is relabeled so the Kernel attributes the limit that
+  # actually fired. Inherited deadlines keep the generic message: their cause
+  # belongs to the outer operation.
+  defp apply_deadline_cause({:timeout, _message, nil}, :deadline_cap),
+    do: {:timeout, Helpers.parallel_run_deadline_message(), nil}
+
+  defp apply_deadline_cause(reason, _deadline_cause), do: reason
 
   defp refresh_contract_capability_activity(
          {:prelude_contract_error, message, details},
@@ -456,15 +468,22 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
 
   defp bounded_concurrency(_concurrency), do: 1
 
+  # An inherited deadline keeps its outer operation's cause.
   defp parallel_deadline(%EvalContext{pmap_deadline: deadline}) when is_integer(deadline),
-    do: deadline
+    do: {deadline, :inherited}
 
   # Clamped at operation start: a relative timeout alone would let an
   # operation started late in a run construct a deadline past the run's own
-  # absolute deadline.
+  # absolute deadline. The chosen bound is recorded so a timeout is
+  # attributed to the limit that actually fired.
   defp parallel_deadline(%EvalContext{pmap_timeout: timeout, parallel_deadline_cap: cap}) do
     deadline = System.monotonic_time(:millisecond) + timeout
-    if is_integer(cap), do: min(deadline, cap), else: deadline
+
+    if is_integer(cap) and cap < deadline do
+      {cap, :deadline_cap}
+    else
+      {deadline, :pmap_timeout}
+    end
   end
 
   defp keyword_runtime?(value) when is_atom(value),

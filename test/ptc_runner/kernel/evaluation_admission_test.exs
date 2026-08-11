@@ -45,10 +45,11 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
         send(parent, {:release_status, self(), RunState.release_evaluation_status(state, lease)})
         worker_loop(state, parent)
 
-      {:reserve_capability, environment, name} ->
+      {:reserve_capability, environment, name, lease} ->
         send(
           parent,
-          {:capability_reserved, self(), RunState.reserve_capability(state, environment, name)}
+          {:capability_reserved, self(),
+           RunState.reserve_capability(state, environment, name, lease)}
         )
 
         worker_loop(state, parent)
@@ -188,6 +189,34 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     release!(w2, w2_lease)
   end
 
+  test "an expired waiter is refused at grant even when the release beats its timer" do
+    state = start_state()
+    holder = start_worker(state)
+    {:ok, lease} = reserve!(holder)
+
+    w1 = start_worker(state)
+    w2 = start_worker(state)
+    reserve_async(w1, :block)
+    await_queued(state, 1)
+    reserve_async(w2, :block)
+    await_queued(state, 2)
+
+    # Backdate w1's absolute deadline: its timer has not fired, but the
+    # release below reaches the owner first. The grant path must consult the
+    # deadline — not the timer — and skip to w2.
+    :sys.replace_state(state.pid, fn owner ->
+      {{:value, head}, rest} = :queue.out(owner.admission_queue)
+      expired = %{head | deadline_mono: System.monotonic_time(:millisecond) - 1}
+      %{owner | admission_queue: :queue.in_r(expired, rest)}
+    end)
+
+    release!(holder, lease)
+
+    assert {:error, :admission_timeout} = await_reserved(w1)
+    assert {:ok, _memory, _history, w2_lease} = await_reserved(w2)
+    release!(w2, w2_lease)
+  end
+
   test "a stale admission-deadline message after admission is ignored" do
     state = start_state()
     holder = start_worker(state)
@@ -271,11 +300,11 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
   test "no grant while a dead evaluation's provider reservation is still live" do
     state = start_state()
     holder = start_worker(state)
-    {:ok, _lease} = reserve!(holder)
+    {:ok, lease} = reserve!(holder)
 
     # A dispatcher holds a mission-capability reservation tied to the lease.
     dispatcher = start_worker(state)
-    send(dispatcher, {:reserve_capability, :mission, "cap"})
+    send(dispatcher, {:reserve_capability, :mission, "cap", lease})
     assert_receive {:capability_reserved, ^dispatcher, :ok}, 1_000
 
     # The evaluation owner dies: the lease clears, but the reservation
@@ -299,6 +328,32 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     release!(blocked, lease)
   end
 
+  test "a dead evaluation's late capability call cannot attach to the next lease" do
+    state = start_state()
+    holder = start_worker(state)
+    {:ok, stale_lease} = reserve!(holder)
+
+    # The dead evaluation's sandbox may outlive its owner briefly; its late
+    # reserve arrives only after the next evaluation was already admitted.
+    holder_monitor = Process.monitor(holder)
+    Process.exit(holder, :kill)
+    assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :killed}, 1_000
+
+    next = start_worker(state)
+    assert {:ok, next_lease} = reserve!(next, :block)
+
+    lingering = start_worker(state)
+    send(lingering, {:reserve_capability, :mission, "cap", stale_lease})
+    assert_receive {:capability_reserved, ^lingering, {:error, :stale_evaluation}}, 1_000
+
+    # A mission call presenting no lease at all is equally rejected.
+    unleased = start_worker(state)
+    send(unleased, {:reserve_capability, :mission, "cap", nil})
+    assert_receive {:capability_reserved, ^unleased, {:error, :stale_evaluation}}, 1_000
+
+    release!(next, next_lease)
+  end
+
   test "fail-fast reserve and source checks stay :busy while the queue holds the lease" do
     state = start_state()
     holder = start_worker(state)
@@ -319,7 +374,7 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     {:ok, lease} = reserve!(holder)
 
     dispatcher = start_worker(state)
-    send(dispatcher, {:reserve_capability, :mission, "cap"})
+    send(dispatcher, {:reserve_capability, :mission, "cap", lease})
     assert_receive {:capability_reserved, ^dispatcher, :ok}, 1_000
 
     # The release parks: the lease still has a live reservation.
@@ -338,7 +393,7 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     {:ok, lease} = reserve!(holder)
 
     dispatcher = start_worker(state)
-    send(dispatcher, {:reserve_capability, :mission, "cap"})
+    send(dispatcher, {:reserve_capability, :mission, "cap", lease})
     assert_receive {:capability_reserved, ^dispatcher, :ok}, 1_000
 
     parent = self()
@@ -378,7 +433,7 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     {:ok, lease} = reserve!(holder)
 
     dispatcher = start_worker(state)
-    send(dispatcher, {:reserve_capability, :mission, "cap"})
+    send(dispatcher, {:reserve_capability, :mission, "cap", lease})
     assert_receive {:capability_reserved, ^dispatcher, :ok}, 1_000
 
     send(holder, {:release_status, lease})
@@ -401,7 +456,7 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     holder =
       spawn(fn ->
         {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, :fail_fast)
-        send(parent, {:leased, self()})
+        send(parent, {:leased, self(), lease})
 
         receive do
           :go ->
@@ -434,10 +489,10 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
         end
       end)
 
-    assert_receive {:leased, ^holder}, 1_000
+    assert_receive {:leased, ^holder, lease}, 1_000
 
     # A live reservation tied to the lease makes the release-status park.
-    send(dispatcher, {:reserve_capability, :mission, "cap"})
+    send(dispatcher, {:reserve_capability, :mission, "cap", lease})
     assert_receive {:capability_reserved, ^dispatcher, :ok}, 1_000
 
     send(holder, :go)
@@ -455,7 +510,7 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     holder =
       spawn(fn ->
         {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, :fail_fast)
-        send(parent, {:leased, self()})
+        send(parent, {:leased, self(), lease})
 
         receive do
           :go ->
@@ -488,9 +543,9 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
         end
       end)
 
-    assert_receive {:leased, ^holder}, 1_000
+    assert_receive {:leased, ^holder, lease}, 1_000
 
-    send(dispatcher, {:reserve_capability, :mission, "cap"})
+    send(dispatcher, {:reserve_capability, :mission, "cap", lease})
     assert_receive {:capability_reserved, ^dispatcher, :ok}, 1_000
 
     send(holder, :go)
@@ -523,7 +578,7 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     {:ok, lease} = reserve!(holder)
 
     dispatcher = start_worker(state)
-    send(dispatcher, {:reserve_capability, :mission, "cap"})
+    send(dispatcher, {:reserve_capability, :mission, "cap", lease})
     assert_receive {:capability_reserved, ^dispatcher, :ok}, 1_000
 
     provider = spawn(fn -> receive do: (:never -> :ok) end)
@@ -562,7 +617,7 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     {:ok, lease} = reserve!(holder)
 
     dispatcher = start_worker(state)
-    send(dispatcher, {:reserve_capability, :mission, "cap"})
+    send(dispatcher, {:reserve_capability, :mission, "cap", lease})
     assert_receive {:capability_reserved, ^dispatcher, :ok}, 1_000
 
     provider =

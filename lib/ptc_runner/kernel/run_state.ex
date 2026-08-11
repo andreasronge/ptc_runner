@@ -133,10 +133,25 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
+  @doc """
+  Reserves a capability slot, authenticating mission calls by lease.
+
+  A mission reservation must present the lease of the evaluation whose tool
+  grant issued the call; a lease that is no longer current answers
+  `{:error, :stale_evaluation}`. This closes the window where a dead
+  evaluation's lingering sandbox reserves after the next evaluation was
+  admitted and has its late call attributed to the new lease. Workflow
+  reservations carry no lease.
+  """
+  @spec reserve_capability(t(), environment(), binary(), reference() | nil) ::
+          :ok | {:error, atom()}
+  def reserve_capability(state, environment, name, lease),
+    do: safe_call(state, {:reserve_capability, environment, name, lease}, {:error, :run_closed})
+
   @spec reserve_capability(t(), environment(), binary()) :: :ok | {:error, atom()}
   @doc "Atomically reserves environment, per-name, and live-provider budgets."
   def reserve_capability(state, environment, name),
-    do: safe_call(state, {:reserve_capability, environment, name}, {:error, :run_closed})
+    do: reserve_capability(state, environment, name, nil)
 
   @spec attach_provider(t(), pid()) :: :ok | {:error, :closed | :provider_down}
   @doc "Attaches the caller's live provider process to its capability reservation."
@@ -401,12 +416,12 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   def handle_call(
-        {token, {:reserve_capability, environment, name}},
+        {token, {:reserve_capability, environment, name, lease}},
         {caller, _tag},
         %{token: token} = state
       )
       when environment in [:workflow, :mission] do
-    case reserve_capability_state(state, environment, name, caller) do
+    case reserve_capability_state(state, environment, name, caller, lease) do
       {:ok, state} -> {:reply, :ok, state}
       {:error, reason, state} -> {:reply, {:error, reason}, state}
     end
@@ -931,13 +946,21 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
-  defp reserve_capability_state(state, environment, name, caller) do
+  defp reserve_capability_state(state, environment, name, caller, lease) do
     {limit_total, limit_name} = capability_limits(state.limits, environment)
     count = get_in(state.calls, [environment, name]) || 0
 
     cond do
       unavailable?(state) ->
         {:error, :run_closed, state}
+
+      # A mission call is authenticated by the lease of the evaluation whose
+      # tool grant issued it. A stale lease means the originating evaluation
+      # already ended: attributing the call to the current lease (or to no
+      # lease) would let a dead evaluation's lingering sandbox overlap the
+      # next evaluation's external effects and mislabel provider provenance.
+      environment == :mission and not current_mission_lease?(state, lease) ->
+        {:error, :stale_evaluation, state}
 
       state.provider_tasks >= state.limits.live_provider_tasks ->
         {:error, :live_task_limit, state}
@@ -1005,6 +1028,12 @@ defmodule PtcRunner.Kernel.RunState do
 
   defp active_evaluation_lease(_state, :workflow), do: nil
 
+  defp current_mission_lease?(state, lease) when is_reference(lease) do
+    match?({^lease, _owner, _monitor_ref}, state.evaluation_lease)
+  end
+
+  defp current_mission_lease?(_state, _lease), do: false
+
   defp evaluation_reservations?(state, lease) do
     Enum.any?(state.reservations, fn
       {_caller, %{evaluation_lease: ^lease}} -> true
@@ -1070,15 +1099,27 @@ defmodule PtcRunner.Kernel.RunState do
 
   defp enqueue_admission_waiter(state, from, caller) do
     monitor_ref = Process.monitor(caller)
+    now = System.monotonic_time(:millisecond)
 
     timeout =
       min(
         state.limits.evaluation_admission_timeout_ms,
-        max(state.deadline_ms - System.monotonic_time(:millisecond), 0)
+        max(state.deadline_ms - now, 0)
       )
 
     timer_ref = Process.send_after(self(), {:admission_deadline, monitor_ref}, timeout)
-    waiter = %{from: from, caller: caller, monitor_ref: monitor_ref, timer_ref: timer_ref}
+
+    # The absolute deadline is authoritative; the timer is only its wake-up.
+    # A lease release already ahead of the timer message in the mailbox must
+    # not grant an expired waiter, so every grant re-checks the deadline.
+    waiter = %{
+      from: from,
+      caller: caller,
+      monitor_ref: monitor_ref,
+      timer_ref: timer_ref,
+      deadline_mono: now + timeout
+    }
+
     %{state | admission_queue: :queue.in(waiter, state.admission_queue)}
   end
 
@@ -1098,6 +1139,10 @@ defmodule PtcRunner.Kernel.RunState do
 
           deadline_expired?(state) ->
             resolve_admission_waiter(waiter, {:error, :deadline_expired})
+            admit_from_queue(%{state | admission_queue: rest})
+
+          System.monotonic_time(:millisecond) >= waiter.deadline_mono ->
+            resolve_admission_waiter(waiter, {:error, :admission_timeout})
             admit_from_queue(%{state | admission_queue: rest})
 
           state.evaluations >= state.limits.subordinate_evaluations ->

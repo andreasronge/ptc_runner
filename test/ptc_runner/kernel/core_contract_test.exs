@@ -153,7 +153,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     evaluation_owner =
       spawn_link(fn ->
         {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
-        send(parent, {:evaluation_ready, self()})
+        send(parent, {:evaluation_ready, self(), lease})
 
         receive do
           :release ->
@@ -162,7 +162,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         end
       end)
 
-    assert_receive {:evaluation_ready, ^evaluation_owner}
+    assert_receive {:evaluation_ready, ^evaluation_owner, lease}
 
     {:ok, blocked} =
       Capability.new(
@@ -184,7 +184,15 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     dispatch =
       Task.async(fn ->
-        Dispatcher.dispatch(state, :mission, mission, "blocked", %{}, 2_000)
+        Dispatcher.dispatch_with_lease(
+          state,
+          :mission,
+          mission,
+          "blocked",
+          %{},
+          2_000,
+          {nil, nil, lease}
+        )
       end)
 
     assert_receive {:provider_ready, provider}

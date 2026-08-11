@@ -319,16 +319,18 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         terminal_reserve: EventSink.terminal_reserve(:normal, limits)
       )
 
+    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state)
+
     task =
       Task.async(fn ->
-        Dispatcher.dispatch(
+        Dispatcher.dispatch_with_lease(
           state,
           :mission,
           environment,
           capability.name,
           %{"query" => "x"},
           500,
-          event_sink
+          {event_sink, nil, lease}
         )
       end)
 
@@ -1361,15 +1363,17 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     capability = built.config.mission_environment.capabilities["remote.structured"]
     assert :ok = RunBuilder.close(built)
     {:ok, state} = RunState.start(Limits.defaults())
+    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state)
 
     failure =
-      Dispatcher.dispatch(
+      Dispatcher.dispatch_with_lease(
         state,
         :mission,
         %{capabilities: %{capability.name => capability}},
         capability.name,
         %{"query" => "x"},
-        1_000
+        1_000,
+        {nil, nil, lease}
       )
 
     assert %{

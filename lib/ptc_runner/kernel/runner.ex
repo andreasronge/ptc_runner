@@ -655,32 +655,40 @@ defmodule PtcRunner.Kernel.Runner do
   defp workflow_error_details(%{reason: reason} = fail, timeout_ms, limits, _sink)
        when reason in [:timeout, :compile_timeout] do
     # A parallel-deadline timeout also surfaces as :timeout; attributing it
-    # to the sandbox limit would name a limit that never fired.
-    parallel_timeout? =
-      reason == :timeout and is_binary(Map.get(fail, :message)) and
-        String.ends_with?(fail.message, Helpers.parallel_timeout_message())
+    # to the sandbox limit would name a limit that never fired. The two
+    # stable messages distinguish which bound won: pmap_timeout, or the run
+    # deadline clamping a later-started operation.
+    cond do
+      reason == :timeout and parallel_message?(fail, Helpers.parallel_timeout_message()) ->
+        %{
+          message: "parallel_timeout_ms exceeded during execution",
+          limit: :parallel_timeout_ms,
+          limit_ms: limits.parallel_timeout_ms,
+          phase: :execution
+        }
 
-    if parallel_timeout? do
-      %{
-        message: "parallel_timeout_ms exceeded during execution",
-        limit: :parallel_timeout_ms,
-        limit_ms: limits.parallel_timeout_ms,
-        phase: :execution
-      }
-    else
-      limit =
-        if timeout_ms == limits.workflow_timeout_ms,
-          do: :workflow_timeout_ms,
-          else: :run_duration_ms
+      reason == :timeout and parallel_message?(fail, Helpers.parallel_run_deadline_message()) ->
+        %{
+          message: "run deadline expired during a parallel operation",
+          limit: :run_duration_ms,
+          limit_ms: limits.run_duration_ms,
+          phase: :execution
+        }
 
-      phase = if reason == :compile_timeout, do: :compilation, else: :execution
+      true ->
+        limit =
+          if timeout_ms == limits.workflow_timeout_ms,
+            do: :workflow_timeout_ms,
+            else: :run_duration_ms
 
-      %{
-        message: "#{limit} exceeded during #{phase} after #{timeout_ms}ms",
-        limit: limit,
-        limit_ms: timeout_ms,
-        phase: phase
-      }
+        phase = if reason == :compile_timeout, do: :compilation, else: :execution
+
+        %{
+          message: "#{limit} exceeded during #{phase} after #{timeout_ms}ms",
+          limit: limit,
+          limit_ms: timeout_ms,
+          phase: phase
+        }
     end
   end
 
@@ -693,6 +701,15 @@ defmodule PtcRunner.Kernel.Runner do
       end
 
     Map.merge(details, SafeMetadata.retain_failure_taxonomy(fail.details))
+  end
+
+  # Both stable parallel messages are compared by suffix because the
+  # evaluator prefixes messages with their reason.
+  defp parallel_message?(fail, stable_message) do
+    case Map.get(fail, :message) do
+      message when is_binary(message) -> String.ends_with?(message, stable_message)
+      _other -> false
+    end
   end
 
   defp workflow_error_details_for_class(:private, _fail),

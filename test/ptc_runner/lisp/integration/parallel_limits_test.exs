@@ -214,6 +214,25 @@ defmodule PtcRunner.Lisp.Integration.ParallelLimitsTest do
     assert elapsed < 5_000, "cap must fire long before the 60s pmap_timeout, took #{elapsed}ms"
   end
 
+  test "a cap-bound timeout carries the run-deadline taxonomy, not pmap_timeout's" do
+    tools = %{"park" => fn _ -> receive do: (:never -> :ok), after: (2_000 -> :ok) end}
+
+    assert {:error, step} =
+             Lisp.run("(pcalls (fn [] (tool/park {})))",
+               tools: tools,
+               timeout: @timeout,
+               pmap_timeout: 60_000,
+               parallel_deadline_cap: System.monotonic_time(:millisecond) + 200
+             )
+
+    assert step.fail.reason == :timeout
+
+    assert String.ends_with?(
+             step.fail.message,
+             "the run deadline expired during a parallel operation"
+           )
+  end
+
   # The cap must survive both EvalContext reconstructions in Apply: the
   # ordinary closure-call copy and the HOF-value invocation copy. If either
   # dropped it, the parked pcalls would succeed at ~2s instead of timing out

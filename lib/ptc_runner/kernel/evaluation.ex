@@ -329,7 +329,8 @@ defmodule PtcRunner.Kernel.Evaluation do
           state,
           timeout_ms,
           capture.event_sink,
-          capture.inspection_sink
+          capture.inspection_sink,
+          lease
         ),
       prelude: bundle_prelude(environment),
       timeout: timeout_ms,
@@ -686,14 +687,15 @@ defmodule PtcRunner.Kernel.Evaluation do
   end
 
   @doc false
-  def mission_tools(environment, state, timeout_ms, event_sink, inspection_sink) do
+  def mission_tools(environment, state, timeout_ms, event_sink, inspection_sink, lease \\ nil) do
     state
     |> ToolGrant.capability_callbacks(
       :mission,
       environment,
       timeout_ms,
       event_sink,
-      inspection_sink
+      inspection_sink,
+      lease: lease
     )
     |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
   end

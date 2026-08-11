@@ -1012,11 +1012,17 @@ brief evaluation phase rather than failing the workflow.
 The queue's wait is bounded server-side by `evaluation_admission_timeout_ms`
 and the run deadline — the blocking client call is infinite precisely
 because the owner's own timers answer first, replying `:admission_timeout`
-or `:deadline_expired`. Admission re-checks closure, deadline, and budget
-when the lease frees, drains rejected waiters with typed errors, and grants
-only when no reservation still references a dead evaluation's lease — the
-gate that keeps a new evaluation from overlapping the old one's external
-effects. Every enqueued waiter receives exactly one reply, or none only
+or `:deadline_expired`. Each waiter's absolute deadline, not its timer, is
+authoritative: every grant re-checks it, so a lease release ahead of the
+timer message cannot admit an expired waiter. Admission re-checks closure,
+deadline, and budget when the lease frees, drains rejected waiters with
+typed errors, and grants only when no reservation still references a dead
+evaluation's lease — the gate that keeps a new evaluation from overlapping
+the old one's external effects. That gate is completed by lease-carrying
+mission tool grants: every mission capability call presents the lease of
+the evaluation that constructed it, and `RunState` rejects a stale lease
+with `:stale_evaluation`, so a dead evaluation's lingering sandbox cannot
+attribute a late call to the next admitted evaluation either. Every enqueued waiter receives exactly one reply, or none only
 because its caller died; no transition may drop a parked `from`, including
 the parked `release_evaluation_status/2` waiter, which is always answered
 `{:ok, status}` once its lease-scoped reservations drain. While waiters are

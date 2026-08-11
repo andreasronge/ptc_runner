@@ -100,19 +100,61 @@ defmodule PtcRunner.Kernel.Dispatcher do
   def dispatch(
         state,
         environment,
-        %{capabilities: capabilities},
+        environment_value,
         name,
         arguments,
         timeout_ms,
         event_sink,
         inspection_sink
+      ) do
+    dispatch_with_lease(
+      state,
+      environment,
+      environment_value,
+      name,
+      arguments,
+      timeout_ms,
+      {event_sink, inspection_sink, nil}
+    )
+  end
+
+  @doc """
+  Dispatches with an authenticated evaluation lease.
+
+  The final argument bundles `{event_sink, inspection_sink, lease}`. A
+  mission capability call carries the lease of the evaluation that
+  constructed its tool grant; `RunState` rejects the reservation when that
+  lease is no longer current, so a dead evaluation's lingering sandbox
+  cannot attribute a late call to the next admitted evaluation.
+  """
+  def dispatch_with_lease(
+        state,
+        environment,
+        %{capabilities: _capabilities},
+        _name,
+        %AmbiguousArguments{},
+        _timeout_ms,
+        {event_sink, _inspection_sink, _lease}
+      )
+      when environment in [:workflow, :mission] do
+    protocol_error(state, event_sink, :ambiguous_arguments)
+  end
+
+  def dispatch_with_lease(
+        state,
+        environment,
+        %{capabilities: capabilities},
+        name,
+        arguments,
+        timeout_ms,
+        {event_sink, inspection_sink, lease}
       )
       when environment in [:workflow, :mission] and is_binary(name) and is_map(arguments) and
              is_integer(timeout_ms) do
     with %Capability{} = capability <- Map.get(capabilities, name),
          :ok <- validate(capability, arguments),
          :ok <- validate_size(arguments, capability_argument_limit(state)),
-         :ok <- RunState.reserve_capability(state, environment, name) do
+         :ok <- RunState.reserve_capability(state, environment, name, lease) do
       invoke_with_events(
         state,
         capability,
@@ -140,6 +182,14 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
       {:error, :reservation_held} ->
         limit_error(state, event_sink, :reservation_held)
+
+      {:error, :stale_evaluation} ->
+        %{
+          status: :error,
+          kind: :capability_denied,
+          reason: :stale_evaluation,
+          retryable?: false
+        }
 
       {:error, :run_closed} ->
         limit_error(state, event_sink, :run_closed)
