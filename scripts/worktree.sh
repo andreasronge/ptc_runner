@@ -4,6 +4,7 @@
 #
 #   scripts/worktree.sh gc [--yes] [--no-fetch] [--no-issues]
 #   scripts/worktree.sh new <branch> [issue-number]
+#   scripts/worktree.sh seed [<dir>]
 #
 # A worktree is a cache, not an artifact. `git worktree remove` never deletes
 # the branch, so a checkout whose commits are already in `origin/main` costs a
@@ -74,9 +75,10 @@ idle_hours() {
   printf '%s' $(((now - newest) / 3600))
 }
 
-# The main worktree is always the first record git prints.
+# The main worktree is always the first record git prints. Strip the prefix
+# rather than taking field 2 so paths containing spaces survive.
 main_worktree() {
-  git worktree list --porcelain | awk '/^worktree /{print $2; exit}'
+  git worktree list --porcelain | awk '/^worktree /{sub(/^worktree /, ""); print; exit}'
 }
 
 # Flatten `git worktree list --porcelain` into `path<TAB>head<TAB>branch<TAB>flags`.
@@ -140,6 +142,167 @@ issue_of_branch() {
 issue_state() {
   local number="$1"
   gh issue view "$number" --json state --jq .state 2>/dev/null || true
+}
+
+# ----------------------------------------------------------------------
+# Seeding: copy build artifacts from the main checkout into a worktree.
+#
+# The main checkout is the cache. Its artifacts are transferable to another
+# checkout on this machine when the toolchain (mise.toml) and dependency sets
+# (the lockfiles) are byte-identical -- OS and architecture are constant on
+# one machine. Correctness never rests on that key: Mix revalidates deps and
+# _build against mix.lock and source digests, and dialyxir revalidates the
+# project PLT against the module set, so a stale seed costs a rebuild, never
+# a wrong answer. Each worktree owns its copies outright -- nothing writable
+# is ever shared, so concurrent gates cannot race.
+# ----------------------------------------------------------------------
+
+SEED_KEY_FILES=(mise.toml mix.lock ptc_viewer/mix.lock ptc_runner_launcher/mix.lock)
+
+# deps/_build make `mix deps.get` and `mix compile` incremental in all three
+# Mix projects; priv/plts carries the writable project PLT so dialyxir
+# updates it instead of re-adding ~1,500 modules (the core PLT is already
+# shared machine-wide via ~/.cache/ptc_runner -- see mix.exs).
+SEED_ARTIFACTS=(
+  deps
+  _build
+  priv/plts
+  ptc_viewer/deps
+  ptc_viewer/_build
+  ptc_runner_launcher/deps
+  ptc_runner_launcher/_build
+)
+
+# Copy-on-write clone where the filesystem supports it (APFS, btrfs, XFS);
+# plain copy otherwise. A clone is near-instant and shares blocks until
+# either side writes.
+clone_tree() {
+  local src="$1" dst="$2"
+  case "$(uname -s)" in
+    Darwin)
+      if ! cp -Rc "$src" "$dst" 2>/dev/null; then
+        rm -rf "${dst:?}"
+        cp -R "$src" "$dst"
+      fi
+      ;;
+    *) cp -R --reflink=auto "$src" "$dst" ;;
+  esac
+}
+
+seed_worktree() {
+  local src="$1" dst="$2" file artifact staging tmp seeded=0 start=$SECONDS
+
+  for file in "${SEED_KEY_FILES[@]}"; do
+    if ! cmp -s "$src/$file" "$dst/$file"; then
+      echo "🌱 Seed skipped: $file differs from the main checkout's copy"
+      return 0
+    fi
+  done
+
+  # Stage each copy and promote it with an atomic same-volume rename, so an
+  # interrupted seed can never leave a partial tree that a later run skips as
+  # "already present". The staging path carries this process's PID so two
+  # concurrent seeds of one destination cannot delete each other's work; a
+  # leftover dir from a crash is gitignored, inert, and safe to remove.
+  staging="$dst/.worktree-seed-tmp.$$"
+  rm -rf "$staging"
+
+  for artifact in "${SEED_ARTIFACTS[@]}"; do
+    tmp="$staging/${artifact//\//__}"
+    if [ -L "$src/$artifact" ]; then
+      echo "   ⏭️  $artifact — main checkout's copy is a symlink"
+    elif [ ! -d "$src/$artifact" ]; then
+      echo "   ⏭️  $artifact — not built in the main checkout"
+    elif [ -e "$dst/$artifact" ] || [ -L "$dst/$artifact" ]; then
+      echo "   ⏭️  $artifact — already present"
+    elif mkdir -p "$staging" "$(dirname "$dst/$artifact")" &&
+      clone_tree "$src/$artifact" "$tmp" &&
+      scrub_seed_artifact "$artifact" "$tmp" &&
+      promote_seed_artifact "$tmp" "$dst/$artifact"; then
+      echo "   🌱 $artifact"
+      seeded=$((seeded + 1))
+    else
+      echo "   ⚠️  $artifact — not promoted (copy failed, torn PLT, or lost a race)"
+    fi
+  done
+
+  rm -rf "$staging"
+  echo "🌱 Seeded ${seeded} artifact(s) from $src in $((SECONDS - start))s"
+}
+
+# Two PLT-specific guards before promotion:
+#
+# 1. dialyxir skips its PLT check entirely when the stored dependency hash
+#    matches (check_hash?/1 in mix/tasks/dialyzer.ex), and that hash covers
+#    the app set, not the PLT file's integrity — drop it so the first
+#    dialyzer run in the new worktree always revalidates the copied PLT.
+# 2. A PLT cloned while the main checkout's dialyzer is rewriting it can be
+#    a torn copy, and dialyxir raises on an invalid PLT rather than
+#    rebuilding it — each staged PLT must prove it decodes before promotion.
+scrub_seed_artifact() {
+  local artifact="$1" tmp_tree="$2" plt
+  if [ "$artifact" = "priv/plts" ]; then
+    rm -f "$tmp_tree"/*.hash
+    for plt in "$tmp_tree"/*.plt; do
+      [ -e "$plt" ] || continue
+      plt_decodes "$plt" || return 1
+    done
+  fi
+}
+
+# A PLT file is a single external term, a #file_plt{} record. The staged copy
+# must decode as exactly that: `[used]` demands the term consume every byte
+# (bare binary_to_term/1 tolerates trailing garbage), and the record tag
+# rejects a complete-but-foreign term. Together they prove the snapshot is
+# whole regardless of what the source's writer was doing at the time. Needs
+# erl on PATH; without it the artifact is simply not seeded.
+plt_decodes() {
+  PTC_SEED_PLT="$1" erl -noshell -eval '
+    P = os:getenv("PTC_SEED_PLT"),
+    R = case file:read_file(P) of
+          {ok, Bin} ->
+            try binary_to_term(Bin, [used]) of
+              {T, Used}
+                when is_tuple(T), element(1, T) =:= file_plt,
+                     Used =:= byte_size(Bin) -> 0;
+              _ -> 1
+            catch _:_ -> 1
+            end;
+          _ -> 1
+        end,
+    halt(R).' 2>/dev/null
+}
+
+# Promotion must be a no-replace operation: a bare `mv` whose destination
+# sprang into existence (a concurrent seed) would move the staged tree
+# *inside* it and report success. `mkdir` is the atomic claim — it fails on
+# any existing entry, symlinks included — and each top-level entry then moves
+# in with an atomic same-volume rename. An interruption mid-promotion leaves
+# only whole top-level units (whole dep dirs, whole build envs, whole PLTs),
+# which Mix and dialyxir treat as merely not-yet-built.
+promote_seed_artifact() {
+  local tmp="$1" final="$2" entry
+  mkdir "$final" 2>/dev/null || return 1
+  for entry in "$tmp"/* "$tmp"/.[!.]* "$tmp"/..?*; do
+    { [ -e "$entry" ] || [ -L "$entry" ]; } || continue
+    mv "$entry" "$final/" || return 1
+  done
+  rmdir "$tmp"
+}
+
+cmd_seed() {
+  local dst="${1:-}" main_wt
+  main_wt="$(main_worktree)"
+  main_wt="$(cd "$main_wt" && pwd -P)"
+  if [ -z "$dst" ]; then
+    dst="$(git rev-parse --show-toplevel)"
+  fi
+  [ -d "$dst" ] || die "$dst does not exist"
+  # Physical paths: a tmpdir symlink (macOS /var -> /private/var) must not
+  # make the same checkout look like two different ones.
+  dst="$(cd "$dst" && pwd -P)"
+  [ "$dst" != "$main_wt" ] || die "refusing to seed the main checkout from itself"
+  seed_worktree "$main_wt" "$dst"
 }
 
 cmd_gc() {
@@ -290,6 +453,8 @@ cmd_new() {
   git fetch -q origin main
   git worktree add -b "$branch" "$dir" origin/main
 
+  seed_worktree "$main_wt" "$dir"
+
   if [ -n "$issue" ]; then
     gh issue edit "$issue" --add-assignee @me >/dev/null
     gh issue comment "$issue" --body "Claimed by an agent working in \`${branch}\` at \`${dir}\` on $(hostname -s), $(date -u +%Y-%m-%dT%H:%M:%SZ).
@@ -317,9 +482,17 @@ scripts/worktree.sh gc [--yes] [--idle-hours N] [--no-fetch] [--no-issues]
     one-line count, and nothing at all when there is nothing to reclaim.
 
 scripts/worktree.sh new <branch> [issue-number]
-    Create a worktree beside the main checkout, branched from origin/main.
-    With an issue number, verify it is open and unassigned, then assign it and
-    post a claim comment. The branch name must contain the issue number.
+    Create a worktree beside the main checkout, branched from origin/main,
+    and seed it with the main checkout's deps, _build, and project-PLT
+    artifacts when toolchain and lockfiles match (Mix revalidates them, so
+    a stale seed only costs a rebuild). With an issue number, verify it is
+    open and unassigned, then assign it and post a claim comment. The branch
+    name must contain the issue number.
+
+scripts/worktree.sh seed [<dir>]
+    Seed an existing worktree (default: the current one) from the main
+    checkout. Artifacts already present are left untouched, so this is safe
+    to re-run and only fills gaps.
 USAGE
 }
 
@@ -347,6 +520,7 @@ main() {
       cmd_gc
       ;;
     new) cmd_new "$@" ;;
+    seed) cmd_seed "$@" ;;
     ""| -h | --help | help) usage ;;
     *)
       usage >&2

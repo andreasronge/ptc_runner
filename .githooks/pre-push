@@ -326,6 +326,27 @@ echo "🔍 Running pre-push checks..."
 
 START_TIME=$(date +%s)
 
+# Per-phase durations, replayed as one compact block at the end. The inline
+# ✅ lines already carry the numbers, but a full run buries them under
+# minutes of test output; the summary is what a human actually reads when
+# deciding where the time went.
+PHASE_LABELS=()
+PHASE_TIMES=()
+record_phase() {
+  PHASE_LABELS+=("$1")
+  PHASE_TIMES+=("$2")
+}
+
+print_phase_summary() {
+  [ "${#PHASE_LABELS[@]}" -gt 0 ] || return 0
+  echo ""
+  echo "⏱  Phase timings:"
+  local i
+  for i in "${!PHASE_LABELS[@]}"; do
+    printf '   %-36s %5ss\n' "${PHASE_LABELS[$i]}" "${PHASE_TIMES[$i]}"
+  done
+}
+
 SCOPES_FILE="$(mktemp -t pre-push-scopes.XXXXXX)"
 "$HOOK_REPO_ROOT/scripts/classify_changes.sh" "$PTC_PRE_PUSH_PATHS_FILE" > "$SCOPES_FILE"
 # The classifier emits only fixed boolean assignments.
@@ -350,7 +371,9 @@ fi
 # this gate before long test and Dialyzer stages so a bad reference does not
 # waste the rest of the push cycle.
 if [ "$docs" = true ]; then
+  DOCS_START=$SECONDS
   run_docs_gate
+  record_phase "documentation (ExDoc)" $((SECONDS - DOCS_START))
 fi
 
 PROJECTS=()
@@ -398,7 +421,9 @@ run_project_gates() {
       popd > /dev/null
       exit 1
     fi
-    echo "  ✅ Launcher checks passed in $((SECONDS - launcher_start))s"
+    local launcher_secs=$((SECONDS - launcher_start))
+    echo "  ✅ Launcher checks passed in ${launcher_secs}s"
+    record_phase "launcher precommit" "$launcher_secs"
     popd > /dev/null
     return 0
   fi
@@ -413,7 +438,9 @@ run_project_gates() {
     popd > /dev/null
     exit 1
   fi
-  echo "  ✅ Tests passed in $((SECONDS - test_start))s"
+  local test_secs=$((SECONDS - test_start))
+  echo "  ✅ Tests passed in ${test_secs}s"
+  record_phase "$label tests" "$test_secs"
 
   if [ "$proj" = "." ]; then
     echo "  ⏳ Running canonical pre-push checks..."
@@ -423,7 +450,9 @@ run_project_gates() {
       popd > /dev/null
       exit 1
     fi
-    echo "  ✅ Pre-push checks passed in $((SECONDS - prepush_start))s"
+    local prepush_secs=$((SECONDS - prepush_start))
+    echo "  ✅ Pre-push checks passed in ${prepush_secs}s"
+    record_phase "root mix prepush (incl. dialyzer)" "$prepush_secs"
   # CWD is the project dir (we are inside `pushd "$proj"`), so check
   # `./mix.exs` rather than `$proj/mix.exs`. Passing `$proj` here would
   # resolve to a duplicated project path and silently skip Dialyzer for
@@ -436,7 +465,9 @@ run_project_gates() {
       popd > /dev/null
       exit 1
     fi
-    echo "  ✅ Dialyzer passed in $((SECONDS - dialyzer_start))s"
+    local dialyzer_secs=$((SECONDS - dialyzer_start))
+    echo "  ✅ Dialyzer passed in ${dialyzer_secs}s"
+    record_phase "$label dialyzer" "$dialyzer_secs"
   else
     echo "  ⏭️  Dialyzer not declared in ${label}mix.exs"
   fi
@@ -450,6 +481,8 @@ done
 
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
+
+print_phase_summary
 
 echo ""
 echo "✅ All pre-push checks passed in ${ELAPSED}s"
