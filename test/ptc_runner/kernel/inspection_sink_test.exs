@@ -372,6 +372,104 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
   end
 
+  @tag :tmp_dir
+  test "artifacts accept only correlations proven missing by canonical dropped-event counts", %{
+    tmp_dir: dir
+  } do
+    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+    assert :ok = emit_small(sink, "cap-1")
+    assert :ok = emit_small(sink, "cap-2")
+    assert {:ok, records} = InspectionSink.records(sink)
+
+    partial_events = dropped_events(%{"capability-started" => 2})
+    path = Path.join(dir, "partial.inspection.jsonl")
+
+    conflicting_terminal_counts =
+      put_in(
+        partial_events,
+        [Access.at(2), "data", "usage", "events_dropped"],
+        %{"capability-started" => 1}
+      )
+
+    intervening_event =
+      List.insert_at(partial_events, 2, canonical_event(3, "workflow-annotation", %{}))
+
+    reversed_terminal_events =
+      [Enum.at(partial_events, 0), Enum.at(partial_events, 2), Enum.at(partial_events, 1)]
+
+    assert :ok = InspectionArtifact.validate_correlations(records, partial_events)
+    assert :ok = InspectionArtifact.persist(path, records, partial_events)
+    assert {:ok, ^records} = InspectionArtifact.load(path)
+
+    for events <- [
+          dropped_events(%{"capability-started" => 1}),
+          dropped_events(%{"capability-stopped" => 2}),
+          conflicting_terminal_counts,
+          intervening_event,
+          reversed_terminal_events,
+          Enum.reject(partial_events, &(&1["type"] == "events-dropped")),
+          Enum.reject(partial_events, &(&1["type"] == "run-stopped"))
+        ] do
+      assert {:error, :inspection_correlation_missing} =
+               InspectionArtifact.validate_correlations(records, events)
+    end
+
+    conflicting =
+      canonical_event(2, "capability-started", %{
+        "capability_id" => "cap-1",
+        "environment" => "workflow",
+        "name" => "other"
+      })
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(records, [conflicting | partial_events])
+
+    assert :ok = InspectionSink.stop(sink)
+
+    {:ok, evaluation_sink} =
+      InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 3)
+
+    assert :ok =
+             InspectionSink.emit(
+               evaluation_sink,
+               "evaluation-source",
+               %{evaluation_id: "eval-mission"},
+               %{
+                 environment: :mission,
+                 program_kind: :"ptc-lisp",
+                 source: @source,
+                 source_hash: @source_hash,
+                 source_bytes: byte_size(@source)
+               }
+             )
+
+    assert :ok =
+             InspectionSink.emit(
+               evaluation_sink,
+               "execution-prints",
+               %{evaluation_id: "eval-workflow"},
+               %{environment: :workflow, prints: ["partial"], truncated: false}
+             )
+
+    assert {:ok, evaluation_records} = InspectionSink.records(evaluation_sink)
+    evaluation_events = dropped_events(%{"evaluation-started" => 2})
+
+    assert :ok = InspectionArtifact.validate_correlations(evaluation_records, evaluation_events)
+
+    conflicting_evaluation_records =
+      Enum.map(evaluation_records, fn record ->
+        put_in(record, ["correlation", "evaluation_id"], "eval-shared")
+      end)
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(
+               conflicting_evaluation_records,
+               dropped_events(%{"evaluation-started" => 1})
+             )
+
+    assert :ok = InspectionSink.stop(evaluation_sink)
+  end
+
   test "rejects a non-MCP record above the artifact document-depth ceiling" do
     {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
     nested = Enum.reduce(1..64, true, fn _level, value -> [value] end)
@@ -1031,6 +1129,18 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
         "name" => "read"
       }),
       canonical_event(4, "run-stopped", %{"outcome" => "ok"})
+    ]
+  end
+
+  defp dropped_events(counts) do
+    [
+      canonical_event(1, "run-started", %{}),
+      canonical_event(2, "events-dropped", %{"counts" => counts}),
+      canonical_event(3, "run-stopped", %{
+        "outcome" => "ok",
+        "reason" => nil,
+        "usage" => %{"events_dropped" => counts}
+      })
     ]
   end
 

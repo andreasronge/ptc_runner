@@ -221,14 +221,6 @@ defmodule PtcRunner.Kernel.Evaluation do
     source_bytes = byte_size(source)
 
     with :ok <-
-           inspection_source(
-             capture.inspection_sink,
-             evaluation_id,
-             source,
-             source_hash,
-             source_bytes
-           ),
-         :ok <-
            Events.emit(state, capture.event_sink, "evaluation-started", %{
              evaluation_id: evaluation_id,
              environment: :mission,
@@ -236,6 +228,14 @@ defmodule PtcRunner.Kernel.Evaluation do
              source_hash: source_hash,
              source_bytes: source_bytes
            }),
+         :ok <-
+           inspection_source(
+             capture.inspection_sink,
+             evaluation_id,
+             source,
+             source_hash,
+             source_bytes
+           ),
          :ok <- after_started(after_started_hook) do
       result =
         execute_with_lease(

@@ -2,14 +2,18 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.ArtifactPublisher
   alias PtcRunner.Kernel.CommandRunOutcome
   alias PtcRunner.Kernel.ExecutionOutcome
+  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.Result
+  alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.Kernel.ViewerAdapter
   alias PtcRunner.TestSupport.RunLifecycle
 
   @tag :tmp_dir
@@ -66,6 +70,88 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
 
     assert :ok = PublicationAuthority.abort(built.publication_authority)
     assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
+  test "trace-proven event loss preserves the partial inspection and successful result", %{
+    tmp_dir: dir
+  } do
+    trace = Path.join(dir, "partial.jsonl")
+    inspection = Path.join(dir, "partial.inspection.jsonl")
+    output = Path.join(dir, "result.json")
+    run_id = "partial-publication"
+    trace_id = "trace-partial-publication"
+    timestamp = "2026-08-11T00:00:00Z"
+    counts = %{"capability-started" => 1, "capability-stopped" => 1}
+    value = %{"answer" => 42}
+    {:ok, encoded} = ResultArtifact.prepare(value, :normal, :normal)
+    result_hash = "sha256:" <> Base.encode16(:crypto.hash(:sha256, encoded), case: :lower)
+
+    records = [
+      %{
+        "schema_version" => 1,
+        "run_id" => run_id,
+        "trace_id" => trace_id,
+        "sequence" => 1,
+        "timestamp" => timestamp,
+        "record_type" => "capability-input",
+        "correlation" => %{"capability_id" => "cap-dropped"},
+        "payload" => %{
+          "environment" => "mission",
+          "name" => "evidence.get",
+          "arguments" => %{"id" => 42}
+        }
+      }
+    ]
+
+    events = [
+      trace_event(run_id, trace_id, 1, "run-started", %{}),
+      trace_event(run_id, trace_id, 2, "events-dropped", %{"counts" => counts}),
+      trace_event(run_id, trace_id, 3, "run-stopped", %{
+        "outcome" => "ok",
+        "reason" => nil,
+        "result_hash" => result_hash,
+        "usage" => %{"events_dropped" => counts}
+      })
+    ]
+
+    evidence = %{
+      result:
+        {:ok, %Result{value: value, usage: %{events_dropped: counts}, evaluation_memory: %{}}},
+      result_class: :normal,
+      result_contract: :ok,
+      terminal_batch: {:ok, events},
+      inspection: {:ok, records}
+    }
+
+    assert {:ok, authority} =
+             PublicationAuthority.authorize(
+               "cmd-00000000000000000000000000",
+               [trace: trace, inspect: inspection, output: output],
+               :normal,
+               :normal
+             )
+
+    assert {:ok, report} = ArtifactPublisher.publish(evidence, authority)
+
+    assert report.artifact_state == %{
+             "trace" => "written",
+             "inspection" => "written",
+             "result" => "written"
+           }
+
+    assert Jason.decode!(File.read!(output)) == value
+    assert {:ok, ^records} = InspectionArtifact.load(inspection)
+    assert {:ok, _source} = ViewerAdapter.pin_inspection(inspection, {:file, trace})
+
+    trace_types =
+      trace
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!(&1)["type"])
+
+    assert trace_types == ["run-started", "events-dropped", "run-stopped"]
+    assert :ok = PublicationAuthority.close(authority)
   end
 
   @tag :tmp_dir
@@ -933,6 +1019,18 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
       "timestamp" => "2026-07-12T12:00:00Z",
       "type" => type,
       "data" => %{}
+    }
+  end
+
+  defp trace_event(run_id, trace_id, sequence, type, data) do
+    %{
+      "schema_version" => 1,
+      "run_id" => run_id,
+      "trace_id" => trace_id,
+      "sequence" => sequence,
+      "timestamp" => "2026-08-11T00:00:00Z",
+      "type" => type,
+      "data" => data
     }
   end
 

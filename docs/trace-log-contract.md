@@ -490,7 +490,8 @@ JSON object with this exact envelope:
 Keys are exact. `sequence` is positive and strictly increasing within the
 artifact. The timestamp is UTC ISO 8601. `correlation` contains exactly one
 of `capability_id`, `evaluation_id`, or `component_id`. Capability and
-evaluation values must occur in the canonical trace for the same run; a
+evaluation values must occur in the canonical trace for the same run unless
+that trace explicitly proves the corresponding start events were dropped. A
 component value must occur in the canonical `run-started` prelude component
 IDs for the record's environment. V1 record types and payloads are:
 
@@ -529,13 +530,14 @@ the Kernel `Error.details` map computed for that failure. Their `environment`
 is always `"workflow"`, and their `evaluation_id` must match a canonical
 `evaluation-started` event with `environment: "workflow"` for the same run.
 
-The input record is accepted before the callback starts, and the source record
-is accepted before evaluation starts. The output record is accepted after
-normalization and before the canonical stop event. A missing output therefore
-means the attempt was interrupted; the loader does not synthesize one. Failure
-to accept a required input/source record prevents execution. Failure after an
-external read has completed fails the run but cannot retroactively undo that
-read.
+The input record is accepted before the callback starts. A subordinate
+`evaluation-started` event is attempted before its source record is accepted,
+and the source record is accepted before Lisp execution starts. The output
+record is accepted after normalization and before the canonical stop event. A
+missing output therefore means the attempt was interrupted; the loader does
+not synthesize one. Failure to accept a required input/source record prevents
+execution. Failure after an external read has completed fails the run but
+cannot retroactively undo that read.
 
 Artifact validation rejects ambiguous joins before persistence or Viewer
 pinning. There may be at most one input and one output for a capability ID, one
@@ -549,11 +551,28 @@ validation is authoritative. There may likewise be at most one
 `execution-prints` and one `execution-error` for a given `evaluation_id`; a run
 with no `println` output and no execution-phase failure emits neither.
 
+A normal trace can prove a missing correlation only through both of its
+terminal loss records: the one `events-dropped.data.counts` map and
+`run-stopped.data.usage.events_dropped` must agree, and the count for
+`capability-started` or `evaluation-started` must cover every distinct missing
+ID of that kind. Missing evaluation IDs also retain their expected environment;
+one dropped event cannot cover conflicting workflow and mission records. The
+runtime emits each correlated private record only after attempting its
+corresponding start event, so this typed count is authoritative evidence of
+trace loss. The `events-dropped` marker and `run-stopped` must be the final two
+events in that order, matching atomic EventSink finalization. The canonical
+marker flags the paired inspection artifact as partial. Missing proof,
+insufficient counts, duplicate canonical IDs, or an existing event whose
+correlation fields disagree all fail closed.
+
 The host enables capture independently of manifest event policy and selects a
 fixed exact destination. The destination is restricted to `0600` before content
 is written. Per-record and aggregate byte ceilings apply before persistence.
-Capture is either disabled or required/fail-closed; there is no silent partial-
-capture mode. Retention belongs to the host in 0.x.
+Inspection capture is either disabled or required/fail-closed; the inspection
+sink never silently drops its own records. A trace-budget loss is different:
+the canonical trace marks it explicitly, and a fully retained inspection stream
+may be persisted as the trace-marked partial correlation overlay described
+above. Retention belongs to the host in 0.x.
 
 Installed defaults are 2,000,000 encoded bytes per record and 16,000,000
 encoded bytes for the artifact; a host may lower them but a manifest cannot
