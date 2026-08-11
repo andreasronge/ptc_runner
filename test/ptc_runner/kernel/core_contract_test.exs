@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.FrozenBundle
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
@@ -1454,6 +1455,33 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              )
 
     assert %{defined_count: 0, history_count: 0} = RunState.evaluation_memory_summary(state)
+  end
+
+  test "failed subordinate evaluation start retains no unattempted inspection source" do
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(normal_event_count: 1, normal_event_bytes: 20_000)
+    {:ok, state} = RunState.start(limits)
+    {:ok, event_sink} = EventSink.start(:private, limits, run_id: "full-before-evaluation")
+
+    {:ok, inspection_sink} =
+      InspectionSink.start(run_id: "full-before-evaluation", trace_id: "full-before-evaluation")
+
+    assert :ok = EventSink.emit(event_sink, "occupied", %{})
+
+    assert %{outcome: :evaluation_error, reason: :event_sink_error} =
+             Evaluation.evaluate_source_detailed(
+               state,
+               mission,
+               "(return 42)",
+               100,
+               event_sink,
+               inspection_sink
+             )
+
+    assert {:ok, []} = InspectionSink.records(inspection_sink)
+    assert :ok = InspectionSink.stop(inspection_sink)
+    assert :ok = EventSink.stop(event_sink)
+    assert :ok = RunState.stop(state)
   end
 
   test "Kernel rejects public projection collisions instead of losing entries" do

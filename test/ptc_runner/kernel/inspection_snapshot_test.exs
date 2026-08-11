@@ -843,6 +843,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       }),
       event(run_id, 4, "evaluation-started", %{
         "evaluation_id" => "eval-#{run_id}",
+        "environment" => "mission",
+        "program_kind" => "ptc-lisp",
         "source_hash" => @source_hash,
         "source_bytes" => byte_size(@source)
       }),

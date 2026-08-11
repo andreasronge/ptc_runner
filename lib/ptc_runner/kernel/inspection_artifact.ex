@@ -19,7 +19,12 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   V3 vocabulary. V2 adds paired MCP request/response bodies correlated to an
   existing capability attempt. V3 adds `execution-prints` and `execution-error`,
   correlated by a canonical workflow `evaluation-started` event's
-  `evaluation_id` rather than a capability attempt.
+  `evaluation_id` rather than a capability attempt. A missing capability or
+  evaluation correlation is accepted only when the same canonical trace's
+  `events-dropped` marker and terminal usage agree on enough dropped events of
+  that exact type. The retained trace marker therefore identifies the
+  inspection artifact as partial; an existing but mismatched correlation still
+  fails closed.
 
   Secure publication is supported on Unix hosts with POSIX-compatible `mkdir`
   and `id` executables available on `PATH`; persistence fails closed when those
@@ -555,18 +560,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
           event_value(event, :trace_id) == first["trace_id"]
       end)
 
-    with {:ok, capabilities} <- canonical_capabilities(events) do
-      evaluations =
-        Enum.reduce(events, %{}, fn event, evaluations ->
-          id = event_data(event, :evaluation_id)
-          hash = event_data(event, :source_hash)
-          bytes = event_data(event, :source_bytes)
-
-          if is_binary(id) and is_binary(hash) and is_integer(bytes),
-            do: Map.put(evaluations, id, {hash, bytes}),
-            else: evaluations
-        end)
-
+    with {:ok, capabilities} <- canonical_capabilities(events),
+         {:ok, evaluations} <- canonical_evaluations(events) do
       prelude_components =
         Enum.reduce(events, %{}, fn event, acc ->
           acc
@@ -574,51 +569,13 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
           |> merge_prelude_ids("mission", event_data(event, :mission_prelude))
         end)
 
-      workflow_evaluation_ids =
-        events
-        |> Enum.filter(fn event ->
-          event_value(event, :type) == "evaluation-started" and
-            event_data(event, :environment) |> string_value() == "workflow"
-        end)
-        |> Enum.map(&event_data(&1, :evaluation_id))
-        |> Enum.filter(&is_binary/1)
-        |> MapSet.new()
-
-      if Enum.all?(records, fn
-           %{
-             "correlation" => %{"capability_id" => id},
-             "payload" => %{"environment" => environment, "name" => name}
-           } ->
-             Map.get(capabilities, id) == {environment, name}
-
-           %{
-             "record_type" => record_type,
-             "correlation" => %{"capability_id" => id, "request_id" => request_id}
-           }
-           when record_type in ["mcp-request", "mcp-response"] ->
-             Map.has_key?(capabilities, id) and valid_request_id?(request_id)
-
-           %{
-             "correlation" => %{"evaluation_id" => id},
-             "payload" => %{"source_hash" => hash, "source_bytes" => bytes}
-           } ->
-             Map.get(evaluations, id) == {hash, bytes}
-
-           %{
-             "record_type" => record_type,
-             "correlation" => %{"evaluation_id" => id}
-           }
-           when record_type in ["execution-prints", "execution-error"] ->
-             MapSet.member?(workflow_evaluation_ids, id)
-
-           %{
-             "correlation" => %{"component_id" => id},
-             "payload" => %{"environment" => environment}
-           } ->
-             MapSet.member?(Map.get(prelude_components, environment, MapSet.new()), id)
-         end),
-         do: :ok,
-         else: {:error, :inspection_correlation_missing}
+      validate_record_correlations(
+        records,
+        capabilities,
+        evaluations,
+        prelude_components,
+        proven_dropped_counts(events)
+      )
     end
   end
 
@@ -631,8 +588,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       name = event_data(event, :name)
 
       cond do
-        event_value(event, :type) != "capability-started" or not is_binary(id) or
-          environment not in ["workflow", "mission"] or not is_binary(name) ->
+        event_value(event, :type) != "capability-started" or not is_binary(id) ->
           {:cont, {:ok, capabilities}}
 
         Map.has_key?(capabilities, id) ->
@@ -643,6 +599,217 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       end
     end)
   end
+
+  defp canonical_evaluations(events) do
+    Enum.reduce_while(events, {:ok, %{}}, fn event, {:ok, evaluations} ->
+      id = event_data(event, :evaluation_id)
+      environment = event_data(event, :environment) |> string_value()
+
+      cond do
+        event_value(event, :type) != "evaluation-started" or not is_binary(id) ->
+          {:cont, {:ok, evaluations}}
+
+        Map.has_key?(evaluations, id) ->
+          {:halt, {:error, :inspection_correlation_missing}}
+
+        true ->
+          source = {event_data(event, :source_hash), event_data(event, :source_bytes)}
+          {:cont, {:ok, Map.put(evaluations, id, {environment, source})}}
+      end
+    end)
+  end
+
+  defp validate_record_correlations(
+         records,
+         capabilities,
+         evaluations,
+         prelude_components,
+         dropped
+       ) do
+    initial = %{capabilities: MapSet.new(), evaluations: %{}}
+
+    records
+    |> Enum.reduce_while({:ok, initial}, fn record, {:ok, missing} ->
+      validate_record_correlation(
+        record,
+        capabilities,
+        evaluations,
+        prelude_components,
+        missing
+      )
+    end)
+    |> case do
+      {:ok, missing} -> validate_missing_correlations(missing, dropped)
+      {:error, :inspection_correlation_missing} = error -> error
+    end
+  end
+
+  defp validate_record_correlation(
+         %{
+           "correlation" => %{"capability_id" => id},
+           "payload" => %{"environment" => environment, "name" => name}
+         },
+         capabilities,
+         _evaluations,
+         _prelude_components,
+         missing
+       ) do
+    correlate_or_mark_missing(capabilities, id, {environment, name}, missing, :capabilities)
+  end
+
+  defp validate_record_correlation(
+         %{
+           "record_type" => record_type,
+           "correlation" => %{"capability_id" => id, "request_id" => request_id}
+         },
+         capabilities,
+         _evaluations,
+         _prelude_components,
+         missing
+       )
+       when record_type in ["mcp-request", "mcp-response"] do
+    if valid_request_id?(request_id),
+      do:
+        correlate_or_mark_missing(
+          capabilities,
+          id,
+          :any,
+          missing,
+          :capabilities,
+          fn _actual, :any -> true end
+        ),
+      else: missing_correlation()
+  end
+
+  defp validate_record_correlation(
+         %{
+           "record_type" => "evaluation-source",
+           "correlation" => %{"evaluation_id" => id},
+           "payload" => %{"source_hash" => hash, "source_bytes" => bytes}
+         },
+         _capabilities,
+         evaluations,
+         _prelude_components,
+         missing
+       ),
+       do:
+         correlate_evaluation_or_mark_missing(
+           evaluations,
+           id,
+           {"mission", {hash, bytes}},
+           missing
+         )
+
+  defp validate_record_correlation(
+         %{
+           "record_type" => record_type,
+           "correlation" => %{"evaluation_id" => id}
+         },
+         _capabilities,
+         evaluations,
+         _prelude_components,
+         missing
+       )
+       when record_type in ["execution-prints", "execution-error"],
+       do: correlate_evaluation_or_mark_missing(evaluations, id, {"workflow", :any}, missing)
+
+  defp validate_record_correlation(
+         %{
+           "correlation" => %{"component_id" => id},
+           "payload" => %{"environment" => environment}
+         },
+         _capabilities,
+         _evaluations,
+         prelude_components,
+         missing
+       ) do
+    if MapSet.member?(Map.get(prelude_components, environment, MapSet.new()), id),
+      do: {:cont, {:ok, missing}},
+      else: missing_correlation()
+  end
+
+  defp validate_record_correlation(
+         _record,
+         _capabilities,
+         _evaluations,
+         _prelude_components,
+         _missing
+       ),
+       do: missing_correlation()
+
+  defp correlate_or_mark_missing(canonical, id, expected, missing, field, matcher \\ &(&1 == &2)) do
+    case Map.fetch(canonical, id) do
+      {:ok, actual} ->
+        if matcher.(actual, expected),
+          do: {:cont, {:ok, missing}},
+          else: missing_correlation()
+
+      :error ->
+        {:cont, {:ok, Map.update!(missing, field, &MapSet.put(&1, id))}}
+    end
+  end
+
+  defp correlate_evaluation_or_mark_missing(canonical, id, expected, missing) do
+    case Map.fetch(canonical, id) do
+      {:ok, actual} ->
+        if evaluation_matches?(actual, expected),
+          do: {:cont, {:ok, missing}},
+          else: missing_correlation()
+
+      :error ->
+        case Map.fetch(missing.evaluations, id) do
+          :error ->
+            {:cont, {:ok, put_in(missing, [:evaluations, id], elem(expected, 0))}}
+
+          {:ok, environment} when environment == elem(expected, 0) ->
+            {:cont, {:ok, missing}}
+
+          {:ok, _conflicting_environment} ->
+            missing_correlation()
+        end
+    end
+  end
+
+  defp evaluation_matches?({"workflow", _source}, {"workflow", :any}), do: true
+  defp evaluation_matches?(actual, expected), do: actual == expected
+
+  defp validate_missing_correlations(missing, dropped) do
+    if MapSet.size(missing.capabilities) <= Map.get(dropped, "capability-started", 0) and
+         map_size(missing.evaluations) <= Map.get(dropped, "evaluation-started", 0),
+       do: :ok,
+       else: {:error, :inspection_correlation_missing}
+  end
+
+  defp proven_dropped_counts(events) do
+    markers = Enum.filter(events, &(event_value(&1, :type) == "events-dropped"))
+    stopped = Enum.filter(events, &(event_value(&1, :type) == "run-stopped"))
+
+    with [marker, terminal] <- Enum.take(events, -2),
+         "events-dropped" <- event_value(marker, :type),
+         "run-stopped" <- event_value(terminal, :type),
+         [^marker] <- markers,
+         [^terminal] <- stopped,
+         {:ok, marker_counts} <- event_counts(event_data(marker, :counts)),
+         usage when is_map(usage) <- event_data(terminal, :usage),
+         {:ok, terminal_counts} <- event_counts(map_value(usage, :events_dropped)),
+         true <- marker_counts == terminal_counts do
+      marker_counts
+    else
+      _unproven -> %{}
+    end
+  end
+
+  defp event_counts(counts) when is_map(counts) and not is_struct(counts) do
+    if Enum.all?(counts, fn {type, count} ->
+         is_binary(type) and is_integer(count) and count > 0
+       end),
+       do: {:ok, counts},
+       else: :error
+  end
+
+  defp event_counts(_counts), do: :error
+
+  defp missing_correlation, do: {:halt, {:error, :inspection_correlation_missing}}
 
   defp merge_prelude_ids(acc, environment, prelude) when is_map(prelude) do
     ids =
@@ -663,6 +830,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       _data -> nil
     end
   end
+
+  defp map_value(map, key), do: Map.get(map, key) || Map.get(map, Atom.to_string(key))
 
   defp string_value(value) when is_atom(value), do: Atom.to_string(value)
   defp string_value(value) when is_binary(value), do: value
