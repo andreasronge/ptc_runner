@@ -26,21 +26,26 @@ artifact saying whether it was seeded or why not — copy skipped, source not
 built, or already present — and skips seeding entirely when `mise.toml` or any
 lockfile differs from the main checkout's copy.
 
-The seed is an optimization, never an authority: Mix revalidates `deps/` and
-`_build/` against `mix.lock` and source digests, and dialyxir revalidates the
-project PLT against the module set, so a stale seed costs a rebuild rather
-than a wrong answer. (The seeded PLT's dialyxir hash file is deliberately not
-copied, so the first `mix dialyzer` run always re-checks the PLT instead of
-trusting the hash.) Copies are staged and promoted with an atomic rename —
-an interrupted seed leaves nothing half-copied — and each worktree owns its
+For build staleness the seed is never an authority: Mix revalidates `deps/`
+and `_build/` against `mix.lock` and source digests, and dialyxir revalidates
+the project PLT against the module set, so a stale seed costs a rebuild
+rather than a wrong answer. The seeded PLT's dialyxir hash file is
+deliberately not copied (the first `mix dialyzer` run must re-check the PLT
+instead of trusting the hash), and each copied PLT is byte-compared against
+its source after the clone, so a PLT caught mid-rewrite by a concurrent
+dialyzer run is discarded rather than promoted. Copies are staged under a
+per-process gitignored directory and promoted with an atomic rename — an
+interrupted seed leaves nothing half-copied — and each worktree owns its
 copies, so concurrent gates never share a writable artifact. Copies use
 copy-on-write clones where the filesystem supports it (APFS/btrfs).
 
-One deliberate trust boundary: seeding copies the main checkout's `deps/`
-trees as they are. If you have locally edited a dependency there, the edit
-travels with the seed — the same trust you accept when running gates in the
-main checkout itself. CI always builds from pristine dependencies and is
-unaffected.
+The one thing the seed takes on faith is dependency *fidelity*: it copies the
+main checkout's `deps/` trees as they are, so a locally edited dependency
+travels with the seed. This is a deliberate trust boundary — it is the same
+trust you accept when running gates in the main checkout itself, no tool
+rescans dependency sources against compiled artifacts anyway, and CI always
+builds from pristine dependencies. If you have edited a dependency in the
+main checkout, do not seed from it.
 
 To warm the cache, keep the main checkout built: `mix compile` and
 `mix dialyzer` there make every subsequent worktree cheap. To fill gaps in an

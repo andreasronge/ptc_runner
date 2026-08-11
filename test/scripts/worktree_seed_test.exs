@@ -27,7 +27,19 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     assert File.read!(Path.join(worktree, "ptc_viewer/_build/test/marker")) == "viewer\n"
 
     assert output =~ "ptc_runner_launcher/deps — not built in the main checkout"
-    refute File.exists?(Path.join(worktree, ".worktree-seed-tmp"))
+    assert Path.wildcard(Path.join(worktree, ".worktree-seed-tmp*")) == []
+  end
+
+  test "discards a PLT whose source diverged from the copy" do
+    %{main: main, worktree: worktree} = repo_with_worktree()
+
+    write!(main, "priv/plts/project.plt", "plt\n")
+    fake_cmp = fake_cmp_reporting_divergence!(main)
+
+    {output, 0} = seed(main, worktree, env: [{"PATH", fake_cmp}])
+
+    assert output =~ "priv/plts — copy failed or source changed mid-copy"
+    refute File.exists?(Path.join(worktree, "priv/plts"))
   end
 
   test "does not seed dialyxir's PLT hash file" do
@@ -114,12 +126,32 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     %{main: main, worktree: worktree}
   end
 
-  defp seed(main, worktree) do
+  defp seed(main, worktree, opts \\ []) do
     System.cmd("bash", [@script, "seed", worktree],
       cd: main,
-      env: @git_env,
+      env: @git_env ++ Keyword.get(opts, :env, []),
       stderr_to_stdout: true
     )
+  end
+
+  # A PATH whose `cmp` reports divergence for .plt files only, standing in
+  # for a PLT that a concurrent dialyzer run rewrote while it was cloned.
+  # Every other cmp call (the seed's lockfile guard) passes through.
+  defp fake_cmp_reporting_divergence!(root) do
+    bin = Path.join(root, "fake-bin")
+    File.mkdir_p!(bin)
+    fake_cmp = Path.join(bin, "cmp")
+
+    File.write!(fake_cmp, """
+    #!/bin/sh
+    case "$*" in
+      *.plt*) exit 1 ;;
+      *) exec /usr/bin/cmp "$@" ;;
+    esac
+    """)
+
+    File.chmod!(fake_cmp, 0o755)
+    bin <> ":" <> System.fetch_env!("PATH")
   end
 
   defp write!(repo, path, contents) do

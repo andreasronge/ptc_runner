@@ -201,9 +201,10 @@ seed_worktree() {
 
   # Stage each copy and promote it with an atomic same-volume rename, so an
   # interrupted seed can never leave a partial tree that a later run skips as
-  # "already present". A leftover staging dir (gitignored) from an interrupt
-  # is discarded here on the next run.
-  staging="$dst/.worktree-seed-tmp"
+  # "already present". The staging path carries this process's PID so two
+  # concurrent seeds of one destination cannot delete each other's work; a
+  # leftover dir from a crash is gitignored, inert, and safe to remove.
+  staging="$dst/.worktree-seed-tmp.$$"
   rm -rf "$staging"
 
   for artifact in "${SEED_ARTIFACTS[@]}"; do
@@ -216,12 +217,12 @@ seed_worktree() {
       echo "   ⏭️  $artifact — already present"
     elif mkdir -p "$staging" "$(dirname "$dst/$artifact")" &&
       clone_tree "$src/$artifact" "$tmp" &&
-      scrub_seed_artifact "$artifact" "$tmp" &&
-      mv "$tmp" "$dst/$artifact"; then
+      scrub_seed_artifact "$artifact" "$src/$artifact" "$tmp" &&
+      [ ! -e "$dst/$artifact" ] && mv "$tmp" "$dst/$artifact"; then
       echo "   🌱 $artifact"
       seeded=$((seeded + 1))
     else
-      echo "   ⚠️  $artifact — copy failed; nothing promoted"
+      echo "   ⚠️  $artifact — copy failed or source changed mid-copy; nothing promoted"
     fi
   done
 
@@ -229,14 +230,25 @@ seed_worktree() {
   echo "🌱 Seeded ${seeded} artifact(s) from $src in $((SECONDS - start))s"
 }
 
-# dialyxir skips its PLT check entirely when the stored dependency hash
-# matches (check_hash?/1 in mix/tasks/dialyzer.ex), and that hash covers the
-# app set, not the PLT file's integrity. Drop it from the seed so the first
-# dialyzer run in the new worktree always revalidates the copied PLT.
+# Two PLT-specific guards before promotion:
+#
+# 1. dialyxir skips its PLT check entirely when the stored dependency hash
+#    matches (check_hash?/1 in mix/tasks/dialyzer.ex), and that hash covers
+#    the app set, not the PLT file's integrity — drop it so the first
+#    dialyzer run in the new worktree always revalidates the copied PLT.
+# 2. A PLT cloned while the main checkout's dialyzer is rewriting it can be
+#    a torn copy, and dialyxir raises on an invalid PLT rather than
+#    rebuilding it. Byte-compare each staged PLT against its source after
+#    the clone: any concurrent write makes them diverge and the artifact is
+#    discarded — the worktree then simply builds its PLT the normal way.
 scrub_seed_artifact() {
-  local artifact="$1" tree="$2"
+  local artifact="$1" src_tree="$2" tmp_tree="$3" plt
   if [ "$artifact" = "priv/plts" ]; then
-    rm -f "$tree"/*.hash
+    rm -f "$tmp_tree"/*.hash
+    for plt in "$tmp_tree"/*.plt; do
+      [ -e "$plt" ] || continue
+      cmp -s "$src_tree/$(basename "$plt")" "$plt" || return 1
+    done
   fi
 }
 
