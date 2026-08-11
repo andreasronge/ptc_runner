@@ -176,16 +176,22 @@ SEED_ARTIFACTS=(
 # Copy-on-write clone where the filesystem supports it (APFS, btrfs, XFS);
 # plain copy otherwise. A clone is near-instant and shares blocks until
 # either side writes.
+#
+# -p is load-bearing, not tidiness: mtimes are the staleness authority make
+# and Mix read. `git worktree add` writes the sources first, so a copy stamped
+# with the seed time is unconditionally newer than everything it was built
+# from, and make reports a months-old native binary as up to date. clonefile
+# preserves timestamps on its own; the fallbacks do not.
 clone_tree() {
   local src="$1" dst="$2"
   case "$(uname -s)" in
     Darwin)
-      if ! cp -Rc "$src" "$dst" 2>/dev/null; then
+      if ! cp -Rpc "$src" "$dst" 2>/dev/null; then
         rm -rf "${dst:?}"
-        cp -R "$src" "$dst"
+        cp -Rp "$src" "$dst"
       fi
       ;;
-    *) cp -R --reflink=auto "$src" "$dst" ;;
+    *) cp -Rp --reflink=auto "$src" "$dst" ;;
   esac
 }
 

@@ -30,6 +30,23 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     assert Path.wildcard(Path.join(worktree, ".worktree-seed-tmp*")) == []
   end
 
+  # A seeded artifact carries make's and Mix's staleness authority with it.
+  # `git worktree add` writes the sources first, so a copy stamped with the
+  # seed time is unconditionally newer than every source it was built from,
+  # and make reports a months-old native binary as up to date.
+  test "preserves artifact timestamps so staleness checks stay meaningful" do
+    %{main: main, worktree: worktree} = repo_with_worktree()
+
+    artifact = "ptc_runner_launcher/_build/prod/lib/ptc_runner_launcher/priv/launcher"
+    write!(main, artifact, "stale\n")
+    stale = DateTime.to_unix(~U[2026-07-29 00:00:00Z])
+    File.touch!(Path.join(main, artifact), stale)
+
+    {_output, 0} = seed(main, worktree)
+
+    assert File.stat!(Path.join(worktree, artifact), time: :posix).mtime == stale
+  end
+
   test "does not seed dialyxir's PLT hash file" do
     %{main: main, worktree: worktree} = repo_with_worktree()
 
