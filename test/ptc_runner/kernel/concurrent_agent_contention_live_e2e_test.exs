@@ -1,6 +1,6 @@
 defmodule PtcRunner.Kernel.ConcurrentAgentContentionLiveE2ETest do
   @moduledoc """
-  The closure criterion for issue #1241: four `agent.core` loops under `pcalls`
+  The closure criterion for issues #1241 and #1287: eight `agent.core` loops under `pcalls`
   against a live provider must not burn `run_duration_ms`.
 
   The deterministic half of #1241 is pinned elsewhere — `agent_evaluation_
@@ -16,7 +16,7 @@ defmodule PtcRunner.Kernel.ConcurrentAgentContentionLiveE2ETest do
   - `:ok` — every agent returned its model-authored value;
   - `:admission` — a typed `evaluation-unavailable`, the queue's bounded
     expiry, which is a fast failure and therefore not the reported symptom;
-  - `:provider` — the live provider failed one branch (a rate limit on four
+  - `:provider` — the live provider failed one branch (a rate limit on eight
     concurrent requests will do it), which `fail`-inside-`pcalls` turns into a
     whole-run failure; a fact about the provider, not the queue;
   - `:deadline` — the run burned `run_duration_ms`. **This is the symptom.**
@@ -46,7 +46,7 @@ defmodule PtcRunner.Kernel.ConcurrentAgentContentionLiveE2ETest do
 
   @host Path.expand("../../../examples/kernel-tutorial/ptc-host.json", __DIR__)
 
-  @agents 4
+  @agents 8
   @max_turns 2
   @run_duration_ms 150_000
   @runs String.to_integer(System.get_env("PTC_CONTENTION_RUNS", "2"))
@@ -57,6 +57,8 @@ defmodule PtcRunner.Kernel.ConcurrentAgentContentionLiveE2ETest do
   setup_all do
     :ok = PtcRunner.Dotenv.load()
     :ok = LLMSupport.admit_provider_application!()
+    assert Application.get_env(:req_llm, :stream_pool_count) == 1
+    assert Application.get_env(:req_llm, :stream_pool_size) == 8
 
     if System.get_env("OPENROUTER_API_KEY") do
       :ok
@@ -183,7 +185,7 @@ defmodule PtcRunner.Kernel.ConcurrentAgentContentionLiveE2ETest do
       String.contains?(rendered, "evaluation-unavailable") ->
         %{class: :admission, detail: rendered}
 
-      # A live provider that rate-limits or drops one of the four concurrent
+      # A live provider that rate-limits or drops one of the eight concurrent
       # requests fails that branch, and `fail` inside `pcalls` aborts the run.
       # That is the provider, not the admission queue — named separately so it
       # cannot be mistaken for either a pass or the reported hang.

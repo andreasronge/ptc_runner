@@ -97,17 +97,30 @@ already owns the prepared run and the session's lifecycle. There is no
 creator-owned variant.
 
 An embedded frontend that drives `ProviderRegistry` and `RunBuilder` directly
-does not pass through that gate, so it owns the admission itself:
+does not pass through that gate, so it owns the admission itself. For an
+otherwise-unconfigured default HTTP/1 ReqLLM pool:
 
 ```elixir
+installed_limits = PtcRunner.Kernel.Limits.installed_defaults()
 Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
 Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+Application.put_env(:req_llm, :stream_pool_count, 1, persistent: true)
+Application.put_env(:req_llm, :stream_pool_size, installed_limits.live_provider_tasks,
+  persistent: true
+)
 {:ok, _started} = Application.ensure_all_started(:req_llm)
 ```
 
 Set `load_dotenv` to `false` first if the host resolves credentials itself; that
 is what the command-owned gate branch does before starting the application, and
 it keeps the dependency from reading a `.env` the host did not choose.
+The command-owned gate also gives ReqLLM's default HTTP/1 Finch pool one shard
+with one connection per installed `live_provider_tasks` slot. It uses the
+installed ceiling because the application constructs one VM-lifetime pool;
+the first manifest's narrower effective limit must not size every later run.
+Direct and host-owned embeddings own this geometry themselves. Explicit
+ReqLLM `:finch` pools or non-HTTP/1 protocol overrides retain ReqLLM's own
+precedence.
 
 A request issued while that application is stopped fails with a non-retryable
 `:internal` provider error naming the application, rather than a retryable

@@ -5,11 +5,16 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
 
   A host-owned application must already be running. A command-owned VM rejects
   an inherited target, disables dotenv loading for both `:req_llm` and
-  `:llm_db`, and starts the selected target without stopping it at session
-  close. The command VM owns the resulting application processes until VM
-  shutdown. Once selected applications are admitted, adapter-owned VM-global
-  metadata is warmed before the run clock begins, so its one-time load does not
-  consume a bounded provider worker's heap.
+  `:llm_db`, configures ReqLLM's default HTTP/1 Finch pool as one shard sized
+  from the installed `live_provider_tasks` ceiling, and starts the selected
+  target without stopping it at session close. A manifest-narrowed effective
+  limit does not resize that VM-lifetime pool. Explicit ReqLLM Finch pools or a
+  non-HTTP/1 protocol configuration retain their dependency-defined precedence.
+  The command VM owns
+  the resulting application processes until VM shutdown. Once selected
+  applications are admitted, adapter-owned VM-global metadata is warmed before
+  the run clock begins, so its one-time load does not consume a bounded provider
+  worker's heap.
 
   OTP application startup is deliberately synchronous here:
   `Application.ensure_all_started/1` is not cancellable and offers no timeout.
@@ -25,6 +30,7 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderRuntimeServices
 
@@ -41,7 +47,11 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
          true <- ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding) do
       requirements = requirements(prepared, catalog)
 
-      case admit_requirements(requirements, services.provider_application_mode) do
+      case admit_requirements(
+             requirements,
+             services.provider_application_mode,
+             catalog.installed_limits
+           ) do
         :ok -> warm_requirements(requirements)
         {:error, name, activity} -> {:error, unavailable_diagnostic(name, activity)}
       end
@@ -88,9 +98,9 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
     |> Enum.uniq_by(&elem(&1, 1))
   end
 
-  defp admit_requirements([], _mode), do: :ok
+  defp admit_requirements([], _mode, _installed_limits), do: :ok
 
-  defp admit_requirements(requirements, :host_owned) do
+  defp admit_requirements(requirements, :host_owned, _installed_limits) do
     running = Application.started_applications() |> MapSet.new(&elem(&1, 0))
 
     case Enum.find(requirements, fn {_name, application} ->
@@ -101,7 +111,7 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
     end
   end
 
-  defp admit_requirements(requirements, :command_vm) do
+  defp admit_requirements(requirements, :command_vm, installed_limits) do
     running = Application.started_applications() |> MapSet.new(&elem(&1, 0))
 
     case Enum.find(requirements, fn {_name, application} ->
@@ -111,10 +121,38 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
         {:error, name, false}
 
       nil ->
-        Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
-        Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+        :ok = configure_command_vm_req_llm(installed_limits)
         start_requirements(requirements)
     end
+  end
+
+  @doc false
+  @spec configure_command_vm_req_llm(Limits.t()) :: :ok
+  def configure_command_vm_req_llm(%Limits{live_provider_tasks: pool_size} = installed_limits) do
+    if Limits.valid?(installed_limits) do
+      Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
+      Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+
+      if command_owned_default_http1_pool?() do
+        Application.put_env(:req_llm, :stream_pool_count, 1, persistent: true)
+        Application.put_env(:req_llm, :stream_pool_size, pool_size, persistent: true)
+      end
+
+      :ok
+    else
+      raise ArgumentError, "invalid installed limits for command-owned ReqLLM configuration"
+    end
+  end
+
+  def configure_command_vm_req_llm(_installed_limits) do
+    raise ArgumentError, "invalid installed limits for command-owned ReqLLM configuration"
+  end
+
+  defp command_owned_default_http1_pool? do
+    protocols = Application.get_env(:req_llm, :stream_pool_protocols, [:http1])
+    finch = Application.get_env(:req_llm, :finch, [])
+
+    protocols == [:http1] and Keyword.keyword?(finch) and not Keyword.has_key?(finch, :pools)
   end
 
   defp start_requirements(requirements) do
