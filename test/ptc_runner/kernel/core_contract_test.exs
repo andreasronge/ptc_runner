@@ -424,8 +424,15 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, limits} = Limits.new(live_provider_tasks: 1, run_duration_ms: 1_000)
     {:ok, state} = RunState.start(limits)
 
+    # The budget only has to outlast the dispatch's own pre-provider work, not
+    # the callback: it blocks until `:finish`, which never arrives. A 1 ms
+    # request cannot do that. The validation worker is given the requested
+    # budget minus the time already spent reaching it, so anything under a
+    # millisecond of setup — a cold JSON-schema validator, a loaded CI
+    # scheduler — collapses it to zero and reports the validator as
+    # unavailable instead of the provider as timed out.
     assert %{status: :error, kind: :timeout, reason: :provider_timeout} =
-             Dispatcher.dispatch(state, :workflow, environment, "slow", %{}, 1)
+             Dispatcher.dispatch(state, :workflow, environment, "slow", %{}, 100)
 
     assert_received :started
     assert :ok = RunState.close(state)
