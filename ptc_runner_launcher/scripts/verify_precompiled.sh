@@ -116,7 +116,11 @@ clear_proxy=(
   https_proxy=
 )
 
-PTC_RUNNER_LAUNCHER_PRECOMPILED_URL="$precompiled_url" \
+# BUILD_FROM_SOURCE=0 overrides the repository-checkout force-build default
+# in mix.exs: this script runs from the checkout but must exercise the
+# precompiled download path that default would bypass.
+PTC_RUNNER_LAUNCHER_BUILD_FROM_SOURCE=0 \
+  PTC_RUNNER_LAUNCHER_PRECOMPILED_URL="$precompiled_url" \
   ELIXIR_MAKE_CACHE_DIR="$download_cache" \
   MIX_BUILD_PATH="$download_build" \
   MIX_ENV=prod \
@@ -178,7 +182,8 @@ printf '\0' >>"$archive"
 
 rm -rf "$download_build" "$download_cache"
 
-PTC_RUNNER_LAUNCHER_PRECOMPILED_URL="$precompiled_url" \
+PTC_RUNNER_LAUNCHER_BUILD_FROM_SOURCE=0 \
+  PTC_RUNNER_LAUNCHER_PRECOMPILED_URL="$precompiled_url" \
   ELIXIR_MAKE_CACHE_DIR="$download_cache" \
   MIX_BUILD_PATH="$download_build" \
   MIX_ENV=prod \
@@ -212,6 +217,7 @@ unlisted_build="$verification_tmp_dir/unlisted-build"
 TARGET_ARCH=unlisted \
   TARGET_OS=linux \
   TARGET_ABI=gnu \
+  PTC_RUNNER_LAUNCHER_BUILD_FROM_SOURCE=0 \
   PTC_RUNNER_LAUNCHER_PRECOMPILED_URL="http://127.0.0.1:1/@{artefact_filename}" \
   MIX_BUILD_PATH="$unlisted_build" \
   MIX_ENV=prod \
