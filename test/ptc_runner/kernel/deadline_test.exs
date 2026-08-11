@@ -50,4 +50,15 @@ defmodule PtcRunner.Kernel.DeadlineTest do
     assert_raise FunctionClauseError, fn -> Deadline.new(0) end
     assert_raise FunctionClauseError, fn -> Deadline.new(-1, 0) end
   end
+
+  test "terminalization floors an expired cutoff and preserves a longer live one" do
+    now = System.monotonic_time(:millisecond)
+
+    floored = Deadline.terminalization(now - 60_000)
+    assert Deadline.expires_at(floored) >= now + 4_000
+    assert Deadline.expires_at(floored) <= now + 6_000
+
+    distant = now + 60_000
+    assert Deadline.expires_at(Deadline.terminalization(distant)) == distant
+  end
 end
