@@ -87,7 +87,8 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
     assert evaluation.value["regressed_cases"] == ["motivating.paged-evidence"]
   end
 
-  test "the shipped replay manifest and dedicated host config run unchanged" do
+  @tag :tmp_dir
+  test "the shipped replay manifest and dedicated host config run unchanged", %{tmp_dir: dir} do
     {:ok, host} = HostConfig.load(@evaluation_host)
 
     {:ok, registry} =
@@ -99,7 +100,9 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
     assert {:ok, result} =
              @replay_manifest
              |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
-             |> RunLifecycle.build(registry)
+             |> RunLifecycle.build(registry,
+               private_output: Path.join(dir, "trial-result.private.json")
+             )
              |> RunLifecycle.execute()
 
     assert result.value["status"] == "scored"
@@ -167,29 +170,44 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
   defp run_pair(manifest, pair) do
     baseline_trace = Path.join(pair.directory, "baseline.private.jsonl")
     candidate_trace = Path.join(pair.directory, "candidate.private.jsonl")
+    baseline_output = Path.join(pair.directory, "baseline.joined.json")
+    candidate_output = Path.join(pair.directory, "candidate.joined.json")
+    baseline_result = baseline_output <> ".result"
+    candidate_result = candidate_output <> ".result"
 
-    baseline =
-      run_trial(manifest, pair.registry, pair.baseline_input_path, baseline_trace)
+    :ok =
+      run_trial(
+        manifest,
+        pair.registry,
+        pair.baseline_input_path,
+        baseline_trace,
+        baseline_result
+      )
 
-    candidate =
-      run_trial(manifest, pair.registry, pair.candidate_input_path, candidate_trace,
+    :ok =
+      run_trial(
+        manifest,
+        pair.registry,
+        pair.candidate_input_path,
+        candidate_trace,
+        candidate_result,
         component_override_descriptor: pair.descriptor_path
       )
 
     {
       join(
         pair.jq,
-        baseline,
+        baseline_result,
         baseline_trace,
         String.replace_suffix(baseline_trace, ".jsonl", ".inspection.jsonl"),
-        Path.join(pair.directory, "baseline.joined.json")
+        baseline_output
       ),
       join(
         pair.jq,
-        candidate,
+        candidate_result,
         candidate_trace,
         String.replace_suffix(candidate_trace, ".jsonl", ".inspection.jsonl"),
-        Path.join(pair.directory, "candidate.joined.json")
+        candidate_output
       )
     }
   end
@@ -244,13 +262,18 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
                input: relative(trials_path),
                input_authority: :private
              )
-             |> RunLifecycle.build(empty_registry)
+             |> RunLifecycle.build(empty_registry,
+               private_output: Path.join(directory, "aggregate.private.result.json")
+             )
              |> RunLifecycle.execute()
+
+    assert Jason.decode!(File.read!(Path.join(directory, "aggregate.private.result.json"))) ==
+             evaluation.value
 
     evaluation
   end
 
-  defp run_trial(manifest, registry, input_path, trace_path, opts \\ []) do
+  defp run_trial(manifest, registry, input_path, trace_path, result_path, opts \\ []) do
     inspection_path = String.replace_suffix(trace_path, ".jsonl", ".inspection.jsonl")
 
     request_opts =
@@ -261,7 +284,7 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
         inspection_capture: true
       ] ++ Keyword.take(opts, [:component_override_descriptor])
 
-    build_opts = [trace_path: trace_path, inspect: inspection_path]
+    build_opts = [trace_path: trace_path, inspect: inspection_path, private_output: result_path]
 
     case manifest
          |> ApplicationPackage.request_directory(request_opts)
@@ -269,18 +292,16 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
          |> RunLifecycle.execute() do
       {:ok, result} ->
         assert File.regular?(inspection_path)
-        result.value
+        assert Jason.decode!(File.read!(result_path)) == result.value
+        :ok
 
       {:error, error} ->
         flunk("trial failed: #{inspect(error)}")
     end
   end
 
-  defp join(jq, result, trace_path, inspection_path, output_path) do
-    result_path = output_path <> ".result"
-    {:ok, canonical} = DeterministicJSON.encode(result)
-    File.write!(result_path, canonical)
-    result_hash = "sha256:" <> Base.encode16(:crypto.hash(:sha256, canonical), case: :lower)
+  defp join(jq, result_path, trace_path, inspection_path, output_path) do
+    result_hash = result_path |> File.read!() |> sha256()
 
     {joined, 0} =
       System.cmd(
