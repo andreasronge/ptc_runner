@@ -655,6 +655,13 @@ defmodule PtcRunner.Kernel.RunState do
         %{token: token} = state
       ) do
     case state.evaluation_lease do
+      # Dispatch is sequential per process, so a second status request while
+      # one is parked is a protocol violation; overwriting would drop the
+      # first waiter's `from`. Reject rather than replace, like a double
+      # capability reserve.
+      {^lease, ^caller, _monitor_ref} when state.evaluation_release_waiter != nil ->
+        {:reply, {:error, :release_pending}, state}
+
       {^lease, ^caller, monitor_ref} ->
         if evaluation_reservations?(state, lease) do
           {:noreply, %{state | evaluation_release_waiter: {from, lease}}}

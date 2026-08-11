@@ -426,6 +426,105 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     assert %{status: {:ok, %{terminal_provider_failure?: false}}, commit: :ok} = replies
   end
 
+  test "a duplicate release-status request is rejected instead of replacing the parked waiter" do
+    state = start_state()
+    parent = self()
+
+    dispatcher = start_worker(state)
+
+    holder =
+      spawn(fn ->
+        {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, :fail_fast)
+        send(parent, {:leased, self()})
+
+        receive do
+          :go ->
+            first_ref = make_ref()
+            second_ref = make_ref()
+
+            send(
+              state.pid,
+              {:"$gen_call", {self(), first_ref},
+               {state.token, {:release_evaluation_status, lease}}}
+            )
+
+            send(
+              state.pid,
+              {:"$gen_call", {self(), second_ref},
+               {state.token, {:release_evaluation_status, lease}}}
+            )
+
+            receive do
+              {^second_ref, reply} -> send(parent, {:second_reply, reply})
+            after
+              2_000 -> send(parent, {:second_reply, :missing})
+            end
+
+            receive do
+              {^first_ref, reply} -> send(parent, {:first_reply, reply})
+            after
+              2_000 -> send(parent, {:first_reply, :missing})
+            end
+        end
+      end)
+
+    assert_receive {:leased, ^holder}, 1_000
+
+    send(dispatcher, {:reserve_capability, :mission, "cap"})
+    assert_receive {:capability_reserved, ^dispatcher, :ok}, 1_000
+
+    send(holder, :go)
+
+    # The duplicate is rejected outright; the first waiter keeps its park and
+    # completes when the reservation drains.
+    assert_receive {:second_reply, {:error, :release_pending}}, 3_000
+
+    send(dispatcher, :finish_provider)
+    assert_receive {:provider_finished, ^dispatcher, :ok}, 1_000
+    assert_receive {:first_reply, {:ok, %{terminal_provider_failure?: false}}}, 3_000
+  end
+
+  test "plain close drains every queued admission waiter" do
+    state = start_state()
+    holder = start_worker(state)
+    {:ok, _lease} = reserve!(holder)
+
+    w1 = start_worker(state)
+    reserve_async(w1, :block)
+    await_queued(state, 1)
+
+    :ok = RunState.close(state)
+    assert {:error, :run_closed} = await_reserved(w1)
+  end
+
+  test "provider death alone keeps the release parked until its dispatcher finishes" do
+    state = start_state()
+    holder = start_worker(state)
+    {:ok, lease} = reserve!(holder)
+
+    dispatcher = start_worker(state)
+    send(dispatcher, {:reserve_capability, :mission, "cap"})
+    assert_receive {:capability_reserved, ^dispatcher, :ok}, 1_000
+
+    provider = spawn(fn -> receive do: (:never -> :ok) end)
+    send(dispatcher, {:attach_provider, provider})
+    assert_receive {:provider_attached, ^dispatcher, :ok}, 1_000
+
+    send(holder, {:release_status, lease})
+    refute_receive {:release_status, ^holder, _result}, 100
+
+    # The reservation belongs to the live dispatcher, not the provider: the
+    # waiter must stay parked through the provider's death.
+    provider_monitor = Process.monitor(provider)
+    Process.exit(provider, :kill)
+    assert_receive {:DOWN, ^provider_monitor, :process, ^provider, :killed}, 1_000
+    refute_receive {:release_status, ^holder, _result}, 100
+
+    send(dispatcher, :finish_provider)
+    assert_receive {:provider_finished, ^dispatcher, :ok}, 1_000
+    assert_receive {:release_status, ^holder, {:ok, %{terminal_provider_failure?: false}}}, 1_000
+  end
+
   test "dispatcher death drains its reservation and completes a parked release" do
     state = start_state()
     holder = start_worker(state)

@@ -14,10 +14,11 @@ defmodule PtcRunner.Kernel.ParallelTimeoutLimitTest do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
 
-  defp run_park_workflow(park_ms, limit_overrides) do
+  defp park_config(park_ms, limit_overrides) do
     {:ok, park} =
       Capability.new(
         name: "park",
@@ -43,15 +44,17 @@ defmodule PtcRunner.Kernel.ParallelTimeoutLimitTest do
     {:ok, limits} = Limits.new(limit_overrides)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "parallel-timeout")
 
-    {:ok, config} =
-      RunConfig.new(
-        workflow_environment: workflow,
-        mission_environment: mission,
-        input: %{},
-        limits: limits,
-        event_sink: sink
-      )
+    RunConfig.new(
+      workflow_environment: workflow,
+      mission_environment: mission,
+      input: %{},
+      limits: limits,
+      event_sink: sink
+    )
+  end
 
+  defp run_park_workflow(park_ms, limit_overrides) do
+    {:ok, config} = park_config(park_ms, limit_overrides)
     Kernel.run(~S[(return (pcalls #(tool/park {})))], config)
   end
 
@@ -69,6 +72,23 @@ defmodule PtcRunner.Kernel.ParallelTimeoutLimitTest do
 
     assert elapsed < 5_000,
            "the narrowed deadline must fire well before the old 5s floor, took #{elapsed}ms"
+  end
+
+  test "the narrowed limit reaches REPL parallel operations" do
+    {:ok, config} =
+      park_config(10_000, parallel_timeout_ms: 200, evaluation_timeout_ms: 5_000)
+
+    {:ok, session} = ReplSession.new(config: config)
+    started = System.monotonic_time(:millisecond)
+
+    assert {:error, step, _session} =
+             ReplSession.eval(session, ~S[(pcalls #(tool/park {}))])
+
+    elapsed = System.monotonic_time(:millisecond) - started
+    assert step.fail.reason == :timeout
+
+    assert elapsed < 4_000,
+           "the REPL must honor parallel_timeout_ms, not the library 5s default, took #{elapsed}ms"
   end
 
   # Proves the removal of the unreachable hard-coded 5s ceiling: a parallel

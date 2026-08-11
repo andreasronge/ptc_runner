@@ -227,36 +227,41 @@ pins the policy.
    `evaluation_admission_timeout_ms`, it now pins the admission-timeout path
    (`failure_kind "evaluation-unavailable"`, no extra model calls) instead of
    pinning fail-fast on first collision.
-2. **Always-reply invariant:** RunState-level tests that a parked
-   `release_evaluation_status` caller and queued admission waiters each get
-   exactly one reply across every lease-ending path (commit, release, caller
-   death, run close, terminal failure). Because `GenServer.call` aliases
-   absorb duplicate replies, the riskiest race (timer expiry vs admission)
-   additionally uses a raw `:"$gen_call"` send with a plain ref, collecting
-   every `{ref, reply}` message — two replies would both be observed. State
-   inspection (queue emptied, waiter slot cleared) covers cleanup.
-3. **Queue mechanics:** FIFO order across ≥3 waiters; head admission-timeout
-   followed by next-waiter admission; multiple simultaneous timer
-   expirations; a stale `{:admission_deadline, ref}` arriving after
-   admission is ignored; a waiter `:DOWN` racing admission; budget exhausted
-   while queued → typed `:limit_exceeded` at admission and the loop drains
-   the rest; closure drains all waiters.
+2. **Always-reply invariant:** a parked `release_evaluation_status` caller
+   is resolved — never dropped — including by a commit the owner issued
+   asynchronously after parking (raw `:"$gen_call"` regression observing
+   both replies), by `close_and_drain`, and by reservation drain; a
+   duplicate status request while one is parked is rejected with a typed
+   `:release_pending` instead of replacing the first waiter's `from`.
+   Because `GenServer.call` aliases absorb duplicate replies, the riskiest
+   race (timer expiry vs admission) uses a raw send with a plain ref —
+   two replies would both be observed.
+3. **Queue mechanics:** FIFO order across 3 waiters; head admission-timeout
+   followed by next-waiter admission; two simultaneous timer expirations
+   with the queue usable afterwards; a stale `{:admission_deadline, ref}`
+   after admission is ignored; a queued waiter killed mid-wait is dropped
+   without wedging the queue; budget exhausted while queued → typed
+   `:limit_exceeded` at admission; both `fail` and plain `close` drain all
+   waiters with `:run_closed`.
 4. **Reservation sequencing (release waiter *and* admission gate):** parked
-   release completes when the last provider reservation drains — via
-   provider completion, provider death, and dispatcher death; close during
-   provider cleanup; `terminal_provider_failure?` preserved through a parked
-   release; no admission while a stale-lease provider reservation is live
-   (the lease-owner-death overlap case).
-5. **Parallel deadline:** manifest narrowing `parallel_timeout_ms` to a small
-   value fails a long `pcalls` at that deadline with the stable timeout
-   taxonomy. The late-started-operation clamp is pinned at the
-   `Parallel`/`Context` unit level (construct a context whose cap is near,
-   assert the timeout taxonomy) — an integration version would race the
-   sandbox kill on the same absolute deadline and flake. Nested ops
-   inheriting the outer absolute deadline;
-   a `:slow`-tagged test proves an op surviving past the old 5 s ceiling
+   release completes when the reservation drains via dispatcher completion
+   and via dispatcher death; provider death alone keeps it parked (the
+   reservation belongs to the dispatcher); `terminal_provider_failure?` is
+   preserved through a parked release; no grant — blocking or fail-fast —
+   while a stale-lease provider reservation is live (the lease-owner-death
+   overlap case).
+5. **Parallel deadline:** manifest narrowing `parallel_timeout_ms` fails a
+   parked `pcalls` at the configured deadline with the failure attributed
+   to `parallel_timeout_ms` (not `workflow_timeout_ms`). The
+   late-started-operation clamp is pinned at the `Parallel`/`Context` unit
+   level (a near cap beats a generous `pmap_timeout`) — an integration
+   version would race the sandbox kill on the same absolute deadline and
+   flake. Nested operations inheriting the outer absolute deadline is
+   pre-existing behavior pinned by the existing parallel-limits suite. A
+   `:slow`-tagged test proves an op surviving past the old 5 s ceiling
    under the new default (park a capability ~5.5 s via `receive after`, no
-   `Process.sleep`).
+   `Process.sleep`). A REPL test proves the configured limit reaches REPL
+   parallel operations instead of the library's 5 s default.
 6. **Fail-fast callers unchanged:** direct `reserve_evaluation` and
    `reserve_source_check` still answer `:busy` while the queue holds the
    lease (pins the scheduling policy).
