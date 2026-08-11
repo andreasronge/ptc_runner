@@ -268,6 +268,12 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
 
     assert_receive {:refresh_result, {:error, :mcp_authorization_required}}
 
+    # Terminalization runs synchronously in the refresh caller before
+    # {:refresh_result, _} is sent, so this acquire is deterministic — but
+    # only because terminalization_deadline/1 floors the post-deadline
+    # store-call budget. With the old 1ms budget the report was lost under
+    # load and this acquire wedged on :mutation_indeterminate forever; if
+    # this assertion starts failing again, suspect that budget first.
     assert {:ok, _lease} =
              Store.acquire_mutation(
                context.store,

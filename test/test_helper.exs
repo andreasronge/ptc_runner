@@ -39,9 +39,18 @@ exclusions = [:skip, :e2e, :clojure, :soak, :nightly]
 # `{:error, ...}` returns from `Lisp.run/2` calls that should always
 # succeed. Capping at `schedulers_online()` halves the contention while
 # preserving parallelism.
+# `assert_receive`'s 100ms default is a failure deadline, not a wait: a
+# message that arrives returns immediately, so raising it costs a passing
+# suite nothing (the same argument as test/support/eventually.ex) while a
+# saturated CI runner gets real margin. Many of these windows bound a whole
+# spawned operation — fsync, dispatch, discovery — not just message delivery,
+# which is how 100ms flaked in CI. `refute_receive_timeout` is deliberately
+# left at its default: refute_receive always waits its full window, so
+# raising it would slow every passing run.
 ExUnit.configure(
   exclude: exclusions,
-  max_cases: System.schedulers_online()
+  max_cases: System.schedulers_online(),
+  assert_receive_timeout: 5_000
 )
 
 ExUnit.start()

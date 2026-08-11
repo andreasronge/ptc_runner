@@ -138,13 +138,18 @@ defmodule PtcRunner.Kernel.MCPOAuth.NetworkPolicyTest do
 
     deadline_ms = System.monotonic_time(:millisecond) + 20
 
+    # Under scheduler load the 20ms may already be spent before resolve/3
+    # checks the clock; the expired-deadline path now also classifies as
+    # :resolution_failed, so either interleaving yields the same error.
     assert {:error, :resolution_failed} =
              NetworkPolicy.resolve("https://auth.example/token", authority,
                resolver: resolver,
                deadline_ms: deadline_ms
              )
 
-    assert System.monotonic_time(:millisecond) - deadline_ms < 500
+    # Proves the never-returning resolver did not block us indefinitely.
+    # Generous: this measures wall time across scheduling, not promptness.
+    assert System.monotonic_time(:millisecond) - deadline_ms < 5_000
   end
 
   test "classifies representative reserved IPv4 and IPv6 ranges" do

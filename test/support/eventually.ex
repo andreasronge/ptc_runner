@@ -61,12 +61,15 @@ defmodule PtcRunner.TestSupport.Eventually do
   @doc """
   Asserts `predicate` returns a truthy value within the module's budget.
 
-  Returns `:ok` as soon as it holds. Fails the test if the deadline passes
-  first, naming the budget that was spent. The budget is deliberately not a
-  parameter: every call site wants "as long as a loaded runner might need",
-  and no caller has yet wanted anything else.
+  Returns the first truthy value the predicate produces, so a poll that has
+  to *acquire* something (an authorization, a lease) can hand it back rather
+  than forcing the caller to fetch it again after the race it just waited
+  out. Fails the test if the deadline passes first, naming the budget that
+  was spent. The budget is deliberately not a parameter: every call site
+  wants "as long as a loaded runner might need", and no caller has yet
+  wanted anything else.
   """
-  @spec assert_eventually((-> as_boolean(term()))) :: :ok
+  @spec assert_eventually((-> as_boolean(term()))) :: as_boolean(term())
   def assert_eventually(predicate) when is_function(predicate, 0) do
     started_at_ms = System.monotonic_time(:millisecond)
     poll(predicate, started_at_ms + @default_timeout_ms, started_at_ms + @yield_phase_ms)
@@ -74,8 +77,8 @@ defmodule PtcRunner.TestSupport.Eventually do
 
   defp poll(predicate, deadline_ms, yield_until_ms) do
     cond do
-      predicate.() ->
-        :ok
+      value = predicate.() ->
+        value
 
       System.monotonic_time(:millisecond) >= deadline_ms ->
         flunk("condition did not become true within #{@default_timeout_ms}ms")

@@ -559,7 +559,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
                 config.key,
                 lease.fence,
                 :possibly_dispatched,
-                Deadline.new(max(remaining(deadline_ms), 1))
+                terminalization_deadline(deadline_ms)
               )
 
             {:error, :mcp_authorization_required}
@@ -572,7 +572,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
             config.key,
             lease.fence,
             :possibly_dispatched,
-            Deadline.new(max(remaining(deadline_ms), 1))
+            terminalization_deadline(deadline_ms)
           )
 
         {:error, :mcp_authorization_required}
@@ -601,7 +601,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
         config.key,
         lease.fence,
         outcome,
-        Deadline.new(max(remaining(deadline_ms), 1))
+        terminalization_deadline(deadline_ms)
       )
 
     {:error, close_reason(reason)}
@@ -722,7 +722,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
         config.key,
         lease.fence,
         :not_dispatched,
-        Deadline.new(max(remaining(deadline_ms), 1))
+        terminalization_deadline(deadline_ms)
       )
 
     :ok
@@ -740,6 +740,16 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
 
   defp remaining(deadline_ms),
     do: max(deadline_ms - System.monotonic_time(:millisecond), 1)
+
+  # Recording a mutation outcome is an obligation that survives the caller's
+  # deadline: a refresh failure learned after the deadline previously got
+  # `max(remaining, 1)` — a 1ms store-call budget — and when that call timed
+  # out under load the discarded report left the lease :dispatched forever,
+  # surfacing as :mutation_indeterminate on every later acquire. Floor the
+  # budget at the response-transition timeout, the same allowance reject/4
+  # and require_scopes/4 already get for post-deadline persistence.
+  defp terminalization_deadline(deadline_ms),
+    do: Deadline.new(max(remaining(deadline_ms), @response_transition_timeout_ms))
 
   defp response_transition_deadline,
     do: System.monotonic_time(:millisecond) + @response_transition_timeout_ms
