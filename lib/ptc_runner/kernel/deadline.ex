@@ -64,8 +64,12 @@ defmodule PtcRunner.Kernel.Deadline do
   the caller's.
   """
   @spec terminalization(integer()) :: t()
-  def terminalization(expires_at_ms) when is_integer(expires_at_ms),
-    do: new(max(expires_at_ms - now_ms(), @terminalization_floor_ms))
+  def terminalization(expires_at_ms) when is_integer(expires_at_ms) do
+    # One clock sample: computing "remaining" and re-anchoring with new/1
+    # would read the clock twice, and preemption between the reads extends
+    # a live absolute cutoff — the drift this module exists to forbid.
+    from_expires_at(max(expires_at_ms, now_ms() + @terminalization_floor_ms))
+  end
 
   @doc "Selects the earlier of two already-anchored deadlines."
   @spec earliest(t(), t()) :: t()
