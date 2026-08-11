@@ -507,8 +507,11 @@ that evaluator-owned provenance separately. Rebuilding, copying, or
 destructuring an equal error-shaped map after a read does not qualify. The
 shipped PTC-Lisp loop then gives the model one correction turn. An error-shaped
 value after an unrelated read is still terminal, as is any failure after a
-`write` or undeclared effect. Correction feedback includes only the bounded
-`kind` and `reason` classification, never provider details.
+`write` or undeclared effect. Correction feedback always includes the bounded
+`kind` and `reason` classification. An input-schema rejection may additionally
+name up to three schema-declared argument paths, violated keywords, and small
+declared bounds or expected sets. Submitted values, undeclared property names,
+opaque semantic-validator reasons, and provider details remain withheld.
 
 When a failure is genuinely unsafe to retry, the shipped loop still does not
 repeat the program — but it no longer discards the run either. It spends one

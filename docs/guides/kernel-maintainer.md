@@ -1152,6 +1152,20 @@ before connector cleanup. Providers are trusted host extensions: the Kernel
 contains ordinary faults and bounded results, but it is not a security
 sandbox for malicious BEAM code.
 
+When a model-authored call fails the capability's compiled input schema before
+callback entry, Dispatcher retains at most three correction facts for the agent
+loop: the schema-declared argument path, the violated keyword, and a small
+declared bound or expected set when one fits. Paths are resolved through the
+frozen schema, the root is `$`, array positions are rendered as `[]`, and
+non-identifier names use JSON-quoted bracket notation so punctuation and
+controls cannot alter path structure. Explanations are omitted when the
+submitted structure or raw error set exceeds its fixed work budget; large
+structures use a separately bounded boolean validation whose timeout and heap
+headroom derive from the run's effective workflow and evaluation limits.
+Submitted values and undeclared property names are never copied into feedback.
+A capability's custom semantic validator remains opaque because its rejection
+reason is not a schema-authored fact.
+
 Limits are host-enforced ceilings. `PtcRunner.Kernel.LimitCatalog` is the
 checked-in authority for every field's public name, scope, compiled and
 installed defaults, inclusive range, and effective-identity participation.

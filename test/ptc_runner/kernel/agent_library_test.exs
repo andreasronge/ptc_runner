@@ -1231,6 +1231,54 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute feedback =~ "private provider detail"
   end
 
+  test "agent.core receives a declared bound after rejecting capability arguments" do
+    parent = self()
+
+    rejected_call = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "oversized-page",
+          name: "run_ptc_lisp",
+          args: %{
+            "program" =>
+              ~S|(let [response (tool/paged_lookup {"limit" 700})] (if (= :ok (get response :status)) (get response :value) (fail response)))|
+          }
+        }
+      ]
+    }
+
+    {:ok, paged_lookup} =
+      Capability.new(
+        name: "paged_lookup",
+        effect: :read,
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{
+            "limit" => %{"type" => "integer", "minimum" => 1, "maximum" => 50}
+          }
+        },
+        callback: fn _arguments ->
+          send(parent, :unexpected_paged_lookup)
+          {:ok, nil}
+        end
+      )
+
+    {:ok, config} =
+      agent_config([rejected_call, @recovered], [], mission_capabilities: [paged_lookup])
+
+    assert {:ok, %{value: %{"ok" => true, "value" => "ok"}}} =
+             Kernel.run(~S|(agent.core/run "Correct the paged lookup" {"max_turns" 3})|, config)
+
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, second}
+    refute_received :unexpected_paged_lookup
+
+    feedback = second["messages"] |> List.last() |> Map.fetch!("content")
+    assert feedback =~ "limit violates maximum 50"
+    refute feedback =~ "700"
+  end
+
   test "agent.core does not correct a capability failure after an unsafe effect" do
     parent = self()
 

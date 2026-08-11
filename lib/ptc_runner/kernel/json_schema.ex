@@ -23,10 +23,13 @@ defmodule PtcRunner.Kernel.JSONSchema do
 
   Each normalized schema is at most 64 KiB with maximum depth 16, 128
   properties per object, and 256 enum members. Schemas are compiled once with
-  JSV. Runtime validation delegates to the compiled JSV root; this module does
-  not evaluate schemas.
+  JSV. Runtime validation delegates to the compiled JSV root. Input rejection
+  may retain a small explanation containing only schema-declared paths,
+  keywords, and bounds; submitted values and undeclared property names never
+  enter that explanation.
   """
 
+  alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.JSONSchema.SHA256Format
   alias PtcRunner.Kernel.JSONValue
@@ -37,8 +40,35 @@ defmodule PtcRunner.Kernel.JSONSchema do
   @max_depth 16
   @max_properties 128
   @max_enum_members 256
+  @max_violations 3
+  @max_explanation_nodes 64
+  @max_explanation_errors 64
+  @max_argument_bytes 512
+  @max_expected_bytes 256
+  @max_expected_members 8
+  @simple_argument_segment ~r/\A[A-Za-z_][A-Za-z0-9_]*\z/
+
+  @constraint_keys %{
+    type: "type",
+    enum: "enum",
+    const: "const",
+    minimum: "minimum",
+    maximum: "maximum",
+    minLength: "minLength",
+    maxLength: "maxLength",
+    minItems: "minItems",
+    maxItems: "maxItems",
+    format: "format",
+    required: "required",
+    additionalProperties: "additionalProperties"
+  }
 
   @type compiled :: JSV.Root.t()
+  @type violation :: %{
+          required(:argument) => binary(),
+          required(:constraint) => binary(),
+          optional(:expected) => term()
+        }
 
   @dialects [
     "https://json-schema.org/draft/2020-12/schema",
@@ -70,6 +100,209 @@ defmodule PtcRunner.Kernel.JSONSchema do
   rescue
     _exception -> false
   end
+
+  @doc "Validates a value and returns only bounded, schema-authored rejection facts."
+  @spec validate(compiled(), map(), term(), pos_integer(), pos_integer()) ::
+          :ok | {:error, [violation()]}
+  def validate(root, schema, value, timeout_ms, max_heap_words)
+      when is_map(schema) and not is_struct(schema) and is_integer(timeout_ms) and
+             timeout_ms > 0 and is_integer(max_heap_words) and max_heap_words > 0 do
+    if match?({:ok, _remaining}, explanation_value_budget(value, @max_explanation_nodes)) do
+      validate_with_details(root, schema, value)
+    else
+      validate_without_details(root, value, timeout_ms, max_heap_words)
+    end
+  end
+
+  defp validate_with_details(root, schema, value) do
+    case JSV.validate(value, root, cast: false) do
+      {:ok, _validated} ->
+        :ok
+
+      {:error, %JSV.ValidationError{errors: errors}} ->
+        {:error, project_violations(errors, schema)}
+    end
+  rescue
+    _exception -> {:error, []}
+  end
+
+  # A large submitted value can make JSV's raw error term exceed the evaluator
+  # heap ceiling by itself. Validate such values in a separately bounded worker
+  # with enough headroom for the admitted capability-argument ceiling, and
+  # discard every diagnostic. Resource exhaustion fails closed as invalid.
+  defp validate_without_details(root, value, timeout_ms, max_heap_words) do
+    case BoundedWorker.run(fn -> valid?(root, value) end,
+           timeout_ms: timeout_ms,
+           max_heap_words: max_heap_words,
+           cancel_with_caller: true
+         ) do
+      {:ok, true} -> :ok
+      _invalid_or_exhausted -> {:error, []}
+    end
+  end
+
+  defp explanation_value_budget(_value, remaining) when remaining < 1, do: :over
+
+  defp explanation_value_budget(value, remaining)
+       when is_nil(value) or is_boolean(value) or is_number(value) or is_binary(value),
+       do: {:ok, remaining - 1}
+
+  defp explanation_value_budget(value, remaining) when is_list(value),
+    do: explanation_list_budget(value, remaining - 1)
+
+  defp explanation_value_budget(value, remaining) when is_map(value) and not is_struct(value) do
+    Enum.reduce_while(value, {:ok, remaining - 1}, fn {_key, child}, {:ok, budget} ->
+      case explanation_value_budget(child, budget) do
+        {:ok, next_budget} -> {:cont, {:ok, next_budget}}
+        :over -> {:halt, :over}
+      end
+    end)
+  end
+
+  defp explanation_value_budget(_value, _remaining), do: :over
+
+  defp explanation_list_budget([], remaining), do: {:ok, remaining}
+  defp explanation_list_budget(_values, remaining) when remaining < 1, do: :over
+
+  defp explanation_list_budget([value | rest], remaining) do
+    case explanation_value_budget(value, remaining) do
+      {:ok, next_remaining} -> explanation_list_budget(rest, next_remaining)
+      :over -> :over
+    end
+  end
+
+  defp explanation_list_budget(_improper_tail, _remaining), do: :over
+
+  # JSV has already accumulated its raw errors. Do not normalize that whole
+  # list: one invalid array element creates one formatted message, and a valid-
+  # size argument can contain thousands of them. Refuse explanation work before
+  # projecting any candidate when the raw cardinality exceeds the fixed budget.
+  # Otherwise select at most three safe schema facts with constant extra space.
+  defp project_violations(errors, schema) when is_list(errors) do
+    if explanation_error_budget?(errors, @max_explanation_errors) do
+      select_violations(errors, schema)
+    else
+      []
+    end
+  end
+
+  defp explanation_error_budget?([], _remaining), do: true
+  defp explanation_error_budget?([_error | _rest], 0), do: false
+
+  defp explanation_error_budget?([_error | rest], remaining),
+    do: explanation_error_budget?(rest, remaining - 1)
+
+  defp select_violations(errors, schema) do
+    errors
+    |> Enum.reduce_while([], fn error, violations ->
+      case project_violation(error, schema) do
+        nil ->
+          {:cont, violations}
+
+        violation ->
+          retained = if violation in violations, do: violations, else: [violation | violations]
+
+          if length(retained) == @max_violations,
+            do: {:halt, retained},
+            else: {:cont, retained}
+      end
+    end)
+    |> Enum.sort_by(&{&1.argument, &1.constraint})
+  end
+
+  defp project_violation(error, schema) do
+    with kind when is_atom(kind) <- Map.get(error, :kind),
+         {:ok, constraint} <- Map.fetch(@constraint_keys, kind),
+         schema_path when is_list(schema_path) <- Map.get(error, :schema_path),
+         {:ok, node, path} <- schema_context(schema, schema_path),
+         {:ok, argument} <- render_argument(path),
+         {:ok, declared} <- Map.fetch(node, constraint) do
+      violation = %{argument: argument, constraint: constraint}
+
+      case project_expected(declared) do
+        {:ok, expected} -> Map.put(violation, :expected, expected)
+        :omit -> violation
+      end
+    else
+      _unsupported_or_unresolved -> nil
+    end
+  end
+
+  # JSV's raw schema path contains only schema-owned tokens and does not carry
+  # the rejected value. Resolve every property and item step against the frozen
+  # schema before retaining it. Array positions become `[]`, because a
+  # submitted index is not a declared schema fact.
+  defp schema_context(schema, schema_path),
+    do: schema_path |> Enum.reverse() |> walk_schema_context(schema, [])
+
+  defp walk_schema_context([], node, path), do: {:ok, node, Enum.reverse(path)}
+
+  defp walk_schema_context([:root | rest], node, path),
+    do: walk_schema_context(rest, node, path)
+
+  defp walk_schema_context([{:properties, name} | rest], %{"properties" => properties}, path)
+       when is_map(properties) do
+    case Map.fetch(properties, name) do
+      {:ok, child} -> walk_schema_context(rest, child, [name | path])
+      :error -> :error
+    end
+  end
+
+  defp walk_schema_context([:items | rest], %{"items" => child}, path),
+    do: walk_schema_context(rest, child, [:item | path])
+
+  defp walk_schema_context(_segments, _node, _path), do: :error
+
+  defp render_argument([]), do: {:ok, "$"}
+
+  defp render_argument(path) do
+    with {:ok, argument} <-
+           Enum.reduce_while(path, {:ok, ""}, fn
+             :item, {:ok, rendered} ->
+               {:cont, {:ok, rendered <> "[]"}}
+
+             name, {:ok, rendered} ->
+               case append_property(rendered, name) do
+                 {:ok, next} -> {:cont, {:ok, next}}
+                 :error -> {:halt, :error}
+               end
+           end),
+         true <- byte_size(argument) <= @max_argument_bytes do
+      {:ok, argument}
+    else
+      _invalid_or_too_large -> :error
+    end
+  end
+
+  defp append_property(rendered, name) when is_binary(name) do
+    if Regex.match?(@simple_argument_segment, name) do
+      separator = if rendered == "", do: "", else: "."
+      {:ok, rendered <> separator <> name}
+    else
+      case DeterministicJSON.encode(name) do
+        {:ok, encoded} -> {:ok, rendered <> "[" <> encoded <> "]"}
+        {:error, _reason} -> :error
+      end
+    end
+  end
+
+  defp project_expected(value) do
+    bounded_shape? =
+      scalar?(value) or
+        (is_list(value) and length(value) <= @max_expected_members and
+           Enum.all?(value, &scalar?/1))
+
+    with true <- bounded_shape?,
+         {:ok, encoded} <- DeterministicJSON.encode(value),
+         true <- byte_size(encoded) <= @max_expected_bytes do
+      {:ok, value}
+    else
+      _too_large_or_structured -> :omit
+    end
+  end
+
+  defp scalar?(value),
+    do: is_nil(value) or is_boolean(value) or is_number(value) or is_binary(value)
 
   defp normalize(_schema, depth) when depth > @max_depth, do: {:error, :invalid_schema}
 

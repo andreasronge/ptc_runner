@@ -18,6 +18,11 @@ defmodule PtcRunner.Kernel.Dispatcher do
   Before a mission provider publishes a terminal policy failure, its monitored
   callback records that classification in RunState so a subsequent evaluator
   kill cannot make the agent repeat the call.
+
+  A pre-callback input-schema rejection may add up to three schema-authored
+  argument violations to the Lisp error envelope. The rejected arguments,
+  undeclared property names, and opaque semantic-validator reasons remain
+  withheld.
   """
 
   alias PtcRunner.Kernel.Capability
@@ -156,7 +161,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
     # atomically re-checks the same lease.
     with true <- authenticated?(state, environment, lease),
          %Capability{} = capability <- Map.get(capabilities, name),
-         :ok <- validate(capability, arguments),
+         :ok <- validate(capability, arguments, state, environment),
          :ok <- validate_size(arguments, capability_argument_limit(state)),
          :ok <- RunState.reserve_capability(state, environment, name, lease) do
       invoke_with_events(
@@ -171,6 +176,12 @@ defmodule PtcRunner.Kernel.Dispatcher do
     else
       nil ->
         %{status: :error, kind: :capability_denied, reason: :capability_absent, retryable?: false}
+
+      {:error, :invalid_arguments, []} ->
+        protocol_error(state, event_sink, :invalid_arguments, environment, lease)
+
+      {:error, :invalid_arguments, violations} ->
+        protocol_error(state, event_sink, :invalid_arguments, environment, lease, violations)
 
       {:error, :invalid_arguments} ->
         protocol_error(state, event_sink, :invalid_arguments, environment, lease)
@@ -565,11 +576,29 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp terminal_provider_failure?(_result), do: false
 
-  defp validate(%Capability{} = capability, arguments) do
-    if JSONSchema.valid?(capability.input_validator, arguments),
-      do: semantic_validate(capability, arguments),
-      else: {:error, :invalid_arguments}
+  defp validate(%Capability{} = capability, arguments, state, environment) do
+    limits = state_limits(state)
+
+    case JSONSchema.validate(
+           capability.input_validator,
+           capability.input_schema,
+           arguments,
+           validation_timeout_ms(limits, environment),
+           validation_heap_words(limits)
+         ) do
+      :ok -> semantic_validate(capability, arguments)
+      {:error, violations} -> {:error, :invalid_arguments, violations}
+    end
   end
+
+  defp validation_timeout_ms(limits, :workflow), do: limits.workflow_timeout_ms
+  defp validation_timeout_ms(limits, :mission), do: limits.evaluation_timeout_ms
+
+  # Schema validation is host work shared by workflow and mission calls. Use
+  # the larger effective evaluator ceiling without converting byte limits into
+  # words or granting an oversized, not-yet-admitted argument extra heap.
+  defp validation_heap_words(limits),
+    do: max(limits.workflow_heap_words, limits.evaluation_heap_words)
 
   defp semantic_validate(%Capability{validate: nil}, _arguments), do: :ok
 
@@ -597,11 +626,17 @@ defmodule PtcRunner.Kernel.Dispatcher do
   # Authentication and accounting are one atomic owner operation: a mission
   # call whose evaluation died mid-validation must not spend the next
   # evaluation's shared protocol-error budget.
-  defp protocol_error(state, event_sink, reason, environment, lease) do
+  defp protocol_error(state, event_sink, reason, environment, lease, details \\ nil) do
     case RunState.protocol_error(state, environment, lease) do
-      :ok -> %{status: :error, kind: :protocol_error, reason: reason, retryable?: false}
-      {:error, :stale_evaluation} -> stale_evaluation_error()
-      {:error, :protocol_error_limit} -> limit_error(state, event_sink, :protocol_errors)
+      :ok ->
+        result = %{status: :error, kind: :protocol_error, reason: reason, retryable?: false}
+        if is_nil(details), do: result, else: Map.put(result, :details, details)
+
+      {:error, :stale_evaluation} ->
+        stale_evaluation_error()
+
+      {:error, :protocol_error_limit} ->
+        limit_error(state, event_sink, :protocol_errors)
     end
   end
 
