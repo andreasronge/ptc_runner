@@ -79,13 +79,23 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
-  @doc "Builds the workflow-only subordinate-evaluation callback."
-  def kernel_eval(state, mission, limits, event_sink, inspection_sink \\ nil) do
+  @doc """
+  Builds the workflow-only subordinate-evaluation callback.
+
+  `opts` accepts `admission: :block | :fail_fast` (default `:fail_fast`).
+  The Runner's workflow route blocks, so concurrent agent loops queue behind
+  the single evaluation lease instead of failing. The REPL keeps fail-fast:
+  a REPL expression evaluates under the session's own lease, so a blocking
+  nested `kernel-eval` would park behind itself until the sandbox timeout.
+  """
+  def kernel_eval(state, mission, limits, event_sink, inspection_sink \\ nil, opts \\ []) do
+    admission = Keyword.get(opts, :admission, :fail_fast)
+
     fn
       %{"kind" => kind, "source" => source} = arguments
       when is_binary(source) and map_size(arguments) == 2 ->
         if keyword_name(kind) == "source" do
-          evaluate_source(state, mission, source, limits, event_sink, inspection_sink)
+          evaluate_source(state, mission, source, limits, event_sink, inspection_sink, admission)
         else
           invalid_kernel_eval_request(state)
         end
@@ -100,7 +110,8 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             params,
             limits,
             event_sink,
-            inspection_sink
+            inspection_sink,
+            admission
           )
         else
           invalid_kernel_eval_request(state)
@@ -109,7 +120,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
       %{"kind" => kind, "program" => %Program{source: source}} = arguments
       when map_size(arguments) == 2 ->
         if keyword_name(kind) == "embedded" do
-          evaluate_source(state, mission, source, limits, event_sink, inspection_sink)
+          evaluate_source(state, mission, source, limits, event_sink, inspection_sink, admission)
         else
           invalid_kernel_eval_request(state)
         end
@@ -124,7 +135,8 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             params,
             limits,
             event_sink,
-            inspection_sink
+            inspection_sink,
+            admission
           )
         else
           invalid_kernel_eval_request(state)
@@ -192,18 +204,20 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end)
   end
 
-  defp evaluate_source(state, mission, source, limits, event_sink, inspection_sink) do
+  defp evaluate_source(state, mission, source, limits, event_sink, inspection_sink, admission) do
     %{
       status: :ok,
       value:
-        Evaluation.evaluate_source(
-          state,
+        state
+        |> Evaluation.evaluate_source_detailed(
           mission,
           source,
           limits.evaluation_timeout_ms,
           event_sink,
-          inspection_sink
+          inspection_sink,
+          admission: admission
         )
+        |> Evaluation.legacy_projection()
     }
   end
 
@@ -214,22 +228,25 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          params,
          limits,
          event_sink,
-         inspection_sink
+         inspection_sink,
+         admission
        ) do
     case normalize_params(params, limits.capability_argument_bytes) do
       {:ok, params} ->
         %{
           status: :ok,
           value:
-            Evaluation.evaluate_source(
-              state,
+            state
+            |> Evaluation.evaluate_source_detailed(
               mission,
               source,
               limits.evaluation_timeout_ms,
               event_sink,
               inspection_sink,
-              params
+              params: params,
+              admission: admission
             )
+            |> Evaluation.legacy_projection()
         }
 
       {:error, _reason} ->

@@ -15,6 +15,7 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
   alias PtcRunner.Lisp.Eval.Capture
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Effects
+  alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Eval.ParallelRunner
   alias PtcRunner.Lisp.Eval.ParallelRunner.Envelope
@@ -232,13 +233,13 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
     do: {:memory_exceeded, "a parallel worker exceeded its per-worker heap cap", nil}
 
   defp classify_runner_error(:timeout, _type, _index),
-    do: {:timeout, "the parallel operation exceeded its deadline", nil}
+    do: {:timeout, Helpers.parallel_timeout_message(), nil}
 
   defp classify_runner_error({:memory_exceeded, _detail}, _type, _index),
     do: {:memory_exceeded, "a parallel worker exceeded its per-worker heap cap", nil}
 
   defp classify_runner_error({:timeout, _detail}, _type, _index),
-    do: {:timeout, "the parallel operation exceeded its deadline", nil}
+    do: {:timeout, Helpers.parallel_timeout_message(), nil}
 
   defp classify_runner_error({reason, _message, nil} = error, _type, _index)
        when reason in [:memory_exceeded, :timeout, :parallel_capacity_exceeded],
@@ -458,8 +459,13 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
   defp parallel_deadline(%EvalContext{pmap_deadline: deadline}) when is_integer(deadline),
     do: deadline
 
-  defp parallel_deadline(%EvalContext{pmap_timeout: timeout}),
-    do: System.monotonic_time(:millisecond) + timeout
+  # Clamped at operation start: a relative timeout alone would let an
+  # operation started late in a run construct a deadline past the run's own
+  # absolute deadline.
+  defp parallel_deadline(%EvalContext{pmap_timeout: timeout, parallel_deadline_cap: cap}) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    if is_integer(cap), do: min(deadline, cap), else: deadline
+  end
 
   defp keyword_runtime?(value) when is_atom(value),
     do: not is_boolean(value) and not is_nil(value)

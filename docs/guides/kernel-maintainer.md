@@ -997,22 +997,36 @@ mission capability, and mutate no continuation. Source is bounded before it is
 hashed; an oversized request exposes only its byte count. The trusted-tool
 ledger likewise retains only source identity for accepted-size requests.
 
-A run holds exactly one evaluation lease. `RunState.reserve_evaluation/1`
-refuses admission with `:busy` while another caller holds it, and with
-`:limit_exceeded` once `subordinate_evaluations` is spent; a refusal charges no
-budget. Both are host conditions rather than anything a generated program did,
-so callers must not present them to a model as a correctable program error.
-The shipped `agent.core` loop fails the outer workflow as
-`evaluation-unavailable` instead of spending a turn. That makes concurrent
-agent loops under `pcalls` fail fast on contention rather than serialize: the
-provider call happens outside the lease, so branches overlap freely until they
-reach `kernel/eval-source`. Admission is deliberately not queued — queuing
-requires an absolute caller deadline that `reserve_evaluation/1` does not yet
-receive, and without one a queued branch would spend the parallel deadline
-waiting. `pmap` and `pcalls` still reject `fail` as a worker control signal, but
-they retain its bounded, payload-free failure taxonomy. A concurrent agent
-admission refusal therefore remains publicly classifiable as
-`evaluation-unavailable` without exposing the failure value.
+A run holds exactly one evaluation lease, with two admission modes.
+`RunState.reserve_evaluation/1` stays fail-fast: `:busy` while another caller
+holds the lease (or a dead evaluation's provider reservations are still
+draining), `:limit_exceeded` once `subordinate_evaluations` is spent; a
+refusal charges no budget. `reserve_evaluation/2` with `:block` — the mode
+the `kernel-eval` tool route uses — parks the caller in a FIFO admission
+queue instead, because concurrent agent loops under `pcalls` collide on the
+lease as a matter of course and PTC-Lisp offers them no way to wait or
+retry. The provider call happens outside the lease, so branches overlap
+freely until they reach `kernel/eval-source`; contention then serializes the
+brief evaluation phase rather than failing the workflow.
+
+The queue's wait is bounded server-side by `evaluation_admission_timeout_ms`
+and the run deadline — the blocking client call is infinite precisely
+because the owner's own timers answer first, replying `:admission_timeout`
+or `:deadline_expired`. Admission re-checks closure, deadline, and budget
+when the lease frees, drains rejected waiters with typed errors, and grants
+only when no reservation still references a dead evaluation's lease — the
+gate that keeps a new evaluation from overlapping the old one's external
+effects. Every enqueued waiter receives exactly one reply, or none only
+because its caller died; no transition may drop a parked `from`, including
+the parked `release_evaluation_status/2` waiter, which is always answered
+`{:ok, status}` once its lease-scoped reservations drain. While waiters are
+queued, fail-fast callers and `reserve_source_check/1` keep observing
+`:busy` — queued admission has priority. A timed-out admission is a host
+condition, not a program error: the shipped `agent.core` loop still fails
+the outer workflow as `evaluation-unavailable` without spending a turn or a
+model call. `pmap` and `pcalls` still reject `fail` as a worker control
+signal, but they retain its bounded, payload-free failure taxonomy, so that
+refusal remains publicly classifiable without exposing the failure value.
 
 Each `PtcRunner.Kernel.Capability` freezes its public identity, effect,
 visibility, bounded schemas, validator, and trusted callback. Environment

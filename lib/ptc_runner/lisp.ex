@@ -1189,6 +1189,7 @@ defmodule PtcRunner.Lisp do
         worker_max_heap: worker_max_heap,
         parallel_budget: parallel_budget,
         pmap_timeout: pmap_timeout,
+        parallel_deadline_cap: Map.get(opts, :run_deadline_ms),
         pmap_max_concurrency: pmap_max_concurrency,
         tools_meta: tools_meta,
         tool_failure_token: Map.fetch!(opts, :tool_failure_token),

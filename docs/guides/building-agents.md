@@ -156,12 +156,17 @@ while also preventing a provider outage from being scored against a candidate.
 `run-value` retains its existing fail-on-subject-failure behavior.
 
 A subordinate evaluation that is never admitted is one of those host failures.
-A run holds a single evaluation lease, so a second concurrent
-`kernel/eval-source` is refused while the first is running, as is any
-evaluation once `subordinate_evaluations` is spent. The loop fails the workflow
-as `evaluation-unavailable` and does not spend a turn or another model call on
-it — the model cannot rewrite its program to clear either condition. Agent
-loops running concurrently under `pcalls` therefore fail fast on contention.
+A run holds a single evaluation lease, but a concurrent `kernel/eval-source`
+queues behind it rather than being refused: agent loops under `pcalls`
+overlap freely during their provider calls and briefly serialize their
+evaluations, so parallel agents compose without a ceiling. The wait is
+bounded by `evaluation_admission_timeout_ms` and the run deadline. Only when
+that bound expires — or once `subordinate_evaluations` is spent — does the
+loop fail the workflow as `evaluation-unavailable`, and it does not spend a
+turn or another model call on it: the model cannot rewrite its program to
+clear a host condition. Long parallel phases also need `parallel_timeout_ms`
+headroom; its default (30 s) accommodates multi-turn agents where the old
+fixed 5 s deadline could not.
 
 ### The prompt is a separate policy seam
 

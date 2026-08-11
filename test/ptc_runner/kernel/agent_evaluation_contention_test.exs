@@ -63,7 +63,7 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
            "contention must not open a second agent turn"
   end
 
-  test "four concurrent agent loops do not retry against a held evaluation lease" do
+  test "agents queued behind a stuck evaluation time out admission without extra model calls" do
     parent = self()
     {:ok, counter} = Agent.start_link(fn -> 0 end)
     expected_requests = min(4, LispContext.default_pmap_max_concurrency())
@@ -88,8 +88,10 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
     end
 
     # Whichever branch wins the single evaluation lease parks inside this
-    # mission capability, so the other three deterministically meet `:busy`.
-    # It is released by run teardown, not by a timer.
+    # mission capability far past the narrowed admission bound, so the queued
+    # branches deterministically exhaust their admission wait. The typed
+    # host failure must surface — not a masked prelude error — and the wait
+    # must not buy any agent another model call.
     {:ok, hold} =
       Capability.new(
         name: "hold",
@@ -104,7 +106,8 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
         end
       )
 
-    {:ok, config, _sink} = build_config(requester, [hold], [])
+    {:ok, config, _sink} =
+      build_config(requester, [hold], evaluation_admission_timeout_ms: 250)
 
     source = ~S"""
     (return
@@ -121,7 +124,7 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
     assert error.details[:failure_kind] == "evaluation-unavailable"
 
     assert Agent.get(counter, & &1) == expected_requests,
-           "each started agent must ask once and contention must not buy another request"
+           "each started agent must ask once and admission waiting must not buy another request"
 
     for request_number <- 1..expected_requests do
       assert_received {:agent_request, ^request_number}
@@ -131,18 +134,115 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
     refute_received {:agent_request, ^unexpected_request}
   end
 
+  test "four concurrent agent loops all succeed by queueing behind the evaluation lease" do
+    parent = self()
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+    expected_requests = min(4, LispContext.default_pmap_max_concurrency())
+    barrier = start_barrier(expected_requests)
+
+    # Every agent's first model call arrives at the barrier before any is
+    # released, so their `kernel/eval-source` calls collide deterministically.
+    # Queued admission must serialize them instead of failing the workflow.
+    requester = fn _request ->
+      request_number = Agent.get_and_update(counter, fn count -> {count + 1, count + 1} end)
+      send(parent, {:agent_request, request_number})
+      if request_number <= expected_requests, do: await_barrier(barrier)
+
+      {:ok,
+       %{
+         content: nil,
+         tool_calls: [
+           %{id: "c1", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+         ]
+       }}
+    end
+
+    {:ok, config, _sink} = build_config(requester, [], [])
+
+    source = ~S"""
+    (return
+      (pcalls
+        #(agent.core/run-value "task 1" {"max_turns" 2})
+        #(agent.core/run-value "task 2" {"max_turns" 2})
+        #(agent.core/run-value "task 3" {"max_turns" 2})
+        #(agent.core/run-value "task 4" {"max_turns" 2})))
+    """
+
+    assert {:ok, result} = Kernel.run(source, config)
+    assert result.value == [42, 42, 42, 42]
+
+    assert Agent.get(counter, & &1) == 4,
+           "each agent asks the model exactly once; queueing must not spend extra calls"
+  end
+
+  test "eight concurrent agent loops all succeed by queueing behind the evaluation lease" do
+    parent = self()
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+    # Only the first scheduling window can be held at a barrier; workers
+    # scheduled later are answered immediately by the released barrier.
+    expected_simultaneous = min(8, LispContext.default_pmap_max_concurrency())
+    barrier = start_barrier(expected_simultaneous)
+
+    requester = fn _request ->
+      request_number = Agent.get_and_update(counter, fn count -> {count + 1, count + 1} end)
+      send(parent, {:agent_request, request_number})
+      await_barrier(barrier)
+
+      {:ok,
+       %{
+         content: nil,
+         tool_calls: [
+           %{id: "c1", name: "run_ptc_lisp", args: %{"program" => "(return 7)"}}
+         ]
+       }}
+    end
+
+    {:ok, config, _sink} = build_config(requester, [], subordinate_evaluations: 8)
+
+    source = ~S"""
+    (return
+      (pcalls
+        #(agent.core/run-value "task 1" {"max_turns" 2})
+        #(agent.core/run-value "task 2" {"max_turns" 2})
+        #(agent.core/run-value "task 3" {"max_turns" 2})
+        #(agent.core/run-value "task 4" {"max_turns" 2})
+        #(agent.core/run-value "task 5" {"max_turns" 2})
+        #(agent.core/run-value "task 6" {"max_turns" 2})
+        #(agent.core/run-value "task 7" {"max_turns" 2})
+        #(agent.core/run-value "task 8" {"max_turns" 2})))
+    """
+
+    assert {:ok, result} = Kernel.run(source, config)
+    assert result.value == List.duplicate(7, 8)
+
+    assert Agent.get(counter, & &1) == 8,
+           "each agent asks the model exactly once; queueing must not spend extra calls"
+  end
+
   defp start_barrier(expected) do
     spawn_link(fn -> collect_barrier_waiters(expected, []) end)
   end
 
   defp collect_barrier_waiters(0, waiters) do
     Enum.each(waiters, fn {caller, ref} -> send(caller, {:barrier_released, ref}) end)
+    released_barrier()
   end
 
   defp collect_barrier_waiters(remaining, waiters) do
     receive do
       {:barrier_arrive, caller, ref} ->
         collect_barrier_waiters(remaining - 1, [{caller, ref} | waiters])
+    end
+  end
+
+  # After release the barrier answers immediately: workers scheduled after
+  # the first pmap concurrency window would otherwise wait forever on a
+  # one-shot barrier that has already fired.
+  defp released_barrier do
+    receive do
+      {:barrier_arrive, caller, ref} ->
+        send(caller, {:barrier_released, ref})
+        released_barrier()
     end
   end
 

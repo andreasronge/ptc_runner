@@ -401,11 +401,14 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   defp diagnostic_prefix(_origin), do: ""
 
+  @doc false
+  @spec parallel_timeout_message() :: String.t()
+  def parallel_timeout_message, do: "the parallel operation exceeded its deadline"
+
   defp stable_parallel_error_message(:memory_exceeded),
     do: "a parallel worker exceeded its per-worker heap cap"
 
-  defp stable_parallel_error_message(:timeout),
-    do: "the parallel operation exceeded its deadline"
+  defp stable_parallel_error_message(:timeout), do: parallel_timeout_message()
 
   defp stable_parallel_error_message(:parallel_capacity_exceeded),
     do: "the parallel worker budget is exhausted; reduce nesting or collection size"
