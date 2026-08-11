@@ -17,6 +17,31 @@ mix deps.get
 mix compile
 ```
 
+## Worktree seeding
+
+`scripts/worktree.sh new` seeds a fresh worktree with the main checkout's
+`deps/`, `_build/`, and `priv/plts/` (root, Viewer, and launcher) so the
+commands above become incremental instead of cold. It prints one line per
+artifact saying whether it was seeded or why not — copy skipped, source not
+built, or already present — and skips seeding entirely when `mise.toml` or any
+lockfile differs from the main checkout's copy.
+
+The seed is an optimization, never an authority: Mix revalidates `deps/` and
+`_build/` against `mix.lock` and source digests, and dialyxir revalidates the
+project PLT against the module set, so a stale seed costs a rebuild rather
+than a wrong answer. Copies are made with copy-on-write clones where the
+filesystem supports it (APFS/btrfs), and each worktree owns its copies —
+concurrent gates never share a writable artifact.
+
+To warm the cache, keep the main checkout built: `mix compile` and
+`mix dialyzer` there make every subsequent worktree cheap. To fill gaps in an
+existing worktree (artifacts already present are left untouched):
+
+```bash
+scripts/worktree.sh seed          # seed the current worktree
+scripts/worktree.sh seed <dir>    # seed another worktree
+```
+
 ## Git hooks
 
 Run `./scripts/install-hooks.sh` once per clone. Linked worktrees share the

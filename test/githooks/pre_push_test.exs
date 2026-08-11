@@ -81,6 +81,10 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     assert output =~ ~r/Tests passed in \d+s/
     assert output =~ ~r/Pre-push checks passed in \d+s/
 
+    assert output =~ "Phase timings:"
+    assert output =~ ~r/root \(:ptc_runner\) tests\s+\d+s/
+    assert output =~ ~r/root mix prepush \(incl\. dialyzer\)\s+\d+s/
+
     assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
              ["test --exclude clojure", "prepush"]
   end
