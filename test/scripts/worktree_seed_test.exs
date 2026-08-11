@@ -55,6 +55,28 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     refute File.exists?(Path.join(worktree, "priv/plts"))
   end
 
+  test "discards a PLT that is a complete term but not a file_plt record" do
+    %{main: main, worktree: worktree} = repo_with_worktree()
+
+    write!(main, "priv/plts/project.plt", :erlang.term_to_binary(:not_a_plt))
+
+    {output, 0} = seed(main, worktree)
+
+    assert output =~ "priv/plts — not promoted"
+    refute File.exists?(Path.join(worktree, "priv/plts"))
+  end
+
+  test "discards a PLT with trailing bytes after the term" do
+    %{main: main, worktree: worktree} = repo_with_worktree()
+
+    write!(main, "priv/plts/project.plt", plt_binary() <> "garbage")
+
+    {output, 0} = seed(main, worktree)
+
+    assert output =~ "priv/plts — not promoted"
+    refute File.exists?(Path.join(worktree, "priv/plts"))
+  end
+
   test "treats a dangling destination symlink as present rather than replacing it" do
     %{main: main, worktree: worktree} = repo_with_worktree()
 

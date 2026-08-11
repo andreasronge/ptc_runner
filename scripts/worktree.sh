@@ -250,15 +250,24 @@ scrub_seed_artifact() {
   fi
 }
 
-# A PLT file is a single external term (#file_plt{}), and binary_to_term
-# rejects both truncation and trailing garbage, so a successful decode of the
-# staged copy proves the snapshot is complete regardless of what the source's
-# writer was doing. Needs erl on PATH; without it the artifact is not seeded.
+# A PLT file is a single external term, a #file_plt{} record. The staged copy
+# must decode as exactly that: `[used]` demands the term consume every byte
+# (bare binary_to_term/1 tolerates trailing garbage), and the record tag
+# rejects a complete-but-foreign term. Together they prove the snapshot is
+# whole regardless of what the source's writer was doing at the time. Needs
+# erl on PATH; without it the artifact is simply not seeded.
 plt_decodes() {
   PTC_SEED_PLT="$1" erl -noshell -eval '
     P = os:getenv("PTC_SEED_PLT"),
     R = case file:read_file(P) of
-          {ok, Bin} -> try binary_to_term(Bin) of _ -> 0 catch _:_ -> 1 end;
+          {ok, Bin} ->
+            try binary_to_term(Bin, [used]) of
+              {T, Used}
+                when is_tuple(T), element(1, T) =:= file_plt,
+                     Used =:= byte_size(Bin) -> 0;
+              _ -> 1
+            catch _:_ -> 1
+            end;
           _ -> 1
         end,
     halt(R).' 2>/dev/null
