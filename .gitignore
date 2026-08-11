@@ -17,6 +17,9 @@ examples/*/mix.lock
 # Temporary files, for example, from tests.
 /tmp/
 
+# Staging area for scripts/worktree.sh seeding; discarded on the next seed.
+/.worktree-seed-tmp/
+
 # Scratch manifests and host documents from probing runs at the repository
 # root. Deliberately anchored: a committed fixture deeper in the tree that
 # happens to end in .tmp.json should still be visible to Git.

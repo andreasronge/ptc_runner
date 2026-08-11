@@ -27,6 +27,32 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     assert File.read!(Path.join(worktree, "ptc_viewer/_build/test/marker")) == "viewer\n"
 
     assert output =~ "ptc_runner_launcher/deps — not built in the main checkout"
+    refute File.exists?(Path.join(worktree, ".worktree-seed-tmp"))
+  end
+
+  test "does not seed dialyxir's PLT hash file" do
+    %{main: main, worktree: worktree} = repo_with_worktree()
+
+    write!(main, "priv/plts/project.plt", "plt\n")
+    write!(main, "priv/plts/project.plt.hash", "hash\n")
+
+    {output, 0} = seed(main, worktree)
+
+    assert output =~ "🌱 priv/plts"
+    assert File.exists?(Path.join(worktree, "priv/plts/project.plt"))
+    refute File.exists?(Path.join(worktree, "priv/plts/project.plt.hash"))
+  end
+
+  test "treats a dangling destination symlink as present rather than replacing it" do
+    %{main: main, worktree: worktree} = repo_with_worktree()
+
+    write!(main, "deps/jason/mix.exs", "jason\n")
+    File.ln_s!("missing-target", Path.join(worktree, "deps"))
+
+    {output, 0} = seed(main, worktree)
+
+    assert output =~ "deps — already present"
+    assert File.lstat!(Path.join(worktree, "deps")).type == :symlink
   end
 
   test "skips seeding entirely when a lockfile differs" do
@@ -69,8 +95,10 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
         "ptc-worktree-seed-#{System.unique_integer([:positive, :monotonic])}"
       )
 
-    main = Path.join(root, "main")
-    worktree = Path.join(root, "wt")
+    # Both paths carry a space so field-splitting bugs in the script's
+    # `git worktree list` parsing surface here rather than on a user's disk.
+    main = Path.join(root, "main checkout")
+    worktree = Path.join(root, "wt one")
     File.mkdir_p!(main)
     on_exit(fn -> File.rm_rf!(root) end)
 
@@ -81,7 +109,7 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     Enum.each(@key_files, &write!(main, &1, "pinned\n"))
     git!(main, ["add", "."])
     git!(main, ["commit", "--quiet", "-m", "base"])
-    git!(main, ["worktree", "add", "--quiet", worktree])
+    git!(main, ["worktree", "add", "--quiet", "--detach", worktree])
 
     %{main: main, worktree: worktree}
   end

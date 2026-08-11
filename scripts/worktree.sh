@@ -75,9 +75,10 @@ idle_hours() {
   printf '%s' $(((now - newest) / 3600))
 }
 
-# The main worktree is always the first record git prints.
+# The main worktree is always the first record git prints. Strip the prefix
+# rather than taking field 2 so paths containing spaces survive.
 main_worktree() {
-  git worktree list --porcelain | awk '/^worktree /{print $2; exit}'
+  git worktree list --porcelain | awk '/^worktree /{sub(/^worktree /, ""); print; exit}'
 }
 
 # Flatten `git worktree list --porcelain` into `path<TAB>head<TAB>branch<TAB>flags`.
@@ -189,7 +190,7 @@ clone_tree() {
 }
 
 seed_worktree() {
-  local src="$1" dst="$2" file artifact seeded=0 start=$SECONDS
+  local src="$1" dst="$2" file artifact staging tmp seeded=0 start=$SECONDS
 
   for file in "${SEED_KEY_FILES[@]}"; do
     if ! cmp -s "$src/$file" "$dst/$file"; then
@@ -198,24 +199,45 @@ seed_worktree() {
     fi
   done
 
+  # Stage each copy and promote it with an atomic same-volume rename, so an
+  # interrupted seed can never leave a partial tree that a later run skips as
+  # "already present". A leftover staging dir (gitignored) from an interrupt
+  # is discarded here on the next run.
+  staging="$dst/.worktree-seed-tmp"
+  rm -rf "$staging"
+
   for artifact in "${SEED_ARTIFACTS[@]}"; do
+    tmp="$staging/${artifact//\//__}"
     if [ -L "$src/$artifact" ]; then
       echo "   ⏭️  $artifact — main checkout's copy is a symlink"
     elif [ ! -d "$src/$artifact" ]; then
       echo "   ⏭️  $artifact — not built in the main checkout"
-    elif [ -e "$dst/$artifact" ]; then
+    elif [ -e "$dst/$artifact" ] || [ -L "$dst/$artifact" ]; then
       echo "   ⏭️  $artifact — already present"
-    elif mkdir -p "$(dirname "$dst/$artifact")" &&
-      clone_tree "$src/$artifact" "$dst/$artifact"; then
+    elif mkdir -p "$staging" "$(dirname "$dst/$artifact")" &&
+      clone_tree "$src/$artifact" "$tmp" &&
+      scrub_seed_artifact "$artifact" "$tmp" &&
+      mv "$tmp" "$dst/$artifact"; then
       echo "   🌱 $artifact"
       seeded=$((seeded + 1))
     else
-      rm -rf "${dst:?}/${artifact:?}"
-      echo "   ⚠️  $artifact — copy failed; partial copy removed"
+      echo "   ⚠️  $artifact — copy failed; nothing promoted"
     fi
   done
 
+  rm -rf "$staging"
   echo "🌱 Seeded ${seeded} artifact(s) from $src in $((SECONDS - start))s"
+}
+
+# dialyxir skips its PLT check entirely when the stored dependency hash
+# matches (check_hash?/1 in mix/tasks/dialyzer.ex), and that hash covers the
+# app set, not the PLT file's integrity. Drop it from the seed so the first
+# dialyzer run in the new worktree always revalidates the copied PLT.
+scrub_seed_artifact() {
+  local artifact="$1" tree="$2"
+  if [ "$artifact" = "priv/plts" ]; then
+    rm -f "$tree"/*.hash
+  fi
 }
 
 cmd_seed() {
