@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "example.workflow", "path": "workflow.clj", "dependencies": ["agent.core"]},
+      {"library": "agent.core"}
+    ],
+    "entry": "example.workflow/run"
+  },
+  "missions": {
+    "reader": {
+      "components": [{"id": "example.reader", "path": "reader.clj"}],
+      "data": {"role": "reader"},
+      "providers": ["reader_workspace"]
+    },
+    "writer": {
+      "components": [{"id": "example.writer", "path": "writer.clj"}],
+      "data": {"role": "writer"},
+      "providers": ["writer_workspace"]
+    }
+  },
+  "input": {
+    "value": {
+      "source": "brief.txt",
+      "destination": "summary.txt"
+    }
+  },
+  "providers": {
+    "workflow": [{"name": "agent_model"}],
+    "mission": [
+      {"name": "reader_workspace"},
+      {"name": "writer_workspace", "config": {"allow": ["workspace.write"]}}
+    ]
+  },
+  "labels": {
+    "name": "named-mission-reader-writer",
+    "tags": {"mode": "agent"}
+  }
+}

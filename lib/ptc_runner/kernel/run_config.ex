@@ -9,7 +9,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   The required fields are:
 
   - `workflow_environment` — trusted outer workflow code and capabilities;
-  - `mission_environment` — confined subordinate code and capabilities;
+  - `missions` — zero to sixteen confined subordinate environments;
   - `input` — a JSON-like map exposed as the workflow evaluation context;
   - `limits` — normalized positive runtime ceilings;
   - `event_sink` — the bounded owner of canonical run events.
@@ -21,8 +21,8 @@ defmodule PtcRunner.Kernel.RunConfig do
   projection. Private sinks reserve no lossy terminal slots but retain the same
   terminal-payload check.
 
-  Construction derives and freezes `mission_inventory` from the mission
-  environment and limits. It contains both the authoritative versioned
+  Construction derives and freezes an inventory for every mission from its
+  environment and the limits. Each contains both the authoritative versioned
   structured inventory and a separately versioned compact model rendering,
   each with distinct hashes and byte counts. Hosts cannot supply mutable
   inventory text.
@@ -70,23 +70,21 @@ defmodule PtcRunner.Kernel.RunConfig do
 
   @enforce_keys [
     :workflow_environment,
-    :mission_environment,
+    :missions,
     :input,
     :limits,
     :event_sink,
     :event_sink_owner,
-    :mission_inventory,
     :run_deadline,
     :claim_id
   ]
   defstruct [
     :workflow_environment,
-    :mission_environment,
+    :missions,
     :input,
     :limits,
     :event_sink,
     :event_sink_owner,
-    :mission_inventory,
     :run_deadline,
     :claim_id,
     result_contract: nil,
@@ -102,12 +100,11 @@ defmodule PtcRunner.Kernel.RunConfig do
 
   @type t :: %__MODULE__{
           workflow_environment: WorkflowEnvironment.t(),
-          mission_environment: MissionEnvironment.t(),
+          missions: %{binary() => %{environment: MissionEnvironment.t(), inventory: term()}},
           input: map(),
           limits: Limits.t(),
           event_sink: EventSink.t(),
           event_sink_owner: pid(),
-          mission_inventory: MissionInventory.t(),
           run_deadline: Deadline.t() | nil,
           claim_id: reference(),
           result_contract: ValueContract.t() | nil,
@@ -133,7 +130,7 @@ defmodule PtcRunner.Kernel.RunConfig do
            Keyword.keys(opts) --
              [
                :workflow_environment,
-               :mission_environment,
+               :missions,
                :input,
                :limits,
                :event_sink,
@@ -148,9 +145,9 @@ defmodule PtcRunner.Kernel.RunConfig do
              ] !=
              [],
          %WorkflowEnvironment{} = workflow <- Keyword.get(opts, :workflow_environment),
-         %MissionEnvironment{} = mission <- Keyword.get(opts, :mission_environment),
          true <- JSONValue.map?(Keyword.get(opts, :input)),
          %Limits{} = limits <- Keyword.get(opts, :limits),
+         {:ok, missions} <- build_missions(Keyword.get(opts, :missions), limits),
          %EventSink{} = sink <- Keyword.get(opts, :event_sink),
          true <- valid_event_sink_contract?(sink, limits),
          true <- result_contract?(Keyword.get(opts, :result_contract)),
@@ -167,12 +164,10 @@ defmodule PtcRunner.Kernel.RunConfig do
          {:ok, labels} <- SafeMetadata.normalize_labels(Keyword.get(opts, :labels, %{})),
          {:ok, component_overrides} <-
            component_overrides(Keyword.get(opts, :component_overrides, [])),
-         {:ok, mission_inventory} <- MissionInventory.build(mission, limits),
          {:ok, run_started_metadata} <-
            run_started_metadata(
              workflow,
-             mission,
-             mission_inventory,
+             missions,
              Keyword.get(opts, :connector_snapshots, []),
              session_profile,
              labels,
@@ -184,17 +179,16 @@ defmodule PtcRunner.Kernel.RunConfig do
            EventSink.terminal_usage_capacity?(
              sink,
              limits,
-             maximum_terminal_usage(workflow, mission, limits)
+             maximum_terminal_usage(workflow, missions, limits)
            ) do
       {:ok,
        %__MODULE__{
          workflow_environment: workflow,
-         mission_environment: mission,
+         missions: missions,
          input: Keyword.fetch!(opts, :input),
          limits: limits,
          event_sink: sink,
          event_sink_owner: event_sink_owner,
-         mission_inventory: mission_inventory,
          run_deadline: run_deadline,
          claim_id: make_ref(),
          result_contract: Keyword.get(opts, :result_contract),
@@ -213,6 +207,52 @@ defmodule PtcRunner.Kernel.RunConfig do
       _ -> {:error, :invalid_run_config}
     end
   end
+
+  defp build_missions(environments, limits)
+       when is_map(environments) and map_size(environments) <= 16 do
+    Enum.reduce_while(environments, {:ok, %{}, 0, 0}, &build_mission(&1, &2, limits))
+    |> case do
+      {:ok, missions, _inventory_bytes, _model_bytes} -> {:ok, missions}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp build_missions(_environments, _limits), do: {:error, :invalid_run_config}
+
+  defp build_mission(
+         {name, %MissionEnvironment{} = environment},
+         {:ok, acc, inventory_bytes, model_bytes},
+         limits
+       ) do
+    with true <- mission_name?(name),
+         {:ok, inventory} <- MissionInventory.build(environment, limits) do
+      retain_mission(name, environment, inventory, acc, inventory_bytes, model_bytes)
+    else
+      _invalid -> {:halt, {:error, :invalid_run_config}}
+    end
+  end
+
+  defp build_mission(_entry, _acc, _limits), do: {:halt, {:error, :invalid_run_config}}
+
+  defp retain_mission(name, environment, inventory, acc, inventory_bytes, model_bytes) do
+    next_inventory_bytes = inventory_bytes + inventory.bytes
+    next_model_bytes = model_bytes + inventory.model_bytes
+
+    if next_inventory_bytes <= 262_144 and next_model_bytes <= 262_144 do
+      {:cont,
+       {:ok, Map.put(acc, name, %{environment: environment, inventory: inventory}),
+        next_inventory_bytes, next_model_bytes}}
+    else
+      {:halt, {:error, :mission_inventory_exceeded}}
+    end
+  end
+
+  defp mission_name?(name) when is_binary(name),
+    do:
+      byte_size(name) in 1..128 and
+        Regex.match?(~r/\A[a-z][a-z0-9._-]*\z/, name)
+
+  defp mission_name?(_name), do: false
 
   defp result_contract?(nil), do: true
   defp result_contract?(%ValueContract{} = contract), do: ValueContract.sealed?(contract)
@@ -256,15 +296,14 @@ defmodule PtcRunner.Kernel.RunConfig do
   end
 
   # One owner assembles the complete static `run-started` payload — labels,
-  # both prelude projections, mission-inventory fingerprints, and connector
+  # workflow and mission prelude projections, inventory fingerprints, and connector
   # snapshots — and measures it with the sink's retained-size rule against
   # the selected event-payload ceiling. A successful build therefore cannot
   # knowingly begin with a `run-started` payload its configured sink must
   # reject; the sink remains the final runtime authority.
   defp run_started_metadata(
          workflow,
-         mission,
-         inventory,
+         missions,
          snapshots,
          session_profile,
          labels,
@@ -272,16 +311,12 @@ defmodule PtcRunner.Kernel.RunConfig do
          limits
        ) do
     with {:ok, workflow_prelude} <- FrozenBundle.trace_metadata(workflow.bundle),
-         {:ok, mission_prelude} <- FrozenBundle.trace_metadata(mission.bundle) do
+         {:ok, mission_metadata} <- mission_metadata(missions) do
       payload =
         %{
           labels: labels,
           workflow_prelude: workflow_prelude,
-          mission_prelude: mission_prelude,
-          mission_inventory_hash: inventory.hash,
-          mission_inventory_bytes: inventory.bytes,
-          mission_model_context_hash: inventory.model_hash,
-          mission_model_context_bytes: inventory.model_bytes,
+          missions: mission_metadata,
           connector_snapshots: snapshots
         }
         |> maybe_put_session_profile(session_profile)
@@ -296,6 +331,27 @@ defmodule PtcRunner.Kernel.RunConfig do
     else
       {:error, :invalid_bundle} -> {:error, :invalid_run_config}
     end
+  end
+
+  defp mission_metadata(missions) do
+    Enum.reduce_while(missions |> Enum.sort_by(&elem(&1, 0)), {:ok, %{}}, fn
+      {name, %{environment: environment, inventory: inventory}}, {:ok, acc} ->
+        case FrozenBundle.trace_metadata(environment.bundle) do
+          {:ok, prelude} ->
+            metadata = %{
+              prelude: prelude,
+              inventory_hash: inventory.hash,
+              inventory_bytes: inventory.bytes,
+              model_context_hash: inventory.model_hash,
+              model_context_bytes: inventory.model_bytes
+            }
+
+            {:cont, {:ok, Map.put(acc, name, metadata)}}
+
+          {:error, _reason} ->
+            {:halt, {:error, :invalid_run_config}}
+        end
+    end)
   end
 
   @spec close_provider_session(t()) :: :ok | {:error, :provider_cleanup_failed}
@@ -355,7 +411,12 @@ defmodule PtcRunner.Kernel.RunConfig do
       byte_size(:erlang.term_to_binary(snapshots)) <= 262_144
   end
 
-  defp maximum_terminal_usage(workflow, mission, limits) do
+  defp maximum_terminal_usage(workflow, missions, limits) do
+    mission_capabilities =
+      missions
+      |> Enum.flat_map(fn {_name, mission} -> mission.environment.capabilities end)
+      |> Map.new()
+
     %{
       closed?: true,
       remaining_ms: limits.run_duration_ms,
@@ -368,12 +429,14 @@ defmodule PtcRunner.Kernel.RunConfig do
           ),
         mission:
           maximum_call_map(
-            mission.capabilities,
+            mission_capabilities,
             limits.mission_capability_calls,
             limits.mission_capability_calls_per_name
           )
       },
       subordinate_evaluations: limits.subordinate_evaluations,
+      evaluations_by_mission:
+        Map.new(missions, fn {name, _mission} -> {name, limits.subordinate_evaluations} end),
       subordinate_source_checks: limits.subordinate_source_checks,
       protocol_errors: limits.protocol_errors + 1,
       evaluation_memory_bytes: limits.evaluation_memory_bytes,
@@ -381,6 +444,7 @@ defmodule PtcRunner.Kernel.RunConfig do
       evaluation_continuation_bytes:
         limits.evaluation_memory_bytes + limits.evaluation_history_bytes,
       evaluation_busy?: true,
+      evaluation_missions: Map.keys(missions) |> Enum.sort(),
       errors: @maximum_repl_errors
     }
   end

@@ -665,7 +665,11 @@ defmodule PtcRunner.Kernel.TraceLog do
          max_result_bytes,
          _source_kind
        ) do
-    with :ok <- validate_keys(arguments, ~w(run_id limit cursor status evaluation_id capability)),
+    with :ok <-
+           validate_keys(
+             arguments,
+             ~w(run_id limit cursor status evaluation_id capability mission_name)
+           ),
          :ok <- valid_string(run_id),
          :ok <- validate_turn_filters(arguments),
          true <- Enum.any?(events, &(&1["run_id"] == run_id)),
@@ -685,12 +689,21 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp execute(:counters, events, _source_id, arguments, max_result_bytes, source_kind) do
     with :ok <-
-           validate_keys(arguments, ~w(status run_id trace_id tags name model provider from to)),
-         :ok <- validate_run_filters(arguments) do
+           validate_keys(
+             arguments,
+             ~w(status run_id trace_id tags name model provider from to mission_name)
+           ),
+         :ok <- validate_run_filters(arguments),
+         :ok <- optional_strings(arguments, ["mission_name"]) do
       selected_ids =
         events |> runs(source_kind) |> filter_runs(arguments) |> MapSet.new(& &1["run_id"])
 
-      selected = Enum.filter(events, &MapSet.member?(selected_ids, &1["run_id"]))
+      selected =
+        Enum.filter(events, fn event ->
+          MapSet.member?(selected_ids, event["run_id"]) and
+            mission_matches?(event, arguments["mission_name"])
+        end)
+
       result = counters(selected)
 
       with :ok <- within_result_limit(result, max_result_bytes), do: {:ok, result}
@@ -1910,7 +1923,13 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp validate_events(events) do
-    initial = %{sequences: %{}, run_traces: %{}, trace_runs: %{}, run_lifecycles: %{}}
+    initial = %{
+      sequences: %{},
+      run_traces: %{},
+      trace_runs: %{},
+      run_lifecycles: %{},
+      run_versions: %{}
+    }
 
     Enum.reduce_while(events, {:ok, initial}, fn event, {:ok, state} ->
       with :ok <- validate_event(event),
@@ -1920,6 +1939,7 @@ defmodule PtcRunner.Kernel.TraceLog do
            previous = Map.get(state.sequences, trace_id, 0),
            true <- sequence > previous,
            :ok <- same_identity(state, run_id, trace_id),
+           :ok <- same_run_version(state.run_versions, run_id, event["schema_version"]),
            {:ok, run_lifecycles} <-
              advance_run_lifecycle(state.run_lifecycles, run_id, event["type"]) do
         {:cont,
@@ -1928,7 +1948,8 @@ defmodule PtcRunner.Kernel.TraceLog do
             sequences: Map.put(state.sequences, trace_id, sequence),
             run_traces: Map.put(state.run_traces, run_id, trace_id),
             trace_runs: Map.put(state.trace_runs, trace_id, run_id),
-            run_lifecycles: run_lifecycles
+            run_lifecycles: run_lifecycles,
+            run_versions: Map.put(state.run_versions, run_id, event["schema_version"])
           }}}
       else
         {:error, reason} -> {:halt, {:error, reason}}
@@ -1973,9 +1994,15 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
+  defp same_run_version(run_versions, run_id, version) do
+    if Map.get(run_versions, run_id, version) == version,
+      do: :ok,
+      else: {:error, :malformed_source}
+  end
+
   defp validate_event(event) when is_map(event) do
     with true <- Enum.sort(Map.keys(event)) == Enum.sort(@event_keys),
-         1 <- event["schema_version"],
+         version when version in [1, 2] <- event["schema_version"],
          :ok <- valid_string(event["run_id"]),
          :ok <- valid_string(event["trace_id"]),
          sequence when is_integer(sequence) and sequence > 0 <- event["sequence"],
@@ -1984,17 +2011,61 @@ defmodule PtcRunner.Kernel.TraceLog do
          type when is_binary(type) <- event["type"],
          true <- type =~ @event_type,
          true <- JSONValue.map?(event["data"]),
-         :ok <- validate_event_data(type, event["data"]) do
+         :ok <- validate_event_data(version, type, event["data"]) do
       :ok
     else
-      version when is_integer(version) and version != 1 -> {:error, :unsupported_version}
+      version when is_integer(version) and version not in [1, 2] -> {:error, :unsupported_version}
       _ -> {:error, :malformed_source}
     end
   end
 
   defp validate_event(_event), do: {:error, :malformed_source}
 
-  defp validate_event_data("run-stopped", data) do
+  defp validate_event_data(version, type, data) do
+    with :ok <- validate_versioned_event_data(version, type, data) do
+      validate_run_stopped_usage(type, data)
+    end
+  end
+
+  defp validate_versioned_event_data(1, _type, data) do
+    if Map.has_key?(data, "mission_name"), do: {:error, :malformed_source}, else: :ok
+  end
+
+  defp validate_versioned_event_data(2, "run-started", data) do
+    singular =
+      ~w(mission_prelude mission_inventory_hash mission_inventory_bytes mission_model_context_hash mission_model_context_bytes)
+
+    if is_map(data["missions"]) and Enum.all?(singular, &(not Map.has_key?(data, &1))) and
+         not Map.has_key?(data, "mission_name") do
+      :ok
+    else
+      {:error, :malformed_source}
+    end
+  end
+
+  defp validate_versioned_event_data(2, type, data)
+       when type in ["run-stopped", "events-dropped"] do
+    if Map.has_key?(data, "mission_name"), do: {:error, :malformed_source}, else: :ok
+  end
+
+  defp validate_versioned_event_data(2, _type, data) do
+    environment = stringify(data["environment"])
+
+    case environment do
+      "mission" ->
+        if valid_string(data["mission_name"]) == :ok,
+          do: :ok,
+          else: {:error, :malformed_source}
+
+      "workflow" ->
+        if Map.has_key?(data, "mission_name"), do: {:error, :malformed_source}, else: :ok
+
+      _other ->
+        if Map.has_key?(data, "mission_name"), do: {:error, :malformed_source}, else: :ok
+    end
+  end
+
+  defp validate_run_stopped_usage("run-stopped", data) do
     case Map.fetch(data, "usage") do
       :error ->
         :ok
@@ -2011,7 +2082,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp validate_event_data(_type, _data), do: :ok
+  defp validate_run_stopped_usage(_type, _data), do: :ok
 
   defp runs(events, source_kind) do
     events
@@ -2027,6 +2098,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     started = Enum.find(events, &(&1["type"] == "run-started"))
     stopped = events |> Enum.filter(&(&1["type"] == "run-stopped")) |> List.last()
     labels = event_data(started, "labels", %{})
+    missions = run_missions(started)
     workflow_calls = capability_call_count(events, "workflow")
     mission_calls = capability_call_count(events, "mission")
 
@@ -2050,18 +2122,14 @@ defmodule PtcRunner.Kernel.TraceLog do
       "error_count" => Enum.count(events, &error_event?/1),
       "duration_ms" => duration_ms(started, stopped),
       "workflow_prelude" => event_data(started, "workflow_prelude", empty_prelude()),
-      "mission_prelude" => event_data(started, "mission_prelude", empty_prelude()),
-      "mission_inventory_hash" => event_data(started, "mission_inventory_hash"),
-      "mission_inventory_bytes" => event_data(started, "mission_inventory_bytes"),
-      "mission_model_context_hash" => event_data(started, "mission_model_context_hash"),
-      "mission_model_context_bytes" => event_data(started, "mission_model_context_bytes"),
+      "missions" => missions,
       "component_overrides" => event_data(started, "component_overrides", []),
       "connector_snapshots" => event_data(started, "connector_snapshots", []),
       "session_profile" => event_data(started, "session_profile"),
       "positions" => event_positions(started),
       "complete" => not is_nil(stopped),
       "truncated" => Enum.any?(events, &(&1["type"] == "events-dropped")),
-      "schema_version" => 1,
+      "schema_version" => 2,
       "source" => Atom.to_string(source_kind)
     }
   end
@@ -2071,6 +2139,27 @@ defmodule PtcRunner.Kernel.TraceLog do
   # layer never invents missing edges.
   defp empty_prelude,
     do: %{"component_ids" => [], "dependency_indices" => [], "hash" => nil}
+
+  # V1 traces described one implicit mission with singular fields. The V2
+  # query projection always exposes the named map, including when its source
+  # is a retained V1 trace.
+  defp run_missions(started) do
+    case event_data(started, "missions") do
+      missions when is_map(missions) ->
+        missions
+
+      _other ->
+        %{
+          "default" => %{
+            "prelude" => event_data(started, "mission_prelude", empty_prelude()),
+            "inventory_hash" => event_data(started, "mission_inventory_hash"),
+            "inventory_bytes" => event_data(started, "mission_inventory_bytes"),
+            "model_context_hash" => event_data(started, "mission_model_context_hash"),
+            "model_context_bytes" => event_data(started, "mission_model_context_bytes")
+          }
+        }
+    end
+  end
 
   defp subordinate_source_checks(%{
          "data" => %{"usage" => %{"subordinate_source_checks" => count}}
@@ -2130,8 +2219,29 @@ defmodule PtcRunner.Kernel.TraceLog do
     (is_nil(arguments["status"]) or status == arguments["status"]) and
       (is_nil(arguments["evaluation_id"]) or
          event_data(event, "evaluation_id") == arguments["evaluation_id"]) and
-      (is_nil(arguments["capability"]) or event_data(event, "name") == arguments["capability"])
+      (is_nil(arguments["capability"]) or event_data(event, "name") == arguments["capability"]) and
+      mission_matches?(event, arguments["mission_name"])
   end
+
+  defp mission_matches?(_event, nil), do: true
+
+  defp mission_matches?(event, expected) when is_binary(expected),
+    do: event_mission_name(event) == expected
+
+  defp event_mission_name(%{"schema_version" => 1} = event) do
+    if stringify(event_data(event, "environment")) == "mission" and
+         is_nil(event_data(event, "mission_name")),
+       do: "default",
+       else: nil
+  end
+
+  defp event_mission_name(%{"schema_version" => 2} = event) do
+    if stringify(event_data(event, "environment")) == "mission",
+      do: event_data(event, "mission_name"),
+      else: nil
+  end
+
+  defp event_mission_name(_event), do: nil
 
   defp counters(events) do
     %{
@@ -2139,6 +2249,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       "runs" => events |> Enum.map(& &1["run_id"]) |> Enum.uniq() |> length(),
       "errors" => Enum.count(events, &error_event?/1),
       "evaluations" => Enum.count(events, &(&1["type"] == "evaluation-started")),
+      "evaluations_by_mission" => evaluations_by_mission(events),
       "workflow_capability_calls" => capability_call_count(events, "workflow"),
       "mission_capability_calls" => capability_call_count(events, "mission"),
       "llm_usage" => llm_usage_counters(events)
@@ -2387,7 +2498,15 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp validate_turn_filters(arguments),
-    do: optional_strings(arguments, ~w(status evaluation_id capability))
+    do: optional_strings(arguments, ~w(status evaluation_id capability mission_name))
+
+  defp evaluations_by_mission(events) do
+    events
+    |> Enum.filter(&(&1["type"] == "evaluation-started"))
+    |> Enum.map(&event_mission_name/1)
+    |> Enum.filter(&is_binary/1)
+    |> Enum.frequencies()
+  end
 
   defp optional_strings(arguments, keys) do
     if Enum.all?(keys, &(is_nil(arguments[&1]) or valid_string(arguments[&1]) == :ok)),

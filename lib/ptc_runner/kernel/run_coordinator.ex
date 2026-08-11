@@ -14,8 +14,8 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   separate caller operation.
   """
 
-  alias PtcRunner.Kernel
   alias PtcRunner.Kernel.ApplicationSource
+  alias PtcRunner.Kernel.BundleCompiler
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
@@ -37,19 +37,29 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
 
+  @mission_compile_timeout_ms 5_000
+  @mission_bundles_bytes 4_000_000
+
   @spec prepare(RunRequest.t(), InstallationCatalog.t()) ::
           {:ok, PreparedRun.t()} | {:error, CommandDiagnostic.t()}
   def prepare(%RunRequest{} = request, %InstallationCatalog{} = catalog) do
     with true <- RunRequest.valid?(request),
          true <- InstallationCatalog.valid?(catalog),
          true <- catalog.installed_limits == request.package.installed_limits,
-         {:ok, workflow_bundle} <- compile_required(request.package.workflow_components),
-         {:ok, mission_bundle} <- compile_optional(request.package.mission_components),
+         compile_deadline = System.monotonic_time(:millisecond) + @mission_compile_timeout_ms,
+         {:ok, workflow_bundle} <-
+           compile_required(request.package.workflow_components, compile_deadline),
+         {:ok, mission_bundles} <-
+           compile_named_missions(
+             request.package.missions,
+             compile_deadline,
+             external_size(workflow_bundle)
+           ),
          :ok <- validate_entry(workflow_bundle, request.package.entry),
          {:ok, declarations} <-
-           prepare_providers(request, workflow_bundle, mission_bundle, catalog),
+           prepare_providers(request, workflow_bundle, mission_bundles, catalog),
          {:ok, derived} <-
-           derive_provider_plan(request, workflow_bundle, mission_bundle, declarations),
+           derive_provider_plan(request, workflow_bundle, mission_bundles, declarations),
          declarations <- add_post_selection_context(declarations, derived.post_selection_context),
          prepared_declarations <- prepared_declarations(declarations),
          {:ok, prepared} <-
@@ -57,7 +67,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              PreparedRun.new(
                request,
                workflow_bundle,
-               mission_bundle,
+               mission_bundles,
                "(#{request.package.entry} data/input)",
                activity,
                catalog,
@@ -227,21 +237,27 @@ defmodule PtcRunner.Kernel.RunCoordinator do
     end
   end
 
-  defp compile_required(components) do
-    case Kernel.compile_bundle(components) do
+  defp compile_required(components, deadline_ms) do
+    case BundleCompiler.compile(components, deadline_ms) do
       {:ok, bundle} -> {:ok, bundle}
       {:error, reason} -> {:error, bundle_diagnostic(reason, components)}
     end
   end
 
-  defp compile_optional([]), do: {:ok, nil}
-
-  defp compile_optional(components) do
-    case Kernel.compile_bundle(components) do
-      {:ok, bundle} -> {:ok, bundle}
-      {:error, reason} -> {:error, bundle_diagnostic(reason, components)}
+  defp compile_named_missions(missions, deadline_ms, initial_bytes) do
+    case BundleCompiler.compile_named(
+           missions,
+           deadline_ms,
+           initial_bytes,
+           @mission_bundles_bytes
+         ) do
+      {:ok, bundles} -> {:ok, bundles}
+      {:error, {failure, components}} -> {:error, bundle_diagnostic(failure, components)}
     end
   end
+
+  defp external_size(nil), do: 0
+  defp external_size(bundle), do: :erlang.external_size(bundle)
 
   defp bundle_diagnostic(%{reason: reason} = failure, components)
        when reason in [
@@ -338,7 +354,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
       else: {:error, diagnostic(:bundle, :entry_invalid)}
   end
 
-  defp prepare_providers(request, workflow_bundle, mission_bundle, catalog) do
+  defp prepare_providers(request, workflow_bundle, mission_bundles, catalog) do
     request.package.providers
     |> provider_specs()
     |> Enum.reduce_while({:ok, []}, fn {destination, selection, index}, {:ok, prepared} ->
@@ -350,7 +366,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
           prepare_provider(
             request,
             workflow_bundle,
-            mission_bundle,
+            mission_bundles,
             descriptor,
             name,
             Map.get(selection, "config", %{}),
@@ -371,7 +387,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   defp prepare_provider(
          request,
          workflow_bundle,
-         mission_bundle,
+         mission_bundles,
          descriptor,
          name,
          config,
@@ -383,7 +399,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
            selection_context(
              request,
              workflow_bundle,
-             mission_bundle,
+             mission_bundles,
              descriptor,
              name,
              occurrence
@@ -427,7 +443,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   defp selection_context(
          request,
          workflow_bundle,
-         mission_bundle,
+         mission_bundles,
          descriptor,
          name,
          occurrence
@@ -437,7 +453,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
       application_content_digest: request.package.application_content_digest,
       bundle_hashes: %{
         workflow: workflow_bundle.hash,
-        mission: if(mission_bundle, do: mission_bundle.hash, else: nil)
+        missions: mission_bundle_hashes(mission_bundles)
       },
       input_authority_class: request.input.authority,
       execution_scope_id: make_ref(),
@@ -447,8 +463,8 @@ defmodule PtcRunner.Kernel.RunCoordinator do
     }
   end
 
-  defp derive_provider_plan(request, workflow_bundle, mission_bundle, declarations) do
-    case ProviderPlan.derive(request, workflow_bundle, mission_bundle, declarations) do
+  defp derive_provider_plan(request, workflow_bundle, mission_bundles, declarations) do
+    case ProviderPlan.derive(request, workflow_bundle, mission_bundles, declarations) do
       {:ok, derived} ->
         {:ok, derived}
 
@@ -523,8 +539,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              "sha256:" <> prepared.request.package.application_content_digest,
            "effective_application_digest" => prepared.effective_application_digest,
            "workflow_bundle_hash" => prepared.workflow_bundle.hash,
-           "mission_bundle_hash" =>
-             if(prepared.mission_bundle, do: prepared.mission_bundle.hash, else: nil),
+           "mission_bundle_hashes" => mission_bundle_hashes(prepared.mission_bundles),
            "provider_activity" => false
          }}
     end
@@ -541,6 +556,9 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   defp destination_rank(:workflow), do: 0
   defp destination_rank(:mission), do: 1
+
+  defp mission_bundle_hashes(bundles),
+    do: Map.new(bundles, fn {name, bundle} -> {name, bundle && bundle.hash} end)
 
   defp diagnostic(phase, code, opts \\ []),
     do: CommandDiagnostic.new!(phase, code, opts)

@@ -109,7 +109,7 @@ signature grammar and [Components and preludes](components-and-preludes.md) for
 the runtime rules. [Building agents](building-agents.md) documents the
 correction protocol that renders this feedback for a live model.
 
-## Input and mission data
+## Input and named missions
 
 Input is either an inline JSON object or a manifest-relative JSON object file:
 
@@ -121,14 +121,45 @@ Input is either an inline JSON object or a manifest-relative JSON object file:
 "input": {"path": "input.json"}
 ```
 
-Optional mission data is separate from workflow input:
+`missions` is a map of zero to sixteen explicitly named subordinate
+environments. Each mission owns its component bundle, JSON data, provider
+grants, inventory/model context, and continuation state:
 
 ```json
-"mission": {
-  "components": [],
-  "data": {"mode": "summary"}
+"missions": {
+  "reader": {
+    "components": [{"id": "app.reader", "path": "reader.clj"}],
+    "data": {"mode": "source"},
+    "providers": ["reader_workspace"]
+  },
+  "writer": {
+    "components": [{"id": "app.writer", "path": "writer.clj"}],
+    "data": {"mode": "destination"},
+    "providers": ["writer_workspace"]
+  }
 }
 ```
+
+Names use the component-ID grammar. `"default"` is an ordinary name: it has
+no authority unless declared, and an unknown name never falls back to it.
+Provider names select unique occurrences already declared in
+`providers.mission`; they can narrow run authority but cannot introduce it.
+Across workflow and all missions, a manifest admits at most 128 component
+occurrences, 512 dependency edges, and 2,000,000 component-source bytes.
+
+Workflow code selects a mission explicitly with `kernel/eval-in`,
+`kernel/eval-source-in`, `kernel/eval-with-in`,
+`kernel/eval-source-with-in`, `kernel/check-source-in`,
+`kernel/mission-inventory-in`, or `kernel/mission-model-context-in`. The
+shipped `agent.core` loop accepts a `{"mission" "name"}` selector and uses
+`"default"` only when that option is omitted; the selected mission must exist.
+Definitions and `*1`/`*2`/`*3` history committed in one mission are invisible
+to every other mission.
+
+The runnable
+[`named-mission-reader-writer`](../../examples/named-mission-reader-writer/README.md)
+example shows one workflow orchestrating separate reader and writer agents
+with distinct APIs, provider grants, roots, data, and continuation state.
 
 Referenced files use portable lowercase ASCII logical names. A name is at most
 1,024 bytes and 16 slash-separated segments; every segment starts with a

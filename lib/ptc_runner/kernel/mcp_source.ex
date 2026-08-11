@@ -1327,13 +1327,22 @@ defmodule PtcRunner.Kernel.MCPSource do
        do: :ok
 
   defp capture_exchange(
-         %{capability_id: capability_id, inspection_sink: sink},
+         %{capability_id: capability_id, inspection_sink: sink} = context,
          transport,
          %{"id" => request_id} = request,
          %{"id" => request_id} = response
        ) do
     correlation = %{capability_id: capability_id, request_id: request_id}
-    payload = fn body -> %{transport: transport, body: body} end
+
+    payload = fn body ->
+      %{transport: transport, body: body}
+      |> then(fn payload ->
+        case Map.get(context, :mission_name) do
+          name when is_binary(name) -> Map.put(payload, :mission_name, name)
+          _ -> payload
+        end
+      end)
+    end
 
     case InspectionSink.emit(sink, "mcp-request", correlation, payload.(request)) do
       :ok -> InspectionSink.emit(sink, "mcp-response", correlation, payload.(response))

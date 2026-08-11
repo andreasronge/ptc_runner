@@ -37,6 +37,7 @@ defmodule PtcRunner.Kernel.ToolGrant do
           :workflow | :mission,
           map(),
           %{
+            optional(:mission_name) => binary() | nil,
             timeout_ms: non_neg_integer(),
             validation_heap_words: pos_integer(),
             evaluation_lease: reference() | nil,
@@ -138,7 +139,8 @@ defmodule PtcRunner.Kernel.ToolGrant do
     end)
     |> Map.merge(
       RuntimeTools.tools(state, environment, event_sink, kind,
-        lease: dispatch_context.evaluation_lease
+        lease: dispatch_context.evaluation_lease,
+        mission_name: Map.get(dispatch_context, :mission_name)
       )
     )
   end

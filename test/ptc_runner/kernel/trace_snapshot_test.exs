@@ -285,7 +285,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   @tag :tmp_dir
   test "fails closed on malformed and unsupported canonical input", %{tmp_dir: directory} do
     path = Path.join(directory, "trace.jsonl")
-    unsupported = Map.put(event("version", 1, "run-started"), "schema_version", 2)
+    unsupported = Map.put(event("version", 1, "run-started"), "schema_version", 3)
     write_events(path, [unsupported])
 
     assert {:error, :unsupported_version} =

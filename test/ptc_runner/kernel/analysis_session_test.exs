@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LogAnalysisProfile
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.MissionInventory
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SessionTrace
@@ -68,7 +69,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert identity["implicit_runtime"]["routes"] ==
              first_state.run_state
              |> RuntimeTools.tools(
-               first_state.config.mission_environment,
+               first_state.config.missions["default"].environment,
                first_state.config.event_sink,
                :mission
              )
@@ -121,22 +122,31 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     on_exit(fn -> AnalysisSession.stop(session) end)
 
     state = :sys.get_state(session.pid)
-    original = state.config.mission_environment.capabilities["trace-list-runs"]
+    original = state.config.missions["default"].environment.capabilities["trace-list-runs"]
     forged = %{original | callback: fn _arguments -> {:ok, %{"items" => []}} end}
 
     capabilities =
-      state.config.mission_environment.capabilities
+      state.config.missions["default"].environment.capabilities
       |> Map.put("trace-list-runs", forged)
       |> Map.values()
 
     assert {:ok, mission} =
              MissionEnvironment.new(
-               bundle: state.config.mission_environment.bundle,
+               bundle: state.config.missions["default"].environment.bundle,
                capabilities: capabilities,
                data: %{}
              )
 
-    config = %{state.config | mission_environment: mission}
+    assert {:ok, inventory} = MissionInventory.build(mission, state.config.limits)
+
+    config = %{
+      state.config
+      | missions:
+          Map.put(state.config.missions, "default", %{
+            environment: mission,
+            inventory: inventory
+          })
+    }
 
     assembly =
       AnalysisAssembly.seal(
@@ -461,7 +471,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
       direct =
         Evaluation.evaluate_source_detailed(
           direct_state,
-          session_state.config.mission_environment,
+          session_state.config.missions["default"].environment,
           source,
           session_state.config.limits.evaluation_timeout_ms,
           direct_sink
@@ -1777,11 +1787,12 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert {:ok, %{lifecycle: :backend_failed}} = AnalysisSession.info(session)
   end
 
+  # ex_dna:disable-for-next-line — boundary test keeps its trace fixture local and explicit
   defp seed_trace(directory, run_id) do
     path = Path.join(directory, run_id <> ".jsonl")
     {:ok, limits} = Limits.new()
     {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
-    :ok = EventSink.emit(sink, "run-started", %{})
+    :ok = EventSink.emit(sink, "run-started", %{missions: %{}})
     :ok = EventSink.emit(sink, "run-stopped", %{outcome: :ok, reason: nil})
     :ok = TraceLog.append_jsonl(path, EventSink.events(sink))
     EventSink.stop(sink)

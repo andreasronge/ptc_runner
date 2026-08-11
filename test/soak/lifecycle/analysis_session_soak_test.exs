@@ -229,7 +229,7 @@ defmodule PtcRunner.Soak.AnalysisSessionSoakTest do
   defp seed_trace(directory, run_id) do
     {:ok, limits} = Limits.new()
     {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
-    :ok = EventSink.emit(sink, "run-started", %{})
+    :ok = EventSink.emit(sink, "run-started", %{missions: %{}})
     :ok = EventSink.emit(sink, "run-stopped", %{outcome: :ok, reason: nil})
     :ok = TraceLog.append_jsonl(Path.join(directory, run_id <> ".jsonl"), EventSink.events(sink))
     EventSink.stop(sink)

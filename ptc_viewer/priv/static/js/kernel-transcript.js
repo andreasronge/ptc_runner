@@ -248,20 +248,21 @@ function Disclosure({ className, summary, hint, open = false, children }) {
 
 function Preludes({ metadata, index }) {
   const entries = [
-    ['Workflow prelude', 'workflow', metadata.workflow_prelude],
-    ['Mission prelude', 'mission', metadata.mission_prelude]
+    ['Workflow prelude', 'workflow', null, metadata.workflow_prelude],
+    ...missionEntries(metadata).map(([name, mission]) =>
+      [`Mission prelude · ${name}`, 'mission', name, mission.prelude])
   ];
 
   return html`
     <div class="kt-preludes">
-      ${entries.map(([title, environment, prelude]) => html`
-        <${PreludeCard} key=${environment} title=${title} environment=${environment}
-                        prelude=${prelude} index=${index} />`)}
+      ${entries.map(([title, environment, mission, prelude]) => html`
+        <${PreludeCard} key=${mission || environment} title=${title} environment=${environment}
+                        mission=${mission} prelude=${prelude} index=${index} />`)}
     </div>
   `;
 }
 
-function PreludeCard({ title, environment, prelude, index }) {
+function PreludeCard({ title, environment, mission, prelude, index }) {
   const ids = Array.isArray(prelude?.component_ids) ? prelude.component_ids : [];
   const components = dependencyGraph(prelude);
 
@@ -273,7 +274,7 @@ function PreludeCard({ title, environment, prelude, index }) {
       </div>
       ${components ? html`<${ComponentRows} components=${components} />` : html`<${ComponentChips} ids=${ids} />`}
       ${ids.length > 1 && html`<div class="kt-prelude-order-note">Load order — dependencies before dependants.</div>`}
-      <${ComponentSources} environment=${environment} ids=${ids} index=${index} />
+      <${ComponentSources} environment=${environment} mission=${mission} ids=${ids} index=${index} />
       <div class="kt-hash" title=${String(prelude?.hash || '')}>${shorten(prelude?.hash) || 'No bundle hash'}</div>
     </article>
   `;
@@ -282,9 +283,11 @@ function PreludeCard({ title, environment, prelude, index }) {
 // Exact effective component source is available only through the pinned
 // private inspection artifact; without it the card shows identity and
 // dependency facts alone.
-function ComponentSources({ environment, ids, index }) {
+function ComponentSources({ environment, mission, ids, index }) {
   const records = ids
-    .map(id => [id, index.byComponent.get(`${environment}/${id}`)])
+    .map(id => [id, index.byComponent.get(
+      mission ? `${environment}/${mission}/${id}` : `${environment}/${id}`
+    )])
     .filter(([, record]) => typeof record?.payload?.source === 'string');
   if (!records.length) return null;
 
@@ -366,16 +369,19 @@ function ComponentRows({ components }) {
 
 function Fingerprints({ metadata }) {
   const connectors = metadata.connector_snapshots || [];
-  const inventoryHash = metadata.mission_inventory_hash;
-  if (!inventoryHash && !connectors.length) return null;
+  const missions = missionEntries(metadata);
+  if (!missions.some(([, mission]) => mission.inventory_hash) && !connectors.length) return null;
 
   return html`
     <section class="kt-fingerprints" aria-label="Frozen run fingerprints">
-      <article class="kt-prelude-card">
-        <div class="kt-card-label">Mission inventory</div>
-        <div class="kt-fingerprint-summary">${String(metadata.mission_inventory_bytes ?? 0)} bytes</div>
-        <div class="kt-hash" title=${String(inventoryHash || '')}>${shorten(inventoryHash) || 'No inventory hash'}</div>
-      </article>
+      ${missions.map(([name, mission]) => html`
+        <article class="kt-prelude-card" key=${name}>
+          <div class="kt-card-label">Mission inventory · ${name}</div>
+          <div class="kt-fingerprint-summary">${String(mission.inventory_bytes ?? 0)} bytes</div>
+          <div class="kt-hash" title=${String(mission.inventory_hash || '')}>
+            ${shorten(mission.inventory_hash) || 'No inventory hash'}
+          </div>
+        </article>`)}
       ${connectors.map((connector, position) => {
         const acquisition = connector.acquisition || connector;
         return html`
@@ -392,6 +398,24 @@ function Fingerprints({ metadata }) {
       })}
     </section>
   `;
+}
+
+function missionEntries(metadata) {
+  if (metadata.missions && typeof metadata.missions === 'object') {
+    return Object.entries(metadata.missions).sort(([left], [right]) => left.localeCompare(right));
+  }
+
+  if (metadata.mission_prelude || metadata.mission_inventory_hash) {
+    return [['default', {
+      prelude: metadata.mission_prelude,
+      inventory_hash: metadata.mission_inventory_hash,
+      inventory_bytes: metadata.mission_inventory_bytes,
+      model_context_hash: metadata.mission_model_context_hash,
+      model_context_bytes: metadata.mission_model_context_bytes
+    }]];
+  }
+
+  return [];
 }
 
 // --- Model dialogue -------------------------------------------------------
@@ -791,6 +815,7 @@ function Execution({ transcript, index }) {
 
 function Evaluation({ evaluation, index }) {
   const environment = environmentOf(evaluation) || 'unknown';
+  const missionName = missionNameOf(evaluation);
   const status = statusOf(evaluation);
   const elapsed = evaluation.stop?.data?.duration_ms;
 
@@ -800,7 +825,7 @@ function Evaluation({ evaluation, index }) {
       <summary>
         <span class="kt-flow-marker" aria-hidden="true">${environment === 'mission' ? 'M' : 'W'}</span>
         <span class="kt-summary-main">
-          <strong>${capitalize(environment)} evaluation</strong>
+          <strong>${capitalize(environment)} evaluation${missionName ? ` · ${missionName}` : ''}</strong>
           <small>${evaluation.id || ''}</small>
         </span>
         <span class="kt-summary-meta">
@@ -997,7 +1022,10 @@ export function buildTranscript(events) {
   for (const evaluation of evaluations) {
     evaluation.capabilities = capabilities.filter(capability =>
       inSpan(capability.start || capability.stop, evaluation) &&
-      environmentOf(capability) === environmentOf(evaluation)
+      environmentOf(capability) === environmentOf(evaluation) &&
+      (environmentOf(evaluation) !== 'mission' ||
+        !missionNameOf(capability) ||
+        missionNameOf(capability) === missionNameOf(evaluation))
     );
     evaluation.capabilities.forEach(span => claimSpan(claimed, span));
     evaluation.annotations = [];
@@ -1025,6 +1053,10 @@ export function buildTranscript(events) {
   );
 
   return { evaluations, capabilities, annotations, limits, looseEvents };
+}
+
+function missionNameOf(span) {
+  return span?.start?.data?.mission_name || span?.stop?.data?.mission_name || null;
 }
 
 function pairSpans(events, startType, stopType, idKey) {

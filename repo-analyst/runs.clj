@@ -47,7 +47,7 @@
        "workflow_capability_calls" "mission_capability_calls" "error_count"
        "component_overrides" "positions" "complete" "truncated" "source"])
     "workflow_prelude" (get-in run ["workflow_prelude" "hash"])
-    "mission_prelude" (get-in run ["mission_prelude" "hash"])))
+    "missions" (get run "missions")))
 
 (defn list-runs
   "Read one public run page. Pass nil first, then only the exact returned
@@ -100,7 +100,7 @@
       {"run_id" run-id
        "component_overrides" (get data "component_overrides" [])
        "workflow_prelude" (get data "workflow_prelude")
-       "mission_prelude" (get data "mission_prelude")
+       "missions" (get data "missions")
        "provider" (get page "provider")
        "snapshot_hash" (get page "snapshot_hash")
        "resource" run-id

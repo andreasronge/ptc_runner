@@ -44,7 +44,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :envelope,
           type: :string,
           syntax: ["--envelope ENVELOPE.json"],
-          description: "atomically publish the V1 command envelope"
+          description: "atomically publish the V2 command envelope"
         },
         @help_option
       ],
@@ -63,7 +63,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :envelope,
           type: :string,
           syntax: ["--envelope ENVELOPE.json"],
-          description: "atomically publish the V1 command envelope"
+          description: "atomically publish the V2 command envelope"
         },
         @help_option
       ],
@@ -124,7 +124,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :envelope,
           type: :string,
           syntax: ["--envelope ENVELOPE.json"],
-          description: "atomically publish the V1 command envelope"
+          description: "atomically publish the V2 command envelope"
         },
         %{
           key: :authorize_mcp,
@@ -171,7 +171,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :envelope,
           type: :string,
           syntax: ["--envelope ENVELOPE.json"],
-          description: "atomically publish the V1 command envelope"
+          description: "atomically publish the V2 command envelope"
         },
         @help_option
       ],
@@ -190,7 +190,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :envelope,
           type: :string,
           syntax: ["--envelope ENVELOPE.json"],
-          description: "atomically publish the V1 command envelope"
+          description: "atomically publish the V2 command envelope"
         },
         @help_option
       ],

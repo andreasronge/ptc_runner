@@ -375,11 +375,14 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
 
   defp usage_projection(usage) when is_map(usage) do
     with {:ok, capability_calls} <- capability_calls(Map.get(usage, :capability_calls)),
+         {:ok, evaluations_by_mission} <-
+           count_map(Map.get(usage, :evaluations_by_mission, %{})),
          {:ok, events_dropped} <- count_map(Map.get(usage, :events_dropped, %{})),
          values <- %{
            "remaining_ms" => Map.get(usage, :remaining_ms),
            "capability_calls" => capability_calls,
            "subordinate_evaluations" => Map.get(usage, :subordinate_evaluations),
+           "evaluations_by_mission" => evaluations_by_mission,
            "protocol_errors" => Map.get(usage, :protocol_errors),
            "evaluation_memory_bytes" => Map.get(usage, :evaluation_memory_bytes),
            "evaluation_history_bytes" => Map.get(usage, :evaluation_history_bytes),

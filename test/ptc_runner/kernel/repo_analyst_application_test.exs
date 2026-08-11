@@ -85,7 +85,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       assert Enum.map(manifest.providers.mission, & &1["name"]) == ["workspace"]
       assert Enum.map(manifest.providers.workflow, & &1["name"]) == ["deepseek"]
       assert manifest.entry == "agent.main/run"
-      assert Enum.map(manifest.mission_components, & &1.id) == ["cap", "repo"]
+      assert Enum.map(manifest.missions["default"].components, & &1.id) == ["cap", "repo"]
     end
 
     test "the review and improve manifests add the evidence surface and nothing else" do
@@ -95,7 +95,12 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
         assert Enum.map(manifest.providers.mission, & &1["name"]) ==
                  ["workspace", "history", "private-history"]
 
-        assert Enum.map(manifest.mission_components, & &1.id) == ["cap", "repo", "runs"]
+        assert Enum.map(manifest.missions["default"].components, & &1.id) == [
+                 "cap",
+                 "repo",
+                 "runs"
+               ]
+
         assert manifest.entry == "agent.main/run"
       end
     end
@@ -401,7 +406,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
               "run_id" => "run-1",
               "component_overrides" => [],
               "workflow_prelude" => %{"hash" => "workflow"},
-              "mission_prelude" => %{"hash" => "mission"},
+              "missions" => %{"default" => %{"prelude" => %{"hash" => "mission"}}},
               "positions" => [1]
             }
           ],
@@ -415,7 +420,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
               "data" => %{
                 "component_overrides" => [],
                 "workflow_prelude" => %{"hash" => "workflow"},
-                "mission_prelude" => %{"hash" => "mission"}
+                "missions" => %{"default" => %{"prelude" => %{"hash" => "mission"}}}
               }
             }
           ],
@@ -862,7 +867,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
   # the shipped cap library as its only declared dependency.
   defp compile_facade(namespace) do
     {:ok, manifest} = Manifest.load(path("repo-analyst-review.json"))
-    component = Enum.find(manifest.mission_components, &(&1.id == namespace))
+    component = Enum.find(manifest.missions["default"].components, &(&1.id == namespace))
     {:ok, cap} = Library.component("cap")
 
     Kernel.compile_bundle([cap, component])
@@ -901,7 +906,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink

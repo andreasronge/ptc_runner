@@ -1155,7 +1155,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
       :crypto.hash(
         :sha256,
         [
-          <<"ptc.effective-application.v1", 0>>,
+          <<"ptc.effective-application.v2", 0>>,
           <<byte_size(encoded)::unsigned-big-64>>,
           encoded
         ]
@@ -1403,7 +1403,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                PreparedRun.new(
                  prepared.request,
                  prepared.workflow_bundle,
-                 prepared.mission_bundle,
+                 prepared.mission_bundles,
                  prepared.entry_source,
                  activity,
                  active_catalog,
@@ -1446,7 +1446,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
              EffectiveApplication.build(
                request,
                prepared.workflow_bundle,
-               prepared.mission_bundle,
+               prepared.mission_bundles,
                %{workflow: [], mission: []},
                :normal
              )
@@ -1477,7 +1477,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                PreparedRun.new(
                  request,
                  prepared.workflow_bundle,
-                 prepared.mission_bundle,
+                 prepared.mission_bundles,
                  prepared.entry_source,
                  activity,
                  catalog,
@@ -1500,7 +1500,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                PreparedRun.new(
                  request,
                  prepared.workflow_bundle,
-                 prepared.mission_bundle,
+                 prepared.mission_bundles,
                  prepared.entry_source,
                  activity,
                  catalog,
@@ -1700,7 +1700,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
              "effective_application_digest" =>
                outcome.envelope["result"]["effective_application_digest"],
              "workflow_bundle_hash" => outcome.envelope["result"]["workflow_bundle_hash"],
-             "mission_bundle_hash" => nil,
+             "mission_bundle_hashes" => %{},
              "provider_activity" => false
            }
   end

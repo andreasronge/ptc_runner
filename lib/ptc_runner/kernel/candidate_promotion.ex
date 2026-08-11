@@ -333,11 +333,13 @@ defmodule PtcRunner.Kernel.CandidatePromotion do
   end
 
   defp components(%ApplicationPackage{} = package, "workflow"), do: package.workflow_components
-  defp components(%ApplicationPackage{} = package, "mission"), do: package.mission_components
+
+  defp components(%ApplicationPackage{} = package, "mission/" <> name),
+    do: package.missions |> Map.fetch!(name) |> Map.fetch!(:components)
 
   defp override_target(%ApplicationPackage{component_overrides: [override | _rest]}) do
-    with {:ok, environment} when environment in ["workflow", "mission"] <-
-           Map.fetch(override, "environment"),
+    with {:ok, target} when is_map(target) <- Map.fetch(override, "target"),
+         {:ok, environment} <- target_environment(target),
          {:ok, component_id} when is_binary(component_id) <-
            Map.fetch(override, "component_id") do
       {:ok, environment, component_id}
@@ -347,6 +349,13 @@ defmodule PtcRunner.Kernel.CandidatePromotion do
   end
 
   defp override_target(%ApplicationPackage{}), do: :error
+
+  defp target_environment(%{"environment" => "workflow"}), do: {:ok, "workflow"}
+
+  defp target_environment(%{"environment" => "mission", "mission" => name}) when is_binary(name),
+    do: {:ok, "mission/" <> name}
+
+  defp target_environment(_target), do: :error
 
   defp outcome(criteria) do
     cond do
@@ -374,9 +383,17 @@ defmodule PtcRunner.Kernel.CandidatePromotion do
     do: %{id: id, status: :blocked, summary: summary, detail: detail}
 
   @doc false
-  @spec component_source(ApplicationPackage.t(), binary()) :: {:ok, binary()} | :error
-  def component_source(%ApplicationPackage{} = package, component_id) do
-    (package.workflow_components ++ package.mission_components)
+  @spec component_source(ApplicationPackage.t(), binary() | {:mission, binary()}, binary()) ::
+          {:ok, binary()} | :error
+  def component_source(%ApplicationPackage{} = package, target, component_id) do
+    components =
+      case target do
+        "workflow" -> package.workflow_components
+        {:mission, name} -> get_in(package.missions, [name, :components]) || []
+        _ -> []
+      end
+
+    components
     |> Enum.find(&(&1.id == component_id))
     |> case do
       %Component{source: source} -> {:ok, source}

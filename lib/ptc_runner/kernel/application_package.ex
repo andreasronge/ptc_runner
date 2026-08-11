@@ -16,13 +16,14 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   while its closure is acquired.
 
   Content identity is SHA-256 over
-  `"ptc.application-content.v1\\0"`, a big-endian `u32` record count, and
+  `"ptc.application-content.v2\\0"`, a big-endian `u32` record count, and
   records sorted by kind byte then UTF-8 logical name. Each record is
   `kind || u32(name-bytes) || name || u64(payload-bytes) || payload`.
   The closed kinds are projected-manifest `0x01`, effective-local-source
   `0x02`, shipped-library-source `0x03`, input-contract `0x04`,
   result-contract `0x05`, direct-dependencies `0x06`, and verified-override
-  identity `0x07`. Component records use `workflow/<id>` or `mission/<id>`;
+  identity `0x07`. Component records use `workflow/<id>` or
+  `mission/<mission-name>/<id>`;
   contract names are `input` and `result`. Duplicate kind/name pairs are
   invalid. Manifest, dependency, and override payloads use
   `PtcRunner.Kernel.TypedCanonicalJSON`; source and contract payloads retain
@@ -46,7 +47,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   alias PtcRunner.Kernel.TypedCanonicalJSON
   alias PtcRunner.Kernel.ValueContract
 
-  @content_domain <<"ptc.application-content.v1", 0>>
+  @content_domain <<"ptc.application-content.v2", 0>>
   @max_records 512
   @max_bytes 8_388_608
   @input_marker %{"$ptc_input" => "excluded"}
@@ -63,12 +64,10 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
     :manifest,
     :workflow_components,
     :workflow_component_kinds,
-    :mission_components,
-    :mission_component_kinds,
     :entry,
     :contracts,
     :contract_sources,
-    :mission_data,
+    :missions,
     :providers,
     :limits,
     :installed_limits,
@@ -88,12 +87,10 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
           manifest: map(),
           workflow_components: [PtcRunner.Kernel.Component.t()],
           workflow_component_kinds: %{binary() => :local | :library},
-          mission_components: [PtcRunner.Kernel.Component.t()],
-          mission_component_kinds: %{binary() => :local | :library},
           entry: binary(),
           contracts: %{input: ValueContract.t() | nil, result: ValueContract.t() | nil},
           contract_sources: %{input: binary() | nil, result: binary() | nil},
-          mission_data: map(),
+          missions: map(),
           providers: %{workflow: [map()], mission: [map()]},
           limits: Limits.t(),
           installed_limits: Limits.t(),
@@ -344,13 +341,9 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   defp apply_override(manifest, {%ComponentOverride{} = override, accounting})
        when accounting in [:captured, :external] do
     result =
-      with {:ok, workflow, workflow?} <-
-             ComponentOverride.apply(manifest.workflow_components, override),
-           {:ok, mission, mission?} <-
-             ComponentOverride.apply(manifest.mission_components, override),
-           {:ok, environment} <- override_environment(workflow?, mission?) do
-        effective = %{manifest | workflow_components: workflow, mission_components: mission}
-        identity = Map.put(ComponentOverride.identity(override), "environment", environment)
+      with {:ok, workflow, missions} <- apply_qualified_override(manifest, override) do
+        effective = %{manifest | workflow_components: workflow, missions: missions}
+        identity = ComponentOverride.identity(override)
         {:ok, effective, [{identity, override, accounting}]}
       end
 
@@ -364,10 +357,31 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
        when role in [:external_input, :component_override],
        do: {:error, {:source_role, role, reason}}
 
-  defp override_environment(true, false), do: {:ok, "workflow"}
-  defp override_environment(false, true), do: {:ok, "mission"}
-  defp override_environment(true, true), do: {:error, :ambiguous_override_target}
-  defp override_environment(false, false), do: {:error, :override_component_not_selected}
+  defp apply_qualified_override(
+         manifest,
+         %ComponentOverride{target: %{"environment" => "workflow"}} = override
+       ) do
+    case ComponentOverride.apply(manifest.workflow_components, override) do
+      {:ok, components, true} -> {:ok, components, manifest.missions}
+      {:ok, _components, false} -> {:error, :override_component_not_selected}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp apply_qualified_override(
+         manifest,
+         %ComponentOverride{target: %{"environment" => "mission", "mission" => name}} = override
+       ) do
+    with {:ok, mission} <- Map.fetch(manifest.missions, name),
+         {:ok, components, true} <- ComponentOverride.apply(mission.components, override) do
+      {:ok, manifest.workflow_components,
+       Map.put(manifest.missions, name, %{mission | components: components})}
+    else
+      :error -> {:error, :override_component_not_selected}
+      {:ok, _components, false} -> {:error, :override_component_not_selected}
+      {:error, _reason} = error -> error
+    end
+  end
 
   defp build(manifest, override_pairs, accounting) do
     # The package-facing projection keeps the resolved environment and adds
@@ -390,12 +404,10 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
         manifest: Map.put(manifest.document, "input", @input_marker),
         workflow_components: manifest.workflow_components,
         workflow_component_kinds: manifest.workflow_component_kinds,
-        mission_components: manifest.mission_components,
-        mission_component_kinds: manifest.mission_component_kinds,
         entry: manifest.entry,
         contracts: manifest.contracts,
         contract_sources: manifest.contract_sources,
-        mission_data: manifest.mission_data,
+        missions: manifest.missions,
         providers: manifest.providers,
         limits: manifest.limits,
         installed_limits: manifest.installed_limits,
@@ -424,12 +436,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
              manifest.workflow_components,
              manifest.workflow_component_kinds
            ),
-         {:ok, mission} <-
-           component_records(
-             "mission",
-             manifest.mission_components,
-             manifest.mission_component_kinds
-           ),
+         {:ok, mission} <- mission_component_records(manifest.missions),
          {:ok, contracts} <- contract_records(manifest),
          {:ok, overrides} <- override_records(override_pairs) do
       records = [{0x01, "", projected_manifest} | workflow ++ mission ++ contracts ++ overrides]
@@ -438,6 +445,15 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
         do: {:ok, records},
         else: {:error, :duplicate_application_record}
     end
+  end
+
+  defp mission_component_records(missions) do
+    Enum.reduce_while(missions, {:ok, []}, fn {name, mission}, {:ok, records} ->
+      case component_records("mission/" <> name, mission.components, mission.kinds) do
+        {:ok, next} -> {:cont, {:ok, records ++ next}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
   end
 
   defp component_records(environment, components, kinds) do
@@ -495,8 +511,8 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
 
   defp override_records(pairs) do
     Enum.reduce_while(pairs, {:ok, []}, fn {identity, _override, _accounting}, {:ok, records} ->
-      name = identity["environment"] <> "/" <> identity["component_id"]
-      safe = Map.delete(identity, "environment")
+      name = override_target_name(identity["target"]) <> "/" <> identity["component_id"]
+      safe = identity
 
       case TypedCanonicalJSON.encode(safe) do
         {:ok, encoded} -> {:cont, {:ok, [{0x07, name, encoded} | records]}}
@@ -508,6 +524,11 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
       {:error, _reason} = error -> error
     end
   end
+
+  defp override_target_name(%{"environment" => "workflow"}), do: "workflow"
+
+  defp override_target_name(%{"environment" => "mission", "mission" => name}),
+    do: "mission/" <> name
 
   defp unique_records?(records) do
     identities = Enum.map(records, fn {kind, name, _payload} -> {kind, name} end)
@@ -603,10 +624,9 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
         manifest.workflow_components,
         manifest.workflow_component_kinds
       ) ++
-        library_component_ids(
-          manifest.mission_components,
-          manifest.mission_component_kinds
-        )
+        Enum.flat_map(manifest.missions, fn {_name, mission} ->
+          library_component_ids(mission.components, mission.kinds)
+        end)
 
     ids
     |> Enum.uniq()

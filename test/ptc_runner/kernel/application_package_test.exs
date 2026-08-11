@@ -71,7 +71,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
              package_projection(memory_request.package)
 
     assert directory_request.package.application_content_digest ==
-             "2a8ceea0df88f23e5115dd1cfcbad1f2af923f5654281aefd90ec06fcfe64bfc"
+             "abe6d9622bbb77dd2ed6f66c6878b96e2a3b51daac35bf6beb62b3c99c2da9ee"
 
     assert directory_request.package.contract_behavior_hashes.input ==
              "7dfe6c77fe7a1360821e8848da675d1d869cc8fe5d7cf38313c749c40cc49ed3"
@@ -400,6 +400,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
 
   test "memory acquisition rejects caller-built override structs" do
     forged = %ComponentOverride{
+      target: %{"environment" => "workflow"},
       component_id: "app",
       base_source_hash: ComponentOverride.hash(@source),
       source_hash: ComponentOverride.hash("different bytes"),
@@ -466,7 +467,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
         "components" => [%{"library" => "kernel"}],
         "entry" => "kernel/return-value"
       },
-      "mission" => %{"components" => [%{"library" => "kernel"}]},
+      "missions" => %{"default" => %{"components" => [%{"library" => "kernel"}]}},
       "input" => %{"value" => %{}}
     }
 
@@ -487,7 +488,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     manifest = %{
       "version" => 1,
       "workflow" => %{"components" => components, "entry" => "component0/run"},
-      "mission" => %{"components" => components},
+      "missions" => %{"default" => %{"components" => components}},
       "input" => %{"value" => %{}}
     }
 
@@ -496,7 +497,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
       "shared.clj" => String.duplicate(" ", 40_000)
     }
 
-    assert {:error, :document_limit_exceeded} =
+    assert {:error, {:manifest_path, _, :mission_aggregate_limit_exceeded}} =
              ApplicationPackage.acquire_memory("app.json", documents)
   end
 
@@ -541,6 +542,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
   } do
     descriptor =
       Jason.encode!(%{
+        "target" => %{"environment" => "workflow"},
         "component_id" => "app",
         "base_source_hash" => ComponentOverride.hash(@source),
         "source_hash" => ComponentOverride.hash(@source),
@@ -571,6 +573,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
   test "nested override references resolve identically in both adapters", %{tmp_dir: directory} do
     descriptor =
       Jason.encode!(%{
+        "target" => %{"environment" => "workflow"},
         "component_id" => "app",
         "base_source_hash" => ComponentOverride.hash(@source),
         "source_hash" => ComponentOverride.hash(@source),
@@ -601,6 +604,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
   test "safe candidate symlink aliases retain adapter-parity accounting", %{tmp_dir: directory} do
     descriptor =
       Jason.encode!(%{
+        "target" => %{"environment" => "workflow"},
         "component_id" => "app",
         "base_source_hash" => ComponentOverride.hash(@source),
         "source_hash" => ComponentOverride.hash(@source),
@@ -808,6 +812,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
 
   defp override_descriptor(component_id, base, candidate) do
     Jason.encode!(%{
+      "target" => %{"environment" => "workflow"},
       "component_id" => component_id,
       "base_source_hash" => ComponentOverride.hash(base),
       "source_hash" => ComponentOverride.hash(candidate),

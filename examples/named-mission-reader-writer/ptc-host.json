@@ -1,0 +1,48 @@
+{
+  "credentials": {
+    "openrouter_key": {"env": "OPENROUTER_API_KEY"}
+  },
+  "install": {
+    "agent_model": {
+      "source": "llm",
+      "installation_revision": "named-missions-example-v1",
+      "model": "openrouter:deepseek/deepseek-v4-flash",
+      "credential": "openrouter_key",
+      "cache": false
+    },
+    "reader_workspace": {
+      "source": "mcp",
+      "installation_revision": "filesystem-reader-v1",
+      "transport": {
+        "type": "stdio",
+        "command": "node",
+        "cwd": ".",
+        "args": ["../mcp/filesystem/dist/server.js", "--root", "reader-state", "--include", "**"],
+        "inherit_environment": true,
+        "env": {}
+      },
+      "tools": {
+        "read_text_file": {"as": "workspace.read", "effect": "read"}
+      }
+    },
+    "writer_workspace": {
+      "source": "mcp",
+      "installation_revision": "named-mission-writer-v1",
+      "transport": {
+        "type": "stdio",
+        "command": "elixir",
+        "cwd": ".",
+        "args": ["writer_server.exs", "writer-state"],
+        "inherit_environment": true,
+        "env": {}
+      },
+      "tools": {
+        "write_text_file": {
+          "as": "workspace.write",
+          "effect": "write",
+          "model_visible": true
+        }
+      }
+    }
+  }
+}

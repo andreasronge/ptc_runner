@@ -23,6 +23,8 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   counted in each `list_runs` row's `counts` but are not an independent
   collection: a raw artifact load remains the way to read their bounded
   `prints` list and `details` map for one `evaluation_id`.
+  V4 projections include `mission_name` on every mission-owned result so
+  repeated component and capability names remain unambiguous.
   """
 
   @default_limit 100
@@ -203,6 +205,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       "trace_id" => input["trace_id"],
       "capability_id" => capability_id,
       "environment" => input_payload["environment"],
+      "mission_name" => input_payload["mission_name"],
       "name" => input_payload["name"],
       "input_sequence" => input["sequence"],
       "output_sequence" => output["sequence"],
@@ -223,6 +226,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       "capability_id" => capability_id,
       "request_id" => request_id,
       "transport" => request_payload["transport"],
+      "mission_name" => request_payload["mission_name"],
       "request_sequence" => request["sequence"],
       "response_sequence" => response["sequence"],
       "request_timestamp" => request["timestamp"],
@@ -242,6 +246,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       "sequence" => record["sequence"],
       "timestamp" => record["timestamp"],
       "environment" => payload["environment"],
+      "mission_name" => payload["mission_name"],
       "program_kind" => payload["program_kind"],
       "source" => payload["source"],
       "source_hash" => descriptor_hash(payload["source_hash"]),
@@ -259,6 +264,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       "sequence" => record["sequence"],
       "timestamp" => record["timestamp"],
       "environment" => payload["environment"],
+      "mission_name" => payload["mission_name"],
       "source" => payload["source"],
       "source_hash" => descriptor_hash(payload["source_hash"]),
       "source_bytes" => payload["source_bytes"]

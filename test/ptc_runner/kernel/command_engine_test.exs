@@ -305,6 +305,48 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "V2 success and error envelopes retain evaluations by mission", %{tmp_dir: directory} do
+    manifest =
+      valid_manifest(%{
+        "workflow" => %{
+          "components" => [
+            %{"id" => "app", "path" => "main.clj", "dependencies" => ["kernel"]},
+            %{"library" => "kernel"}
+          ],
+          "entry" => "app/run"
+        },
+        "missions" => %{"reader" => %{}}
+      })
+
+    success = write_application(directory, "mission-usage-success", manifest)
+
+    File.write!(
+      Path.join(Path.dirname(success), "main.clj"),
+      ~S|(ns app) (defn run [_input] (return (get (kernel/eval-source-in "reader" "(return 1)") :value)))|
+    )
+
+    assert {:ok, %CommandOutcome{} = success_outcome} = CommandEngine.dispatch(["run", success])
+
+    assert get_in(success_outcome.envelope, ["execution", "usage", "evaluations_by_mission"]) ==
+             %{"reader" => 1}
+
+    failed = write_application(directory, "mission-usage-error", manifest)
+
+    File.write!(
+      Path.join(Path.dirname(failed), "main.clj"),
+      ~S|(ns app) (defn run [_input] (do (kernel/eval-source-in "reader" "(return 1)") (fail :nope)))|
+    )
+
+    assert {:error, %CommandOutcome{} = failed_outcome} = CommandEngine.dispatch(["run", failed])
+
+    assert get_in(failed_outcome.envelope, ["execution", "usage", "evaluations_by_mission"]) ==
+             %{"reader" => 1}
+
+    assert_schema_valid(success_outcome.envelope)
+    assert_schema_valid(failed_outcome.envelope)
+  end
+
+  @tag :tmp_dir
   test "shared dispatch classifies an invalid terminal result as a result-guard failure", %{
     tmp_dir: directory
   } do
@@ -1231,7 +1273,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                },
                %{
                  "switches" => ["--envelope ENVELOPE.json"],
-                 "description" => "atomically publish the V1 command envelope"
+                 "description" => "atomically publish the V2 command envelope"
                },
                %{
                  "switches" => ["--help"],
@@ -2503,7 +2545,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert %CommandOutcome{} = CommandOutcome.error({:doctor, :connect}, run_ref, active)
 
     manual = %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "command" => "validate",
       "status" => "error",
       "run_ref" => run_ref,
@@ -2534,7 +2576,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       end
 
       manual = %{
-        "schema_version" => 1,
+        "schema_version" => 2,
         "command" =>
           case command_mode do
             {:doctor, :connect} -> "doctor"
@@ -2616,7 +2658,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     }
 
     classified = %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "command" => "run",
       "status" => "error",
       "run_ref" => run_ref,
@@ -2717,7 +2759,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     result_publication = CommandDiagnostic.new!(:publication, :result_publication_failed)
 
     envelope = %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "command" => "run",
       "status" => "error",
       "run_ref" => run_ref,
@@ -2775,7 +2817,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "application_content_digest" => "sha256:" <> String.duplicate("0", 64),
       "effective_application_digest" => "sha256:" <> String.duplicate("1", 64),
       "workflow_bundle_hash" => String.duplicate("2", 64),
-      "mission_bundle_hash" => nil,
+      "mission_bundle_hashes" => %{},
       "provider_activity" => false
     }
 
@@ -2797,7 +2839,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.exit_status == 2
 
     assert outcome.envelope == %{
-             "schema_version" => 1,
+             "schema_version" => 2,
              "command" => "unknown",
              "status" => "error",
              "run_ref" => outcome.envelope["run_ref"],
@@ -3270,7 +3312,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     cases = [
       {["workflow"],
        %{"workflow" => %{"components" => [], "entry" => "app/run", "extra" => true}}},
-      {["mission"], %{"mission" => %{"extra" => true}}},
+      {["missions", "default"], %{"missions" => %{"default" => %{"extra" => true}}}},
       {["input"], %{"input" => %{"value" => %{}, "extra" => true}}},
       {["input"], %{"input" => %{"caller-secret" => 1}}},
       {["contracts"], %{"contracts" => %{"extra" => true}}},
@@ -3294,7 +3336,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         write_application(directory, "nested-#{length(path)}-#{hd(path)}", manifest)
 
       outcome = assert_error(["validate", directory_path], "application", "schema_violation")
-      expected_pointer = Enum.map_join(path, "", &"/#{&1}")
+
+      expected_pointer =
+        if hd(path) == "missions", do: "/missions", else: Enum.map_join(path, "", &"/#{&1}")
+
       assert outcome.envelope["error"]["path"] == expected_pointer
       refute Jason.encode!(outcome.envelope) =~ "caller-secret"
       refute Jason.encode!(outcome.envelope) =~ "must-not-escape"
@@ -3389,7 +3434,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       {["labels", "tags"], %{"labels" => %{"tags" => []}}},
       {["labels", "tags"], %{"labels" => %{"tags" => nil}}},
       {["labels", "tags", "stage"], %{"labels" => %{"tags" => %{"stage" => "secret"}}}},
-      {["mission", "data"], %{"mission" => %{"data" => []}}},
+      {["missions", "default", "data"], %{"missions" => %{"default" => %{"data" => []}}}},
       {["version"], %{"version" => 2}},
       {["$schema"], %{"$schema" => 42}},
       {["$schema"], %{"$schema" => nil}}
@@ -3400,7 +3445,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       name = "invalid-value-#{index}-" <> Enum.map_join(path, "-", &to_string/1)
       directory_path = write_application(directory, name, manifest)
       outcome = assert_error(["validate", directory_path], "application", "schema_violation")
-      expected_pointer = Enum.map_join(path, "", &"/#{&1}")
+
+      expected_pointer =
+        if hd(path) == "missions", do: "/missions", else: Enum.map_join(path, "", &"/#{&1}")
+
       assert outcome.envelope["error"]["path"] == expected_pointer
 
       documents = %{
@@ -4148,7 +4196,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                PreparedRun.new(
                  first_request,
                  second_prepared.workflow_bundle,
-                 second_prepared.mission_bundle,
+                 second_prepared.mission_bundles,
                  first_prepared.entry_source,
                  activity,
                  catalog,
@@ -4161,9 +4209,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         directory,
         "prepared-mission",
         valid_manifest(%{
-          "mission" => %{
-            "components" => [%{"id" => "mission", "path" => "mission.clj"}],
-            "data" => %{}
+          "missions" => %{
+            "default" => %{
+              "components" => [%{"id" => "mission", "path" => "mission.clj"}],
+              "data" => %{}
+            }
           }
         }),
         %{"mission.clj" => "(ns mission) (defn evaluate [input] input)"}
@@ -4180,7 +4230,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                PreparedRun.new(
                  first_request,
                  first_prepared.workflow_bundle,
-                 mission_prepared.mission_bundle,
+                 mission_prepared.mission_bundles,
                  first_prepared.entry_source,
                  activity,
                  catalog,
@@ -4244,7 +4294,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              PreparedRun.new(
                request,
                prepared.workflow_bundle,
-               prepared.mission_bundle,
+               prepared.mission_bundles,
                prepared.entry_source,
                prepared.provider_activity,
                catalog,
@@ -4258,7 +4308,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              PreparedRun.new(
                request,
                prepared.workflow_bundle,
-               prepared.mission_bundle,
+               prepared.mission_bundles,
                prepared.entry_source,
                marked_activity,
                catalog,
@@ -5014,7 +5064,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "external override aggregate-limit failures retain override provenance", %{
+  test "manifest source aggregate failures precede external override acquisition", %{
     tmp_dir: directory
   } do
     component_bytes = String.duplicate(" ", 1_835_000)
@@ -5044,6 +5094,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     File.write!(
       descriptor_path,
       Jason.encode!(%{
+        "target" => %{"environment" => "workflow"},
         "component_id" => "component0",
         "base_source_hash" => ComponentOverride.hash(component_bytes),
         "source_hash" => ComponentOverride.hash(candidate),
@@ -5055,12 +5106,12 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert_error(
         ["run", application, "--component-override-descriptor", descriptor_path],
         "application",
-        "document_limit_exceeded"
+        "schema_violation"
       )
 
     assert outcome.envelope["error"]["source"] == %{
-             "kind" => "component_override",
-             "name" => "component-override.json"
+             "kind" => "application",
+             "name" => "ptc.json"
            }
   end
 
@@ -5077,7 +5128,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     digest = "sha256:" <> String.duplicate("0", 64)
 
     deep =
-      ~s|{"component_id":"app","base_source_hash":"#{digest}","source_hash":"#{digest}","path":"candidate.clj","extra":| <>
+      ~s|{"target":{"environment":"workflow"},"component_id":"app","base_source_hash":"#{digest}","source_hash":"#{digest}","path":"candidate.clj","extra":| <>
         nested <> "}"
 
     deep_captured = Path.join(Path.dirname(application), "deep-override.json")
@@ -5090,6 +5141,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     source_descriptor = fn candidate_name ->
       Jason.encode!(%{
+        "target" => %{"environment" => "workflow"},
         "component_id" => "app",
         "base_source_hash" => ComponentOverride.hash(base_source),
         "source_hash" => ComponentOverride.hash(oversized_source),
@@ -5142,10 +5194,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     descriptors = [
       {"duplicate",
-       ~s|{"component_id":"app","component_id":"app","base_source_hash":"#{digest}","source_hash":"#{digest}","path":"candidate.clj"}|,
+       ~s|{"target":{"environment":"workflow"},"component_id":"app","component_id":"app","base_source_hash":"#{digest}","source_hash":"#{digest}","path":"candidate.clj"}|,
        ""},
       {"unknown",
        Jason.encode!(%{
+         "target" => %{"environment" => "workflow"},
          "component_id" => "app",
          "base_source_hash" => digest,
          "source_hash" => digest,
@@ -5154,6 +5207,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
        }), ""},
       {"invalid-declared",
        Jason.encode!(%{
+         "target" => %{"environment" => "workflow"},
          "component_id" => "INVALID",
          "base_source_hash" => digest,
          "source_hash" => digest,
@@ -5253,6 +5307,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "remaining_ms" => 0,
       "capability_calls" => %{"workflow/read-file" => 1},
       "subordinate_evaluations" => 0,
+      "evaluations_by_mission" => %{"default" => 0},
       "protocol_errors" => 0,
       "evaluation_memory_bytes" => 0,
       "evaluation_history_bytes" => 0,
@@ -5263,7 +5318,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
   defp run_success_fixture(artifact_class, result) do
     %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "command" => "run",
       "status" => "ok",
       "run_ref" => CommandRunRef.encode(@zero_entropy),

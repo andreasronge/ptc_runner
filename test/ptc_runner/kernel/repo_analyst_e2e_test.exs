@@ -178,12 +178,15 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
         "components" => [%{"id" => "app", "path" => "workflow.clj"}],
         "entry" => "app/run"
       },
-      "mission" => %{
-        "components" => [
-          %{"library" => "cap"},
-          %{"id" => "repo-probe", "path" => "probe.clj", "dependencies" => ["cap"]}
-        ],
-        "data" => %{}
+      "missions" => %{
+        "default" => %{
+          "components" => [
+            %{"library" => "cap"},
+            %{"id" => "repo-probe", "path" => "probe.clj", "dependencies" => ["cap"]}
+          ],
+          "data" => %{},
+          "providers" => ["workspace"]
+        }
       },
       "input" => %{"value" => %{"program" => program}},
       "providers" => %{"mission" => [%{"name" => "workspace"}]},
@@ -305,12 +308,15 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
       "$schema" => Path.join(@root, "priv/schemas/ptc-application-manifest.schema.json"),
       "version" => 1,
       "workflow" => %{"components" => workflow_components, "entry" => "app/run"},
-      "mission" => %{
-        "components" => [
-          %{"library" => "cap"},
-          %{"id" => "repo", "path" => "repo.clj", "dependencies" => ["cap"]}
-        ],
-        "data" => %{}
+      "missions" => %{
+        "default" => %{
+          "components" => [
+            %{"library" => "cap"},
+            %{"id" => "repo", "path" => "repo.clj", "dependencies" => ["cap"]}
+          ],
+          "data" => %{},
+          "providers" => ["workspace"]
+        }
       },
       "input" => %{"value" => if(program, do: %{"program" => program}, else: %{})},
       "providers" => %{

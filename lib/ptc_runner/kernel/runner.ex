@@ -433,6 +433,15 @@ defmodule PtcRunner.Kernel.Runner do
     end
   end
 
+  defp mission_environments(config),
+    do: Map.new(config.missions, fn {name, mission} -> {name, mission.environment} end)
+
+  defp mission_renderings(config, field),
+    do:
+      Map.new(config.missions, fn {name, mission} ->
+        {name, Map.fetch!(mission.inventory, field)}
+      end)
+
   defp workflow_tools(config, state, validation_deadline_ms) do
     state
     |> ToolGrant.capability_callbacks(
@@ -456,7 +465,7 @@ defmodule PtcRunner.Kernel.Runner do
         "kernel-eval",
         RuntimeTools.kernel_eval(
           state,
-          config.mission_environment,
+          mission_environments(config),
           config.limits,
           config.event_sink,
           config.inspection_sink,
@@ -473,7 +482,7 @@ defmodule PtcRunner.Kernel.Runner do
         "kernel-check-source",
         RuntimeTools.kernel_check_source(
           state,
-          config.mission_environment,
+          mission_environments(config),
           config.limits,
           config.event_sink
         )
@@ -486,7 +495,7 @@ defmodule PtcRunner.Kernel.Runner do
         config.event_sink,
         :workflow,
         "kernel-mission-inventory",
-        RuntimeTools.mission_inventory(state, config.mission_inventory.rendered)
+        RuntimeTools.mission_inventory(state, mission_renderings(config, :rendered))
       )
     )
     |> Map.put(
@@ -496,7 +505,7 @@ defmodule PtcRunner.Kernel.Runner do
         config.event_sink,
         :workflow,
         "kernel-mission-model-context",
-        RuntimeTools.mission_model_context(state, config.mission_inventory.model_rendered)
+        RuntimeTools.mission_model_context(state, mission_renderings(config, :model_rendered))
       )
     )
     |> Map.put(

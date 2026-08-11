@@ -130,7 +130,7 @@ def citation_is_backed_by_read($citation; $reads):
           "run_id": $started.run_id,
           "result_hash": $result_hash,
           "workflow_bundle_hash": $started.data.workflow_prelude.hash,
-          "mission_bundle_hash": $started.data.mission_prelude.hash,
+          "mission_bundle_hashes": ($started.data.missions | with_entries(.value = .value.prelude.hash)),
           "provider_snapshot_hashes": $provider_hashes,
           "content_snapshot_hashes": $content_hashes
         }

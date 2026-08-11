@@ -10,9 +10,9 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   contain only fixed literals plus bounded PTC-Lisp symbol names and require
   component-source provenance; every other message is the catalog literal.
 
-  `notes` is reserved and always empty: the published V1 envelope schema pins
+  `notes` is reserved and always empty: the published V2 envelope schema pins
   it to `{"const": []}`, so a populated array would invalidate the envelope for
-  every strict V1 consumer. Reporting a rejected value against the bound it
+  every strict V2 consumer. Reporting a rejected value against the bound it
   broke is a later-version change, not a producer-side one.
   """
 

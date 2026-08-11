@@ -15,11 +15,13 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   whose bytes must match. It rejects symlinks,
   changed files, content above 16 MB, any record above 2,000,000 encoded bytes,
   excessive structural depth, malformed lines, mixed identities or schema
-  versions, non-contiguous sequences, and records outside the exact V1, V2, or
-  V3 vocabulary. V2 adds paired MCP request/response bodies correlated to an
+  versions, non-contiguous sequences, and records outside the exact V1 through
+  V4 vocabulary. V2 adds paired MCP request/response bodies correlated to an
   existing capability attempt. V3 adds `execution-prints` and `execution-error`,
   correlated by a canonical workflow `evaluation-started` event's
-  `evaluation_id` rather than a capability attempt. A missing capability or
+  `evaluation_id` rather than a capability attempt. V4 replaces the implicit
+  mission with a required `mission_name` on mission-owned source and capability
+  records while forbidding it on workflow-owned records. A missing capability or
   evaluation correlation is accepted only when the same canonical trace's
   `events-dropped` marker and terminal usage agree on enough dropped events of
   that exact type. The retained trace marker therefore identifies the
@@ -354,24 +356,25 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          %{
            "record_type" => "capability-input",
            "correlation" => %{"capability_id" => id},
-           "payload" => %{"environment" => environment, "name" => name}
+           "payload" => %{"environment" => environment, "name" => name} = payload
          },
          state
        ) do
     if Map.has_key?(state.inputs, id),
       do: invalid_record_join(),
-      else: {:cont, {:ok, put_in(state, [:inputs, id], {environment, name})}}
+      else:
+        {:cont, {:ok, put_in(state, [:inputs, id], {environment, payload["mission_name"], name})}}
   end
 
   defp validate_record_join(
          %{
            "record_type" => "capability-output",
            "correlation" => %{"capability_id" => id},
-           "payload" => %{"environment" => environment, "name" => name}
+           "payload" => %{"environment" => environment, "name" => name} = payload
          },
          state
        ) do
-    if Map.get(state.inputs, id) == {environment, name} and
+    if Map.get(state.inputs, id) == {environment, payload["mission_name"], name} and
          not MapSet.member?(state.outputs, id),
        do: {:cont, {:ok, %{state | outputs: MapSet.put(state.outputs, id)}}},
        else: invalid_record_join()
@@ -381,15 +384,17 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          %{
            "record_type" => "mcp-request",
            "correlation" => %{"capability_id" => capability_id, "request_id" => request_id},
-           "payload" => %{"transport" => transport}
+           "payload" => %{"transport" => transport} = payload
          },
          state
        ) do
     key = {capability_id, request_id}
 
     if Map.has_key?(state.inputs, capability_id) and
+         mission_join?(state.inputs[capability_id], payload["mission_name"]) and
          not Map.has_key?(state.mcp_requests, key),
-       do: {:cont, {:ok, put_in(state, [:mcp_requests, key], transport)}},
+       do:
+         {:cont, {:ok, put_in(state, [:mcp_requests, key], {transport, payload["mission_name"]})}},
        else: invalid_record_join()
   end
 
@@ -397,13 +402,13 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          %{
            "record_type" => "mcp-response",
            "correlation" => %{"capability_id" => capability_id, "request_id" => request_id},
-           "payload" => %{"transport" => transport}
+           "payload" => %{"transport" => transport} = payload
          },
          state
        ) do
     key = {capability_id, request_id}
 
-    if Map.get(state.mcp_requests, key) == transport and
+    if Map.get(state.mcp_requests, key) == {transport, payload["mission_name"]} and
          not MapSet.member?(state.mcp_responses, key),
        do: {:cont, {:ok, %{state | mcp_responses: MapSet.put(state.mcp_responses, key)}}},
        else: invalid_record_join()
@@ -419,11 +424,11 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          %{
            "record_type" => "prelude-source",
            "correlation" => %{"component_id" => id},
-           "payload" => %{"environment" => environment}
+           "payload" => %{"environment" => environment} = payload
          },
          state
        ),
-       do: unique_record(state, :preludes, {environment, id})
+       do: unique_record(state, :preludes, {environment, payload["mission_name"], id})
 
   defp validate_record_join(
          %{"record_type" => "execution-prints", "correlation" => %{"evaluation_id" => id}},
@@ -436,6 +441,13 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          state
        ),
        do: unique_record(state, :execution_errors, id)
+
+  defp mission_join?({"mission", mission_name, _name}, mission_name) when is_binary(mission_name),
+    do: true
+
+  defp mission_join?({"mission", nil, _name}, nil), do: true
+  defp mission_join?({"workflow", nil, _name}, nil), do: true
+  defp mission_join?(_input, _mission_name), do: false
 
   defp invalid_record_join, do: {:halt, {:error, :invalid_inspection_artifact}}
 
@@ -452,12 +464,84 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   defp valid_record?(record, run_id, trace_id, schema_version, sequence) do
     MCPProtocol.within_inspection_document_depth?(record) and
       is_map(record) and Map.keys(record) |> Enum.sort() == Enum.sort(@envelope_keys) and
-      schema_version in [1, 2, 3] and record["schema_version"] == schema_version and
+      schema_version in [1, 2, 3, 4] and record["schema_version"] == schema_version and
       record["run_id"] == run_id and
       record["trace_id"] == trace_id and is_binary(run_id) and is_binary(trace_id) and
       record["sequence"] == sequence and valid_timestamp?(record["timestamp"]) and
-      record["record_type"] in record_types(schema_version) and valid_shape?(record)
+      record["record_type"] in record_types(schema_version) and
+      valid_shape?(record, schema_version)
   end
+
+  defp valid_shape?(
+         %{
+           "record_type" => record_type,
+           "correlation" => %{"capability_id" => id},
+           "payload" => payload
+         },
+         4
+       )
+       when record_type in ["capability-input", "capability-output"] do
+    value_key = if record_type == "capability-input", do: "arguments", else: "result"
+
+    valid_id?(id) and valid_capability_payload?(payload, value_key) and
+      ((payload["environment"] == "workflow" and
+          exact_keys?(payload, ["environment", "name", value_key])) or
+         (payload["environment"] == "mission" and
+            exact_keys?(payload, ["environment", "mission_name", "name", value_key]) and
+            valid_id?(payload["mission_name"])))
+  end
+
+  defp valid_shape?(
+         %{
+           "record_type" => record_type,
+           "correlation" => correlation,
+           "payload" => payload
+         },
+         4
+       )
+       when record_type in ["mcp-request", "mcp-response"] do
+    exact_keys?(correlation, ~w(capability_id request_id)) and
+      valid_id?(correlation["capability_id"]) and valid_request_id?(correlation["request_id"]) and
+      (exact_keys?(payload, ~w(transport body)) or
+         (exact_keys?(payload, ~w(transport body mission_name)) and
+            valid_id?(payload["mission_name"])))
+  end
+
+  defp valid_shape?(
+         %{
+           "record_type" => "prelude-source",
+           "correlation" => %{"component_id" => id},
+           "payload" => payload
+         },
+         4
+       ) do
+    valid_id?(id) and is_binary(payload["source"]) and
+      payload["source_bytes"] == byte_size(payload["source"]) and
+      payload["source_hash"] == sha256(payload["source"]) and
+      ((payload["environment"] == "workflow" and
+          exact_keys?(payload, ~w(environment source source_hash source_bytes))) or
+         (payload["environment"] == "mission" and valid_id?(payload["mission_name"]) and
+            exact_keys?(payload, ~w(environment mission_name source source_hash source_bytes))))
+  end
+
+  defp valid_shape?(
+         %{
+           "record_type" => "evaluation-source",
+           "correlation" => %{"evaluation_id" => id},
+           "payload" => payload
+         },
+         4
+       ) do
+    exact_keys?(
+      payload,
+      ~w(environment mission_name program_kind source source_hash source_bytes)
+    ) and valid_id?(id) and valid_id?(payload["mission_name"]) and
+      payload["environment"] == "mission" and payload["program_kind"] == "ptc-lisp" and
+      is_binary(payload["source"]) and payload["source_bytes"] == byte_size(payload["source"]) and
+      payload["source_hash"] == sha256(payload["source"])
+  end
+
+  defp valid_shape?(record, _schema_version), do: valid_shape?(record)
 
   defp valid_shape?(%{
          "record_type" => "capability-input",
@@ -482,8 +566,13 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          "correlation" => %{"evaluation_id" => id},
          "payload" => payload
        }) do
-    exact_keys?(payload, ~w(environment program_kind source source_hash source_bytes)) and
+    # `space` is optional: an artifact written before named missions has
+    # no such key, and persisted evidence must stay readable. Present means it
+    # must be a string.
+    (exact_keys?(payload, ~w(environment program_kind source source_hash source_bytes)) or
+       exact_keys?(payload, ~w(environment space program_kind source source_hash source_bytes))) and
       valid_id?(id) and payload["environment"] == "mission" and
+      (is_nil(payload["space"]) or is_binary(payload["space"])) and
       payload["program_kind"] == "ptc-lisp" and is_binary(payload["source"]) and
       payload["source_bytes"] == byte_size(payload["source"]) and
       payload["source_hash"] == sha256(payload["source"])
@@ -565,8 +654,9 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       prelude_components =
         Enum.reduce(events, %{}, fn event, acc ->
           acc
-          |> merge_prelude_ids("workflow", event_data(event, :workflow_prelude))
-          |> merge_prelude_ids("mission", event_data(event, :mission_prelude))
+          |> merge_prelude_ids({"workflow", nil}, event_data(event, :workflow_prelude))
+          |> merge_prelude_ids({"mission", nil}, event_data(event, :mission_prelude))
+          |> merge_named_prelude_ids(event_data(event, :missions))
         end)
 
       validate_record_correlations(
@@ -585,6 +675,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     Enum.reduce_while(events, {:ok, %{}}, fn event, {:ok, capabilities} ->
       id = event_data(event, :capability_id)
       environment = event_data(event, :environment) |> string_value()
+      mission_name = event_data(event, :mission_name)
       name = event_data(event, :name)
 
       cond do
@@ -595,7 +686,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
           {:halt, {:error, :inspection_correlation_missing}}
 
         true ->
-          {:cont, {:ok, Map.put(capabilities, id, {environment, name})}}
+          {:cont, {:ok, Map.put(capabilities, id, {environment, mission_name, name})}}
       end
     end)
   end
@@ -604,6 +695,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     Enum.reduce_while(events, {:ok, %{}}, fn event, {:ok, evaluations} ->
       id = event_data(event, :evaluation_id)
       environment = event_data(event, :environment) |> string_value()
+      mission_name = event_data(event, :mission_name)
 
       cond do
         event_value(event, :type) != "evaluation-started" or not is_binary(id) ->
@@ -614,7 +706,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
 
         true ->
           source = {event_data(event, :source_hash), event_data(event, :source_bytes)}
-          {:cont, {:ok, Map.put(evaluations, id, {environment, source})}}
+          {:cont, {:ok, Map.put(evaluations, id, {environment, mission_name, source})}}
       end
     end)
   end
@@ -647,20 +739,27 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   defp validate_record_correlation(
          %{
            "correlation" => %{"capability_id" => id},
-           "payload" => %{"environment" => environment, "name" => name}
+           "payload" => %{"environment" => environment, "name" => name} = payload
          },
          capabilities,
          _evaluations,
          _prelude_components,
          missing
        ) do
-    correlate_or_mark_missing(capabilities, id, {environment, name}, missing, :capabilities)
+    correlate_or_mark_missing(
+      capabilities,
+      id,
+      {environment, payload["mission_name"], name},
+      missing,
+      :capabilities
+    )
   end
 
   defp validate_record_correlation(
          %{
            "record_type" => record_type,
-           "correlation" => %{"capability_id" => id, "request_id" => request_id}
+           "correlation" => %{"capability_id" => id, "request_id" => request_id},
+           "payload" => payload
          },
          capabilities,
          _evaluations,
@@ -673,10 +772,12 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
         correlate_or_mark_missing(
           capabilities,
           id,
-          :any,
+          payload["mission_name"],
           missing,
           :capabilities,
-          fn _actual, :any -> true end
+          fn {_environment, actual_mission, _name}, expected_mission ->
+            actual_mission == expected_mission
+          end
         ),
       else: missing_correlation()
   end
@@ -685,7 +786,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          %{
            "record_type" => "evaluation-source",
            "correlation" => %{"evaluation_id" => id},
-           "payload" => %{"source_hash" => hash, "source_bytes" => bytes}
+           "payload" => %{"source_hash" => hash, "source_bytes" => bytes} = payload
          },
          _capabilities,
          evaluations,
@@ -696,7 +797,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          correlate_evaluation_or_mark_missing(
            evaluations,
            id,
-           {"mission", {hash, bytes}},
+           {"mission", payload["mission_name"], {hash, bytes}},
            missing
          )
 
@@ -711,19 +812,21 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          missing
        )
        when record_type in ["execution-prints", "execution-error"],
-       do: correlate_evaluation_or_mark_missing(evaluations, id, {"workflow", :any}, missing)
+       do: correlate_evaluation_or_mark_missing(evaluations, id, {"workflow", nil, :any}, missing)
 
   defp validate_record_correlation(
          %{
            "correlation" => %{"component_id" => id},
-           "payload" => %{"environment" => environment}
+           "payload" => %{"environment" => environment} = payload
          },
          _capabilities,
          _evaluations,
          prelude_components,
          missing
        ) do
-    if MapSet.member?(Map.get(prelude_components, environment, MapSet.new()), id),
+    key = {environment, payload["mission_name"]}
+
+    if MapSet.member?(Map.get(prelude_components, key, MapSet.new()), id),
       do: {:cont, {:ok, missing}},
       else: missing_correlation()
   end
@@ -770,7 +873,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     end
   end
 
-  defp evaluation_matches?({"workflow", _source}, {"workflow", :any}), do: true
+  defp evaluation_matches?({"workflow", nil, _source}, {"workflow", nil, :any}), do: true
   defp evaluation_matches?(actual, expected), do: actual == expected
 
   defp validate_missing_correlations(missing, dropped) do
@@ -811,16 +914,29 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
 
   defp missing_correlation, do: {:halt, {:error, :inspection_correlation_missing}}
 
-  defp merge_prelude_ids(acc, environment, prelude) when is_map(prelude) do
+  defp merge_prelude_ids(acc, key, prelude) when is_map(prelude) do
     ids =
       (Map.get(prelude, :component_ids) || Map.get(prelude, "component_ids") || [])
       |> List.wrap()
       |> Enum.filter(&is_binary/1)
 
-    Map.update(acc, environment, MapSet.new(ids), &MapSet.union(&1, MapSet.new(ids)))
+    Map.update(acc, key, MapSet.new(ids), &MapSet.union(&1, MapSet.new(ids)))
   end
 
-  defp merge_prelude_ids(acc, _environment, _prelude), do: acc
+  defp merge_prelude_ids(acc, _key, _prelude), do: acc
+
+  defp merge_named_prelude_ids(acc, missions) when is_map(missions) do
+    Enum.reduce(missions, acc, fn {name, metadata}, inner_acc ->
+      prelude =
+        if is_map(metadata),
+          do: Map.get(metadata, :prelude) || Map.get(metadata, "prelude"),
+          else: nil
+
+      merge_prelude_ids(inner_acc, {"mission", to_string(name)}, prelude)
+    end)
+  end
+
+  defp merge_named_prelude_ids(acc, _missions), do: acc
 
   defp event_value(event, key), do: Map.get(event, key) || Map.get(event, Atom.to_string(key))
 

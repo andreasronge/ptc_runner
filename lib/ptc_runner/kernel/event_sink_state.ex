@@ -265,7 +265,7 @@ defmodule PtcRunner.Kernel.EventSinkState do
 
   defp event(state, type, data) do
     %{
-      schema_version: 1,
+      schema_version: 2,
       run_id: state.run_id,
       trace_id: state.trace_id,
       sequence: state.sequence + 1,

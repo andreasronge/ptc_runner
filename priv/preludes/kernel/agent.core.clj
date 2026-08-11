@@ -84,8 +84,11 @@
                              "max_program_chars" max-program-chars
                              "max_observation_chars" max-observation-chars
                              "max_transcript_chars" max-transcript-chars)
+        mission-name (or (get cfg "mission") "default")
         initial-prompt-state (agent.prompt/initial-state effective-cfg)]
-    (if (not (map? initial-prompt-state))
+    (if (not (and (string? mission-name) (not (blank? mission-name))))
+      (fail (result/error :invalid-agent-config :invalid-mission))
+      (if (not (map? initial-prompt-state))
       (fail (result/error :invalid-prompt :invalid-initial-state))
       (loop [turn 0
              messages [{"role" "user" "content" task}]
@@ -101,7 +104,7 @@
               {:turn turn :kind (get action :kind)})
             (case (get action :kind)
               :tool-call
-              (let [evaluation (kernel/eval-source (get action :program))]
+              (let [evaluation (kernel/eval-source-in mission-name (get action :program))]
                 ;; Host policy and malformed/provider-initiated MCP exchanges
                 ;; are not argument mistakes the model can correct. The Kernel
                 ;; derives this provenance from the private capability ledger,
@@ -218,12 +221,12 @@
               :provider-error
               (fail (result/error :llm-provider-error (get action :error)))
 
-              (fail (result/error :unknown-action (get action :kind))))))))))
+              (fail (result/error :unknown-action (get action :kind)))))))))))
 
 (defn run-outcome
   "Runs the agent loop and distinguishes model-authored completion from a
   bounded subject-attributable failure."
-  {:signature "(task :string, cfg {model :string?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, mission :string?}) -> :any"}
   [task cfg]
   (run-outcome* task cfg false))
 
@@ -234,7 +237,7 @@
 
   Subject failures retain the historical fail behavior. Evaluators that need
   to record those attempts use `run-outcome`."
-  {:signature "(task :string, cfg {model :string?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, mission :string?}) -> :any"}
   [task cfg]
   (let [outcome (run-outcome task cfg)]
     (if (= :returned (get outcome :status))
@@ -244,7 +247,7 @@
 (defn run-result-value
   "Runs the agent loop and validates model-authored completion against the
   manifest result contract before returning it to the calling workflow."
-  {:signature "(task :string, cfg {model :string?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, mission :string?}) -> :any"}
   [task cfg]
   (let [outcome (run-outcome* task cfg true)]
     (if (= :returned (get outcome :status))
@@ -257,7 +260,7 @@
   The default result is a success envelope. Set `result_envelope` to false for
   a raw application value. Use `run-value` when the caller must continue after
   the model-authored value returns."
-  {:signature "(task :string, cfg {model :string?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, mission :string?}) -> :any"}
   [task cfg]
   (let [value (run-value task cfg)]
     (if (false? (get cfg "result_envelope"))

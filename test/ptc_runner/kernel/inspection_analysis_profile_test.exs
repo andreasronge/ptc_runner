@@ -296,7 +296,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
 
     state = :sys.get_state(session.pid)
     identity = state.profile.identity
-    mission = state.config.mission_environment
+    mission = state.config.missions["default"].environment
 
     assert identity["components"] == [
              "cap",

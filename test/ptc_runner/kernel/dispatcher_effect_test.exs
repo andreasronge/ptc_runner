@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Dispatcher
+  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
@@ -84,6 +85,71 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
       result = dispatch_mission(effect, callback, opts)
       assert_effect_failure(result, effect, expected, false)
     end
+  end
+
+  test "mission quota, timeout, and result-size limits retain mission attribution" do
+    cases = [
+      {[capability_result_bytes: 64], 100, fn -> {:ok, String.duplicate("x", 256)} end,
+       :provider_result_limit},
+      {[], 100,
+       fn ->
+         receive do
+           :never -> {:ok, nil}
+         end
+       end, :provider_timeout}
+    ]
+
+    for {limit_opts, timeout_ms, callback, reason} <- cases do
+      {result, events} = dispatch_mission_with_events(limit_opts, timeout_ms, callback)
+      assert result.kind in [:result_exceeded, :timeout]
+
+      assert %{data: %{reason: ^reason, environment: :mission, mission_name: "reader"}} =
+               Enum.find(events, &(&1.type == "limit-exceeded"))
+    end
+
+    {:ok, limits} =
+      Limits.new(mission_capability_calls: 1, mission_capability_calls_per_name: 1)
+
+    {:ok, state} = RunState.start(limits)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "mission-quota-attribution")
+    {:ok, capability} = capability(:read, fn -> {:ok, 1} end)
+    {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
+    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "reader")
+
+    context = %{
+      timeout_ms: 100,
+      validation_heap_words: limits.evaluation_heap_words,
+      evaluation_lease: lease,
+      validation_deadline_ms: nil,
+      mission_name: "reader"
+    }
+
+    assert %{status: :ok} =
+             Dispatcher.dispatch(
+               state,
+               :mission,
+               environment,
+               capability.name,
+               %{},
+               context,
+               sink,
+               nil
+             )
+
+    assert %{kind: :limit_exceeded, reason: :capability_quota} =
+             Dispatcher.dispatch(
+               state,
+               :mission,
+               environment,
+               capability.name,
+               %{},
+               context,
+               sink,
+               nil
+             )
+
+    assert %{data: %{reason: :capability_quota, mission_name: "reader"}} =
+             EventSink.events(sink) |> Enum.find(&(&1.type == "limit-exceeded"))
   end
 
   test "mission callback raises, exits, and process deaths are effect-aware" do
@@ -403,6 +469,35 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
       Keyword.get(opts, :timeout_ms, 100),
       {nil, Keyword.get(opts, :inspection_sink), lease}
     )
+  end
+
+  defp dispatch_mission_with_events(limit_opts, timeout_ms, callback) do
+    {:ok, limits} = Limits.new(limit_opts)
+    {:ok, state} = RunState.start(limits)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "mission-limit-attribution")
+    {:ok, capability} = capability(:read, callback)
+    {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
+    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "reader")
+
+    result =
+      Dispatcher.dispatch(
+        state,
+        :mission,
+        environment,
+        capability.name,
+        %{},
+        %{
+          timeout_ms: timeout_ms,
+          validation_heap_words: limits.evaluation_heap_words,
+          evaluation_lease: lease,
+          validation_deadline_ms: nil,
+          mission_name: "reader"
+        },
+        sink,
+        nil
+      )
+
+    {result, EventSink.events(sink)}
   end
 
   defp capability(effect, callback, opts \\ []) do

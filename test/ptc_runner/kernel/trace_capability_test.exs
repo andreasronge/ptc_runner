@@ -63,11 +63,11 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     assert metadata["workflow_prelude"] ==
              %{"component_ids" => [], "dependency_indices" => [], "hash" => nil}
 
-    assert metadata["mission_prelude"] ==
+    assert metadata["missions"]["default"]["prelude"] ==
              %{"component_ids" => [], "dependency_indices" => [], "hash" => nil}
 
-    assert metadata["mission_inventory_hash"] =~ ~r/\A[0-9a-f]{64}\z/
-    assert is_integer(metadata["mission_inventory_bytes"])
+    assert metadata["missions"]["default"]["inventory_hash"] =~ ~r/\A[0-9a-f]{64}\z/
+    assert is_integer(metadata["missions"]["default"]["inventory_bytes"])
     assert metadata["connector_snapshots"] == []
     assert first_page["next_cursor"] == nil
 
@@ -86,6 +86,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
               "runs" => 1,
               "errors" => 0,
               "evaluations" => 1,
+              "evaluations_by_mission" => %{},
               "workflow_capability_calls" => 0,
               "mission_capability_calls" => 0,
               "llm_usage" => []
@@ -140,7 +141,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: run_sink
@@ -160,7 +161,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     {:ok, workflow_only_config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: workflow_only_sink
@@ -789,7 +790,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     stopped_only_path = Path.join(directory, "stopped-only.jsonl")
     stopped_before_start_path = Path.join(directory, "stopped-before-start.jsonl")
     event_after_stop_path = Path.join(directory, "event-after-stop.jsonl")
-    unsupported = Map.put(decoded_event("version", 1, "run-started"), "schema_version", 2)
+    unsupported = Map.put(decoded_event("version", 1, "run-started"), "schema_version", 3)
     mixed = [decoded_event("same", 1, "run-started"), decoded_event("same", 1, "run-stopped")]
     mixed = put_in(mixed, [Access.at(1), "trace_id"], "different-trace")
 
@@ -844,6 +845,117 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   end
 
   @tag :tmp_dir
+  test "V2 validation rejects mixed versions and missing or misplaced mission attribution", %{
+    tmp_dir: directory
+  } do
+    query = fn events, name ->
+      path = Path.join(directory, "#{name}.jsonl")
+      File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+      {:ok, log} = TraceLog.new(source: {:file, path})
+      TraceLog.query(log, :list_runs, %{})
+    end
+
+    valid = [
+      v2_event("v2", 1, "run-started", %{"missions" => %{}}),
+      v2_event("v2", 2, "evaluation-started", %{
+        "environment" => "mission",
+        "mission_name" => "reader",
+        "evaluation_id" => "e1"
+      }),
+      v2_event("v2", 3, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert {:ok, _result} = query.(valid, "valid")
+
+    mixed = put_in(valid, [Access.at(1), "schema_version"], 1)
+    missing = update_in(valid, [Access.at(1), "data"], &Map.delete(&1, "mission_name"))
+
+    misplaced =
+      put_in(valid, [Access.at(1), "data"], %{
+        "environment" => "workflow",
+        "mission_name" => "reader"
+      })
+
+    singular_start =
+      put_in(valid, [Access.at(0), "data"], %{
+        "mission_prelude" => %{},
+        "missions" => %{}
+      })
+
+    for {label, events} <- [
+          mixed: mixed,
+          missing: missing,
+          misplaced: misplaced,
+          singular_start: singular_start
+        ] do
+      case query.(events, "invalid-#{label}") do
+        {:error, :malformed_source} -> :ok
+        other -> flunk("accepted invalid #{label} V2 trace: #{inspect(other)}")
+      end
+    end
+  end
+
+  test "mission filters narrow counters and infer default only for retained V1 events" do
+    v2_events = [
+      v2_event("v2-filter", 1, "run-started", %{"missions" => %{}}),
+      v2_event("v2-filter", 2, "evaluation-started", %{
+        "environment" => "mission",
+        "mission_name" => "reader",
+        "evaluation_id" => "reader-eval"
+      }),
+      v2_event("v2-filter", 3, "capability-started", %{
+        "environment" => "mission",
+        "mission_name" => "reader",
+        "capability_id" => "reader-call",
+        "name" => "read"
+      }),
+      v2_event("v2-filter", 4, "evaluation-started", %{
+        "environment" => "mission",
+        "mission_name" => "writer",
+        "evaluation_id" => "writer-eval"
+      }),
+      v2_event("v2-filter", 5, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert {:ok, counters} =
+             TraceLog.query_loaded(
+               v2_events,
+               "v2-filter",
+               :counters,
+               %{"mission_name" => "reader"},
+               100_000,
+               :sanitized
+             )
+
+    assert counters["events"] == 2
+    assert counters["runs"] == 1
+    assert counters["evaluations"] == 1
+    assert counters["evaluations_by_mission"] == %{"reader" => 1}
+    assert counters["mission_capability_calls"] == 1
+    assert counters["workflow_capability_calls"] == 0
+    assert counters["llm_usage"] == []
+
+    v1_events = [
+      decoded_event("v1-filter", 1, "run-started"),
+      decoded_event("v1-filter", 2, "evaluation-started", %{
+        "environment" => "mission",
+        "evaluation_id" => "legacy"
+      }),
+      decoded_event("v1-filter", 3, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert {:ok, %{"items" => [%{"type" => "evaluation-started"}]}} =
+             TraceLog.query_loaded(
+               v1_events,
+               "v1-filter",
+               :list_turns,
+               %{"run_id" => "v1-filter", "mission_name" => "default"},
+               100_000,
+               :sanitized
+             )
+  end
+
+  @tag :tmp_dir
   test "canonical validation rejects malformed source-check usage counts", %{
     tmp_dir: directory
   } do
@@ -887,7 +999,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -915,5 +1027,10 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
       "type" => type,
       "data" => data
     }
+  end
+
+  defp v2_event(run_id, sequence, type, data) do
+    decoded_event(run_id, sequence, type, data)
+    |> Map.put("schema_version", 2)
   end
 end

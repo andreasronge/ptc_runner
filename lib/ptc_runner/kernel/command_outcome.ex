@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   @moduledoc """
   Sealed command result returned to frontends.
 
-  It carries a validated V1 envelope and status. Frontends must call
+  It carries a validated V2 envelope and status. Frontends must call
   `to_map/1` at the rendering boundary so a mutated or caller-authored struct
   cannot be emitted. Outcomes never write a stream, raise through Mix, halt the
   VM, or exit the operating-system process.
@@ -133,7 +133,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
       end
 
     envelope = %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "command" => "run",
       "status" => "ok",
       "run_ref" => run_ref,
@@ -199,7 +199,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
       seal(
         command_mode,
         %{
-          "schema_version" => 1,
+          "schema_version" => 2,
           "command" => Atom.to_string(public_command),
           "status" => "ok",
           "run_ref" => run_ref,
@@ -216,7 +216,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     do: raise(ArgumentError, "invalid closed command outcome")
 
   @doc """
-  Checks the complete sealed outcome, including its exact fields, V1 envelope,
+  Checks the complete sealed outcome, including its exact fields, V2 envelope,
   command mode, exit status, and in-VM construction attestation.
   """
   @spec valid?(term()) :: boolean()
@@ -238,7 +238,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
 
   def valid?(_outcome), do: false
 
-  @doc "Returns the validated V1 envelope for rendering."
+  @doc "Returns the validated V2 envelope for rendering."
   @spec to_map(t()) :: map()
   def to_map(%__MODULE__{} = outcome) do
     if valid?(outcome),
@@ -250,7 +250,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
 
   defp error_envelope(command_mode, run_ref, diagnostic, secondary) do
     %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "command" => command_mode |> public_command() |> Atom.to_string(),
       "status" => "error",
       "run_ref" => run_ref,

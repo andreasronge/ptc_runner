@@ -568,7 +568,7 @@ defmodule Mix.Tasks.Bench.Heap do
       {:ok, config} =
         RunConfig.new(
           workflow_environment: workflow,
-          mission_environment: mission,
+          missions: %{"default" => mission},
           input: %{"seed" => 3},
           limits: limits,
           event_sink: sink

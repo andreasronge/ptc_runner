@@ -15,7 +15,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
   @run_ref "cmd-00000000000000000000000001"
 
-  @human_fixtures Path.expand("../../fixtures/command-human-v1.json", __DIR__)
+  @human_fixtures Path.expand("../../fixtures/command-human-v2.json", __DIR__)
                   |> File.read!()
                   |> Jason.decode!()
 
@@ -550,6 +550,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
       "remaining_ms" => 0,
       "capability_calls" => %{},
       "subordinate_evaluations" => 0,
+      "evaluations_by_mission" => %{},
       "protocol_errors" => 0,
       "evaluation_memory_bytes" => 0,
       "evaluation_history_bytes" => 0,
@@ -592,7 +593,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
           "application_content_digest" => "sha256:" <> String.duplicate("0", 64),
           "effective_application_digest" => "sha256:" <> String.duplicate("1", 64),
           "workflow_bundle_hash" => String.duplicate("2", 64),
-          "mission_bundle_hash" => nil,
+          "mission_bundle_hashes" => %{},
           "provider_activity" => false
         }),
       "doctor_default" => CommandOutcome.success(:doctor, @run_ref, doctor_default),
@@ -649,6 +650,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
           "remaining_ms" => 0,
           "capability_calls" => %{},
           "subordinate_evaluations" => 0,
+          "evaluations_by_mission" => %{},
           "protocol_errors" => 0,
           "evaluation_memory_bytes" => 0,
           "evaluation_history_bytes" => 0,

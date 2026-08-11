@@ -12,7 +12,7 @@ defmodule Mix.Tasks.Ptc do
 
   Use `mix ptc help COMMAND` to list every switch accepted by a command.
   The task always prints the shared human rendering. `--envelope PATH`
-  additionally publishes the machine-readable V1 envelope atomically.
+  additionally publishes the machine-readable V2 envelope atomically.
   """
   use Mix.Task
 

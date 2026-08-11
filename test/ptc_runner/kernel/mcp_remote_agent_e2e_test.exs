@@ -80,9 +80,12 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
         ],
         "entry" => "e2e.agent/run"
       },
-      "mission" => %{
-        "components" => [%{"id" => "e2e.tools", "path" => "mission.clj"}],
-        "data" => %{}
+      "missions" => %{
+        "default" => %{
+          "components" => [%{"id" => "e2e.tools", "path" => "mission.clj"}],
+          "data" => %{},
+          "providers" => ["remote-time"]
+        }
       },
       "input" => %{
         "value" => %{

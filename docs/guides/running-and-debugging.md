@@ -19,12 +19,12 @@ rendering paths.
 | `mix ptc run MANIFEST --output VALUE.json` | Write only the validated result value |
 | `mix ptc run MANIFEST --trace-dir DIR` | Persist bounded canonical events under the command run reference (`DIR` must already exist) |
 | `mix ptc run MANIFEST --inspect RUN.inspection.jsonl` | Also write the owner-only private artifact |
-| `mix ptc run MANIFEST --envelope ENVELOPE.json` | Atomically publish the machine-readable V1 command envelope |
+| `mix ptc run MANIFEST --envelope ENVELOPE.json` | Atomically publish the machine-readable V2 command envelope |
 | `mix ptc run MANIFEST --component-override-descriptor D.json` | Compile one selected component from verified replacement source |
 | `mix ptc doctor [MANIFEST]` | Inspect application and provider readiness without running the workflow |
 | `mix ptc doctor MANIFEST --host-config HOST.json --connect` | Perform active provider connectivity checks |
 | `mix ptc models --host-config HOST.json` | List the host document's installed model aliases |
-| `mix ptc.materialize MANIFEST --component ID --out DIR --source S.clj` | Publish model-authored source as a gated candidate component |
+| `mix ptc.materialize MANIFEST --workflow --component ID --out DIR --source S.clj` | Publish model-authored source as a gated candidate component |
 | `mix ptc repl` | Start the direct transactional PTC-Lisp REPL |
 | `mix ptc repl -e EXPR -l SETUP.clj` | Run repeatable expressions with optional setup |
 | `mix ptc repl --manifest MANIFEST [--host-config HOST.json]` | Reuse a manifest's workflow bundle and one provider session |
@@ -191,11 +191,10 @@ rather than compiled against the wrong baseline. The file is opened once and
 the bytes that were hashed are the bytes that compile — the path is never
 reopened, so a file replaced mid-run cannot substitute different source.
 
-The named component must already be selected; an override replaces source and
-never introduces a component. Its declared dependencies are preserved, so a
-candidate cannot quietly acquire a new one. If the same ID is selected into
-both the workflow and the mission, the run fails as an ambiguous target rather
-than replacing both. Normal dependency, export, signature, and capability
+The named component must already be selected in the descriptor's exact
+workflow-or-mission target; an override replaces source and never introduces a
+component. Its declared dependencies are preserved, so a candidate cannot
+quietly acquire a new one. Normal dependency, export, signature, and capability
 validation still applies: an override changes which source compiles, never what
 compilation permits.
 
@@ -214,7 +213,7 @@ the frozen bundle, not covered by a component source hash, and absent from
 bytes into a candidate a later run can evaluate.
 
 ```bash
-mix ptc.materialize ptc.json --component my.helper --out private/candidate \
+mix ptc.materialize ptc.json --workflow --component my.helper --out private/candidate \
   --source authored.clj --origin-run-id run-2026-08-03-0001
 ```
 
@@ -222,6 +221,10 @@ Source comes from `--source` (raw bytes) or from `--from-result PATH
 --result-pointer /json/pointer`, because `mix ptc run --output` writes a JSON
 result artifact rather than raw Lisp. The pointer must resolve to one string;
 anything else is refused rather than coerced.
+
+Use `--workflow` for a workflow component or `--target-mission NAME` for one
+exact declared mission. The selector is required and becomes the descriptor's
+closed qualified target; the task never infers a target from a component ID.
 
 `--out` must not exist. It is created exclusively at mode 0700 with both files
 at 0600 before any content is written, because a candidate extracted from a
@@ -299,7 +302,7 @@ This presentation contract does not change the raw-byte treatment required by
 child stdio transports.
 
 When `--envelope` names a destination, the standalone `ptc` command additionally
-writes one V1 JSON command envelope there. When the arguments parse, every
+writes one V2 JSON command envelope there. When the arguments parse, every
 ordinary or caught path produces exactly one envelope — except a failure to
 publish the envelope itself, which exits `74` with no envelope, described below:
 
@@ -311,7 +314,7 @@ publish the envelope itself, which exits `74` with no envelope, described below:
 - a caught unexpected failure writes the closed `internal/internal_error`
   envelope and exits `70`.
 
-The envelope schema is `priv/schemas/ptc-command-envelope-v1.schema.json`.
+The envelope schema is `priv/schemas/ptc-command-envelope-v2.schema.json`.
 One-shot command presentation never renders an inspected exception, arbitrary
 callback result, credential, private value, provider response, selector, or
 filesystem path into either public stream. The long-lived REPL has its own
@@ -421,7 +424,7 @@ code-owned diagnostic to stderr and exits `74`. No valid envelope is promised on
 that path.
 
 `SIGINT`, `SIGTERM`, VM abort, OOM, and failure before the command boundary are
-outside the V1 envelope contract. They may produce no envelope or VM/OS
+outside the V2 envelope contract. They may produce no envelope or VM/OS
 emergency output, and the OS or shell determines their status. Distribution
 tests characterize termination and child behavior but do not promote one observed
 signal status to a portable guarantee. A deployment that requires a bounded

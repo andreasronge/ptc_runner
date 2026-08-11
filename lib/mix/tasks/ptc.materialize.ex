@@ -4,10 +4,10 @@ defmodule Mix.Tasks.Ptc.Materialize do
   Turns model-authored source into `{candidate.clj, descriptor.json}` and
   reports whether it is fit to promote.
 
-      mix ptc.materialize MANIFEST --component ID --out DIR --source authored.clj
-      mix ptc.materialize MANIFEST --component ID --out DIR \\
+      mix ptc.materialize MANIFEST --workflow --component ID --out DIR --source authored.clj
+      mix ptc.materialize MANIFEST --target-mission NAME --component ID --out DIR \\
         --from-result results/run.json --result-pointer /value/source
-      mix ptc.materialize MANIFEST --component ID --out DIR --source authored.clj \\
+      mix ptc.materialize MANIFEST --workflow --component ID --out DIR --source authored.clj \\
         --origin-run-id run-2026-08-03-0001 --accept-widened-effect
 
   A model can author a working library inside a run, but a runtime `defn` dies
@@ -25,6 +25,10 @@ defmodule Mix.Tasks.Ptc.Materialize do
   written by `mix ptc run --output`/`--private-output` and resolves one RFC 6901
   JSON pointer to one string, because a result artifact is JSON, not raw Lisp.
   A non-string or absent target is refused rather than coerced.
+
+  `--workflow` targets the selected workflow occurrence. `--target-mission
+  NAME` targets exactly that declared mission; supplying neither or both is
+  invalid. The target is written into the closed override descriptor.
 
   ## Publication
 
@@ -70,7 +74,7 @@ defmodule Mix.Tasks.Ptc.Materialize do
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.StrictJSON
 
-  @usage "usage: mix ptc.materialize MANIFEST --component ID --out DIR " <>
+  @usage "usage: mix ptc.materialize MANIFEST (--workflow | --target-mission NAME) --component ID --out DIR " <>
            "(--source PATH | --from-result PATH --result-pointer POINTER) " <>
            "[--origin-run-id ID] [--origin-prompt-hash sha256:...] " <>
            "[--origin-authored-at RFC3339] [--accept-widened-effect]"
@@ -85,6 +89,8 @@ defmodule Mix.Tasks.Ptc.Materialize do
     case OptionParser.parse(argv,
            strict: [
              component: :string,
+             workflow: :boolean,
+             target_mission: :string,
              out: :string,
              source: :string,
              from_result: :string,
@@ -108,11 +114,13 @@ defmodule Mix.Tasks.Ptc.Materialize do
 
   defp materialize(opts, manifest) do
     with {:ok, component_id} <- required(opts, :component),
+         {:ok, target} <- target(opts),
          {:ok, out} <- required(opts, :out),
          {:ok, source} <- candidate_source(opts),
          {:ok, base} <- acquire(manifest, []),
-         {:ok, base_source} <- installed_source(base, component_id),
-         {:ok, published} <- publish(out, source, descriptor(component_id, base_source, opts)),
+         {:ok, base_source} <- installed_source(base, target, component_id),
+         {:ok, published} <-
+           publish(out, source, descriptor(target, component_id, base_source, opts)),
          {:ok, candidate} <- gate_acquire(manifest, published),
          report <- evaluate(base, candidate, opts) do
       finish(report, published)
@@ -152,10 +160,11 @@ defmodule Mix.Tasks.Ptc.Materialize do
 
   defp publish(out, source, descriptor), do: CandidateArtifact.publish(out, source, descriptor)
 
-  defp descriptor(component_id, base_source, opts) do
+  defp descriptor(target, component_id, base_source, opts) do
     # source_hash and path are derived by CandidateArtifact from the bytes it
     # actually writes, so a descriptor cannot name source published beside it.
     %{
+      "target" => target,
       "component_id" => component_id,
       "base_source_hash" => ComponentOverride.hash(base_source)
     }
@@ -181,10 +190,30 @@ defmodule Mix.Tasks.Ptc.Materialize do
   defp put_acceptance(map, false), do: map
   defp put_acceptance(map, true), do: Map.put(map, "accept_widened_effect", true)
 
-  defp installed_source(package, component_id) do
-    case CandidatePromotion.component_source(package, component_id) do
+  defp installed_source(package, %{"environment" => "workflow"}, component_id) do
+    case CandidatePromotion.component_source(package, "workflow", component_id) do
       {:ok, source} -> {:ok, source}
       :error -> {:error, :override_component_not_selected}
+    end
+  end
+
+  defp installed_source(package, %{"environment" => "mission", "mission" => name}, component_id) do
+    case CandidatePromotion.component_source(package, {:mission, name}, component_id) do
+      {:ok, source} -> {:ok, source}
+      :error -> {:error, :override_component_not_selected}
+    end
+  end
+
+  defp target(opts) do
+    case {Keyword.get(opts, :workflow, false), Keyword.get(opts, :target_mission)} do
+      {true, nil} ->
+        {:ok, %{"environment" => "workflow"}}
+
+      {false, name} when is_binary(name) ->
+        {:ok, %{"environment" => "mission", "mission" => name}}
+
+      _ ->
+        {:error, :invalid_override_target}
     end
   end
 

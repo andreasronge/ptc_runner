@@ -1,0 +1,2 @@
+Named missions keep APIs, provider authority, data, and continuation state separate.
+The workflow may coordinate them without merging those boundaries.

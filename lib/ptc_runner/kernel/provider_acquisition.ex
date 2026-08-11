@@ -691,7 +691,14 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     if Enum.any?(entries, & &1.workflow_llm?) do
       {:error, :invalid_workflow_llm_provider}
     else
-      {:ok, %{capabilities: flatten_capability_entries(entries)}}
+      {:ok,
+       %{
+         capabilities: flatten_capability_entries(entries),
+         by_occurrence:
+           entries
+           |> Enum.sort_by(& &1.index)
+           |> Map.new(&{&1.index, &1.capabilities})
+       }}
     end
   end
 

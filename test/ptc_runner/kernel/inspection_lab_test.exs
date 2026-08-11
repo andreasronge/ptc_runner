@@ -124,8 +124,10 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
       assert metadata.status == 200
       assert turns.status == 200
 
-      assert %{"mission_inventory_hash" => inventory_hash, "connector_snapshots" => snapshots} =
-               Jason.decode!(metadata.resp_body)
+      assert %{
+               "missions" => %{"default" => %{"inventory_hash" => inventory_hash}},
+               "connector_snapshots" => snapshots
+             } = Jason.decode!(metadata.resp_body)
 
       assert inventory_hash =~ ~r/\A[0-9a-f]{64}\z/
       assert [_snapshot | _rest] = snapshots

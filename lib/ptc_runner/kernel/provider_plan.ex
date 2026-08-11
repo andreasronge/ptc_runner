@@ -7,10 +7,10 @@ defmodule PtcRunner.Kernel.ProviderPlan do
   @spec derive(
           PtcRunner.Kernel.RunRequest.t(),
           PtcRunner.Kernel.FrozenBundle.t(),
-          PtcRunner.Kernel.FrozenBundle.t() | nil,
+          %{binary() => PtcRunner.Kernel.FrozenBundle.t() | nil},
           [map()]
         ) :: {:ok, map()} | {:error, {:dependency_invalid | :data_policy_denied, map() | nil}}
-  def derive(request, workflow_bundle, mission_bundle, declarations) do
+  def derive(request, workflow_bundle, mission_bundles, declarations) do
     with :ok <- validate_dependencies(declarations),
          :ok <- validate_workflow_llm_defaults(declarations),
          effective_data_class <- effective_data_class(request, declarations),
@@ -22,7 +22,7 @@ defmodule PtcRunner.Kernel.ProviderPlan do
            EffectiveApplication.build(
              request,
              workflow_bundle,
-             mission_bundle,
+             mission_bundles,
              providers,
              effective_event_policy
            ) do
@@ -37,7 +37,7 @@ defmodule PtcRunner.Kernel.ProviderPlan do
            post_selection_context(
              request,
              workflow_bundle,
-             mission_bundle,
+             mission_bundles,
              effective.digest,
              effective_data_class,
              effective_flow,
@@ -123,7 +123,7 @@ defmodule PtcRunner.Kernel.ProviderPlan do
   defp post_selection_context(
          request,
          workflow_bundle,
-         mission_bundle,
+         mission_bundles,
          effective_digest,
          effective_data_class,
          effective_flow,
@@ -134,7 +134,7 @@ defmodule PtcRunner.Kernel.ProviderPlan do
       effective_application_digest: effective_digest,
       bundle_hashes: %{
         workflow: workflow_bundle.hash,
-        mission: if(mission_bundle, do: mission_bundle.hash, else: nil)
+        missions: Map.new(mission_bundles, fn {name, bundle} -> {name, bundle && bundle.hash} end)
       },
       input_authority_class: request.input.authority,
       limits: request.package.limits,

@@ -44,7 +44,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -85,7 +85,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -118,7 +118,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -152,7 +152,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -197,7 +197,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink,
@@ -275,7 +275,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         {:ok, config} =
           RunConfig.new(
             workflow_environment: workflow,
-            mission_environment: mission,
+            missions: %{"default" => mission},
             input: %{},
             limits: limits,
             event_sink: sink,
@@ -338,7 +338,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, mixed_config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: local_sink,
@@ -366,7 +366,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         {:ok, config} =
           RunConfig.new(
             workflow_environment: workflow,
-            mission_environment: mission,
+            missions: %{"default" => mission},
             input: %{},
             limits: limits,
             event_sink: sink,
@@ -410,7 +410,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         {:ok, config} =
           RunConfig.new(
             workflow_environment: workflow,
-            mission_environment: mission,
+            missions: %{"default" => mission},
             input: %{},
             limits: limits,
             event_sink: event_sink,
@@ -453,7 +453,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         {:ok, config} =
           RunConfig.new(
             workflow_environment: workflow,
-            mission_environment: mission,
+            missions: %{"default" => mission},
             input: %{},
             limits: limits,
             event_sink: event_sink,
@@ -493,7 +493,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         {:ok, config} =
           RunConfig.new(
             workflow_environment: workflow,
-            mission_environment: mission,
+            missions: %{"default" => mission},
             input: %{},
             limits: limits,
             event_sink: sink,
@@ -543,7 +543,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         {:ok, config} =
           RunConfig.new(
             workflow_environment: workflow,
-            mission_environment: mission,
+            missions: %{"default" => mission},
             input: %{},
             limits: limits,
             event_sink: sink
@@ -641,7 +641,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         {:ok, config} =
           RunConfig.new(
             workflow_environment: workflow,
-            mission_environment: mission,
+            missions: %{"default" => mission},
             input: %{},
             limits: limits,
             event_sink: sink,
@@ -723,7 +723,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -751,7 +751,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -791,7 +791,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -833,7 +833,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -857,7 +857,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -880,7 +880,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -904,7 +904,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -935,12 +935,12 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, private_sink} = EventSink.start(:private, limits, run_id: "repl-constructor")
     failed_pid = private_sink.pid
     failed_ref = Process.monitor(failed_pid)
-    :ok = EventSink.emit(private_sink, "run-started", %{})
+    :ok = EventSink.emit(private_sink, "run-started", %{missions: %{}})
 
     assert {:error, :invalid_run_config} =
              RunConfig.new(
                workflow_environment: workflow,
-               mission_environment: mission,
+               missions: %{"default" => mission},
                input: %{},
                limits: limits,
                event_sink: private_sink
@@ -958,23 +958,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-one-shot-owner")
 
     {:ok, config} =
-      RunConfig.new(
-        workflow_environment: workflow,
-        mission_environment: mission,
-        input: %{},
-        limits: limits,
-        event_sink: sink,
-        provider_session:
-          ProviderSessionFixture.start(
-            [
-              fn ->
-                send(parent, :resource_closed)
-                :ok
-              end
-            ],
-            limits
-          )
-      )
+      config_with_close_message(workflow, mission, limits, sink, parent, :resource_closed)
 
     {:ok, session} = ReplSession.new(config: config)
     assert {:error, :event_sink_error} = ReplSession.new(config: config)
@@ -994,23 +978,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-distinct-owner")
 
     config = fn close_message ->
-      RunConfig.new(
-        workflow_environment: workflow,
-        mission_environment: mission,
-        input: %{},
-        limits: limits,
-        event_sink: sink,
-        provider_session:
-          ProviderSessionFixture.start(
-            [
-              fn ->
-                send(parent, close_message)
-                :ok
-              end
-            ],
-            limits
-          )
-      )
+      config_with_close_message(workflow, mission, limits, sink, parent, close_message)
     end
 
     {:ok, winner_config} = config.(:winner_resource_closed)
@@ -1026,6 +994,27 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert_receive :winner_resource_closed
   end
 
+  # ex_dna:disable-for-next-line — mirrors the Kernel owner-resource fixture for REPL coverage
+  defp config_with_close_message(workflow, mission, limits, sink, parent, close_message) do
+    RunConfig.new(
+      workflow_environment: workflow,
+      missions: %{"default" => mission},
+      input: %{},
+      limits: limits,
+      event_sink: sink,
+      provider_session:
+        ProviderSessionFixture.start(
+          [
+            fn ->
+              send(parent, close_message)
+              :ok
+            end
+          ],
+          limits
+        )
+    )
+  end
+
   test "configuration assembly rejects a run-started payload above the event ceiling" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
@@ -1036,7 +1025,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert {:error, :run_started_metadata_exceeded} =
              RunConfig.new(
                workflow_environment: workflow,
-               mission_environment: mission,
+               missions: %{"default" => mission},
                input: %{},
                limits: limits,
                event_sink: sink,
@@ -1048,7 +1037,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert {:error, :run_started_metadata_exceeded} =
              RunConfig.new(
                workflow_environment: workflow,
-               mission_environment: mission,
+               missions: %{"default" => mission},
                input: %{},
                limits: limits,
                event_sink: private_sink,
@@ -1097,7 +1086,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1129,7 +1118,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1166,7 +1155,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1238,7 +1227,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink

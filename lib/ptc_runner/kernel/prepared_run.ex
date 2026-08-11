@@ -23,7 +23,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
   @enforce_keys [
     :request,
     :workflow_bundle,
-    :mission_bundle,
+    :mission_bundles,
     :entry_source,
     :catalog_attestation,
     :provider_declarations,
@@ -41,7 +41,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
   @type t :: %__MODULE__{
           request: RunRequest.t(),
           workflow_bundle: FrozenBundle.t(),
-          mission_bundle: FrozenBundle.t() | nil,
+          mission_bundles: %{binary() => FrozenBundle.t() | nil},
           entry_source: binary(),
           catalog_attestation: binary(),
           provider_declarations: [map()],
@@ -58,7 +58,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
   @spec new(
           RunRequest.t(),
           FrozenBundle.t(),
-          FrozenBundle.t() | nil,
+          %{binary() => FrozenBundle.t() | nil},
           binary(),
           ProviderActivity.t(),
           InstallationCatalog.t(),
@@ -67,7 +67,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
   def new(
         request,
         workflow_bundle,
-        mission_bundle,
+        mission_bundles,
         entry_source,
         provider_activity,
         catalog,
@@ -76,15 +76,15 @@ defmodule PtcRunner.Kernel.PreparedRun do
     if RunRequest.valid?(request) and
          InstallationCatalog.valid?(catalog) and
          bundle_matches?(workflow_bundle, request.package.workflow_components) and
-         mission_bundle_matches?(mission_bundle, request.package.mission_components) and
+         mission_bundles_matches?(mission_bundles, request.package.missions) and
          entry_callable?(workflow_bundle, request.package.entry) and
          entry_source == expected_entry_source(request) and
-         metadata_valid?(request, workflow_bundle, mission_bundle, catalog, metadata) and
+         metadata_valid?(request, workflow_bundle, mission_bundles, catalog, metadata) and
          ProviderActivity.claim(provider_activity) == :ok do
       prepared = %__MODULE__{
         request: request,
         workflow_bundle: workflow_bundle,
-        mission_bundle: mission_bundle,
+        mission_bundles: mission_bundles,
         entry_source: entry_source,
         catalog_attestation: catalog.attestation,
         provider_declarations: metadata.provider_declarations,
@@ -155,16 +155,16 @@ defmodule PtcRunner.Kernel.PreparedRun do
         prepared.workflow_bundle,
         prepared.request.package.workflow_components
       ) and
-      mission_bundle_matches?(
-        prepared.mission_bundle,
-        prepared.request.package.mission_components
+      mission_bundles_matches?(
+        prepared.mission_bundles,
+        prepared.request.package.missions
       ) and
       entry_callable?(prepared.workflow_bundle, prepared.request.package.entry) and
       prepared.entry_source == expected_entry_source(prepared.request) and
       sealed_metadata_valid?(
         prepared.request,
         prepared.workflow_bundle,
-        prepared.mission_bundle,
+        prepared.mission_bundles,
         Map.take(prepared, [
           :provider_declarations,
           :effective_data_class,
@@ -222,12 +222,19 @@ defmodule PtcRunner.Kernel.PreparedRun do
   def close(%__MODULE__{provider_activity: activity}), do: ProviderActivity.stop(activity)
   def close(_prepared), do: :ok
 
-  defp mission_bundle_matches?(nil, []), do: true
+  defp mission_bundles_matches?(bundles, missions)
+       when is_map(bundles) and is_map(missions) and map_size(bundles) == map_size(missions) do
+    Enum.sort(Map.keys(bundles)) == Enum.sort(Map.keys(missions)) and
+      Enum.all?(missions, fn {name, mission} ->
+        case Map.fetch(bundles, name) do
+          {:ok, nil} -> mission.components == []
+          {:ok, bundle} -> bundle_matches?(bundle, mission.components)
+          :error -> false
+        end
+      end)
+  end
 
-  defp mission_bundle_matches?(%FrozenBundle{} = bundle, [_component | _rest] = components),
-    do: bundle_matches?(bundle, components)
-
-  defp mission_bundle_matches?(_bundle, _components), do: false
+  defp mission_bundles_matches?(_bundles, _missions), do: false
 
   defp bundle_matches?(%FrozenBundle{} = bundle, components) when is_list(components) do
     with true <- FrozenBundle.valid?(bundle),
@@ -288,7 +295,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
   defp expected_entry_source(request),
     do: "(#{request.package.entry} data/input)"
 
-  defp metadata_valid?(request, workflow_bundle, mission_bundle, catalog, metadata)
+  defp metadata_valid?(request, workflow_bundle, mission_bundles, catalog, metadata)
        when is_map(metadata) do
     with true <-
            Enum.sort(Map.keys(metadata)) ==
@@ -308,14 +315,14 @@ defmodule PtcRunner.Kernel.PreparedRun do
              catalog
            ),
          {:ok, expected} <-
-           ProviderPlan.derive(request, workflow_bundle, mission_bundle, declarations),
+           ProviderPlan.derive(request, workflow_bundle, mission_bundles, declarations),
          true <- Map.drop(metadata, [:provider_declarations]) == expected,
          true <-
            selection_contexts_valid?(
              declarations,
              request,
              workflow_bundle,
-             mission_bundle,
+             mission_bundles,
              expected.post_selection_context
            ) do
       true
@@ -324,10 +331,10 @@ defmodule PtcRunner.Kernel.PreparedRun do
     end
   end
 
-  defp metadata_valid?(_request, _workflow_bundle, _mission_bundle, _catalog, _metadata),
+  defp metadata_valid?(_request, _workflow_bundle, _mission_bundles, _catalog, _metadata),
     do: false
 
-  defp sealed_metadata_valid?(request, workflow_bundle, mission_bundle, metadata)
+  defp sealed_metadata_valid?(request, workflow_bundle, mission_bundles, metadata)
        when is_map(metadata) do
     with true <-
            Enum.sort(Map.keys(metadata)) ==
@@ -350,14 +357,14 @@ defmodule PtcRunner.Kernel.PreparedRun do
            EffectiveApplication.build(
              request,
              workflow_bundle,
-             mission_bundle,
+             mission_bundles,
              providers,
              metadata.effective_event_policy
            ),
          true <- identity.projection == metadata.effective_application_projection,
          true <- identity.digest == metadata.effective_application_digest,
          true <-
-           post_selection_context_valid?(request, workflow_bundle, mission_bundle, metadata) do
+           post_selection_context_valid?(request, workflow_bundle, mission_bundles, metadata) do
       true
     else
       _invalid -> false
@@ -496,7 +503,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
     end)
   end
 
-  defp post_selection_context_valid?(request, workflow_bundle, mission_bundle, metadata) do
+  defp post_selection_context_valid?(request, workflow_bundle, mission_bundles, metadata) do
     expected_flow =
       if request.input.authority == :private or
            metadata.effective_data_class == :private_inspection,
@@ -513,7 +520,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
       effective_application_digest: metadata.effective_application_digest,
       bundle_hashes: %{
         workflow: workflow_bundle.hash,
-        mission: if(mission_bundle, do: mission_bundle.hash, else: nil)
+        missions: mission_bundle_hashes(mission_bundles)
       },
       input_authority_class: request.input.authority,
       limits: request.package.limits,
@@ -528,7 +535,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
          declarations,
          request,
          workflow_bundle,
-         mission_bundle,
+         mission_bundles,
          post_selection_context
        ) do
     Enum.all?(declarations, fn declaration ->
@@ -536,7 +543,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
         declaration.selection_context,
         request,
         workflow_bundle,
-        mission_bundle,
+        mission_bundles,
         declaration,
         post_selection_context
       )
@@ -547,7 +554,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
          context,
          request,
          workflow_bundle,
-         mission_bundle,
+         mission_bundles,
          declaration,
          post_selection_context
        ) do
@@ -559,7 +566,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
           application_content_digest: request.package.application_content_digest,
           bundle_hashes: %{
             workflow: workflow_bundle.hash,
-            mission: if(mission_bundle, do: mission_bundle.hash, else: nil)
+            missions: mission_bundle_hashes(mission_bundles)
           },
           input_authority_class: request.input.authority,
           destination: declaration.destination,
@@ -573,11 +580,14 @@ defmodule PtcRunner.Kernel.PreparedRun do
       Map.delete(context, :execution_scope_id) == expected
   end
 
+  defp mission_bundle_hashes(bundles),
+    do: Map.new(bundles, fn {name, bundle} -> {name, bundle && bundle.hash} end)
+
   defp payload(prepared) do
     {
       prepared.request,
       prepared.workflow_bundle,
-      prepared.mission_bundle,
+      prepared.mission_bundles,
       prepared.entry_source,
       prepared.catalog_attestation,
       prepared.provider_declarations,

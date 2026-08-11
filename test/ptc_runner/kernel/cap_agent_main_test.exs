@@ -29,6 +29,22 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
       prompt_refs = Enum.map(Prelude.prompt_exports(bundle.prelude), & &1.ref)
       assert "agent.main/run" in prompt_refs
     end
+
+    test "agent exports advertise the optional mission selector" do
+      {:ok, components} = Library.components(agent_main_closure())
+      {:ok, bundle} = Kernel.compile_bundle(components)
+
+      signatures = Map.new(bundle.prelude.exports, &{&1.ref, &1.signature})
+
+      for ref <-
+            ~w(agent.core/run agent.core/run-value agent.core/run-outcome agent.core/run-result-value) do
+        assert signatures[ref] ==
+                 "(task :string, cfg {model :string?, mission :string?}) -> :any"
+      end
+
+      assert signatures["agent.main/run"] ==
+               "(input {task :string, agent {model :string?, mission :string?}}) -> :any"
+    end
   end
 
   describe "cap/unwrap!" do
