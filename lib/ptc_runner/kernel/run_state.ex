@@ -1011,33 +1011,38 @@ defmodule PtcRunner.Kernel.RunState do
 
   defp maybe_complete_evaluation_release(%{evaluation_release_waiter: nil} = state), do: state
 
-  defp maybe_complete_evaluation_release(%{evaluation_release_waiter: {from, lease}} = state) do
+  defp maybe_complete_evaluation_release(%{evaluation_release_waiter: {_from, lease}} = state) do
     case state.evaluation_lease do
       {^lease, _owner, monitor_ref} ->
         if evaluation_reservations?(state, lease) do
           state
         else
           Process.demonitor(monitor_ref, [:flush])
-          GenServer.reply(from, {:ok, evaluation_status(state)})
           clear_evaluation(state)
         end
 
       # The waiter's lease is already gone, so no provider provenance is
-      # pending for it. Reply rather than drop: a dropped `from` leaves the
-      # caller blocked until its client-side timeout kills it.
+      # pending for it; clearing resolves it.
       _other ->
-        GenServer.reply(from, {:ok, evaluation_status(state)})
         clear_evaluation(state)
     end
   end
 
+  # A parked release-status waiter is resolved — never dropped — by every
+  # path that clears the lease, including a commit or release the lease
+  # owner issued asynchronously after parking. The reply carries the status
+  # bits as they stand at resolution, before the clear resets them.
+  defp resolve_release_waiter(%{evaluation_release_waiter: nil} = state), do: state
+
+  defp resolve_release_waiter(%{evaluation_release_waiter: {from, _lease}} = state) do
+    GenServer.reply(from, {:ok, evaluation_status(state)})
+    %{state | evaluation_release_waiter: nil}
+  end
+
   defp clear_evaluation(state) do
-    %{
-      state
-      | evaluation_lease: nil,
-        evaluation_release_waiter: nil,
-        evaluation_terminal_provider_failure?: false
-    }
+    state = resolve_release_waiter(state)
+
+    %{state | evaluation_lease: nil, evaluation_terminal_provider_failure?: false}
     |> admit_from_queue()
   end
 

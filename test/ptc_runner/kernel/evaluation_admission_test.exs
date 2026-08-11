@@ -369,6 +369,120 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     assert_receive {:release_status, ^holder, {:ok, %{terminal_provider_failure?: false}}}, 1_000
   end
 
+  test "an async release-status followed by commit replies to both raw calls" do
+    state = start_state()
+    parent = self()
+
+    dispatcher = start_worker(state)
+
+    # The lease owner parks a release-status call and then commits without
+    # waiting — raw sends model the async ordering. Both must be answered:
+    # the commit's clear resolves the parked waiter instead of dropping it.
+    holder =
+      spawn(fn ->
+        {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, :fail_fast)
+        send(parent, {:leased, self()})
+
+        receive do
+          :go ->
+            status_ref = make_ref()
+            commit_ref = make_ref()
+
+            send(
+              state.pid,
+              {:"$gen_call", {self(), status_ref},
+               {state.token, {:release_evaluation_status, lease}}}
+            )
+
+            send(
+              state.pid,
+              {:"$gen_call", {self(), commit_ref},
+               {state.token, {:commit_evaluation, lease, %{}, []}}}
+            )
+
+            replies =
+              for _n <- 1..2 do
+                receive do
+                  {^status_ref, reply} -> {:status, reply}
+                  {^commit_ref, reply} -> {:commit, reply}
+                after
+                  2_000 -> :missing_reply
+                end
+              end
+
+            send(parent, {:replies, Map.new(replies)})
+        end
+      end)
+
+    assert_receive {:leased, ^holder}, 1_000
+
+    # A live reservation tied to the lease makes the release-status park.
+    send(dispatcher, {:reserve_capability, :mission, "cap"})
+    assert_receive {:capability_reserved, ^dispatcher, :ok}, 1_000
+
+    send(holder, :go)
+
+    assert_receive {:replies, replies}, 3_000
+    assert %{status: {:ok, %{terminal_provider_failure?: false}}, commit: :ok} = replies
+  end
+
+  test "dispatcher death drains its reservation and completes a parked release" do
+    state = start_state()
+    holder = start_worker(state)
+    {:ok, lease} = reserve!(holder)
+
+    dispatcher = start_worker(state)
+    send(dispatcher, {:reserve_capability, :mission, "cap"})
+    assert_receive {:capability_reserved, ^dispatcher, :ok}, 1_000
+
+    provider =
+      spawn(fn ->
+        receive do
+          :never -> :ok
+        end
+      end)
+
+    send(dispatcher, {:attach_provider, provider})
+    assert_receive {:provider_attached, ^dispatcher, :ok}, 1_000
+
+    send(holder, {:release_status, lease})
+    refute_receive {:release_status, ^holder, _result}, 100
+
+    # Dispatcher death kills the attached provider; only the provider's
+    # observed :DOWN releases the reservation and completes the waiter.
+    monitor = Process.monitor(dispatcher)
+    Process.exit(dispatcher, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^dispatcher, :killed}, 1_000
+
+    assert_receive {:release_status, ^holder, {:ok, %{terminal_provider_failure?: false}}}, 1_000
+  end
+
+  test "simultaneous admission-deadline expirations resolve every waiter" do
+    state = start_state()
+    holder = start_worker(state)
+    {:ok, lease} = reserve!(holder)
+
+    w1 = start_worker(state)
+    w2 = start_worker(state)
+    reserve_async(w1, :block)
+    await_queued(state, 1)
+    reserve_async(w2, :block)
+    await_queued(state, 2)
+
+    [w1_ref, w2_ref] = queued_monitor_refs(state)
+    send(state.pid, {:admission_deadline, w1_ref})
+    send(state.pid, {:admission_deadline, w2_ref})
+
+    assert {:error, :admission_timeout} = await_reserved(w1)
+    assert {:error, :admission_timeout} = await_reserved(w2)
+
+    # The drained queue must not wedge later admission.
+    release!(holder, lease)
+    late = start_worker(state)
+    assert {:ok, late_lease} = reserve!(late, :block)
+    release!(late, late_lease)
+  end
+
   test "raw-call seam observes exactly one reply under a timer/admission race" do
     state = start_state()
     holder = start_worker(state)
