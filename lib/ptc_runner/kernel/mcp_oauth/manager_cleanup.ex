@@ -4,10 +4,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.ManagerCleanup do
 
   This owner serializes adoption and gives each manager exactly one linked
   cleanup worker, including across concurrent or repeated adoption attempts.
-  The worker retries bounded close calls with capped exponential backoff. If
-  this owner restarts, OTP terminates the linked workers, which in turn
-  terminate their linked managers rather than leaving unreachable credential
-  owners alive.
+  The worker retries bounded close calls with capped exponential backoff.
+  Consecutive close timeouts have a finite cleanup-slot budget and reclaim a
+  manager abnormally when it is exhausted. A persistence failure resets that
+  timeout streak and remains retryable without a cleanup deadline. If this
+  owner restarts, OTP terminates the linked workers, which in turn terminate
+  their linked managers rather than leaving unreachable credential owners
+  alive.
   Provider cleanup uses `adopt/2` to confirm both worker ownership and removal
   from the registrar's force-close set as one caller-visible handoff. Worker
   registration is serialized here, while registrar calls run as deduplicated

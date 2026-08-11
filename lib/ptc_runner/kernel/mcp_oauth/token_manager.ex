@@ -200,8 +200,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
     do: {:error, :invalid_scope_challenge}
 
   @spec close(t()) :: :ok | {:error, :persistence_failed | :timeout}
-  def close(%__MODULE__{pid: pid}) do
-    GenServer.call(pid, :close, @close_timeout_ms)
+  def close(%__MODULE__{} = manager), do: close(manager, @close_timeout_ms)
+
+  @doc false
+  @spec close(t(), pos_integer()) :: :ok | {:error, :persistence_failed | :timeout}
+  def close(%__MODULE__{pid: pid}, timeout_ms)
+      when is_integer(timeout_ms) and timeout_ms > 0 do
+    GenServer.call(pid, :close, min(timeout_ms, @close_timeout_ms))
   catch
     :exit, {:timeout, _detail} -> {:error, :timeout}
     :exit, _reason -> :ok

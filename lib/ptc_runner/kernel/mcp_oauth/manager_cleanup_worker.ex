@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.ManagerCleanupWorker do
 
   @initial_retry_ms 250
   @maximum_retry_ms 30_000
+  @timeout_deadline_ms 300_000
 
   @spec child_spec(TokenManager.t()) :: Supervisor.child_spec()
   def child_spec(%TokenManager{pid: pid} = manager) do
@@ -19,15 +20,25 @@ defmodule PtcRunner.Kernel.MCPOAuth.ManagerCleanupWorker do
     }
   end
 
-  @spec start_link(TokenManager.t()) :: GenServer.on_start()
-  def start_link(%TokenManager{} = manager),
-    do: GenServer.start_link(__MODULE__, manager)
+  @spec start_link(TokenManager.t(), keyword()) :: GenServer.on_start()
+  def start_link(%TokenManager{} = manager, opts \\ []) do
+    timeout_deadline_ms = Keyword.get(opts, :timeout_deadline_ms, @timeout_deadline_ms)
+    GenServer.start_link(__MODULE__, {manager, timeout_deadline_ms})
+  end
 
   @impl GenServer
-  def init(%TokenManager{pid: pid} = manager) do
+  def init({%TokenManager{pid: pid} = manager, timeout_deadline_ms})
+      when is_integer(timeout_deadline_ms) and timeout_deadline_ms > 0 do
     Process.link(pid)
     send(self(), :close)
-    {:ok, %{manager: manager, retry_ms: @initial_retry_ms}}
+
+    {:ok,
+     %{
+       manager: manager,
+       retry_ms: @initial_retry_ms,
+       timeout_deadline_ms: timeout_deadline_ms,
+       timeout_deadline: nil
+     }}
   rescue
     ErlangError ->
       # Linking is the atomic ownership handoff. A manager that exited before
@@ -37,17 +48,46 @@ defmodule PtcRunner.Kernel.MCPOAuth.ManagerCleanupWorker do
 
   @impl GenServer
   def handle_info(:close, state) do
-    case TokenManager.close(state.manager) do
-      :ok ->
-        {:stop, :normal, state}
+    now = System.monotonic_time(:millisecond)
+    deadline = state.timeout_deadline || now + state.timeout_deadline_ms
+    remaining = deadline - now
 
-      {:error, _reason} ->
-        Process.send_after(self(), :close, state.retry_ms)
-        {:noreply, %{state | retry_ms: min(state.retry_ms * 2, @maximum_retry_ms)}}
+    if remaining <= 0 do
+      timeout_exhausted(state, deadline)
+    else
+      case TokenManager.close(state.manager, remaining) do
+        :ok ->
+          {:stop, :normal, state}
+
+        {:error, :persistence_failed} ->
+          retry(%{state | timeout_deadline: nil})
+
+        {:error, :timeout} ->
+          retry_timeout(state, deadline)
+      end
     end
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  defp retry_timeout(state, deadline) do
+    now = System.monotonic_time(:millisecond)
+    remaining = deadline - now
+
+    if remaining <= 0 do
+      timeout_exhausted(state, deadline)
+    else
+      retry(%{state | timeout_deadline: deadline}, min(state.retry_ms, remaining))
+    end
+  end
+
+  defp timeout_exhausted(state, deadline),
+    do: {:stop, :cleanup_timeout_exhausted, %{state | timeout_deadline: deadline}}
+
+  defp retry(state, delay_ms \\ nil) do
+    Process.send_after(self(), :close, delay_ms || state.retry_ms)
+    {:noreply, %{state | retry_ms: min(state.retry_ms * 2, @maximum_retry_ms)}}
+  end
 
   if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
     @impl GenServer
