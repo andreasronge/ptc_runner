@@ -272,6 +272,20 @@ defmodule PtcRunner.Kernel.RunState do
   @doc "Records one protocol error and closes the run when its ceiling is exceeded."
   def protocol_error(state), do: safe_call(state, :protocol_error, :ok)
 
+  @doc """
+  Records one protocol error after atomically authenticating the mission lease.
+
+  Authentication and accounting are one owner operation: an advisory check
+  followed by a separate `protocol_error/1` would let an evaluation that died
+  mid-validation spend the next evaluation's shared protocol-error budget.
+  A stale mission lease answers `{:error, :stale_evaluation}` and records
+  nothing. Workflow calls carry no lease and are always recorded.
+  """
+  @spec protocol_error(t(), environment(), reference() | nil) ::
+          :ok | {:error, :protocol_error_limit | :stale_evaluation}
+  def protocol_error(state, environment, lease),
+    do: safe_call(state, {:protocol_error, environment, lease}, :ok)
+
   # There is no failure left to record once the owner is gone. As above, the
   # declared :ok never covered the mismatched-token reply.
   @spec fail(t(), atom(), atom()) :: :ok | {:error, :closed}
@@ -719,6 +733,19 @@ defmodule PtcRunner.Kernel.RunState do
 
       _ ->
         {:reply, {:error, :stale_lease}, state}
+    end
+  end
+
+  def handle_call(
+        {token, {:protocol_error, environment, lease}},
+        from,
+        %{token: token} = state
+      )
+      when environment in [:workflow, :mission] do
+    if environment == :mission and not current_mission_lease?(state, lease) do
+      {:reply, {:error, :stale_evaluation}, state}
+    else
+      handle_call({token, :protocol_error}, from, state)
     end
   end
 

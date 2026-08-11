@@ -59,7 +59,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         event_sink
       )
       when environment in [:workflow, :mission] do
-    protocol_error(state, event_sink, :ambiguous_arguments)
+    protocol_error(state, event_sink, :ambiguous_arguments, environment, nil)
   end
 
   def dispatch(
@@ -94,7 +94,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         _inspection_sink
       )
       when environment in [:workflow, :mission] do
-    protocol_error(state, event_sink, :ambiguous_arguments)
+    protocol_error(state, event_sink, :ambiguous_arguments, environment, nil)
   end
 
   def dispatch(
@@ -137,14 +137,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         {event_sink, _inspection_sink, lease}
       )
       when environment in [:workflow, :mission] do
-    # Authenticated before protocol accounting: a stale evaluation's
-    # malformed call must not spend the current run's shared protocol-error
-    # budget.
-    if authenticated?(state, environment, lease) do
-      protocol_error(state, event_sink, :ambiguous_arguments)
-    else
-      stale_evaluation_error()
-    end
+    protocol_error(state, event_sink, :ambiguous_arguments, environment, lease)
   end
 
   def dispatch_with_lease(
@@ -180,10 +173,10 @@ defmodule PtcRunner.Kernel.Dispatcher do
         %{status: :error, kind: :capability_denied, reason: :capability_absent, retryable?: false}
 
       {:error, :invalid_arguments} ->
-        protocol_error(state, event_sink, :invalid_arguments)
+        protocol_error(state, event_sink, :invalid_arguments, environment, lease)
 
       {:error, :argument_exceeded} ->
-        protocol_error(state, event_sink, :argument_exceeded)
+        protocol_error(state, event_sink, :argument_exceeded, environment, lease)
 
       {:error, :limit_exceeded} ->
         limit_error(state, event_sink, :capability_quota)
@@ -601,9 +594,13 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
-  defp protocol_error(state, event_sink, reason) do
-    case RunState.protocol_error(state) do
+  # Authentication and accounting are one atomic owner operation: a mission
+  # call whose evaluation died mid-validation must not spend the next
+  # evaluation's shared protocol-error budget.
+  defp protocol_error(state, event_sink, reason, environment, lease) do
+    case RunState.protocol_error(state, environment, lease) do
       :ok -> %{status: :error, kind: :protocol_error, reason: reason, retryable?: false}
+      {:error, :stale_evaluation} -> stale_evaluation_error()
       {:error, :protocol_error_limit} -> limit_error(state, event_sink, :protocol_errors)
     end
   end

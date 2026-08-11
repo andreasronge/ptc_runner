@@ -122,10 +122,13 @@ carries the lease of the evaluation whose tool grant issued it
 (`mission_tools` → `ToolGrant` → `Dispatcher.dispatch_with_lease/8` →
 `reserve_capability/4`); a lease that is no longer current is rejected as
 `:stale_evaluation`. Authentication happens *before* argument validation
-and protocol accounting (advisory `mission_lease_current?/2`, with the
-atomic recheck inside `reserve_capability/4` staying authoritative), so a
-stale evaluation's malformed call can neither spend the current run's
-shared protocol-error budget nor close it. This closes the window where a
+(advisory `mission_lease_current?/2`), and protocol-error accounting is
+itself lease-authenticated in one atomic owner operation
+(`protocol_error/3`) — an owner that dies while its call is mid-validation
+still cannot spend the next evaluation's shared protocol-error budget or
+close the run, and the legacy no-lease dispatch overloads fail closed for
+mission ambiguity too. The atomic recheck inside `reserve_capability/4`
+stays authoritative for grants. This closes the window where a
 dead evaluation's lingering sandbox reserves after the next evaluation was
 admitted and has its late call attributed to the new lease (or to none),
 bypassing the stale-reservation gate.

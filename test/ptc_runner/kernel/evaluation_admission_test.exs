@@ -412,6 +412,29 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     assert usage_after.protocol_errors == usage_before.protocol_errors
     refute usage_after.closed?
 
+    # The atomic accounting call itself: a stale lease records nothing even
+    # when reached directly (the state an evaluation lands in when its owner
+    # dies mid-validation), while the current lease records normally.
+    assert {:error, :stale_evaluation} = RunState.protocol_error(state, :mission, stale_lease)
+    assert RunState.usage(state).protocol_errors == usage_before.protocol_errors
+
+    assert :ok = RunState.protocol_error(state, :mission, next_lease)
+    assert RunState.usage(state).protocol_errors == usage_before.protocol_errors + 1
+
+    # Legacy mission dispatch without a lease is fail-closed for ambiguity
+    # too: no protocol-error accounting for an unauthenticated caller.
+    assert %{status: :error, kind: :capability_denied, reason: :stale_evaluation} =
+             Dispatcher.dispatch(
+               state,
+               :mission,
+               environment,
+               "strict",
+               %AmbiguousArguments{},
+               100
+             )
+
+    assert RunState.usage(state).protocol_errors == usage_before.protocol_errors + 1
+
     release!(next, next_lease)
   end
 
