@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.ProviderApplicationGate do
   @moduledoc """
-  Admits selected optional provider applications after provider activity begins.
+  Admits selected optional provider applications after the active lifecycle
+  begins.
 
   A host-owned application must already be running. A command-owned VM rejects
   an inherited target, disables dotenv loading for both `:req_llm` and
@@ -14,6 +15,11 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
   `Application.ensure_all_started/1` is not cancellable and offers no timeout.
   A stuck application callback can therefore require terminating the command
   VM. This gate does not wrap startup in a worker and claim a false bound.
+
+  Availability rejections that contact nothing report no provider activity.
+  Once a command-owned VM attempts OTP application startup, a startup failure
+  reports activity even when the target application never reaches the running
+  set.
   """
 
   alias PtcRunner.Kernel.CommandDiagnostic
@@ -37,7 +43,7 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
 
       case admit_requirements(requirements, services.provider_application_mode) do
         :ok -> warm_requirements(requirements)
-        {:error, name} -> {:error, unavailable_diagnostic(name)}
+        {:error, name, activity} -> {:error, unavailable_diagnostic(name, activity)}
       end
     else
       _invalid -> {:error, internal_diagnostic()}
@@ -49,6 +55,24 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
   end
 
   def admit(_prepared, _catalog, _services), do: {:error, internal_diagnostic()}
+
+  @doc false
+  @spec startup_attempted_after_admission?(
+          PreparedRun.t(),
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t()
+        ) :: boolean()
+  def startup_attempted_after_admission?(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{provider_application_mode: :command_vm}
+      ) do
+    PreparedRun.active_valid?(prepared) and InstallationCatalog.valid?(catalog) and
+      prepared.catalog_attestation == catalog.attestation and
+      requirements(prepared, catalog) != []
+  end
+
+  def startup_attempted_after_admission?(_prepared, _catalog, _services), do: false
 
   defp requirements(prepared, catalog) do
     prepared.provider_declarations
@@ -73,7 +97,7 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
            not MapSet.member?(running, application)
          end) do
       nil -> :ok
-      {name, _application} -> {:error, name}
+      {name, _application} -> {:error, name, false}
     end
   end
 
@@ -84,7 +108,7 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
            MapSet.member?(running, application)
          end) do
       {name, _application} ->
-        {:error, name}
+        {:error, name, false}
 
       nil ->
         Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
@@ -97,10 +121,10 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
     Enum.reduce_while(requirements, :ok, fn {name, application}, :ok ->
       case Application.ensure_all_started(application) do
         {:ok, started} ->
-          if application in started, do: {:cont, :ok}, else: {:halt, {:error, name}}
+          if application in started, do: {:cont, :ok}, else: {:halt, {:error, name, true}}
 
         {:error, _reason} ->
-          {:halt, {:error, name}}
+          {:halt, {:error, name, true}}
       end
     end)
   end
@@ -114,12 +138,12 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
     :ok
   end
 
-  defp unavailable_diagnostic(name) do
+  defp unavailable_diagnostic(name, activity) do
     {:ok, subject} = CommandSubject.provider(name, :application)
 
     CommandDiagnostic.new!(:active_preflight, :provider_application_unavailable,
       subject: subject,
-      provider_activity: true
+      provider_activity: activity
     )
   end
 

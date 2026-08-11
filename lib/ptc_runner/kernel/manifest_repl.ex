@@ -3,7 +3,7 @@ defmodule PtcRunner.Kernel.ManifestRepl do
   Shared manifest-backed REPL acquisition and lifecycle boundary.
 
   Manifest mode uses the same bounded host catalog, sealed native request,
-  inert runtime services, audited-local checks, provider-activity marker, and
+  inert runtime services, audited-local checks, active-lifecycle marker, and
   active provider acquisition prefix as a one-shot command. Phase-6 trace and
   terminal authority is decided before the opening owner starts. A successful
   opening returns a process-affine `PtcRunner.Kernel.ReplSession` whose owner
@@ -178,13 +178,10 @@ defmodule PtcRunner.Kernel.ManifestRepl do
   defp project_open_result({:ok, %ReplSession{}} = result, _preparation), do: result
 
   defp project_open_result({:error, %OwnerFailure{} = owner_failure}, _preparation) do
-    case OwnerFailure.evidence(owner_failure) do
-      {:ok, reason, provider_activity, _stage} ->
-        {:error, failure(reason, provider_activity)}
+    {reason, provider_activity, _stage} =
+      OwnerFailure.evidence_or_unknown(owner_failure, :invalid_manifest_repl, :incomplete)
 
-      {:error, :invalid_owner_failure} ->
-        {:error, failure(:invalid_manifest_repl, false)}
-    end
+    {:error, failure(reason, provider_activity)}
   end
 
   defp project_open_result({:error, reason}, preparation),

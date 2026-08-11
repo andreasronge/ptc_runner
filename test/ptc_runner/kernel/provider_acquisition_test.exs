@@ -252,7 +252,8 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionTest do
              context.prepared,
              context.catalog,
              context.registry,
-             context.session
+             context.session,
+             true
            ) do
       ProviderAcquisition.acquire(
         context.prepared,

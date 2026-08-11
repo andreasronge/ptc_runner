@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderAcquisition
   alias PtcRunner.Kernel.ProviderActiveSession
+  alias PtcRunner.Kernel.ProviderApplicationGate
   alias PtcRunner.Kernel.ProviderCredentials
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
@@ -270,7 +271,11 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           )
 
         name ->
-          {:error, authorization_required_diagnostic(name)}
+          {:error,
+           authorization_required_diagnostic(
+             name,
+             provider_application_activity?(prepared, execution)
+           )}
       end
 
     result = classify_marked_failure(result)
@@ -285,10 +290,10 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   defp retain_or_close_repl(result, session, tracker),
     do: close_owned_session(result, session, tracker)
 
-  # Everything reachable from here has crossed the activity marker, so nothing
-  # from here may answer with a bare reason: a consumer cannot tell one that was
-  # produced before the marker from one produced after it, and the difference is
-  # a public claim about whether the command incurred provider cost.
+  # Everything reachable from here has crossed the active lifecycle marker, so
+  # a bare reason has lost the evidence needed to state whether work was
+  # attempted. Typed diagnostics carry exact evidence; an untyped failure is
+  # conservatively classified as active rather than making a false no-cost claim.
   #
   # Most of this region already answers with a diagnostic. Registry setup is the
   # exception — `registry_result/4` forwards a reason it has no classification
@@ -345,8 +350,9 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # That is the same rule the validator/unverified ordering rests on.
   #
   # It is nevertheless past the phase-8 marker, which `active_preflight` requires
-  # and the OAuth contract states: the session is open, so a refusal here reports
-  # activity honestly rather than claiming a command that never started.
+  # and the OAuth contract states. The marker makes the refusal admissible but is
+  # not activity evidence: only successful command-owned application admission
+  # may already have attempted provider-facing work here.
   #
   # `PtcRunner.Kernel.AcquisitionReason` mints this same code for the different
   # question of an authorization failing underneath an alias that *was*
@@ -405,7 +411,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         authorities,
         deadline,
         tracker,
-        operation,
+        {operation, precredential_activity?(prepared, execution)},
         fn registry ->
           complete(prepared, authority, opened_sinks, registry, session, execution, operation)
         end
@@ -440,7 +446,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         authorities,
         deadline,
         tracker,
-        {:authorization, selected_names},
+        {{:authorization, selected_names}, provider_application_activity?(prepared, execution)},
         fn registry, context ->
           with :ok <-
                  authorize_installations(
@@ -462,7 +468,16 @@ defmodule PtcRunner.Kernel.ProviderExecution do
                    execution.services,
                    provider_operation(operation)
                  ) do
-            complete(prepared, authority, opened_sinks, registry, session, execution, operation)
+            resolve_credentials_and_complete(
+              prepared,
+              authority,
+              opened_sinks,
+              registry,
+              session,
+              execution,
+              operation,
+              true
+            )
           end
         end
       )
@@ -480,11 +495,43 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # pipeline with a different derivation rule.
   #
   # Reached from both the ordinary and the post-authorization branch, so the
-  # registry and the OAuth context already exist and no provider callback below
-  # this line has run yet.
-  defp complete(prepared, authority, opened_sinks, registry, session, execution, operation) do
+  # registry and the OAuth context already exist and no provider prepare,
+  # preflight, acquisition, or execution callback below this line has run yet.
+  # The branch still supplies whether authorization or an earlier active step
+  # actually attempted provider-facing work. The lifecycle marker alone is not
+  # evidence: inert application rejection and ordinary credential lookup both
+  # occur after it.
+  defp complete(prepared, authority, opened_sinks, registry, session, execution, operation),
+    do:
+      resolve_credentials_and_complete(
+        prepared,
+        authority,
+        opened_sinks,
+        registry,
+        session,
+        execution,
+        operation,
+        precredential_activity?(prepared, execution)
+      )
+
+  defp resolve_credentials_and_complete(
+         prepared,
+         authority,
+         opened_sinks,
+         registry,
+         session,
+         execution,
+         operation,
+         provider_activity
+       ) do
     with {:ok, credentials} <-
-           ProviderCredentials.resolve(prepared, execution.catalog, registry, session) do
+           ProviderCredentials.resolve(
+             prepared,
+             execution.catalog,
+             registry,
+             session,
+             provider_activity
+           ) do
       complete(
         prepared,
         authority,
@@ -498,8 +545,26 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
+  defp precredential_activity?(prepared, execution) do
+    provider_application_activity?(prepared, execution) or
+      Enum.any?(prepared.provider_declarations, fn declaration ->
+        descriptor = Map.fetch!(execution.catalog.descriptors, declaration.name)
+
+        declaration.validation_state == :active_required or
+          descriptor.local_preflight == :unverified
+      end)
+  end
+
+  defp provider_application_activity?(prepared, execution),
+    do:
+      ProviderApplicationGate.startup_attempted_after_admission?(
+        prepared,
+        execution.catalog,
+        execution.services
+      )
+
   # Every step above this one is shared by a run and connectivity: the
-  # same activity marker, session, registry, credentials, OAuth, and cleanup
+  # same active-lifecycle marker, session, registry, credentials, OAuth, and cleanup
   # ownership. Only the completion differs, so none of them can drift into its
   # own provider lifecycle.
   defp complete(
@@ -658,13 +723,24 @@ defmodule PtcRunner.Kernel.ProviderExecution do
              entries,
              credentials
            ),
-         :ok <-
-           ConnectivityProbe.run(prepared, catalog, execution.services, deadline, credentials),
-         {:ok, result} <- ConnectivityResult.new(prepared, catalog, entries),
-         false <- Deadline.expired?(deadline) do
-      {:ok, result}
+         activity_before_probe =
+           precredential_activity?(prepared, execution) or
+             Enum.any?(entries, &(&1.mode == :acquisition)),
+         {:ok, provider_activity} <-
+           ConnectivityProbe.run(
+             prepared,
+             catalog,
+             execution.services,
+             deadline,
+             credentials,
+             activity_before_probe
+           ),
+         {:ok, result} <-
+           ConnectivityResult.new(prepared, catalog, entries, provider_activity) do
+      if Deadline.expired?(deadline),
+        do: {:error, connectivity_timeout_diagnostic(provider_activity)},
+        else: {:ok, result}
     else
-      true -> {:error, connectivity_timeout_diagnostic()}
       {:error, %CommandDiagnostic{}} = error -> error
       _invalid -> {:error, internal_diagnostic()}
     end
@@ -727,13 +803,15 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # is non-retriable and belongs to the operation, so it carries no subject.
   # `ConnectivityProbe` already reports a spent budget this way, and the two
   # paths must not disagree about what the same condition means.
-  defp connectivity_timeout_diagnostic do
-    CommandDiagnostic.new!(:active_preflight, :connectivity_timeout, provider_activity: true)
+  defp connectivity_timeout_diagnostic(provider_activity) do
+    CommandDiagnostic.new!(:active_preflight, :connectivity_timeout,
+      provider_activity: provider_activity
+    )
   end
 
   # A sealed declaration carries an inert projection, not its descriptor, so the
   # declared mode is read from the catalog the preparation was validated
-  # against. `ConnectivityResult.new/3` re-derives every mode from that same
+  # against. `ConnectivityResult.new/4` re-derives every mode from that same
   # catalog and refuses a result whose entries disagree, because alias names are
   # not identity.
   defp connectivity_entries(prepared, catalog) do
@@ -769,7 +847,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          authorities,
          deadline,
          tracker,
-         operation,
+         operation_context,
          callback
        ) do
     if map_size(authorities) == 0 do
@@ -780,7 +858,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         selected_names,
         deadline,
         tracker,
-        operation,
+        operation_context,
         callback
       )
     else
@@ -790,7 +868,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         selected_names,
         deadline,
         tracker,
-        operation,
+        operation_context,
         callback
       )
     end
@@ -805,7 +883,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          selected_names,
          deadline,
          tracker,
-         operation,
+         operation_context,
          callback
        ) do
     with {:ok, memory} <- Memory.start(owner: lifecycle_owner),
@@ -832,7 +910,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
             selected_names,
             deadline,
             tracker,
-            operation,
+            operation_context,
             registry_callback(callback, context)
           )
         end
@@ -878,7 +956,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          selected_names,
          deadline,
          tracker,
-         operation,
+         {operation, _provider_activity} = operation_context,
          callback
        ) do
     result =
@@ -889,7 +967,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         deadline,
         lifecycle_owner
       )
-      |> registry_result(operation, selected_names, catalog)
+      |> registry_result(operation_context, selected_names, catalog)
 
     with {:ok, registry} <- result,
          :ok <- tracker.(:put, :registry, registry) do
@@ -907,12 +985,12 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
-  defp registry_result({:ok, registry}, _operation, _selected_names, _catalog),
+  defp registry_result({:ok, registry}, _operation_context, _selected_names, _catalog),
     do: {:ok, registry}
 
   defp registry_result(
          {:error, :operation_deadline_expired},
-         operation,
+         {operation, _provider_activity},
          _selected_names,
          _catalog
        )
@@ -921,7 +999,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
   defp registry_result(
          {:error, :operation_deadline_expired},
-         :repl,
+         {:repl, _provider_activity},
          _selected_names,
          _catalog
        ),
@@ -933,15 +1011,15 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # unrenderable outcome.
   defp registry_result(
          {:error, :operation_deadline_expired},
-         :connect,
+         {:connect, provider_activity},
          _selected_names,
          _catalog
        ),
-       do: {:error, connectivity_timeout_diagnostic()}
+       do: {:error, connectivity_timeout_diagnostic(provider_activity)}
 
   defp registry_result(
          {:error, reason},
-         {:authorization, selected_names},
+         {{:authorization, selected_names}, provider_activity},
          _ignored,
          catalog
        )
@@ -951,11 +1029,16 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       |> Enum.filter(&(catalog.descriptors[&1].authorization_mode == :oauth))
       |> Enum.min()
 
-    {:error, authorization_diagnostic(name)}
+    {:error, authorization_diagnostic(name, provider_activity)}
   end
 
-  defp registry_result({:error, _reason} = error, _operation, _selected_names, _catalog),
-    do: error
+  defp registry_result(
+         {:error, _reason} = error,
+         _operation_context,
+         _selected_names,
+         _catalog
+       ),
+       do: error
 
   defp oauth_authorities(execution, selected_names) do
     with {:ok, authorities} <-
@@ -1254,11 +1337,11 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   defp payload(execution),
     do: {execution.catalog, execution.services, execution.authorizations}
 
-  defp authorization_diagnostic(name) do
+  defp authorization_diagnostic(name, provider_activity \\ true) do
     {:ok, subject} = CommandSubject.provider(name, :authorization)
 
     CommandDiagnostic.new!(:active_preflight, :authorization_unavailable,
-      provider_activity: true,
+      provider_activity: provider_activity,
       subject: subject
     )
   end
@@ -1268,11 +1351,11 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # shares the single authorization that is missing, so naming one of them would
   # be arbitrary. The alias reported is the first in manifest order, the same
   # deterministic rule credential attribution uses.
-  defp authorization_required_diagnostic(name) do
+  defp authorization_required_diagnostic(name, provider_activity) do
     {:ok, subject} = CommandSubject.provider(name, :authorization)
 
     CommandDiagnostic.new!(:active_preflight, :authorization_required,
-      provider_activity: true,
+      provider_activity: provider_activity,
       subject: subject
     )
   end

@@ -247,13 +247,28 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     prepared = prepared(catalog, ["custom"])
 
     assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error} = refusal} =
-             LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
+             LocalPreflight.run_unverified(
+               prepared,
+               catalog,
+               services(),
+               session(prepared),
+               false
+             )
 
     assert refusal.provider_activity
     refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
 
     assert :ok = ProviderActivity.mark(prepared.provider_activity)
-    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
+
+    assert :ok =
+             LocalPreflight.run_unverified(
+               prepared,
+               catalog,
+               services(),
+               session(prepared),
+               false
+             )
+
     assert_received {:audited_local, _step, "custom", :workflow, %{}, true}
   end
 
@@ -269,7 +284,15 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     prepared = prepared(catalog, ["audited"], ["custom"])
     assert :ok = ProviderActivity.mark(prepared.provider_activity)
 
-    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
+    assert :ok =
+             LocalPreflight.run_unverified(
+               prepared,
+               catalog,
+               services(),
+               session(prepared),
+               false
+             )
+
     assert_received {:audited_local, _step, "custom", :mission, %{}, true}
     refute_received {:audited_local, _step, "audited", _destination, _selection, _limits}
   end
@@ -326,7 +349,16 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert_received {:scope, "audited", nil, nil}
 
     assert :ok = ProviderActivity.mark(prepared.provider_activity)
-    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
+
+    assert :ok =
+             LocalPreflight.run_unverified(
+               prepared,
+               catalog,
+               services(),
+               session(prepared),
+               false
+             )
+
     assert_received {:scope, "custom", owner, registrar}
 
     assert is_pid(owner)
@@ -341,7 +373,15 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     prepared = prepared(catalog, ["custom"])
     assert :ok = ProviderActivity.mark(prepared.provider_activity)
 
-    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
+    assert :ok =
+             LocalPreflight.run_unverified(
+               prepared,
+               catalog,
+               services(),
+               session(prepared),
+               false
+             )
+
     assert_received {:root, root}
 
     ref = Process.monitor(root)
@@ -357,7 +397,15 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert prepared.request.package.limits.provider_heap_words > 1_000_000
     assert :ok = ProviderActivity.mark(prepared.provider_activity)
 
-    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
+    assert :ok =
+             LocalPreflight.run_unverified(
+               prepared,
+               catalog,
+               services(),
+               session(prepared),
+               false
+             )
+
     assert_received {:allocated, words} when words > 200_000
   end
 
@@ -387,7 +435,7 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
 
         send(
           parent,
-          {:result, LocalPreflight.run_unverified(prepared, catalog, services, session)}
+          {:result, LocalPreflight.run_unverified(prepared, catalog, services, session, false)}
         )
       end)
 
@@ -414,13 +462,21 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert prepared.attestation != foreign.attestation
 
     assert {:error, %CommandDiagnostic{phase: :internal, code: :internal_error}} =
-             LocalPreflight.run_unverified(prepared, catalog, services(), session(foreign))
+             LocalPreflight.run_unverified(prepared, catalog, services(), session(foreign), false)
 
     refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
 
     # The same preparation is fine with its own session, so the refusal is about
     # the binding rather than the preparation.
-    assert :ok = LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
+    assert :ok =
+             LocalPreflight.run_unverified(
+               prepared,
+               catalog,
+               services(),
+               session(prepared),
+               false
+             )
+
     assert_received {:audited_local, _step, "custom", :workflow, %{}, true}
   end
 
@@ -438,12 +494,25 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
                prepared,
                catalog,
                services(),
-               expired_session(prepared)
+               expired_session(prepared),
+               false
              )
 
     assert diagnostic.phase == :local_preflight
     assert diagnostic.code == :local_check_timeout
-    assert diagnostic.provider_activity
+    refute diagnostic.provider_activity
+    refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
+
+    assert {:error, %CommandDiagnostic{} = after_earlier_work} =
+             LocalPreflight.run_unverified(
+               prepared,
+               catalog,
+               services(),
+               expired_session(prepared),
+               true
+             )
+
+    assert after_earlier_work.provider_activity
     refute_received {:audited_local, _step, _name, _destination, _selection, _limits}
   end
 
@@ -508,7 +577,13 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert :ok = ProviderActivity.mark(prepared.provider_activity)
 
     assert {:error, %CommandDiagnostic{} = diagnostic} =
-             LocalPreflight.run_unverified(prepared, catalog, services(), session(prepared))
+             LocalPreflight.run_unverified(
+               prepared,
+               catalog,
+               services(),
+               session(prepared),
+               false
+             )
 
     diagnostic
   end

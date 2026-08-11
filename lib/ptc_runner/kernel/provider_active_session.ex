@@ -4,14 +4,18 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
 
   The opener first verifies the exact sealed `PreparedRun` and
   `InstallationCatalog` pair — already consumed by the execution-session owner
-  that opens the sinks — and monotonically marks provider activity. It then opens the command's `ProviderSession` and
-  admits selected optional provider applications according to the sealed
-  runtime services before running the active selection validators and then the
-  post-marker `:unverified` local checks, both in declaration order. `open_consumed_setup/5` and `begin_owned_operation/5` expose that boundary in
-  two steps for the Mix-only explicit OAuth interaction: setup admission occurs
-  first, while the ordinary run clock and active validators begin only after
-  interaction. Both halves belong to the execution-session owner, which owns the
-  prepared run; a failure here closes only the session it opened.
+  that opens the sinks — and monotonically crosses the active lifecycle marker.
+  The marker makes active-only boundaries admissible; it does not by itself
+  prove that a provider callback or authorization exchange ran. It then opens
+  the command's `ProviderSession` and admits selected optional provider
+  applications according to the sealed runtime services before running the
+  active selection validators and then the post-marker `:unverified` local
+  checks, both in declaration order. `open_consumed_setup/5` and
+  `begin_owned_operation/5` expose that boundary in two steps for the Mix-only
+  explicit OAuth interaction: setup admission occurs first, while the ordinary
+  run clock and active validators begin only after interaction. Both halves
+  belong to the execution-session owner, which owns the prepared run; a failure
+  here closes only the session it opened.
 
   Each validator runs in a heap- and time-bounded worker with its own
   provisional `ResourceRegistrar`. The callback receives only the normalized
@@ -23,7 +27,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   Cleanup responsibility is fixed: `open_consumed_setup/5` receives a
   preparation the execution owner already consumed and a lifecycle owner that
   receives the session, so a failed open closes only the session it opened. The
-  execution owner remains responsible for the prepared run's activity marker.
+  execution owner remains responsible for the prepared run's active-lifecycle marker.
   """
 
   alias PtcRunner.Kernel.BoundedWorker
@@ -122,7 +126,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   defp open_marked(prepared, catalog, services, ownership) do
     case start_session(prepared, ownership) do
       {:ok, session} -> admit_open_session(session, prepared, catalog, services)
-      {:error, _reason} -> {:error, internal_diagnostic(true)}
+      {:error, _reason} -> {:error, internal_diagnostic(false)}
     end
   end
 
@@ -154,7 +158,14 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
       # bounded call becomes unavailable. Do not follow that timeout with an
       # unbounded synchronous close against the same unavailable process.
       {:error, _reason} ->
-        {:error, internal_diagnostic(true)}
+        application_activity =
+          ProviderApplicationGate.startup_attempted_after_admission?(
+            prepared,
+            catalog,
+            services
+          )
+
+        {:error, internal_diagnostic(application_activity)}
     end
   end
 
@@ -169,8 +180,19 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   # with "a local check contacts nothing" — true of an audited-local check in
   # phase 7, and precisely untrue of this one.
   defp validate_open_session(session, prepared, catalog, services) do
-    with :ok <- validate_active_selections(session, prepared, catalog),
-         :ok <- LocalPreflight.run_unverified(prepared, catalog, services, session) do
+    application_activity =
+      ProviderApplicationGate.startup_attempted_after_admission?(prepared, catalog, services)
+
+    with {:ok, provider_activity} <-
+           validate_active_selections(session, prepared, catalog, application_activity),
+         :ok <-
+           LocalPreflight.run_unverified(
+             prepared,
+             catalog,
+             services,
+             session,
+             provider_activity
+           ) do
       {:ok, session}
     else
       {:error, %CommandDiagnostic{} = diagnostic} -> fail_with_session(session, diagnostic)
@@ -182,20 +204,24 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     _kind, _reason -> fail_with_session(session, internal_diagnostic(true))
   end
 
-  defp validate_active_selections(session, prepared, catalog) do
-    Enum.reduce_while(prepared.provider_declarations, :ok, fn declaration, :ok ->
-      if declaration.validation_state == :active_required do
-        case validate_selection(session, prepared, catalog, declaration) do
-          :ok -> {:cont, :ok}
-          {:error, %CommandDiagnostic{} = diagnostic} -> {:halt, {:error, diagnostic}}
+  defp validate_active_selections(session, prepared, catalog, provider_activity) do
+    Enum.reduce_while(
+      prepared.provider_declarations,
+      {:ok, provider_activity},
+      fn declaration, {:ok, activity} ->
+        if declaration.validation_state == :active_required do
+          case validate_selection(session, prepared, catalog, declaration, activity) do
+            {:ok, activity} -> {:cont, {:ok, activity}}
+            {:error, %CommandDiagnostic{} = diagnostic} -> {:halt, {:error, diagnostic}}
+          end
+        else
+          {:cont, {:ok, activity}}
         end
-      else
-        {:cont, :ok}
       end
-    end)
+    )
   end
 
-  defp validate_selection(session, prepared, catalog, declaration) do
+  defp validate_selection(session, prepared, catalog, declaration, provider_activity) do
     case ProviderSession.open_registrar(session) do
       {:ok, registrar} ->
         validate_in_scope(
@@ -203,28 +229,51 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
           session,
           prepared,
           catalog,
-          declaration
+          declaration,
+          provider_activity
         )
 
       # A scope the session refuses past the operation deadline is the budget
       # running out, not a defect, so it keeps the operation-class code the
       # validator itself would have reported.
       {:error, _reason} ->
-        {:error, selection_setup_diagnostic(session, declaration)}
+        {:error, selection_setup_diagnostic(session, declaration, provider_activity)}
     end
   end
 
-  defp selection_setup_diagnostic(session, declaration) do
+  defp selection_setup_diagnostic(session, declaration, provider_activity) do
     if session |> ProviderSession.run_deadline() |> Deadline.expired?(),
-      do: selection_diagnostic(declaration, :selection_validation_timeout),
-      else: internal_diagnostic(true)
+      do:
+        selection_diagnostic(
+          declaration,
+          :selection_validation_timeout,
+          provider_activity
+        ),
+      else: internal_diagnostic(provider_activity)
   end
 
-  defp validate_in_scope(registrar, session, prepared, catalog, declaration) do
+  defp validate_in_scope(
+         registrar,
+         session,
+         prepared,
+         catalog,
+         declaration,
+         provider_activity
+       ) do
     result =
       case ResourceRegistrar.activate(registrar) do
-        :ok -> run_validator(registrar, session, prepared, catalog, declaration)
-        {:error, _reason} -> {:error, selection_setup_diagnostic(session, declaration)}
+        :ok ->
+          run_validator(
+            registrar,
+            session,
+            prepared,
+            catalog,
+            declaration,
+            provider_activity
+          )
+
+        {:error, _reason} ->
+          {:error, selection_setup_diagnostic(session, declaration, provider_activity)}
       end
 
     case ResourceRegistrar.abort(registrar) do
@@ -233,7 +282,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  defp run_validator(registrar, session, prepared, catalog, declaration) do
+  defp run_validator(registrar, session, prepared, catalog, declaration, provider_activity) do
     deadline =
       Deadline.earliest(
         ProviderSession.run_deadline(session),
@@ -252,29 +301,52 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
         resource_registrar: registrar
       })
 
-    result =
-      case Deadline.remaining(deadline) do
-        0 ->
-          {:error, :timeout}
+    dispatch = fn timeout_ms ->
+      BoundedWorker.run(fn -> callback.(declaration.config, context) end,
+        timeout_ms: timeout_ms,
+        max_heap_words: prepared.request.package.limits.provider_heap_words,
+        cancel_with_caller: true,
+        # A validator may reach a provider, and the executor can outlive the
+        # session, so the caller link alone would leave blocked work running
+        # after the session that owns it is gone.
+        cancel_with: ProviderSession.worker_cancel_target(session)
+      )
+    end
 
-        timeout_ms ->
-          BoundedWorker.run(fn -> callback.(declaration.config, context) end,
-            timeout_ms: timeout_ms,
-            max_heap_words: prepared.request.package.limits.provider_heap_words,
-            cancel_with_caller: true,
-            # A validator may reach a provider, and the executor can outlive the
-            # session, so the caller link alone would leave blocked work running
-            # after the session that owns it is gone.
-            cancel_with: ProviderSession.worker_cancel_target(session)
-          )
-      end
-
-    classify_validator_result(result, deadline, declaration)
+    dispatch_validator(deadline, dispatch, declaration, provider_activity)
   end
 
-  defp classify_validator_result(result, deadline, declaration) do
+  @doc false
+  @spec dispatch_validator(Deadline.t(), (pos_integer() -> term()), map(), boolean()) ::
+          {:ok, true} | {:error, CommandDiagnostic.t()}
+  def dispatch_validator(deadline, dispatch, declaration, provider_activity)
+      when is_function(dispatch, 1) and is_map(declaration) and is_boolean(provider_activity) do
+    result =
+      case Deadline.remaining(deadline) do
+        0 -> {:not_attempted, {:error, :timeout}}
+        timeout_ms -> {:attempted, dispatch.(timeout_ms)}
+      end
+
+    classify_validator_result(result, deadline, declaration, provider_activity)
+  end
+
+  defp classify_validator_result(
+         {:not_attempted, _result},
+         _deadline,
+         declaration,
+         provider_activity
+       ),
+       do:
+         {:error,
+          selection_diagnostic(
+            declaration,
+            :selection_validation_timeout,
+            provider_activity
+          )}
+
+  defp classify_validator_result({:attempted, result}, deadline, declaration, _activity) do
     if Deadline.expired?(deadline) do
-      {:error, selection_diagnostic(declaration, :selection_validation_timeout)}
+      {:error, selection_diagnostic(declaration, :selection_validation_timeout, true)}
     else
       do_classify_validator_result(result, declaration)
     end
@@ -283,16 +355,16 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   defp do_classify_validator_result(result, declaration) do
     case result do
       {:ok, :ok} ->
-        :ok
+        {:ok, true}
 
       {:ok, {:error, :selection_rejected}} ->
-        {:error, selection_diagnostic(declaration, :selection_rejected)}
+        {:error, selection_diagnostic(declaration, :selection_rejected, true)}
 
       {:error, :timeout} ->
-        {:error, selection_diagnostic(declaration, :selection_validation_timeout)}
+        {:error, selection_diagnostic(declaration, :selection_validation_timeout, true)}
 
       _failure ->
-        {:error, selection_diagnostic(declaration, :selection_validation_failed)}
+        {:error, selection_diagnostic(declaration, :selection_validation_failed, true)}
     end
   end
 
@@ -317,13 +389,13 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  defp selection_diagnostic(declaration, code) do
+  defp selection_diagnostic(declaration, code, provider_activity) do
     occurrence = %{destination: declaration.destination, index: declaration.index}
     {:ok, subject} = CommandSubject.provider(declaration.name, :selection, occurrence)
 
     CommandDiagnostic.new!(:active_preflight, code,
       subject: subject,
-      provider_activity: true
+      provider_activity: provider_activity
     )
   end
 

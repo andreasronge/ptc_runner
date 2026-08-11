@@ -46,6 +46,20 @@ defmodule PtcRunner.Kernel.OwnerFailure do
 
   def evidence(_failure), do: {:error, :invalid_owner_failure}
 
+  @doc false
+  @spec evidence_or_unknown(term(), term(), :not_started | :incomplete) ::
+          {term(), boolean(), :not_started | :incomplete}
+  def evidence_or_unknown(failure, fallback_reason, fallback_stage)
+      when fallback_stage in @stages do
+    case evidence(failure) do
+      {:ok, reason, provider_activity, stage} ->
+        {reason, provider_activity, stage}
+
+      {:error, :invalid_owner_failure} ->
+        {fallback_reason, true, fallback_stage}
+    end
+  end
+
   defp payload(failure),
     do: {failure.reason, failure.provider_activity, failure.stage}
 end

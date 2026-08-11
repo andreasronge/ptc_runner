@@ -1,15 +1,17 @@
 defmodule PtcRunner.Kernel.ProviderActivity do
   @moduledoc """
-  Owner-backed monotonic provider-activity marker.
+  Owner-backed monotonic active-lifecycle marker.
 
   A fresh marker belongs to its creating process, remains linked to it, may be
   claimed by exactly one prepared run, is consumed once, and admits at most one
   owned build. The marker also monitors its creator so even a normal owner exit
-  closes it. Activity then changes monotonically from false to true. Every
-  transition runs as one operation inside the owner process. Calls carry a
-  server-checked monotonic deadline and allow a short reply grace, so they
-  remain bounded without a timed-out queued transition later mutating the
-  marker.
+  closes it. Lifecycle state then changes monotonically from false to true.
+  Crossing that boundary makes active-only operations admissible; it does not
+  by itself prove that provider-facing work ran. Producers accumulate that
+  evidence at their dispatch sites. Every transition runs as one operation
+  inside the owner process. Calls carry a server-checked monotonic deadline and
+  allow a short reply grace, so they remain bounded without a timed-out queued
+  transition later mutating the marker.
   """
 
   use GenServer

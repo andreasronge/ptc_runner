@@ -45,7 +45,7 @@ A provider-bearing manifest requires `--host-config`. Use the standalone
 provider connectivity must be checked without running the workflow.
 
 A fresh Mix invocation safely configures and starts a selected optional
-provider application only after provider activity begins. A later `ptc run`
+provider application only after the active provider lifecycle begins. A later `ptc run`
 invocation in the same VM reuses an already-running application as host-owned,
 so task chaining and `iex -S mix` do not require restarting the VM.
 

@@ -120,25 +120,16 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
         )
 
       {:error, %OwnerFailure{} = failure} ->
-        case OwnerFailure.evidence(failure) do
-          {:ok, reason, provider_activity, execution_state} ->
-            operation_failure(
-              preparation,
-              reason,
-              authority_artifact_state(authority),
-              provider_activity,
-              execution_state
-            )
+        {reason, provider_activity, execution_state} =
+          OwnerFailure.evidence_or_unknown(failure, :internal_error, :incomplete)
 
-          {:error, :invalid_owner_failure} ->
-            operation_failure(
-              preparation,
-              :internal_error,
-              authority_artifact_state(authority),
-              false,
-              :not_started
-            )
-        end
+        operation_failure(
+          preparation,
+          reason,
+          authority_artifact_state(authority),
+          provider_activity,
+          execution_state
+        )
 
       {:error, reason} ->
         operation_failure(

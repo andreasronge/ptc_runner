@@ -21,9 +21,11 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   # draws, decided by the same question: whether the session carries an
   # operation deadline.
   #
-  # Every caller here is past the phase-8 marker, so activity is always true and
-  # is not a parameter, unlike `PtcRunner.Kernel.LocalPreflight`, whose table
-  # spans the marker.
+  # Every caller here has entered provider acquisition and attempted its
+  # provider-facing preparation, preflight, or acquisition work, so activity is
+  # always true and is not a parameter. Merely crossing the earlier lifecycle
+  # marker would not establish that evidence; `PtcRunner.Kernel.LocalPreflight`
+  # therefore carries the accumulated value explicitly.
   #
   # ## How a reason is placed
   #

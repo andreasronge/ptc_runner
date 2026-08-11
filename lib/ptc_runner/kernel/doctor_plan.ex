@@ -390,10 +390,11 @@ defmodule PtcRunner.Kernel.DoctorPlan do
 
   defp outcome(:selection, %{selection_validation: :active}, _prepared, :connect), do: :pending
 
-  # The remaining operations are active work by definition. They appear only
-  # when the declaration says they apply. Default doctor defers all of them;
-  # connect settles each from what its operation returned, except authorization,
-  # which has no settling path in V1 at all.
+  # The remaining operations require connect mode, but the credentials row can
+  # finish through local lookup without attempting provider work. They appear
+  # only when the declaration says they apply. Default doctor defers all of
+  # them; connect settles each from what its operation returned, except
+  # authorization, which has no settling path in V1 at all.
   defp outcome(:credentials, %{credential_names: []}, _prepared, _mode), do: nil
   defp outcome(:credentials, _descriptor, _prepared, :default), do: {:skipped, :requires_connect}
   defp outcome(:credentials, _descriptor, _prepared, :connect), do: :pending
