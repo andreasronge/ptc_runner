@@ -1745,6 +1745,10 @@ as a `[key value]` pair passed to the predicate. They return a **vector** of
   an error context; concurrently returned secondary failures are not retained
 - The local scheduling window defaults to `2 × CPU cores`; the program-wide
   worker cap in §15.2 is the hard aggregate bound
+- Kernel-owned evaluations set that worker cap to the run's effective
+  `live_provider_tasks` ceiling. A wider collection is processed in bounded
+  batches, so parallel tool calls do not race for a smaller provider-task
+  budget
 - The whole operation, including nested parallel calls, shares one default
   5-second deadline
 
@@ -4147,6 +4151,10 @@ cap is NOT divided by concurrency). The number of such workers alive at
 once, across the whole program and at every nesting depth, is bounded by
 a shared slot budget of `Max Parallel Workers`. Aggregate live parallel
 heap is therefore bounded by `Max Parallel Workers × Worker Max Heap`.
+For Kernel-owned workflow, mission, and REPL evaluations,
+`Max Parallel Workers` is set explicitly from the effective
+`live_provider_tasks` run limit; the default of 8 in the table applies to
+direct `PtcRunner.Lisp` callers.
 
 - A worker that exceeds its fixed heap cap is killed; the program fails
   with `:memory_exceeded`.

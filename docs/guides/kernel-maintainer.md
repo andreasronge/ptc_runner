@@ -1145,7 +1145,10 @@ diverge. `PtcRunner.Kernel.Limits`, `RunState`, `BoundedWorker`, and
 ordering. Mission compilation and source checking explicitly use
 `evaluation_heap_words` as `Lisp.run_native/2`'s `compile_max_heap`; callers
 that do not set it compile under their own `:max_heap`, so no ambient
-application default can move a sealed run's compile ceiling.
+application default can move a sealed run's compile ceiling. Workflow, mission,
+and REPL execution likewise pass the effective `live_provider_tasks` limit as
+Lisp's global `max_parallel_workers`, so `pmap` and `pcalls` batch at the same
+ceiling that bounds their concurrent provider callbacks.
 
 Standalone `PtcRunner.Kernel.ReplSession` is process-affine. Passing its public
 value does not transfer ownership. A product that needs transferable or

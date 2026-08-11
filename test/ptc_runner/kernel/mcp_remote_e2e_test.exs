@@ -44,7 +44,8 @@ defmodule PtcRunner.Kernel.MCPRemoteE2ETest do
       Limits.new(
         run_duration_ms: 90_000,
         workflow_timeout_ms: 90_000,
-        evaluation_timeout_ms: 30_000
+        evaluation_timeout_ms: 30_000,
+        live_provider_tasks: 1
       )
 
     {:ok, %{capabilities: [capability], snapshot: snapshot, close: close}} =
@@ -88,18 +89,25 @@ defmodule PtcRunner.Kernel.MCPRemoteE2ETest do
       )
 
     source =
-      ~S|(return (tool/kernel-eval {"kind" :source "source" "(return (tool/time.city {\"city\" \"nyc\"}))"}))|
+      ~S|(return (tool/kernel-eval {"kind" :source "source" "(return (pmap (fn [city] (tool/time.city {\"city\" city \"delay_ms\" 100})) [\"nyc\" \"sf\" \"boston\" \"nyc\"]))"}))|
 
     assert {:ok,
             %{
               value: %{
                 "status" => "ok",
-                "value" => %{"outcome" => "returned", "value" => value}
+                "value" => %{"outcome" => "returned", "value" => values}
               }
             }} =
              Kernel.run(source, config)
 
-    assert %{"status" => "ok", "value" => %{"text" => [entry | _]}} = value
-    assert is_binary(entry) and entry != ""
+    assert 4 == length(values)
+
+    assert Enum.all?(values, fn
+             %{"status" => "ok", "value" => %{"text" => [entry | _]}} ->
+               is_binary(entry) and entry != ""
+
+             _other ->
+               false
+           end)
   end
 end
