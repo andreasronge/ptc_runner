@@ -28,9 +28,18 @@ defmodule PtcRunner.TestSupport.LLMSupport do
   apply the same dependency dotenv and installed-default pool configuration as
   the command-owned gate, so no unchosen `.env` is read and live contention
   exercises the production geometry.
+
+  That configuration is VM-global and persistent, so the admitting scope owns
+  undoing it: the caller's `on_exit` restores the application environment and
+  running set this admission found. Without that, a live module's command-owned
+  pool geometry outlives it and every later test in the same VM inherits it —
+  which is why this belongs here rather than in each caller.
   """
   @spec admit_provider_application!() :: :ok
   def admit_provider_application! do
+    snapshot = snapshot_provider_applications()
+    ExUnit.Callbacks.on_exit(fn -> restore_provider_applications(snapshot) end)
+
     stop_provider_applications()
     :ok = ProviderApplicationGate.configure_command_vm_req_llm(Limits.installed_defaults())
     {:ok, _started} = Application.ensure_all_started(:req_llm)
