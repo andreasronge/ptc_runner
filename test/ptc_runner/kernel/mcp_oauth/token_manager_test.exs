@@ -264,16 +264,23 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     wait_ms = max(deadline - System.monotonic_time(:millisecond) + 10, 10)
     Process.send_after(self(), :deadline_passed, wait_ms)
     assert_receive :deadline_passed, wait_ms + 100
+
+    # Suspend the store across the failure report. The report is issued
+    # after the caller's deadline, so with the old max(remaining, 1) budget
+    # its store call had one millisecond to live — this stall deterministically
+    # exceeded it, the discarded report left the lease :dispatched, and the
+    # acquire below wedged on :mutation_indeterminate forever. The
+    # Deadline.terminalization/1 floor rides out the stall.
+    :ok = :sys.suspend(context.memory.pid)
     send(refresh_worker, :return_failure)
+    Process.send_after(self(), :stall_elapsed, 100)
+    assert_receive :stall_elapsed
+    :ok = :sys.resume(context.memory.pid)
 
     assert_receive {:refresh_result, {:error, :mcp_authorization_required}}
 
-    # Terminalization runs synchronously in the refresh caller before
-    # {:refresh_result, _} is sent, so this acquire is deterministic — but
-    # only because terminalization_deadline/1 floors the post-deadline
-    # store-call budget. With the old 1ms budget the report was lost under
-    # load and this acquire wedged on :mutation_indeterminate forever; if
-    # this assertion starts failing again, suspect that budget first.
+    # Terminalization completes in the refresh caller before
+    # {:refresh_result, _} is sent, so this acquire is deterministic.
     assert {:ok, _lease} =
              Store.acquire_mutation(
                context.store,
