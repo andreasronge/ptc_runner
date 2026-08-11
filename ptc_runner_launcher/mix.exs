@@ -49,13 +49,19 @@ defmodule PtcRunnerLauncher.MixProject do
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_env), do: ["lib"]
 
-  # True for any git checkout of this repository — a linked worktree carries
-  # a `.git` file rather than a directory, hence exists?/1 and not dir?/1.
-  # The Hex tarball ships without `../.git`, so package consumers keep the
-  # precompiled-restore path.
+  # Default: true for any git checkout of this repository — a linked
+  # worktree carries a `.git` file rather than a directory, hence exists?/1
+  # and not dir?/1 — while the Hex tarball ships without `../.git`, so
+  # package consumers keep the precompiled-restore path. "1" forces the
+  # source build anywhere; "0" forces the precompiled flow even from a
+  # checkout, which scripts/verify_precompiled.sh needs to exercise the
+  # download and checksum paths this default would otherwise bypass.
   defp force_build? do
-    System.get_env("PTC_RUNNER_LAUNCHER_BUILD_FROM_SOURCE") == "1" or
-      File.exists?(Path.expand("../.git", __DIR__))
+    case System.get_env("PTC_RUNNER_LAUNCHER_BUILD_FROM_SOURCE") do
+      "1" -> true
+      "0" -> false
+      _unset -> File.exists?(Path.expand("../.git", __DIR__))
+    end
   end
 
   defp deps do
