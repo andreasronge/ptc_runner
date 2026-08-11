@@ -43,6 +43,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderCallbackBoundary
   alias PtcRunner.Kernel.ProviderRegistry
@@ -89,7 +90,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   and cleaned up like any other, and never reported as a caller's own result.
 
   The whole-application judgements need no re-derivation. Phase 5 decided
-  dependency validity, cycles, the single-workflow-LLM rule, the effective data
+  dependency validity, cycles, workflow-LLM default uniqueness, the effective data
   class, and the providers' acceptance of it inertly over the complete
   selection, and sealed the result — an application whose classes disagree never
   becomes a preparation at all.
@@ -183,7 +184,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
          {:ok, preparations} <-
            prepare_providers(package, registry, session, max_heap_words, :all),
          :ok <- validate_provider_dependencies(preparations),
-         :ok <- validate_single_workflow_llm(preparations),
+         :ok <- validate_workflow_llm_defaults(preparations),
          effective_class <- effective_data_class(input_class, preparations),
          :ok <- providers_accept(preparations, effective_class),
          :ok <- artifact_preflight.(effective_class) do
@@ -248,6 +249,13 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
           provides: descriptor.provides,
           credential_names: descriptor.credential_names,
           workflow_llm?: descriptor.workflow_llm?,
+          workflow_llm_route:
+            workflow_llm_route(
+              descriptor.workflow_llm?,
+              descriptor.source,
+              descriptor.installation_revision,
+              declaration.config
+            ),
           data_class: descriptor.data_class,
           accepts_data: descriptor.accepts_data
         }
@@ -327,6 +335,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       Enum.sort(provider.requires) == Enum.sort(declaration.requires) and
       Enum.sort(provider.provides) == Enum.sort(declaration.provides) and
       provider.workflow_llm? == declaration.workflow_llm? and
+      provider.workflow_llm_route == declaration.workflow_llm_route and
       provider.data_class == declaration.data_class and
       Enum.sort(provider.accepts_data) == Enum.sort(declaration.accepts_data)
   end
@@ -351,7 +360,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
                  session,
                  max_heap_words
                ) do
-          {:ok, acquisition_result(acquired, session)}
+          acquisition_result(acquired, session)
         end
       after
         ProviderCallbackBoundary.release_preflights(preflighted, session, max_heap_words)
@@ -360,12 +369,16 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   end
 
   defp acquisition_result(acquired, session) do
-    acquired
-    |> Map.put(:workflow, finalize_capabilities(acquired.workflow))
-    |> Map.put(:mission, finalize_capabilities(acquired.mission))
-    |> Map.put(:snapshots, sort_snapshots(acquired.snapshots))
-    |> Map.put(:provider_session, session)
-    |> Map.delete(:exports)
+    with {:ok, workflow} <- finalize_capabilities(acquired.workflow, :workflow),
+         {:ok, mission} <- finalize_capabilities(acquired.mission, :mission) do
+      {:ok,
+       acquired
+       |> Map.put(:workflow, workflow)
+       |> Map.put(:mission, mission)
+       |> Map.put(:snapshots, sort_snapshots(acquired.snapshots))
+       |> Map.put(:provider_session, session)
+       |> Map.delete(:exports)}
+    end
   end
 
   defp sort_snapshots(snapshots), do: Enum.sort_by(snapshots, &Map.get(&1, "provider", ""))
@@ -441,6 +454,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
           requires: provider.requires,
           provides: provider.provides,
           workflow_llm?: provider.workflow_llm?,
+          workflow_llm_route: provider.workflow_llm_route,
           registrar: registrar,
           prepared: provider
         }
@@ -582,7 +596,16 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
         next =
           current
           |> Map.put(provider.destination, %{
-            capabilities: [{provider.index, built.capabilities} | environment.capabilities]
+            capabilities: [
+              %{
+                index: provider.index,
+                provider: provider.provider,
+                workflow_llm?: provider.workflow_llm?,
+                workflow_llm_route: provider.workflow_llm_route,
+                capabilities: built.capabilities
+              }
+              | environment.capabilities
+            ]
           })
           |> Map.update!(:snapshots, &maybe_append(&1, built.snapshot))
           |> Map.update!(:exports, &merge_provider_exports(&1, provider.provider, built.exports))
@@ -664,12 +687,65 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     end)
   end
 
-  defp finalize_capabilities(%{capabilities: capabilities}) do
+  defp finalize_capabilities(%{capabilities: entries}, :mission) do
+    if Enum.any?(entries, & &1.workflow_llm?) do
+      {:error, :invalid_workflow_llm_provider}
+    else
+      {:ok, %{capabilities: flatten_capability_entries(entries)}}
+    end
+  end
+
+  defp finalize_capabilities(%{capabilities: entries}, :workflow) do
+    {llm_entries, ordinary_entries} = Enum.split_with(entries, & &1.workflow_llm?)
+
+    if llm_entries == [] do
+      {:ok, %{capabilities: flatten_capability_entries(ordinary_entries)}}
+    else
+      with :ok <- no_unclaimed_llm_request(ordinary_entries),
+           {:ok, router_entry} <- build_llm_router_entry(llm_entries) do
+        {:ok, %{capabilities: flatten_capability_entries([router_entry | ordinary_entries])}}
+      end
+    end
+  end
+
+  defp flatten_capability_entries(entries) do
+    entries
+    |> Enum.sort_by(& &1.index)
+    |> Enum.flat_map(& &1.capabilities)
+  end
+
+  defp no_unclaimed_llm_request(entries) do
+    if Enum.any?(entries, fn entry ->
+         Enum.any?(entry.capabilities, &(&1.name == "llm-request"))
+       end),
+       do: {:error, :invalid_workflow_llm_provider},
+       else: :ok
+  end
+
+  defp build_llm_router_entry(entries) do
+    with true <- Enum.all?(entries, &match?([%{name: "llm-request"}], &1.capabilities)),
+         routes <- Enum.map(entries, &llm_route/1),
+         {:ok, router} <- LLMRouter.new(routes) do
+      {:ok,
+       %{
+         index: Enum.min_by(entries, & &1.index).index,
+         provider: "llm-router",
+         workflow_llm?: false,
+         workflow_llm_route: nil,
+         capabilities: [router]
+       }}
+    else
+      _invalid -> {:error, :invalid_workflow_llm_provider}
+    end
+  end
+
+  defp llm_route(entry) do
     %{
-      capabilities:
-        capabilities
-        |> Enum.sort_by(&elem(&1, 0))
-        |> Enum.flat_map(&elem(&1, 1))
+      alias: entry.provider,
+      source: entry.workflow_llm_route.source,
+      installation_revision: entry.workflow_llm_route.installation_revision,
+      default?: entry.workflow_llm_route.default,
+      capability: List.first(entry.capabilities)
     }
   end
 
@@ -690,19 +766,25 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     end
   end
 
-  # A run has one frozen workflow environment, so it has one language model.
-  # Selecting a live alias and a replay alias together would otherwise be
-  # decided by whichever capability won the duplicate-name check during
-  # environment construction — after fixtures were opened and credentials
-  # resolved. An evaluation trial has to be attributable to its configured
-  # provider, so this fails while every provider is still inert.
-  defp validate_single_workflow_llm(preparations) do
+  defp validate_workflow_llm_defaults(preparations) do
     workflow_llms =
-      Enum.count(preparations, fn entry ->
+      Enum.filter(preparations, fn entry ->
         entry.destination == :workflow and entry.workflow_llm?
       end)
 
-    if workflow_llms > 1, do: {:error, :ambiguous_workflow_llm}, else: :ok
+    defaults = Enum.count(workflow_llms, & &1.workflow_llm_route.default)
+
+    if defaults > 1, do: {:error, :ambiguous_workflow_llm_default}, else: :ok
+  end
+
+  defp workflow_llm_route(false, _source, _revision, _config), do: nil
+
+  defp workflow_llm_route(true, source, revision, config) do
+    %{
+      source: Atom.to_string(source),
+      installation_revision: revision,
+      default: Map.get(config, "default", false)
+    }
   end
 
   # Occurrence identity is `{destination, index}` with the index restarting per

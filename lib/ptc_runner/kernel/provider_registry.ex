@@ -159,6 +159,13 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           requires: [atom()],
           provides: [atom()],
           workflow_llm?: boolean(),
+          workflow_llm_route:
+            nil
+            | %{
+                source: binary(),
+                installation_revision: binary(),
+                default: boolean()
+              },
           preflight: (-> {:ok, acquire()}
                          | {:ok, acquire(), (-> :ok | {:error, term()})}
                          | {:error, term()})
@@ -352,6 +359,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
            requires: [],
            provides: [],
            workflow_llm?: false,
+           workflow_llm_route: nil,
            preflight: fn ->
              {:ok, fn %{}, %{} -> builder.(config, full_context) end}
            end
@@ -503,6 +511,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
       |> Map.put_new(:requires, [])
       |> Map.put_new(:provides, [])
       |> Map.put_new(:workflow_llm?, false)
+      |> Map.put_new(:workflow_llm_route, nil)
 
     if Map.keys(prepared) --
          [
@@ -512,9 +521,11 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
            :accepts_data,
            :requires,
            :provides,
-           :workflow_llm?
+           :workflow_llm?,
+           :workflow_llm_route
          ] == [] and
          is_boolean(prepared.workflow_llm?) and
+         valid_workflow_llm_route?(prepared.workflow_llm?, prepared.workflow_llm_route) and
          valid_data_policy?(prepared.data_class, prepared.accepts_data) and
          length(names) <= 128 and Enum.uniq(names) == names and Enum.all?(names, &valid_name?/1) and
          valid_services?(prepared.requires) and valid_services?(prepared.provides) and
@@ -527,6 +538,18 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   defp normalize_prepared({:error, _reason} = error), do: error
   defp normalize_prepared(_result), do: {:error, :invalid_provider_preparation}
+
+  defp valid_workflow_llm_route?(false, nil), do: true
+
+  defp valid_workflow_llm_route?(true, route)
+       when is_map(route) and not is_struct(route) do
+    Enum.sort(Map.keys(route)) == [:default, :installation_revision, :source] and
+      route.source in ["llm", "llm_replay", "custom"] and
+      is_binary(route.installation_revision) and valid_name?(route.installation_revision) and
+      is_boolean(route.default)
+  end
+
+  defp valid_workflow_llm_route?(_workflow_llm?, _route), do: false
 
   # Checked after normalization so an omitted field is compared as the
   # normal-only default it becomes, not as an absent value. `accepts_data` is a

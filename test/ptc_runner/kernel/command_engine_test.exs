@@ -1731,6 +1731,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     refute CommandContract.valid_success_semantics?(:doctor, %{
              "checks" => fixed_doctor_checks,
+             "model_aliases" => [],
              "provider_activity" => true
            })
 
@@ -1744,6 +1745,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
               "code" => "available"
             }
           ],
+      "model_aliases" => [],
       "provider_activity" => true
     }
 
@@ -1759,6 +1761,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
               "code" => "available"
             }
           ],
+      "model_aliases" => [],
       "provider_activity" => false
     }
 
@@ -1780,6 +1783,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                 "code" => "declarative"
               }
             ],
+        "model_aliases" => [],
         "provider_activity" => false
       })
 
@@ -1800,6 +1804,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           "code" => "available"
         }
       ],
+      "model_aliases" => [],
       "provider_activity" => true
     }
 
@@ -1816,6 +1821,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         %{"name" => "application", "status" => "pass", "code" => "valid"},
         %{"name" => "viewer", "status" => "pass", "code" => "available"}
       ],
+      "model_aliases" => [],
       "provider_activity" => false
     }
 
@@ -1885,6 +1891,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert CommandContract.valid_success_semantics?(:doctor, %{
              "checks" => valid_doctor.envelope["result"]["checks"],
+             "model_aliases" => [],
              "provider_activity" => true
            })
 
@@ -1903,6 +1910,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                      "code" => "available"
                    }
                  ],
+             "model_aliases" => [],
              "provider_activity" => false
            })
 
@@ -1921,6 +1929,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                      "code" => "active_check_required"
                    }
                  ],
+             "model_aliases" => [],
              "provider_activity" => true
            })
 

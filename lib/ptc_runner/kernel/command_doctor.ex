@@ -50,19 +50,25 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   defp local_outcome(arguments, run_ref, host, catalog, runtime) do
     case preparation(arguments, catalog, run_ref) do
       {:ok, prepared} ->
-        result = local_checks(host, catalog, prepared, runtime)
-        if prepared, do: PreparedRun.close(prepared)
+        try do
+          case local_checks(host, catalog, prepared, runtime) do
+            {:ok, checks} ->
+              doctor_success(
+                :doctor,
+                arguments,
+                run_ref,
+                host,
+                catalog,
+                prepared,
+                checks,
+                false
+              )
 
-        case result do
-          {:ok, checks} ->
-            {:ok,
-             CommandOutcome.success(:doctor, run_ref, %{
-               "checks" => checks,
-               "provider_activity" => false
-             })}
-
-          {:error, diagnostic} ->
-            {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+            {:error, diagnostic} ->
+              {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+          end
+        after
+          if prepared, do: PreparedRun.close(prepared)
         end
 
       {:error, diagnostic} ->
@@ -115,7 +121,16 @@ defmodule PtcRunner.Kernel.CommandDoctor do
     with :ok <- maybe_setup_environment(host, prepared, runtime),
          {:ok, checks, provider_activity} <-
            connect_checks(host, catalog, prepared, run_ref, runtime) do
-      connect_success(arguments, run_ref, checks, provider_activity)
+      doctor_success(
+        {:doctor, :connect},
+        arguments,
+        run_ref,
+        host,
+        catalog,
+        prepared,
+        checks,
+        provider_activity
+      )
     else
       {:error, %CommandDiagnostic{} = diagnostic} ->
         {:error, arguments_outcome(arguments, run_ref, diagnostic)}
@@ -131,17 +146,49 @@ defmodule PtcRunner.Kernel.CommandDoctor do
       else: :ok
   end
 
-  defp connect_success(arguments, run_ref, checks, provider_activity) do
-    {:ok,
-     CommandOutcome.success({:doctor, :connect}, run_ref, %{
-       "checks" => checks,
-       "provider_activity" => provider_activity
-     })}
+  defp doctor_success(
+         mode,
+         arguments,
+         run_ref,
+         host,
+         catalog,
+         prepared,
+         checks,
+         provider_activity
+       ) do
+    with {:ok, aliases} <- DoctorPlan.model_aliases(catalog, prepared) do
+      aliases = maybe_add_model_selectors(aliases, host, arguments.options)
+
+      {:ok,
+       CommandOutcome.success(mode, run_ref, %{
+         "checks" => checks,
+         "model_aliases" => aliases,
+         "provider_activity" => provider_activity
+       })}
+    end
   rescue
     _exception -> connect_interrupted(arguments, run_ref, provider_activity)
   catch
     _kind, _reason -> connect_interrupted(arguments, run_ref, provider_activity)
   end
+
+  defp maybe_add_model_selectors(aliases, nil, _options), do: aliases
+
+  defp maybe_add_model_selectors(aliases, host, %{show_model_selectors: true}) do
+    Enum.map(aliases, fn row ->
+      case Map.fetch(host.install, row["alias"]) do
+        {:ok, %{source: :llm, model: selector}} when is_binary(selector) ->
+          if String.starts_with?(selector, "openai-compat:"),
+            do: row,
+            else: Map.put(row, "model_selector", selector)
+
+        _other ->
+          row
+      end
+    end)
+  end
+
+  defp maybe_add_model_selectors(aliases, _host, _options), do: aliases
 
   defp connect_interrupted(arguments, run_ref, provider_activity),
     do: {:error, arguments_outcome(arguments, run_ref, projection_diagnostic(provider_activity))}

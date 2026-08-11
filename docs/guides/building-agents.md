@@ -232,10 +232,19 @@ custom workflows can rely on the same closed contract:
 | `messages` | array | Conversation messages with `role` and `content`. |
 | `tools` | array, optional | Provider-neutral tool definitions. |
 | `cache` | boolean, optional | Request preference; a host-fixed cache policy takes precedence. |
+| `model` | string, optional | Selected workflow LLM installation alias. |
 
-Unknown request keys are not forwarded to the adapter. Model choice,
-credentials, sampling parameters, byte ceilings, and timeouts remain
-host-owned rather than being supplied by PTC-Lisp.
+When the manifest selects one LLM alias, `model` may be omitted. With several
+aliases, omission uses the one whose manifest selection has `"default": true`;
+without a declared default the call fails and lists the available aliases.
+`model` names the manifest alias, never a raw provider model ID. An unknown or
+`null` selector fails before provider reservation or invocation, and there is no
+implicit fallback to a different alias. The router removes `model` before
+calling the selected provider, so replay request hashes remain provider-neutral.
+
+`agent.core` accepts the same selector as `"model"` in its configuration and
+adds it to every turn. Credentials, sampling parameters, byte ceilings, and
+timeouts remain host-owned rather than being supplied by PTC-Lisp.
 
 A successful response has `content` and may contain `tool_calls` and `tokens`.
 Each tool call uses `id`, `name`, and `args`; the normalized field is `args`,
@@ -244,6 +253,11 @@ payload may additionally carry the bounded `args_error` classification. The
 token map can contain `input`, `output`, `cache_creation`, `cache_read`, and
 `total_cost`. Unsupported or unavailable metrics are reported as zero or
 omitted according to the adapter.
+
+Canonical `capability-started` and `capability-stopped` events identify the
+selected alias and installation revision. Successful stopped events also carry
+the closed token map as `usage`, without response content. `log/counters`
+aggregates those values per alias and revision.
 
 `llm/request` unwraps successful capability envelopes. A recoverable provider
 failure remains the ordinary bounded error envelope returned by the

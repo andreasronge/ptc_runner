@@ -204,7 +204,11 @@ defmodule PtcRunner.Kernel.CommandContract do
   @spec valid_success_semantics?(atom(), term()) :: boolean()
   def valid_success_semantics?(
         :doctor,
-        %{"checks" => checks, "provider_activity" => provider_activity}
+        %{
+          "checks" => checks,
+          "model_aliases" => model_aliases,
+          "provider_activity" => provider_activity
+        }
       ) do
     case checks do
       [
@@ -215,7 +219,8 @@ defmodule PtcRunner.Kernel.CommandContract do
       ] ->
         keys = Enum.map(provider_checks, &doctor_provider_key/1)
 
-        Enum.all?(keys, &is_tuple/1) and
+        model_aliases_valid?(model_aliases) and
+          Enum.all?(keys, &is_tuple/1) and
           keys == Enum.sort(keys) and
           keys == Enum.uniq(keys) and
           provider_groups_start_with_local?(keys) and
@@ -254,6 +259,22 @@ defmodule PtcRunner.Kernel.CommandContract do
       do: true
 
   def valid_success_semantics?(_command, _result), do: false
+
+  defp model_aliases_valid?(aliases) when is_list(aliases) do
+    names = Enum.map(aliases, &Map.get(&1, "alias"))
+
+    names == Enum.sort(Enum.uniq(names)) and
+      Enum.all?(aliases, fn row ->
+        case {row["selected"], row["default"]} do
+          {true, default?} when is_boolean(default?) -> true
+          {false, nil} -> true
+          _invalid -> false
+        end
+      end) and
+      Enum.count(aliases, &(&1["default"] == true)) <= 1
+  end
+
+  defp model_aliases_valid?(_aliases), do: false
 
   defp valid_installation_revision?(revision) when is_binary(revision),
     do: revision =~ @installation_revision
@@ -987,13 +1008,32 @@ defmodule PtcRunner.Kernel.CommandContract do
       ])
     ]
 
-    closed(~w(checks provider_activity), %{
+    closed(~w(checks model_aliases provider_activity), %{
       "checks" => %{
         "type" => "array",
         "minItems" => 3,
         "maxItems" => 1_024,
         "prefixItems" => fixed,
         "items" => doctor_provider_check_schema()
+      },
+      "model_aliases" => %{
+        "type" => "array",
+        "maxItems" => 128,
+        "items" => %{
+          "type" => "object",
+          "additionalProperties" => false,
+          "required" => ~w(alias source installation_revision default selected),
+          "properties" => %{
+            "alias" => %{"type" => "string", "pattern" => @alias},
+            "source" => %{"enum" => ["llm", "llm_replay", "custom"]},
+            "installation_revision" => %{"type" => "string", "pattern" => @alias},
+            "default" => %{
+              "oneOf" => [%{"type" => "boolean"}, %{"type" => "null"}]
+            },
+            "selected" => %{"type" => "boolean"},
+            "model_selector" => %{"type" => "string", "maxLength" => 4_096}
+          }
+        }
       },
       "provider_activity" => %{"type" => "boolean"}
     })

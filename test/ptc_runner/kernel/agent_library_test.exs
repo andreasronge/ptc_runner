@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
+  alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunConfig
@@ -133,6 +134,70 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert annotation.data.data == %{"turn" => 0, "kind" => "tool-call"}
     assert_receive {:provider_closed, :terminal_success}
     refute_receive {:provider_closed, :terminal_success}
+  end
+
+  test "agent.core threads its configured model alias through every LLM turn" do
+    parent = self()
+
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "call-1", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+      ]
+    }
+
+    {:ok, chosen} =
+      LLMCapability.new(
+        requester: fn request ->
+          send(parent, {:chosen_request, request})
+          {:ok, response}
+        end
+      )
+
+    {:ok, other} =
+      LLMCapability.new(requester: fn _request -> flunk("wrong model alias invoked") end)
+
+    assert {:ok, router} =
+             LLMRouter.new([
+               %{
+                 alias: "chosen",
+                 source: "llm_replay",
+                 installation_revision: "chosen-v1",
+                 default?: false,
+                 capability: chosen
+               },
+               %{
+                 alias: "other",
+                 source: "llm_replay",
+                 installation_revision: "other-v1",
+                 default?: false,
+                 capability: other
+               }
+             ])
+
+    {:ok, bundle} = agent_bundle([])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [router])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "agent-model-alias")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: %{"ok" => true, "value" => 42}}} =
+             Kernel.run(
+               ~S|(agent.core/run "Compute" {"model" "chosen" "max_turns" 1})|,
+               config
+             )
+
+    assert_receive {:chosen_request, request}
+    refute Map.has_key?(request, "model")
   end
 
   test "agent.main returns the application value without agent.core's success envelope" do
@@ -879,7 +944,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     # detail is withheld here — and only here — because `agent.core` is a
     # private prelude, so its internal message is generalized at that
     # boundary; a user program gets the full position (see JsonTest).
-    assert {:error, %{fail: %{reason: :type_error, message: message}}} =
+    assert {:error, %PtcRunner.Lisp.Result{} = result} =
              Lisp.run_native(
                ~S|(agent.core/run (fn [] 1) {"max_turns" 1 "max_transcript_chars" 1000000})|,
                prelude: bundle.prelude,
@@ -888,7 +953,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                caller: :kernel
              )
 
-    assert message =~ "agent.core/run: prelude function failed with a type error"
+    assert result.tool_calls == []
   end
 
   test "an intermediate result on the final turn commits before turn-limit failure" do

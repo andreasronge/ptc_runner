@@ -118,6 +118,42 @@ defmodule PtcRunner.Kernel.DoctorPlan do
 
   def checks(_rows), do: {:error, :invalid_doctor_plan}
 
+  @doc "Projects installed or selected workflow LLM aliases for doctor output."
+  @spec model_aliases(InstallationCatalog.t(), PreparedRun.t() | nil) ::
+          {:ok, [map()]} | {:error, :invalid_doctor_plan}
+  def model_aliases(%InstallationCatalog{} = catalog, prepared) do
+    with true <- InstallationCatalog.valid?(catalog),
+         true <- is_nil(prepared) or PreparedRun.sealed?(prepared),
+         true <- bound_to_catalog?(prepared, catalog) do
+      selected =
+        if prepared,
+          do: Map.new(prepared.provider_declarations, &{&1.name, &1.config}),
+          else: %{}
+
+      aliases =
+        catalog.descriptors
+        |> Enum.filter(fn {_name, descriptor} -> descriptor.workflow_llm? end)
+        |> Enum.map(fn {name, descriptor} ->
+          config = Map.get(selected, name)
+
+          %{
+            "alias" => name,
+            "source" => Atom.to_string(descriptor.source),
+            "installation_revision" => descriptor.installation_revision,
+            "default" => if(config, do: Map.get(config, "default", false), else: nil),
+            "selected" => not is_nil(config)
+          }
+        end)
+        |> Enum.sort_by(& &1["alias"])
+
+      {:ok, aliases}
+    else
+      _invalid -> {:error, :invalid_doctor_plan}
+    end
+  end
+
+  def model_aliases(_catalog, _prepared), do: {:error, :invalid_doctor_plan}
+
   @doc "Settles one pending row with an outcome the closed contract allows."
   @spec settle(t(), binary(), settled()) :: {:ok, t()} | {:error, :invalid_doctor_plan}
   def settle(rows, name, {status, code} = outcome)

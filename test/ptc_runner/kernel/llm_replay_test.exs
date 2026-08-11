@@ -322,6 +322,64 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     end
 
     @tag :tmp_dir
+    test "a run explicitly routes between two installed replay aliases", %{tmp_dir: dir} do
+      {:ok, key} = LLMReplay.request_hash(@request)
+
+      File.write!(
+        Path.join(dir, "replay.jsonl"),
+        Jason.encode!(%{"request_hash" => key, "response" => %{"content" => "first"}}) <>
+          "\n"
+      )
+
+      File.write!(
+        Path.join(dir, "second.jsonl"),
+        Jason.encode!(%{"request_hash" => key, "response" => %{"content" => "second"}}) <>
+          "\n"
+      )
+
+      paths = write_application(dir)
+      host = paths.host |> File.read!() |> Jason.decode!()
+      second = host["install"]["replay-llm"] |> Map.put("fixtures", "second.jsonl")
+      host = put_in(host, ["install", "second-replay"], second)
+      File.write!(paths.host, Jason.encode!(host))
+
+      manifest = paths.manifest |> File.read!() |> Jason.decode!()
+
+      manifest =
+        put_in(manifest, ["providers", "workflow"], [
+          %{"name" => "replay-llm"},
+          %{"name" => "second-replay"}
+        ])
+
+      File.write!(paths.manifest, Jason.encode!(manifest))
+
+      File.write!(
+        Path.join(dir, "w.clj"),
+        ~S|(ns app)
+        (defn run [_i]
+          (return
+            (llm/request
+              {"model" "second-replay"
+               "system" "bounded"
+               "messages" [{"role" "user" "content" "hi"}]})))|
+      )
+
+      assert {:ok, host} = HostConfig.load(paths.host)
+      assert {:ok, catalog} = HostInstallation.catalog(host)
+      assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+
+      assert {:ok, result} =
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: registry.installed_limits
+               )
+               |> RunLifecycle.build(registry)
+               |> RunLifecycle.execute()
+
+      assert result.value == %{"content" => "second"}
+    end
+
+    @tag :tmp_dir
     test "a sealed replay declaration is accepted by the runtime provider path", %{tmp_dir: dir} do
       {:ok, key} = LLMReplay.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"content" => "a"}}])
@@ -365,31 +423,50 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     end
 
     @tag :tmp_dir
-    test "a run selecting both a live and a replay LLM fails before provider activity", %{
+    test "a run may select both a live and a replay LLM while providers are inert", %{
       tmp_dir: dir
     } do
       {:ok, key} = LLMReplay.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"content" => "a"}}])
 
-      # A fixture path that does not exist and a credential that is never set:
-      # if either provider were activated, the failure would name one of those
-      # instead of the ambiguity.
+      # A fixture path that does not exist and a credential that is never set
+      # prove that preparation is entirely inert.
       paths = write_application(dir, both_llms: true, fixtures: "missing.jsonl")
       {:ok, host} = HostConfig.load(paths.host)
 
-      {:ok, registry} =
-        HostInstallation.catalog(host)
-        |> then(fn {:ok, catalog} ->
-          HostInstallation.runtime_registry(host, catalog)
-        end)
+      assert {:ok, catalog} = HostInstallation.catalog(host)
 
-      assert {:error, :ambiguous_workflow_llm} =
-               paths.manifest
-               |> ApplicationPackage.request_directory(
-                 installed_limits: registry.installed_limits
+      assert {:ok, request} =
+               ApplicationPackage.request_directory(paths.manifest,
+                 installed_limits: catalog.installed_limits
                )
-               |> RunLifecycle.build(registry)
-               |> RunLifecycle.execute()
+
+      assert {:ok, prepared} = RunCoordinator.prepare(request, catalog)
+      assert Enum.map(prepared.provider_declarations, & &1.name) == ["replay-llm", "live-llm"]
+      assert :ok = PreparedRun.close(prepared)
+    end
+
+    @tag :tmp_dir
+    test "two declared workflow LLM defaults fail while providers are inert", %{tmp_dir: dir} do
+      paths =
+        write_application(dir,
+          both_llms: true,
+          fixtures: "missing.jsonl",
+          selection: %{"default" => true},
+          live_selection: %{"default" => true}
+        )
+
+      assert {:ok, host} = HostConfig.load(paths.host)
+      assert {:ok, catalog} = HostInstallation.catalog(host)
+
+      assert {:ok, request} =
+               ApplicationPackage.request_directory(paths.manifest,
+                 installed_limits: catalog.installed_limits
+               )
+
+      assert {:error, diagnostic} = RunCoordinator.prepare(request, catalog)
+      assert diagnostic.phase == :provider_declaration
+      assert diagnostic.code == :dependency_invalid
     end
 
     @tag :tmp_dir
@@ -512,9 +589,17 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
         else: %{"name" => "replay-llm"}
 
     providers =
-      if Keyword.get(opts, :both_llms, false),
-        do: %{"workflow" => [spec, %{"name" => "live-llm"}]},
-        else: %{destination => [spec]}
+      if Keyword.get(opts, :both_llms, false) do
+        live_spec =
+          case Keyword.get(opts, :live_selection) do
+            nil -> %{"name" => "live-llm"}
+            config -> %{"name" => "live-llm", "config" => config}
+          end
+
+        %{"workflow" => [spec, live_spec]}
+      else
+        %{destination => [spec]}
+      end
 
     manifest = %{
       "version" => 1,

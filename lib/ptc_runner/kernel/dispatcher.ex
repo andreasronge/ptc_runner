@@ -29,12 +29,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
   """
 
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.CapabilityInvocation
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.LLMUsage
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.RoutedCapability
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Lisp.AmbiguousArguments
   alias PtcRunner.Lisp.RetainedSize
@@ -243,11 +246,21 @@ defmodule PtcRunner.Kernel.Dispatcher do
          event_sink,
          inspection_sink
        ) do
+    validation_deadline_ms =
+      shared_validation_deadline(
+        validation_deadline_ms,
+        state,
+        environment,
+        timeout_ms
+      )
+
     # Advisory pre-authentication keeps a dead evaluation's lingering call
     # away from validators and protocol accounting; reserve_capability/4
     # atomically re-checks the same lease.
     with true <- authenticated?(state, environment, evaluation_lease),
-         %Capability{} = capability <- Map.get(capabilities, name),
+         capability
+         when is_struct(capability, Capability) or is_struct(capability, RoutedCapability) <-
+           Map.get(capabilities, name),
          :ok <- validate_size(arguments, capability_argument_limit(state)),
          :ok <-
            validate(
@@ -259,11 +272,21 @@ defmodule PtcRunner.Kernel.Dispatcher do
              validation_heap_words,
              validation_deadline_ms
            ),
+         {:ok, invocation} <-
+           resolve_invocation(
+             capability,
+             arguments,
+             state,
+             environment,
+             timeout_ms,
+             validation_heap_words,
+             validation_deadline_ms
+           ),
          :ok <- RunState.reserve_capability(state, environment, name, evaluation_lease) do
       invoke_with_events(
         state,
-        capability,
-        arguments,
+        name,
+        invocation,
         timeout_ms,
         environment,
         event_sink,
@@ -299,8 +322,21 @@ defmodule PtcRunner.Kernel.Dispatcher do
           retryable?: false
         }
 
+      {:error, :resolver_unavailable} ->
+        _ = mark_terminal_host_failure(state, environment, evaluation_lease)
+
+        %{
+          status: :error,
+          kind: :capability_unavailable,
+          reason: :resolver_unavailable,
+          retryable?: false
+        }
+
       {:error, :argument_exceeded} ->
         protocol_error(state, event_sink, :argument_exceeded, environment, evaluation_lease)
+
+      {:error, reason, details} when is_atom(reason) and is_binary(details) ->
+        protocol_error(state, event_sink, reason, environment, evaluation_lease, details)
 
       {:error, :limit_exceeded} ->
         limit_error(state, event_sink, :capability_quota)
@@ -338,16 +374,24 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp invoke_with_events(
          state,
-         capability,
-         arguments,
+         public_name,
+         %CapabilityInvocation{} = invocation,
          timeout_ms,
          environment,
          event_sink,
          inspection_sink
        ) do
+    capability = invocation.capability
+    arguments = invocation.arguments
     capability_id = Events.id("capability")
     started_ms = System.monotonic_time(:millisecond)
-    data = %{capability_id: capability_id, environment: environment, name: capability.name}
+
+    data =
+      Map.merge(invocation.event_attributes, %{
+        capability_id: capability_id,
+        environment: environment,
+        name: public_name
+      })
 
     case Events.emit(state, event_sink, "capability-started", data) do
       :ok ->
@@ -356,7 +400,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
                  inspection_sink,
                  capability_id,
                  environment,
-                 capability.name,
+                 public_name,
                  arguments
                ) do
             :ok ->
@@ -373,7 +417,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
                    inspection_sink,
                    capability_id,
                    environment,
-                   capability.name,
+                   public_name,
                    result
                  ) do
               :ok ->
@@ -390,14 +434,19 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
         _ = maybe_emit_limit(state, event_sink, result)
 
-        _ =
-          Events.emit(state, event_sink, "capability-stopped", %{
+        stopped_data =
+          invocation.event_attributes
+          |> maybe_merge_error_attributes(result, invocation.error_attributes)
+          |> maybe_put_usage(result, invocation.usage_projection)
+          |> Map.merge(%{
             capability_id: capability_id,
             environment: environment,
-            name: capability.name,
+            name: public_name,
             status: result.status,
             duration_ms: Events.duration_ms(started_ms)
           })
+
+        _ = Events.emit(state, event_sink, "capability-stopped", stopped_data)
 
         result
 
@@ -731,10 +780,73 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
+  defp validate(
+         %RoutedCapability{} = capability,
+         arguments,
+         state,
+         environment,
+         requested_timeout_ms,
+         validation_heap_words,
+         validation_deadline_ms
+       ) do
+    with {:ok, validation_arguments} <-
+           RoutedCapability.validation_arguments(capability, arguments) do
+      validate_schema(
+        capability,
+        validation_arguments,
+        state,
+        environment,
+        requested_timeout_ms,
+        validation_heap_words,
+        validation_deadline_ms
+      )
+    end
+  end
+
+  defp validate_schema(
+         capability,
+         arguments,
+         state,
+         environment,
+         requested_timeout_ms,
+         validation_heap_words,
+         validation_deadline_ms
+       ) do
+    limits = state_limits(state)
+
+    dispatch_timeout_ms =
+      min(
+        requested_timeout_ms,
+        min(validation_timeout_ms(limits, environment), RunState.remaining_ms(state))
+      )
+
+    validation_timeout_ms =
+      validation_worker_timeout_ms(dispatch_timeout_ms, validation_deadline_ms)
+
+    cond do
+      dispatch_timeout_ms <= 0 ->
+        {:error, :run_closed}
+
+      validation_timeout_ms <= 0 ->
+        {:error, :input_validation_unavailable}
+
+      true ->
+        case JSONSchema.validate(
+               capability.input_validator,
+               capability.input_schema,
+               arguments,
+               validation_timeout_ms,
+               validation_heap_words
+             ) do
+          :ok -> :ok
+          {:invalid, violations} -> {:error, :invalid_arguments, violations}
+          {:unavailable, _internal_cause} -> {:error, :input_validation_unavailable}
+        end
+    end
+  end
+
   defp validation_timeout_ms(limits, :workflow), do: limits.workflow_timeout_ms
   defp validation_timeout_ms(limits, :mission), do: limits.evaluation_timeout_ms
-
-  defp validation_worker_timeout_ms(timeout_ms, nil), do: timeout_ms
 
   defp validation_worker_timeout_ms(timeout_ms, deadline_ms) when is_integer(deadline_ms) do
     remaining_ms = deadline_ms - System.monotonic_time(:millisecond) - @validation_handoff_ms
@@ -760,6 +872,73 @@ defmodule PtcRunner.Kernel.Dispatcher do
   rescue
     _exception -> {:error, :invalid_arguments}
   end
+
+  defp resolve_invocation(
+         %Capability{} = capability,
+         arguments,
+         _state,
+         _environment,
+         _timeout_ms,
+         _validation_heap_words,
+         _validation_deadline_ms
+       ),
+       do: {:ok, CapabilityInvocation.leaf(capability, arguments)}
+
+  defp resolve_invocation(
+         %RoutedCapability{} = routed,
+         arguments,
+         state,
+         environment,
+         timeout_ms,
+         validation_heap_words,
+         validation_deadline_ms
+       ) do
+    with {:ok, %CapabilityInvocation{} = invocation} <-
+           RoutedCapability.resolve(routed, arguments),
+         :ok <- validate_size(invocation.arguments, capability_argument_limit(state)),
+         :ok <-
+           validate(
+             invocation.capability,
+             invocation.arguments,
+             state,
+             environment,
+             timeout_ms,
+             validation_heap_words,
+             validation_deadline_ms
+           ) do
+      {:ok, invocation}
+    end
+  end
+
+  defp shared_validation_deadline(deadline_ms, _state, _environment, _timeout_ms)
+       when is_integer(deadline_ms),
+       do: deadline_ms
+
+  defp shared_validation_deadline(nil, state, environment, timeout_ms) do
+    limits = state_limits(state)
+
+    available_ms =
+      min(
+        timeout_ms,
+        min(validation_timeout_ms(limits, environment), RunState.remaining_ms(state))
+      )
+
+    System.monotonic_time(:millisecond) + max(available_ms, 0) + @validation_handoff_ms
+  end
+
+  defp maybe_merge_error_attributes(data, %{status: :error}, attributes),
+    do: Map.merge(data, attributes)
+
+  defp maybe_merge_error_attributes(data, _result, _attributes), do: data
+
+  defp maybe_put_usage(data, result, :llm_tokens) do
+    case LLMUsage.from_response(result) do
+      nil -> data
+      usage -> Map.put(data, :usage, usage)
+    end
+  end
+
+  defp maybe_put_usage(data, _result, nil), do: data
 
   defp valid_output?(%Capability{output_validator: nil}, _value), do: true
 

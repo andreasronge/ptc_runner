@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.Deadline
+  alias PtcRunner.Kernel.DoctorPlan
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.HostInstallationOwner
@@ -847,11 +848,20 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     host = load_host(dir, config)
 
-    assert {:ok, registry} =
-             HostInstallation.catalog(host)
-             |> then(fn {:ok, catalog} ->
-               HostInstallation.runtime_registry(host, catalog)
-             end)
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+
+    assert {:ok,
+            [
+              %{
+                "alias" => "deepseek",
+                "source" => "llm",
+                "installation_revision" => "model-policy-v2",
+                "default" => nil,
+                "selected" => false
+              }
+            ]} = DoctorPlan.model_aliases(catalog, nil)
+
+    assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
 
     workflow = context(dir, :workflow)
 
@@ -865,6 +875,12 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert prepared.credential_names == ["openrouter_key"]
 
+    assert prepared.workflow_llm_route == %{
+             source: "llm",
+             installation_revision: "model-policy-v2",
+             default: false
+           }
+
     assert {:error, :provider_destination_denied} =
              ProviderRegistry.prepare(registry, "deepseek", %{}, %{
                workflow
@@ -876,6 +892,14 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
                registry,
                "deepseek",
                %{"max_response_bytes" => 300_001},
+               workflow
+             )
+
+    assert {:error, :invalid_llm_selection} =
+             ProviderRegistry.prepare(
+               registry,
+               "deepseek",
+               %{"default" => "yes"},
                workflow
              )
 
@@ -901,6 +925,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
              "accepts_data" => ["normal", "private_inspection"],
              "authorization_mode" => "none",
              "config" => %{
+               "default" => false,
                "max_request_bytes" => 100_000,
                "max_response_bytes" => 300_000
              }

@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.LLMUsage
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.TracePublication
@@ -2139,8 +2140,67 @@ defmodule PtcRunner.Kernel.TraceLog do
       "errors" => Enum.count(events, &error_event?/1),
       "evaluations" => Enum.count(events, &(&1["type"] == "evaluation-started")),
       "workflow_capability_calls" => capability_call_count(events, "workflow"),
-      "mission_capability_calls" => capability_call_count(events, "mission")
+      "mission_capability_calls" => capability_call_count(events, "mission"),
+      "llm_usage" => llm_usage_counters(events)
     }
+  end
+
+  defp llm_usage_counters(events) do
+    events
+    |> Enum.filter(fn event ->
+      event["type"] == "capability-stopped" and
+        event_data(event, "name") == "llm-request" and
+        is_binary(event_data(event, "alias")) and
+        is_binary(event_data(event, "installation_revision"))
+    end)
+    |> Enum.reduce(%{}, fn event, counters ->
+      alias_name = event_data(event, "alias")
+      revision = event_data(event, "installation_revision")
+      key = {alias_name, revision}
+      success? = stringify(event_data(event, "status")) == "ok"
+
+      row =
+        Map.get(counters, key, %{
+          "alias" => alias_name,
+          "installation_revision" => revision,
+          "calls" => 0,
+          "successful_calls" => 0,
+          "usage_calls" => 0,
+          "missing_usage_calls" => 0,
+          "usage" => %{}
+        })
+
+      row =
+        row
+        |> Map.update!("calls", &(&1 + 1))
+        |> Map.update!("successful_calls", &(&1 + if(success?, do: 1, else: 0)))
+
+      row = update_usage_row(row, event_data(event, "usage"), success?)
+      Map.put(counters, key, row)
+    end)
+    |> Enum.sort_by(fn {{alias_name, revision}, _row} -> {alias_name, revision} end)
+    |> Enum.map(&elem(&1, 1))
+  end
+
+  defp update_usage_row(row, usage, true) when is_map(usage) do
+    case LLMUsage.normalize(usage) do
+      {:ok, normalized} ->
+        row
+        |> Map.update!("usage_calls", &(&1 + 1))
+        |> Map.update!("usage", &sum_usage(&1, normalized))
+
+      {:error, :invalid_llm_usage} ->
+        Map.update!(row, "missing_usage_calls", &(&1 + 1))
+    end
+  end
+
+  defp update_usage_row(row, _usage, true),
+    do: Map.update!(row, "missing_usage_calls", &(&1 + 1))
+
+  defp update_usage_row(row, _usage, false), do: row
+
+  defp sum_usage(left, right) do
+    Map.merge(left, right, fn _key, first, second -> first + second end)
   end
 
   defp capability_call_count(events, environment) do
