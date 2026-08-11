@@ -1393,6 +1393,11 @@ continued failure makes transport shutdown fail while the runtime keeps the
 shared fence. When provider acquisition fails before it can return a close
 handle, the supervised OAuth cleanup owner adopts the token manager and retries
 that bounded shutdown, so the retained fence cannot become an orphaned process.
+The cleanup owner keeps retrying answered persistence failures because those
+attempts can still make progress. A consecutive streak of unanswered close
+timeouts instead has a five-minute slot budget; exhaustion terminates the
+linked worker abnormally so its manager is reclaimed and the node-global slot
+is released. Any answered persistence failure breaks the timeout streak.
 An ordinary or malformed dynamic `403` that is not one valid satisfiable
 `insufficient_scope` challenge is a non-retryable authentication or
 authorization result; it is not mislabeled as a retryable transport failure.
