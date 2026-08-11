@@ -133,13 +133,18 @@ defmodule PtcRunner.Kernel.Evaluation do
       |> Keyword.get(:projection_boundary, :kernel_json)
       |> validate_projection_boundary!()
 
+    admission =
+      opts
+      |> Keyword.get(:admission, :fail_fast)
+      |> validate_admission!()
+
     result =
       evaluate_detailed(
         state,
         mission_environment,
         source,
         timeout_ms,
-        %{event_sink: event_sink, inspection_sink: inspection_sink},
+        %{event_sink: event_sink, inspection_sink: inspection_sink, admission: admission},
         {
           evaluation_id,
           started_ms,
@@ -163,8 +168,10 @@ defmodule PtcRunner.Kernel.Evaluation do
          capture,
          evaluation_context
        ) do
+    admission = Map.get(capture, :admission, :fail_fast)
+
     with :ok <- source_within_limit(source, RunState.limits(state).subordinate_source_bytes),
-         {:ok, memory, history, lease} <- RunState.reserve_evaluation(state) do
+         {:ok, memory, history, lease} <- RunState.reserve_evaluation(state, admission) do
       evaluate_with_lease(
         state,
         mission_environment,
@@ -177,6 +184,9 @@ defmodule PtcRunner.Kernel.Evaluation do
     else
       {:error, :busy} ->
         failure(:busy, :evaluation_in_progress)
+
+      {:error, :admission_timeout} ->
+        failure(:busy, :admission_timeout)
 
       {:error, :limit_exceeded} ->
         preflight_limit(state, capture.event_sink, :limit_exceeded, :subordinate_evaluations)
@@ -291,6 +301,13 @@ defmodule PtcRunner.Kernel.Evaluation do
           "invalid projection boundary #{inspect(boundary)}; expected :public or :kernel_json"
   end
 
+  defp validate_admission!(admission) when admission in [:fail_fast, :block], do: admission
+
+  defp validate_admission!(admission) do
+    raise ArgumentError,
+          "invalid admission mode #{inspect(admission)}; expected :fail_fast or :block"
+  end
+
   defp execute_with_lease(
          state,
          environment,
@@ -312,13 +329,15 @@ defmodule PtcRunner.Kernel.Evaluation do
           state,
           timeout_ms,
           capture.event_sink,
-          capture.inspection_sink
+          capture.inspection_sink,
+          lease
         ),
       prelude: bundle_prelude(environment),
       timeout: timeout_ms,
       compile_timeout: timeout_ms,
       compile_max_heap: limits.evaluation_heap_words,
       run_deadline_ms: deadline_ms,
+      pmap_timeout: limits.parallel_timeout_ms,
       max_heap: limits.evaluation_heap_words,
       max_parallel_workers: limits.live_provider_tasks,
       max_program_bytes: limits.subordinate_source_bytes,
@@ -669,14 +688,15 @@ defmodule PtcRunner.Kernel.Evaluation do
   end
 
   @doc false
-  def mission_tools(environment, state, timeout_ms, event_sink, inspection_sink) do
+  def mission_tools(environment, state, timeout_ms, event_sink, inspection_sink, lease \\ nil) do
     state
     |> ToolGrant.capability_callbacks(
       :mission,
       environment,
       timeout_ms,
       event_sink,
-      inspection_sink
+      inspection_sink,
+      lease: lease
     )
     |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
   end
@@ -696,7 +716,9 @@ defmodule PtcRunner.Kernel.Evaluation do
     result
   end
 
-  defp legacy_projection(result) do
+  @doc false
+  @spec legacy_projection(map()) :: map()
+  def legacy_projection(result) do
     result
     |> Map.drop([:continuation_effect, :duration_ms, :evaluation_id])
     |> maybe_drop_terminal_prints()

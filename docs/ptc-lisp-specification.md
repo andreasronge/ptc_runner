@@ -4162,10 +4162,12 @@ direct `PtcRunner.Lisp` callers.
   nested parallelism that would exceed the global budget — fails with
   `:parallel_capacity_exceeded` (there is no sequential fallback).
 - The whole parallel operation (including nested `pmap`/`pcalls`) shares
-  one deadline derived from `pmap_timeout`; exceeding it fails with
-  `:timeout`.
+  one deadline derived from `pmap_timeout`, clamped by the embedding run's
+  absolute deadline when one exists; exceeding it fails with `:timeout`.
 
-*Note: Hosts may configure higher timeouts (e.g., 5,000ms) to accommodate slow tool calls.*
+*Note: Kernel runs derive `pmap_timeout` from the `parallel_timeout_ms`
+limit (default 30,000 ms); direct library embedders configure their own
+value to accommodate slow tool calls.*
 
 ### 15.3 Compatibility Testing
 

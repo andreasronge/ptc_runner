@@ -59,7 +59,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         event_sink
       )
       when environment in [:workflow, :mission] do
-    protocol_error(state, event_sink, :ambiguous_arguments)
+    protocol_error(state, event_sink, :ambiguous_arguments, environment, nil)
   end
 
   def dispatch(
@@ -94,25 +94,71 @@ defmodule PtcRunner.Kernel.Dispatcher do
         _inspection_sink
       )
       when environment in [:workflow, :mission] do
-    protocol_error(state, event_sink, :ambiguous_arguments)
+    protocol_error(state, event_sink, :ambiguous_arguments, environment, nil)
   end
 
   def dispatch(
+        state,
+        environment,
+        environment_value,
+        name,
+        arguments,
+        timeout_ms,
+        event_sink,
+        inspection_sink
+      ) do
+    dispatch_with_lease(
+      state,
+      environment,
+      environment_value,
+      name,
+      arguments,
+      timeout_ms,
+      {event_sink, inspection_sink, nil}
+    )
+  end
+
+  @doc """
+  Dispatches with an authenticated evaluation lease.
+
+  The final argument bundles `{event_sink, inspection_sink, lease}`. A
+  mission capability call carries the lease of the evaluation that
+  constructed its tool grant; `RunState` rejects the reservation when that
+  lease is no longer current, so a dead evaluation's lingering sandbox
+  cannot attribute a late call to the next admitted evaluation.
+  """
+  def dispatch_with_lease(
+        state,
+        environment,
+        %{capabilities: _capabilities},
+        _name,
+        %AmbiguousArguments{},
+        _timeout_ms,
+        {event_sink, _inspection_sink, lease}
+      )
+      when environment in [:workflow, :mission] do
+    protocol_error(state, event_sink, :ambiguous_arguments, environment, lease)
+  end
+
+  def dispatch_with_lease(
         state,
         environment,
         %{capabilities: capabilities},
         name,
         arguments,
         timeout_ms,
-        event_sink,
-        inspection_sink
+        {event_sink, inspection_sink, lease}
       )
       when environment in [:workflow, :mission] and is_binary(name) and is_map(arguments) and
              is_integer(timeout_ms) do
-    with %Capability{} = capability <- Map.get(capabilities, name),
+    # Advisory pre-authentication keeps a dead evaluation's lingering call
+    # away from validators and protocol accounting; reserve_capability/4
+    # atomically re-checks the same lease.
+    with true <- authenticated?(state, environment, lease),
+         %Capability{} = capability <- Map.get(capabilities, name),
          :ok <- validate(capability, arguments),
          :ok <- validate_size(arguments, capability_argument_limit(state)),
-         :ok <- RunState.reserve_capability(state, environment, name) do
+         :ok <- RunState.reserve_capability(state, environment, name, lease) do
       invoke_with_events(
         state,
         capability,
@@ -127,10 +173,10 @@ defmodule PtcRunner.Kernel.Dispatcher do
         %{status: :error, kind: :capability_denied, reason: :capability_absent, retryable?: false}
 
       {:error, :invalid_arguments} ->
-        protocol_error(state, event_sink, :invalid_arguments)
+        protocol_error(state, event_sink, :invalid_arguments, environment, lease)
 
       {:error, :argument_exceeded} ->
-        protocol_error(state, event_sink, :argument_exceeded)
+        protocol_error(state, event_sink, :argument_exceeded, environment, lease)
 
       {:error, :limit_exceeded} ->
         limit_error(state, event_sink, :capability_quota)
@@ -141,9 +187,29 @@ defmodule PtcRunner.Kernel.Dispatcher do
       {:error, :reservation_held} ->
         limit_error(state, event_sink, :reservation_held)
 
+      false ->
+        stale_evaluation_error()
+
+      {:error, :stale_evaluation} ->
+        stale_evaluation_error()
+
       {:error, :run_closed} ->
         limit_error(state, event_sink, :run_closed)
     end
+  end
+
+  defp authenticated?(_state, :workflow, _lease), do: true
+
+  defp authenticated?(state, :mission, lease),
+    do: RunState.mission_lease_current?(state, lease)
+
+  defp stale_evaluation_error do
+    %{
+      status: :error,
+      kind: :capability_denied,
+      reason: :stale_evaluation,
+      retryable?: false
+    }
   end
 
   defp invoke_with_events(
@@ -528,9 +594,13 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
-  defp protocol_error(state, event_sink, reason) do
-    case RunState.protocol_error(state) do
+  # Authentication and accounting are one atomic owner operation: a mission
+  # call whose evaluation died mid-validation must not spend the next
+  # evaluation's shared protocol-error budget.
+  defp protocol_error(state, event_sink, reason, environment, lease) do
+    case RunState.protocol_error(state, environment, lease) do
       :ok -> %{status: :error, kind: :protocol_error, reason: reason, retryable?: false}
+      {:error, :stale_evaluation} -> stale_evaluation_error()
       {:error, :protocol_error_limit} -> limit_error(state, event_sink, :protocol_errors)
     end
   end

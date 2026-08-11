@@ -955,6 +955,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         eval_context.turn_history,
         max_print_length: eval_context.max_print_length,
         pmap_timeout: eval_context.pmap_timeout,
+        parallel_deadline_cap: eval_context.parallel_deadline_cap,
         pmap_max_concurrency: eval_context.pmap_max_concurrency,
         # Security H1: propagate the sandbox cap, the FIXED per-worker
         # heap cap, and the shared worker-slot budget so a nested
@@ -1408,6 +1409,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               effects: caller_ctx.effects,
               max_print_length: caller_ctx.max_print_length,
               pmap_timeout: caller_ctx.pmap_timeout,
+              parallel_deadline_cap: caller_ctx.parallel_deadline_cap,
               pmap_max_concurrency: caller_ctx.pmap_max_concurrency,
               # Security H1: propagate the heap caps + shared worker-slot
               # budget into nested closure evaluation so a nested

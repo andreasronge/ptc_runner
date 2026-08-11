@@ -19,6 +19,7 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @stable_parallel_errors [:memory_exceeded, :timeout, :parallel_capacity_exceeded]
+  @parallel_run_deadline_message "the run deadline expired during a parallel operation"
   @safe_type_names [
     "boolean",
     "function",
@@ -306,6 +307,12 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   def sanitize_private_error({:type_error, _message, {:safe_diagnostic, _diagnostic}} = reason),
     do: sanitize_private_error(reason, nil)
 
+  # The run-deadline variant of the timeout message is itself a stable
+  # constant, so preserving it leaks nothing while keeping the binding limit
+  # attributable at the Kernel boundary.
+  def sanitize_private_error({:timeout, @parallel_run_deadline_message, nil}),
+    do: {:timeout, @parallel_run_deadline_message, nil}
+
   def sanitize_private_error({reason, _message, nil}) when reason in @stable_parallel_errors,
     do: {reason, stable_parallel_error_message(reason), nil}
 
@@ -401,11 +408,18 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   defp diagnostic_prefix(_origin), do: ""
 
+  @doc false
+  @spec parallel_timeout_message() :: String.t()
+  def parallel_timeout_message, do: "the parallel operation exceeded its deadline"
+
+  @doc false
+  @spec parallel_run_deadline_message() :: String.t()
+  def parallel_run_deadline_message, do: @parallel_run_deadline_message
+
   defp stable_parallel_error_message(:memory_exceeded),
     do: "a parallel worker exceeded its per-worker heap cap"
 
-  defp stable_parallel_error_message(:timeout),
-    do: "the parallel operation exceeded its deadline"
+  defp stable_parallel_error_message(:timeout), do: parallel_timeout_message()
 
   defp stable_parallel_error_message(:parallel_capacity_exceeded),
     do: "the parallel worker budget is exhausted; reduce nesting or collection size"

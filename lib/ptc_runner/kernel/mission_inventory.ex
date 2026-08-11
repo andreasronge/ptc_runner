@@ -311,6 +311,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
     {:object,
      [
        {"evaluation_timeout_ms", limits.evaluation_timeout_ms},
+       {"parallel_timeout_ms", limits.parallel_timeout_ms},
        {"subordinate_source_bytes", limits.subordinate_source_bytes},
        {"subordinate_source_checks", limits.subordinate_source_checks},
        {"mission_capability_calls", limits.mission_capability_calls},

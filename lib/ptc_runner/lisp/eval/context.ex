@@ -17,6 +17,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   | `max_print_length` | 2,000 | — | Max chars per `println` call |
   | `max_tool_call_result_bytes` | 16,384 | — | Per-entry cap on the `:result` retained in the in-eval tool ledger |
   | `pmap_max_concurrency` | build-time `schedulers * 2` | — | Max concurrent pmap/pcalls tasks |
+  | `parallel_deadline_cap` | `nil` | — | Absolute ceiling clamping every pmap/pcalls deadline |
 
   ## Tool-ledger retention
 
@@ -71,6 +72,13 @@ defmodule PtcRunner.Lisp.Eval.Context do
     # to `now + pmap_timeout` and nested calls inherit it unchanged, so
     # N parallel branches cannot multiply total wall time.
     pmap_deadline: nil,
+    # Absolute monotonic-time ceiling (ms) for ANY parallel deadline,
+    # regardless of when the operation starts. A relative `pmap_timeout`
+    # alone would let an operation started late in a run construct a
+    # deadline past the run's own deadline; the outermost pmap/pcalls
+    # clamps to this cap instead. `nil` when the embedding run has no
+    # absolute deadline.
+    parallel_deadline_cap: nil,
     # Per-process heap cap (in words) applied to the sandbox process.
     # `nil` means no sandbox cap is configured.
     max_heap: nil,
@@ -185,6 +193,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           pmap_timeout: pos_integer(),
           pmap_max_concurrency: pos_integer(),
           pmap_deadline: integer() | nil,
+          parallel_deadline_cap: integer() | nil,
           max_heap: pos_integer() | nil,
           worker_max_heap: pos_integer() | nil,
           parallel_budget: PtcRunner.Lisp.Eval.ParallelBudget.t() | nil,
@@ -213,6 +222,9 @@ defmodule PtcRunner.Lisp.Eval.Context do
   - `:pmap_timeout` - Shared absolute deadline in ms for each pmap/pcalls
     operation, including nested parallel calls (default: 5000). Increase for
     LLM-backed tools.
+  - `:parallel_deadline_cap` - Absolute monotonic-time ceiling in ms that
+    clamps every parallel deadline regardless of when the operation starts
+    (default: nil = no ceiling). Kernel runs pass their run deadline here.
   - `:pmap_max_concurrency` - Max concurrent tasks in pmap/pcalls (default: the build-time `System.schedulers_online() * 2`, frozen into the semantic revision)
   - `:max_heap` - Sandbox per-process heap cap in words (default: nil).
   - `:worker_max_heap` - FIXED `max_heap_size` (in words) for every
@@ -256,6 +268,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
         Keyword.get(opts, :max_tool_call_result_bytes, @default_tool_call_result_bytes),
       max_print_length: Keyword.get(opts, :max_print_length, @default_print_length),
       pmap_timeout: Keyword.get(opts, :pmap_timeout, @default_pmap_timeout),
+      parallel_deadline_cap: Keyword.get(opts, :parallel_deadline_cap),
       pmap_max_concurrency:
         Keyword.get(opts, :pmap_max_concurrency, @default_pmap_max_concurrency),
       max_heap: Keyword.get(opts, :max_heap),

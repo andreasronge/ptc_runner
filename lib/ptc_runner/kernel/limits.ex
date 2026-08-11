@@ -12,6 +12,10 @@ defmodule PtcRunner.Kernel.Limits do
     application admission, including active preflight and Kernel execution;
   - `workflow_timeout_ms` and `evaluation_timeout_ms` bound individual
     workflow and subordinate evaluations;
+  - `evaluation_admission_timeout_ms` bounds how long a blocking
+    `kernel-eval` caller may wait behind the single evaluation lease;
+  - `parallel_timeout_ms` bounds one `pmap`/`pcalls` operation, clamped by
+    the run deadline;
   - `workflow_heap_words`, `evaluation_heap_words`, and
     `provider_heap_words` are per-process heap ceilings;
   - `live_provider_tasks` bounds concurrent provider callback processes and is
@@ -62,6 +66,8 @@ defmodule PtcRunner.Kernel.Limits do
           run_duration_ms: pos_integer(),
           workflow_timeout_ms: pos_integer(),
           evaluation_timeout_ms: pos_integer(),
+          evaluation_admission_timeout_ms: pos_integer(),
+          parallel_timeout_ms: pos_integer(),
           workflow_heap_words: pos_integer(),
           evaluation_heap_words: pos_integer(),
           provider_heap_words: pos_integer(),

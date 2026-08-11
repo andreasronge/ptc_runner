@@ -37,29 +37,42 @@ defmodule PtcRunner.Kernel.ToolGrant do
           map(),
           non_neg_integer(),
           term(),
-          term()
+          term(),
+          keyword()
         ) :: %{binary() => (map() -> map())}
-  def capability_callbacks(state, kind, environment, timeout_ms, event_sink, inspection_sink)
+  def capability_callbacks(
+        state,
+        kind,
+        environment,
+        timeout_ms,
+        event_sink,
+        inspection_sink,
+        opts \\ []
+      )
       when kind in [:workflow, :mission] do
+    # Mission grants carry the lease of the evaluation constructing them, so
+    # a call surviving that evaluation's death is rejected as stale instead
+    # of being attributed to the next admitted evaluation.
+    lease = Keyword.get(opts, :lease)
+
     environment.capabilities
     |> Map.new(fn {name, capability} ->
       view = Environment.capability_view(name, capability)
 
       callback = fn arguments ->
-        Dispatcher.dispatch(
+        Dispatcher.dispatch_with_lease(
           state,
           kind,
           view,
           name,
           arguments,
           timeout_ms,
-          event_sink,
-          inspection_sink
+          {event_sink, inspection_sink, lease}
         )
       end
 
       {name, callback}
     end)
-    |> Map.merge(RuntimeTools.tools(state, environment, event_sink, kind))
+    |> Map.merge(RuntimeTools.tools(state, environment, event_sink, kind, lease: lease))
   end
 end

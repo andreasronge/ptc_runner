@@ -133,10 +133,37 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
+  @doc """
+  Reserves a capability slot, authenticating mission calls by lease.
+
+  A mission reservation must present the lease of the evaluation whose tool
+  grant issued the call; a lease that is no longer current answers
+  `{:error, :stale_evaluation}`. This closes the window where a dead
+  evaluation's lingering sandbox reserves after the next evaluation was
+  admitted and has its late call attributed to the new lease. Workflow
+  reservations carry no lease.
+  """
+  @spec reserve_capability(t(), environment(), binary(), reference() | nil) ::
+          :ok | {:error, atom()}
+  def reserve_capability(state, environment, name, lease),
+    do: safe_call(state, {:reserve_capability, environment, name, lease}, {:error, :run_closed})
+
   @spec reserve_capability(t(), environment(), binary()) :: :ok | {:error, atom()}
   @doc "Atomically reserves environment, per-name, and live-provider budgets."
   def reserve_capability(state, environment, name),
-    do: safe_call(state, {:reserve_capability, environment, name}, {:error, :run_closed})
+    do: reserve_capability(state, environment, name, nil)
+
+  @doc """
+  Checks whether a mission lease is still the current evaluation lease.
+
+  Advisory pre-authentication for dispatch: a stale evaluation's call is
+  turned away before it can run argument validators or spend the shared
+  protocol-error budget. The atomic recheck inside `reserve_capability/4`
+  remains authoritative.
+  """
+  @spec mission_lease_current?(t(), reference() | nil) :: boolean()
+  def mission_lease_current?(state, lease),
+    do: safe_call(state, {:mission_lease_current?, lease}, false)
 
   @spec attach_provider(t(), pid()) :: :ok | {:error, :closed | :provider_down}
   @doc "Attaches the caller's live provider process to its capability reservation."
@@ -191,7 +218,30 @@ defmodule PtcRunner.Kernel.RunState do
 
   @spec reserve_evaluation(t()) :: {:ok, map(), [term()], reference()} | {:error, atom()}
   @doc "Atomically reserves and returns native subordinate memory and turn history."
-  def reserve_evaluation(state), do: call(state, :reserve_evaluation)
+  def reserve_evaluation(state), do: reserve_evaluation(state, :fail_fast)
+
+  @doc """
+  Reserves the evaluation lease with the chosen admission mode.
+
+  `:fail_fast` answers `{:error, :busy}` while another evaluation holds the
+  lease (or its provider reservations are still draining). `:block` parks the
+  caller in a FIFO admission queue instead; the reply arrives when the lease
+  frees, or as `{:error, :admission_timeout}` /
+  `{:error, :deadline_expired}` when the bounded wait ends first. The wait is
+  bounded server-side by `evaluation_admission_timeout_ms` and the run
+  deadline, so the blocking call itself uses an infinite client timeout.
+  """
+  @spec reserve_evaluation(t(), :fail_fast | :block) ::
+          {:ok, map(), [term()], reference()} | {:error, atom()}
+  def reserve_evaluation(state, :fail_fast), do: call(state, :reserve_evaluation)
+
+  # The admission wait is bounded from the moment the caller asks, not the
+  # moment the owner processes the request — time in the owner's mailbox
+  # counts against the bound.
+  def reserve_evaluation(state, :block) do
+    requested_at = System.monotonic_time(:millisecond)
+    call_blocking(state, {:reserve_evaluation, :block, requested_at})
+  end
 
   @doc false
   @spec reserve_source_check(t()) :: {:ok, map(), non_neg_integer()} | {:error, atom()}
@@ -221,6 +271,20 @@ defmodule PtcRunner.Kernel.RunState do
   @spec protocol_error(t()) :: :ok | {:error, :protocol_error_limit}
   @doc "Records one protocol error and closes the run when its ceiling is exceeded."
   def protocol_error(state), do: safe_call(state, :protocol_error, :ok)
+
+  @doc """
+  Records one protocol error after atomically authenticating the mission lease.
+
+  Authentication and accounting are one owner operation: an advisory check
+  followed by a separate `protocol_error/1` would let an evaluation that died
+  mid-validation spend the next evaluation's shared protocol-error budget.
+  A stale mission lease answers `{:error, :stale_evaluation}` and records
+  nothing. Workflow calls carry no lease and are always recorded.
+  """
+  @spec protocol_error(t(), environment(), reference() | nil) ::
+          :ok | {:error, :protocol_error_limit | :stale_evaluation}
+  def protocol_error(state, environment, lease),
+    do: safe_call(state, {:protocol_error, environment, lease}, :ok)
 
   # There is no failure left to record once the owner is gone. As above, the
   # declared :ok never covered the mismatched-token reply.
@@ -355,6 +419,7 @@ defmodule PtcRunner.Kernel.RunState do
        evaluation_lease: nil,
        evaluation_release_waiter: nil,
        evaluation_terminal_provider_failure?: false,
+       admission_queue: :queue.new(),
        reservations: %{}
      }}
   end
@@ -384,16 +449,19 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   def handle_call(
-        {token, {:reserve_capability, environment, name}},
+        {token, {:reserve_capability, environment, name, lease}},
         {caller, _tag},
         %{token: token} = state
       )
       when environment in [:workflow, :mission] do
-    case reserve_capability_state(state, environment, name, caller) do
+    case reserve_capability_state(state, environment, name, caller, lease) do
       {:ok, state} -> {:reply, :ok, state}
       {:error, reason, state} -> {:reply, {:error, reason}, state}
     end
   end
+
+  def handle_call({token, {:mission_lease_current?, lease}}, _from, %{token: token} = state),
+    do: {:reply, current_mission_lease?(state, lease), state}
 
   def handle_call({token, {:attach_provider, provider}}, {caller, _tag}, %{token: token} = state) do
     if unavailable?(state) do
@@ -464,7 +532,7 @@ defmodule PtcRunner.Kernel.RunState do
       deadline_expired?(state) ->
         {:reply, {:error, :deadline_expired}, state}
 
-      state.evaluation_lease != nil ->
+      not grantable?(state) or not :queue.is_empty(state.admission_queue) ->
         {:reply, {:error, :busy}, state}
 
       state.evaluations >= state.limits.subordinate_evaluations ->
@@ -484,6 +552,51 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
+  def handle_call(
+        {token, {:reserve_evaluation, :block, requested_at}},
+        {caller, _tag} = from,
+        %{token: token} = state
+      )
+      when is_integer(requested_at) do
+    admission_deadline = admission_deadline(state, requested_at)
+
+    cond do
+      state.closed? ->
+        {:reply, {:error, :run_closed}, state}
+
+      deadline_expired?(state) ->
+        {:reply, {:error, :deadline_expired}, state}
+
+      # The bound counts from the caller's request, so a message that sat in
+      # the owner's mailbox past its whole admission window is refused even
+      # when the lease happens to be free.
+      System.monotonic_time(:millisecond) >= admission_deadline ->
+        {:reply, {:error, :admission_timeout}, state}
+
+      state.evaluations >= state.limits.subordinate_evaluations ->
+        {:reply, {:error, :limit_exceeded}, state}
+
+      grantable?(state) and :queue.is_empty(state.admission_queue) ->
+        lease = {make_ref(), caller, Process.monitor(caller)}
+
+        {:reply, {:ok, state.memory, state.history, elem(lease, 0)},
+         %{
+           state
+           | evaluations: state.evaluations + 1,
+             evaluation_lease: lease,
+             evaluation_release_waiter: nil,
+             evaluation_terminal_provider_failure?: false
+         }}
+
+      true ->
+        # admit_from_queue self-heals the (unreachable by invariant) state of
+        # a grantable lease behind a non-empty queue: the FIFO head is
+        # admitted, which may be this caller.
+        {:noreply,
+         admit_from_queue(enqueue_admission_waiter(state, from, caller, admission_deadline))}
+    end
+  end
+
   def handle_call({token, :reserve_source_check}, _from, %{token: token} = state) do
     cond do
       state.closed? ->
@@ -492,7 +605,7 @@ defmodule PtcRunner.Kernel.RunState do
       deadline_expired?(state) ->
         {:reply, {:error, :deadline_expired}, state}
 
-      state.evaluation_lease != nil ->
+      not grantable?(state) or not :queue.is_empty(state.admission_queue) ->
         {:reply, {:error, :busy}, state}
 
       state.source_checks >= state.limits.subordinate_source_checks ->
@@ -603,6 +716,13 @@ defmodule PtcRunner.Kernel.RunState do
         %{token: token} = state
       ) do
     case state.evaluation_lease do
+      # Dispatch is sequential per process, so a second status request while
+      # one is parked is a protocol violation; overwriting would drop the
+      # first waiter's `from`. Reject rather than replace, like a double
+      # capability reserve.
+      {^lease, ^caller, _monitor_ref} when state.evaluation_release_waiter != nil ->
+        {:reply, {:error, :release_pending}, state}
+
       {^lease, ^caller, monitor_ref} ->
         if evaluation_reservations?(state, lease) do
           {:noreply, %{state | evaluation_release_waiter: {from, lease}}}
@@ -616,6 +736,19 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
+  def handle_call(
+        {token, {:protocol_error, environment, lease}},
+        from,
+        %{token: token} = state
+      )
+      when environment in [:workflow, :mission] do
+    if environment == :mission and not current_mission_lease?(state, lease) do
+      {:reply, {:error, :stale_evaluation}, state}
+    else
+      handle_call({token, :protocol_error}, from, state)
+    end
+  end
+
   def handle_call({token, :protocol_error}, _from, %{token: token} = state) do
     next = state.protocol_errors + 1
     reply = if next > state.limits.protocol_errors, do: {:error, :protocol_error_limit}, else: :ok
@@ -624,12 +757,12 @@ defmodule PtcRunner.Kernel.RunState do
       if reply == :ok do
         %{state | protocol_errors: next}
       else
-        %{
+        admit_from_queue(%{
           state
           | protocol_errors: next,
             closed?: true,
             terminal_failure: %{kind: :limit_exceeded, reason: :protocol_errors}
-        }
+        })
       end
 
     {:reply, reply, state}
@@ -638,14 +771,14 @@ defmodule PtcRunner.Kernel.RunState do
   def handle_call({token, {:fail, kind, reason}}, _from, %{token: token} = state)
       when is_atom(kind) and is_atom(reason) do
     failure = state.terminal_failure || %{kind: kind, reason: reason}
-    {:reply, :ok, %{state | closed?: true, terminal_failure: failure}}
+    {:reply, :ok, admit_from_queue(%{state | closed?: true, terminal_failure: failure})}
   end
 
   def handle_call({token, :terminal_failure}, _from, %{token: token} = state),
     do: {:reply, state.terminal_failure, state}
 
   def handle_call({token, :close}, _from, %{token: token} = state),
-    do: {:reply, :ok, %{state | closed?: true}}
+    do: {:reply, :ok, admit_from_queue(%{state | closed?: true})}
 
   def handle_call({token, :close_and_drain}, _from, %{token: token} = state),
     do: {:reply, :ok, close_and_drain_state(state)}
@@ -767,12 +900,41 @@ defmodule PtcRunner.Kernel.RunState do
             {:noreply, put_in(state.reservations[caller], reservation)}
 
           nil ->
-            {:noreply, state}
+            {:noreply, drop_dead_admission_waiter(state, ref)}
         end
     end
   end
 
+  def handle_info({:admission_deadline, monitor_ref}, state) do
+    case take_admission_waiter(state, monitor_ref) do
+      {nil, state} ->
+        {:noreply, state}
+
+      {waiter, state} ->
+        Process.demonitor(waiter.monitor_ref, [:flush])
+
+        reply =
+          if deadline_expired?(state),
+            do: {:error, :deadline_expired},
+            else: {:error, :admission_timeout}
+
+        GenServer.reply(waiter.from, reply)
+        {:noreply, state}
+    end
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
+
+  defp drop_dead_admission_waiter(state, monitor_ref) do
+    case take_admission_waiter(state, monitor_ref) do
+      {nil, state} ->
+        state
+
+      {waiter, state} ->
+        Process.cancel_timer(waiter.timer_ref)
+        state
+    end
+  end
 
   if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
     @impl GenServer
@@ -820,6 +982,7 @@ defmodule PtcRunner.Kernel.RunState do
 
     %{state | closed?: true, provider_tasks: 0, reservations: %{}}
     |> maybe_complete_evaluation_release()
+    |> admit_from_queue()
   end
 
   defp redact_status(status) do
@@ -842,13 +1005,21 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
-  defp reserve_capability_state(state, environment, name, caller) do
+  defp reserve_capability_state(state, environment, name, caller, lease) do
     {limit_total, limit_name} = capability_limits(state.limits, environment)
     count = get_in(state.calls, [environment, name]) || 0
 
     cond do
       unavailable?(state) ->
         {:error, :run_closed, state}
+
+      # A mission call is authenticated by the lease of the evaluation whose
+      # tool grant issued it. A stale lease means the originating evaluation
+      # already ended: attributing the call to the current lease (or to no
+      # lease) would let a dead evaluation's lingering sandbox overlap the
+      # next evaluation's external effects and mislabel provider provenance.
+      environment == :mission and not current_mission_lease?(state, lease) ->
+        {:error, :stale_evaluation, state}
 
       state.provider_tasks >= state.limits.live_provider_tasks ->
         {:error, :live_task_limit, state}
@@ -902,7 +1073,9 @@ defmodule PtcRunner.Kernel.RunState do
         state
       end
 
-    maybe_complete_evaluation_release(next)
+    next
+    |> maybe_complete_evaluation_release()
+    |> admit_from_queue()
   end
 
   defp active_evaluation_lease(state, :mission) do
@@ -913,6 +1086,12 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   defp active_evaluation_lease(_state, :workflow), do: nil
+
+  defp current_mission_lease?(state, lease) when is_reference(lease) do
+    match?({^lease, _owner, _monitor_ref}, state.evaluation_lease)
+  end
+
+  defp current_mission_lease?(_state, _lease), do: false
 
   defp evaluation_reservations?(state, lease) do
     Enum.any?(state.reservations, fn
@@ -927,29 +1106,149 @@ defmodule PtcRunner.Kernel.RunState do
 
   defp maybe_complete_evaluation_release(%{evaluation_release_waiter: nil} = state), do: state
 
-  defp maybe_complete_evaluation_release(%{evaluation_release_waiter: {from, lease}} = state) do
+  defp maybe_complete_evaluation_release(%{evaluation_release_waiter: {_from, lease}} = state) do
     case state.evaluation_lease do
       {^lease, _owner, monitor_ref} ->
         if evaluation_reservations?(state, lease) do
           state
         else
           Process.demonitor(monitor_ref, [:flush])
-          GenServer.reply(from, {:ok, evaluation_status(state)})
           clear_evaluation(state)
         end
 
+      # The waiter's lease is already gone, so no provider provenance is
+      # pending for it; clearing resolves it.
       _other ->
         clear_evaluation(state)
     end
   end
 
+  # A parked release-status waiter is resolved — never dropped — by every
+  # path that clears the lease, including a commit or release the lease
+  # owner issued asynchronously after parking. The reply carries the status
+  # bits as they stand at resolution, before the clear resets them.
+  defp resolve_release_waiter(%{evaluation_release_waiter: nil} = state), do: state
+
+  defp resolve_release_waiter(%{evaluation_release_waiter: {from, _lease}} = state) do
+    GenServer.reply(from, {:ok, evaluation_status(state)})
+    %{state | evaluation_release_waiter: nil}
+  end
+
   defp clear_evaluation(state) do
+    state = resolve_release_waiter(state)
+
+    %{state | evaluation_lease: nil, evaluation_terminal_provider_failure?: false}
+    |> admit_from_queue()
+  end
+
+  # Grants require a free lease AND no reservation still tied to a dead
+  # evaluation's lease: the lease-owner :DOWN path frees the lease while that
+  # evaluation's provider tasks may still be live, and granting before their
+  # reservations drain would overlap two evaluations' external effects.
+  defp grantable?(state) do
+    state.evaluation_lease == nil and not stale_lease_reservations?(state)
+  end
+
+  defp stale_lease_reservations?(state) do
+    Enum.any?(state.reservations, fn
+      {_caller, %{evaluation_lease: lease}} -> is_reference(lease)
+      _reservation -> false
+    end)
+  end
+
+  # The admission bound counts from the caller's request time and is capped
+  # by the run deadline.
+  defp admission_deadline(state, requested_at) do
+    min(
+      requested_at + state.limits.evaluation_admission_timeout_ms,
+      state.deadline_ms
+    )
+  end
+
+  defp enqueue_admission_waiter(state, from, caller, deadline_mono) do
+    monitor_ref = Process.monitor(caller)
+    delay = max(deadline_mono - System.monotonic_time(:millisecond), 0)
+    timer_ref = Process.send_after(self(), {:admission_deadline, monitor_ref}, delay)
+
+    # The absolute deadline is authoritative; the timer is only its wake-up.
+    # A lease release already ahead of the timer message in the mailbox must
+    # not grant an expired waiter, so every grant re-checks the deadline.
+    waiter = %{
+      from: from,
+      caller: caller,
+      monitor_ref: monitor_ref,
+      timer_ref: timer_ref,
+      deadline_mono: deadline_mono
+    }
+
+    %{state | admission_queue: :queue.in(waiter, state.admission_queue)}
+  end
+
+  # The single admission point. Pops waiters until it grants one or runs out:
+  # a waiter that fails the preflight re-check gets its typed error and the
+  # loop continues, because no future lease-clear is guaranteed to occur.
+  defp admit_from_queue(state) do
+    case :queue.out(state.admission_queue) do
+      {:empty, _queue} ->
+        state
+
+      {{:value, waiter}, rest} ->
+        cond do
+          state.closed? ->
+            resolve_admission_waiter(waiter, {:error, :run_closed})
+            admit_from_queue(%{state | admission_queue: rest})
+
+          deadline_expired?(state) ->
+            resolve_admission_waiter(waiter, {:error, :deadline_expired})
+            admit_from_queue(%{state | admission_queue: rest})
+
+          System.monotonic_time(:millisecond) >= waiter.deadline_mono ->
+            resolve_admission_waiter(waiter, {:error, :admission_timeout})
+            admit_from_queue(%{state | admission_queue: rest})
+
+          state.evaluations >= state.limits.subordinate_evaluations ->
+            resolve_admission_waiter(waiter, {:error, :limit_exceeded})
+            admit_from_queue(%{state | admission_queue: rest})
+
+          not grantable?(state) ->
+            state
+
+          true ->
+            grant_admission(%{state | admission_queue: rest}, waiter)
+        end
+    end
+  end
+
+  # The waiter's caller monitor becomes the lease monitor, so only the timer
+  # needs cancelling; a timer message already in flight misses its queue
+  # lookup and is ignored.
+  defp grant_admission(state, waiter) do
+    Process.cancel_timer(waiter.timer_ref)
+    lease = {make_ref(), waiter.caller, waiter.monitor_ref}
+    GenServer.reply(waiter.from, {:ok, state.memory, state.history, elem(lease, 0)})
+
     %{
       state
-      | evaluation_lease: nil,
+      | evaluations: state.evaluations + 1,
+        evaluation_lease: lease,
         evaluation_release_waiter: nil,
         evaluation_terminal_provider_failure?: false
     }
+  end
+
+  defp resolve_admission_waiter(waiter, reply) do
+    Process.cancel_timer(waiter.timer_ref)
+    Process.demonitor(waiter.monitor_ref, [:flush])
+    GenServer.reply(waiter.from, reply)
+  end
+
+  defp take_admission_waiter(state, monitor_ref) do
+    waiters = :queue.to_list(state.admission_queue)
+
+    case Enum.split_with(waiters, &(&1.monitor_ref == monitor_ref)) do
+      {[waiter], rest} -> {waiter, %{state | admission_queue: :queue.from_list(rest)}}
+      {[], _waiters} -> {nil, state}
+    end
   end
 
   defp reservation_by_provider_ref(reservations, ref) do
@@ -1042,6 +1341,12 @@ defmodule PtcRunner.Kernel.RunState do
 
   defp call(%__MODULE__{pid: pid, token: token}, request),
     do: GenServer.call(pid, {token, request})
+
+  # Blocking admission is bounded server-side (admission timer + run
+  # deadline), so the client timeout is infinite: a finite one would race the
+  # server's own timers and turn a legitimate reply into a caller exit.
+  defp call_blocking(%__MODULE__{pid: pid, token: token}, request),
+    do: GenServer.call(pid, {token, request}, :infinity)
 
   defp safe_call(state, request, on_exit) do
     call(state, request)

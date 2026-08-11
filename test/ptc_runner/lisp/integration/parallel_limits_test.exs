@@ -185,4 +185,74 @@ defmodule PtcRunner.Lisp.Integration.ParallelLimitsTest do
 
     assert step.fail.reason == :timeout
   end
+
+  # The cap is what stops an operation started late in a run from building a
+  # deadline past the run's own: a generous pmap_timeout must lose to it.
+  test "the absolute parallel deadline cap clamps a generous pmap_timeout" do
+    alias PtcRunner.Lisp.Eval.Abort
+    alias PtcRunner.Lisp.Eval.Context, as: EvalContext
+    alias PtcRunner.Lisp.Eval.Parallel
+
+    context =
+      EvalContext.new(%{}, %{}, %{}, fn _name, _args, _meta -> nil end, [],
+        pmap_timeout: 60_000,
+        parallel_deadline_cap: System.monotonic_time(:millisecond) + 150
+      )
+
+    do_eval = fn _ast, ctx -> {:ok, nil, ctx} end
+    parked = fn -> receive do: (:never -> :done), after: (30_000 -> :done) end
+
+    started = System.monotonic_time(:millisecond)
+
+    abort =
+      assert_raise Abort, fn ->
+        Parallel.eval_pcalls([parked], context, do_eval)
+      end
+
+    elapsed = System.monotonic_time(:millisecond) - started
+    assert {:error, {:timeout, _message, nil}, _context} = abort.outcome
+    assert elapsed < 5_000, "cap must fire long before the 60s pmap_timeout, took #{elapsed}ms"
+  end
+
+  test "a cap-bound timeout carries the run-deadline taxonomy, not pmap_timeout's" do
+    tools = %{"park" => fn _ -> receive do: (:never -> :ok), after: (2_000 -> :ok) end}
+
+    assert {:error, step} =
+             Lisp.run("(pcalls (fn [] (tool/park {})))",
+               tools: tools,
+               timeout: @timeout,
+               pmap_timeout: 60_000,
+               parallel_deadline_cap: System.monotonic_time(:millisecond) + 200
+             )
+
+    assert step.fail.reason == :timeout
+
+    assert String.ends_with?(
+             step.fail.message,
+             "the run deadline expired during a parallel operation"
+           )
+  end
+
+  # The cap must survive both EvalContext reconstructions in Apply: the
+  # ordinary closure-call copy and the HOF-value invocation copy. If either
+  # dropped it, the parked pcalls would succeed at ~2s instead of timing out
+  # at the ~200ms cap.
+  for {label, program} <- [
+        {"an ordinary closure call", "(do (defn f [] (pcalls (fn [] (tool/park {})))) (f))"},
+        {"a HOF callback", "(first (map (fn [_] (pcalls (fn [] (tool/park {}))))  [1]))"}
+      ] do
+    test "the parallel deadline cap survives #{label}" do
+      tools = %{"park" => fn _ -> receive do: (:never -> :ok), after: (2_000 -> :ok) end}
+
+      assert {:error, step} =
+               Lisp.run(unquote(program),
+                 tools: tools,
+                 timeout: @timeout,
+                 pmap_timeout: 60_000,
+                 parallel_deadline_cap: System.monotonic_time(:millisecond) + 200
+               )
+
+      assert step.fail.reason == :timeout
+    end
+  end
 end

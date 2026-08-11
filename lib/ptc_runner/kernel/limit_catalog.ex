@@ -19,6 +19,8 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     {:run_duration_ms, 30_000, 300_000},
     {:workflow_timeout_ms, 30_000, 120_000},
     {:evaluation_timeout_ms, 1_000, 60_000},
+    {:evaluation_admission_timeout_ms, 10_000, 120_000},
+    {:parallel_timeout_ms, 30_000, 300_000},
     {:workflow_heap_words, 8_000_000, 8_000_000},
     {:evaluation_heap_words, 1_250_000, 1_250_000},
     {:provider_heap_words, 5_000_000, 5_000_000},

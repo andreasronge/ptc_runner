@@ -580,8 +580,14 @@ more turns, model calls, and trace events than they allow:
 ```
 
 Every cataloged limit name is accepted. Existing application limits accept
-positive integers through 2,592,000,000. Four operational timeouts instead
-have narrow, installed-only contracts:
+positive integers through 2,592,000,000. Two of them matter specifically for
+parallel agent workloads: `parallel_timeout_ms` bounds one `pmap`/`pcalls`
+operation (installed default 300,000 ms — multi-turn agent loops running
+under `pcalls` need this headroom), and `evaluation_admission_timeout_ms`
+bounds how long a concurrent `kernel-eval` waits for the run's single
+evaluation lease before failing as `evaluation-unavailable` (installed
+default 120,000 ms). Four operational timeouts instead have narrow,
+installed-only contracts:
 
 | Limit | Installed default | Accepted range | Identity metadata |
 | --- | ---: | ---: | --- |
