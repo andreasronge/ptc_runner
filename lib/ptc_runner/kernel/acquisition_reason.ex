@@ -173,6 +173,9 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   def diagnostic({:source_retained_limit_exceeded, _limit}, occurrence),
     do: subject_diagnostic(:local_preflight, :environment_unavailable, :local, occurrence)
 
+  def diagnostic({:unsupported_inspection_schema_version, _details}, occurrence),
+    do: subject_diagnostic(:local_preflight, :environment_unavailable, :local, occurrence)
+
   def diagnostic(reason, occurrence) when reason in @environment_reasons,
     do: subject_diagnostic(:local_preflight, :environment_unavailable, :local, occurrence)
 

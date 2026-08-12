@@ -1,7 +1,17 @@
 defmodule PtcViewer.ServerTest do
   use ExUnit.Case, async: false
 
-  alias PtcViewer.TestReplAdapter
+  alias PtcViewer.{TestInspectionAdapter, TestReplAdapter}
+
+  test "inspection startup preserves an unsupported schema version error" do
+    assert {:error,
+            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 5}}} =
+             PtcViewer.start(
+               inspection_file: "run.inspection.jsonl",
+               inspection_adapter: TestInspectionAdapter,
+               open: false
+             )
+  end
 
   test "requested REPL connection and feature failures fail startup" do
     assert {:error, :connection_rejected} =

@@ -26,6 +26,10 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   inspection artifact as partial; an existing but mismatched correlation still
   fails closed.
 
+  A syntactically decoded artifact whose records uniformly declare another
+  integer schema version is rejected with both the declared and supported
+  versions. It is not validated against a deleted historical vocabulary.
+
   Secure publication is supported on Unix hosts with POSIX-compatible `mkdir`
   and `id` executables available on `PATH`; persistence fails closed when those
   authority/mode primitives are unavailable, a physical or lexical ancestor
@@ -44,8 +48,13 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
 
   @max_bytes 16_000_000
   @max_record_bytes 2_000_000
+  @schema_version 5
   @suffix ".inspection.jsonl"
   @envelope_keys ~w(schema_version run_id trace_id sequence timestamp record_type correlation payload)
+
+  @type unsupported_schema_error ::
+          {:unsupported_inspection_schema_version,
+           %{artifact_version: integer(), supported_version: pos_integer()}}
 
   @spec preflight_destination(term()) ::
           :ok
@@ -163,7 +172,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     end
   end
 
-  @spec load(binary(), keyword()) :: {:ok, [map()]} | {:error, atom()}
+  @spec load(binary(), keyword()) ::
+          {:ok, [map()]} | {:error, atom() | unsupported_schema_error()}
   @doc "Loads one exact fixed artifact with optional lower aggregate and per-record limits."
   def load(path, opts \\ [])
 
@@ -175,7 +185,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
 
   @doc false
   @spec load(binary(), keyword(), nil | (-> term())) ::
-          {:ok, [map()]} | {:error, atom()}
+          {:ok, [map()]} | {:error, atom() | unsupported_schema_error()}
   def load(path, opts, verification_hook)
       when is_binary(path) and is_list(opts) and
              (is_nil(verification_hook) or is_function(verification_hook, 0)) do
@@ -187,7 +197,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   @doc false
   @spec load(binary(), keyword(), nil | (-> term()), (:file.io_device(), non_neg_integer() ->
                                                         {:ok, binary()} | :eof | {:error, term()})) ::
-          {:ok, [map()]} | {:error, atom()}
+          {:ok, [map()]} | {:error, atom() | unsupported_schema_error()}
   def load(path, opts, verification_hook, reader)
       when is_binary(path) and is_list(opts) and
              (is_nil(verification_hook) or is_function(verification_hook, 0)) and
@@ -209,6 +219,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          :ok <- unchanged(before, opened),
          :ok <- unchanged(before, after_read),
          {:ok, records} <- decode(content, max_record_bytes),
+         :ok <- validate_loaded_schema_version(records),
          :ok <- validate_records(records) do
       {:ok, records}
     else
@@ -301,6 +312,24 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   end
 
   defp ordered_value(value), do: {:ok, value}
+
+  defp validate_loaded_schema_version([]), do: :ok
+
+  defp validate_loaded_schema_version([first | _rest] = records) do
+    artifact_version = first["schema_version"]
+
+    if is_integer(artifact_version) and artifact_version != @schema_version and
+         Enum.all?(records, fn record ->
+           is_map(record) and Enum.sort(Map.keys(record)) == Enum.sort(@envelope_keys) and
+             record["schema_version"] == artifact_version
+         end) do
+      {:error,
+       {:unsupported_inspection_schema_version,
+        %{artifact_version: artifact_version, supported_version: @schema_version}}}
+    else
+      :ok
+    end
+  end
 
   defp validate_records([]), do: {:error, :invalid_inspection_artifact}
 
@@ -469,7 +498,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   defp valid_record?(record, run_id, trace_id, schema_version, sequence) do
     MCPProtocol.within_inspection_document_depth?(record) and
       is_map(record) and Map.keys(record) |> Enum.sort() == Enum.sort(@envelope_keys) and
-      schema_version == 5 and record["schema_version"] == schema_version and
+      schema_version == @schema_version and record["schema_version"] == schema_version and
       record["run_id"] == run_id and
       record["trace_id"] == trace_id and is_binary(run_id) and is_binary(trace_id) and
       record["sequence"] == sequence and valid_timestamp?(record["timestamp"]) and

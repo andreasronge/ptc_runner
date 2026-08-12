@@ -212,6 +212,10 @@ directories must be physically separate, including through ancestors and
 symlink aliases. Inspection capture validates every private artifact against
 the corresponding run in the immutable canonical trace capture; malformed,
 replaced, uncorrelated, or oversized input rejects the whole private source.
+An artifact from an unsupported inspection schema also rejects the whole
+source, and setup reports both the artifact's declared version and the version
+supported by the running build. Use a matching PtcRunner build to inspect the
+retained artifact, or regenerate it with the current build.
 
 ### Private analysis without a terminal
 

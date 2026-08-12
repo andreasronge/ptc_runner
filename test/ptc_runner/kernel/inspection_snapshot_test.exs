@@ -733,6 +733,19 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   end
 
   @tag :tmp_dir
+  test "an unsupported inspection schema remains distinguishable during capture", %{tmp_dir: root} do
+    {trace, inspection} = source_directories(root)
+    write_run(trace, inspection, "unsupported", :basic)
+    PrivateInspectionFixture.rewrite_schema!(inspection, 4)
+    {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
+    on_exit(fn -> TraceSnapshot.stop(trace_snapshot) end)
+
+    assert {:error,
+            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 5}}} =
+             InspectionSnapshot.start({:directory, inspection}, trace_snapshot, owner: self())
+  end
+
+  @tag :tmp_dir
   test "encoded, retained, result, and file ceilings are independent", %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
     write_run(trace, inspection, "bounded", :basic)

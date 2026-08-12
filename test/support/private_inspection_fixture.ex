@@ -46,6 +46,26 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     Map.put(fixture, :result_hash, result_hash)
   end
 
+  def rewrite_schema!(directory, schema_version) when is_integer(schema_version) do
+    directory
+    |> Path.join("*.inspection.jsonl")
+    |> Path.wildcard()
+    |> Enum.each(fn path ->
+      rewritten =
+        path
+        |> File.stream!()
+        |> Enum.map_join(fn line ->
+          line
+          |> Jason.decode!()
+          |> Map.put("schema_version", schema_version)
+          |> Jason.encode!()
+          |> Kernel.<>("\n")
+        end)
+
+      File.write!(path, rewritten)
+    end)
+  end
+
   def canonical_events(run_id) do
     [
       event(run_id, 1, "run-started", %{

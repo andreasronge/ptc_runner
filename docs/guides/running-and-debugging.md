@@ -681,7 +681,9 @@ The Viewer binds to loopback, pins the selected inspection file, and can enable
 a bounded log-analysis REPL over an immutable trace capture. It is currently a
 development/test path dependency and is not included in the published Hex
 package. Treat this command as source-checkout tooling until standalone Viewer
-packaging is released.
+packaging is released. If the selected inspection artifact uses an unsupported
+schema, Viewer startup reports both the artifact version and the version
+supported by the running PtcRunner build.
 
 See [`ptc_viewer/README.md`](../../ptc_viewer/README.md) for the Viewer's HTTP
 API, configuration, and programmatic start/stop.
