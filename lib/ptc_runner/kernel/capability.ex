@@ -7,6 +7,10 @@ defmodule PtcRunner.Kernel.Capability do
   budget reservation, and provider invocation. `output_schema`, when present,
   checks successful values before they return to Lisp. `callback` returns
   `{:ok, json_value}` or `{:error, %PtcRunner.Kernel.ProviderError{}}`.
+  Expected transient failures must use `ProviderError` with an explicit
+  `retryable?: true`. The dispatcher contains callback raises, exits, throws,
+  and monitored process deaths, but these unclassified failures default to
+  non-retryable.
   One-argument callbacks receive only normalized arguments. Trusted
   two-argument callbacks additionally receive a dispatcher-owned invocation
   context for private observation and safe trace propagation; that context

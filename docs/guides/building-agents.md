@@ -523,6 +523,12 @@ dispatched, every non-success remains non-retryable and carries
 Cancellation does not prove rollback. Deterministic failures that prove no
 transport send was attempted omit mutation state.
 
+Capability implementations must return expected transient failures as typed
+`ProviderError` values with `retryable?: true`. Callback raises, exits, throws,
+and monitored provider-process deaths are contained by the Dispatcher but are
+unclassified failures, so they default to non-retryable. Dispatcher-observed
+provider timeouts remain retryable for read and workflow calls.
+
 Some read-side provider failures are terminal even though repeating an ordinary
 read would otherwise be effect-safe. In particular, the MCP adapter never asks
 the model to correct or repeat an `input_required` exchange: policy refusal,
