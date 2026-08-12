@@ -107,7 +107,7 @@ components. The analysis stack is a concrete example:
 | `cap` | Fail-safe capability-envelope handling and bounded cursor traversal |
 | `log.core` | One-page canonical trace queries |
 | `log.analysis` | Bounded whole-result trace traversal |
-| `inspection.core` | One-page private inspection queries |
+| `inspection.core` | One-page and singular private inspection queries |
 | `inspection.analysis` | Bounded whole-result private inspection traversal |
 
 `log.core` and `inspection.core` depend on `cap`; each analysis layer depends

@@ -9,9 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added exact successful terminal-result inspection for explicitly private
+  captures. Inspection V5 binds one strictly JSON `run-result` record to the
+  canonical `run-stopped.data.result_hash`; `inspection/result` exposes the value
+  and hash through the bounded private analysis profile, while ordinary traces
+  retain only the hash.
+
 - Added explicit named mission environments: manifests declare a bounded
   `missions` map with isolated data, continuations, APIs, and provider grants;
-  workflow and agent APIs select missions by name; V2 traces, V4 inspection,
+  workflow and agent APIs select missions by name; V2 traces, V5 inspection,
   Viewer projections, and stable command V2 evidence preserve mission
   attribution. The reader/writer example demonstrates two least-authority
   agents orchestrated by one workflow.

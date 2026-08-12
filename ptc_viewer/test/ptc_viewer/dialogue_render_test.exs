@@ -112,6 +112,20 @@ defmodule PtcViewer.DialogueRenderTest do
     |> String.reverse()
   end
 
+  describe "fixture contract" do
+    test "uses the current inspection schema and correlated terminal result" do
+      metadata = fixture("dialogue_metadata.json")
+      inspection = fixture("dialogue_inspection.json")
+
+      assert Enum.all?(inspection["records"], &(&1["schema_version"] == 5))
+
+      assert [result] =
+               Enum.filter(inspection["records"], &(&1["record_type"] == "run-result"))
+
+      assert result["payload"]["result_hash"] == metadata["result_hash"]
+    end
+  end
+
   describe "model dialogue" do
     test "renders one dialogue turn per captured llm-request", %{rendered: rendered} do
       assert rendered =~ "Model dialogue"
@@ -758,5 +772,12 @@ defmodule PtcViewer.DialogueRenderTest do
         assert rendered =~ "agent.core"
       end
     end
+  end
+
+  defp fixture(name) do
+    @fixtures
+    |> Path.join(name)
+    |> File.read!()
+    |> Jason.decode!()
   end
 end

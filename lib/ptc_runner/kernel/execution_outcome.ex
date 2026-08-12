@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcome do
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.ValueContract
@@ -70,7 +71,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcome do
       result_class: classify(event_sink),
       result_contract: validate_result(result, contract),
       terminal_batch: terminal_batch,
-      inspection: capture_inspection(inspection_sink),
+      inspection: capture_inspection(inspection_sink, result, terminal_batch),
       publication_binding: publication_binding(authority),
       attestation: <<>>
     }
@@ -118,9 +119,52 @@ defmodule PtcRunner.Kernel.ExecutionOutcome do
     end
   end
 
-  defp capture_inspection(nil), do: :disabled
-  defp capture_inspection(%InspectionSink{} = sink), do: InspectionSink.records(sink)
-  defp capture_inspection(_sink), do: {:error, :inspection_sink_error}
+  defp capture_inspection(nil, _result, _terminal_batch), do: :disabled
+
+  defp capture_inspection(%InspectionSink{} = sink, result, terminal_batch) do
+    case maybe_emit_result(sink, result, terminal_batch) do
+      :ok -> InspectionSink.records(sink)
+      _error -> {:error, :inspection_sink_error}
+    end
+  end
+
+  defp capture_inspection(_sink, _result, _terminal_batch),
+    do: {:error, :inspection_sink_error}
+
+  defp maybe_emit_result(
+         sink,
+         {:ok, %Result{value: value}},
+         {:ok, events}
+       ) do
+    if JSONValue.value?(value) do
+      case terminal_result_hash(events) do
+        nil ->
+          :ok
+
+        result_hash ->
+          InspectionSink.emit(sink, "run-result", %{}, %{result_hash: result_hash, value: value})
+      end
+    else
+      :ok
+    end
+  end
+
+  defp maybe_emit_result(_sink, _result, _terminal_batch), do: :ok
+
+  defp terminal_result_hash(events) do
+    events
+    |> Enum.reverse()
+    |> Enum.find(&(field(&1, :type) == "run-stopped"))
+    |> field(:data)
+    |> field(:result_hash)
+  end
+
+  defp field(nil, _key), do: nil
+
+  defp field(map, key) when is_map(map),
+    do: Map.get(map, key) || Map.get(map, Atom.to_string(key))
+
+  defp field(_value, _key), do: nil
 
   defp validate_result(_result, nil), do: :ok
 

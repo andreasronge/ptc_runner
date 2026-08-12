@@ -9,7 +9,7 @@ defmodule PtcRunner.Kernel.InspectionRecordTypes do
   divergence either module is free to make on its own.
   """
 
-  @record_types ~w(capability-input capability-output evaluation-source prelude-source mcp-request mcp-response execution-prints execution-error)
+  @record_types ~w(capability-input capability-output evaluation-source prelude-source mcp-request mcp-response execution-prints execution-error run-result)
 
   @spec all() :: [binary()]
   @doc "Returns every record type admitted by the current schema."

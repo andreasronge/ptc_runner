@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   environment, and exact bounded diagnostic payload.
   Projections include `mission_name` on every mission-owned result so
   repeated component and capability names remain unambiguous.
+  V5 adds one singular, non-paginated terminal `result` projection per run.
   """
 
   @default_limit 100
@@ -38,7 +39,8 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     :effective_preludes,
     :provider_exchanges,
     :execution_prints,
-    :execution_errors
+    :execution_errors,
+    :result
   ]
 
   @type operation ::
@@ -50,6 +52,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
           | :provider_exchanges
           | :execution_prints
           | :execution_errors
+          | :result
 
   @spec compile([[map()]], binary()) ::
           {:ok, %{source_id: binary(), collections: map()}} | {:error, atom()}
@@ -117,6 +120,11 @@ defmodule PtcRunner.Kernel.InspectionQuery do
         |> records_of_type("execution-error")
         |> Enum.map(&execution_item/1)
 
+      result =
+        records
+        |> Enum.find(&(&1["record_type"] == "run-result"))
+        |> result_item()
+
       counts = %{
         "model_exchanges" => length(model_exchanges),
         "capability_calls" => length(capability_calls),
@@ -144,7 +152,8 @@ defmodule PtcRunner.Kernel.InspectionQuery do
          effective_preludes: effective_preludes,
          provider_exchanges: provider_pairs,
          execution_prints: execution_prints,
-         execution_errors: execution_errors
+         execution_errors: execution_errors,
+         result: result
        }}
     end
   end
@@ -298,6 +307,21 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     |> Map.merge(record["payload"])
   end
 
+  defp result_item(nil), do: nil
+
+  defp result_item(record) do
+    payload = record["payload"]
+
+    %{
+      "run_id" => record["run_id"],
+      "trace_id" => record["trace_id"],
+      "sequence" => record["sequence"],
+      "timestamp" => record["timestamp"],
+      "result_hash" => payload["result_hash"],
+      "value" => payload["value"]
+    }
+  end
+
   defp descriptor_hash(hash), do: "sha256:" <> hash
 
   defp model_exchange?(%{"environment" => "workflow", "name" => "llm-request"}), do: true
@@ -315,7 +339,8 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       effective_preludes: merge_collection(compiled, :effective_preludes),
       provider_exchanges: merge_collection(compiled, :provider_exchanges),
       execution_prints: merge_collection(compiled, :execution_prints),
-      execution_errors: merge_collection(compiled, :execution_errors)
+      execution_errors: merge_collection(compiled, :execution_errors),
+      results: compiled |> Enum.map(& &1.result) |> Enum.reject(&is_nil/1)
     }
   end
 
@@ -335,6 +360,18 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       paginate(collections.list_runs, page, source_id, max_result_bytes)
     end
   end
+
+  defp execute(collections, _source_id, :result, %{"run_id" => run_id} = arguments, max_bytes) do
+    with :ok <- validate_keys(arguments, ["run_id"]),
+         :ok <- validate_result_run_id(run_id, collections.list_runs),
+         {:ok, result} <- fetch_result(collections.results, run_id),
+         :ok <- validate_result_size(result, max_bytes) do
+      {:ok, result}
+    end
+  end
+
+  defp execute(_collections, _source_id, :result, _arguments, _max_result_bytes),
+    do: {:error, :invalid_query}
 
   defp execute(collections, source_id, operation, %{"run_id" => run_id} = arguments, max_bytes)
        when operation in [
@@ -364,6 +401,27 @@ defmodule PtcRunner.Kernel.InspectionQuery do
 
   defp execute(_collections, _source_id, _operation, _arguments, _max_result_bytes),
     do: {:error, :invalid_query}
+
+  defp validate_result_run_id(run_id, runs) do
+    cond do
+      not valid_string?(run_id) -> {:error, :invalid_query}
+      Enum.any?(runs, &(&1["run_id"] == run_id)) -> :ok
+      true -> {:error, :not_found}
+    end
+  end
+
+  defp fetch_result(results, run_id) do
+    case Enum.find(results, &(&1["run_id"] == run_id)) do
+      nil -> {:error, :result_not_found}
+      result -> {:ok, result}
+    end
+  end
+
+  defp validate_result_size(result, max_bytes) do
+    if byte_size(Jason.encode!(result)) <= max_bytes,
+      do: :ok,
+      else: {:error, :result_limit_exceeded}
+  end
 
   defp validate_keys(arguments, allowed) do
     if Map.keys(arguments) -- allowed == [],

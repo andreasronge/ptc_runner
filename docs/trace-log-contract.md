@@ -308,6 +308,7 @@ a run without loading its turns:
 - run ID and trace ID;
 - start and stop timestamps;
 - status and terminal reason when present;
+- the successful terminal `result_hash` when present, without the result value;
 - workflow/agent name when supplied;
 - model and provider identifiers when recorded by a provider;
 - subordinate-evaluation count;
@@ -493,7 +494,7 @@ JSON object with this exact envelope:
 
 ```json
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "run_id": "run-id",
   "trace_id": "trace-id",
   "sequence": 1,
@@ -505,12 +506,13 @@ JSON object with this exact envelope:
 ```
 
 Keys are exact. `sequence` is positive and strictly increasing within the
-artifact. The timestamp is UTC ISO 8601. `correlation` contains exactly one
-of `capability_id`, `evaluation_id`, or `component_id`. Capability and
-evaluation values must occur in the canonical trace for the same run unless
-that trace explicitly proves the corresponding start events were dropped. A
-component value must occur in the canonical `run-started` prelude component
-IDs for the record's environment. The current record types and payloads are:
+artifact. The timestamp is UTC ISO 8601. Except for the V5 `run-result`,
+`correlation` contains exactly one of `capability_id`, `evaluation_id`, or
+`component_id`. Capability and evaluation values must occur in the canonical
+trace for the same run unless that trace explicitly proves the corresponding
+start events were dropped. A component value must occur in the canonical
+`run-started` prelude component IDs for the record's environment. The current record
+types and payloads are:
 
 | Record type | Correlation | Exact payload fields |
 | --- | --- | --- |
@@ -530,8 +532,23 @@ Prelude uniqueness is `(environment, mission_name, component_id)`, so the same
 component ID can be inspected independently in multiple missions. Every
 mission-owned query result preserves `mission_name`.
 
-Enums and map keys are normalized to JSON strings before retention. `result` is
-the bounded Dispatcher envelope returned to Lisp, so `llm-request` input/output
+V5 includes at most one successful terminal-result record:
+
+| Record type | Correlation | Exact payload fields |
+| --- | --- | --- |
+| `run-result` | empty map | `result_hash`, `value` |
+
+The value must already be strict JSON: string-keyed maps, lists, strings,
+finite numbers, booleans, or `null`. Its lowercase `sha256:` hash is computed
+from deterministic canonical JSON and must equal both `payload.result_hash`
+and the one successful canonical `run-stopped.data.result_hash`. The record is
+omitted for failures and successful native values that cannot be represented
+as strict JSON.
+
+For record types other than `run-result`, enums and map keys are normalized to
+JSON strings before retention. A `run-result.value` is never coerced; it is
+rejected unless the supplied value is already strict JSON. `result` is the
+bounded Dispatcher envelope returned to Lisp, so `llm-request` input/output
 records contain the provider-neutral model request and normalized response, and
 MCP records contain the public connector arguments and normalized result/error.
 `evaluation-source` is emitted only for subordinate mission evaluation in this
@@ -632,11 +649,15 @@ from every `log/` query. Normal discovery explicitly rejects or omits the
 `.inspection.jsonl` suffix rather than accidentally parsing it as canonical
 JSONL.
 
-A later host-installed capability may read one completed immutable inspection
-record by run and record ID under separate input, source, and result ceilings.
-Possessing `trace-list-turns`, a private canonical event source, local Viewer
-access, or the active run does not imply this capability. Calls emit ordinary
-bounded capability facts without copying returned payloads into the trace.
+A host-installed inspection snapshot exposes bounded collections plus the
+singular successful result query. `inspection-result` accepts exactly one
+`run_id`; it returns the immutable value, canonical `result_hash`, record
+identity, and snapshot hash without pagination. An unknown run and a known run
+without an eligible V5 result remain distinct internally. Both encoded and
+retained result sizes must fit the snapshot's result ceiling. Possessing
+`trace-list-turns`, a private canonical event source, local Viewer access, or
+the active run does not imply this capability. Calls emit ordinary bounded
+capability facts without copying returned payloads into the trace.
 
 Active-run trace self-query remains unsupported. Every trace capability call
 adds events to the same sink, while pagination cursors are source-digest-bound;

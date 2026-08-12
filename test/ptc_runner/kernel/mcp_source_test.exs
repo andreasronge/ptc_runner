@@ -531,7 +531,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     trace_path = Path.join(dir, "mcp.trace.jsonl")
     manifest_path = manifest(dir, Map.keys(public_mappings()))
 
-    assert {:ok, _result} =
+    assert {:ok, %PtcRunner.Kernel.Result{value: result_value}} =
              manifest_path
              |> directory_request(registry(fixture.endpoint),
                inspect: inspection_path,
@@ -549,13 +549,15 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     requests = Enum.filter(records, &(&1["record_type"] == "mcp-request"))
     responses = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
+    results = Enum.filter(records, &(&1["record_type"] == "run-result"))
     assert length(requests) == 3
     assert length(responses) == 3
+    assert [%{"payload" => %{"value" => ^result_value}}] = results
 
     assert Enum.map(requests, & &1["correlation"]) |> MapSet.new() ==
              Enum.map(responses, & &1["correlation"]) |> MapSet.new()
 
-    assert Enum.all?(requests ++ responses, &(&1["schema_version"] == 4))
+    assert Enum.all?(records, &(&1["schema_version"] == 5))
     assert Enum.all?(requests ++ responses, &(&1["payload"]["mission_name"] == "default"))
 
     encoded_inspection = File.read!(inspection_path)

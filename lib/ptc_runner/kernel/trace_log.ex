@@ -34,6 +34,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.LLMUsage
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.PublicationHandle
+  alias PtcRunner.Kernel.ResultIdentity
   alias PtcRunner.Kernel.TracePublication
 
   @default_source_bytes 8_000_000
@@ -2013,10 +2014,25 @@ defmodule PtcRunner.Kernel.TraceLog do
   defp validate_event(_event), do: {:error, :malformed_source}
 
   defp validate_event_data(type, data) do
-    with :ok <- validate_current_event_data(type, data) do
-      validate_run_stopped_usage(type, data)
+    with :ok <- validate_current_event_data(type, data),
+         :ok <- validate_run_stopped_usage(type, data) do
+      validate_run_stopped_result_hash(type, data)
     end
   end
+
+  defp validate_run_stopped_result_hash("run-stopped", data) do
+    case Map.fetch(data, "result_hash") do
+      :error ->
+        :ok
+
+      {:ok, result_hash} ->
+        if stringify(data["outcome"]) == "ok" and ResultIdentity.valid_hash?(result_hash),
+          do: :ok,
+          else: {:error, :malformed_source}
+    end
+  end
+
+  defp validate_run_stopped_result_hash(_type, _data), do: :ok
 
   defp validate_current_event_data("run-started", data) do
     singular =
@@ -2095,6 +2111,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       "start_timestamp" => event_value(started, "timestamp"),
       "stop_timestamp" => event_value(stopped, "timestamp"),
       "status" => stringify(event_data(stopped, "outcome")),
+      "result_hash" => event_data(stopped, "result_hash"),
       "terminal_reason" => event_data(stopped, "reason"),
       "labels" => labels,
       "tags" => Map.get(labels, "tags", %{}),

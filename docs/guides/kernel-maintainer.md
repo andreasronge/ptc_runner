@@ -1262,7 +1262,7 @@ Observability uses separate planes:
 | Logger | sparse operator diagnostics; no prompts, source, capability payloads, credentials, or transport secrets |
 | Telemetry | bounded low-cardinality measurements and closed metadata |
 | EventSink/TraceLog | sanitized bounded canonical events and queries |
-| InspectionSink/InspectionArtifact | explicit bounded private model, source, and capability evidence |
+| InspectionSink/InspectionArtifact | explicit bounded private model, source, capability, and eligible terminal-result evidence |
 
 Do not copy a private field into canonical events merely because it helps
 debugging. Add correlation metadata to the canonical plane and retain exact
@@ -1273,13 +1273,15 @@ terminal finalization, and the immutable terminal batch.
 `PtcRunner.Kernel.TraceLog` owns canonical validation, persistence, discovery,
 and queries. `PtcRunner.Kernel.InspectionArtifact` owns the exact private
 artifact grammar, exclusive persistence, loading, and correlation checks.
-Inspection V4 covers provider-neutral capability, source, and model evidence,
+Inspection V5 covers provider-neutral capability, source, and model evidence,
 paired decoded MCP request/response bodies correlated to an existing capability
 attempt, and workflow execution prints and errors. Mission-owned source,
 capability, prelude, and MCP evidence carries the exact mission name, so
-identical component or tool names remain distinguishable. MCP inspection
-records never include
-rendered headers or subprocess environment values.
+identical component or tool names remain distinguishable. It also admits at
+most one strictly JSON terminal result, self-hashed with the same deterministic
+canonical JSON identity carried by a successful `run-stopped`. Ineligible
+native results and failed runs emit no result record. MCP inspection records
+never include rendered headers or subprocess environment values.
 `PtcRunner.Kernel.SafeMetadata` owns the closed labels and annotation
 vocabulary.
 
@@ -1475,7 +1477,9 @@ queries used by `log-analysis-v2`. A paired private
 `ptc_inspection_snapshot` receives that already captured trace through the
 provider acquisition service, validates all artifacts and correlations before
 publication, and exposes the shared `InspectionQuery` layer through
-`InspectionCapability`.
+`InspectionCapability`. Its `inspection-result` operation is singular rather
+than paginated, accepts only `run_id`, and applies both encoded-byte and
+retained-size result ceilings before returning the exact private value.
 
 Local analysis profiles are fixed, code-owned recipes selected through the
 closed `AnalysisProfileRegistry`. `AnalysisSessionBuilder` is the host entry;

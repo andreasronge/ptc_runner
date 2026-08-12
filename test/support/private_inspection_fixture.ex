@@ -3,22 +3,47 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
 
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.ResultIdentity
 
   @source "(return 42)"
   @source_hash :crypto.hash(:sha256, @source) |> Base.encode16(case: :lower)
 
   def create!(root, run_id \\ "private-run") do
-    traces = Path.join(root, "traces")
-    inspection = Path.join(root, "inspection")
-    output = Path.join(root, "analysis-traces")
-
-    Enum.each([traces, inspection, output], &File.mkdir_p!/1)
+    %{traces: traces, inspection: inspection} = fixture = create_directories(root, run_id)
 
     events = canonical_events(run_id)
     File.write!(Path.join(traces, "#{run_id}.jsonl"), encode_jsonl(events))
     write_inspection!(inspection, run_id, events)
 
-    %{traces: traces, inspection: inspection, output: output, run_id: run_id}
+    fixture
+  end
+
+  def create_result!(root, value, run_id \\ "private-result-run") do
+    %{traces: traces, inspection: inspection} = fixture = create_directories(root, run_id)
+    {:ok, result_hash} = ResultIdentity.strict_json_hash(value)
+
+    events = [
+      event(run_id, 1, "run-started", %{"missions" => %{}}),
+      event(run_id, 2, "run-stopped", %{"outcome" => "ok", "result_hash" => result_hash})
+    ]
+
+    File.write!(Path.join(traces, "#{run_id}.jsonl"), encode_jsonl(events))
+
+    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
+
+    :ok = InspectionSink.emit(sink, "run-result", %{}, %{result_hash: result_hash, value: value})
+    {:ok, records} = InspectionSink.records(sink)
+
+    :ok =
+      InspectionArtifact.persist(
+        Path.join(inspection, "#{run_id}.inspection.jsonl"),
+        records,
+        events
+      )
+
+    :ok = InspectionSink.stop(sink)
+
+    Map.put(fixture, :result_hash, result_hash)
   end
 
   def canonical_events(run_id) do
@@ -161,6 +186,18 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
 
   defp emit!(sink, type, correlation, payload),
     do: :ok = InspectionSink.emit(sink, type, correlation, payload)
+
+  defp create_directories(root, run_id) do
+    fixture = %{
+      traces: Path.join(root, "traces"),
+      inspection: Path.join(root, "inspection"),
+      output: Path.join(root, "analysis-traces"),
+      run_id: run_id
+    }
+
+    Enum.each([fixture.traces, fixture.inspection, fixture.output], &File.mkdir_p!/1)
+    fixture
+  end
 
   defp event(run_id, sequence, type, data) do
     %{

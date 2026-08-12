@@ -264,6 +264,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
       %{"run_id" => fixture.run_id},
       %{"run_id" => fixture.run_id},
       %{"run_id" => fixture.run_id},
+      %{"run_id" => fixture.run_id},
       %{"run_id" => fixture.run_id}
     ]
 
@@ -431,6 +432,31 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
              TraceLog.query(trace, :list_runs, %{})
 
     assert analysis_run == info.session_id
+  end
+
+  @tag :tmp_dir
+  test "PTC-Lisp returns an exact successful terminal value and its canonical hash", %{
+    tmp_dir: root
+  } do
+    value = %{"answer" => 42, "nested" => [true, nil, "done"]}
+    fixture = PrivateInspectionFixture.create_result!(root, value)
+    {:ok, session, _info} = start_internal_session(fixture)
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    assert {:ok,
+            %{
+              status: :ok,
+              value: %{
+                "run_id" => run_id,
+                "result_hash" => result_hash,
+                "value" => ^value,
+                "snapshot_hash" => snapshot_hash
+              }
+            }} = AnalysisSession.evaluate(session, ~s|(inspection/result "#{fixture.run_id}")|)
+
+    assert run_id == fixture.run_id
+    assert result_hash == fixture.result_hash
+    assert snapshot_hash =~ ~r/\Asha256:[0-9a-f]{64}\z/
   end
 
   @tag :tmp_dir
