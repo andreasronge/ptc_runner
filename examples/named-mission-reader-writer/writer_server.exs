@@ -46,7 +46,11 @@ defmodule NamedMissionWriterServer do
             "additionalProperties" => false,
             "required" => ["path", "content"],
             "properties" => %{
-              "path" => %{"type" => "string", "pattern" => "^[a-z0-9][a-z0-9._-]*$"},
+              "path" => %{
+                "type" => "string",
+                "description" =>
+                  "A basename containing lowercase letters, digits, dots, underscores, or hyphens."
+              },
               "content" => %{"type" => "string", "maxLength" => 65_536}
             }
           },

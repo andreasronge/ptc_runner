@@ -118,6 +118,13 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
         "components" => [%{"id" => "app", "path" => "workflow.clj"}],
         "entry" => "app/run"
       },
+      "missions" => %{
+        "default" => %{
+          "components" => [],
+          "data" => %{},
+          "providers" => ["workspace"]
+        }
+      },
       "input" => %{"value" => %{"program" => program}},
       "providers" => %{"mission" => [%{"name" => "workspace"}]},
       "limits" => %{"evaluation_timeout_ms" => 15_000, "run_duration_ms" => 60_000}
