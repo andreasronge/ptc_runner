@@ -246,13 +246,14 @@ functions, it exports one-page private queries:
 - `(inspection/execution-prints run-id cursor)`; and
 - `(inspection/execution-errors run-id cursor)`.
 
-Pass `nil` as the initial cursor for a run-scoped query. Each collection
-returns an opaque `next_cursor`; pass that value to the same function to read a
-later page:
+`inspection/runs` takes its cursor inside the options map. The other seven
+queries take a run ID and cursor as separate arguments. Pass `nil` as the
+initial cursor, then pass the opaque `next_cursor` from the returned page to
+read the next page:
 
 ```clojure
-(def page (inspection/model-exchanges run-id nil))
-(inspection/model-exchanges run-id (get page "next_cursor"))
+(def first-page (inspection/model-exchanges "cmd-..." nil))
+(inspection/model-exchanges "cmd-..." (get first-page "next_cursor"))
 ```
 
 The `inspection.analysis/*` namespace provides bounded whole-result variants.

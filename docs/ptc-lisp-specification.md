@@ -3947,7 +3947,12 @@ API.
 
 PTC-Lisp intentionally omits many Clojure features for sandbox safety and simplicity, and supports a few (like anonymous functions) only with restrictions. For a complete list of intentional divergences with rationale, see [Clojure Conformance Gaps — Intentional Divergences](clojure-conformance-gaps.md#intentional-divergences-by-design-not-bugs).
 
-Key omissions: lazy sequences, macros, mutable state (`atom`/`ref`/`agent`), `eval`/`read-string`, file I/O, `try`/`catch`/`throw`, multi-methods/protocols, user-defined namespaces, and full Java interop (minimal Date/Time subset supported: see §8.14).
+Key omissions: lazy sequences, macros, mutable state (`atom`/`ref`/`agent`),
+`eval`/`read-string`, file I/O, `try`/`catch`/`throw`,
+multi-methods/protocols, user-defined namespaces, and arbitrary Java or host
+interop. PTC-Lisp instead exposes a closed, manifest-defined compatibility
+subset of Java-named methods, constructors, static members, and constants; see
+the [Java Interop Reference](java-interop.md).
 
 **Note:** `println` IS supported — see §8.13. It appends to the evaluation
 result's bounded `prints` list, not stdout or a canonical trace.

@@ -334,7 +334,9 @@ No user-defined namespaces or modules. All definitions live in a single flat nam
 | **Priority** | n/a |
 | **Status** | by design |
 
-No general Java/host interop. A minimal Date/Time subset is supported (see spec §8.13).
+No arbitrary Java or host interop, reflection, or class loading. PTC-Lisp
+instead provides the closed, manifest-defined methods, constructors, constants,
+and static members in the [Java interop reference](java-interop.md).
 
 **Rationale:** Security. Arbitrary host access would break the sandbox.
 
