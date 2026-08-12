@@ -496,9 +496,9 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:agent_request, _request}
   end
 
-  test "agent.core persists a defn across a correlated intermediate turn" do
+  test "agent.core persists narration and a defn across a correlated intermediate turn" do
     define = %{
-      content: nil,
+      content: "I will define the helper before using it.",
       tool_calls: [
         %{
           id: "define-add-one",
@@ -536,7 +536,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              %{"role" => "user", "content" => "Build then use a helper"},
              %{
                "role" => "assistant",
-               "content" => nil,
+               "content" => "I will define the helper before using it.",
                "tool_calls" => [public_call]
              },
              %{
