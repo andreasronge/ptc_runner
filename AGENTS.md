@@ -49,6 +49,14 @@ how it was verified.
 
 ## Commands
 
+- `mix ptc ...` — the root-project command path skips dependency validation for fast
+  startup while still compiling changed root sources and shipped preludes.
+  This optimization is root-only; downstream projects retain Mix's normal
+  dependency validation.
+  After changing `mix.exs`, `mix.lock`, dependency sources, or either local
+  path dependency (`ptc_runner_launcher/` or `ptc_viewer/`), run a normal
+  `mix compile` once. Runtime manifests, host configuration, external inputs,
+  and component override descriptors and sources remain live.
 - `mix precommit` — comprehensive local quality gate (format, compile, compile
   cycles, stable-CLI callers, credo, duplication, spec, generated-artifact
   staleness, root/Viewer/launcher tests, core-package and standalone release

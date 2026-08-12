@@ -9,6 +9,13 @@ defmodule Mix.Tasks.PtcTest do
   alias PtcRunner.Kernel.CommandFrontend
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.MixCommandAdapter
+  alias PtcRunner.MixCommandRuntime
+
+  test "only the root project bootstrap skips dependency checks" do
+    assert MixCommandRuntime.app_config_args(PtcRunner.MixProject) == ["--no-deps-check"]
+    assert MixCommandRuntime.app_config_args(Downstream.MixProject) == []
+    assert MixCommandRuntime.app_config_args(nil) == []
+  end
 
   @root Path.expand("../../..", __DIR__)
 

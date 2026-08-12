@@ -4,6 +4,10 @@ defmodule PtcRunner.Kernel.SemanticRevisionTest do
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.SemanticRevision
 
+  test "non-production builds skip consuming dependency artifact verification" do
+    refute SemanticRevision.runtime_dependency_artifacts_verified?()
+  end
+
   test "the checked-in source projection includes code-owned Mix application defaults" do
     assert Enum.any?(
              SemanticRevision.build_projection()["sources"],
