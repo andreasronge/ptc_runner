@@ -222,8 +222,12 @@ exclusive with `--private-terminal`. Because private values may then reach the
 caller-controlled stdout sink, redirect it only to an owner-authorized private
 destination and do not treat it as an ordinary public command channel:
 
+In a repository checkout, set `MIX_QUIET=1` for machine-readable output so
+Mix and dependency build progress do not share stdout. The packaged `ptc`
+executable and container entry point do not have that Mix build stream.
+
 ```bash
-mix ptc repl \
+MIX_QUIET=1 mix ptc repl \
   --profile inspection-analysis-v2 \
   --resource traces=tmp/tutorial-traces \
   --resource inspection=tmp/tutorial-inspection \
@@ -352,7 +356,7 @@ Coding agents can avoid PTY and prompt handling by repeating `-e` with
 `--format jsonl`:
 
 ```bash
-mix ptc repl \
+MIX_QUIET=1 mix ptc repl \
   --profile log-analysis-v2 \
   --resource traces=tmp/tutorial-traces \
   --session-trace-dir tmp/analysis-traces \
@@ -385,7 +389,7 @@ unsuccessful. To collect feedback from later expressions after a recoverable
 form error, use `--continue-on-error` with at least two `-e` arguments:
 
 ```bash
-mix ptc repl \
+MIX_QUIET=1 mix ptc repl \
   --profile log-analysis-v2 \
   --resource traces=tmp/tutorial-traces \
   --format jsonl \
@@ -404,7 +408,7 @@ session:
 
 ```bash
 mix ptc repl --describe-profile log-analysis-v2
-mix ptc repl --describe-profile log-analysis-v2 --format jsonl
+MIX_QUIET=1 mix ptc repl --describe-profile log-analysis-v2 --format jsonl
 ```
 
 The description lists the required resources, complete component closure,
