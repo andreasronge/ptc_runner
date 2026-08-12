@@ -1482,7 +1482,7 @@ closed `AnalysisProfileRegistry`. `AnalysisSessionBuilder` is the host entry;
 `AnalysisSession`, `SessionTrace`, and `AnalysisResources` share continuation,
 publication, and cleanup without letting a caller supply modules,
 capabilities, limits, or sink policy. `log-analysis-v2` remains the Viewer and
-ordinary terminal profile. `inspection-analysis-v2` adds correlated
+ordinary terminal profile. `inspection-analysis-v3` adds correlated
 `TraceSnapshot` and `InspectionSnapshot` captures behind a private
 interactive-terminal gate. Browser or Lisp input does not supply profile
 internals or paths.

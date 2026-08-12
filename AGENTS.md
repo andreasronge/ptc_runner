@@ -14,7 +14,7 @@ reference in `docs/ptc-lisp-specification.md`, and built-ins in
 To debug the runtime itself (not a manifest under it) — query canonical
 traces or private inspection records (model exchanges, generated source,
 capability payloads) non-interactively — use `mix ptc repl --profile
-inspection-analysis-v2 --private-unattended`. See ["Private analysis without a
+inspection-analysis-v3 --private-unattended`. See ["Private analysis without a
 terminal"](docs/guides/kernel-repl.md#private-analysis-without-a-terminal).
 
 ## Working Style

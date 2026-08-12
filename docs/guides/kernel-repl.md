@@ -5,7 +5,7 @@
 - direct and manifest-backed sessions are workflow scratchpads;
 - `log-analysis-v2` is a fixed mission session for querying an immutable
   capture of canonical traces; and
-- `inspection-analysis-v2` is a fixed private mission session for correlating
+- `inspection-analysis-v3` is a fixed private mission session for correlating
   canonical traces with exact private inspection evidence.
 
 All modes retain successful definitions and exact `*1`, `*2`, and `*3`
@@ -199,7 +199,7 @@ that terminal as the private result sink:
 
 ```bash
 mix ptc repl \
-  --profile inspection-analysis-v2 \
+  --profile inspection-analysis-v3 \
   --resource traces=tmp/tutorial-traces \
   --resource inspection=tmp/tutorial-inspection \
   --session-trace-dir tmp/analysis-traces \
@@ -228,7 +228,7 @@ executable and container entry point do not have that Mix build stream.
 
 ```bash
 MIX_QUIET=1 mix ptc repl \
-  --profile inspection-analysis-v2 \
+  --profile inspection-analysis-v3 \
   --resource traces=tmp/tutorial-traces \
   --resource inspection=tmp/tutorial-inspection \
   --session-trace-dir tmp/analysis-traces \
@@ -237,9 +237,9 @@ MIX_QUIET=1 mix ptc repl \
   -e '(inspection/runs {})' >tmp/private-analysis.jsonl
 ```
 
-`inspection-analysis-v2` installs both core query components, both analysis
-layers, and their shared `cap` dependency. Alongside the ordinary `log/*`
-functions, it exports one-page private queries:
+`inspection-analysis-v3` installs both core query components, both analysis
+layers, their shared `cap` dependency, and `prompt.audit`. Alongside the
+ordinary `log/*` functions, it exports one-page private queries:
 
 - `(inspection/runs options-map)`;
 - `(inspection/model-exchanges run-id cursor)`;
@@ -282,6 +282,37 @@ For example:
 (inspection.analysis/all-provider-exchanges run-id 10)
 (inspection.analysis/all-execution-errors run-id 10)
 ```
+
+### Measuring a recorded system prompt
+
+`prompt.audit` measures a rendered agent system prompt. Its functions are pure
+and take a string, so the same numbers reach a session reading recorded
+evidence, the tests that guard the committed prompt artifacts, and the size
+gate built on them:
+
+- `(prompt.audit/segments text)` — the ordered segments the rendering is made
+  of, as a vector of `{"label" .. "text" ..}`;
+- `(prompt.audit/measure text)` — `{"rows" [...] "recognised?" bool}`, one row
+  per segment plus the derived `authored`, `dynamic` and `total` rows; and
+- `(prompt.audit/delta before after)` — the per-segment character change
+  between two renderings.
+
+A prompt reaches the session through the ordinary inspection query. Each item
+of an exchange page is flattened, carrying `"arguments"` directly:
+
+```clojure
+(def run-id "cmd-...")
+(def prompt
+  (get-in (inspection.analysis/all-model-exchanges run-id 5)
+          ["items" 0 "arguments" "system"]))
+(prompt.audit/measure prompt)
+```
+
+`characters` is authoritative and counts graphemes; `tokens_estimated` is
+`ceil(characters / 4)` and is named so it cannot be mistaken for a measurement.
+A string that is not a shipped rendering — a manifest's own prompt, or one
+whose namespace docstrings reproduce a section heading — measures as a single
+`unrecognised` segment with `"recognised?" false` rather than as a guess.
 
 Exact model messages, generated source, capability arguments/results,
 effective preludes, MCP request/response bodies, execution prints, and

@@ -2140,6 +2140,304 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              )
   end
 
+  @prompt_artifacts %{
+    ordinary: "test/fixtures/prompts/agent-prompt-ordinary-turn.txt",
+    final: "test/fixtures/prompts/agent-prompt-final-turn.txt"
+  }
+
+  @regenerate_prompt_artifacts "PTC_WRITE_PROMPT_ARTIFACTS=1 mix test test/ptc_runner/kernel/agent_library_test.exs"
+
+  # The largest rendering the canonical fixture can produce: the final-turn line
+  # and the tool-envelope sentence are independent conditionals and this artifact
+  # carries both. It measured 3429 characters when this ceiling was set; 3600 is
+  # that plus ~5% headroom, so an ordinary wording edit fits and a structural one
+  # does not. Raising it is allowed; raising it without saying why is not.
+  @final_turn_character_ceiling 3600
+
+  test "the shipped prompt matches its committed turn artifacts and both are recognised" do
+    for {turn, path} <- @prompt_artifacts do
+      rendered = render_artifact_prompt(turn)
+
+      if System.get_env("PTC_WRITE_PROMPT_ARTIFACTS") == "1" do
+        File.mkdir_p!(Path.dirname(path))
+        File.write!(path, rendered)
+      end
+
+      assert File.exists?(path),
+             "missing committed prompt artifact #{path}; regenerate with #{@regenerate_prompt_artifacts}"
+
+      assert File.read!(path) == rendered,
+             """
+             the rendered #{turn}-turn system prompt no longer matches #{path}.
+             A prompt change must be a reviewed diff, so this file is never rewritten
+             automatically. Regenerate it with:
+
+                 #{@regenerate_prompt_artifacts}
+             """
+
+      measured = measure_prompt(rendered)
+      assert measured["recognised?"] == true
+      assert rejoined_prompt(rendered) == rendered
+
+      assert Enum.map(measured["rows"], & &1["label"]) ==
+               ~w(marker protocol language examples api-heading api-notes api-legend
+                  api-entries authored dynamic total)
+    end
+  end
+
+  test "the final-turn prompt total stays under its character ceiling" do
+    rendered = File.read!(@prompt_artifacts.final)
+    measured = measure_prompt(rendered)
+
+    # Asserted first: an unrecognised rendering collapses to one segment, and a
+    # ceiling read off that would still pass while measuring nothing.
+    assert measured["recognised?"] == true
+
+    total = prompt_row(measured, "total")["characters"]
+
+    assert total <= @final_turn_character_ceiling,
+           """
+           the canonical final-turn rendering measures #{total} characters, over the
+           #{@final_turn_character_ceiling} ceiling. This bounds one pinned rendering,
+           not agent.prompt.clj alone: the fixture's inventory projection, a capability
+           schema or docstring, and entry ordering all move it. Reduce it, or raise the
+           ceiling and state the reason.
+           """
+  end
+
+  test "the ceiling reads a total that a formatter literal inside a dynamic segment moves" do
+    baseline =
+      prompt_row(measure_prompt(File.read!(@prompt_artifacts.final)), "total")["characters"]
+
+    widened =
+      "agent.prompt"
+      |> Library.component()
+      |> then(fn {:ok, component} -> component.source end)
+      |> String.replace(~S|"  Type: "|, ~S|"  Type:  "|)
+
+    rendered = render_artifact_prompt(:final, prompt_source: widened)
+    measured = measure_prompt(rendered)
+
+    assert measured["recognised?"] == true
+    assert prompt_row(measured, "total")["characters"] > baseline
+
+    # The edited literal is emitted by render-entry, which lands in api-entries.
+    assert prompt_row(measured, "api-entries")["characters"] >
+             prompt_row(measure_prompt(File.read!(@prompt_artifacts.final)), "api-entries")[
+               "characters"
+             ]
+  end
+
+  test "prompt.audit recognises the empty-API and no-docstring renderings" do
+    empty_api = render_artifact_prompt(:ordinary, mission: :empty)
+    measured = measure_prompt(empty_api)
+
+    assert measured["recognised?"] == true
+    assert rejoined_prompt(empty_api) == empty_api
+
+    assert Enum.map(measured["rows"], & &1["label"]) ==
+             ~w(marker protocol language examples api-heading authored dynamic total)
+
+    no_docstring = render_artifact_prompt(:ordinary, mission: :no_docstring)
+    measured = measure_prompt(no_docstring)
+
+    assert measured["recognised?"] == true
+    assert rejoined_prompt(no_docstring) == no_docstring
+
+    assert Enum.map(measured["rows"], & &1["label"]) ==
+             ~w(marker protocol language examples api-heading api-legend api-entries
+                authored dynamic total)
+  end
+
+  test "a namespace docstring containing a blank line stays inside api-notes" do
+    # The notes segment ends at the last blank line before the legend, not the
+    # first after the heading. Ending it at the first would cut the docstring in
+    # half and count its remainder as authored — a reporting row stating the
+    # opposite of the truth rather than an approximation of it.
+    rendered =
+      render_artifact_prompt(:ordinary,
+        mission: {:docstring, "First paragraph.\n\nSecond paragraph."}
+      )
+
+    measured = measure_prompt(rendered)
+
+    assert measured["recognised?"] == true
+    assert rejoined_prompt(rendered) == rendered
+
+    notes = Enum.find(segments_of(rendered), &(&1["label"] == "api-notes"))
+    assert notes["text"] =~ "First paragraph."
+    assert notes["text"] =~ "Second paragraph."
+
+    legend = Enum.find(segments_of(rendered), &(&1["label"] == "api-legend"))
+    refute legend["text"] =~ "Second paragraph."
+  end
+
+  test "prompt.audit refuses a rendering whose namespace docstring reproduces an anchor" do
+    for docstring <- [
+          "Available API\\n injected by a manifest",
+          "In map types, field? means the field may be omitted; type? means nil is allowed.\\n\\n"
+        ] do
+      rendered = render_artifact_prompt(:ordinary, mission: {:docstring, docstring})
+      measured = measure_prompt(rendered)
+
+      assert measured["recognised?"] == false
+
+      assert Enum.map(measured["rows"], & &1["label"]) ==
+               ~w(unrecognised authored dynamic total)
+    end
+  end
+
+  test "a replaced render measures as one unrecognised segment rather than failing" do
+    rendered = render_artifact_prompt(:ordinary, prompt_source: tiny_prompt_source())
+    assert rendered == "tiny prompt"
+
+    measured = measure_prompt(rendered)
+
+    assert measured["recognised?"] == false
+    assert prompt_row(measured, "unrecognised")["characters"] == 11
+    assert prompt_row(measured, "total")["characters"] == 11
+  end
+
+  defp render_artifact_prompt(turn, opts \\ []) do
+    max_turns = if turn == :final, do: 1, else: 2
+
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "done", name: "run_ptc_lisp", args: %{"program" => ~S|(return 1)|}}
+      ]
+    }
+
+    config_opts =
+      case Keyword.get(opts, :mission, :canonical) do
+        :empty ->
+          []
+
+        :no_docstring ->
+          [
+            mission_source: prompt_fixture_mission_source(nil),
+            mission_capabilities: [prompt_fixture_capability()]
+          ]
+
+        {:docstring, docstring} ->
+          [
+            mission_source: prompt_fixture_mission_source(docstring),
+            mission_capabilities: [prompt_fixture_capability()]
+          ]
+
+        :canonical ->
+          [
+            mission_source: prompt_fixture_mission_source(prompt_fixture_docstring()),
+            mission_capabilities: [prompt_fixture_capability()]
+          ]
+      end
+
+    config_opts =
+      case Keyword.fetch(opts, :prompt_source) do
+        {:ok, source} -> Keyword.put(config_opts, :prompt_source, source)
+        :error -> config_opts
+      end
+
+    {:ok, config} = agent_config([response], [], config_opts)
+
+    assert {:ok, _result} =
+             Kernel.run(
+               ~s|(agent.core/run "Measure the prompt" {"max_turns" #{max_turns}})|,
+               config
+             )
+
+    assert_receive {:agent_request, %{"system" => system}}
+    system
+  end
+
+  defp prompt_fixture_docstring do
+    "Every export here is measured, never called; the fixture pins one rendering."
+  end
+
+  # A prompt-visible value export contributes its namespace docstring without
+  # satisfying prelude-call-entry?, so the direct tool/ entry survives
+  # prompt-entries and the tool-envelope sentence renders. One mission therefore
+  # exercises every segment at once.
+  defp prompt_fixture_mission_source(docstring) do
+    namespace =
+      if is_nil(docstring) do
+        ~S|(ns fixture {:visibility :prompt})|
+      else
+        ~s|(ns fixture "#{docstring}" {:visibility :prompt})|
+      end
+
+    """
+    #{namespace}
+    (def sample-budget "Characters this fixture reserves." {:type ":int"} 4096)
+    """
+  end
+
+  defp prompt_fixture_capability do
+    {:ok, capability} =
+      Capability.new(
+        name: "sample-lookup",
+        description: "Look one sample up by identifier.",
+        effect: :read,
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{
+            "id" => %{
+              "type" => "string",
+              "minLength" => 1,
+              "description" => "Identifier to look up."
+            },
+            "limit" => %{"type" => "integer", "minimum" => 1, "maximum" => 50}
+          },
+          "required" => ["id"],
+          "additionalProperties" => false
+        },
+        output_schema: %{
+          "type" => "object",
+          "properties" => %{"value" => %{"type" => "string"}},
+          "required" => ["value"]
+        },
+        callback: fn _ -> {:ok, %{"value" => "sample"}} end
+      )
+
+    capability
+  end
+
+  # The gate reads the same numbers the REPL does: the measurement runs in Lisp
+  # against a bundle carrying prompt.audit, with the artifact supplied as input.
+  defp measure_prompt(prompt) do
+    {:ok, config} = agent_config([], [], input: %{"prompt" => prompt})
+
+    assert {:ok, %{value: measured}} =
+             Kernel.run(~S|(return (prompt.audit/measure data/prompt))|, config)
+
+    measured
+  end
+
+  defp segments_of(prompt) do
+    {:ok, config} = agent_config([], [], input: %{"prompt" => prompt})
+
+    assert {:ok, %{value: segments}} =
+             Kernel.run(~S|(return (prompt.audit/segments data/prompt))|, config)
+
+    segments
+  end
+
+  defp rejoined_prompt(prompt) do
+    {:ok, config} = agent_config([], [], input: %{"prompt" => prompt})
+
+    assert {:ok, %{value: rejoined}} =
+             Kernel.run(
+               ~S|(return (join "" (mapv #(get % "text") (prompt.audit/segments data/prompt))))|,
+               config
+             )
+
+    rejoined
+  end
+
+  defp prompt_row(measured, label) do
+    Enum.find(measured["rows"], &(&1["label"] == label))
+  end
+
   defp agent_config(responses, limit_overrides \\ [], opts \\ []) do
     parent = self()
     {:ok, queue} = Agent.start_link(fn -> responses end)
@@ -2253,10 +2551,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     names =
       if Keyword.get(opts, :agent_main, false) do
         ~w(agent.main agent.core agent.feedback agent.native agent.prompt agent.retry
-           kernel llm result workflow.event)
+           kernel llm prompt.audit result workflow.event)
       else
         ~w(agent.core agent.feedback agent.native agent.prompt agent.retry
-           kernel llm result workflow.event)
+           kernel llm prompt.audit result workflow.event)
       end
 
     with {:ok, components} <- Library.components(names),

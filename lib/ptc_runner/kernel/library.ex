@@ -5,7 +5,7 @@ defmodule PtcRunner.Kernel.Library do
   Available component IDs are `kernel`, `runtime`, `cap`, `workflow.event`,
   `llm`, `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`,
   `agent.prompt`, `agent.main`, `result`, `log.core`, `log.analysis`,
-  `inspection.core`, and `inspection.analysis`.
+  `inspection.core`, `inspection.analysis`, and `prompt.audit`.
 
   `agent.main` is a generic entry wrapper: a manifest names `agent.main/run`
   and supplies `task` and `agent` through input, instead of every application
@@ -26,6 +26,13 @@ defmodule PtcRunner.Kernel.Library do
   envelope rather than
   returning it, `with-cursor` adds one opaque cursor to an argument map, and
   `collect-pages` follows cursors only up to its explicit page bound.
+
+  `prompt.audit` measures a rendered agent system prompt: it segments the
+  string, sizes each segment, and diffs two versions. It is pure and takes a
+  string, so one implementation serves the REPL reading a recorded run, the
+  tests guarding the committed prompt artifacts, and the size gate built on
+  them. It is `:discoverable` for the same reason `cap` is — a model composing
+  an application has no use for it.
 
   Fetching one component with `component/1` does not expand its dependencies,
   and `PtcRunner.Kernel` refuses to compile an incomplete set. Manifests and
@@ -54,6 +61,7 @@ defmodule PtcRunner.Kernel.Library do
   @log_core_path Path.expand("../../../priv/preludes/kernel/log.core.clj", __DIR__)
   @inspection_core_path Path.expand("../../../priv/preludes/kernel/inspection.core.clj", __DIR__)
   @log_analysis_path Path.expand("../../../priv/preludes/kernel/log.analysis.clj", __DIR__)
+  @prompt_audit_path Path.expand("../../../priv/preludes/kernel/prompt.audit.clj", __DIR__)
 
   @inspection_analysis_path Path.expand(
                               "../../../priv/preludes/kernel/inspection.analysis.clj",
@@ -75,6 +83,7 @@ defmodule PtcRunner.Kernel.Library do
   @external_resource @inspection_core_path
   @external_resource @log_analysis_path
   @external_resource @inspection_analysis_path
+  @external_resource @prompt_audit_path
   @sources %{
     "kernel" => File.read!(@kernel_path),
     "runtime" => File.read!(@runtime_path),
@@ -91,7 +100,8 @@ defmodule PtcRunner.Kernel.Library do
     "log.core" => File.read!(@log_core_path),
     "inspection.core" => File.read!(@inspection_core_path),
     "log.analysis" => File.read!(@log_analysis_path),
-    "inspection.analysis" => File.read!(@inspection_analysis_path)
+    "inspection.analysis" => File.read!(@inspection_analysis_path),
+    "prompt.audit" => File.read!(@prompt_audit_path)
   }
   @dependencies %{
     "inspection.analysis" => ["cap", "inspection.core"],

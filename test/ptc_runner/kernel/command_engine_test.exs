@@ -1459,7 +1459,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           [
             "repl",
             "--profile",
-            "inspection-analysis-v2",
+            "inspection-analysis-v3",
             "--resource",
             "traces=traces",
             "--private-unattended",

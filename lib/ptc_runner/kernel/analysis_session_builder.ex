@@ -8,7 +8,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   profile module, component, capability set, mission data, label, limit, or
   sink policy.
 
-  `inspection-analysis-v2` requires one authorized private destination before
+  `inspection-analysis-v3` requires one authorized private destination before
   either source is captured, alongside physical separation of its trace,
   inspection, and analysis-trace directories.
 

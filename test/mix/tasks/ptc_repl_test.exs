@@ -313,7 +313,7 @@ defmodule PtcRunner.ReplFrontendTest do
 
   test "unknown profiles report the accepted profile ids" do
     assert_raise Mix.Error,
-                 ~r/unsupported session profile; accepted: inspection-analysis-v2, log-analysis-v2/,
+                 ~r/unsupported session profile; accepted: inspection-analysis-v3, log-analysis-v2/,
                  fn ->
                    run_repl(["--describe-profile", "missing-profile"])
                  end
@@ -322,7 +322,7 @@ defmodule PtcRunner.ReplFrontendTest do
   test "private profile frontend policy fails before opening declared sources" do
     missing_resources = [
       "--profile",
-      "inspection-analysis-v2",
+      "inspection-analysis-v3",
       "--resource",
       "traces=/definitely/missing/private-traces",
       "--resource",
@@ -347,7 +347,7 @@ defmodule PtcRunner.ReplFrontendTest do
   test "private_unattended admits eval and jsonl output, reaching source preflight" do
     args = [
       "--profile",
-      "inspection-analysis-v2",
+      "inspection-analysis-v3",
       "--resource",
       "traces=/definitely/missing/private-traces",
       "--resource",
@@ -369,7 +369,7 @@ defmodule PtcRunner.ReplFrontendTest do
   test "private_unattended with jsonl and no input is rejected, not silently interactive" do
     args = [
       "--profile",
-      "inspection-analysis-v2",
+      "inspection-analysis-v3",
       "--resource",
       "traces=/definitely/missing/private-traces",
       "--resource",

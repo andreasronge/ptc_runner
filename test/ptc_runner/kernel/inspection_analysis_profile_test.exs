@@ -17,10 +17,10 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.TestSupport.PrivateInspectionFixture
 
-  @profile_id "inspection-analysis-v2"
+  @profile_id "inspection-analysis-v3"
 
   test "the profile registry is closed and describes fixed private authority" do
-    assert AnalysisProfileRegistry.ids() == ["inspection-analysis-v2", "log-analysis-v2"]
+    assert AnalysisProfileRegistry.ids() == ["inspection-analysis-v3", "log-analysis-v2"]
     assert {:error, :unsupported_analysis_profile} = AnalysisProfileRegistry.fetch("custom")
     assert {:error, :unsupported_analysis_profile} = AnalysisProfileRegistry.fetch(nil)
 
@@ -32,7 +32,8 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
              "inspection.core",
              "inspection.analysis",
              "log.core",
-             "log.analysis"
+             "log.analysis",
+             "prompt.audit"
            ]
 
     assert description["namespaces"] == [
@@ -40,7 +41,8 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
              "inspection",
              "inspection.analysis",
              "log",
-             "log.analysis"
+             "log.analysis",
+             "prompt.audit"
            ]
 
     assert description["source_data_class"] == "private_inspection"
@@ -306,7 +308,8 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
              "inspection.core",
              "inspection.analysis",
              "log.core",
-             "log.analysis"
+             "log.analysis",
+             "prompt.audit"
            ]
 
     assert identity["source_data_class"] == "private_inspection"
@@ -478,6 +481,26 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     encoded_trace = File.read!(trace_path)
     refute encoded_trace =~ "Undefined variables"
     refute encoded_trace =~ "defn-"
+  end
+
+  @tag :tmp_dir
+  test "a private session resolves prompt.audit against a recorded prompt", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root)
+    {:ok, session, _info} = start_internal_session(fixture)
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    # Reading a rendered prompt back out of a recorded run is an inspection
+    # query, so the measurement has to resolve in the session that can reach the
+    # model exchange, not only in the tests that guard the committed artifacts.
+    prompt = File.read!("test/fixtures/prompts/agent-prompt-final-turn.txt")
+
+    assert {:ok, %{status: :ok, value: value}} =
+             AnalysisSession.evaluate(
+               session,
+               ~s|(get (prompt.audit/measure #{inspect(prompt)}) "recognised?")|
+             )
+
+    assert value == true
   end
 
   @tag :tmp_dir
