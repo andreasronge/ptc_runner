@@ -4,6 +4,23 @@
 (defn- contract-diagnostic-truncation-marker [] "\n... (contract diagnostics truncated)")
 (defn- contract-diagnostic-max-chars [] 32768)
 
+(defn turn-budget
+  "Renders model-visible pacing guidance outside the cached system prompt."
+  {:signature "(turns_remaining :int, consolidate_at_turns_remaining :int?) -> :string"}
+  [turns-remaining consolidate-at-turns-remaining]
+  (str "TURN BUDGET: " turns-remaining " "
+       (if (= turns-remaining 1) "turn remains" "turns remain")
+       ", including the next program."
+       (cond
+         (= turns-remaining 1)
+         "\nFINAL TURN: the next program must call (return value) or (fail value)."
+
+         (and (integer? consolidate-at-turns-remaining)
+              (<= turns-remaining consolidate-at-turns-remaining))
+         "\nCONSOLIDATE: prioritize synthesizing and returning; explore further only to close a material gap."
+
+         :else "")))
+
 (defn- cap-with-marker [body max-chars marker]
     (if (<= (count body) max-chars)
       body

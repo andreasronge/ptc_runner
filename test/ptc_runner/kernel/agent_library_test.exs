@@ -401,7 +401,9 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     correction = List.last(second_request["messages"])["content"]
     assert correction =~ "... (contract diagnostics truncated)"
-    assert String.length(correction) <= 33_000
+    # The 32 KiB diagnostic cap is followed by fixed correction and turn-budget
+    # guidance, all before the prospective transcript receives its own bound.
+    assert String.length(correction) <= 33_256
     assert byte_size(Jason.encode!(second_request)) < 262_144
   end
 
@@ -528,12 +530,11 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert_receive {:agent_request, first_request}
     assert_receive {:agent_request, second_request}
     refute first_request["system"] =~ "FINAL TURN:"
-
-    assert second_request["system"] =~
-             "FINAL TURN: the next program must call (return value) or (fail value)."
+    refute second_request["system"] =~ "FINAL TURN:"
+    assert first_request["system"] == second_request["system"]
 
     assert [
-             %{"role" => "user", "content" => "Build then use a helper"},
+             %{"role" => "user", "content" => initial_task},
              %{
                "role" => "assistant",
                "content" => "I will define the helper before using it.",
@@ -547,10 +548,69 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
            ] = second_request["messages"]
 
     assert public_call["id"] == "define-add-one"
+    assert initial_task =~ "Build then use a helper"
+    assert initial_task =~ "TURN BUDGET: 2 turns remain, including the next program."
+    refute initial_task =~ "CONSOLIDATE:"
     assert observation =~ ~s|<untrusted_ptc_output source="evaluation">|
     assert observation =~ "user=> #'add-one"
     assert observation =~ "Definitions created by this successful program remain available."
+    assert observation =~ "TURN BUDGET: 1 turn remains, including the next program."
+
+    assert observation =~
+             "FINAL TURN: the next program must call (return value) or (fail value)."
+
     refute observation =~ ":closure"
+  end
+
+  test "agent.core gives configurable consolidation guidance without mutating the system prompt" do
+    continue_one = %{
+      content: nil,
+      tool_calls: [
+        %{id: "continue-one", name: "run_ptc_lisp", args: %{"program" => "(def one 1)"}}
+      ]
+    }
+
+    continue_two = %{
+      content: nil,
+      tool_calls: [
+        %{id: "continue-two", name: "run_ptc_lisp", args: %{"program" => "(def two 2)"}}
+      ]
+    }
+
+    finish = %{
+      content: nil,
+      tool_calls: [
+        %{id: "finish", name: "run_ptc_lisp", args: %{"program" => "(return (+ one two))"}}
+      ]
+    }
+
+    {:ok, config} = agent_config([continue_one, continue_two, finish])
+
+    assert {:ok, %{value: %{"ok" => true, "value" => 3}}} =
+             Kernel.run(
+               ~S|(agent.core/run "Pace the work" {"max_turns" 4 "consolidate_at_turns_remaining" 2})|,
+               config
+             )
+
+    assert_receive {:agent_request, first_request}
+    assert_receive {:agent_request, second_request}
+    assert_receive {:agent_request, third_request}
+
+    assert first_request["system"] == second_request["system"]
+    assert second_request["system"] == third_request["system"]
+
+    initial_task = hd(first_request["messages"])["content"]
+    second_feedback = List.last(second_request["messages"])["content"]
+    third_feedback = List.last(third_request["messages"])["content"]
+
+    assert initial_task =~ "TURN BUDGET: 4 turns remain, including the next program."
+    refute initial_task =~ "CONSOLIDATE:"
+    assert second_feedback =~ "TURN BUDGET: 3 turns remain, including the next program."
+    refute second_feedback =~ "CONSOLIDATE:"
+    assert third_feedback =~ "TURN BUDGET: 2 turns remain, including the next program."
+
+    assert third_feedback =~
+             "CONSOLIDATE: prioritize synthesizing and returning; explore further only to close a material gap."
   end
 
   test "agent.core exposes exact three-value subordinate history across turns" do
@@ -730,9 +790,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert_receive {:semantic_prompt, second_prompt}
     assert first_prompt =~ "exactly once per turn"
     assert first_prompt =~ "only against the advertised mission API"
-
-    assert second_prompt =~
-             "FINAL TURN: the next program must call (return value) or (fail value)."
+    assert first_prompt == second_prompt
+    assert second_prompt =~ "each continuation message state how many programs remain"
   end
 
   test "default prompt keeps an empty Available API section" do
@@ -840,7 +899,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert system =~ ~S|\u2029|
   end
 
-  test "agent.core bounds malformed public limit configuration" do
+  test "agent.core bounds out-of-range public limit configuration" do
     response = %{
       content: nil,
       tool_calls: [
@@ -852,9 +911,28 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert {:ok, %{value: %{"ok" => true, "value" => 42}}} =
              Kernel.run(
-               ~S|(agent.core/run "Compute" {"max_turns" "bad" "max_program_chars" -1})|,
+               ~S|(agent.core/run "Compute" {"max_turns" 129 "max_program_chars" -1})|,
                config
              )
+  end
+
+  test "agent.core rejects a consolidation threshold outside the effective turn budget" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "unused", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+      ]
+    }
+
+    {:ok, config} = agent_config([response])
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+             Kernel.run(
+               ~S|(agent.core/run "Compute" {"max_turns" 2 "consolidate_at_turns_remaining" 3})|,
+               config
+             )
+
+    refute_receive {:agent_request, _request}
   end
 
   test "agent.core honors the documented 65536-character observation ceiling" do
@@ -1158,7 +1236,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, config} = agent_config([mixed, invalid_program, corrected])
 
     assert {:ok, %{value: %{"ok" => true, "value" => 7}}} =
-             Kernel.run(~S|(agent.core/run "Correct errors" {"max_turns" 3})|, config)
+             Kernel.run(
+               ~S|(agent.core/run "Correct errors" {"max_turns" 3 "consolidate_at_turns_remaining" 2})|,
+               config
+             )
 
     assert_receive {:agent_request, first_request}
     assert_receive {:agent_request, second_request}
@@ -1176,7 +1257,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     end
 
     assert [
-             %{"role" => "user", "content" => "Correct errors"},
+             %{"role" => "user", "content" => initial_task},
              %{"role" => "user", "content" => protocol_feedback},
              %{
                "role" => "assistant",
@@ -1191,6 +1272,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
            ] = third_request["messages"]
 
     assert protocol_feedback =~ "Protocol error"
+    assert initial_task =~ "TURN BUDGET: 3 turns remain, including the next program."
+    refute initial_task =~ "CONSOLIDATE:"
+    assert protocol_feedback =~ "TURN BUDGET: 2 turns remain, including the next program."
+    assert protocol_feedback =~ "CONSOLIDATE:"
 
     assert failed_call == %{
              "id" => "eval-bad",
@@ -1199,6 +1284,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
            }
 
     assert evaluation_feedback =~ "evaluation did not return successfully"
+    assert evaluation_feedback =~ "TURN BUDGET: 1 turn remains, including the next program."
+    assert evaluation_feedback =~ "FINAL TURN:"
   end
 
   test "agent.core retries an input contract failure with public correction details" do
@@ -1786,6 +1873,55 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert_receive {:agent_request, %{"system" => "CUSTOM_PROMPT_0"}}
     assert_receive {:agent_request, %{"system" => "CUSTOM_PROMPT_1"}}
+  end
+
+  test "unsafe closing-turn budgets do not depend on custom prompt state" do
+    prompt_source = """
+    (ns agent.prompt "Test prompt policy" {:visibility :discoverable})
+    (defn initial-state [_cfg] {:revision 0})
+    (defn render [state] (str "CUSTOM_PROMPT_" (get state :revision)))
+    (defn transition [state _event] (assoc state :revision (inc (get state :revision))))
+    """
+
+    unsafe = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "unsafe",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(do (tool/commit {}) (+ {} 1))|}
+        }
+      ]
+    }
+
+    {:ok, commit} =
+      Capability.new(
+        name: "commit",
+        effect: :write,
+        input_schema: %{"type" => "object"},
+        callback: fn _ -> {:ok, 42} end
+      )
+
+    {:ok, config} =
+      agent_config([unsafe, @recovered], [],
+        prompt_source: prompt_source,
+        mission_capabilities: [commit]
+      )
+
+    assert {:ok, %{value: %{"ok" => true, "value" => "ok"}}} =
+             Kernel.run(
+               ~S|(agent.core/run "Close safely" {"max_turns" 3 "consolidate_at_turns_remaining" 2})|,
+               config
+             )
+
+    assert_receive {:agent_request, %{"system" => "CUSTOM_PROMPT_0"}}
+    assert_receive {:agent_request, second}
+    assert second["system"] == "CUSTOM_PROMPT_1"
+
+    feedback = List.last(second["messages"])["content"]
+    assert feedback =~ "TURN BUDGET: 2 turns remain"
+    assert feedback =~ "CONSOLIDATE:"
+    assert String.ends_with?(feedback, "using return or fail on this turn.")
   end
 
   test "default prompt renders the prelude facade instead of its raw capabilities" do

@@ -282,20 +282,35 @@ defmodule PtcViewer.DialogueRenderTest do
       assert rendered =~ "PTC_AGENT_PROMPT_V1"
       assert rendered =~ "Available API"
       assert rendered =~ "Exact captured prompt"
-      refute rendered =~ "System prompt: same as LLM call 1."
+      assert rendered =~ "System prompt: same as LLM call 1."
+      assert rendered =~ "TURN BUDGET: 1 turn remains"
       refute rendered =~ "Edited or unknown prompt format"
       refute rendered =~ "Exact request sent to the model"
     end
 
-    test "reports a changed system prompt as a diff, not a second full copy", %{
-      rendered: rendered
-    } do
+    test "reports an explicitly changed system prompt as a diff, not a second full copy" do
+      rendered =
+        render_fixtures(%{
+          inspection: fn inspection ->
+            map_llm_inputs(inspection, fn record, index ->
+              if index == 1 do
+                update_in(
+                  record,
+                  ["payload", "arguments", "system"],
+                  &(&1 <> "\nSYNTHETIC_PROMPT_CHANGE")
+                )
+              else
+                record
+              end
+            end)
+          end
+        })
+
       assert rendered =~ "System prompt changed"
       assert rendered =~ "kt-prompt-diff"
-      # The only substantive change between the two captured prompts is the
-      # final-turn instruction, and it is marked as an addition.
+
       assert rendered =~
-               ~r/kt-diff-add"><span class="kt-diff-marker"[^>]*>\+<\/span><span class="kt-diff-text">FINAL TURN: the next program must call/
+               ~r/kt-diff-add"><span class="kt-diff-marker"[^>]*>\+<\/span><span class="kt-diff-text">SYNTHETIC_PROMPT_CHANGE/
 
       assert rendered =~ ~r/\+1 −0 lines vs LLM call 1/
       # Unchanged stretches are elided rather than reprinted.

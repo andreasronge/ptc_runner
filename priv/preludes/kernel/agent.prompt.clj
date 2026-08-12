@@ -248,9 +248,8 @@
              "Use (fail value) only when the task cannot be completed; (fail value) aborts the run.\n"
              "Generated programs run only against the advertised mission API below.\n"
              "Do not repeat irreversible capability effects merely to reconstruct state.\n"
-             (if (= 1 (get state :turns-remaining))
-               "FINAL TURN: the next program must call (return value) or (fail value).\n"
-               "")
+             "The task and each continuation message state how many programs remain; use that budget to pace exploration.\n"
+             "When a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\n"
              "Do not answer in prose.\n\n"
              "PTC-Lisp\n"
              "- PTC-Lisp is a bounded Clojure-like language.\n"

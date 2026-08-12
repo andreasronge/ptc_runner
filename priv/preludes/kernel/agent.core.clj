@@ -22,6 +22,23 @@
    :turn turn
    :turns-remaining (- max-turns (inc turn))})
 
+(defn- consolidation-threshold [value max-turns]
+  (if (nil? value)
+    nil
+    (if (and (integer? value) (pos? value) (<= value max-turns))
+      value
+      (fail (result/error :invalid-agent-config :invalid-consolidation-threshold)))))
+
+(defn- with-turn-budget [content turns-remaining consolidate-at-turns-remaining]
+  (str content "\n\n"
+       (agent.feedback/turn-budget turns-remaining consolidate-at-turns-remaining)))
+
+(defn- completed-feedback [content event consolidate-at-turns-remaining]
+  (with-turn-budget
+    content
+    (get event :turns-remaining)
+    consolidate-at-turns-remaining))
+
 ;; The model's own narration is its stated plan for the turn. Dropping it left
 ;; the next turn seeing a tool result with no record of why it was requested.
 (defn- append-correlated [messages action content]
@@ -76,6 +93,10 @@
   behavior."
   [task cfg validate-result?]
   (let [max-turns (positive-int-or (get cfg "max_turns") 4 128)
+        consolidate-at-turns-remaining
+        (consolidation-threshold
+          (get cfg "consolidate_at_turns_remaining")
+          max-turns)
         max-program-chars (positive-int-or (get cfg "max_program_chars") 64000 1000000)
         max-observation-chars (positive-int-or (get cfg "max_observation_chars") 2048 65536)
         max-transcript-chars (positive-int-or (get cfg "max_transcript_chars") 262144 1000000)
@@ -91,7 +112,11 @@
       (if (not (map? initial-prompt-state))
       (fail (result/error :invalid-prompt :invalid-initial-state))
       (loop [turn 0
-             messages [{"role" "user" "content" task}]
+             messages [{"role" "user"
+                        "content" (with-turn-budget
+                                    task
+                                    max-turns
+                                    consolidate-at-turns-remaining)}]
              prompt-state initial-prompt-state
              closing? false]
         (if (>= turn max-turns)
@@ -131,7 +156,10 @@
                                      (append-correlated
                                        messages
                                        action
-                                       (agent.feedback/result-contract validation))
+                                       (completed-feedback
+                                         (agent.feedback/result-contract validation)
+                                         event
+                                         consolidate-at-turns-remaining))
                                      next-prompt-state
                                      closing?))
                             (subject-failure :result-contract :invalid-result))))
@@ -145,7 +173,10 @@
                                (append-correlated
                                  messages
                                  action
-                                 (agent.feedback/capability-error evaluation))
+                                 (completed-feedback
+                                   (agent.feedback/capability-error evaluation)
+                                   event
+                                   consolidate-at-turns-remaining))
                                next-prompt-state
                                closing?))
                       (subject-failure :model-program-failed (get evaluation :value)))
@@ -153,7 +184,11 @@
                     (if (agent.retry/retry? turn max-turns)
                       (let [event (completed-event :evaluation-success turn max-turns)
                             next-prompt-state (transition-prompt prompt-state event)
-                            observation (agent.feedback/success evaluation max-observation-chars)]
+                            observation
+                            (completed-feedback
+                              (agent.feedback/success evaluation max-observation-chars)
+                              event
+                              consolidate-at-turns-remaining)]
                         (recur (inc turn)
                                (append-correlated messages action observation)
                                next-prompt-state
@@ -179,15 +214,20 @@
                       ;; failure ends it.
                       (if (or closing? (not (agent.retry/retry? turn max-turns)))
                         (subject-failure :non-retryable-evaluation (get evaluation :kind))
-                        (let [next-prompt-state
-                              (transition-prompt
-                                prompt-state
-                                (completed-event :evaluation-error turn max-turns))]
+                        (let [event (completed-event :evaluation-error turn max-turns)
+                              next-prompt-state (transition-prompt prompt-state event)]
                           (recur (inc turn)
                                  (append-correlated
                                    messages
                                    action
-                                   (agent.feedback/non-retryable evaluation))
+                                   ;; The closing instruction must remain the last
+                                   ;; and strongest direction even when the hard
+                                   ;; turn limit has more runway.
+                                   (str (agent.feedback/turn-budget
+                                          (get event :turns-remaining)
+                                          consolidate-at-turns-remaining)
+                                        "\n\n"
+                                        (agent.feedback/non-retryable evaluation)))
                                  next-prompt-state
                                  true)))
                       (if (agent.retry/retry? turn max-turns)
@@ -199,7 +239,10 @@
                                  (append-correlated
                                    messages
                                    action
-                                   (agent.feedback/evaluation-error evaluation))
+                                   (completed-feedback
+                                     (agent.feedback/evaluation-error evaluation)
+                                     (completed-event :evaluation-error turn max-turns)
+                                     consolidate-at-turns-remaining))
                                  next-prompt-state
                                  closing?))
                         (subject-failure :turn-limit :evaluation-error)))))))
@@ -213,7 +256,10 @@
                   (recur (inc turn)
                          (conj messages
                                {"role" "user"
-                                "content" (agent.feedback/protocol-error action)})
+                                "content" (completed-feedback
+                                            (agent.feedback/protocol-error action)
+                                            (completed-event :protocol-error turn max-turns)
+                                            consolidate-at-turns-remaining)})
                          next-prompt-state
                          closing?))
                 (subject-failure :turn-limit :protocol-error))
@@ -226,7 +272,7 @@
 (defn run-outcome
   "Runs the agent loop and distinguishes model-authored completion from a
   bounded subject-attributable failure."
-  {:signature "(task :string, cfg {model :string?, mission :string?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
   (run-outcome* task cfg false))
 
@@ -237,7 +283,7 @@
 
   Subject failures retain the historical fail behavior. Evaluators that need
   to record those attempts use `run-outcome`."
-  {:signature "(task :string, cfg {model :string?, mission :string?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
   (let [outcome (run-outcome task cfg)]
     (if (= :returned (get outcome :status))
@@ -247,7 +293,7 @@
 (defn run-result-value
   "Runs the agent loop and validates model-authored completion against the
   manifest result contract before returning it to the calling workflow."
-  {:signature "(task :string, cfg {model :string?, mission :string?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
   (let [outcome (run-outcome* task cfg true)]
     (if (= :returned (get outcome :status))
@@ -260,7 +306,7 @@
   The default result is a success envelope. Set `result_envelope` to false for
   a raw application value. Use `run-value` when the caller must continue after
   the model-authored value returns."
-  {:signature "(task :string, cfg {model :string?, mission :string?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?, result_envelope :bool?}) -> :any"}
   [task cfg]
   (let [value (run-value task cfg)]
     (if (false? (get cfg "result_envelope"))
