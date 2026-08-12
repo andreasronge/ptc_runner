@@ -125,9 +125,21 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
            :unsupported_java_member,
            member_family_id,
            nil,
-           "unsupported Java member for receiver class",
+           ambiguous_family_message(member_family_id),
            %{receiver_profile: profile}
          )}
+    end
+  end
+
+  # Names the member and stops. This is a type failure, not a failed lookup, so
+  # there is no alternative name to offer; and the receiver profile stays
+  # structured detail rather than message text, because receiver_profile/1
+  # answers :unsupported for most wrong receivers and that atom is not a type
+  # the model could act on.
+  defp ambiguous_family_message(member_family_id) do
+    case Surface.member_family_source(member_family_id) do
+      {:ok, spelling} -> "Java member #{spelling} does not accept this receiver"
+      :error -> "Java member does not accept this receiver"
     end
   end
 

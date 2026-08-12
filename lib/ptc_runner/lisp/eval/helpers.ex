@@ -228,16 +228,23 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
                    :"some->>"
                  ])
 
+  @special_form_names MapSet.new(@special_forms, &Atom.to_string/1)
+
   # Common Clojure/Java functions that don't exist in PTC-Lisp, with alternatives
   @clojure_alternatives %{
-    "format" => "use str and arithmetic, e.g. (str (* 100.0 (/ a b)) \"%\")",
-    "re-find" => "use grep for line matching, or (re-pattern \"...\") with re-find",
-    "re-seq" => "use (re-seq (re-pattern \"...\") text) — requires compiled regex",
     "printf" => "use println with str",
     "spit" => "not available — no file I/O",
     "slurp" => "not available — no file I/O",
     "require" => "not available — no namespace loading",
-    "import" => "not available — no Java interop"
+    "refer" => "not available — no namespace loading",
+    # The admitted bounded surface contradicts "no Java interop", and a model
+    # told that stops writing Java-shaped calls that would have worked.
+    "import" =>
+      "not available — no importing; the admitted Java-named methods, constructors, " <>
+        "static members and constants are already callable",
+    "defmacro" => "not available — user-defined macros are not supported; use defn",
+    "eval" => "not available — programs cannot evaluate constructed source",
+    "read-string" => "not available — programs cannot evaluate constructed source"
   }
 
   # Definition heads the prelude compiler understands but the analyzer does not.
@@ -266,41 +273,100 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   def definition_only_hint(_names), do: nil
 
+  @doc false
+  @spec clojure_alternative_names() :: [String.t()]
+  def clojure_alternative_names, do: Map.keys(@clojure_alternatives)
+
+  @doc """
+  Returns the trailing hint for one or more unresolved names, or `""`.
+
+  A failed lookup takes the highest rung it can reach: name one alternative
+  that was resolved first, list the bounded set the name must have come from,
+  or point at search. The rungs are not interchangeable — the first two cost
+  the model no turns and the third costs one — and none of them may print a
+  name that was not looked up, because a plausible name that does not exist
+  costs the same turn twice.
+
+  A form that is absent by *category* — an import, a macro, constructed-source
+  evaluation, file I/O — is told so. Pointing those at search spends a turn on
+  a query that cannot succeed.
+
+  Several unresolved names share one message, and neither a suggestion nor a
+  search term for one of them applies to the rest, so only the category rungs
+  run for a list.
+  """
+  @spec unresolved_name_suffix(term()) :: String.t()
+  def unresolved_name_suffix([name]), do: unresolved_name_suffix(name)
+
+  def unresolved_name_suffix(names) when is_list(names),
+    do: Enum.find_value(names, "", &category_absent_hint/1)
+
+  def unresolved_name_suffix(name) when is_binary(name) or is_atom(name) do
+    name = to_string(name)
+
+    cond do
+      hint = category_absent_hint(name) ->
+        hint
+
+      MapSet.member?(@special_form_names, name) ->
+        ". Hint: '#{name}' is a special form, use (#{name} ...) with parentheses"
+
+      # Verified before it is printed. map_indexed -> map-indexed is a real
+      # correction; rewriting every underscore taught the model names that were
+      # never bound.
+      candidate = verified_hyphenated_name(name) ->
+        ". Did you mean: #{candidate}"
+
+      suggestion = find_similar_builtin(name) ->
+        ". Did you mean: #{suggestion}"
+
+      # Nothing resolved. `format_closure_error/1` holds only the failed name —
+      # the evaluator has discarded lexical, prelude and visibility context — so
+      # state the convention without asserting that any binding exists.
+      String.contains?(name, "_") ->
+        ". Hint: PTC-Lisp names use hyphens, not underscores"
+
+      true ->
+        prelude_search_hint(name)
+    end
+  end
+
+  def unresolved_name_suffix(_names), do: ""
+
   @doc """
   Formats closure errors with helpful messages.
   """
   @spec format_closure_error(term()) :: String.t()
-  def format_closure_error({:unbound_var, name}) do
-    var_str = to_string(name)
+  def format_closure_error({:unbound_var, name}),
+    do: "Undefined variable: #{name}#{unresolved_name_suffix(name)}"
+
+  def format_closure_error(reason), do: "closure error: #{inspect(reason)}"
+
+  defp category_absent_hint(name) do
+    name = to_string(name)
 
     cond do
-      # Check if the name is a definition head that only component source has
-      hint = definition_only_hint(var_str) ->
-        "Undefined variable: #{var_str}. Hint: #{hint}"
-
-      # Check if it's a special form used without parentheses
-      MapSet.member?(@special_forms, name) ->
-        "Undefined variable: #{var_str}. Hint: '#{var_str}' is a special form, use (#{var_str} ...) with parentheses"
-
-      # Check for common Clojure/Java functions not in PTC-Lisp
-      alt = Map.get(@clojure_alternatives, var_str) ->
-        "Undefined variable: #{var_str}. Not available in PTC-Lisp — #{alt}"
-
-      # Check for common underscore/hyphen confusion
-      String.contains?(var_str, "_") ->
-        suggested = String.replace(var_str, "_", "-")
-        "Undefined variable: #{var_str}. Hint: Use hyphens not underscores (try: #{suggested})"
-
-      # Try to find similar builtin names
-      suggestion = find_similar_builtin(name) ->
-        "Undefined variable: #{var_str}. Did you mean: #{suggestion}"
-
-      true ->
-        "Undefined variable: #{var_str}"
+      hint = definition_only_hint(name) -> ". Hint: #{hint}"
+      alt = Map.get(@clojure_alternatives, name) -> ". Not available in PTC-Lisp — #{alt}"
+      true -> nil
     end
   end
 
-  def format_closure_error(reason), do: "closure error: #{inspect(reason)}"
+  defp verified_hyphenated_name(name) do
+    if String.contains?(name, "_") do
+      candidate = String.replace(name, "_", "-")
+      if candidate in builtin_names(), do: candidate
+    end
+  end
+
+  # The search is offered as what it is. The name could have been a builtin, a
+  # lexical binding, a definition from an earlier turn, or a prelude export, and
+  # apropos covers only the last; an unqualified "search for it" sends the model
+  # looking in three places this form cannot see.
+  defp prelude_search_hint(name) do
+    ". Hint: (apropos #{inspect(name)}) searches prelude exports by name; " <>
+      "it does not cover builtins, lexical bindings, or definitions from earlier turns"
+  end
 
   @doc false
   @spec sanitize_private_error(term()) :: term()
@@ -457,9 +523,11 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     do: "private validation: arguments did not match the private tool signature"
 
   # Find a similar builtin name using Jaro distance + heuristics
+  defp builtin_names, do: Env.initial() |> Map.keys() |> Enum.map(&to_string/1)
+
   defp find_similar_builtin(name) do
     name_str = to_string(name)
-    builtins = Env.initial() |> Map.keys() |> Enum.map(&to_string/1)
+    builtins = builtin_names()
 
     # Score each builtin: higher is better
     scored =

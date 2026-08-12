@@ -12,11 +12,11 @@ defmodule PtcRunner.ReplFrontend do
       ptc repl --manifest ptc.json --host-config ptc-host.json
       ptc repl --manifest ptc.json --trace trace.jsonl
       ptc repl --profile log-analysis-v2 --resource traces=tmp/traces
-      ptc repl --profile inspection-analysis-v2 \
+      ptc repl --profile inspection-analysis-v3 \
         --resource traces=tmp/traces \
         --resource inspection=tmp/inspection \
         --private-terminal
-      ptc repl --profile inspection-analysis-v2 \
+      ptc repl --profile inspection-analysis-v3 \
         --resource traces=tmp/traces \
         --resource inspection=tmp/inspection \
         --private-unattended --format jsonl -e '(inspection/runs {})'
@@ -36,7 +36,7 @@ defmodule PtcRunner.ReplFrontend do
     * `--session-trace-dir` — existing output directory for a profile session's
       separate canonical trace;
     * `--private-terminal` — explicitly authorize an attached terminal as the
-      private output sink required by `inspection-analysis-v2`;
+      private output sink required by `inspection-analysis-v3`;
     * `--private-unattended` — explicitly authorize this command's own streams
       as that sink instead, admitting `-e`/`--load`/script/stdin and
       `--format jsonl`. Mutually exclusive with `--private-terminal`;
@@ -309,10 +309,10 @@ defmodule PtcRunner.ReplFrontend do
     do: "selected profile does not allow --continue-on-error"
 
   defp profile_frontend_error(:private_terminal_required),
-    do: "inspection-analysis-v2 requires --private-terminal"
+    do: "inspection-analysis-v3 requires --private-terminal"
 
   defp profile_frontend_error(:interactive_terminal_required),
-    do: "inspection-analysis-v2 requires attached stdin and stdout terminals"
+    do: "inspection-analysis-v3 requires attached stdin and stdout terminals"
 
   defp profile_frontend_error(:private_terminal_unsupported),
     do: "--private-terminal is supported only by a private analysis profile"

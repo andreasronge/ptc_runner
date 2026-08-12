@@ -109,9 +109,13 @@ components. The analysis stack is a concrete example:
 | `log.analysis` | Bounded whole-result trace traversal |
 | `inspection.core` | One-page private inspection queries |
 | `inspection.analysis` | Bounded whole-result private inspection traversal |
+| `prompt.audit` | Pure segmentation, sizing and diffing of a rendered system prompt |
 
 `log.core` and `inspection.core` depend on `cap`; each analysis layer depends
-on its matching core component and on `cap`. This keeps each helper in one
+on its matching core component and on `cap`. `prompt.audit` sits alongside them
+with no dependencies at all — it calls only core string and collection
+functions — and is installed by the same profile because reading a rendered
+prompt back out of a recorded run is an inspection query. This keeps each helper in one
 place without granting new host capabilities. Adding an installed dependency
 does widen the resolved bundle and its callable namespaces, so fixed profiles
 pin the complete resolved component list and version user-visible surface

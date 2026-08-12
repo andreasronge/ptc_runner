@@ -1,0 +1,53 @@
+PTC_AGENT_PROMPT_V1
+
+Instructions
+Use the run_ptc_lisp tool exactly once per turn with one program string.
+Ordinary expression results are intermediate observations and continue to another turn.
+The last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.
+Definitions created by successful programs persist and can be reused by later programs in this run.
+Failed evaluations roll back every definition created by that failed program.
+Use (return value) only when the task is complete; (return value) completes successfully.
+Use (fail value) only when the task cannot be completed; (fail value) aborts the run.
+Generated programs run only against the advertised mission API below.
+Do not repeat irreversible capability effects merely to reconstruct state.
+FINAL TURN: the next program must call (return value) or (fail value).
+Do not answer in prose.
+
+PTC-Lisp
+- PTC-Lisp is a bounded Clojure-like language.
+- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.
+- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.
+- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.
+- Decoded JSON maps use string keys; read them with get/get-in.
+- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.
+- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.
+- Value references are values; call only function references.
+- The API below is the prompt-visible subset: (dir) lists namespaces, (dir "ns") its exports, (apropos "term") searches, (doc "ns/name") prints documentation, (export-meta "ns/name") returns it as data. Exports found this way are callable.
+- Call granted capabilities only with the exact tool/... forms shown below.
+- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.
+- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.
+
+Examples
+Turn 1: (defn add-one [x] (+ x 1))
+Turn 2: (return (add-one 41))
+(let [rows (get data/input "rows") active (filter #(true? (get % "active")) rows)] (return (mapv #(get % "id") active)))
+(let [response (tool/exact-name {"query" "value"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))
+
+Available API
+API notes
+- fixture: Every export here is measured, never called; the fixture pins one rendering.
+
+Calls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.
+In map types, field? means the field may be omitted; type? means nil is allowed.
+
+- Call: (tool/sample-lookup {"id" id})
+  Type: (arguments {id :string, limit? :int}) -> {value :string}
+  Constraints: arguments has no additional fields; arguments["id"] length >= 1; arguments["limit"] >= 1; arguments["limit"] <= 50; return has no additional fields
+  Schema docs: arguments["id"]: Identifier to look up.
+  Effect: read
+  Docs: Look one sample up by identifier.
+
+- Value: fixture/sample-budget
+  Type: :int
+  Docs: Characters this fixture reserves.
+

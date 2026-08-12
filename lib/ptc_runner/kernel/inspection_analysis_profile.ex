@@ -2,11 +2,16 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfile do
   @moduledoc """
   Fixed private authority recipe for correlated trace and inspection analysis.
 
-  `inspection-analysis-v2` captures one canonical trace directory and one
+  `inspection-analysis-v3` captures one canonical trace directory and one
   private inspection directory, validates the private records against the
   captured canonical runs, and exposes the shipped primitive and bounded
   traversal functions for both sources. It grants no model, filesystem,
   network, MCP, write, or inspection-capture authority.
+
+  It also installs `prompt.audit`, whose pure string functions measure a
+  rendered system prompt. Reading one back out of a recorded run is an
+  inspection query, so the measurement belongs to the session that can already
+  reach the recorded model exchange rather than to a second tool.
   """
 
   alias PtcRunner.Kernel.AnalysisProfile
@@ -17,15 +22,23 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfile do
   alias PtcRunner.Kernel.TraceCapability
   alias PtcRunner.Kernel.TraceSnapshot
 
-  @id "inspection-analysis-v2"
+  @id "inspection-analysis-v3"
   @component_ids [
     "cap",
     "inspection.core",
     "inspection.analysis",
     "log.core",
-    "log.analysis"
+    "log.analysis",
+    "prompt.audit"
   ]
-  @namespaces ["cap", "inspection", "inspection.analysis", "log", "log.analysis"]
+  @namespaces [
+    "cap",
+    "inspection",
+    "inspection.analysis",
+    "log",
+    "log.analysis",
+    "prompt.audit"
+  ]
   @trace_capabilities ~w(trace-counters trace-get-run trace-list-runs trace-list-turns)
   @inspection_capabilities ~w(
     inspection-capability-calls
@@ -116,7 +129,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfile do
     }
   end
 
-  @doc "Returns the safe, static discovery contract for `inspection-analysis-v2`."
+  @doc "Returns the safe, static discovery contract for `inspection-analysis-v3`."
   @spec description() :: map()
   def description do
     %{

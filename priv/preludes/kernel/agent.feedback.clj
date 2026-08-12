@@ -45,7 +45,8 @@
     (str "The PTC-Lisp evaluation did not return successfully. "
          "outcome=" outcome "; error_code=" code
          (if message (str "; message=" message) "")
-         ". Send one corrected run_ptc_lisp call.")))
+         ". Definitions created by that program were rolled back. "
+         "Send one corrected run_ptc_lisp call.")))
 
 (defn- argument-violation [violation]
   (str (get violation :argument) " violates " (get violation :constraint)
@@ -67,14 +68,16 @@
     (str "The capability call failed without an unsafe effect. "
          "kind=" (get error :kind) "; reason=" (get error :reason)
          (argument-violation-feedback error)
-         ". Send one corrected run_ptc_lisp call with corrected capability arguments.")))
+         ". Definitions created by that program were rolled back. "
+         "Send one corrected run_ptc_lisp call with corrected capability arguments.")))
 
 (defn non-retryable [evaluation]
   (str "The PTC-Lisp evaluation did not return successfully and cannot be retried, "
        "because it already performed an effect this runtime cannot undo. "
        "error_code=" (or (get evaluation :kind) (get evaluation :outcome))
-       ". Do not repeat that program. Return your best decision from the evidence "
-       "you have already gathered, using return or fail on this turn."))
+       ". Do not repeat that program. Definitions created by that program were "
+       "rolled back. Return your best decision from the evidence you have already "
+       "gathered, using return or fail on this turn."))
 
 (defn result-contract [validation]
   (let [diagnostics (pr-str (get validation :details))

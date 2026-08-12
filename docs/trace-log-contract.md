@@ -171,9 +171,10 @@ terminal REPL frontends. Its mission bundle contains `cap`, `log.core`, and
 `trace-get-run`, `trace-list-turns`, and `trace-counters`; and ordinary implicit
 mission introspection remains available. Filesystem, network, LLM, agent,
 workflow, MCP, private-inspection, and nested `kernel-eval` authority are
-absent. The separate `inspection-analysis-v2` profile adds the validated
-private-inspection source, both inspection components, and a private terminal
-gate.
+absent. The separate `inspection-analysis-v3` profile adds the validated
+private-inspection source, both inspection components, a private terminal gate,
+and `prompt.audit`, whose pure string functions measure a rendered system prompt
+and grant no further authority.
 
 Each session queries one immutable snapshot and records its own canonical events
 in the same owner process that holds its continuation and quotas, under a
