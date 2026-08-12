@@ -220,8 +220,10 @@ Read these in order. Each one owns its topic and links onward.
 ### Examples
 
 Runnable projects live under
-[`examples/kernel-tutorial/`](examples/kernel-tutorial/README.md) and
-[`examples/kernel-inspection-lab/`](examples/kernel-inspection-lab/README.md).
+[`examples/kernel-tutorial/`](examples/kernel-tutorial/README.md),
+[`examples/kernel-inspection-lab/`](examples/kernel-inspection-lab/README.md),
+and
+[`examples/named-mission-reader-writer/`](examples/named-mission-reader-writer/README.md).
 
 ### Reference
 

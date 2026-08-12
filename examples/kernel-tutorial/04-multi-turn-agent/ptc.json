@@ -22,5 +22,8 @@
     "model": "openrouter:deepseek/deepseek-v4-flash",
     "provider": "openrouter",
     "tags": {"mode": "agent"}
+  },
+  "missions": {
+    "default": {"components": []}
   }
 }
