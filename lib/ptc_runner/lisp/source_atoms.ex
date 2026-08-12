@@ -38,9 +38,16 @@ defmodule PtcRunner.Lisp.SourceAtoms do
 
   ## What's NOT in the table
 
-  User-defined names: var bindings from `let`, `fn` params, `def`
+  User-defined *spellings*: var bindings from `let`, `fn` params, `def`
   bindings, custom keywords like `:my_kw`, namespaced keys like
   `data/foo_42`. These stay as binaries in the AST.
+
+  Membership is a property of the spelling, not of the binding. A user
+  definition whose name happens to be in the table — `(defn- parse …)`,
+  `(let [text …] …)` — still interns as an atom, so a single form routinely
+  mixes atoms and binaries. Anything that compares definition names against
+  reference names must normalise first; comparing raw representations reported
+  such definitions as undefined (#1166).
 
   ## Cache
 
