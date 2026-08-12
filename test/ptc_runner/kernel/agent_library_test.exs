@@ -2140,6 +2140,111 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              )
   end
 
+  # agent.feedback/success tells the model its definitions survived. No failure
+  # path stated the converse, and only one of the three carries details.message,
+  # so a sentence written into an evaluator condition would reach the model on
+  # one path in three.
+  test "a retryable evaluation failure tells the model its definitions were rolled back" do
+    failed = %{
+      content: nil,
+      tool_calls: [
+        %{id: "bad", name: "run_ptc_lisp", args: %{"program" => "(missing/function)"}}
+      ]
+    }
+
+    corrected = %{
+      content: nil,
+      tool_calls: [
+        %{id: "good", name: "run_ptc_lisp", args: %{"program" => "(return 7)"}}
+      ]
+    }
+
+    {:ok, config} = agent_config([failed, corrected])
+
+    assert {:ok, %{value: %{"ok" => true, "value" => 7}}} =
+             Kernel.run(~S|(agent.core/run "Recover" {"max_turns" 3})|, config)
+
+    feedback = second_turn_feedback()
+
+    assert feedback =~ "evaluation did not return successfully"
+    assert feedback =~ "Definitions created by that program were rolled back"
+  end
+
+  test "a correctable capability failure tells the model its definitions were rolled back" do
+    invalid = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "bad-args",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(fail (tool/sample-lookup {}))|}
+        }
+      ]
+    }
+
+    corrected = %{
+      content: nil,
+      tool_calls: [
+        %{id: "good", name: "run_ptc_lisp", args: %{"program" => "(return 7)"}}
+      ]
+    }
+
+    {:ok, config} =
+      agent_config([invalid, corrected], [], mission_capabilities: [prompt_fixture_capability()])
+
+    assert {:ok, %{value: %{"ok" => true, "value" => 7}}} =
+             Kernel.run(~S|(agent.core/run "Correct arguments" {"max_turns" 3})|, config)
+
+    feedback = second_turn_feedback()
+
+    assert feedback =~ "capability call failed"
+    assert feedback =~ "Definitions created by that program were rolled back"
+  end
+
+  test "a non-retryable failure tells the model its definitions were rolled back" do
+    unsafe = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "unsafe",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(do (tool/commit {}) (+ {} 1))|}
+        }
+      ]
+    }
+
+    closing = %{
+      content: nil,
+      tool_calls: [
+        %{id: "close", name: "run_ptc_lisp", args: %{"program" => ~S|(return 1)|}}
+      ]
+    }
+
+    {:ok, commit} =
+      Capability.new(
+        name: "commit",
+        effect: :write,
+        input_schema: %{"type" => "object"},
+        callback: fn _ -> {:ok, 42} end
+      )
+
+    {:ok, config} = agent_config([unsafe, closing], [], mission_capabilities: [commit])
+
+    assert {:ok, _result} =
+             Kernel.run(~S|(agent.core/run "Write once" {"max_turns" 3})|, config)
+
+    feedback = second_turn_feedback()
+
+    assert feedback =~ "cannot be retried"
+    assert feedback =~ "Definitions created by that program were rolled back"
+  end
+
+  defp second_turn_feedback do
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, second}
+    List.last(second["messages"])["content"]
+  end
+
   @prompt_artifacts %{
     ordinary: "test/fixtures/prompts/agent-prompt-ordinary-turn.txt",
     final: "test/fixtures/prompts/agent-prompt-final-turn.txt"
