@@ -8,7 +8,7 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
   immutable grant and never reopen the configured path.
   """
 
-  alias PtcRunner.Kernel.{InspectionArtifact, TraceLog}
+  alias PtcRunner.Kernel.{InspectionArtifact, InspectionQuery, RunAnalysis, TraceLog}
 
   @spec query(TraceLog.source(), atom(), map()) :: {:ok, map()} | {:error, atom()}
   @doc "Constructs a bounded TraceLog for the source and executes one query."
@@ -46,18 +46,74 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
 
   def pin_inspection(_path, _trace_source), do: {:error, :invalid_inspection_query}
 
-  @spec inspection(inspection_grant(), binary()) :: {:ok, map()} | {:error, atom()}
-  @doc "Returns pinned records only for the grant's exact run identity."
-  def inspection({:inspection_v1, granted_run_id, records}, run_id)
+  @spec conversation(inspection_grant(), binary()) :: {:ok, map()} | {:error, atom()}
+  @doc "Builds a semantic conversation from the pinned, already validated records."
+  def conversation({:inspection_v1, granted_run_id, records}, run_id)
       when is_binary(granted_run_id) and is_list(records) and is_binary(run_id) do
     if granted_run_id == run_id do
-      {:ok, %{"run_id" => run_id, "records" => records}}
+      with {:ok, compiled} <- InspectionQuery.compile([records], "viewer:" <> run_id),
+           {:ok, exchanges} <- all_inspection(compiled, :model_exchanges, run_id),
+           {:ok, programs} <- all_inspection(compiled, :generated_sources, run_id),
+           result = RunAnalysis.conversation_result(exchanges, programs),
+           true <- byte_size(Jason.encode!(result)) <= 1_000_000 do
+        {:ok, result}
+      else
+        false -> {:error, :result_limit_exceeded}
+        {:error, _reason} = error -> error
+      end
     else
       {:error, :inspection_run_mismatch}
     end
   end
 
-  def inspection(_grant, _run_id), do: {:error, :invalid_inspection_query}
+  def conversation(_grant, _run_id), do: {:error, :invalid_inspection_query}
+
+  defp all_inspection(compiled, operation, run_id),
+    do: all_inspection(compiled, operation, run_id, nil, [], nil, 0)
+
+  defp all_inspection(_compiled, _operation, _run_id, _cursor, _items, _hash, 1_000),
+    do: {:error, :result_limit_exceeded}
+
+  defp all_inspection(compiled, operation, run_id, cursor, items, hash, pages) do
+    arguments = %{"run_id" => run_id, "limit" => 1_000}
+    arguments = if cursor, do: Map.put(arguments, "cursor", cursor), else: arguments
+
+    with {:ok, page} <-
+           InspectionQuery.query(
+             compiled.collections,
+             compiled.source_id,
+             operation,
+             arguments,
+             1_000_000
+           ),
+         next_items = items ++ page["items"],
+         true <- byte_size(Jason.encode!(next_items)) <= 1_000_000 do
+      case page["next_cursor"] do
+        nil ->
+          {:ok,
+           %{
+             "items" => next_items,
+             "next_cursor" => nil,
+             "omitted_count" => 0,
+             "snapshot_hash" => hash || compiled.source_id
+           }}
+
+        next ->
+          all_inspection(
+            compiled,
+            operation,
+            run_id,
+            next,
+            next_items,
+            hash || compiled.source_id,
+            pages + 1
+          )
+      end
+    else
+      false -> {:error, :result_limit_exceeded}
+      {:error, _reason} = error -> error
+    end
+  end
 
   defp all_turns(trace_log, run_id), do: all_turns(trace_log, run_id, nil, [], 0)
 

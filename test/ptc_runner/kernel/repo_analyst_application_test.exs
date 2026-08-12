@@ -30,14 +30,13 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
   @host Path.join(@root, "repo-analyst.host.json")
   @base_source_hash "sha256:" <> String.duplicate("0", 64)
 
-  # Frozen by direction plan section 8.3. A stub that renames one of these
-  # would silently diverge from the native inspection source.
-  @private_operations ~w(
-    private-history.capability-calls
-    private-history.effective-preludes
-    private-history.generated-sources
-    private-history.model-exchanges
-    private-history.provider-exchanges
+  @analysis_operations ~w(
+    private-history.runs
+    private-history.overview
+    private-history.activity
+    private-history.conversation
+    private-history.failure
+    private-history.source
   )
 
   describe "host installation" do
@@ -186,6 +185,12 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
                |> Enum.map(& &1["provider"])
                |> Enum.sort() == ["deepseek", "history", "private-history", "workspace"]
 
+        capability_names =
+          built.config.missions["default"].environment.capabilities |> Map.keys()
+
+        refute Enum.any?(capability_names, &String.starts_with?(&1, "history."))
+        assert Enum.count(capability_names, &String.starts_with?(&1, "private-history.")) == 6
+
         assert :ok = RunBuilder.close(built)
       end
     end
@@ -232,17 +237,13 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       end
     end
 
-    test "runs exposes the documented evidence functions over both sources" do
+    test "runs exposes six question-shaped reads over one provider vocabulary" do
       assert {:ok, bundle} = compile_facade("runs")
 
       assert facade_names(bundle) ==
-               ~w(runs/capability-calls runs/effective-prelude runs/effective-preludes
-                  runs/generated-sources runs/latest-generated-source
-                  runs/latest-model-exchange runs/list-runs runs/model-exchanges
-                  runs/provenance runs/provider-exchanges runs/review-seed runs/turns)
+               ~w(runs/activity runs/conversation runs/failure runs/list runs/overview runs/source)
 
-      assert tool_refs(bundle, "runs") ==
-               Enum.sort(["history.list-runs", "history.list-turns"] ++ @private_operations)
+      assert tool_refs(bundle, "runs") == Enum.sort(@analysis_operations)
     end
 
     test "every facade function carries a signature the model can read" do
@@ -261,45 +262,46 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
   end
 
   describe "capability requirements" do
-    test "runs cannot be selected into a mission that lacks the private operations" do
+    test "runs cannot be selected into a mission that lacks a question operation" do
       {:ok, bundle} = compile_facade("runs")
 
       assert {:error, {:missing_capability_requirement, missing}} =
-               MissionEnvironment.new(bundle: bundle, capabilities: stubs(["history.list-runs"]))
+               MissionEnvironment.new(
+                 bundle: bundle,
+                 capabilities: stubs(["private-history.runs"])
+               )
 
-      assert missing == Enum.sort(["history.list-turns"] ++ @private_operations)
+      assert missing == Enum.sort(@analysis_operations -- ["private-history.runs"])
     end
 
-    test "runs assembles against the frozen operation names" do
+    test "runs assembles against the semantic operation names" do
       {:ok, bundle} = compile_facade("runs")
-      granted = ["history.list-runs", "history.list-turns"] ++ @private_operations
 
       assert {:ok, _mission} =
-               MissionEnvironment.new(bundle: bundle, capabilities: stubs(granted))
+               MissionEnvironment.new(bundle: bundle, capabilities: stubs(@analysis_operations))
     end
 
-    test "each runs function calls its own operation and unwraps the envelope" do
+    test "each runs function is one capability call with no caller-side record joins" do
       {:ok, bundle} = compile_facade("runs")
-      granted = ["history.list-runs", "history.list-turns"] ++ @private_operations
       {:ok, calls} = Agent.start_link(fn -> [] end)
 
       {:ok, mission} =
-        MissionEnvironment.new(bundle: bundle, capabilities: stubs(granted, calls))
+        MissionEnvironment.new(
+          bundle: bundle,
+          capabilities: stubs(@analysis_operations, calls)
+        )
 
-      # Assembly alone proves only that the names resolve. Calling each function
-      # proves the facade reaches the operation it claims and that cap/unwrap!
-      # returns the value rather than the envelope.
-      for {function, operation, limit} <- [
-            {~s|(runs/list-runs 10 nil)|, "history.list-runs", 10},
-            {~s|(runs/turns "run-1" {"status" "error" "ignored" true} nil)|, "history.list-turns",
-             20},
-            {~s|(runs/model-exchanges "run-1" nil)|, "private-history.model-exchanges", 1},
-            {~s|(runs/latest-model-exchange "run-1")|, "private-history.model-exchanges", 1},
-            {~s|(runs/capability-calls "run-1" nil)|, "private-history.capability-calls", 1},
-            {~s|(runs/generated-sources "run-1" nil)|, "private-history.generated-sources", 1},
-            {~s|(runs/latest-generated-source "run-1")|, "private-history.generated-sources", 1},
-            {~s|(runs/effective-preludes "run-1" nil)|, "private-history.effective-preludes", 1},
-            {~s|(runs/provider-exchanges "run-1" nil)|, "private-history.provider-exchanges", 1}
+      for {function, operation, expected} <- [
+            {~s|(runs/list {"limit" 10})|, "private-history.runs", %{"limit" => 10}},
+            {~s|(runs/overview "run-1")|, "private-history.overview", %{"run_id" => "run-1"}},
+            {~s|(runs/activity "run-1" {"limit" 20})|, "private-history.activity",
+             %{"run_id" => "run-1", "limit" => 20}},
+            {~s|(runs/conversation "run-1" {"limit" 30})|, "private-history.conversation",
+             %{"run_id" => "run-1", "limit" => 30}},
+            {~s|(runs/failure "run-1" {"limit" 40})|, "private-history.failure",
+             %{"run_id" => "run-1", "limit" => 40}},
+            {~s|(runs/source "run-1" {"limit" 50})|, "private-history.source",
+             %{"run_id" => "run-1", "limit" => 50}}
           ] do
         Agent.update(calls, fn _previous -> [] end)
 
@@ -310,172 +312,12 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
                  ),
                "#{function} did not evaluate"
 
-        assert [{^operation, args}] = Agent.get(calls, & &1),
-               "#{function} must call exactly #{operation}"
-
-        # cap/unwrap! returns the value; an unwrapped envelope would still carry :status.
+        assert [{^operation, args}] = Agent.get(calls, & &1)
+        assert args == expected
         assert value["snapshot_hash"] == "sha256:stub"
-
-        expected_provider =
-          if String.starts_with?(operation, "history."), do: "history", else: "private-history"
-
-        assert value["provider"] == expected_provider
+        assert value["provider"] == "private-history"
         refute Map.has_key?(value, :status)
-
-        # A nil cursor is the first page and must not appear in the arguments.
-        refute Map.has_key?(args, "cursor")
-        assert args["limit"] == limit
-
-        if operation == "history.list-turns" do
-          assert args["run_id"] == "run-1"
-          assert args["status"] == "error"
-          refute Map.has_key?(args, "ignored")
-        end
       end
-    end
-
-    test "review-seed composes three audited source reads into one bounded observation" do
-      {:ok, bundle} = compile_facade("runs")
-      granted = ["history.list-runs", "history.list-turns"] ++ @private_operations
-      {:ok, calls} = Agent.start_link(fn -> [] end)
-
-      values = %{
-        "private-history.model-exchanges" => %{
-          "items" => [
-            %{
-              "capability_id" => "llm-1",
-              "input_sequence" => 7,
-              "output_sequence" => 8,
-              "result" => %{"content" => "answer"},
-              "run_id" => "run-1",
-              "trace_id" => "trace-1"
-            }
-          ],
-          "snapshot_hash" => "sha256:inspection"
-        },
-        "private-history.generated-sources" => %{
-          "items" => [
-            %{
-              "run_id" => "run-1",
-              "sequence" => 9,
-              "source" => "(return 42)"
-            }
-          ],
-          "snapshot_hash" => "sha256:inspection"
-        },
-        "history.list-turns" => %{
-          "items" => [
-            %{"run_id" => "run-1", "sequence" => 11, "type" => "evaluation-stopped"}
-          ],
-          "snapshot_hash" => "sha256:trace"
-        }
-      }
-
-      {:ok, mission} =
-        MissionEnvironment.new(bundle: bundle, capabilities: stubs(granted, calls, values))
-
-      assert {:ok, %{value: %{"outcome" => "returned", "value" => value}}} =
-               Kernel.run(
-                 ~S|(return (kernel/eval "default" (program (return (runs/review-seed "run-1")))))|,
-                 run_config(mission)
-               )
-
-      assert Map.keys(value) |> Enum.sort() == ["model_action", "program", "trace_errors"]
-      assert value["model_action"]["provider"] == "private-history"
-      assert value["program"]["provider"] == "private-history"
-      assert value["trace_errors"]["provider"] == "history"
-      assert value["model_action"]["resource"] == "run-1"
-      assert value["model_action"]["positions"] == [7, 8]
-      assert value["program"]["resource"] == "run-1"
-      assert value["program"]["positions"] == [9]
-      assert value["trace_errors"]["resource"] == "run-1"
-      assert value["trace_errors"]["positions"] == [11]
-
-      assert Enum.map(Agent.get(calls, & &1), &elem(&1, 0)) == [
-               "private-history.model-exchanges",
-               "private-history.generated-sources",
-               "history.list-turns"
-             ]
-    end
-
-    test "catalog, provenance, and effective source expose copyable citation positions" do
-      {:ok, bundle} = compile_facade("runs")
-      granted = ["history.list-runs", "history.list-turns"] ++ @private_operations
-      {:ok, calls} = Agent.start_link(fn -> [] end)
-
-      values = %{
-        "history.list-runs" => %{
-          "items" => [
-            %{
-              "run_id" => "run-1",
-              "component_overrides" => [],
-              "workflow_prelude" => %{"hash" => "workflow"},
-              "missions" => %{"default" => %{"prelude" => %{"hash" => "mission"}}},
-              "positions" => [1]
-            }
-          ],
-          "snapshot_hash" => "sha256:trace"
-        },
-        "history.list-turns" => %{
-          "items" => [
-            %{
-              "sequence" => 1,
-              "type" => "run-started",
-              "data" => %{
-                "component_overrides" => [],
-                "workflow_prelude" => %{"hash" => "workflow"},
-                "missions" => %{"default" => %{"prelude" => %{"hash" => "mission"}}}
-              }
-            }
-          ],
-          "snapshot_hash" => "sha256:trace"
-        },
-        "private-history.effective-preludes" => %{
-          "items" => [
-            %{
-              "component_id" => "agent.retry",
-              "sequence" => 9,
-              "source_hash" => "sha256:source"
-            }
-          ],
-          "snapshot_hash" => "sha256:inspection"
-        }
-      }
-
-      {:ok, mission} =
-        MissionEnvironment.new(
-          bundle: bundle,
-          capabilities: stubs(granted, calls, values)
-        )
-
-      for {expression, provider, snapshot_hash, resource, positions} <- [
-            {~S|(first (get (runs/list-runs 10 nil) "items"))|, "history", "sha256:trace",
-             "run-1", [1]},
-            {~S|(runs/provenance "run-1")|, "history", "sha256:trace", "run-1", [1]},
-            {~S|(runs/effective-prelude "run-1" "agent.retry")|, "private-history",
-             "sha256:inspection", "run-1", [9]}
-          ] do
-        assert {:ok, %{value: %{"outcome" => "returned", "value" => value}}} =
-                 Kernel.run(
-                   "(return (kernel/eval \"default\" (program (return #{expression}))))",
-                   run_config(mission)
-                 )
-
-        assert Map.take(value, ~w(provider snapshot_hash resource positions)) == %{
-                 "provider" => provider,
-                 "snapshot_hash" => snapshot_hash,
-                 "resource" => resource,
-                 "positions" => positions
-               }
-      end
-
-      assert Agent.get(calls, & &1)
-             |> Enum.map(&elem(&1, 0))
-             |> Enum.count(&(&1 == "history.list-runs")) == 1
-
-      assert Agent.get(calls, & &1)
-             |> Enum.map(&elem(&1, 0))
-             |> Enum.count(&(&1 == "history.list-turns")) == 1
     end
 
     test "repo assembles against the four mapped workspace tools" do
@@ -546,7 +388,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
       evidence = [
         %{
-          "provider" => "history",
+          "provider" => "private-history",
           "snapshot_hash" => "sha256:" <> String.duplicate("a", 64),
           "resource" => "run-1",
           "positions" => [12, 18]
@@ -606,12 +448,10 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
       assert Enum.all?(
                descriptions,
-               &String.contains?(&1, "canonical event sequence IDs for history")
-             )
-
-      assert Enum.all?(
-               descriptions,
-               &String.contains?(&1, "inspection-record sequence IDs for private-history")
+               &String.contains?(
+                 &1,
+                 "event or inspection-record sequence IDs for private-history"
+               )
              )
 
       assert Enum.all?(descriptions, &String.contains?(&1, "source line numbers for workspace"))
@@ -624,12 +464,9 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
           |> Jason.decode!()
           |> Map.fetch!("task")
 
-        assert task =~ "history positions are canonical event sequence IDs"
-        assert task =~ "private-history positions are inspection-record sequence IDs"
-        assert task =~ "workspace positions are source line numbers"
-
-        assert task =~
-                 "runs/list-runs positions cite only run-started provenance, not outcome or aggregate counts"
+        assert task =~ "provider as private-history"
+        assert task =~ "sequence positions"
+        assert task =~ "For workspace evidence"
       end
     end
 
@@ -654,7 +491,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
                contract,
                Map.put(proposal(), "evidence", [
                  %{
-                   "provider" => "history",
+                   "provider" => "private-history",
                    "snapshot_hash" => "sha256:" <> String.duplicate("a", 64)
                  }
                ])
@@ -694,7 +531,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
                "rationale" => "…",
                "evidence" => [
                  %{
-                   "provider" => "history",
+                   "provider" => "private-history",
                    "snapshot_hash" => "sha256:" <> String.duplicate("a", 64),
                    "resource" => "run-1",
                    "positions" => [12]
@@ -953,7 +790,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       "generalized_failure" => "The loop stops at the first page of a paged capability result.",
       "evidence" => [
         %{
-          "provider" => "history",
+          "provider" => "private-history",
           "snapshot_hash" => "sha256:" <> String.duplicate("a", 64),
           "resource" => "run-1",
           "positions" => [12, 18]

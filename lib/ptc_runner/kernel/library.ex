@@ -4,8 +4,7 @@ defmodule PtcRunner.Kernel.Library do
 
   Available component IDs are `kernel`, `runtime`, `cap`, `workflow.event`,
   `llm`, `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`,
-  `agent.prompt`, `agent.main`, `result`, `log.core`, `log.analysis`,
-  `inspection.core`, and `inspection.analysis`.
+  `agent.prompt`, `agent.main`, `result`, and `analysis`.
 
   `agent.main` is a generic entry wrapper: a manifest names `agent.main/run`
   and supplies `task` and `agent` through input, instead of every application
@@ -51,14 +50,7 @@ defmodule PtcRunner.Kernel.Library do
   @agent_feedback_path Path.expand("../../../priv/preludes/kernel/agent.feedback.clj", __DIR__)
   @agent_retry_path Path.expand("../../../priv/preludes/kernel/agent.retry.clj", __DIR__)
   @result_path Path.expand("../../../priv/preludes/kernel/result.clj", __DIR__)
-  @log_core_path Path.expand("../../../priv/preludes/kernel/log.core.clj", __DIR__)
-  @inspection_core_path Path.expand("../../../priv/preludes/kernel/inspection.core.clj", __DIR__)
-  @log_analysis_path Path.expand("../../../priv/preludes/kernel/log.analysis.clj", __DIR__)
-
-  @inspection_analysis_path Path.expand(
-                              "../../../priv/preludes/kernel/inspection.analysis.clj",
-                              __DIR__
-                            )
+  @analysis_path Path.expand("../../../priv/preludes/kernel/analysis.clj", __DIR__)
   @external_resource @kernel_path
   @external_resource @runtime_path
   @external_resource @cap_path
@@ -71,10 +63,7 @@ defmodule PtcRunner.Kernel.Library do
   @external_resource @agent_feedback_path
   @external_resource @agent_retry_path
   @external_resource @result_path
-  @external_resource @log_core_path
-  @external_resource @inspection_core_path
-  @external_resource @log_analysis_path
-  @external_resource @inspection_analysis_path
+  @external_resource @analysis_path
   @sources %{
     "kernel" => File.read!(@kernel_path),
     "runtime" => File.read!(@runtime_path),
@@ -88,16 +77,10 @@ defmodule PtcRunner.Kernel.Library do
     "agent.feedback" => File.read!(@agent_feedback_path),
     "agent.retry" => File.read!(@agent_retry_path),
     "result" => File.read!(@result_path),
-    "log.core" => File.read!(@log_core_path),
-    "inspection.core" => File.read!(@inspection_core_path),
-    "log.analysis" => File.read!(@log_analysis_path),
-    "inspection.analysis" => File.read!(@inspection_analysis_path)
+    "analysis" => File.read!(@analysis_path)
   }
   @dependencies %{
-    "inspection.analysis" => ["cap", "inspection.core"],
-    "inspection.core" => ["cap"],
-    "log.analysis" => ["cap", "log.core"],
-    "log.core" => ["cap"],
+    "analysis" => ["cap"],
     "agent.prompt" => ["kernel"],
     "agent.core" => [
       "agent.feedback",

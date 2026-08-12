@@ -388,11 +388,15 @@ mappings, data classes, and installed ceilings.
 Three providers are native rather than MCP, and all serve PtcRunner's own
 evidence back to a mission. A `ptc_trace_snapshot` or
 `ptc_private_trace_snapshot` alias named `history` derives
-`history.list-runs`, `history.get-run`, `history.list-turns`, and
-`history.counters`. A `ptc_inspection_snapshot` alias derives `list-runs`,
-`model-exchanges`, `capability-calls`, `generated-sources`,
-`effective-preludes`, `provider-exchanges`, `execution-prints`, and
-`execution-errors`, plus the singular `result` operation.
+`history.runs`, `history.overview`, `history.activity`,
+`history.conversation`, `history.failure`, and `history.source`. A
+`ptc_inspection_snapshot` alias derives those same six operations while
+composing its required canonical trace snapshot with the authorized private
+records. Public sources return `evidence_unavailable` for private questions;
+callers never switch to a record-family vocabulary or perform joins themselves.
+When the inspection alias is the mission's aggregate read surface, select its
+trace dependency with `"config": {"expose": false}`. The dependency still
+captures and exports canonical evidence but adds no second analysis namespace.
 [Kernel REPL](kernel-repl.md#private-inspection-mission-sessions) shows the
 queries in use, and the
 [TraceLog contract](../trace-log-contract.md#query-contract) is normative for
@@ -488,7 +492,7 @@ event:
 ```
 
 They exist for one job: grouping and filtering runs when a single trace
-directory holds many of them, in the log-analysis REPL or the Viewer. They
+directory holds many of them, in the run-analysis REPL or the Viewer. They
 affect nothing else — not execution, authority, prompts, results, or provider
 selection — so most small manifests should omit them entirely.
 
@@ -496,7 +500,7 @@ Because the manifest author supplies labels, the Kernel does not treat them as
 authoritative. They are never inferred from the providers actually selected, so
 a label claiming `"model": "deepseek"` proves nothing about which model ran. For
 runtime accounting, use the canonical provider snapshot's adapter-attested
-`resolved_model` and `log/counters` model grouping. Calls whose target is private
+`resolved_model` and the canonical counters consumed by semantic analysis. Calls whose target is private
 remain attributable only by the canonical capability events' alias and
 installation revision. Neither form should be repurposed as an authorization
 decision.
@@ -512,7 +516,7 @@ The fields serve different purposes:
 For example, this query selects deterministic runs by their readable tag:
 
 ```clojure
-(log/runs {"tags" {"mode" "deterministic"}})
+(analysis/runs {"tags" {"mode" "deterministic"}})
 ```
 
 Use labels when operational trace classification is useful; omit them when it

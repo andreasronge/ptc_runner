@@ -15,14 +15,14 @@ defmodule PtcViewer.ReplStoreTest do
     assert byte_size(nonce) == 43
     assert first["generation_sequence"] == 1
     assert first["lifecycle"] == "open"
-    assert first["session"][:profile_id] == "log-analysis-v2"
+    assert first["session"][:profile_id] == "run-analysis-v1"
 
     assert {:ok, evaluated} = ReplStore.evaluate(store, first_session, "(+ 1 2)")
     assert evaluated["evaluation"].status == :ok
     assert [%{source_preview: "(+ 1 2)"}] = evaluated["transcript"]
 
     assert {:ok, templated} = ReplStore.template(store, first_session, :run, "run-1")
-    assert templated["template"]["source"] == ~s[(log/run "run-1")]
+    assert templated["template"]["source"] == ~s[(analysis/overview "run-1")]
 
     assert {:ok, reset} = ReplStore.reset(store, first_session)
     replacement = reset["session_id"]

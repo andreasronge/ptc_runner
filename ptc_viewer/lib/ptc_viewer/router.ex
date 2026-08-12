@@ -108,8 +108,8 @@ defmodule PtcViewer.Router do
     send_kernel_query(conn, :counters, query_arguments(conn))
   end
 
-  get "/api/inspection/runs/:run_id" do
-    send_inspection(conn, run_id)
+  get "/api/analysis/runs/:run_id/conversation" do
+    send_conversation(conn, run_id)
   end
 
   match "/api/*path" do
@@ -412,8 +412,8 @@ defmodule PtcViewer.Router do
     end
   end
 
-  defp send_inspection(conn, run_id) do
-    case PtcViewer.Api.inspection(viewer_config(conn), run_id) do
+  defp send_conversation(conn, run_id) do
+    case PtcViewer.Api.conversation(viewer_config(conn), run_id) do
       {:ok, result} ->
         send_private_json(conn, result)
 

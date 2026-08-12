@@ -31,7 +31,7 @@
             "properties": {
               "provider": {
                 "type": "string",
-                "enum": ["history", "private-history", "workspace"]
+                "enum": ["private-history", "workspace"]
               },
               "snapshot_hash": {
                 "type": "string",
@@ -39,13 +39,13 @@
               },
               "resource": {
                 "type": "string",
-                "description": "Run ID for history providers, or relative path for the workspace provider.",
+                "description": "Run ID for private-history, or relative path for workspace.",
                 "minLength": 1,
                 "maxLength": 1024
               },
               "positions": {
                 "type": "array",
-                "description": "Positive positions in the cited provider snapshot: canonical event sequence IDs for history, inspection-record sequence IDs for private-history, or source line numbers for workspace.",
+                "description": "Positive positions in the cited provider snapshot: event or inspection-record sequence IDs for private-history, or source line numbers for workspace.",
                 "minItems": 1,
                 "maxItems": 32,
                 "items": {"type": "integer", "minimum": 1}
@@ -67,7 +67,7 @@
             },
             "base_source_hash": {
               "type": "string",
-              "description": "Exact sha256-prefixed source_hash returned by runs/effective-preludes for the component this candidate replaces. Verified against the installed component before compilation.",
+              "description": "Exact sha256-prefixed source_hash returned by runs/source for the component this candidate replaces. Verified against the installed component before compilation.",
               "format": "sha256",
               "minLength": 71,
               "maxLength": 71
@@ -156,7 +156,7 @@
             "properties": {
               "provider": {
                 "type": "string",
-                "enum": ["history", "private-history", "workspace"]
+                "enum": ["private-history", "workspace"]
               },
               "snapshot_hash": {
                 "type": "string",
@@ -164,13 +164,13 @@
               },
               "resource": {
                 "type": "string",
-                "description": "Run ID for history providers, or relative path for the workspace provider.",
+                "description": "Run ID for private-history, or relative path for workspace.",
                 "minLength": 1,
                 "maxLength": 1024
               },
               "positions": {
                 "type": "array",
-                "description": "Positive positions in the cited provider snapshot: canonical event sequence IDs for history, inspection-record sequence IDs for private-history, or source line numbers for workspace.",
+                "description": "Positive positions in the cited provider snapshot: event or inspection-record sequence IDs for private-history, or source line numbers for workspace.",
                 "minItems": 1,
                 "maxItems": 32,
                 "items": {"type": "integer", "minimum": 1}

@@ -112,7 +112,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         get_in(branch, ["properties", "topic", "const"])
       end)
 
-    assert topics == ~w(doctor init models repl root run run validate)
+    assert topics == ~w(doctor init models repl root run run transcript validate)
 
     run_options =
       help_branch
@@ -1452,15 +1452,15 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   test "repl structural combinations are rejected by the shared parser" do
     for argv <- [
           ["repl", "--format", "yaml"],
-          ["repl", "--describe-profile", "log-analysis-v2", "--load", "caller-value"],
-          ["repl", "--profile", "log-analysis-v2", "--manifest", "ptc.json"],
-          ["repl", "--profile", "log-analysis-v2", "--host-config", "host.json"],
-          ["repl", "--profile", "log-analysis-v2", "--trace", "trace.jsonl"],
-          ["repl", "--profile", "log-analysis-v2"],
+          ["repl", "--describe-profile", "run-analysis-v1", "--load", "caller-value"],
+          ["repl", "--profile", "run-analysis-v1", "--manifest", "ptc.json"],
+          ["repl", "--profile", "run-analysis-v1", "--host-config", "host.json"],
+          ["repl", "--profile", "run-analysis-v1", "--trace", "trace.jsonl"],
+          ["repl", "--profile", "run-analysis-v1"],
           [
             "repl",
             "--profile",
-            "inspection-analysis-v2",
+            "private-run-analysis-v1",
             "--resource",
             "traces=traces",
             "--private-unattended",
@@ -1470,7 +1470,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           [
             "repl",
             "--profile",
-            "log-analysis-v2",
+            "run-analysis-v1",
             "--resource",
             "traces=traces",
             "--continue-on-error",

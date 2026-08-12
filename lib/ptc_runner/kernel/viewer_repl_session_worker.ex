@@ -3,13 +3,13 @@ defmodule PtcRunner.Kernel.ViewerReplSessionWorker do
 
   alias PtcRunner.Kernel.AnalysisSession
   alias PtcRunner.Kernel.AnalysisSessionBuilder
-  alias PtcRunner.Kernel.LogAnalysisProfile
+  alias PtcRunner.Kernel.PublicRunAnalysisProfile
 
   def run(backend, trace_dir, public_session_id) when is_pid(backend) do
     Process.link(backend)
 
     case AnalysisSessionBuilder.start(
-           LogAnalysisProfile.id(),
+           PublicRunAnalysisProfile.id(),
            %{"traces" => trace_dir},
            {:directory, trace_dir}
          ) do

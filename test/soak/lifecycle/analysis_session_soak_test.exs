@@ -46,7 +46,7 @@ defmodule PtcRunner.Soak.AnalysisSessionSoakTest do
   alias PtcRunner.Kernel.AnalysisSessionBuilder
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
-  alias PtcRunner.Kernel.LogAnalysisProfile
+  alias PtcRunner.Kernel.PublicRunAnalysisProfile
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.TestSupport.LifecycleSoak
   alias PtcRunner.TestSupport.MemorySoak
@@ -169,7 +169,7 @@ defmodule PtcRunner.Soak.AnalysisSessionSoakTest do
   defp open(traces) do
     {:ok, session, _info} =
       AnalysisSessionBuilder.start(
-        LogAnalysisProfile.id(),
+        PublicRunAnalysisProfile.id(),
         %{"traces" => traces},
         {:directory, traces}
       )

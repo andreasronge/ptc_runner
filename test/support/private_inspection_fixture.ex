@@ -87,7 +87,8 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
         "mission_name" => "default",
         "name" => "workspace.read"
       }),
-      event(run_id, 4, "evaluation-started", %{
+      workflow_evaluation_event(run_id, 4),
+      event(run_id, 5, "evaluation-started", %{
         "evaluation_id" => "eval-#{run_id}",
         "environment" => "mission",
         "mission_name" => "default",
@@ -95,8 +96,18 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
         "source_hash" => @source_hash,
         "source_bytes" => byte_size(@source)
       }),
-      workflow_evaluation_event(run_id, 5),
-      event(run_id, 6, "run-stopped", %{"outcome" => "failed"})
+      event(run_id, 6, "evaluation-stopped", %{
+        "evaluation_id" => "eval-#{run_id}",
+        "environment" => "mission",
+        "mission_name" => "default",
+        "status" => "ok"
+      }),
+      event(run_id, 7, "evaluation-stopped", %{
+        "evaluation_id" => "workflow-eval-#{run_id}",
+        "environment" => "workflow",
+        "status" => "error"
+      }),
+      event(run_id, 8, "run-stopped", %{"outcome" => "failed"})
     ]
   end
 
@@ -112,7 +123,15 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     emit!(sink, "capability-output", %{capability_id: "llm-#{run_id}"}, %{
       environment: :workflow,
       name: "llm-request",
-      result: %{status: :ok, value: %{"answer" => "private-answer-#{run_id}"}}
+      result: %{
+        status: :ok,
+        value: %{
+          "answer" => "private-answer-#{run_id}",
+          "tool_calls" => [
+            %{"id" => "program-#{run_id}", "args" => %{"program" => @source}}
+          ]
+        }
+      }
     })
 
     emit!(sink, "capability-input", %{capability_id: "tool-#{run_id}"}, %{

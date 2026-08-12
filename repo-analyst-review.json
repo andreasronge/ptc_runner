@@ -20,7 +20,10 @@
         "name": "workspace"
       },
       {
-        "name": "history"
+        "name": "history",
+        "config": {
+          "expose": false
+        }
       },
       {
         "name": "private-history"

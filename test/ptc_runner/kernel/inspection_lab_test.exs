@@ -106,12 +106,12 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
         inspection_adapter: ViewerAdapter
       ]
 
-      inspection =
-        Plug.Test.conn(:get, "/api/inspection/runs/#{journey.run_id}")
+      conversation =
+        Plug.Test.conn(:get, "/api/analysis/runs/#{journey.run_id}/conversation")
         |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
 
-      assert inspection.status == 200
-      assert %{"records" => ^records} = Jason.decode!(inspection.resp_body)
+      assert conversation.status == 200
+      assert %{"streams" => [%{"turns" => [_ | _]}]} = Jason.decode!(conversation.resp_body)
 
       metadata =
         Plug.Test.conn(:get, "/api/kernel/runs/#{journey.run_id}")
@@ -134,29 +134,26 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
 
       metadata_path = Path.join(dir, "#{journey.name}-metadata.json")
       turns_path = Path.join(dir, "#{journey.name}-turns.json")
-      inspection_path = Path.join(dir, "#{journey.name}-inspection.json")
+      conversation_path = Path.join(dir, "#{journey.name}-conversation.json")
       File.write!(metadata_path, metadata.resp_body)
       File.write!(turns_path, turns.resp_body)
-      File.write!(inspection_path, inspection.resp_body)
+      File.write!(conversation_path, conversation.resp_body)
 
       {rendered, 0} =
         System.cmd(
           "node",
           [
-            Path.expand("../../../ptc_viewer/test/render_viewer.mjs", __DIR__),
+            Path.expand("../../../ptc_viewer/test/render_semantic_viewer.mjs", __DIR__),
             metadata_path,
             turns_path,
-            inspection_path
+            conversation_path
           ],
           stderr_to_stdout: true
         )
 
-      assert rendered =~ "Private inspection overlay loaded"
-      assert rendered =~ "Advanced/private records"
-      assert rendered =~ "evaluation-source"
-      assert rendered =~ "remote.structured"
-      assert rendered =~ "remote.text"
-      assert rendered =~ "remote.fail"
+      assert rendered =~ "Private analysis"
+      assert rendered =~ "Model conversation"
+      assert rendered =~ "Turn 1"
       assert rendered =~ "Canonical Kernel trace"
       assert rendered =~ "Mission inventory"
       assert rendered =~ "Connector"

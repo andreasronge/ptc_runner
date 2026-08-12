@@ -120,6 +120,11 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   def source(_snapshot), do: {:error, :invalid_snapshot}
 
   @doc false
+  @spec result_limit(t()) :: {:ok, pos_integer()} | {:error, atom()}
+  def result_limit(%__MODULE__{} = snapshot), do: call(snapshot, :result_limit)
+  def result_limit(_snapshot), do: {:error, :invalid_snapshot}
+
+  @doc false
   @spec validate_inspection(t(), [map()]) :: :ok | {:error, atom()}
   def validate_inspection(%__MODULE__{} = snapshot, records) when is_list(records),
     do: call(snapshot, {:validate_inspection, records})
@@ -191,6 +196,9 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   def handle_call({token, :source}, _from, %{token: token} = state),
     do: {:reply, {:ok, state.info.source}, state}
+
+  def handle_call({token, :result_limit}, _from, %{token: token} = state),
+    do: {:reply, {:ok, state.max_result_bytes}, state}
 
   def handle_call({token, {:query, operation, arguments}}, _from, %{token: token} = state) do
     {:reply, query_with_snapshot_hash(state, operation, arguments), state}

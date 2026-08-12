@@ -5,6 +5,7 @@ defmodule PtcRunner.StandaloneCLI do
   alias PtcRunner.Kernel.CommandRouter
   alias PtcRunner.ReplFrontend
   alias PtcRunner.StandaloneCommandRuntime
+  alias PtcRunner.TranscriptFrontend
 
   @doc false
   @spec execute([binary()]) :: CommandPresentation.t()
@@ -14,8 +15,14 @@ defmodule PtcRunner.StandaloneCLI do
         argv,
         :standalone,
         &StandaloneCommandRuntime.bootstrap/1,
-        &ReplFrontend.run/2
+        &run_one_shot/2
       )
+
+  defp run_one_shot(%{command: :repl} = arguments, runtime),
+    do: ReplFrontend.run(arguments, runtime)
+
+  defp run_one_shot(%{command: :transcript} = arguments, runtime),
+    do: TranscriptFrontend.run(arguments, runtime)
 
   @doc false
   @spec main([binary()]) :: no_return()

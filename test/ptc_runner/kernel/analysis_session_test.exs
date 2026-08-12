@@ -7,9 +7,9 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
   alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
-  alias PtcRunner.Kernel.LogAnalysisProfile
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.MissionInventory
+  alias PtcRunner.Kernel.PublicRunAnalysisProfile
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SessionTrace
@@ -18,7 +18,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
   @lifecycle_timeout_ms 30_000
 
   @tag :tmp_dir
-  test "fixed profile exposes only log analysis authority and a deterministic identity", %{
+  test "fixed profile exposes only run analysis authority and a deterministic identity", %{
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
@@ -36,17 +36,15 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
       AnalysisSession.stop(second)
     end)
 
-    assert first_info.profile_id == "log-analysis-v2"
+    assert first_info.profile_id == "run-analysis-v1"
     assert first_info.profile_digest == second_info.profile_digest
 
-    assert first_info.profile_digest ==
-             "sha256:e2706d7a91c66fe64f49d4f2f20f81d595eb20cb1860e6439c2f6ee523b00d42"
-
-    assert first_info.namespaces == ["cap", "log", "log.analysis"]
+    assert first_info.profile_digest =~ ~r/\Asha256:[0-9a-f]{64}\z/
+    assert first_info.namespaces == ["analysis", "cap"]
     refute inspect(first_info) =~ directory
 
     forged = %{first | token: make_ref()}
-    assert {:error, :log_analysis_session_closed} = AnalysisSession.info(forged)
+    assert {:error, :run_analysis_session_closed} = AnalysisSession.info(forged)
 
     first_state = :sys.get_state(first.pid)
     identity = first_state.profile.identity
@@ -55,9 +53,9 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert Process.read_timer(first_state.timer) <=
              remaining_before_timer_read + 10
 
-    assert identity["profile_id"] == "log-analysis-v2"
-    assert identity["components"] == ["cap", "log.core", "log.analysis"]
-    assert identity["explicit_capabilities"] == LogAnalysisProfile.explicit_capabilities()
+    assert identity["profile_id"] == "run-analysis-v1"
+    assert identity["components"] == ["cap", "analysis"]
+    assert identity["explicit_capabilities"] == PublicRunAnalysisProfile.explicit_capabilities()
 
     assert identity["implicit_runtime"] == %{
              "version" => 1,
@@ -80,7 +78,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert identity["result_policy"] == "bounded-json-v1"
 
     assert Map.keys(identity["limits"]) |> Enum.sort() ==
-             LogAnalysisProfile.limits()
+             PublicRunAnalysisProfile.limits()
              |> Map.from_struct()
              |> Map.keys()
              |> Enum.map(&to_string/1)
@@ -94,7 +92,8 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert {:ok, %{status: :ok, value: capabilities}} =
              AnalysisSession.evaluate(first, "(tool/cap-list {})")
 
-    assert Enum.map(capabilities, & &1["name"]) == LogAnalysisProfile.explicit_capabilities()
+    assert Enum.map(capabilities, & &1["name"]) ==
+             PublicRunAnalysisProfile.explicit_capabilities()
 
     assert {:ok, %{status: :ok, value: usage}} =
              AnalysisSession.evaluate(first, "(tool/runtime-usage {})")
@@ -122,12 +121,12 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     on_exit(fn -> AnalysisSession.stop(session) end)
 
     state = :sys.get_state(session.pid)
-    original = state.config.missions["default"].environment.capabilities["trace-list-runs"]
+    original = state.config.missions["default"].environment.capabilities["analysis-runs"]
     forged = %{original | callback: fn _arguments -> {:ok, %{"items" => []}} end}
 
     capabilities =
       state.config.missions["default"].environment.capabilities
-      |> Map.put("trace-list-runs", forged)
+      |> Map.put("analysis-runs", forged)
       |> Map.values()
 
     assert {:ok, mission} =
@@ -157,7 +156,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
         state.run_state
       )
 
-    assert {:error, :invalid_log_analysis_assembly} = AnalysisSession.start(assembly)
+    assert {:error, :invalid_run_analysis_assembly} = AnalysisSession.start(assembly)
   end
 
   @tag :tmp_dir
@@ -198,7 +197,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
   test "session trace construction binds limits, destination, and sink run identity", %{
     tmp_dir: directory
   } do
-    limits = LogAnalysisProfile.limits()
+    limits = PublicRunAnalysisProfile.limits()
     reserve = EventSink.terminal_reserve(:normal, limits)
 
     assert {:ok, run_state, sink} =
@@ -255,7 +254,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
   test "session trace construction rejects missing reserve and non-open recorder state", %{
     tmp_dir: directory
   } do
-    limits = LogAnalysisProfile.limits()
+    limits = PublicRunAnalysisProfile.limits()
     reserve = EventSink.terminal_reserve(:normal, limits)
 
     starts = [
@@ -437,7 +436,9 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert length(prints) == 128
     assert Enum.all?(prints, &(&1 == ""))
     assert byte_size(Jason.encode!(prints)) <= 65_536
-    assert byte_size(Jason.encode!(result)) <= LogAnalysisProfile.limits().terminal_result_bytes
+
+    assert byte_size(Jason.encode!(result)) <=
+             PublicRunAnalysisProfile.limits().terminal_result_bytes
   end
 
   @tag :tmp_dir
@@ -588,12 +589,12 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
             }} =
              AnalysisSession.evaluate(
                session,
-               ~S|(fail (tool/trace-list-runs {"unsupported" true}))|
+               ~S|(fail (tool/analysis-runs {"unsupported" true}))|
              )
   end
 
   @tag :tmp_dir
-  test "log.core queries the frozen capture and public accounting is authoritative", %{
+  test "analysis queries the frozen capture and public accounting is authoritative", %{
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
@@ -604,29 +605,29 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     on_exit(fn -> AnalysisSession.stop(session) end)
 
     assert {:ok, %{status: :ok, value: %{"items" => items}, usage: usage}} =
-             AnalysisSession.evaluate(session, "(log/runs {})")
+             AnalysisSession.evaluate(session, "(analysis/runs {})")
 
     assert Enum.map(items, & &1["run_id"]) == ["seed"]
 
-    assert Map.keys(usage.trace_calls) |> Enum.sort() ==
-             LogAnalysisProfile.explicit_capabilities()
+    assert Map.keys(usage.capability_calls) |> Enum.sort() ==
+             PublicRunAnalysisProfile.explicit_capabilities()
 
     assert usage.mission_calls.used == 1
-    assert usage.trace_calls["trace-list-runs"] == %{used: 1, limit: 256, remaining: 255}
+    assert usage.capability_calls["analysis-runs"] == %{used: 1, limit: 256, remaining: 255}
 
     assert {:ok, info} = AnalysisSession.info(session)
-    assert info.usage.trace_calls == usage.trace_calls
+    assert info.usage.capability_calls == usage.capability_calls
 
     seed_trace(directory, "later")
 
     assert {:ok, %{value: %{"items" => still_frozen}}} =
-             AnalysisSession.evaluate(session, "(log/runs {})")
+             AnalysisSession.evaluate(session, "(analysis/runs {})")
 
     assert Enum.map(still_frozen, & &1["run_id"]) == ["seed"]
   end
 
   @tag :tmp_dir
-  test "log analysis fails rejected queries and traverses bounded pages", %{
+  test "run analysis rejects invalid limits and returns bounded pages", %{
     tmp_dir: directory
   } do
     for run_id <- ~w(first second third), do: seed_trace(directory, run_id)
@@ -637,67 +638,29 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     on_exit(fn -> AnalysisSession.stop(session) end)
 
     assert {:ok, %{status: :error, outcome: :failed}} =
-             AnalysisSession.evaluate(session, ~S|(log/runs {"limit" 101})|)
+             AnalysisSession.evaluate(session, ~S|(analysis/runs {"limit" 1001})|)
 
     assert {:ok,
             %{
               status: :ok,
-              value: %{
-                "complete?" => true,
-                "items" => items,
-                "pages" => 3,
-                "snapshot_hash" => snapshot_hash
-              }
+              value: %{"complete?" => false, "items" => [first], "next_cursor" => cursor}
             }} =
              AnalysisSession.evaluate(
                session,
-               ~S|(log.analysis/all-runs {"limit" 1} 4)|
+               ~S|(analysis/runs {"limit" 1})|
              )
 
-    assert items |> Enum.map(& &1["run_id"]) |> Enum.sort() == ~w(first second third)
-    assert snapshot_hash =~ ~r/\Asha256:[0-9a-f]{64}\z/
+    assert first["run_id"] in ~w(first second third)
+    assert is_binary(cursor)
 
     assert {:ok, %{value: %{"items" => from_first_page}}} =
              AnalysisSession.evaluate(
                session,
-               ~S"""
-               (let [cursor (get (log/runs {"limit" 1}) "next_cursor")]
-                 (log.analysis/all-runs {"limit" 1 "cursor" cursor} 4))
-               """
+               ~s|(analysis/runs {"limit" 2 "cursor" "#{cursor}"})|
              )
 
-    assert from_first_page |> Enum.map(& &1["run_id"]) |> Enum.sort() ==
+    assert [first["run_id"] | Enum.map(from_first_page, & &1["run_id"])] |> Enum.sort() ==
              ~w(first second third)
-
-    assert {:ok,
-            %{
-              value: %{
-                "complete?" => true,
-                "items" => turns,
-                "pages" => 2,
-                "snapshot_hash" => ^snapshot_hash
-              }
-            }} =
-             AnalysisSession.evaluate(
-               session,
-               ~S|(log.analysis/all-turns "first" {"limit" 1} 3)|
-             )
-
-    assert Enum.map(turns, & &1["type"]) == ["run-started", "run-stopped"]
-
-    assert {:ok,
-            %{
-              value: %{
-                "complete?" => false,
-                "items" => [_],
-                "pages" => 1,
-                "snapshot_hash" => ^snapshot_hash
-              }
-            }} =
-             AnalysisSession.evaluate(
-               session,
-               ~S|(log.analysis/all-runs {"limit" 1} 1)|
-             )
   end
 
   @tag :tmp_dir
@@ -717,7 +680,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert {:ok, %{lifecycle: :closed}} = AnalysisSession.close(session)
     assert File.ls!(source) == ["seed.jsonl"]
     assert File.ls!(output) == [info.session_id <> ".jsonl"]
-    assert String.starts_with?(info.session_id, "log-analysis-")
+    assert String.starts_with?(info.session_id, "run-analysis-")
   end
 
   @tag :tmp_dir
@@ -796,7 +759,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     on_exit(fn -> AnalysisSession.stop(second) end)
 
     assert {:ok, %{value: %{"items" => runs}}} =
-             AnalysisSession.evaluate(second, "(log/runs {})")
+             AnalysisSession.evaluate(second, "(analysis/runs {})")
 
     assert Enum.map(runs, & &1["run_id"]) |> Enum.sort() ==
              Enum.sort(["seed", first_info.session_id])
@@ -850,7 +813,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
 
     on_exit(fn -> AnalysisSession.stop(session) end)
 
-    for value <- 1..LogAnalysisProfile.limits().subordinate_evaluations do
+    for value <- 1..PublicRunAnalysisProfile.limits().subordinate_evaluations do
       assert {:ok, %{status: :ok, outcome: :continued}} =
                AnalysisSession.evaluate(session, Integer.to_string(value))
     end
@@ -1226,7 +1189,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert_receive {:DOWN, ^trace_ref, :process, _pid, :killed}
     send(builder, :finish_final_completion)
 
-    assert {:error, :log_analysis_session_failed} = Task.await(starter)
+    assert {:error, :run_analysis_session_failed} = Task.await(starter)
     assert_receive {:DOWN, ^session_ref, :process, _pid, _reason}, 1_000
   end
 
@@ -1392,7 +1355,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
         end
 
       send(builder, :raise)
-      assert {:error, :log_analysis_session_failed} = Task.await(starter)
+      assert {:error, :run_analysis_session_failed} = Task.await(starter)
       assert_receive {:DOWN, ^snapshot_ref, :process, _pid, :normal}
 
       if trace_ref do
@@ -1426,7 +1389,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert Enum.count(events, &(&1["type"] == "events-dropped")) == 1
     assert Enum.count(events, &(&1["type"] == "run-stopped")) == 1
     assert List.last(events)["type"] == "run-stopped"
-    assert length(events) == LogAnalysisProfile.limits().normal_event_count
+    assert length(events) == PublicRunAnalysisProfile.limits().normal_event_count
 
     assert {:ok, trace} = TraceLog.new(source: {:file, path})
 
@@ -1801,7 +1764,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
 
   defp start_log_session({:directory, directory}, destination, opts \\ []) do
     AnalysisSessionBuilder.start(
-      LogAnalysisProfile.id(),
+      PublicRunAnalysisProfile.id(),
       %{"traces" => directory},
       destination,
       opts

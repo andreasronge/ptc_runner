@@ -132,10 +132,12 @@ defmodule PtcViewer.RouterTest do
     end)
   end
 
-  test "inspection route is unavailable by default and delegates a fixed source", %{
+  test "conversation route is unavailable by default and delegates a fixed source", %{
     trace_dir: trace_dir
   } do
-    unavailable = conn(:get, "/api/inspection/runs/run-1") |> call_router(trace_dir: trace_dir)
+    unavailable =
+      conn(:get, "/api/analysis/runs/run-1/conversation") |> call_router(trace_dir: trace_dir)
+
     assert unavailable.status == 503
 
     source = {:pinned, "fixed.inspection.jsonl"}
@@ -145,7 +147,7 @@ defmodule PtcViewer.RouterTest do
        %{
          "source" => inspect(pinned_source),
          "run_id" => run_id,
-         "records" => [%{"sequence" => 1}]
+         "streams" => [%{"stream_id" => "stream-1"}]
        }}
     end
 
@@ -153,7 +155,7 @@ defmodule PtcViewer.RouterTest do
     on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
 
     response =
-      conn(:get, "/api/inspection/runs/run-1")
+      conn(:get, "/api/analysis/runs/run-1/conversation")
       |> call_router(
         trace_dir: trace_dir,
         inspection_store: store,
@@ -165,11 +167,11 @@ defmodule PtcViewer.RouterTest do
     assert Jason.decode!(response.resp_body) == %{
              "source" => inspect(source),
              "run_id" => "run-1",
-             "records" => [%{"sequence" => 1}]
+             "streams" => [%{"stream_id" => "stream-1"}]
            }
   end
 
-  test "inspection route classifies fixed source failures", %{trace_dir: trace_dir} do
+  test "conversation route classifies fixed source failures", %{trace_dir: trace_dir} do
     statuses = %{
       not_found: 404,
       inspection_run_mismatch: 404,
@@ -185,7 +187,7 @@ defmodule PtcViewer.RouterTest do
         PtcViewer.InspectionStore.start({:pinned, "fixed.inspection.jsonl"})
 
       response =
-        conn(:get, "/api/inspection/runs/run-1")
+        conn(:get, "/api/analysis/runs/run-1/conversation")
         |> call_router(
           trace_dir: trace_dir,
           inspection_store: store,

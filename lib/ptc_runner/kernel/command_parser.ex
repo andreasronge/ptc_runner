@@ -229,6 +229,32 @@ defmodule PtcRunner.Kernel.CommandParser do
       else: reject(:models, :invalid_arguments)
   end
 
+  defp validate_command(
+         :transcript,
+         [run_id],
+         %{
+           traces: traces,
+           inspection: inspection,
+           private_unattended: true,
+           private_output: private_output
+         } = options,
+         ordered,
+         [],
+         frontend
+       )
+       when map_size(options) == 4 do
+    if Enum.all?([run_id, traces, inspection, private_output], &valid_nonempty_string?/1) do
+      arguments(:transcript,
+        application: run_id,
+        options: options,
+        ordered_options: ordered,
+        frontend: frontend
+      )
+    else
+      reject(:transcript, :invalid_arguments)
+    end
+  end
+
   defp validate_command(:repl, positional, options, ordered, [], frontend)
        when length(positional) <= 1 do
     cond do
@@ -294,7 +320,24 @@ defmodule PtcRunner.Kernel.CommandParser do
     not Enum.any?([:manifest, :host_config, :trace], &Map.has_key?(options, &1)) and
       resources != [] and
       not (format == "jsonl" and evals == [] and positional == []) and
-      not (Map.get(options, :continue_on_error, false) and length(evals) < 2)
+      not (Map.get(options, :continue_on_error, false) and length(evals) < 2) and
+      profile_output_arguments_valid?(options, positional, evals)
+  end
+
+  defp profile_output_arguments_valid?(options, positional, evals) do
+    output? = Map.has_key?(options, :output)
+    private_output? = Map.has_key?(options, :private_output)
+
+    if output? or private_output? do
+      positional == [] and length(evals) == 1 and not Map.has_key?(options, :load) and
+        not Map.get(options, :continue_on_error, false) and
+        ((output? and options[:profile] == "run-analysis-v1" and
+            not Map.get(options, :private_unattended, false)) or
+           (private_output? and options[:profile] == "private-run-analysis-v1" and
+              Map.get(options, :private_unattended, false)))
+    else
+      true
+    end
   end
 
   defp manifest_arguments_valid?(options, resources, format) do
@@ -369,6 +412,9 @@ defmodule PtcRunner.Kernel.CommandParser do
     length(authorizations) <= 128 and authorizations == Enum.uniq(authorizations) and
       Enum.all?(authorizations, &valid_authorization_name?/1)
   end
+
+  defp valid_nonempty_string?(value),
+    do: is_binary(value) and byte_size(value) in 1..4_096 and String.valid?(value)
 
   defp valid_authorization_name?(name),
     do:

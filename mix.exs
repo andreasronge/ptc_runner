@@ -344,7 +344,7 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.RunBuilder,
           PtcRunner.Kernel.RunConfig,
           PtcRunner.Kernel.RunRequest,
-          PtcRunner.Kernel.TraceCapability,
+          PtcRunner.Kernel.RunAnalysis,
           PtcRunner.Kernel.TraceLog,
           PtcRunner.Kernel.WorkflowEnvironment
         ],

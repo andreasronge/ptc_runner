@@ -23,6 +23,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         "ptc doctor [ptc.json] [--host-config HOST.json] [--connect]",
         "ptc models --host-config HOST.json",
         "ptc init DIRECTORY",
+        "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE",
         "ptc repl [OPTIONS] [SCRIPT|-]",
         "ptc --version"
       ],
@@ -185,6 +186,38 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         @help_option
       ]
     },
+    transcript: %{
+      usage: [
+        "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE"
+      ],
+      options: [
+        %{
+          key: :traces,
+          type: :string,
+          syntax: ["--traces DIRECTORY"],
+          description: "private-authorized canonical trace directory"
+        },
+        %{
+          key: :inspection,
+          type: :string,
+          syntax: ["--inspection DIRECTORY"],
+          description: "correlated private inspection directory"
+        },
+        %{
+          key: :private_unattended,
+          type: :boolean,
+          syntax: ["--private-unattended"],
+          description: "explicitly authorize one unattended private result"
+        },
+        %{
+          key: :private_output,
+          type: :string,
+          syntax: ["--private-output TRANSCRIPT.json"],
+          description: "new owner-only private transcript artifact"
+        },
+        @help_option
+      ]
+    },
     repl: %{
       usage: ["ptc repl [OPTIONS] [SCRIPT|-]"],
       options: [
@@ -243,6 +276,18 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           description: "existing directory for the profile session trace"
         },
         %{
+          key: :output,
+          type: :string,
+          syntax: ["--output VALUE.json"],
+          description: "publish one public profile evaluation value"
+        },
+        %{
+          key: :private_output,
+          type: :string,
+          syntax: ["--private-output VALUE.json"],
+          description: "publish one owner-only private profile evaluation value"
+        },
+        %{
           key: :format,
           type: :string,
           syntax: ["--format clojure|jsonl"],
@@ -283,10 +328,10 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
     }
   }
 
-  @commands [:init, :validate, :run, :doctor, :models, :repl]
+  @commands [:init, :validate, :run, :doctor, :models, :transcript, :repl]
   @topics [:root | @commands]
 
-  @type command :: :init | :validate | :run | :doctor | :models | :repl
+  @type command :: :init | :validate | :run | :doctor | :models | :transcript | :repl
   @type topic :: :root | command()
   @type frontend :: :standalone | :mix
 

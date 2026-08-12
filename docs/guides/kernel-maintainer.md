@@ -1295,10 +1295,10 @@ never include rendered headers or subprocess environment values.
 `PtcRunner.Kernel.SafeMetadata` owns the closed labels and annotation
 vocabulary.
 
-The Viewer and `PtcRunner.Kernel.TraceCapability` delegate to TraceLog rather
-than defining another event model. Custom `Inspect` implementations and
-redacted owner status are defense-in-depth; runtime code must still avoid
-logging payload-bearing structures directly.
+The Viewer and `PtcRunner.Kernel.RunAnalysis` delegate to the immutable
+snapshots rather than defining another event model. Custom `Inspect`
+implementations and redacted owner status are defense-in-depth; runtime code
+must still avoid logging payload-bearing structures directly.
 
 ## Providers and interactive frontends
 
@@ -1482,23 +1482,24 @@ so a write remains indeterminate.
 
 PtcRunner-owned canonical traces remain native rather than passing through
 MCP. Host-installed `ptc_trace_snapshot` and `ptc_private_trace_snapshot`
-providers use `TraceSnapshot` to capture one directory and `TraceCapability`
-to expose the same four canonical `TraceLog` queries used by `log-analysis-v2`.
+providers use `TraceSnapshot` to capture one directory and
+`RunAnalysisCapability` to expose the same six question-shaped operations used
+by `run-analysis-v1`.
 The former admits ordinary traces only; the latter is a private-authorized
 capture of ordinary and private traces with per-run provenance. A paired private
 `ptc_inspection_snapshot` receives that already captured trace through the
 provider acquisition service, validates all artifacts and correlations before
-publication, and exposes the shared `InspectionQuery` layer through
-`InspectionCapability`. Its `inspection-result` operation is singular rather
-than paginated, accepts only `run_id`, and applies both encoded-byte and
-retained-size result ceilings before returning the exact private value.
+publication, and composes both snapshots through the same
+`RunAnalysisCapability` builder. Callers receive `runs`, `overview`, `activity`,
+`conversation`, `failure`, and `source`; private evidence is unavailable rather
+than replaced with primitive inspection record families.
 
 Local analysis profiles are fixed, code-owned recipes selected through the
 closed `AnalysisProfileRegistry`. `AnalysisSessionBuilder` is the host entry;
 `AnalysisSession`, `SessionTrace`, and `AnalysisResources` share continuation,
 publication, and cleanup without letting a caller supply modules,
-capabilities, limits, or sink policy. `log-analysis-v2` remains the Viewer and
-ordinary terminal profile. `inspection-analysis-v2` adds correlated
+capabilities, limits, or sink policy. `run-analysis-v1` remains the Viewer and
+ordinary terminal profile. `private-run-analysis-v1` adds correlated
 private-authorized `TraceSnapshot` and `InspectionSnapshot` captures behind a private
 interactive-terminal gate. Browser or Lisp input does not supply profile
 internals or paths.
@@ -1514,8 +1515,8 @@ internals or paths.
 | Mutable resources | `Limits`, `RunState`, `BoundedWorker`, `Dispatcher` |
 | Subordinate execution | `Runner`, `Evaluation`, `RuntimeTools` |
 | Lisp internals | `Lisp.Eval`, `Lisp.Eval.Effects`, `Lisp.Eval.Capture`, `Lisp.Eval.Parallel`, `Lisp.Eval.ParallelRunner` |
-| Providers | `HostConfig`, `HostInstallation`, `ProviderRegistry`, `ProviderAcquisition`, `ProviderSession`, `LLMCapability`, `MCPSource`, `MCPProtocol`, `TraceCapability`, `InspectionCapability` |
-| Canonical/private evidence | `EventSink`, `TraceLog`, `TraceSnapshot`, `InspectionSink`, `InspectionArtifact`, `InspectionSnapshot`, `InspectionQuery`, `SafeMetadata` |
+| Providers | `HostConfig`, `HostInstallation`, `ProviderRegistry`, `ProviderAcquisition`, `ProviderSession`, `LLMCapability`, `MCPSource`, `MCPProtocol`, `RunAnalysisCapability` |
+| Canonical/private evidence | `EventSink`, `TraceLog`, `TraceSnapshot`, `InspectionSink`, `InspectionArtifact`, `InspectionSnapshot`, `InspectionQuery`, `RunAnalysis`, `SafeMetadata` |
 | Interactive evaluation | `ReplSession`, `AnalysisProfileRegistry`, `AnalysisSessionBuilder`, `AnalysisSession`, `SessionTrace` |
 
 Modules grouped as Kernel internals in ExDoc remain documented for maintenance

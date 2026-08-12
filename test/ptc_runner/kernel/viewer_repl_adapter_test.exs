@@ -8,19 +8,19 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
   alias PtcRunner.Kernel.ViewerReplBackend
 
   @tag :tmp_dir
-  test "connected backend owns an idempotent log-analysis session ledger", %{tmp_dir: trace_dir} do
+  test "connected backend owns an idempotent run-analysis session ledger", %{tmp_dir: trace_dir} do
     seed_trace(trace_dir, "seed")
 
     assert {:ok, backend, features} =
              ViewerReplAdapter.connect(%{
                trace_dir: trace_dir,
-               profile_id: "log-analysis-v2"
+               profile_id: "run-analysis-v1"
              })
 
     assert features == %{
              "enabled" => true,
-             "namespaces" => ["cap", "log", "log.analysis"],
-             "profile_id" => "log-analysis-v2",
+             "namespaces" => ["analysis", "cap"],
+             "profile_id" => "run-analysis-v1",
              "source_limit_bytes" => 65_536
            }
 
@@ -32,7 +32,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
              ViewerReplAdapter.start(backend, start_id, public_session_id)
 
     assert info.session_id == public_session_id
-    assert info.profile_id == "log-analysis-v2"
+    assert info.profile_id == "run-analysis-v1"
 
     assert Map.keys(info) |> Enum.sort() ==
              Enum.sort([
@@ -59,7 +59,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
              ViewerReplAdapter.prepare_operation(backend, nil, :start, second_start_id)
 
     evaluation_id = random_id()
-    source = "(log/runs {})"
+    source = "(analysis/runs {})"
     assert :ok = ViewerReplAdapter.prepare_operation(backend, session, :evaluation, evaluation_id)
     assert {:ok, result} = ViewerReplAdapter.evaluate(backend, session, evaluation_id, source)
     assert result.status == :ok
@@ -73,10 +73,10 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
     assert {:ok, ^result} = ViewerReplAdapter.reconcile_evaluate(backend, session, evaluation_id)
     assert :ok = ViewerReplAdapter.acknowledge_operation(backend, :evaluation, evaluation_id)
 
-    assert {:ok, %{source: ~s[(log/run "seed")]}} =
+    assert {:ok, %{source: ~s[(analysis/overview "seed")]}} =
              ViewerReplAdapter.template(backend, session, :run, "seed")
 
-    assert {:ok, %{source: ~s[(log/turns "seed" {})]}} =
+    assert {:ok, %{source: ~s[(analysis/activity "seed" {})]}} =
              ViewerReplAdapter.template(backend, session, :turns, "seed")
 
     close_id = random_id()
@@ -98,7 +98,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
     assert {:ok, backend, _features} =
              ViewerReplAdapter.connect(%{
                trace_dir: trace_dir,
-               profile_id: "log-analysis-v2"
+               profile_id: "run-analysis-v1"
              })
 
     start_id = random_id()
@@ -127,7 +127,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
         {:ok, backend, _features} =
           ViewerReplAdapter.connect(%{
             trace_dir: trace_dir,
-            profile_id: "log-analysis-v2"
+            profile_id: "run-analysis-v1"
           })
 
         start_id = random_id()
@@ -180,7 +180,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
     assert {:ok, backend, _features} =
              ViewerReplAdapter.connect(%{
                trace_dir: trace_dir,
-               profile_id: "log-analysis-v2"
+               profile_id: "run-analysis-v1"
              })
 
     start_id = random_id()
@@ -218,7 +218,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
     assert {:ok, backend, _features} =
              ViewerReplAdapter.connect(%{
                trace_dir: trace_dir,
-               profile_id: "log-analysis-v2"
+               profile_id: "run-analysis-v1"
              })
 
     start_id = random_id()
@@ -250,7 +250,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
     assert {:ok, backend, _features} =
              ViewerReplAdapter.connect(%{
                trace_dir: trace_dir,
-               profile_id: "log-analysis-v2"
+               profile_id: "run-analysis-v1"
              })
 
     start_id = random_id()
@@ -281,7 +281,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
     assert {:ok, backend, _features} =
              ViewerReplAdapter.connect(%{
                trace_dir: private_dir,
-               profile_id: "log-analysis-v2"
+               profile_id: "run-analysis-v1"
              })
 
     status = backend.pid |> :sys.get_status() |> inspect()
@@ -295,7 +295,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
     assert {:ok, backend, _features} =
              ViewerReplAdapter.connect(%{
                trace_dir: trace_dir,
-               profile_id: "log-analysis-v2"
+               profile_id: "run-analysis-v1"
              })
 
     start_id = random_id()
@@ -320,7 +320,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
     assert {:ok, backend, _features} =
              ViewerReplAdapter.connect(%{
                trace_dir: trace_dir,
-               profile_id: "log-analysis-v2"
+               profile_id: "run-analysis-v1"
              })
 
     start_id = random_id()

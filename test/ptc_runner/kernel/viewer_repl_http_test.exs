@@ -7,7 +7,7 @@ defmodule PtcRunner.Kernel.ViewerReplHttpTest do
   alias PtcRunner.Kernel.ViewerReplAdapter
 
   @tag :tmp_dir
-  test "real Viewer HTTP lifecycle delegates to the root log-analysis backend", %{
+  test "real Viewer HTTP lifecycle delegates to the root run-analysis backend", %{
     tmp_dir: trace_dir
   } do
     seed_trace(trace_dir, "seed")
@@ -29,7 +29,7 @@ defmodule PtcRunner.Kernel.ViewerReplHttpTest do
         port: 0,
         trace_dir: trace_dir,
         repl_adapter: ViewerReplAdapter,
-        repl_config: %{trace_dir: trace_dir, profile_id: "log-analysis-v2"},
+        repl_config: %{trace_dir: trace_dir, profile_id: "run-analysis-v1"},
         open: false
       )
 
@@ -60,11 +60,11 @@ defmodule PtcRunner.Kernel.ViewerReplHttpTest do
     assert bootstrap.status == 200
     session_id = bootstrap.body["session_id"]
     nonce = bootstrap.body["mutation_nonce"]
-    assert bootstrap.body["session"]["profile_id"] == "log-analysis-v2"
-    assert bootstrap.body["session"]["namespaces"] == ["cap", "log", "log.analysis"]
+    assert bootstrap.body["session"]["profile_id"] == "run-analysis-v1"
+    assert bootstrap.body["session"]["namespaces"] == ["analysis", "cap"]
     refute inspect(bootstrap.body) =~ trace_dir
 
-    private_source = ~S|(do "PRIVATE_REPL_SOURCE" (log/runs {}))|
+    private_source = ~S|(do "PRIVATE_REPL_SOURCE" (analysis/runs {}))|
 
     evaluated =
       Req.post!(origin <> "/api/repl/evaluations",
@@ -113,7 +113,7 @@ defmodule PtcRunner.Kernel.ViewerReplHttpTest do
     persisted =
       trace_dir
       |> File.ls!()
-      |> Enum.filter(&String.starts_with?(&1, "log-analysis-"))
+      |> Enum.filter(&String.starts_with?(&1, "run-analysis-"))
 
     assert length(persisted) == 1
   end

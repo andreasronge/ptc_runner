@@ -143,6 +143,11 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   def info(_snapshot), do: {:error, :invalid_snapshot}
 
   @doc false
+  @spec result_limit(t()) :: {:ok, pos_integer()} | {:error, atom()}
+  def result_limit(%__MODULE__{} = snapshot), do: call(snapshot, :result_limit)
+  def result_limit(_snapshot), do: {:error, :invalid_snapshot}
+
+  @doc false
   @spec transfer_owner(t(), pid()) :: :ok | {:error, atom()}
   def transfer_owner(%__MODULE__{} = snapshot, owner) when is_pid(owner),
     do: call(snapshot, {:transfer_owner, owner})
@@ -211,6 +216,9 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   @impl GenServer
   def handle_call({token, :info}, _from, %{token: token} = state),
     do: {:reply, {:ok, state.info}, state}
+
+  def handle_call({token, :result_limit}, _from, %{token: token} = state),
+    do: {:reply, {:ok, state.max_result_bytes}, state}
 
   def handle_call({token, {:query, operation, arguments}}, _from, %{token: token} = state) do
     {:reply, query_with_snapshot_hash(state, operation, arguments), state}

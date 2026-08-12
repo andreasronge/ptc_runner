@@ -1,104 +1,8 @@
-defmodule PtcRunner.Kernel.TraceCapabilityTest do
+defmodule PtcRunner.Kernel.TraceLogTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel
-  alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.DeterministicJSON
-  alias PtcRunner.Kernel.EventSink
-  alias PtcRunner.Kernel.Library
-  alias PtcRunner.Kernel.Limits
-  alias PtcRunner.Kernel.MissionEnvironment
-  alias PtcRunner.Kernel.RunConfig
-  alias PtcRunner.Kernel.TraceCapability
   alias PtcRunner.Kernel.TraceLog
-  alias PtcRunner.Kernel.WorkflowEnvironment
-
-  test "log.core requires source-scoped query capabilities" do
-    assert {:ok, component} = Library.component("log.core")
-    assert component.dependencies == ["cap"]
-
-    assert {:error, %{id: "log.core", reason: :missing_component_dependency}} =
-             Kernel.compile_bundle([component])
-
-    assert {:ok, components} = Library.resolve_components([{:library, "log.core"}])
-    assert Enum.map(components, & &1.id) == ["cap", "log.core"]
-    assert {:ok, bundle} = Kernel.compile_bundle(components)
-
-    assert {:error,
-            {:missing_capability_requirement,
-             ["trace-counters", "trace-get-run", "trace-list-runs", "trace-list-turns"]}} =
-             MissionEnvironment.new(bundle: bundle)
-  end
-
-  test "an in-memory grant exposes canonical metadata, turns, counters, and stable pages" do
-    {:ok, limits} = Limits.new()
-    {:ok, sink} = EventSink.start(:normal, limits, run_id: "visible", trace_id: "trace-visible")
-    run_kernel(sink, limits)
-
-    assert {:ok, capabilities} = TraceCapability.new(source: sink, max_result_bytes: 100_000)
-
-    assert Enum.all?(capabilities, fn capability ->
-             match?(
-               %{
-                 effect: :read,
-                 input_schema: %{"additionalProperties" => true},
-                 output_schema: %{"additionalProperties" => true}
-               },
-               Capability.metadata(capability)
-             )
-           end)
-
-    callbacks = Map.new(capabilities, &{&1.name, &1.callback})
-
-    assert {:ok, first_page} = callbacks["trace-list-runs"].(%{"limit" => 1})
-    assert [%{"run_id" => "visible"} = metadata] = first_page["items"]
-    assert metadata["trace_id"] == "trace-visible"
-    assert metadata["status"] == "ok"
-    assert metadata["complete"]
-    assert metadata["subordinate_evaluations"] == 0
-    assert metadata["workflow_capability_calls"] == 0
-    assert metadata["mission_capability_calls"] == 0
-    assert metadata["error_count"] == 0
-    assert is_integer(metadata["duration_ms"])
-    assert metadata["result_hash"] == result_hash(42)
-
-    assert metadata["workflow_prelude"] ==
-             %{"component_ids" => [], "dependency_indices" => [], "hash" => nil}
-
-    assert metadata["missions"]["default"]["prelude"] ==
-             %{"component_ids" => [], "dependency_indices" => [], "hash" => nil}
-
-    assert metadata["missions"]["default"]["inventory_hash"] =~ ~r/\A[0-9a-f]{64}\z/
-    assert is_integer(metadata["missions"]["default"]["inventory_bytes"])
-    assert metadata["connector_snapshots"] == []
-    assert first_page["next_cursor"] == nil
-
-    assert {:ok, turns} =
-             callbacks["trace-list-turns"].(%{
-               "run_id" => "visible",
-               "status" => "ok",
-               "limit" => 10
-             })
-
-    assert Enum.map(turns["items"], & &1["type"]) == ["evaluation-stopped", "run-stopped"]
-
-    assert {:ok,
-            %{
-              "events" => 4,
-              "runs" => 1,
-              "errors" => 0,
-              "evaluations" => 1,
-              "evaluations_by_mission" => %{},
-              "workflow_capability_calls" => 0,
-              "mission_capability_calls" => 0,
-              "llm_usage" => [],
-              "llm_usage_by_model" => [],
-              "unattributed_model_calls" => 0
-            }} = callbacks["trace-counters"].(%{"run_id" => "visible"})
-
-    assert {:error, %{kind: :invalid_request}} =
-             callbacks["trace-list-runs"].(%{"cursor" => 1})
-  end
 
   @tag :tmp_dir
   test "run-result hashes are projected only from valid successful canonical completion", %{
@@ -132,81 +36,6 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     assert {:error, :malformed_source} = query.(invalid_hash, "invalid-hash")
     assert {:error, :malformed_source} = query.(failed_with_hash, "failed-with-hash")
     assert {:error, :unsupported_version} = query.(unsupported, "unsupported")
-  end
-
-  test "a trace grant never discovers runs in another sink" do
-    {:ok, limits} = Limits.new()
-    {:ok, visible} = EventSink.start(:normal, limits, run_id: "visible")
-    {:ok, hidden} = EventSink.start(:normal, limits, run_id: "hidden")
-    run_kernel(visible, limits)
-    run_kernel(hidden, limits)
-
-    {:ok, capabilities} = TraceCapability.new(source: visible)
-    list_runs = Enum.find(capabilities, &(&1.name == "trace-list-runs"))
-
-    assert {:ok, %{"items" => [%{"run_id" => "visible"}]}} = list_runs.callback.(%{})
-  end
-
-  test "private memory traces require a distinct explicit grant" do
-    {:ok, limits} = Limits.new()
-    {:ok, private_sink} = EventSink.start(:private, limits, run_id: "private")
-    run_kernel(private_sink, limits)
-
-    assert {:error, :invalid_trace_capability} = TraceCapability.new(source: private_sink)
-    assert {:ok, capabilities} = TraceCapability.new(source: {:private, private_sink})
-    list_runs = Enum.find(capabilities, &(&1.name == "trace-list-runs"))
-
-    assert {:ok, %{"items" => [%{"source" => "private"}]}} = list_runs.callback.(%{})
-  end
-
-  test "log.core queries the granted source from a mission without workflow inheritance" do
-    {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
-    {:ok, source_sink} = EventSink.start(:normal, limits, run_id: "source-run")
-    run_kernel(source_sink, limits)
-
-    {:ok, trace_capabilities} = TraceCapability.new(source: source_sink)
-    {:ok, kernel_component} = Library.component("kernel")
-    {:ok, workflow_bundle} = Kernel.compile_bundle([kernel_component])
-    {:ok, log_components} = Library.resolve_components([{:library, "log.core"}])
-    {:ok, mission_bundle} = Kernel.compile_bundle(log_components)
-    {:ok, workflow} = WorkflowEnvironment.new(bundle: workflow_bundle)
-
-    {:ok, mission} =
-      MissionEnvironment.new(bundle: mission_bundle, capabilities: trace_capabilities)
-
-    {:ok, run_sink} = EventSink.start(:normal, limits, run_id: "query-run")
-
-    {:ok, config} =
-      RunConfig.new(
-        workflow_environment: workflow,
-        missions: %{"default" => mission},
-        input: %{},
-        limits: limits,
-        event_sink: run_sink
-      )
-
-    assert {:ok, %{value: %{"outcome" => "returned", "value" => %{"items" => [metadata]}}}} =
-             Kernel.run(
-               ~S|(return (kernel/eval "default" (program (return (log/runs {"limit" 1})))))|,
-               config
-             )
-
-    assert metadata["run_id"] == "source-run"
-
-    {:ok, workflow_only_sink} =
-      EventSink.start(:normal, limits, run_id: "query-run-workflow-only")
-
-    {:ok, workflow_only_config} =
-      RunConfig.new(
-        workflow_environment: workflow,
-        missions: %{"default" => mission},
-        input: %{},
-        limits: limits,
-        event_sink: workflow_only_sink
-      )
-
-    assert {:error, %{kind: :workflow_failed}} =
-             Kernel.run("(return (tool/trace-list-runs {}))", workflow_only_config)
   end
 
   @tag :tmp_dir
@@ -755,45 +584,6 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   end
 
   @tag :tmp_dir
-  test "file and directory grants reject malformed, duplicate, changed, and oversized sources", %{
-    tmp_dir: directory
-  } do
-    first = Path.join(directory, "a.jsonl")
-    second = Path.join(directory, "b.jsonl")
-    malformed = Path.join(directory, "c.jsonl")
-
-    File.write!(first, jsonl_event("first", 1, "run-started"))
-    File.write!(second, jsonl_event("second", 1, "run-started"))
-
-    {:ok, capabilities} = TraceCapability.new(source: {:directory, directory})
-    list_runs = Enum.find(capabilities, &(&1.name == "trace-list-runs"))
-
-    assert {:ok, %{"items" => items}} = list_runs.callback.(%{"limit" => 1})
-    assert length(items) == 1
-
-    assert {:ok, %{"next_cursor" => cursor}} = list_runs.callback.(%{"limit" => 1})
-    assert is_binary(cursor)
-
-    File.write!(second, jsonl_event("changed", 1, "run-started"))
-
-    assert {:error, %{kind: :invalid_request, details: "trace source changed"}} =
-             list_runs.callback.(%{"limit" => 1, "cursor" => cursor})
-
-    File.write!(malformed, ~s({"schema_version":2,"schema_version":2}\n))
-
-    assert {:error, %{kind: :invalid_request, details: "malformed trace source"}} =
-             list_runs.callback.(%{})
-
-    assert {:ok, file_capabilities} =
-             TraceCapability.new(source: {:file, first}, max_source_bytes: 1)
-
-    file_runs = Enum.find(file_capabilities, &(&1.name == "trace-list-runs"))
-
-    assert {:error, %{kind: :invalid_request, details: "trace source limit exceeded"}} =
-             file_runs.callback.(%{})
-  end
-
-  @tag :tmp_dir
   test "cursors are bound to their operation and filters", %{tmp_dir: directory} do
     File.write!(Path.join(directory, "a.jsonl"), jsonl_event("first", 1, "run-started"))
     File.write!(Path.join(directory, "b.jsonl"), jsonl_event("second", 1, "run-started"))
@@ -1115,22 +905,6 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
 
     assert {:ok, %{"items" => [%{"run_id" => "time"}]}} =
              TraceLog.query(trace_log, :list_runs, %{"to" => "2026-07-12T12:00:00.10Z"})
-  end
-
-  defp run_kernel(sink, limits) do
-    {:ok, workflow} = WorkflowEnvironment.new([])
-    {:ok, mission} = MissionEnvironment.new([])
-
-    {:ok, config} =
-      RunConfig.new(
-        workflow_environment: workflow,
-        missions: %{"default" => mission},
-        input: %{},
-        limits: limits,
-        event_sink: sink
-      )
-
-    assert {:ok, _result} = Kernel.run("(return 42)", config)
   end
 
   defp jsonl_event(run_id, sequence, type) do

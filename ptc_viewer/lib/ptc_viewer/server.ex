@@ -253,7 +253,7 @@ defmodule PtcViewer.Server do
 
   defp pin_inspection(path, adapter, trace_dir) when is_binary(path) and is_atom(adapter) do
     if Code.ensure_loaded?(adapter) and function_exported?(adapter, :pin_inspection, 2) and
-         function_exported?(adapter, :inspection, 2) do
+         function_exported?(adapter, :conversation, 2) do
       with {:ok, source} <-
              adapter
              |> apply(:pin_inspection, [Path.expand(path), {:directory, trace_dir}])

@@ -145,7 +145,7 @@ defmodule PtcViewer.ReplRouterTest do
       |> call_router(opts)
       |> response_body()
 
-    assert template["template"]["source"] == ~s[(log/turns "run-1" {})]
+    assert template["template"]["source"] == ~s[(analysis/activity "run-1" {})]
 
     reset = mutation(:post, "/api/repl/reset", %{}, session_id, nonce) |> call_router(opts)
     reset_body = response_body(reset)
@@ -188,7 +188,7 @@ defmodule PtcViewer.ReplRouterTest do
 
     assert html.status == 200
     assert html.resp_body =~ "ptc-viewer-config"
-    refute html.resp_body =~ "log-analysis-v2"
+    refute html.resp_body =~ "run-analysis-v1"
     refute html.resp_body =~ "source_limit_bytes"
     refute html.resp_body =~ "test_pid"
 

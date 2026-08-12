@@ -78,7 +78,7 @@ Requirements validate authority; they never create it.
 
 ## Select a shipped prelude
 
-Shipped libraries such as `runtime`, `cap`, `kernel`, `llm`, `fs`, `log.core`,
+Shipped libraries such as `runtime`, `cap`, `kernel`, `llm`, `fs`, `analysis`,
 and the agent and result libraries are selected by ID rather than copied into
 the project:
 
@@ -105,14 +105,11 @@ components. The analysis stack is a concrete example:
 | Component | Purpose |
 | --- | --- |
 | `cap` | Fail-safe capability-envelope handling and bounded cursor traversal |
-| `log.core` | One-page canonical trace queries |
-| `log.analysis` | Bounded whole-result trace traversal |
-| `inspection.core` | One-page and singular private inspection queries |
-| `inspection.analysis` | Bounded whole-result private inspection traversal |
+| `analysis` | Six question-shaped public/private run-analysis operations |
 
-`log.core` and `inspection.core` depend on `cap`; each analysis layer depends
-on its matching core component and on `cap`. This keeps each helper in one
-place without granting new host capabilities. Adding an installed dependency
+`analysis` depends on `cap`. Its Elixir read model joins validated canonical
+and private snapshots; the Lisp layer only unwraps the six bounded semantic
+capabilities. Adding an installed dependency
 does widen the resolved bundle and its callable namespaces, so fixed profiles
 pin the complete resolved component list and version user-visible surface
 changes.

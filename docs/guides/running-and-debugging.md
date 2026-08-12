@@ -576,23 +576,23 @@ limits, and lifecycle details.
 
 Normal traces contain bounded operational events and omit prompts, model
 responses, capability arguments/results, and generated source. Query an
-immutable directory capture through the fixed log-analysis profile:
+immutable directory capture through the fixed run-analysis profile:
 
 ```console
 mix ptc repl \
-  --profile log-analysis-v2 \
+  --profile run-analysis-v1 \
   --resource traces=traces \
-  -e '(log/runs {})' \
-  -e '(log/counters {})'
+  -e '(analysis/runs {})' \
+  -e '(analysis/overview "run-id")'
 ```
 
 Useful functions are:
 
 ```clojure
-(log/runs {})
-(log/run "run-id")
-(log/turns "run-id" {"limit" 100})
-(log/counters {})
+(analysis/runs {})
+(analysis/overview "run-id")
+(analysis/activity "run-id" {"limit" 100})
+(analysis/failure "run-id" {"limit" 100})
 ```
 
 The captured files, session code, results, and analysis trace have independent
@@ -630,9 +630,24 @@ creates correlated canonical and inspection artifacts without a live model.
 Canonical traces answer *what happened* without retaining private content. The
 inspection artifact answers *what the model saw and wrote*. It is created with
 owner-only permissions and contains the full request, response, generated
-source, and capability payloads. The log-analysis REPL cannot read or join this
-private data by design; use the development Viewer below or the private
-inspection profile in the [Kernel REPL guide](kernel-repl.md).
+source, and capability payloads. Use the semantic Viewer below, the private
+run-analysis profile, or the one-shot transcript command:
+
+```console
+ptc transcript RUN_ID \
+  --traces tmp/traces \
+  --inspection tmp/inspection \
+  --private-unattended \
+  --private-output tmp/transcript.private.json
+```
+
+The trace, inspection, and private-output directories must satisfy the private
+analysis separation and owner checks described in the Kernel REPL guide.
+Failures are machine-distinguishable on stderr as
+`error: transcript/CODE: ...`; codes distinguish unavailable or changed
+sources, unsupported schemas, ambiguous or incomplete evidence, result limits,
+destination failures, and internal failures. No partial output file is
+published.
 
 In one verified `03-file-agent` run, the request contained four relevant parts:
 
@@ -680,7 +695,7 @@ metadata. Use `--port` to choose a port instead of the default 4123, and
 `--no-open` when running on a remote machine.
 
 The Viewer binds to loopback, pins the selected inspection file, and can enable
-a bounded log-analysis REPL over an immutable trace capture. It is currently a
+a bounded run-analysis REPL over an immutable trace capture. It is currently a
 development/test path dependency and is not included in the published Hex
 package. Treat this command as source-checkout tooling until standalone Viewer
 packaging is released. If the selected inspection artifact uses an unsupported

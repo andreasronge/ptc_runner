@@ -11,16 +11,16 @@ defmodule PtcRunner.ReplFrontend do
       ptc repl --manifest ptc.json
       ptc repl --manifest ptc.json --host-config ptc-host.json
       ptc repl --manifest ptc.json --trace trace.jsonl
-      ptc repl --profile log-analysis-v2 --resource traces=tmp/traces
-      ptc repl --profile inspection-analysis-v2 \
+      ptc repl --profile run-analysis-v1 --resource traces=tmp/traces
+      ptc repl --profile private-run-analysis-v1 \
         --resource traces=tmp/traces \
         --resource inspection=tmp/inspection \
         --private-terminal
-      ptc repl --profile inspection-analysis-v2 \
+      ptc repl --profile private-run-analysis-v1 \
         --resource traces=tmp/traces \
         --resource inspection=tmp/inspection \
-        --private-unattended --format jsonl -e '(inspection/runs {})'
-      ptc repl --describe-profile log-analysis-v2
+        --private-unattended --format jsonl -e '(analysis/runs {})'
+      ptc repl --describe-profile run-analysis-v1
 
   Options:
 
@@ -35,8 +35,10 @@ defmodule PtcRunner.ReplFrontend do
     * `--resource NAME=VALUE` — supply a required profile resource; repeatable;
     * `--session-trace-dir` — existing output directory for a profile session's
       separate canonical trace;
+    * `--output` / `--private-output` — atomically publish the value of exactly
+      one non-interactive public/private profile evaluation;
     * `--private-terminal` — explicitly authorize an attached terminal as the
-      private output sink required by `inspection-analysis-v2`;
+      private output sink required by `private-run-analysis-v1`;
     * `--private-unattended` — explicitly authorize this command's own streams
       as that sink instead, admitting `-e`/`--load`/script/stdin and
       `--format jsonl`. Mutually exclusive with `--private-terminal`;
@@ -75,6 +77,7 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.ManifestRepl
+  alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Registry
@@ -309,10 +312,10 @@ defmodule PtcRunner.ReplFrontend do
     do: "selected profile does not allow --continue-on-error"
 
   defp profile_frontend_error(:private_terminal_required),
-    do: "inspection-analysis-v2 requires --private-terminal"
+    do: "private-run-analysis-v1 requires --private-terminal"
 
   defp profile_frontend_error(:interactive_terminal_required),
-    do: "inspection-analysis-v2 requires attached stdin and stdout terminals"
+    do: "private-run-analysis-v1 requires attached stdin and stdout terminals"
 
   defp profile_frontend_error(:private_terminal_unsupported),
     do: "--private-terminal is supported only by a private analysis profile"
@@ -323,10 +326,24 @@ defmodule PtcRunner.ReplFrontend do
   defp profile_frontend_error(_reason), do: "invalid profile command"
 
   defp run_profile_session(opts, arguments) do
+    case reserve_profile_result(opts) do
+      {:ok, result_handle} ->
+        try do
+          run_profile_session(opts, arguments, result_handle)
+        after
+          if result_handle, do: PublicationHandle.discard(result_handle)
+        end
+
+      {:error, _reason} ->
+        command_error(opts, :cli, "profile result destination unavailable")
+    end
+  end
+
+  defp run_profile_session(opts, arguments, result_handle) do
     with {:ok, recipe} <- AnalysisProfileRegistry.fetch(opts[:profile]),
          {:ok, resources} <- profile_resources(opts, recipe),
          {:ok, output_directory, temporary?} <- profile_output_directory(opts) do
-      case separate_directories(Map.values(resources), output_directory) do
+      case separate_directories(Map.values(resources), output_directory, result_handle) do
         {:ok, output_identity} ->
           start_profile_session(
             opts,
@@ -334,7 +351,8 @@ defmodule PtcRunner.ReplFrontend do
             resources,
             output_directory,
             temporary?,
-            output_identity
+            output_identity,
+            result_handle
           )
 
         {:error, message} ->
@@ -343,6 +361,15 @@ defmodule PtcRunner.ReplFrontend do
       end
     else
       {:error, category, message} -> command_error(opts, category, message)
+    end
+  end
+
+  defp reserve_profile_result(opts) do
+    case {opts[:output], opts[:private_output]} do
+      {nil, nil} -> {:ok, nil}
+      {path, nil} when is_binary(path) -> PublicationHandle.reserve(path, :result, 0o600)
+      {nil, path} when is_binary(path) -> PublicationHandle.reserve(path, :result, 0o600)
+      _ -> {:error, :invalid_destination}
     end
   end
 
@@ -438,13 +465,23 @@ defmodule PtcRunner.ReplFrontend do
     _exception -> {:error, :setup, "could not create a private session trace directory"}
   end
 
-  defp separate_directories(input_directories, output_directory) do
+  defp separate_directories(input_directories, output_directory, result_handle) do
     with {:ok, output} <- AnalysisDirectory.resolve(output_directory),
          {:ok, inputs} <- AnalysisDirectory.resolve_all(input_directories),
-         true <- AnalysisDirectory.pairwise_separate?([output | inputs]) do
+         {:ok, result_outputs} <- result_output_directories(result_handle),
+         true <- AnalysisDirectory.pairwise_separate?([output | result_outputs ++ inputs]) do
       {:ok, output.identity}
     else
       _ -> {:error, "input and session trace directories must be physically separate"}
+    end
+  end
+
+  defp result_output_directories(nil), do: {:ok, []}
+
+  defp result_output_directories(handle) do
+    case handle |> PublicationHandle.path() |> Path.dirname() |> AnalysisDirectory.resolve() do
+      {:ok, directory} -> {:ok, [directory]}
+      {:error, _reason} -> {:error, :invalid_result_directory}
     end
   end
 
@@ -454,7 +491,8 @@ defmodule PtcRunner.ReplFrontend do
          resources,
          output_directory,
          temporary?,
-         output_identity
+         output_identity,
+         result_handle
        ) do
     builder_options =
       [expected_destination_identity: output_identity]
@@ -472,7 +510,7 @@ defmodule PtcRunner.ReplFrontend do
         try do
           present_profile_started(opts, info)
           state = evaluate_profile_mode(session, opts, arguments)
-          finish_profile_session(session, opts, state, trace_path)
+          finish_profile_session(session, opts, state, trace_path, result_handle)
         rescue
           exception ->
             safe_profile_abort(session, :frontend_exception)
@@ -543,7 +581,7 @@ defmodule PtcRunner.ReplFrontend do
   end
 
   defp evaluate_profile_mode(session, opts, arguments) do
-    initial = %{next_index: 1, failed_indexes: [], failure: nil}
+    initial = %{next_index: 1, failed_indexes: [], failure: nil, result: :unavailable}
 
     case maybe_profile_load(session, opts, initial) do
       {:ok, state} -> run_profile_input(session, opts, arguments, state)
@@ -698,7 +736,11 @@ defmodule PtcRunner.ReplFrontend do
     case AnalysisSession.evaluate(session, source) do
       {:ok, result} ->
         present_profile_result(opts, index, input_kind, result)
-        next = %{state | next_index: index + 1}
+
+        next =
+          state
+          |> Map.put(:next_index, index + 1)
+          |> retain_profile_result(result)
 
         if result.status == :ok do
           {:ok, next}
@@ -726,14 +768,19 @@ defmodule PtcRunner.ReplFrontend do
 
   defp put_failure(state, _category, _message), do: state
 
-  defp finish_profile_session(session, opts, state, trace_path) do
+  defp retain_profile_result(state, %{status: :ok, value_available?: true, value: value}),
+    do: %{state | result: {:ok, value}}
+
+  defp retain_profile_result(state, _result), do: state
+
+  defp finish_profile_session(session, opts, state, trace_path, result_handle) do
     case close_profile_session(session) do
       {:ok, info} ->
         present_profile_closed(opts, info, trace_path)
 
         case state.failure do
           nil ->
-            :ok
+            publish_profile_result(result_handle, state.result)
 
           {category, message} ->
             command_error(opts, category, message, %{
@@ -745,6 +792,23 @@ defmodule PtcRunner.ReplFrontend do
         command_error(opts, :persistence, "profile trace persistence failed: #{reason}")
     end
   end
+
+  defp publish_profile_result(nil, _result), do: :ok
+
+  defp publish_profile_result(handle, {:ok, value}) do
+    with {:ok, encoded} <- value |> json_projection() |> DeterministicJSON.encode(),
+         :ok <- PublicationHandle.write(handle, encoded <> "\n"),
+         :ok <- PublicationHandle.sync(handle),
+         :ok <- PublicationHandle.publish(handle),
+         :ok <- PublicationHandle.release(handle) do
+      :ok
+    else
+      _ -> fail("profile result publication failed")
+    end
+  end
+
+  defp publish_profile_result(_handle, :unavailable),
+    do: fail("profile evaluation produced no publishable value")
 
   defp close_profile_session(session) do
     case AnalysisSession.close(session) do

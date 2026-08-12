@@ -17,18 +17,18 @@ defmodule PtcViewer.Api do
 
   def kernel_query(_config, _operation, _arguments), do: {:error, :invalid_query}
 
-  @doc "Delegates a private inspection read for one run to an explicitly configured host adapter."
-  def inspection(config, run_id) when is_list(config) and is_binary(run_id) do
+  @doc "Delegates semantic private conversation reconstruction to the configured host adapter."
+  def conversation(config, run_id) when is_list(config) and is_binary(run_id) do
     with store when is_pid(store) <- Keyword.get(config, :inspection_store),
          {:ok, source} <- PtcViewer.InspectionStore.fetch(store),
          adapter when not is_nil(adapter) <- Keyword.get(config, :inspection_adapter) do
-      safely_inspect(adapter, source, run_id)
+      safely_conversation(adapter, source, run_id)
     else
       _missing -> {:error, :unavailable}
     end
   end
 
-  def inspection(_config, _run_id), do: {:error, :invalid_inspection_query}
+  def conversation(_config, _run_id), do: {:error, :invalid_inspection_query}
 
   defp safely_query(adapter, source, operation, arguments) when is_function(adapter, 3) do
     adapter.(source, operation, arguments)
@@ -48,7 +48,7 @@ defmodule PtcViewer.Api do
     _kind, _reason -> {:error, :adapter_failure}
   end
 
-  defp safely_inspect(adapter, source, run_id) when is_function(adapter, 2) do
+  defp safely_conversation(adapter, source, run_id) when is_function(adapter, 2) do
     adapter.(source, run_id)
     |> normalize_adapter_result()
   rescue
@@ -57,8 +57,8 @@ defmodule PtcViewer.Api do
     _kind, _reason -> {:error, :adapter_failure}
   end
 
-  defp safely_inspect(adapter, source, run_id) when is_atom(adapter) do
-    apply(adapter, :inspection, [source, run_id])
+  defp safely_conversation(adapter, source, run_id) when is_atom(adapter) do
+    apply(adapter, :conversation, [source, run_id])
     |> normalize_adapter_result()
   rescue
     _exception -> {:error, :adapter_failure}
