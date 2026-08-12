@@ -165,6 +165,49 @@ evaluation. `agent.main/run` passes the nested `input.agent` map through with
 the same rule. An empty, non-string, or unknown selector fails without silently
 falling back to another mission.
 
+### Configure the shipped loop
+
+The configuration map passed to `agent.core` accepts these public options.
+`agent.main/run` reads the same options from the input's `agent` map.
+
+| Option | Default | Accepted value | Effect |
+| --- | --- | --- | --- |
+| `model` | installed default | string | Selects an installed workflow model alias. |
+| `mission` | `"default"` | non-empty string | Selects the mission whose API the model sees and evaluates against. |
+| `max_turns` | `4` | integer from 1 through 128 | Bounds model programs in this agent run. |
+| `max_program_chars` | `64000` | integer from 1 through 1,000,000 | Bounds one generated PTC-Lisp program. |
+| `max_observation_chars` | `2048` | integer from 1 through 65,536 | Bounds the untrusted body of one successful observation. |
+| `max_transcript_chars` | `262144` | integer from 1 through 1,000,000 | Bounds the JSON-encoded prospective provider request. |
+| `consolidate_at_turns_remaining` | omitted | integer from 1 through `max_turns` | Adds generic consolidation guidance at and below this remaining-turn count. |
+| `result_envelope` | `true` | boolean | On `agent.core/run` only, chooses the standard success envelope or the raw application value. |
+
+The model always receives its remaining budget; this visibility is not an
+option. The initial task and every retained continuation message contain the
+exact count, including the next program. The notice is normally last; after an
+unsafe effect it precedes the stronger instruction not to repeat that program.
+At one remaining turn the notice requires `return` or `fail`. On earlier turns,
+setting `consolidate_at_turns_remaining` adds a domain-blind instruction to
+prioritize synthesis and returning at and below the chosen count; omitting it
+leaves pacing decisions to the model.
+
+For example, this `agent.main/run` input gives the model 40 turns and asks it to
+start consolidating with 10 left:
+
+```json
+{
+  "task": "Complete the requested analysis.",
+  "agent": {
+    "max_turns": 40,
+    "consolidate_at_turns_remaining": 10
+  }
+}
+```
+
+The consolidation threshold must fit inside the effective turn budget. An
+invalid threshold fails before any provider request. The other numeric options
+retain their bounded defaults when an integer falls outside its accepted range;
+their declared signatures reject wrong types before the loop starts.
+
 A subordinate evaluation that is never admitted is one of those host failures.
 A run holds a single evaluation lease, but a concurrent `kernel/eval-source`
 queues behind it rather than being refused: agent loops under `pcalls`
@@ -196,13 +239,10 @@ limits stay enforced and available in the frozen structured inventory, but the
 default prompt does not render them; trusted workflow code can read that
 inventory through `kernel/mission-inventory`.
 
-The agent configuration defaults `max_observation_chars` to 2,048 and accepts
-values through 65,536 characters. The larger ceiling exists for bounded
-code/trace analysis where one observation may contain a substantial source
-fragment; it matches the maximum candidate-component source size. It does not
-change the default, transcript ceiling, provider byte limits, or Kernel memory
-limits. Values above 65,536 are invalid and fall back to the 2,048-character
-default.
+The larger `max_observation_chars` ceiling exists for bounded code or trace
+analysis where one observation may contain a substantial source fragment; it
+matches the maximum candidate-component source size. It does not change the
+default, transcript ceiling, provider byte limits, or Kernel memory limits.
 
 ## Select model access separately from task access
 

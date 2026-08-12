@@ -30,20 +30,22 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
       assert "agent.main/run" in prompt_refs
     end
 
-    test "agent exports advertise the optional mission selector" do
+    test "agent exports advertise their public configuration" do
       {:ok, components} = Library.components(agent_main_closure())
       {:ok, bundle} = Kernel.compile_bundle(components)
 
       signatures = Map.new(bundle.prelude.exports, &{&1.ref, &1.signature})
 
-      for ref <-
-            ~w(agent.core/run agent.core/run-value agent.core/run-outcome agent.core/run-result-value) do
+      for ref <- ~w(agent.core/run-value agent.core/run-outcome agent.core/run-result-value) do
         assert signatures[ref] ==
-                 "(task :string, cfg {model :string?, mission :string?}) -> :any"
+                 "(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any"
       end
 
+      assert signatures["agent.core/run"] ==
+               "(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?, result_envelope :bool?}) -> :any"
+
       assert signatures["agent.main/run"] ==
-               "(input {task :string, agent {model :string?, mission :string?}}) -> :any"
+               "(input {task :string, agent {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}}) -> :any"
     end
   end
 

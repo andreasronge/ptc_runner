@@ -9,7 +9,7 @@
   about, and adding a new application needs no change here. The application
   entry returns the model-authored value directly so a manifest result contract
   describes that value rather than agent.core's default success envelope."
-  {:signature "(input {task :string, agent {model :string?, mission :string?}}) -> :any"}
+  {:signature "(input {task :string, agent {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}}) -> :any"}
   [input]
   (return
     (agent.core/run-result-value
