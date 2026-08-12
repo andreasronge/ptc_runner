@@ -1,19 +1,12 @@
 defmodule PtcViewer.RouterTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   import Plug.Test
   import Plug.Conn
 
   @moduletag :router
+  @moduletag :tmp_dir
 
-  setup do
-    trace_dir = Path.join(System.tmp_dir!(), "ptc_viewer_test_traces_#{:rand.uniform(100_000)}")
-
-    File.mkdir_p!(trace_dir)
-
-    on_exit(fn ->
-      File.rm_rf!(trace_dir)
-    end)
-
+  setup %{tmp_dir: trace_dir} do
     %{trace_dir: trace_dir, router_opts: [trace_dir: trace_dir, kernel_trace_adapter: nil]}
   end
 

@@ -11,11 +11,11 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
 
   The refc payloads below are >64-byte binaries — the kind
   `include_shared_binaries: true` bills against the heap limit. Measured
-  amplification of the baseline over the raw payload (2026-06-11, OTP 28):
+  amplification of the baseline over the raw payload (2026-08-12, OTP 29):
   `memory:` ≈ 1.7×; tool grants ≈ 3.5× per closure capturing the data.
   The tool-grant regressions use an explicit 8 MB program budget and assert
-  that the measured baseline exceeds it; other cases retain the 10 MB default.
-  Each grant fits its default `4 × max_heap` setup ceiling after re-baselining.
+  that the measured baseline exceeds it, while retaining margin below the
+  default `4 × max_heap` setup ceiling; other cases retain the 10 MB default.
   The ceiling is checked at GC time and counts GC workspace (~2× the live
   baseline), so its practical capacity is about half its nominal value.
   """
@@ -42,8 +42,8 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
   end
 
   describe "host-granted data is excluded from the program budget (F3 regression)" do
-    test "tools closing over 2MB of refc binaries: trivial program passes after re-baseline" do
-      tools = grant_over(refc_rows(6_667, 300))
+    test "tools closing over 4MB of refc binaries: trivial program passes after re-baseline" do
+      tools = grant_over(refc_rows(4_000, 1_000))
 
       assert {:ok, step} =
                Lisp.run("(+ 1 2)", tools: tools, max_heap: @rebaseline_max_heap, timeout: 5_000)
@@ -52,8 +52,8 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
       assert step.usage.baseline_bytes > @rebaseline_max_heap * 8
     end
 
-    test "tools closing over 2MB of refc binaries: grouping passes after re-baseline" do
-      tools = grant_over(refc_rows(6_667, 300))
+    test "tools closing over 4MB of refc binaries: grouping passes after re-baseline" do
+      tools = grant_over(refc_rows(4_000, 1_000))
 
       program = """
       (let [rows (tool/rows {})

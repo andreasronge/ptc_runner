@@ -256,9 +256,9 @@ Install hooks once per clone with `./scripts/install-hooks.sh`; linked
 worktrees share them. The tracked pre-push hook runs the complete push gate,
 including `mix prepush`, and validates documentation before longer stages.
 Run that Mix alias directly only to diagnose its slower audit, Dialyzer, and
-unused-dependency checks or when hooks are unavailable. Use
-`PTC_PRE_PUSH_MAX_CASES=2 git push` on a resource-constrained machine instead
-of bypassing the gate.
+unused-dependency checks or when hooks are unavailable. The hook retains the
+project's scheduler-count ExUnit concurrency so load-sensitive failures remain
+visible locally.
 
 ## License
 

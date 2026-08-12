@@ -1,17 +1,9 @@
 defmodule PtcViewer.ApiTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
-  setup do
-    trace_dir = Path.join(System.tmp_dir!(), "ptc_api_test_traces_#{:rand.uniform(100_000)}")
+  @moduletag :tmp_dir
 
-    File.mkdir_p!(trace_dir)
-
-    on_exit(fn ->
-      File.rm_rf!(trace_dir)
-    end)
-
-    %{trace_dir: trace_dir}
-  end
+  setup %{tmp_dir: trace_dir}, do: %{trace_dir: trace_dir}
 
   test "kernel_query delegates the explicit directory source to the host adapter", %{
     trace_dir: trace_dir

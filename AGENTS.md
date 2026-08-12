@@ -68,9 +68,9 @@ how it was verified.
   for `conformance_inventory.json` — then stage the result. Do not run
   `mix prepush` immediately before an ordinary push;
   invoke it directly only for diagnosis or when hooks are unavailable. PR CI
-  runs the same checks as individual steps. On a resource-constrained machine,
-  `PTC_PRE_PUSH_MAX_CASES=2 git push` keeps every gate enabled while reducing
-  ExUnit concurrency.
+  runs the same checks as individual steps. The test suite uses
+  `System.schedulers_online()` concurrent cases; do not reduce that pressure
+  to make a failing push pass.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`;
   the MCP tests also require the local server in the
   [development setup guide](docs/development-setup.md)).
@@ -108,9 +108,9 @@ that bite mid-task: never regenerate `priv/semantic_build_projection.json` on a
 feature branch, and never hand-merge its hashes.
 
 If a timing-sensitive test fails only in the full suite, rerun the exact file
-and line reported by ExUnit. Do not bypass the hook; use
-`PTC_PRE_PUSH_MAX_CASES=2 git push` to confirm the complete gate under lower
-scheduler pressure, and fix reproducible failures.
+and line reported by ExUnit. Do not bypass or throttle the hook; reproduce the
+reported seed and fix shared-state races, brittle deadlines, or other
+load-sensitive failures.
 
 ## Project Structure
 
