@@ -278,7 +278,11 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
       end
     end
 
-    test "an interned name binds as a fn param, let binding and loop binding" do
+    # Acceptance only: parsing one form gives params and their references the
+    # same representation, so this passes with or without the scope fix. The
+    # representation mixing itself is covered by the `undefined_vars/2` tests
+    # in `PtcRunner.LispTest`.
+    test "interned names are accepted as fn params and let/loop bindings" do
       assert {:ok, _} =
                Compiler.compile("""
                (ns t "Interned-name probe." {:visibility :prompt})
