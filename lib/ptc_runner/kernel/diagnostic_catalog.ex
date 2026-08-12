@@ -411,6 +411,38 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   def subject_operations(_phase, _code), do: []
 
+  @doc false
+  @spec doctor_attributable_rows() :: [row()]
+  def doctor_attributable_rows do
+    operations = [:local, :selection, :credentials, :authorization, :connectivity]
+
+    Enum.filter(rows(), fn row ->
+      row.phase in [:local_preflight, :active_preflight, :provider_acquisition] and
+        subject_policy(row.phase, row.code) != :forbidden and
+        Enum.any?(subject_operations(row.phase, row.code), fn subject_operation ->
+          doctor_report_operation(subject_operation) in operations
+        end)
+    end)
+  end
+
+  @doc false
+  @spec doctor_failure_codes_by_operation() :: %{atom() => [atom()]}
+  def doctor_failure_codes_by_operation do
+    operations = [:local, :selection, :credentials, :authorization, :connectivity]
+
+    for row <- doctor_attributable_rows(),
+        subject_operation <- subject_operations(row.phase, row.code),
+        report_operation = doctor_report_operation(subject_operation),
+        report_operation in operations,
+        reduce: %{} do
+      codes -> Map.update(codes, report_operation, [row.code], &[row.code | &1])
+    end
+    |> Map.new(fn {operation, codes} -> {operation, codes |> Enum.uniq() |> Enum.sort()} end)
+  end
+
+  defp doctor_report_operation(:acquisition), do: :connectivity
+  defp doctor_report_operation(operation), do: operation
+
   @spec source_kinds(phase(), atom()) :: [atom()]
   def source_kinds(:host, :installation_revision_missing), do: []
   def source_kinds(:host, _code), do: [:host]

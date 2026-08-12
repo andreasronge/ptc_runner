@@ -65,6 +65,11 @@ defmodule PtcRunner.Kernel.CommandContract do
   @result_cleanup_codes Map.fetch!(@codes_by_phase, :result_cleanup)
   @provider_cleanup_codes @result_cleanup_codes --
                             [:result_invalid, :result_contract_failed, :result_limit_exceeded]
+  @doctor_failure_codes_by_operation DiagnosticCatalog.doctor_failure_codes_by_operation()
+                                     |> Map.new(fn {operation, codes} ->
+                                       {Atom.to_string(operation),
+                                        Enum.map(codes, &Atom.to_string/1)}
+                                     end)
   @version Mix.Project.config() |> Keyword.fetch!(:version)
   @doctor_notice "doctor --connect may perform one or more real provider requests and may incur provider cost"
   @spec schema() :: map()
@@ -78,6 +83,7 @@ defmodule PtcRunner.Kernel.CommandContract do
           error_envelope(command, diagnostic_rows(mode), provider_activity, compound?)
         end) ++
           [
+            doctor_failure_envelope(),
             run_error_envelope(
               "unclassified",
               ~w(not_requested not_written),
@@ -114,7 +120,7 @@ defmodule PtcRunner.Kernel.CommandContract do
               "private",
               closed(~w(result_class), %{"result_class" => %{"const" => "private"}})
             ),
-            success_envelope("doctor", doctor_result()),
+            success_envelope("doctor", doctor_success_result()),
             success_envelope("models", models_result())
           ],
       "$defs" => %{
@@ -165,7 +171,8 @@ defmodule PtcRunner.Kernel.CommandContract do
   def valid_envelope?(envelope) do
     with true <- JSONValue.value?(envelope),
          {:ok, root} <- JSV.build(schema(), atoms: false, warnings: :silent),
-         {:ok, _validated} <- JSV.validate(envelope, root, cast: false) do
+         {:ok, _validated} <- JSV.validate(envelope, root, cast: false),
+         true <- valid_envelope_semantics?(envelope) do
       true
     else
       _invalid -> false
@@ -173,6 +180,24 @@ defmodule PtcRunner.Kernel.CommandContract do
   rescue
     _exception -> false
   end
+
+  defp valid_envelope_semantics?(%{
+         "command" => "doctor",
+         "status" => "error",
+         "error" => primary,
+         "secondary_errors" => secondary,
+         "result" => result
+       }),
+       do: valid_doctor_failure_result?(result, primary, secondary)
+
+  defp valid_envelope_semantics?(%{
+         "command" => "doctor",
+         "status" => "ok",
+         "result" => result
+       }),
+       do: valid_success_semantics?(:doctor, result)
+
+  defp valid_envelope_semantics?(_envelope), do: true
 
   @doc false
   @spec valid_success_result?(atom(), term()) :: boolean()
@@ -207,7 +232,8 @@ defmodule PtcRunner.Kernel.CommandContract do
         %{
           "checks" => checks,
           "model_aliases" => model_aliases,
-          "provider_activity" => provider_activity
+          "provider_activity" => provider_activity,
+          "readiness" => readiness
         }
       ) do
     case checks do
@@ -219,24 +245,35 @@ defmodule PtcRunner.Kernel.CommandContract do
       ] ->
         keys = Enum.map(provider_checks, &doctor_provider_key/1)
 
-        model_aliases_valid?(model_aliases) and
-          Enum.all?(keys, &is_tuple/1) and
-          keys == Enum.sort(keys) and
-          keys == Enum.uniq(keys) and
-          provider_groups_start_with_local?(keys) and
-          provider_groups_match_application?(keys, application_check) and
-          (doctor_mode_consistent?(
-             :default,
-             application_check,
-             provider_checks,
-             provider_activity
-           ) or
-             doctor_mode_consistent?(
-               :connect,
-               application_check,
-               provider_checks,
-               provider_activity
-             ))
+        common =
+          model_aliases_valid?(model_aliases) and
+            Enum.all?(keys, &is_tuple/1) and
+            keys == Enum.sort(keys) and
+            keys == Enum.uniq(keys) and
+            provider_groups_start_with_local?(keys) and
+            provider_groups_match_application?(keys, application_check)
+
+        common and
+          case readiness do
+            "unverified" ->
+              doctor_mode_consistent?(
+                :default,
+                application_check,
+                provider_checks,
+                provider_activity
+              )
+
+            "ready" ->
+              doctor_mode_consistent?(
+                :connect,
+                application_check,
+                provider_checks,
+                provider_activity
+              )
+
+            _other ->
+              false
+          end
 
       _invalid ->
         false
@@ -259,6 +296,108 @@ defmodule PtcRunner.Kernel.CommandContract do
       do: true
 
   def valid_success_semantics?(_command, _result), do: false
+
+  @doc false
+  @spec valid_doctor_failure_result?(term(), term(), term()) :: boolean()
+  def valid_doctor_failure_result?(result, primary, secondary)
+      when is_map(result) and is_map(primary) and is_list(secondary) do
+    with true <- valid_doctor_result_shape?(result),
+         %{
+           "checks" => checks,
+           "model_aliases" => model_aliases,
+           "provider_activity" => provider_activity,
+           "readiness" => "failed"
+         } <- result,
+         [
+           %{"name" => "runtime"},
+           %{"name" => "application", "status" => "pass", "code" => "valid"} =
+             application_check,
+           %{"name" => "viewer"}
+           | provider_checks
+         ] <- checks,
+         keys = Enum.map(provider_checks, &doctor_provider_key/1),
+         true <- model_aliases_valid?(model_aliases),
+         true <- Enum.all?(keys, &is_tuple/1),
+         true <- keys == Enum.sort(keys) and keys == Enum.uniq(keys),
+         true <- provider_groups_start_with_local?(keys),
+         true <- provider_groups_match_application?(keys, application_check),
+         true <- doctor_failure_checks_consistent?(provider_checks, primary),
+         true <- provider_activity == diagnostic_activity([primary | secondary]) do
+      true
+    else
+      _invalid -> false
+    end
+  rescue
+    _exception -> false
+  end
+
+  def valid_doctor_failure_result?(_result, _primary, _secondary), do: false
+
+  defp valid_doctor_result_shape?(result) do
+    with true <- JSONValue.value?(result),
+         {:ok, root} <- JSV.build(doctor_failure_result(), atoms: false, warnings: :silent),
+         {:ok, _validated} <- JSV.validate(result, root, cast: false) do
+      true
+    else
+      _invalid -> false
+    end
+  end
+
+  defp doctor_failure_checks_consistent?(checks, primary) do
+    with {:ok, expected_name, expected_code} <- failure_row_identity(primary),
+         [failed] <- Enum.filter(checks, &(&1["status"] == "fail")),
+         true <-
+           failed == %{
+             "name" => expected_name,
+             "status" => "fail",
+             "code" => expected_code
+           } do
+      Enum.all?(checks, fn check ->
+        check == failed or indeterminate_provider_check?(check) or static_connect_check?(check)
+      end)
+    else
+      _invalid -> false
+    end
+  end
+
+  defp failure_row_identity(%{
+         "code" => code,
+         "subject" => %{"kind" => "provider", "name" => name, "operation" => operation}
+       }) do
+    report_operation = if(operation == "acquisition", do: "connectivity", else: operation)
+
+    if report_operation in ~w(local selection credentials authorization connectivity),
+      do: {:ok, "provider/#{name}/#{report_operation}", code},
+      else: :error
+  end
+
+  defp failure_row_identity(_primary), do: :error
+
+  defp indeterminate_provider_check?(%{
+         "status" => "skipped",
+         "code" => "not_verified_due_to_failure"
+       }),
+       do: true
+
+  defp indeterminate_provider_check?(_check), do: false
+
+  defp static_connect_check?(%{"name" => name, "status" => "pass", "code" => "available"}),
+    do: String.ends_with?(name, "/local")
+
+  defp static_connect_check?(%{
+         "name" => name,
+         "status" => "pass",
+         "code" => "declarative"
+       }),
+       do: String.ends_with?(name, "/selection")
+
+  defp static_connect_check?(_check), do: false
+
+  defp diagnostic_activity(diagnostics) do
+    if Enum.all?(diagnostics, &is_boolean(&1["provider_activity"])),
+      do: Enum.any?(diagnostics, & &1["provider_activity"]),
+      else: :invalid
+  end
 
   defp model_aliases_valid?(aliases) when is_list(aliases) do
     names = Enum.map(aliases, &Map.get(&1, "alias"))
@@ -494,6 +633,25 @@ defmodule PtcRunner.Kernel.CommandContract do
             do: %{"type" => "array", "maxItems" => 6, "items" => diagnostic},
             else: %{"const" => []}
           )
+      })
+    )
+  end
+
+  defp doctor_failure_envelope do
+    primary_diagnostic = diagnostic_schema(DiagnosticCatalog.doctor_attributable_rows())
+    secondary_diagnostic = diagnostic_schema(diagnostic_rows({:doctor, :connect}))
+
+    closed(
+      ~w(schema_version command status run_ref error secondary_errors result),
+      base_properties(["doctor"], "error")
+      |> Map.merge(%{
+        "error" => primary_diagnostic,
+        "secondary_errors" => %{
+          "type" => "array",
+          "maxItems" => 6,
+          "items" => secondary_diagnostic
+        },
+        "result" => doctor_failure_result()
       })
     )
   end
@@ -998,26 +1156,31 @@ defmodule PtcRunner.Kernel.CommandContract do
     )
   end
 
-  defp doctor_result do
+  defp doctor_success_result, do: doctor_result(:success)
+  defp doctor_failure_result, do: doctor_result(:failure)
+
+  defp doctor_result(mode) when mode in [:success, :failure] do
+    application_pairs =
+      if mode == :success,
+        do: [{"pass", "valid"}, {"skipped", "not_requested"}],
+        else: [{"pass", "valid"}]
+
     fixed = [
       doctor_fixed_check_schema("runtime", [{"pass", "supported"}, {"warn", "unsupported"}]),
-      doctor_fixed_check_schema("application", [
-        {"pass", "valid"},
-        {"skipped", "not_requested"}
-      ]),
+      doctor_fixed_check_schema("application", application_pairs),
       doctor_fixed_check_schema("viewer", [
         {"pass", "available"},
         {"warn", "optional_unavailable"}
       ])
     ]
 
-    closed(~w(checks model_aliases provider_activity), %{
+    closed(~w(checks model_aliases provider_activity readiness), %{
       "checks" => %{
         "type" => "array",
         "minItems" => 3,
         "maxItems" => 1_024,
         "prefixItems" => fixed,
-        "items" => doctor_provider_check_schema()
+        "items" => doctor_provider_check_schema(mode)
       },
       "model_aliases" => %{
         "type" => "array",
@@ -1038,11 +1201,16 @@ defmodule PtcRunner.Kernel.CommandContract do
           }
         }
       },
-      "provider_activity" => %{"type" => "boolean"}
+      "provider_activity" => %{"type" => "boolean"},
+      "readiness" =>
+        if(mode == :success,
+          do: %{"enum" => ~w(unverified ready)},
+          else: %{"const" => "failed"}
+        )
     })
   end
 
-  defp doctor_provider_check_schema do
+  defp doctor_provider_check_schema(mode) do
     providers = [
       {"local",
        [
@@ -1069,9 +1237,28 @@ defmodule PtcRunner.Kernel.CommandContract do
             "pattern" => "^provider/[a-z][a-z0-9._-]{0,127}/#{operation}$(?![\\s\\S])"
           }
 
+          pairs = doctor_check_pairs(mode, operation, pairs)
+
           Enum.map(pairs, &doctor_check_branch(name, &1))
         end)
     }
+  end
+
+  defp doctor_check_pairs(:success, _operation, pairs), do: pairs
+
+  defp doctor_check_pairs(:failure, operation, _success_pairs) do
+    static =
+      case operation do
+        "local" -> [{"pass", "available"}]
+        "selection" -> [{"pass", "declarative"}]
+        _other -> []
+      end
+
+    static ++
+      [{"skipped", "not_verified_due_to_failure"}] ++
+      Enum.map(Map.get(@doctor_failure_codes_by_operation, operation, []), fn code ->
+        {"fail", code}
+      end)
   end
 
   defp doctor_fixed_check_schema(name, pairs) do
@@ -1126,7 +1313,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp success_result_schema(:version), do: version_result_schema()
   defp success_result_schema(:init), do: init_result()
   defp success_result_schema(:validate), do: validate_result()
-  defp success_result_schema(:doctor), do: doctor_result()
+  defp success_result_schema(:doctor), do: doctor_success_result()
   defp success_result_schema(:models), do: models_result()
 
   defp nullable_ref(name),

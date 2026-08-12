@@ -132,6 +132,18 @@ defmodule PtcRunner.Kernel.CommandDoctor do
         provider_activity
       )
     else
+      {:finding, checks, %CommandDiagnostic{} = diagnostic, secondary} ->
+        doctor_failure(
+          arguments,
+          run_ref,
+          host,
+          catalog,
+          prepared,
+          checks,
+          diagnostic,
+          secondary
+        )
+
       {:error, %CommandDiagnostic{} = diagnostic} ->
         {:error, arguments_outcome(arguments, run_ref, diagnostic)}
 
@@ -163,7 +175,8 @@ defmodule PtcRunner.Kernel.CommandDoctor do
        CommandOutcome.success(mode, run_ref, %{
          "checks" => checks,
          "model_aliases" => aliases,
-         "provider_activity" => provider_activity
+         "provider_activity" => provider_activity,
+         "readiness" => readiness(mode)
        })}
     end
   rescue
@@ -171,6 +184,45 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   catch
     _kind, _reason -> connect_interrupted(arguments, run_ref, provider_activity)
   end
+
+  defp doctor_failure(
+         arguments,
+         run_ref,
+         host,
+         catalog,
+         prepared,
+         checks,
+         diagnostic,
+         secondary
+       ) do
+    provider_activity =
+      Enum.any?([diagnostic | secondary], & &1.provider_activity)
+
+    with {:ok, aliases} <- DoctorPlan.model_aliases(catalog, prepared) do
+      aliases = maybe_add_model_selectors(aliases, host, arguments.options)
+
+      result = %{
+        "checks" => checks,
+        "model_aliases" => aliases,
+        "provider_activity" => provider_activity,
+        "readiness" => "failed"
+      }
+
+      {:error, CommandOutcome.doctor_failure(run_ref, result, diagnostic, secondary)}
+    end
+  rescue
+    _exception ->
+      connect_interrupted(arguments, run_ref, diagnostic_activity(diagnostic, secondary))
+  catch
+    _kind, _reason ->
+      connect_interrupted(arguments, run_ref, diagnostic_activity(diagnostic, secondary))
+  end
+
+  defp readiness(:doctor), do: "unverified"
+  defp readiness({:doctor, :connect}), do: "ready"
+
+  defp diagnostic_activity(diagnostic, secondary),
+    do: Enum.any?([diagnostic | secondary], & &1.provider_activity)
 
   defp maybe_add_model_selectors(aliases, nil, _options), do: aliases
 
@@ -194,9 +246,14 @@ defmodule PtcRunner.Kernel.CommandDoctor do
     do: {:error, arguments_outcome(arguments, run_ref, projection_diagnostic(provider_activity))}
 
   defp connect_checks(host, catalog, prepared, run_ref, runtime) do
-    case DoctorPlan.new(catalog, prepared, DoctorEnvironment.facts(), :connect) do
-      {:ok, rows} -> connect_operation(host, catalog, prepared, rows, run_ref, runtime)
-      {:error, _reason} -> {:error, diagnostic(:internal, :internal_error)}
+    environment = DoctorEnvironment.facts()
+
+    case DoctorPlan.new(catalog, prepared, environment, :connect) do
+      {:ok, rows} ->
+        connect_operation(host, catalog, prepared, rows, environment, run_ref, runtime)
+
+      {:error, _reason} ->
+        {:error, diagnostic(:internal, :internal_error)}
     end
   end
 
@@ -205,12 +262,13 @@ defmodule PtcRunner.Kernel.CommandDoctor do
          _catalog,
          %PreparedRun{provider_declarations: []},
          rows,
+         _environment,
          _run_ref,
          _runtime
        ),
        do: connect_projection(rows, false)
 
-  defp connect_operation(host, catalog, prepared, rows, run_ref, runtime) do
+  defp connect_operation(host, catalog, prepared, rows, environment, run_ref, runtime) do
     with {:ok, services} <- runtime_services(host, runtime),
          {:ok, execution} <- ProviderExecution.new(catalog, services, []),
          {:ok, authority} <-
@@ -220,13 +278,13 @@ defmodule PtcRunner.Kernel.CommandDoctor do
              prepared.effective_event_policy,
              prepared.effective_data_class
            ) do
-      connect_settlement(rows, prepared, catalog, execution, authority)
+      connect_settlement(rows, prepared, catalog, environment, execution, authority)
     else
       {:error, _reason} -> {:error, diagnostic(:internal, :internal_error)}
     end
   end
 
-  defp connect_settlement(rows, prepared, catalog, execution, authority) do
+  defp connect_settlement(rows, prepared, catalog, environment, execution, authority) do
     case RunCoordinator.connect(prepared, authority, execution) do
       {:ok, result} ->
         case DoctorPlan.settle_connect(rows, result, prepared, catalog) do
@@ -238,7 +296,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
         end
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
-        {:error, diagnostic}
+        connect_failure_projection(rows, diagnostic, prepared, catalog, environment)
 
       {:error, %OwnerFailure{} = failure} ->
         {:error, connect_failure_diagnostic(failure)}
@@ -252,6 +310,16 @@ defmodule PtcRunner.Kernel.CommandDoctor do
     _kind, _reason -> {:error, active_diagnostic(:internal, :internal_error)}
   after
     PublicationAuthority.close(authority)
+  end
+
+  defp connect_failure_projection(rows, diagnostic, prepared, catalog, environment) do
+    with {:ok, settled} <-
+           DoctorPlan.settle_failure(rows, diagnostic, prepared, catalog, environment),
+         {:ok, checks} <- DoctorPlan.checks(settled) do
+      {:finding, checks, diagnostic, []}
+    else
+      {:error, _reason} -> {:error, diagnostic}
+    end
   end
 
   defp operation_diagnostic(:execution_session_unavailable),

@@ -52,6 +52,16 @@ provider connectivity must be checked without running the workflow.
 Use `--show-model-selectors` when doctor should also print safe model selectors;
 endpoint-bearing `openai-compat:` selectors remain omitted.
 
+Doctor results carry an explicit `readiness`. Plain doctor is `unverified`: it
+performs local checks but leaves provider-active rows skipped. A successful
+`--connect` report is `ready`. When an active diagnostic identifies one report
+row, doctor exits nonzero but still renders the JSON report with `readiness:
+"failed"`; the named envelope, when requested, also retains the complete
+diagnostic. Other pending rows say `not_verified_due_to_failure`, which means no
+sealed evidence was retained for them. Unattributable operation failures,
+cleanup failures, owner failures, and internal invariants remain ordinary fatal
+diagnostics rather than synthesized health findings.
+
 A fresh Mix invocation safely configures and starts a selected optional
 provider application only after the active provider lifecycle begins. A later `ptc run`
 invocation in the same VM reuses an already-running application as host-owned,

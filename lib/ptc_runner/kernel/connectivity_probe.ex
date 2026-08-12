@@ -36,9 +36,10 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
   #
   # ## Failure translation
   #
-  # A failure is reported through the closed diagnostic catalog, never as a
-  # doctor check row. Only the reason the shipped probe can produce is
-  # translated:
+  # A failure is reported authoritatively through the closed diagnostic catalog.
+  # The doctor command may additionally project an attributable diagnostic into
+  # its corresponding failed check row; subjectless operation timeouts remain
+  # diagnostic-only. Only the reason the shipped probe can produce is translated:
   #
   #   * `:active_preflight` / `:connectivity_unavailable` —
   #     `llm_connectivity_unavailable`

@@ -15,16 +15,23 @@ defmodule PtcRunner.Kernel.DoctorPlan do
   # `doctor --connect` runs all of them, so each becomes pending instead and is
   # settled from what the connect operation returned.
   #
-  # The closed result contract has no failing provider row in any mode, so this
-  # module cannot express one. A check that fails must fail the whole command
-  # with its catalogued diagnostic instead.
+  # A failed connect operation can be projected only when its closed diagnostic
+  # identifies one canonical row in the exact plan. Every other pending row is
+  # reported as unverified: the fail-fast operation retains no per-step success
+  # transcript, so a diagnostic cannot prove whether those checks ran.
 
+  alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.ConnectivityResult
+  alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
 
   @operations [:local, :selection, :credentials, :authorization, :connectivity]
   @modes [:default, :connect]
+
+  @failure_codes_by_operation DiagnosticCatalog.doctor_failure_codes_by_operation()
 
   # Every code a connect plan cannot hold: the two that say default doctor
   # declined the work rather than doing it, and the two an application-less plan
@@ -41,12 +48,30 @@ defmodule PtcRunner.Kernel.DoctorPlan do
 
   @type mode :: :default | :connect
   @type operation :: :local | :selection | :credentials | :authorization | :connectivity
-  @type settled :: {:pass | :warn | :skipped, atom()}
+  @type settled :: {:pass | :warn | :skipped | :fail, atom()}
   @type row ::
-          %{name: binary(), outcome: settled()}
-          | %{name: binary(), alias: binary(), operation: operation(), outcome: settled()}
-          | %{name: binary(), alias: binary(), operation: :local, outcome: :audited_local}
-          | %{name: binary(), alias: binary(), operation: operation(), outcome: :pending}
+          %{name: binary(), outcome: settled(), plan_binding: binary()}
+          | %{
+              name: binary(),
+              alias: binary(),
+              operation: operation(),
+              outcome: settled(),
+              plan_binding: binary()
+            }
+          | %{
+              name: binary(),
+              alias: binary(),
+              operation: :local,
+              outcome: :audited_local,
+              plan_binding: binary()
+            }
+          | %{
+              name: binary(),
+              alias: binary(),
+              operation: operation(),
+              outcome: :pending,
+              plan_binding: binary()
+            }
   @type environment :: %{
           runtime: :supported | :unsupported,
           viewer: :available | :unavailable
@@ -76,13 +101,8 @@ defmodule PtcRunner.Kernel.DoctorPlan do
     with true <- InstallationCatalog.valid?(catalog),
          true <- is_nil(prepared) or PreparedRun.valid?(prepared),
          true <- mode == :default or not is_nil(prepared),
-         true <- bound_to_catalog?(prepared, catalog),
-         {:ok, runtime} <- environment_row("runtime", environment, :runtime, runtime_codes()),
-         {:ok, viewer} <- environment_row("viewer", environment, :viewer, viewer_codes()),
-         {:ok, aliases} <- aliases(catalog, prepared) do
-      {:ok,
-       [runtime, application_row(prepared), viewer] ++
-         provider_rows(catalog, aliases, prepared, mode)}
+         true <- bound_to_catalog?(prepared, catalog) do
+      derive_plan(catalog, prepared, environment, mode)
     else
       _invalid -> {:error, :invalid_doctor_plan}
     end
@@ -236,6 +256,49 @@ defmodule PtcRunner.Kernel.DoctorPlan do
 
   def settle_connect(_rows, _result, _prepared, _catalog), do: {:error, :invalid_doctor_plan}
 
+  @doc """
+  Settles one attributable connect failure against its canonical plan.
+
+  The supplied rows must be byte-for-byte equal to a connect plan reconstructed
+  from the same catalog, preparation, and environment. This prevents alias
+  names from standing in for the sealed identities they happen to name.
+
+  Only the row identified by the diagnostic becomes a failure. Other pending
+  rows become `skipped/not_verified_due_to_failure`, which records the absence
+  of retained evidence without claiming that the operation did or did not run.
+  """
+  @spec settle_failure(
+          t(),
+          CommandDiagnostic.t(),
+          PreparedRun.t(),
+          InstallationCatalog.t(),
+          environment()
+        ) :: {:ok, t()} | {:error, :invalid_doctor_plan}
+  def settle_failure(
+        rows,
+        %CommandDiagnostic{} = diagnostic,
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        environment
+      )
+      when is_list(rows) do
+    with true <- CommandDiagnostic.valid?(diagnostic),
+         true <- InstallationCatalog.valid?(catalog),
+         true <- PreparedRun.sealed?(prepared),
+         true <- bound_to_catalog?(prepared, catalog),
+         {:ok, canonical} <- derive_plan(catalog, prepared, environment, :connect),
+         true <- rows == canonical,
+         {:ok, target} <- failure_target(diagnostic, prepared, catalog),
+         1 <- Enum.count(rows, &pending_target?(&1, target)) do
+      {:ok, Enum.map(rows, &settle_failure_row(&1, target, diagnostic.code))}
+    else
+      _invalid -> {:error, :invalid_doctor_plan}
+    end
+  end
+
+  def settle_failure(_rows, _diagnostic, _prepared, _catalog, _environment),
+    do: {:error, :invalid_doctor_plan}
+
   # The aliases the result reports as reached, and only those. An occurrence a
   # `:none` declaration skipped contributes nothing, and an alias holding both a
   # reached and a skipped occurrence is reported as neither, so it can never
@@ -309,8 +372,92 @@ defmodule PtcRunner.Kernel.DoctorPlan do
   # different settlement.
   defp settle_connect_row(_row), do: :error
 
+  defp failure_target(
+         %CommandDiagnostic{
+           phase: phase,
+           code: code,
+           subject: %CommandSubject{
+             name: name,
+             operation: subject_operation,
+             occurrence: occurrence
+           }
+         },
+         prepared,
+         catalog
+       )
+       when phase in [:local_preflight, :active_preflight, :provider_acquisition] do
+    with true <- selected_occurrence?(prepared, name, occurrence),
+         {:ok, report_operation} <- report_operation(subject_operation, name, catalog),
+         true <- code in Map.get(@failure_codes_by_operation, report_operation, []) do
+      {:ok, {name, report_operation}}
+    else
+      _invalid -> :error
+    end
+  end
+
+  defp failure_target(_diagnostic, _prepared, _catalog), do: :error
+
+  defp report_operation(:acquisition, name, catalog) do
+    case Map.fetch(catalog.descriptors, name) do
+      {:ok, %{connectivity_mode: :acquisition}} -> {:ok, :connectivity}
+      _other -> :error
+    end
+  end
+
+  defp report_operation(operation, _name, _catalog) when operation in @operations,
+    do: {:ok, operation}
+
+  defp report_operation(_operation, _name, _catalog), do: :error
+
+  defp selected_occurrence?(prepared, name, nil),
+    do: Enum.any?(prepared.provider_declarations, &(&1.name == name))
+
+  defp selected_occurrence?(prepared, name, occurrence) do
+    Enum.any?(prepared.provider_declarations, fn declaration ->
+      declaration.name == name and declaration.destination == occurrence.destination and
+        declaration.index == occurrence.index
+    end)
+  end
+
+  defp pending_target?(
+         %{alias: name, operation: operation, outcome: :pending},
+         {name, operation}
+       ),
+       do: true
+
+  defp pending_target?(_row, _target), do: false
+
+  defp settle_failure_row(row, target, code) do
+    cond do
+      pending_target?(row, target) -> %{row | outcome: {:fail, code}}
+      row.outcome == :pending -> %{row | outcome: {:skipped, :not_verified_due_to_failure}}
+      true -> row
+    end
+  end
+
   defp pending(rows), do: Enum.filter(rows, &match?(%{outcome: :audited_local}, &1))
 
+  defp derive_plan(catalog, prepared, environment, mode) do
+    with {:ok, runtime} <- environment_row("runtime", environment, :runtime, runtime_codes()),
+         {:ok, viewer} <- environment_row("viewer", environment, :viewer, viewer_codes()),
+         {:ok, aliases} <- aliases(catalog, prepared) do
+      binding =
+        Attestation.attest(
+          __MODULE__,
+          {catalog.attestation, prepared && prepared.attestation, environment, mode}
+        )
+
+      {:ok,
+       [runtime, application_row(prepared), viewer]
+       |> Kernel.++(provider_rows(catalog, aliases, prepared, mode))
+       |> Enum.map(&Map.put(&1, :plan_binding, binding))}
+    end
+  end
+
+  defp permitted?(%{operation: operation, outcome: {:fail, code}}),
+    do: code in Map.get(@failure_codes_by_operation, operation, [])
+
+  defp permitted?(%{outcome: {:skipped, :not_verified_due_to_failure}}), do: true
   defp permitted?(%{outcome: outcome}), do: outcome in @permitted
   defp permitted?(_row), do: false
 

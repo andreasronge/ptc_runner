@@ -716,8 +716,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   test "a failing audited-local check fails the command instead of the row", %{
     tmp_dir: directory
   } do
-    # The closed result contract has no failing provider row in any mode, so a
-    # local check that fails must surface as the command's own diagnostic.
+    # Default doctor has no failing-row form, so a local check that fails
+    # surfaces as the command's own diagnostic. Connect has the separate
+    # finding result exercised below.
     host_path =
       write_host_config(directory, "doctor-local-fail", %{
         "credentials" => %{"key" => %{"literal" => "not-read"}},
@@ -1135,15 +1136,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "a failing check under --connect renders one diagnostic and no rows", %{
+  test "a failing check under --connect reports the attributed row", %{
     tmp_dir: directory
   } do
-    # The closed result contract has no failing provider row in either mode, so
-    # a connect that cannot settle every row reports its catalogued diagnostic
-    # and no `result` at all. This one fails in the shared phase-7 step, which
-    # the connect operation crosses through `ProviderExecution` before the
-    # activity marker — which is why it reports no provider activity even though
-    # the command asked for connectivity.
+    # This one fails in the shared phase-7 step, which the connect operation
+    # crosses through `ProviderExecution` before the activity marker. Doctor
+    # retains the diagnostic as the error authority while projecting its
+    # attributable local check as a finding.
     host_path =
       write_host_config(directory, "connect-local-fail", %{
         "credentials" => %{"key" => %{"literal" => "not-read"}},
@@ -1170,12 +1169,90 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert outcome.command_mode == {:doctor, :connect}
     assert outcome.envelope["command"] == "doctor"
-    refute Map.has_key?(outcome.envelope, "result")
+    assert outcome.exit_status == 4
     assert outcome.envelope["error"]["phase"] == "local_preflight"
     assert outcome.envelope["error"]["code"] == "adapter_unavailable"
     assert outcome.envelope["error"]["subject"]["name"] == "model"
     assert outcome.envelope["error"]["provider_activity"] == false
     assert outcome.envelope["secondary_errors"] == []
+
+    assert %{
+             "readiness" => "failed",
+             "provider_activity" => false,
+             "checks" => checks
+           } = outcome.envelope["result"]
+
+    assert %{"status" => "fail", "code" => "adapter_unavailable"} =
+             Enum.find(checks, &(&1["name"] == "provider/model/local"))
+
+    assert %{"status" => "skipped", "code" => "not_verified_due_to_failure"} =
+             Enum.find(checks, &(&1["name"] == "provider/model/credentials"))
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "doctor --connect turns a missing credential into a failed check", %{
+    tmp_dir: directory
+  } do
+    environment_name = "PTC_TEST_DOCTOR_MISSING_CREDENTIAL"
+    previous_environment = System.get_env(environment_name)
+    System.delete_env(environment_name)
+
+    on_exit(fn ->
+      if previous_environment,
+        do: System.put_env(environment_name, previous_environment),
+        else: System.delete_env(environment_name)
+    end)
+
+    host_path =
+      write_host_config(directory, "connect-missing-credential", %{
+        "credentials" => %{"key" => %{"env" => environment_name}},
+        "install" => %{
+          "workspace" => %{
+            "source" => "mcp",
+            "installation_revision" => "workspace-v1",
+            "transport" => %{
+              "type" => "stdio",
+              "command" => System.find_executable("sh"),
+              "env" => %{"TOKEN" => %{"binding" => "key"}}
+            },
+            "tools" => %{
+              "read" => %{"as" => "workspace.read", "effect" => "read"}
+            }
+          }
+        }
+      })
+
+    application =
+      doctor_application(directory, "connect-missing-credential", mission: ["workspace"])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.exit_status == 4
+    assert outcome.envelope["error"]["phase"] == "active_preflight"
+    assert outcome.envelope["error"]["code"] == "credential_unavailable"
+    assert outcome.envelope["error"]["subject"]["operation"] == "credentials"
+
+    result = outcome.envelope["result"]
+    assert result["readiness"] == "failed"
+
+    assert result["provider_activity"] ==
+             outcome.envelope["error"]["provider_activity"]
+
+    assert %{"status" => "fail", "code" => "credential_unavailable"} =
+             Enum.find(result["checks"], &(&1["name"] == "provider/workspace/credentials"))
+
+    assert %{"status" => "skipped", "code" => "not_verified_due_to_failure"} =
+             Enum.find(result["checks"], &(&1["name"] == "provider/workspace/connectivity"))
+
     assert_schema_valid(outcome.envelope)
   end
 
@@ -1761,7 +1838,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     refute CommandContract.valid_success_semantics?(:doctor, %{
              "checks" => fixed_doctor_checks,
              "model_aliases" => [],
-             "provider_activity" => true
+             "provider_activity" => true,
+             "readiness" => "unverified"
            })
 
     doctor_without_local = %{
@@ -1775,7 +1853,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
             }
           ],
       "model_aliases" => [],
-      "provider_activity" => true
+      "provider_activity" => true,
+      "readiness" => "ready"
     }
 
     refute CommandContract.valid_success_semantics?(:doctor, doctor_without_local)
@@ -1791,7 +1870,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
             }
           ],
       "model_aliases" => [],
-      "provider_activity" => false
+      "provider_activity" => false,
+      "readiness" => "unverified"
     }
 
     refute CommandContract.valid_success_semantics?(:doctor, local_only_application_doctor)
@@ -1813,7 +1893,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
               }
             ],
         "model_aliases" => [],
-        "provider_activity" => false
+        "provider_activity" => false,
+        "readiness" => "unverified"
       })
 
     active_doctor_result = %{
@@ -1834,7 +1915,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         }
       ],
       "model_aliases" => [],
-      "provider_activity" => true
+      "provider_activity" => true,
+      "readiness" => "ready"
     }
 
     assert_raise ArgumentError, fn ->
@@ -1851,7 +1933,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         %{"name" => "viewer", "status" => "pass", "code" => "available"}
       ],
       "model_aliases" => [],
-      "provider_activity" => false
+      "provider_activity" => false,
+      "readiness" => "ready"
     }
 
     assert %CommandOutcome{command_mode: {:doctor, :connect}} =
@@ -1921,7 +2004,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert CommandContract.valid_success_semantics?(:doctor, %{
              "checks" => valid_doctor.envelope["result"]["checks"],
              "model_aliases" => [],
-             "provider_activity" => true
+             "provider_activity" => true,
+             "readiness" => "ready"
            })
 
     refute CommandContract.valid_success_semantics?(:doctor, %{
@@ -1940,7 +2024,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                    }
                  ],
              "model_aliases" => [],
-             "provider_activity" => false
+             "provider_activity" => false,
+             "readiness" => "ready"
            })
 
     refute CommandContract.valid_success_semantics?(:doctor, %{
@@ -1959,7 +2044,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                    }
                  ],
              "model_aliases" => [],
-             "provider_activity" => true
+             "provider_activity" => true,
+             "readiness" => "unverified"
            })
 
     assert_schema_invalid(

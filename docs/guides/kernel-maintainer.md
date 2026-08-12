@@ -612,11 +612,26 @@ attestation. Non-run outcomes admit only the phase/code rows reachable by that
 command, as exact pairs rather than whole phases. Static command modes require
 `provider_activity: false`; the private `{:doctor, :connect}` mode admits only
 active doctor and provider-cleanup rows while retaining the public `"doctor"`
-command value. Successful default doctor outcomes require activity false and
-only local/declarative/skipped provider checks. Successful connect outcomes
-preserve cumulative attempted-work evidence and admit only completed
+command value. Doctor results always classify readiness: default doctor is
+`unverified`, a completed connect is `ready`, and an attributable connect
+diagnostic is `failed`. The failed form is a dedicated error-envelope branch:
+it retains the primary and secondary diagnostics, carries the result, preserves
+the primary nonzero exit status, and requires exactly one failed row correlated
+with the primary diagnostic. Result `provider_activity` is the logical union of
+all retained diagnostics. Successful default doctor outcomes require activity
+false and only local/declarative/skipped provider checks. Successful connect
+outcomes preserve cumulative attempted-work evidence and admit only completed
 local/declarative-or-active provider checks; an active pass requires activity
 true, while a provider-free or provider-bearing no-op connect can remain false.
+Failure settlement reconstructs the connect plan against the exact sealed
+preparation, catalog, environment, and plan binding. Only local, selection,
+credential, authorization, and connectivity subjects map; acquisition maps to
+connectivity only for a descriptor sealed with acquisition connectivity. Every
+other pending row is `skipped/not_verified_due_to_failure`: connect is fail-fast
+and returns no partial transcript, so the row deliberately makes no claim about
+whether that work ran. Subjectless operation diagnostics, provider-application
+diagnostics, cleanup/owner failures, and internal errors retain the ordinary
+diagnostic-only envelope.
 Default doctor also binds
 provider rows to application presence: host-only groups require
 `application_required` and omit selection, while application-backed groups
@@ -805,10 +820,14 @@ Help, version, and doctor success values are closed data contracts, not merely
 shape-compatible maps. Help usage/notices and the packaged version are exact
 compile-time constants. Doctor check names and status/code pairs come from the
 closed runtime/application/viewer/provider vocabulary. The generated schema
-requires the runtime/application/viewer prefix. Consumers must additionally
-call `CommandContract.valid_success_semantics?/2` after schema validation for
-the byte-order and per-provider-local ordering rules that JSON Schema cannot
-express; the same predicate owns `models` ordering. A lone successful `local`
+requires the runtime/application/viewer prefix. Consumers accepting whole
+envelopes must additionally call `CommandContract.valid_envelope?/1` after
+schema validation. For doctor failures it owns the exact primary-diagnostic/
+failed-row correlation and cumulative activity rules that JSON Schema cannot
+express. For standalone success results, call
+`CommandContract.valid_success_semantics?/2` for the byte-order and
+per-provider-local ordering rules; the same predicate owns `models` ordering.
+A lone successful `local`
 provider check admits either activity value because its public row deliberately
 does not reveal whether the implementation was audited-local or unverified.
 Each `models` row preserves the host contract's required public

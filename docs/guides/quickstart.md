@@ -69,17 +69,24 @@ credential is unavailable
 
 It means `OPENROUTER_API_KEY` was not visible to the command. The message does
 not yet name the variable or the alias
-([#1166](https://github.com/andreasronge/ptc_runner/issues/1166)), and
-`ptc doctor --connect` aborts the same way instead of reporting a failed check
-([#1302](https://github.com/andreasronge/ptc_runner/issues/1302)). Once the key
-is in place, that command confirms it:
+([#1166](https://github.com/andreasronge/ptc_runner/issues/1166)). Use the active
+doctor operation to identify the failed readiness check:
 
 ```console
 mix ptc doctor examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
   --host-config examples/kernel-tutorial/ptc-host.json --connect
 ```
 
-Every check reports `pass`, including `provider/deepseek/credentials`.
+With no key it exits nonzero and reports
+`provider/deepseek/credentials` as `fail/credential_unavailable`. Checks for
+which the failed operation retained no evidence are
+`skipped/not_verified_due_to_failure`; they are not claims that those checks
+did or did not run. The report's `readiness` is `failed`.
+
+Once the key is in place, the same command exits successfully, every check
+reports `pass`, including `provider/deepseek/credentials`, and `readiness` is
+`ready`. Plain `ptc doctor` performs no active provider work and therefore
+reports `readiness: "unverified"`.
 
 ## Next
 
