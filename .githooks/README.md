@@ -20,12 +20,6 @@ Fresh clones and worktrees should follow the bootstrap commands in `AGENTS.md`.
 Linked worktrees share installed hook wrappers but keep their own build and
 Dialyzer PLT directories.
 
-If the full suite is starved by local scheduler pressure, use a positive
-integer concurrency limit without skipping any gate:
-
-```console
-PTC_PRE_PUSH_MAX_CASES=2 git push
-```
-
-The hook rejects invalid limits. A test that still fails at lower concurrency
-is a real failure to diagnose, not a reason to bypass the hook.
+The hook uses the project's scheduler-count ExUnit concurrency. Do not reduce
+that pressure to make a failing push pass; reproduce the reported seed and fix
+the load-sensitive test instead.

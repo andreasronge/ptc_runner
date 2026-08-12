@@ -43,19 +43,6 @@ defmodule PtcRunner.GitHooks.PrePushTest do
              ["precommit"]
   end
 
-  test "launcher gate receives an explicit test concurrency limit" do
-    %{repo: repo, mix_marker: mix_marker, path: path} =
-      git_repo_with_change("ptc_runner_launcher/c_src/launcher.c")
-
-    {output, status} = run_hook(repo, path, [{"PTC_PRE_PUSH_MAX_CASES", "2"}])
-
-    assert status == 0
-    assert output =~ "Test concurrency: 2 cases"
-
-    assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
-             ["precommit --max-cases 2"]
-  end
-
   test "Viewer-only changes do not run the root gate" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_change("ptc_viewer/lib/ptc_viewer.ex")
@@ -90,6 +77,20 @@ defmodule PtcRunner.GitHooks.PrePushTest do
   end
 
   @tag :slow
+  test "the removed concurrency environment variable cannot throttle the full gate" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_change("lib/example.ex")
+
+    {output, status} = run_hook(repo, path, [{"PTC_PRE_PUSH_MAX_CASES", "2"}])
+
+    assert status == 0
+    refute output =~ "Test concurrency"
+
+    assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
+             ["test --exclude clojure", "prepush"]
+  end
+
+  @tag :slow
   test "mixed documentation and core changes validate documentation first" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_changes(["docs/guides/replay.md", "lib/example.ex"])
@@ -107,42 +108,6 @@ defmodule PtcRunner.GitHooks.PrePushTest do
                "test --exclude clojure",
                "prepush"
              ]
-  end
-
-  @tag :slow
-  test "full gate accepts an explicit test concurrency limit" do
-    %{repo: repo, mix_marker: mix_marker, path: path} =
-      git_repo_with_change("lib/example.ex")
-
-    {output, status} = run_hook(repo, path, [{"PTC_PRE_PUSH_MAX_CASES", "2"}])
-
-    assert status == 0
-    assert output =~ "Test concurrency: 2 cases"
-
-    assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
-             ["test --exclude clojure --max-cases 2", "prepush"]
-  end
-
-  test "full gate rejects an invalid test concurrency limit" do
-    %{repo: repo, mix_marker: mix_marker, path: path} =
-      git_repo_with_change("lib/example.ex")
-
-    {output, status} = run_hook(repo, path, [{"PTC_PRE_PUSH_MAX_CASES", "many"}])
-
-    assert status != 0
-    assert output =~ "PTC_PRE_PUSH_MAX_CASES must be a positive integer"
-    refute File.exists?(mix_marker)
-  end
-
-  test "documentation routing rejects an invalid test concurrency limit" do
-    %{repo: repo, mix_marker: mix_marker, path: path} =
-      git_repo_with_change("docs/guides/replay.md")
-
-    {output, status} = run_hook(repo, path, [{"PTC_PRE_PUSH_MAX_CASES", "many"}])
-
-    assert status != 0
-    assert output =~ "PTC_PRE_PUSH_MAX_CASES must be a positive integer"
-    refute File.exists?(mix_marker)
   end
 
   test "documentation dependency setup rejects an uncommitted lockfile repair" do
@@ -222,7 +187,6 @@ defmodule PtcRunner.GitHooks.PrePushTest do
             {"HOOK_REFS", refs},
             {"MIX_MARKER",
              Path.join(path |> String.split(":") |> hd() |> Path.dirname(), "mix-called")},
-            {"PTC_PRE_PUSH_MAX_CASES", nil},
             {"PATH", path}
           ] ++ extra_env,
       stderr_to_stdout: true
