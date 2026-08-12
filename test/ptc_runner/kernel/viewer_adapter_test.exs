@@ -17,9 +17,20 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
       "tools" => []
     }
 
+    mission = %{
+      "prelude" => %{
+        "component_ids" => ["reader"],
+        "dependency_indices" => [[]],
+        "hash" => String.duplicate("c", 64)
+      },
+      "inventory_hash" => String.duplicate("b", 64),
+      "inventory_bytes" => 321,
+      "model_context_hash" => String.duplicate("d", 64),
+      "model_context_bytes" => 123
+    }
+
     started = %{
-      "mission_inventory_hash" => String.duplicate("b", 64),
-      "mission_inventory_bytes" => 321,
+      "missions" => %{"reader" => mission},
       "connector_snapshots" => [connector]
     }
 
@@ -32,8 +43,7 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
     assert {:ok, ^expected} = PtcViewer.Api.kernel_query(config, :list_runs, %{"limit" => 1})
 
     assert {:ok, run} = TraceLog.query(trace_log, :get_run, %{"run_id" => "viewer-run"})
-    assert run["mission_inventory_hash"] == String.duplicate("b", 64)
-    assert run["mission_inventory_bytes"] == 321
+    assert run["missions"] == %{"reader" => mission}
     assert run["connector_snapshots"] == [connector]
     assert {:ok, ^run} = PtcViewer.Api.kernel_query(config, :get_run, %{"run_id" => "viewer-run"})
 

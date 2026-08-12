@@ -53,6 +53,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   def tools(state, environment, event_sink, kind, opts \\ [])
       when kind in [:workflow, :mission] do
     lease = Keyword.get(opts, :lease)
+    mission_name = Keyword.get(opts, :mission_name)
     # cap-list/cap-describe are the discovery routes that legitimately need
     # every capability; runtime-usage/runtime-remaining ignore this argument.
     # Narrowing here (rather than per-route) keeps the whole environment from
@@ -63,7 +64,12 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     |> Map.new(fn {name, route} -> {name, route_callback(route, state, view, kind, lease)} end)
     |> maybe_put_annotation(state, event_sink, kind)
     |> Map.new(fn {name, callback} ->
-      instrumented = instrument(state, event_sink, kind, name, callback)
+      attributes =
+        if kind == :mission and is_binary(mission_name),
+          do: %{mission_name: mission_name},
+          else: %{}
+
+      instrumented = instrument(state, event_sink, kind, name, callback, attributes)
       {name, authenticate_mission_route(instrumented, state, kind, lease)}
     end)
   end
@@ -86,24 +92,22 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   end
 
   @doc "Builds the workflow-only frozen mission-inventory callback."
-  def mission_inventory(state, rendered) when is_binary(rendered) do
-    fn
-      arguments when is_map(arguments) and map_size(arguments) == 0 ->
-        %{status: :ok, value: rendered}
-
-      _arguments ->
-        protocol_error(state, :invalid_mission_inventory_request)
-    end
-  end
+  def mission_inventory(state, rendered_by_mission) when is_map(rendered_by_mission),
+    do: frozen_by_mission(state, rendered_by_mission, :invalid_mission_inventory_request)
 
   @doc "Builds the workflow-only frozen compact mission-model-context callback."
-  def mission_model_context(state, rendered) when is_binary(rendered) do
-    fn
-      arguments when is_map(arguments) and map_size(arguments) == 0 ->
-        %{status: :ok, value: rendered}
+  def mission_model_context(state, rendered_by_mission) when is_map(rendered_by_mission),
+    do: frozen_by_mission(state, rendered_by_mission, :invalid_mission_model_context_request)
 
-      _arguments ->
-        protocol_error(state, :invalid_mission_model_context_request)
+  defp frozen_by_mission(state, rendered_by_mission, invalid_reason) do
+    fn arguments ->
+      with {:ok, mission_name} <- requested_mission(arguments),
+           {:ok, rendered} <- Map.fetch(rendered_by_mission, mission_name) do
+        %{status: :ok, value: rendered}
+      else
+        :error -> protocol_error(state, :unknown_mission)
+        {:error, :invalid_request} -> protocol_error(state, invalid_reason)
+      end
     end
   end
 
@@ -116,14 +120,46 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   a REPL expression evaluates under the session's own lease, so a blocking
   nested `kernel-eval` would park behind itself until the sandbox timeout.
   """
-  def kernel_eval(state, mission, limits, event_sink, inspection_sink \\ nil, opts \\ []) do
+  def kernel_eval(state, missions, limits, event_sink, inspection_sink \\ nil, opts \\ [])
+      when is_map(missions) and not is_struct(missions) do
     admission = Keyword.get(opts, :admission, :fail_fast)
 
-    fn
+    fn arguments ->
+      case take_mission(arguments, missions) do
+        {:ok, mission_name, mission, arguments} ->
+          dispatch_kernel_eval(
+            state,
+            {mission_name, mission},
+            arguments,
+            limits,
+            event_sink,
+            inspection_sink,
+            admission
+          )
+
+        :error ->
+          protocol_error(state, :unknown_mission)
+
+        {:error, :invalid_request} ->
+          invalid_kernel_eval_request(state)
+      end
+    end
+  end
+
+  defp dispatch_kernel_eval(
+         state,
+         target,
+         arguments,
+         limits,
+         event_sink,
+         inspection_sink,
+         admission
+       ) do
+    case arguments do
       %{"kind" => kind, "source" => source} = arguments
       when is_binary(source) and map_size(arguments) == 2 ->
         if keyword_name(kind) == "source" do
-          evaluate_source(state, mission, source, limits, event_sink, inspection_sink, admission)
+          evaluate_source(state, target, source, limits, event_sink, inspection_sink, admission)
         else
           invalid_kernel_eval_request(state)
         end
@@ -133,7 +169,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         if keyword_name(kind) == "source" do
           evaluate_source_with(
             state,
-            mission,
+            target,
             source,
             params,
             limits,
@@ -148,7 +184,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
       %{"kind" => kind, "program" => %Program{source: source}} = arguments
       when map_size(arguments) == 2 ->
         if keyword_name(kind) == "embedded" do
-          evaluate_source(state, mission, source, limits, event_sink, inspection_sink, admission)
+          evaluate_source(state, target, source, limits, event_sink, inspection_sink, admission)
         else
           invalid_kernel_eval_request(state)
         end
@@ -158,7 +194,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         if keyword_name(kind) == "embedded" do
           evaluate_source_with(
             state,
-            mission,
+            target,
             source,
             params,
             limits,
@@ -170,25 +206,60 @@ defmodule PtcRunner.Kernel.RuntimeTools do
           invalid_kernel_eval_request(state)
         end
 
-      _arguments ->
+      _rest ->
         invalid_kernel_eval_request(state)
     end
   end
 
   @doc "Builds the workflow-only mission-aware source-check callback."
-  def kernel_check_source(state, mission, limits, event_sink) do
-    fn
-      %{"source" => source} = arguments
-      when is_binary(source) and map_size(arguments) == 1 ->
+  def kernel_check_source(state, missions, limits, event_sink) when is_map(missions) do
+    fn arguments ->
+      with {:ok, mission_name, mission, %{"source" => source} = rest} <-
+             take_mission(arguments, missions),
+           true <- is_binary(source) and map_size(rest) == 1 do
         %{
           status: :ok,
-          value: SourceCheck.check(state, mission, source, limits, event_sink)
+          value:
+            SourceCheck.check(state, mission, source, limits, event_sink,
+              mission_name: mission_name
+            )
         }
-
-      _arguments ->
-        invalid_kernel_check_source_request(state)
+      else
+        :error -> protocol_error(state, :unknown_mission)
+        _ -> invalid_kernel_check_source_request(state)
+      end
     end
   end
+
+  defp requested_mission(arguments) when is_map(arguments) do
+    case arguments do
+      map when map_size(map) == 0 ->
+        {:ok, RunState.default_mission()}
+
+      %{"mission" => mission_name} = map when is_binary(mission_name) and map_size(map) == 1 ->
+        {:ok, mission_name}
+
+      _other ->
+        {:error, :invalid_request}
+    end
+  end
+
+  defp requested_mission(_arguments), do: {:error, :invalid_request}
+
+  defp take_mission(arguments, missions) when is_map(arguments) do
+    {mission_name, rest} = Map.pop(arguments, "mission", RunState.default_mission())
+
+    if is_binary(mission_name) do
+      case Map.fetch(missions, mission_name) do
+        {:ok, mission} -> {:ok, mission_name, mission, rest}
+        :error -> :error
+      end
+    else
+      {:error, :invalid_request}
+    end
+  end
+
+  defp take_mission(_arguments, _missions), do: {:error, :invalid_request}
 
   @doc false
   @spec kernel_eval_ledger_arguments(map()) :: (map() -> map())
@@ -232,7 +303,15 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end)
   end
 
-  defp evaluate_source(state, mission, source, limits, event_sink, inspection_sink, admission) do
+  defp evaluate_source(
+         state,
+         {mission_name, mission},
+         source,
+         limits,
+         event_sink,
+         inspection_sink,
+         admission
+       ) do
     %{
       status: :ok,
       value:
@@ -243,7 +322,8 @@ defmodule PtcRunner.Kernel.RuntimeTools do
           limits.evaluation_timeout_ms,
           event_sink,
           inspection_sink,
-          admission: admission
+          admission: admission,
+          mission_name: mission_name
         )
         |> Evaluation.legacy_projection()
     }
@@ -251,7 +331,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
   defp evaluate_source_with(
          state,
-         mission,
+         {mission_name, mission},
          source,
          params,
          limits,
@@ -272,7 +352,8 @@ defmodule PtcRunner.Kernel.RuntimeTools do
               event_sink,
               inspection_sink,
               params: params,
-              admission: admission
+              admission: admission,
+              mission_name: mission_name
             )
             |> Evaluation.legacy_projection()
         }
@@ -438,28 +519,37 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   end
 
   @doc "Wraps an internal runtime callback with canonical capability events."
-  def instrument(state, event_sink, environment, name, callback)
-      when environment in [:workflow, :mission] and is_binary(name) and is_function(callback, 1) do
+  def instrument(state, event_sink, environment, name, callback, attributes \\ %{})
+      when environment in [:workflow, :mission] and is_binary(name) and is_function(callback, 1) and
+             is_map(attributes) do
     fn arguments ->
       capability_id = Events.id("capability")
       started_ms = System.monotonic_time(:millisecond)
 
-      case Events.emit(state, event_sink, "capability-started", %{
-             capability_id: capability_id,
-             environment: environment,
-             name: name
-           }) do
+      started =
+        Map.merge(attributes, %{
+          capability_id: capability_id,
+          environment: environment,
+          name: name
+        })
+
+      case Events.emit(state, event_sink, "capability-started", started) do
         :ok ->
           result = callback.(arguments)
 
           _ =
-            Events.emit(state, event_sink, "capability-stopped", %{
-              capability_id: capability_id,
-              environment: environment,
-              name: name,
-              status: result_status(result),
-              duration_ms: Events.duration_ms(started_ms)
-            })
+            Events.emit(
+              state,
+              event_sink,
+              "capability-stopped",
+              Map.merge(attributes, %{
+                capability_id: capability_id,
+                environment: environment,
+                name: name,
+                status: result_status(result),
+                duration_ms: Events.duration_ms(started_ms)
+              })
+            )
 
           result
 

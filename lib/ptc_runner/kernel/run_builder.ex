@@ -50,6 +50,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.ArtifactPublisher
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.BundleCompiler
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
@@ -442,7 +443,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   defp do_build_prepared(prepared, registry, opts, failure_mode) do
-    bundles = {prepared.workflow_bundle, prepared.mission_bundle}
+    bundles = {prepared.workflow_bundle, prepared.mission_bundles}
 
     assemble(
       prepared.request,
@@ -465,7 +466,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
            ) do
       build_with_opened_sinks(
         prepared.request,
-        {prepared.workflow_bundle, prepared.mission_bundle},
+        {prepared.workflow_bundle, prepared.mission_bundles},
         prepared.entry_source,
         providers,
         authority,
@@ -493,7 +494,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
            ) do
       build_with_opened_sinks(
         prepared.request,
-        {prepared.workflow_bundle, prepared.mission_bundle},
+        {prepared.workflow_bundle, prepared.mission_bundles},
         prepared.entry_source,
         providers,
         authority,
@@ -503,12 +504,20 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   defp build_provider_bearing(request, registry, opts) do
-    with {:ok, workflow_bundle} <- bundle(request.package.workflow_components),
-         {:ok, mission_bundle} <- bundle(request.package.mission_components),
+    deadline = System.monotonic_time(:millisecond) + 5_000
+
+    with {:ok, workflow_bundle} <-
+           BundleCompiler.compile(request.package.workflow_components, deadline),
+         {:ok, mission_bundles} <-
+           mission_bundles(
+             request.package.missions,
+             deadline,
+             :erlang.external_size(workflow_bundle)
+           ),
          :ok <- RunCoordinator.validate_entry(workflow_bundle, request.package.entry) do
       assemble(
         request,
-        {workflow_bundle, mission_bundle},
+        {workflow_bundle, mission_bundles},
         "(#{request.package.entry} data/input)",
         registry,
         opts,
@@ -564,9 +573,43 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
+  # One environment per declared mission, each assembled from its already
+  # prepared bundle and granted only the mission providers that mission named. A grant a mission did
+  # not name is simply absent from its environment, so authority is enforced by
+  # assembly rather than by anything the model is asked to respect.
+  defp mission_environments(package, mission_bundles, providers) do
+    by_occurrence = Map.get(providers.mission, :by_occurrence, %{})
+
+    Enum.reduce_while(Map.get(package, :missions) || %{}, {:ok, %{}}, fn {name, spec},
+                                                                         {:ok, acc} ->
+      capabilities =
+        spec.provider_occurrences
+        |> Enum.flat_map(&Map.get(by_occurrence, &1, []))
+
+      with {:ok, bundle} <- Map.fetch(mission_bundles, name),
+           {:ok, environment} <-
+             MissionEnvironment.new(
+               bundle: bundle,
+               capabilities: capabilities,
+               data: spec.data
+             ) do
+        {:cont, {:ok, Map.put(acc, name, environment)}}
+      else
+        _error -> {:halt, {:error, :invalid_mission_environment}}
+      end
+    end)
+  end
+
+  defp mission_bundles(missions, deadline, initial_bytes) do
+    case BundleCompiler.compile_named(missions, deadline, initial_bytes, 4_000_000) do
+      {:ok, bundles} -> {:ok, bundles}
+      {:error, {_failure, _components}} -> {:error, :invalid_mission_bundle}
+    end
+  end
+
   defp build_with_providers(
          request,
-         {workflow_bundle, mission_bundle},
+         {workflow_bundle, mission_bundles},
          entry_source,
          providers,
          opts,
@@ -581,19 +624,14 @@ defmodule PtcRunner.Kernel.RunBuilder do
                bundle: workflow_bundle,
                capabilities: providers.workflow.capabilities
              ),
-           {:ok, mission} <-
-             MissionEnvironment.new(
-               bundle: mission_bundle,
-               capabilities: providers.mission.capabilities,
-               data: package.mission_data
-             ),
+           {:ok, missions} <- mission_environments(package, mission_bundles, providers),
            {:ok, publication_authority, sink, inspection_sink} <-
              execution_sinks(request, providers, opts, failure_mode, sink_source),
            :ok <-
              capture_prelude_sources(
                inspection_sink,
                sink,
-               {workflow, mission},
+               {workflow, missions},
                package,
                failure_mode
              ) do
@@ -601,7 +639,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
           {request, entry_source},
           providers,
           workflow,
-          mission,
+          missions,
           {sink, inspection_sink},
           package.component_overrides,
           publication_authority,
@@ -633,7 +671,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp build_with_opened_sinks(
          request,
-         {workflow_bundle, mission_bundle},
+         {workflow_bundle, mission_bundles},
          entry_source,
          providers,
          authority,
@@ -641,7 +679,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
        ) do
     build_with_providers(
       request,
-      {workflow_bundle, mission_bundle},
+      {workflow_bundle, mission_bundles},
       entry_source,
       providers,
       [],
@@ -765,7 +803,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
          {request, entry_source},
          providers,
          workflow,
-         mission,
+         missions,
          {sink, inspection_sink},
          component_overrides,
          publication_authority,
@@ -775,7 +813,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
     case RunConfig.new(
            workflow_environment: workflow,
-           mission_environment: mission,
+           missions: missions,
            input: %{"input" => request.input.value},
            limits: package.limits,
            event_sink: sink,
@@ -824,7 +862,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp capture_prelude_sources(
          inspection_sink,
          sink,
-         {workflow, mission},
+         {workflow, missions},
          manifest,
          failure_mode
        ) do
@@ -836,12 +874,20 @@ defmodule PtcRunner.Kernel.RunBuilder do
                workflow.bundle,
                manifest.workflow_components
              ) do
-        capture_bundle_sources(
-          inspection_sink,
-          "mission",
-          mission.bundle,
-          manifest.mission_components
-        )
+        Enum.reduce_while(missions, :ok, fn {name, mission}, :ok ->
+          components = manifest.missions |> Map.fetch!(name) |> Map.fetch!(:components)
+
+          case capture_bundle_sources(
+                 inspection_sink,
+                 "mission",
+                 mission.bundle,
+                 components,
+                 name
+               ) do
+            :ok -> {:cont, :ok}
+            {:error, _reason} = error -> {:halt, error}
+          end
+        end)
       end
 
     case result do
@@ -853,9 +899,13 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp capture_bundle_sources(_inspection_sink, _environment, nil, _components), do: :ok
+  defp capture_bundle_sources(inspection_sink, environment, bundle, components),
+    do: capture_bundle_sources(inspection_sink, environment, bundle, components, nil)
 
-  defp capture_bundle_sources(inspection_sink, environment, bundle, components) do
+  defp capture_bundle_sources(_inspection_sink, _environment, nil, _components, _mission_name),
+    do: :ok
+
+  defp capture_bundle_sources(inspection_sink, environment, bundle, components, mission_name) do
     sources = Map.new(components, &{&1.id, &1.source})
 
     Enum.reduce_while(bundle.component_ids, :ok, fn id, :ok ->
@@ -865,18 +915,26 @@ defmodule PtcRunner.Kernel.RunBuilder do
                inspection_sink,
                "prelude-source",
                %{component_id: id},
-               %{
-                 environment: environment,
-                 source: source,
-                 source_hash: :crypto.hash(:sha256, source) |> Base.encode16(case: :lower),
-                 source_bytes: byte_size(source)
-               }
+               prelude_source_payload(environment, source, mission_name)
              ) do
         {:cont, :ok}
       else
         _failure -> {:halt, {:error, :inspection_sink_error}}
       end
     end)
+  end
+
+  defp prelude_source_payload(environment, source, mission_name) do
+    payload = %{
+      environment: environment,
+      source: source,
+      source_hash: :crypto.hash(:sha256, source) |> Base.encode16(case: :lower),
+      source_bytes: byte_size(source)
+    }
+
+    if is_binary(mission_name),
+      do: Map.put(payload, :mission_name, mission_name),
+      else: payload
   end
 
   # `acquisition` is `nil` for a direct embedding build, which opens its own
@@ -1288,9 +1346,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp provider_free?(%{workflow: [], mission: []}), do: true
   defp provider_free?(_providers), do: false
 
-  defp bundle([]), do: {:ok, nil}
-  defp bundle(components), do: Kernel.compile_bundle(components)
-
   defp event_sink(request, providers), do: event_sink(request, providers, self())
 
   defp event_sink(request, providers, owner) do
@@ -1321,7 +1376,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
           InspectionSink.start(
             run_id: identity.run_id,
             trace_id: identity.trace_id,
-            schema_version: 3,
+            schema_version: 4,
             owner: owner
           )
         end

@@ -2,16 +2,18 @@
   "version": 1,
   "workflow": {
     "components": [
-      {"id": "demo.agent", "path": "agent.clj", "dependencies": ["agent.core"]},
-      {"library": "agent.core"}
+      {
+        "id": "demo.agent",
+        "path": "agent.clj",
+        "dependencies": [
+          "agent.core"
+        ]
+      },
+      {
+        "library": "agent.core"
+      }
     ],
     "entry": "demo.agent/run"
-  },
-  "mission": {
-    "components": [
-      {"id": "demo.files", "path": "files.clj"}
-    ],
-    "data": {}
   },
   "input": {
     "value": {
@@ -21,16 +23,34 @@
   },
   "providers": {
     "workflow": [
-      {"name": "deepseek"}
+      {
+        "name": "deepseek"
+      }
     ],
     "mission": [
-      {"name": "workspace"}
+      {
+        "name": "workspace"
+      }
     ]
   },
   "labels": {
     "name": "viewer-demo-recovery",
     "model": "openrouter:deepseek/deepseek-v4-flash",
     "provider": "openrouter",
-    "tags": {"mode": "agent"}
+    "tags": {
+      "mode": "agent"
+    }
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {
+          "id": "demo.files",
+          "path": "files.clj"
+        }
+      ],
+      "data": {
+      }
+    }
   }
 }

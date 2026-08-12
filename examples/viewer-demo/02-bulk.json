@@ -15,15 +15,6 @@
     ],
     "entry": "demo.agent/run"
   },
-  "mission": {
-    "components": [
-      {
-        "id": "demo.files",
-        "path": "files.clj"
-      }
-    ],
-    "data": {}
-  },
   "input": {
     "value": {
       "task": "Call (demo.files/sum-values) with no arguments and return the integer it produces.",
@@ -32,10 +23,14 @@
   },
   "providers": {
     "workflow": [
-      {"name": "deepseek"}
+      {
+        "name": "deepseek"
+      }
     ],
     "mission": [
-      {"name": "workspace"}
+      {
+        "name": "workspace"
+      }
     ]
   },
   "labels": {
@@ -44,6 +39,18 @@
     "provider": "openrouter",
     "tags": {
       "mode": "agent"
+    }
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {
+          "id": "demo.files",
+          "path": "files.clj"
+        }
+      ],
+      "data": {
+      }
     }
   }
 }

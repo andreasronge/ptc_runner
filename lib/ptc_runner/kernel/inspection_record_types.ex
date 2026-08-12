@@ -12,10 +12,12 @@ defmodule PtcRunner.Kernel.InspectionRecordTypes do
   @v1 ~w(capability-input capability-output evaluation-source prelude-source)
   @v2 @v1 ++ ~w(mcp-request mcp-response)
   @v3 @v2 ++ ~w(execution-prints execution-error)
+  @v4 @v3
 
-  @spec for_schema_version(1 | 2 | 3) :: [binary()]
+  @spec for_schema_version(1 | 2 | 3 | 4) :: [binary()]
   @doc "Returns the exact record types admitted at the given schema version."
   def for_schema_version(1), do: @v1
   def for_schema_version(2), do: @v2
   def for_schema_version(3), do: @v3
+  def for_schema_version(4), do: @v4
 end

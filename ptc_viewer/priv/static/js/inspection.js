@@ -28,7 +28,10 @@ export function indexInspection(inspection) {
       if (byEvaluation.has(evaluationId)) conflicts.push(`evaluation-source/${evaluationId}`);
       else byEvaluation.set(evaluationId, record);
     } else if (componentId && record.record_type === 'prelude-source') {
-      const key = `${record.payload?.environment}/${componentId}`;
+      const mission = record.payload?.mission_name;
+      const key = mission
+        ? `${record.payload?.environment}/${mission}/${componentId}`
+        : `${record.payload?.environment}/${componentId}`;
       if (byComponent.has(key)) conflicts.push(`prelude-source/${key}`);
       else byComponent.set(key, record);
     }

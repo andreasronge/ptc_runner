@@ -65,8 +65,8 @@
 
 (defn- same-pair-evidence? [left right]
   (and (= (get left "case") (get right "case"))
-       (= (get-in left ["run_identity" "mission_bundle_hash"])
-          (get-in right ["run_identity" "mission_bundle_hash"]))
+       (= (get-in left ["run_identity" "mission_bundle_hashes"])
+          (get-in right ["run_identity" "mission_bundle_hashes"]))
        (= (get-in left ["run_identity" "provider_snapshot_hashes"])
           (get-in right ["run_identity" "provider_snapshot_hashes"]))
        (= (get-in left ["run_identity" "content_snapshot_hashes"])

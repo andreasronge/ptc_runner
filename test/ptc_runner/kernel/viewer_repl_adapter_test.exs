@@ -348,11 +348,12 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
              ViewerReplAdapter.prepare_operation(backend, session, :evaluation, random_id())
   end
 
+  # ex_dna:disable-for-next-line — boundary test keeps its trace fixture local and explicit
   defp seed_trace(directory, run_id) do
     path = Path.join(directory, run_id <> ".jsonl")
     {:ok, limits} = Limits.new()
     {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
-    :ok = EventSink.emit(sink, "run-started", %{})
+    :ok = EventSink.emit(sink, "run-started", %{missions: %{}})
     :ok = EventSink.emit(sink, "run-stopped", %{outcome: :ok, reason: nil})
     :ok = TraceLog.append_jsonl(path, EventSink.events(sink))
     EventSink.stop(sink)

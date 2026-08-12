@@ -139,7 +139,7 @@ defmodule PtcRunner.Kernel.ViewerReplHttpTest do
     path = Path.join(directory, run_id <> ".jsonl")
     {:ok, limits} = Limits.new()
     {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
-    :ok = EventSink.emit(sink, "run-started", %{})
+    :ok = EventSink.emit(sink, "run-started", %{missions: %{}})
     :ok = EventSink.emit(sink, "run-stopped", %{outcome: :ok, reason: nil})
     :ok = TraceLog.append_jsonl(path, EventSink.events(sink))
     EventSink.stop(sink)

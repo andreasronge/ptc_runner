@@ -1,4 +1,4 @@
-# TraceLog and Log Prelude — V1 Contract
+# TraceLog and Log Prelude — V2 Contract
 
 **Status:** implemented retained product contract, including the local 0.x
 inspection increment. Complements the
@@ -77,11 +77,11 @@ An index may accelerate discovery and pagination, but it:
 - does not silently merge unrelated trace sources;
 - cannot grant access beyond the underlying source grant.
 
-Do not maintain a second authoritative session/run database in V1.
+Do not maintain a second authoritative session/run database.
 
 ## Storage sources
 
-V1 supports:
+V1 and V2 support:
 
 - append-only JSONL files;
 - explicitly granted directories containing JSONL files;
@@ -295,9 +295,14 @@ start late, stop twice, or continue after stopping fail closed as
 Grouping does not depend only on filenames. Duplicate events may be
 deduplicated only by a documented stable identity such as `{trace_id, seq}`.
 
-Mixed schema versions are upgraded through an explicit bounded reader or
-rejected with a stable unsupported-version error. Query code does not guess
-missing identity fields.
+One run identity uses exactly one canonical schema version. A source may hold
+separate V1 and V2 runs, but events from both versions under one `run_id` are
+malformed. V2 `run-started` requires the plural `missions` metadata map and
+forbids the retired singular mission fields. Every V2 event whose
+`environment` is `mission` requires `mission_name`; workflow and lifecycle
+events forbid it. A retained V1 mission event without a name is interpreted as
+`default` only for mission filtering and V2 query projection. Missing fields on
+a V2 event are never repaired by legacy inference.
 
 ## Required run metadata
 
@@ -315,6 +320,10 @@ a run without loading its turns:
 - error count and duration summary;
 - one-way fingerprints of caller-supplied name/model/provider labels, plus
   finite canonical tag keys and enumerated values;
+- the effective workflow prelude plus a sorted `missions` map. Each mission
+  entry contains its prelude component IDs, hashes, compact dependency
+  projection, and full/model inventory hashes and byte counts. V1 singular
+  mission metadata projects under `missions.default`; and
 - effective workflow and mission prelude component IDs, hashes, and the
   compact dependency projection (`dependency_indices`, positionally aligned
   with `component_ids`; every entry lists unique ascending indices strictly
@@ -327,7 +336,6 @@ a run without loading its turns:
 - the bounded `component_overrides` recorded at run start, including component,
   base-source, and effective-source identities, so run discovery exposes
   treatment assignment rather than requiring one provenance query per run;
-- frozen mission-inventory hash and byte count when an inventory was rendered;
 - safe connector snapshots containing public names, effects, schema hashes, and
   snapshot hashes, but no endpoint or session data;
 - an optional server-owned session-profile ID and SHA-256 authority digest;
@@ -357,8 +365,17 @@ Examples:
 (log/runs {:status :error :tags {:stage "failed"} :limit 20})
 (log/run "run-id")
 (log/turns "run-id" {:status :error :limit 20})
+(log/turns "run-id" {:mission_name "reader" :limit 20})
 (log/counters {:run "run-id"})
+(log/counters {:mission_name "writer"})
 ```
+
+`trace-list-turns` and `trace-counters` accept `mission_name`. Run filters
+select runs first, then mission matching retains only events attributed to that
+mission. Counters—including event/error/run counts, evaluations,
+`evaluations_by_mission`, capability calls, and LLM usage—are derived from that
+narrowed event set. Workflow and lifecycle events never match a mission filter;
+V1 mission events without a name match only `default`.
 
 ### `log/runs`
 
@@ -463,7 +480,7 @@ restricted to owner read/write permissions before any event payload is
 appended. They use the reserved `.private.jsonl` suffix, and normal
 file/directory sources and Viewer discovery reject or omit that suffix.
 
-### Implemented 0.x developer-inspection increment
+### Implemented 0.x developer-inspection contract
 
 Sanitized subordinate `evaluation-started` data adds:
 
@@ -517,6 +534,14 @@ evaluation:
 | --- | --- | --- |
 | `execution-prints` | `evaluation_id` | `environment`, `prints`, `truncated` |
 | `execution-error` | `evaluation_id` | `environment`, `kind`, `reason`, `details` |
+
+V4 makes named-mission ownership explicit. Mission `capability-input`,
+`capability-output`, `evaluation-source`, `prelude-source`, `mcp-request`, and
+`mcp-response` payloads require `mission_name`; workflow payloads forbid it.
+Prelude uniqueness is `(environment, mission_name, component_id)`, so the same
+component ID can be inspected independently in multiple missions. Every V4
+mission-owned query result preserves `mission_name`. Loaders retain V1-V3 and
+infer `default` only for legacy mission matching; writers emit V4.
 
 Enums and map keys are normalized to JSON strings before retention. `result` is
 the bounded Dispatcher envelope returned to Lisp, so `llm-request` input/output

@@ -550,7 +550,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert Enum.map(requests, & &1["correlation"]) |> MapSet.new() ==
              Enum.map(responses, & &1["correlation"]) |> MapSet.new()
 
-    assert Enum.all?(requests ++ responses, &(&1["schema_version"] == 3))
+    assert Enum.all?(requests ++ responses, &(&1["schema_version"] == 4))
+    assert Enum.all?(requests ++ responses, &(&1["payload"]["mission_name"] == "default"))
 
     encoded_inspection = File.read!(inspection_path)
     refute encoded_inspection =~ "Bearer fixture-secret"
@@ -691,7 +692,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              |> RunLifecycle.build()
 
     assert %Capability{effect: :write} =
-             built.config.mission_environment.capabilities["remote.structured"]
+             built.config.missions["default"].environment.capabilities["remote.structured"]
 
     assert [%{"name" => "remote.structured", "effect" => "write"}] =
              built.config.connector_snapshots |> hd() |> Map.fetch!("tools")
@@ -973,17 +974,17 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              |> RunLifecycle.build()
 
     assert %Capability{effect: :write} =
-             built.config.mission_environment.capabilities["remote.structured"]
+             built.config.missions["default"].environment.capabilities["remote.structured"]
 
     assert [%{"name" => "remote.structured", "effect" => "write"} = snapshot_tool] =
              built.config.connector_snapshots |> hd() |> Map.fetch!("tools")
 
     refute Map.has_key?(snapshot_tool, "annotations")
 
-    inventory = Jason.decode!(built.config.mission_inventory.rendered)
+    inventory = Jason.decode!(built.config.missions["default"].inventory.rendered)
     assert [%{"ref" => "actions/save", "effect" => "write"}] = inventory["exports"]
 
-    model_inventory = Jason.decode!(built.config.mission_inventory.model_rendered)
+    model_inventory = Jason.decode!(built.config.missions["default"].inventory.model_rendered)
 
     assert %{"effect" => "write"} =
              Enum.find(model_inventory["entries"], &(&1["form"] == "(actions/save query)"))
@@ -1240,7 +1241,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       {:ok, config} =
         RunConfig.new(
           workflow_environment: workflow,
-          mission_environment: mission,
+          missions: %{"default" => mission},
           input: %{},
           limits: limits,
           event_sink: sink,
@@ -1360,7 +1361,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              |> directory_request(registry(fixture.endpoint, tools: tools))
              |> RunLifecycle.build()
 
-    capability = built.config.mission_environment.capabilities["remote.structured"]
+    capability = built.config.missions["default"].environment.capabilities["remote.structured"]
     assert :ok = RunBuilder.close(built)
     {:ok, state} = RunState.start(Limits.defaults())
     {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state)
@@ -1486,7 +1487,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       |> directory_request(registry(fixture.endpoint))
       |> RunLifecycle.build()
 
-    capability = built.config.mission_environment.capabilities["remote.structured"]
+    capability = built.config.missions["default"].environment.capabilities["remote.structured"]
     assert :ok = RunBuilder.close(built)
 
     assert {:error,
@@ -1782,7 +1783,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              |> directory_request(registry)
              |> RunLifecycle.build()
 
-    built.config.mission_environment.capabilities
+    built.config.missions["default"].environment.capabilities
     |> Map.values()
     |> Enum.each(fn capability ->
       {:env, environment} = :erlang.fun_info(capability.callback, :env)
@@ -2099,7 +2100,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       |> RunLifecycle.build()
 
     visibility =
-      Map.new(built.config.mission_environment.capabilities, fn {_name, capability} ->
+      Map.new(built.config.missions["default"].environment.capabilities, fn {_name, capability} ->
         {capability.name, capability.model_visible}
       end)
 
@@ -2521,7 +2522,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   defp capability_contracts(built) do
-    built.config.mission_environment.capabilities
+    built.config.missions["default"].environment.capabilities
     |> Map.values()
     |> Enum.map(&Capability.metadata/1)
     |> Enum.sort_by(& &1.name)
@@ -3036,6 +3037,9 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         "entry" => "app/run"
       },
       "input" => %{"value" => %{"program" => program}},
+      "missions" => %{
+        "default" => %{"components" => [], "data" => %{}, "providers" => ["fixture-mcp"]}
+      },
       "providers" => %{
         "mission" => [
           %{
@@ -3059,9 +3063,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         source when is_binary(source) ->
           File.write!(Path.join(dir, "mission.clj"), source)
 
-          Map.put(body, "mission", %{
+          put_in(body, ["missions", "default"], %{
             "components" => [%{"id" => "actions", "path" => "mission.clj"}],
-            "data" => %{}
+            "data" => %{},
+            "providers" => ["fixture-mcp"]
           })
 
         _missing ->

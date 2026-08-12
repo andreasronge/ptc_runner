@@ -13,7 +13,7 @@ belongs in the [Kernel maintainer guide](../../guides/kernel-maintainer.md),
 current user behavior belongs in
 [Running and debugging](../../guides/running-and-debugging.md), and the checked-in
 machine contract is
-[`ptc-command-envelope-v1.schema.json`](../../../priv/schemas/ptc-command-envelope-v1.schema.json).
+[`ptc-command-envelope-v2.schema.json`](../../../priv/schemas/ptc-command-envelope-v2.schema.json).
 Git history retains the detailed Checkpoint A–D implementation record.
 
 ## Goal

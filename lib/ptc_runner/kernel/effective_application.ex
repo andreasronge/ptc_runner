@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
   @moduledoc """
   Exact behavior identity for one fully normalized application declaration.
 
-  The digest is SHA-256 over `"ptc.effective-application.v1\\0"`, the
+  The digest is SHA-256 over `"ptc.effective-application.v2\\0"`, the
   big-endian `u64` byte length, and the TJCS projection documented by the
   stable command contract. Selected input values, paths, labels, event IDs,
   raw provider selectors, credentials, and private OAuth authority never enter
@@ -14,7 +14,7 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.TypedCanonicalJSON
 
-  @domain <<"ptc.effective-application.v1", 0>>
+  @domain <<"ptc.effective-application.v2", 0>>
 
   @type normalized_providers :: %{
           required(:workflow) => [map()],
@@ -24,23 +24,23 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
   @spec build(
           RunRequest.t(),
           FrozenBundle.t(),
-          FrozenBundle.t() | nil,
+          %{binary() => FrozenBundle.t() | nil},
           normalized_providers(),
           :normal | :private
         ) ::
           {:ok, %{projection: map(), digest: binary()}} | {:error, :invalid_effective_application}
   @doc "Builds the literal effective projection and its domain-separated digest."
-  def build(request, workflow_bundle, mission_bundle, providers, effective_event_policy) do
+  def build(request, workflow_bundle, mission_bundles, providers, effective_event_policy) do
     with true <- RunRequest.valid?(request),
          true <- FrozenBundle.valid?(workflow_bundle),
-         true <- is_nil(mission_bundle) or FrozenBundle.valid?(mission_bundle),
+         true <- valid_mission_bundles?(mission_bundles, request.package.missions),
          true <- valid_providers?(providers),
          true <- effective_event_policy in [:normal, :private],
          projection <-
            projection(
              request,
              workflow_bundle,
-             mission_bundle,
+             mission_bundles,
              providers,
              effective_event_policy
            ),
@@ -55,17 +55,18 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
     end
   end
 
-  defp projection(request, workflow_bundle, mission_bundle, providers, effective_event_policy) do
+  defp projection(request, workflow_bundle, mission_bundles, providers, effective_event_policy) do
     package = request.package
 
     %{
       "bundle_hashes" => %{
         "workflow" => workflow_bundle.hash,
-        "mission" => if(mission_bundle, do: mission_bundle.hash, else: nil)
+        "missions" =>
+          Map.new(mission_bundles, fn {name, bundle} -> {name, bundle && bundle.hash} end)
       },
       "components" => %{
         "workflow" => component_projection(workflow_bundle),
-        "mission" => component_projection(mission_bundle)
+        "missions" => mission_projection(package.missions, mission_bundles)
       },
       "contracts" => %{
         "input" => package.contract_behavior_hashes.input,
@@ -76,7 +77,6 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
       "input_authority_class" => Atom.to_string(request.input.authority),
       "inspection_capture_enabled" => request.policy.inspection_capture,
       "limits" => LimitCatalog.effective_projection(package.limits),
-      "mission_data" => package.mission_data,
       "providers" => %{
         "workflow" => providers.workflow,
         "mission" => providers.mission
@@ -86,7 +86,18 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
     }
   end
 
-  defp component_projection(nil), do: []
+  defp mission_projection(missions, bundles) do
+    missions
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Map.new(fn {name, mission} ->
+      {name,
+       %{
+         "components" => bundles |> Map.fetch!(name) |> component_projection(),
+         "data" => mission.data,
+         "provider_occurrences" => mission.provider_occurrences
+       }}
+    end)
+  end
 
   defp component_projection(%FrozenBundle{} = bundle) do
     bundle.components
@@ -99,6 +110,21 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
       }
     end)
   end
+
+  defp component_projection(nil), do: []
+
+  defp valid_mission_bundles?(bundles, missions)
+       when is_map(bundles) and is_map(missions) and map_size(bundles) == map_size(missions) do
+    Enum.sort(Map.keys(bundles)) == Enum.sort(Map.keys(missions)) and
+      Enum.all?(bundles, fn {name, bundle} ->
+        case bundle do
+          nil -> Map.fetch!(missions, name).components == []
+          bundle -> FrozenBundle.valid?(bundle)
+        end
+      end)
+  end
+
+  defp valid_mission_bundles?(_bundles, _missions), do: false
 
   defp valid_providers?(%{workflow: workflow, mission: mission} = providers)
        when map_size(providers) == 2 and is_list(workflow) and is_list(mission),

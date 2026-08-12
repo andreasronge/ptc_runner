@@ -4,6 +4,8 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandSource
+  alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.SchemaPath
 
   @spec project(:validate | :run | :doctor, term()) :: CommandDiagnostic.t()
   def project(command, reason) do
@@ -134,7 +136,15 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   end
 
   defp command_path(_role, segments) when is_list(segments) do
-    {:ok, path} = CommandPath.manifest(segments)
+    safe_segments =
+      segments
+      |> Enum.map(fn
+        {:property, name} -> name
+        {:index, index} -> index
+      end)
+      |> SchemaPath.explained_prefix(Manifest.schema())
+
+    {:ok, path} = CommandPath.manifest(safe_segments)
     path
   end
 

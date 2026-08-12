@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added explicit named mission environments: manifests declare a bounded
+  `missions` map with isolated data, continuations, APIs, and provider grants;
+  workflow and agent APIs select missions by name; V2 traces, V4 inspection,
+  Viewer projections, and stable command V2 evidence preserve mission
+  attribution. The reader/writer example demonstrates two least-authority
+  agents orchestrated by one workflow.
+
 - Added a bounded Java interop oracle baseline with pinned Temurin and JVM
   Clojure versions, typed fixtures for every admitted overload, exact descriptor
   attestation for every JVM overload, executable closed-dispatch compatibility
@@ -81,7 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mix ptc <command>` surface. The dotted Mix tasks were removed without
   compatibility shims.
 - Removed the unreferenced `diagnostic` and `artifact_state` definitions from
-  the published `ptc-command-envelope-v1` schema. Both were emitted but
+  the published `ptc-command-envelope-v2` schema. Both were emitted but
   referenced by no envelope branch, and `diagnostic` was a union over the whole
   diagnostic catalog, so consumers generating types from `$defs` derived a
   wider diagnostic than any envelope can carry. Validation behaviour is

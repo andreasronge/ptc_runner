@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionCapability
+  alias PtcRunner.Kernel.InspectionQuery
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.RunBuilder
@@ -16,6 +17,47 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
   @source "(return 42)"
   @source_hash :crypto.hash(:sha256, @source) |> Base.encode16(case: :lower)
+
+  test "V4 effective preludes qualify repeated component IDs by mission" do
+    records =
+      ["reader", "writer"]
+      |> Enum.with_index(1)
+      |> Enum.map(fn {mission_name, sequence} ->
+        %{
+          "schema_version" => 4,
+          "run_id" => "qualified-preludes",
+          "trace_id" => "trace-qualified-preludes",
+          "sequence" => sequence,
+          "timestamp" => "2026-08-11T12:00:00Z",
+          "record_type" => "prelude-source",
+          "correlation" => %{"component_id" => "shared.api"},
+          "payload" => %{
+            "environment" => "mission",
+            "mission_name" => mission_name,
+            "source" => @source,
+            "source_hash" => @source_hash,
+            "source_bytes" => byte_size(@source)
+          }
+        }
+      end)
+
+    assert {:ok, %{source_id: source_id, collections: collections}} =
+             InspectionQuery.compile([records], "trace-source")
+
+    assert {:ok, %{"items" => items}} =
+             InspectionQuery.query(
+               collections,
+               source_id,
+               :effective_preludes,
+               %{"run_id" => "qualified-preludes"},
+               100_000
+             )
+
+    assert Enum.map(items, &{&1["component_id"], &1["mission_name"]}) == [
+             {"shared.api", "reader"},
+             {"shared.api", "writer"}
+           ]
+  end
 
   @tag :tmp_dir
   test "mixed V1/V2 artifacts expose paired deterministic private queries", %{tmp_dir: root} do
@@ -247,6 +289,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     File.write!(
       Path.join(root, "override.json"),
       Jason.encode!(%{
+        "target" => %{"environment" => "workflow"},
         "component_id" => item["component_id"],
         "base_source_hash" => item["source_hash"],
         "source_hash" => ComponentOverride.hash(candidate_source),
@@ -350,6 +393,9 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
           "entry" => "app/run"
         },
         "input" => %{"value" => %{}},
+        "missions" => %{
+          "default" => %{"providers" => ["private-history", "history"]}
+        },
         "providers" => %{
           "mission" => [
             %{"name" => "private-history"},
@@ -391,7 +437,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     capability =
       Map.fetch!(
-        built.config.mission_environment.capabilities,
+        built.config.missions["default"].environment.capabilities,
         "private-history.provider-exchanges"
       )
 

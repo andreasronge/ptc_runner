@@ -410,7 +410,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
 
     RunConfig.new(
       workflow_environment: workflow,
-      mission_environment: mission,
+      missions: %{"default" => mission},
       input: %{},
       limits: limits,
       event_sink: sink

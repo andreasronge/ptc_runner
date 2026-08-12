@@ -34,7 +34,7 @@ alias PtcRunner.Kernel.WorkflowEnvironment
 {:ok, config} =
   RunConfig.new(
     workflow_environment: workflow,
-    mission_environment: mission,
+    missions: %{"default" => mission},
     input: %{"input" => %{"n" => 21}},
     limits: limits,
     event_sink: sink

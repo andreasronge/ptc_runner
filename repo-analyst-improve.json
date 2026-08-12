@@ -2,28 +2,38 @@
   "$schema": "./priv/schemas/ptc-application-manifest.schema.json",
   "version": 1,
   "workflow": {
-    "components": [{"library": "agent.main"}],
+    "components": [
+      {
+        "library": "agent.main"
+      }
+    ],
     "entry": "agent.main/run"
   },
-  "mission": {
-    "components": [
-      {"library": "cap"},
-      {"id": "repo", "path": "repo-analyst/repo.clj", "dependencies": ["cap"]},
-      {"id": "runs", "path": "repo-analyst/runs.clj", "dependencies": ["cap"]}
-    ],
-    "data": {}
-  },
   "providers": {
-    "workflow": [{"name": "deepseek"}],
+    "workflow": [
+      {
+        "name": "deepseek"
+      }
+    ],
     "mission": [
-      {"name": "workspace"},
-      {"name": "history"},
-      {"name": "private-history"}
+      {
+        "name": "workspace"
+      },
+      {
+        "name": "history"
+      },
+      {
+        "name": "private-history"
+      }
     ]
   },
-  "input": {"path": "repo-analyst/improve-input.json"},
+  "input": {
+    "path": "repo-analyst/improve-input.json"
+  },
   "contracts": {
-    "result_schema": {"path": "repo-analyst/candidate.schema.json"}
+    "result_schema": {
+      "path": "repo-analyst/candidate.schema.json"
+    }
   },
   "limits": {
     "run_duration_ms": 120000,
@@ -33,5 +43,35 @@
     "workflow_capability_calls_per_name": 24,
     "mission_capability_calls": 64,
     "normal_event_count": 512
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {
+          "library": "cap"
+        },
+        {
+          "id": "repo",
+          "path": "repo-analyst/repo.clj",
+          "dependencies": [
+            "cap"
+          ]
+        },
+        {
+          "id": "runs",
+          "path": "repo-analyst/runs.clj",
+          "dependencies": [
+            "cap"
+          ]
+        }
+      ],
+      "data": {
+      },
+      "providers": [
+        "workspace",
+        "history",
+        "private-history"
+      ]
+    }
   }
 }

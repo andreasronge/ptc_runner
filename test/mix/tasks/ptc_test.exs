@@ -29,7 +29,7 @@ defmodule Mix.Tasks.PtcTest do
     assert rendering == "1\n"
 
     assert %{
-             "schema_version" => 1,
+             "schema_version" => 2,
              "command" => "run",
              "status" => "ok",
              "result" => %{"result_class" => "normal", "value" => 1},

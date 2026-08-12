@@ -172,7 +172,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
       detailed =
         Evaluation.evaluate_source_detailed(
           state.run_state,
-          state.config.mission_environment,
+          state.config.missions["default"].environment,
           source,
           state.config.limits.evaluation_timeout_ms,
           state.config.event_sink,

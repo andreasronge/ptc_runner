@@ -142,10 +142,17 @@
                 "minLength": 71,
                 "maxLength": 71
               },
-              "mission_bundle_hash": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 128
+              "mission_bundle_hashes": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  }
+                },
+                "required": ["default"]
               },
               "provider_snapshot_hashes": {
                 "type": "array",
@@ -188,7 +195,7 @@
               "run_id",
               "result_hash",
               "workflow_bundle_hash",
-              "mission_bundle_hash",
+              "mission_bundle_hashes",
               "provider_snapshot_hashes",
               "content_snapshot_hashes"
             ]

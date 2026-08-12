@@ -195,6 +195,81 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
   end
 
+  test "V4 requires and correlates exact mission identity" do
+    {:ok, missing_name} =
+      InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 4)
+
+    assert {:error, :inspection_sink_error} =
+             InspectionSink.emit(
+               missing_name,
+               "capability-input",
+               %{capability_id: "cap-1"},
+               %{environment: :mission, name: "read", arguments: %{}}
+             )
+
+    {:ok, workflow_name} =
+      InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 4)
+
+    assert {:error, :inspection_sink_error} =
+             InspectionSink.emit(
+               workflow_name,
+               "capability-input",
+               %{capability_id: "cap-1"},
+               %{environment: :workflow, mission_name: "reader", name: "read", arguments: %{}}
+             )
+
+    {:ok, sink} =
+      InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 4)
+
+    assert :ok =
+             InspectionSink.emit(
+               sink,
+               "capability-input",
+               %{capability_id: "cap-1"},
+               %{
+                 environment: :mission,
+                 mission_name: "reader",
+                 name: "read",
+                 arguments: %{}
+               }
+             )
+
+    assert :ok =
+             InspectionSink.emit(
+               sink,
+               "capability-output",
+               %{capability_id: "cap-1"},
+               %{
+                 environment: :mission,
+                 mission_name: "reader",
+                 name: "read",
+                 result: %{status: :ok, value: 1}
+               }
+             )
+
+    assert {:ok, records} = InspectionSink.records(sink)
+
+    event = %{
+      run_id: "run-1",
+      trace_id: "trace-1",
+      type: "capability-started",
+      data: %{
+        capability_id: "cap-1",
+        environment: :mission,
+        mission_name: "reader",
+        name: "read"
+      }
+    }
+
+    assert :ok = InspectionArtifact.validate_correlations(records, [event])
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(
+               records,
+               [put_in(event, [:data, :mission_name], "writer")]
+             )
+  end
+
   test "enforces installed per-record and aggregate encoded byte ceilings" do
     {:ok, record_limited} =
       InspectionSink.start(
@@ -783,6 +858,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
         "entry" => "app/run"
       },
       "input" => %{"value" => %{"program" => program}},
+      "missions" => %{"default" => %{"providers" => ["native"]}},
       "providers" => %{
         "mission" => [%{"name" => "native", "config" => %{}}]
       },
@@ -842,9 +918,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     assert input["payload"] == %{
              "environment" => "mission",
+             "mission_name" => "default",
              "name" => "native-read",
              "arguments" => %{"query" => "inspect me"}
            }
+
+    assert output["payload"]["mission_name"] == "default"
 
     assert output["payload"]["result"] == %{
              "status" => "ok",

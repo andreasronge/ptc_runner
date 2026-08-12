@@ -225,7 +225,13 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
         ],
         "entry" => "lab.workflow/run"
       },
-      "mission" => %{"components" => mission_components, "data" => %{}},
+      "missions" => %{
+        "default" => %{
+          "components" => mission_components,
+          "data" => %{},
+          "providers" => ["filesystem", "fixture-native", "fixture-mcp"]
+        }
+      },
       "input" => %{"value" => %{"task" => @task}},
       "providers" => %{
         "workflow" => [%{"name" => "fixture-model", "config" => %{}}],

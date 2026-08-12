@@ -13,7 +13,9 @@ defmodule PtcRunner.Kernel.Manifest do
           ],
           "entry": "workflow.main/run"
         },
-        "mission": {"components": [], "data": {}},
+        "missions": {
+          "default": {"components": [], "data": {}, "providers": []}
+        },
         "input": {"value": {}},
         "contracts": {
           "input_schema": {"path": "input.schema.json"},
@@ -80,7 +82,7 @@ defmodule PtcRunner.Kernel.Manifest do
   @max_contract_bytes 65_536
   @component_id ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @entry ~r/\A[a-z][a-z0-9._-]{0,127}\/[a-z][a-z0-9._?!-]{0,127}\z/
-  @top_keys ~w($schema version workflow mission input contracts providers limits events labels)
+  @top_keys ~w($schema version workflow missions input contracts providers limits events labels)
   @label_keys ~w(name model provider tags)
   @tag_keys ~w(environment mode stage suite)
   @label_identifier ~r/\A(?:[A-Za-z0-9][A-Za-z0-9._:\/@+-]{0,255}|sha256:[0-9a-f]{64})\z/
@@ -95,14 +97,12 @@ defmodule PtcRunner.Kernel.Manifest do
     :document,
     :workflow_components,
     :workflow_component_kinds,
-    :mission_components,
-    :mission_component_kinds,
     :entry,
     :input_declaration,
     :input,
     :contracts,
     :contract_sources,
-    :mission_data,
+    :missions,
     :providers,
     :limits,
     :installed_limits,
@@ -115,14 +115,19 @@ defmodule PtcRunner.Kernel.Manifest do
           document: map(),
           workflow_components: [Component.t()],
           workflow_component_kinds: %{binary() => :local | :library},
-          mission_components: [Component.t()],
-          mission_component_kinds: %{binary() => :local | :library},
           entry: binary(),
           input_declaration: map(),
           input: map() | nil,
           contracts: %{input: ValueContract.t() | nil, result: ValueContract.t() | nil},
           contract_sources: %{input: binary() | nil, result: binary() | nil},
-          mission_data: map(),
+          missions: %{
+            binary() => %{
+              components: [Component.t()],
+              kinds: %{binary() => :local | :library},
+              data: map(),
+              provider_occurrences: [non_neg_integer()]
+            }
+          },
           providers: %{workflow: [map()], mission: [map()]},
           limits: Limits.t(),
           installed_limits: Limits.t(),
@@ -203,39 +208,39 @@ defmodule PtcRunner.Kernel.Manifest do
          :ok <- root_keys(manifest, @top_keys, ~w(version workflow input)),
          :ok <- optional_schema(manifest),
          :ok <- version(manifest["version"]),
+         {:ok, declarations} <- preflight_declarations(manifest, installed_limits),
          {:ok, workflow} <- workflow(manifest["workflow"], source),
-         {:ok, mission} <- mission(Map.get(manifest, "mission", %{}), source),
          {:ok, contract_result} <- contracts(Map.get(manifest, "contracts", %{}), source),
-         {:ok, input_declaration} <- input_declaration(manifest["input"]),
          {:ok, input} <-
            maybe_materialize_input(
-             input_declaration,
+             declarations.input,
              source,
              contract_result.contracts.input,
              materialize_input?
            ),
-         {:ok, providers} <- providers(Map.get(manifest, "providers", %{})),
-         {:ok, limits} <- limits(Map.get(manifest, "limits", %{}), installed_limits),
-         {:ok, events} <- events(Map.get(manifest, "events", %{})),
-         {:ok, labels} <- labels(Map.get(manifest, "labels", %{})) do
+         {:ok, missions} <-
+           missions(
+             Map.get(manifest, "missions", %{}),
+             source,
+             declarations.providers
+           ),
+         :ok <- aggregate_source_bytes(workflow, missions) do
       {:ok,
        %__MODULE__{
          document: manifest,
          workflow_components: workflow.components,
          workflow_component_kinds: workflow.kinds,
-         mission_components: mission.components,
-         mission_component_kinds: mission.kinds,
          entry: workflow.entry,
-         input_declaration: input_declaration,
+         input_declaration: declarations.input,
          input: input,
          contracts: contract_result.contracts,
          contract_sources: contract_result.sources,
-         mission_data: mission.data,
-         providers: providers,
-         limits: limits,
+         missions: missions,
+         providers: declarations.providers,
+         limits: declarations.limits,
          installed_limits: installed_limits,
-         events: events,
-         labels: labels
+         events: declarations.events,
+         labels: declarations.labels
        }}
     else
       {:error, _reason} = error -> error
@@ -285,7 +290,8 @@ defmodule PtcRunner.Kernel.Manifest do
 
   defp workflow(value, source) when is_map(value) do
     with :ok <- section_keys(value, "workflow", ~w(components entry), ~w(components entry)),
-         {:ok, component_result} <- components(value["components"], source, :workflow),
+         {:ok, component_result} <-
+           components(value["components"], source, [{:property, "workflow"}]),
          {:ok, entry} <- workflow_entry(value["entry"]) do
       {:ok,
        %{components: component_result.components, kinds: component_result.kinds, entry: entry}}
@@ -313,35 +319,298 @@ defmodule PtcRunner.Kernel.Manifest do
         :invalid_workflow_entry
       )
 
-  defp mission(value, source) when is_map(value) do
-    with :ok <- section_keys(value, "mission", ~w(components data), []),
+  # Named missions. Each declares its own components, data, and a subset
+  # of the mission providers selected at the top level. Selecting a provider a
+  # mission does not name is the whole point: the grant is absent from that
+  # mission's environment, so the model cannot reach it even if it tries.
+  defp missions(value, source, providers) when is_map(value) and not is_struct(value) do
+    if map_size(value) > 16 do
+      manifest_value_error([{:property, "missions"}], :invalid_missions_manifest)
+    else
+      names = providers.mission |> Enum.map(& &1["name"]) |> Enum.with_index() |> Map.new()
+
+      Enum.reduce_while(value, {:ok, %{}}, fn {name, spec}, {:ok, acc} ->
+        case mission_spec(name, spec, source, names) do
+          {:ok, mission} -> {:cont, {:ok, Map.put(acc, name, mission)}}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+    end
+  end
+
+  defp missions(_value, _source, _providers),
+    do: manifest_value_error([{:property, "missions"}], :invalid_missions_manifest)
+
+  defp mission_spec(name, spec, source, provider_names) do
+    path = [{:property, "missions"}, {:property, name}]
+
+    with true <- mission_name?(name),
+         true <- is_map(spec) and not is_struct(spec),
+         :ok <- section_keys(spec, path, ~w(components data providers), []),
          {:ok, component_result} <-
-           components(Map.get(value, "components", []), source, :mission),
-         {:ok, data} <- mission_data(Map.get(value, "data", %{})) do
-      {:ok, %{components: component_result.components, kinds: component_result.kinds, data: data}}
+           components(Map.get(spec, "components", []), source, path),
+         {:ok, data} <- mission_data(Map.get(spec, "data", %{}), path),
+         {:ok, occurrences} <-
+           mission_providers(Map.get(spec, "providers", []), provider_names, path) do
+      {:ok,
+       %{
+         components: component_result.components,
+         kinds: component_result.kinds,
+         data: data,
+         provider_occurrences: occurrences
+       }}
+    else
+      {:error, _reason} = error -> error
+      _ -> manifest_value_error(path, :invalid_missions_manifest)
     end
   end
 
-  defp mission(_value, _source),
-    do: manifest_value_error([{:property, "mission"}], :invalid_mission_manifest)
+  defp mission_name?(name),
+    do: is_binary(name) and Regex.match?(@component_id, name)
 
-  defp mission_data(data) when is_map(data) and not is_struct(data) do
-    case StrictJSON.admit(data) do
-      {:ok, admitted} when is_map(admitted) -> {:ok, admitted}
-      _invalid -> invalid_mission_data()
+  defp mission_providers(values, provider_names, path)
+       when is_list(values) and length(values) <= 32 do
+    if Enum.uniq(values) != values do
+      manifest_value_error(
+        path ++ [{:property, "providers"}],
+        :duplicate_mission_provider
+      )
+    else
+      Enum.reduce_while(values, {:ok, []}, fn value, {:ok, acc} ->
+        # A mission may only narrow what `providers.mission` already selected. It
+        # can never introduce a grant, so a mission cannot widen run authority.
+        case Map.fetch(provider_names, value) do
+          {:ok, index} ->
+            {:cont, {:ok, acc ++ [index]}}
+
+          :error ->
+            {:halt,
+             manifest_value_error(
+               path ++ [{:property, "providers"}],
+               :unknown_mission_provider
+             )}
+        end
+      end)
     end
   end
 
-  defp mission_data(_data), do: invalid_mission_data()
-
-  defp invalid_mission_data,
+  defp mission_providers(_values, _provider_names, path),
     do:
       manifest_value_error(
-        [{:property, "mission"}, {:property, "data"}],
+        path ++ [{:property, "providers"}],
+        :invalid_missions_manifest
+      )
+
+  defp mission_data(data, path) when is_map(data) and not is_struct(data) do
+    case StrictJSON.admit(data) do
+      {:ok, admitted} when is_map(admitted) -> {:ok, admitted}
+      _invalid -> invalid_mission_data(path)
+    end
+  end
+
+  defp mission_data(_data, path), do: invalid_mission_data(path)
+
+  defp invalid_mission_data(path),
+    do:
+      manifest_value_error(
+        path ++ [{:property, "data"}],
         :invalid_mission_data
       )
 
-  defp components(values, source, destination)
+  # All declarations are validated before any referenced source is opened.
+  # Materialization below may repeat cheap shape checks, but a structural
+  # failure can never be masked by a missing or changed component/contract/input
+  # file.
+  defp preflight_declarations(manifest, installed_limits) do
+    with :ok <- preflight_aggregate_shape(manifest),
+         :ok <- workflow_declaration(manifest["workflow"]),
+         :ok <- contract_declarations(Map.get(manifest, "contracts", %{})),
+         {:ok, input} <- input_declaration(manifest["input"]),
+         {:ok, providers} <- providers(Map.get(manifest, "providers", %{})),
+         :ok <- mission_declarations(Map.get(manifest, "missions", %{}), providers),
+         {:ok, limits} <- limits(Map.get(manifest, "limits", %{}), installed_limits),
+         {:ok, events} <- events(Map.get(manifest, "events", %{})),
+         {:ok, labels} <- labels(Map.get(manifest, "labels", %{})) do
+      {:ok,
+       %{
+         input: input,
+         providers: providers,
+         limits: limits,
+         events: events,
+         labels: labels
+       }}
+    end
+  end
+
+  defp workflow_declaration(value) when is_map(value) and not is_struct(value) do
+    with :ok <- section_keys(value, "workflow", ~w(components entry), ~w(components entry)),
+         :ok <- component_declarations(value["components"], [{:property, "workflow"}]),
+         {:ok, _entry} <- workflow_entry(value["entry"]) do
+      :ok
+    end
+  end
+
+  defp workflow_declaration(_value),
+    do: manifest_value_error([{:property, "workflow"}], :invalid_workflow_manifest)
+
+  defp contract_declarations(value) when is_map(value) and not is_struct(value) do
+    with :ok <- section_keys(value, "contracts", ~w(input_schema result_schema), []) do
+      Enum.reduce_while(
+        [{"input_schema", :input_contract}, {"result_schema", :result_contract}],
+        :ok,
+        fn {name, role}, :ok ->
+          case optional_contract_declaration(value, name, role) do
+            :ok -> {:cont, :ok}
+            {:error, _reason} = error -> {:halt, error}
+          end
+        end
+      )
+    end
+  end
+
+  defp contract_declarations(_value),
+    do: {:error, {:manifest_path, [{:property, "contracts"}], :invalid_contracts_section}}
+
+  defp optional_contract_declaration(value, name, role) do
+    case Map.fetch(value, name) do
+      :error -> :ok
+      {:ok, reference} -> contract_declaration(reference, role)
+    end
+  end
+
+  defp contract_declaration(reference, role)
+       when is_map(reference) and not is_struct(reference) do
+    with :ok <- structural_keys(reference, ~w(path), ~w(path)),
+         path when is_binary(path) <- reference["path"],
+         true <- ApplicationSource.valid_name?(path) do
+      :ok
+    else
+      {:error, reason} -> {:error, {:manifest_path, contract_reference_path(role), reason}}
+      _invalid -> invalid_contract_path(role)
+    end
+  end
+
+  defp contract_declaration(_reference, role),
+    do: {:error, {:manifest_path, contract_reference_path(role), :invalid_contract_reference}}
+
+  defp mission_declarations(value, providers)
+       when is_map(value) and not is_struct(value) and map_size(value) <= 16 do
+    provider_names = providers.mission |> Enum.map(& &1["name"]) |> Enum.with_index() |> Map.new()
+
+    Enum.reduce_while(value, :ok, fn {name, spec}, :ok ->
+      path = [{:property, "missions"}, {:property, name}]
+
+      result =
+        with true <- mission_name?(name),
+             true <- is_map(spec) and not is_struct(spec),
+             :ok <- section_keys(spec, path, ~w(components data providers), []),
+             :ok <- component_declarations(Map.get(spec, "components", []), path),
+             {:ok, _data} <- mission_data(Map.get(spec, "data", %{}), path),
+             {:ok, _occurrences} <-
+               mission_providers(Map.get(spec, "providers", []), provider_names, path) do
+          :ok
+        else
+          {:error, _reason} = error -> error
+          _invalid -> manifest_value_error(path, :invalid_missions_manifest)
+        end
+
+      case result do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp mission_declarations(_value, _providers),
+    do: manifest_value_error([{:property, "missions"}], :invalid_missions_manifest)
+
+  defp component_declarations(values, path)
+       when is_list(values) and length(values) <= 128 do
+    values
+    |> Enum.with_index()
+    |> Enum.reduce_while(:ok, fn {value, index}, :ok ->
+      declaration_path = path ++ [{:property, "components"}, {:index, index}]
+
+      case component_declaration(value) do
+        :ok ->
+          {:cont, :ok}
+
+        {:error, reason} ->
+          {:halt, {:error, {:manifest_path, declaration_path, reason}}}
+
+        {:value_error, suffix, reason} ->
+          {:halt, {:error, {:manifest_path, declaration_path ++ suffix, reason}}}
+      end
+    end)
+  end
+
+  defp component_declarations(_values, path),
+    do: manifest_value_error(path ++ [{:property, "components"}], :invalid_components)
+
+  defp component_declaration(%{"library" => library} = value) do
+    with :ok <- structural_keys(value, ~w(library), ~w(library)) do
+      component_id(library, "library")
+    end
+  end
+
+  defp component_declaration(value) when is_map(value) and not is_struct(value) do
+    with :ok <- structural_keys(value, ~w(id path dependencies), ~w(id path)),
+         :ok <- component_id(value["id"], "id"),
+         {:ok, _path} <- component_path(value["path"]) do
+      component_dependencies(Map.get(value, "dependencies", []))
+    end
+  end
+
+  defp component_declaration(_value), do: {:value_error, [], :invalid_component}
+
+  defp preflight_aggregate_shape(manifest) do
+    workflow = get_in(manifest, ["workflow", "components"])
+    missions = Map.get(manifest, "missions", %{})
+
+    mission_components =
+      if is_map(missions),
+        do:
+          missions
+          |> Map.values()
+          |> Enum.map(&if(is_map(&1), do: Map.get(&1, "components", []), else: nil)),
+        else: [nil]
+
+    all = [workflow | mission_components]
+
+    if Enum.all?(all, &is_list/1) do
+      if Enum.sum(Enum.map(all, &length/1)) <= 128 and dependency_edge_count(all) <= 512,
+        do: :ok,
+        else: manifest_value_error([{:property, "missions"}], :mission_aggregate_limit_exceeded)
+    else
+      :ok
+    end
+  end
+
+  defp dependency_edge_count(component_lists) do
+    component_lists
+    |> List.flatten()
+    |> Enum.reduce(0, fn
+      %{"dependencies" => dependencies}, total when is_list(dependencies) ->
+        total + length(dependencies)
+
+      _component, total ->
+        total
+    end)
+  end
+
+  defp aggregate_source_bytes(workflow, missions) do
+    bytes =
+      Enum.reduce(workflow.components, 0, &(byte_size(&1.source) + &2)) +
+        Enum.reduce(missions, 0, fn {_name, mission}, total ->
+          total + Enum.reduce(mission.components, 0, &(byte_size(&1.source) + &2))
+        end)
+
+    if bytes <= 2_000_000,
+      do: :ok,
+      else: manifest_value_error([{:property, "missions"}], :mission_source_bytes_exceeded)
+  end
+
+  defp components(values, source, path)
        when is_list(values) and length(values) <= 128 do
     values
     |> Enum.with_index()
@@ -351,20 +620,12 @@ defmodule PtcRunner.Kernel.Manifest do
           {:cont, {:ok, [selection | selections]}}
 
         {:error, {:component_structure, reason}} ->
-          path = [
-            {:property, Atom.to_string(destination)},
-            {:property, "components"},
-            {:index, index}
-          ]
+          path = path ++ [{:property, "components"}, {:index, index}]
 
           {:halt, {:error, {:manifest_path, path, reason}}}
 
         {:error, {:component_value, suffix, reason}} ->
-          path = [
-            {:property, Atom.to_string(destination)},
-            {:property, "components"},
-            {:index, index}
-          ]
+          path = path ++ [{:property, "components"}, {:index, index}]
 
           {:halt, {:error, {:manifest_path, path ++ suffix, reason}}}
 
@@ -395,10 +656,10 @@ defmodule PtcRunner.Kernel.Manifest do
     end
   end
 
-  defp components(_values, _source, destination),
+  defp components(_values, _source, path),
     do:
       manifest_value_error(
-        [{:property, Atom.to_string(destination)}, {:property, "components"}],
+        path ++ [{:property, "components"}],
         :invalid_components
       )
 
@@ -1029,7 +1290,7 @@ defmodule PtcRunner.Kernel.Manifest do
         "$schema" => bounded_string(2_048),
         "version" => %{"const" => 1},
         "workflow" => workflow_schema(),
-        "mission" => mission_schema(),
+        "missions" => missions_schema(),
         "input" => input_schema(),
         "contracts" => contracts_schema(),
         "providers" => providers_schema(),
@@ -1053,11 +1314,23 @@ defmodule PtcRunner.Kernel.Manifest do
     )
   end
 
-  defp mission_schema do
-    closed_object(%{
-      "components" => components_schema(),
-      "data" => %{"type" => "object"}
-    })
+  defp missions_schema do
+    %{
+      "type" => "object",
+      "maxProperties" => 16,
+      "propertyNames" => %{"pattern" => "^[a-z][a-z0-9._-]{0,127}$"},
+      "additionalProperties" =>
+        closed_object(%{
+          "components" => components_schema(),
+          "data" => %{"type" => "object"},
+          "providers" => %{
+            "type" => "array",
+            "maxItems" => 32,
+            "uniqueItems" => true,
+            "items" => component_id_schema()
+          }
+        })
+    }
   end
 
   defp components_schema do

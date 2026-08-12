@@ -48,6 +48,7 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
         Materialize.run([
           manifest,
+          "--workflow",
           "--component",
           "helper",
           "--out",
@@ -82,6 +83,32 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
   end
 
   @tag :tmp_dir
+  test "a mission target is explicit in the published descriptor", %{tmp_dir: dir} do
+    manifest = write_mission_application(dir)
+    File.write!(Path.join(dir, "authored.clj"), @authored)
+    out = Path.join(dir, "mission-candidate")
+
+    capture_io(fn ->
+      Mix.Task.reenable("ptc.materialize")
+
+      Materialize.run([
+        manifest,
+        "--target-mission",
+        "writer",
+        "--component",
+        "helper",
+        "--out",
+        out,
+        "--source",
+        Path.join(dir, "authored.clj")
+      ])
+    end)
+
+    descriptor = out |> Path.join("descriptor.json") |> File.read!() |> Jason.decode!()
+    assert descriptor["target"] == %{"environment" => "mission", "mission" => "writer"}
+  end
+
+  @tag :tmp_dir
   test "a candidate reaching a new capability is refused and leaves nothing behind", %{
     tmp_dir: dir
   } do
@@ -111,6 +138,7 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
         Materialize.run([
           manifest,
+          "--workflow",
           "--component",
           "helper",
           "--out",
@@ -152,6 +180,7 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
         Materialize.run([
           manifest,
+          "--workflow",
           "--component",
           "helper",
           "--out",
@@ -186,6 +215,7 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
         Materialize.run([
           manifest,
+          "--workflow",
           "--component",
           "helper",
           "--out",
@@ -212,6 +242,7 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
         Materialize.run([
           manifest,
+          "--workflow",
           "--component",
           "helper",
           "--out",
@@ -243,6 +274,7 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
         Materialize.run([
           manifest,
+          "--workflow",
           "--component",
           "main",
           "--out",
@@ -276,6 +308,7 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
         Materialize.run([
           manifest,
+          "--workflow",
           "--component",
           "helper",
           "--out",
@@ -302,6 +335,7 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
         Materialize.run([
           manifest,
+          "--workflow",
           "--component",
           "helper",
           "--out",
@@ -335,6 +369,28 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
     }
 
     path = Path.join(dir, "ptc.json")
+    File.write!(path, Jason.encode!(manifest))
+    path
+  end
+
+  defp write_mission_application(dir) do
+    File.write!(Path.join(dir, "helper.clj"), @placeholder)
+    File.write!(Path.join(dir, "main.clj"), ~S|(ns main) (defn run [_i] (return 1))|)
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "missions" => %{
+        "writer" => %{"components" => [%{"id" => "helper", "path" => "helper.clj"}]}
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"run_duration_ms" => 30_000}
+    }
+
+    path = Path.join(dir, "mission-ptc.json")
     File.write!(path, Jason.encode!(manifest))
     path
   end

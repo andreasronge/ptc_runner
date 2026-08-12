@@ -674,7 +674,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, normal_config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: normal
@@ -690,7 +690,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, private_config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: private
@@ -711,7 +711,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -737,7 +737,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -778,7 +778,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:error, :invalid_run_config} =
              RunConfig.new(
                workflow_environment: workflow,
-               mission_environment: mission,
+               missions: %{"default" => mission},
                input: %{},
                limits: limits,
                event_sink: sink
@@ -796,7 +796,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:error, :invalid_run_config} =
              RunConfig.new(
                workflow_environment: workflow,
-               mission_environment: mission,
+               missions: %{"default" => mission},
                input: %{},
                limits: limits,
                event_sink: sink,
@@ -820,7 +820,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:ok, %{run_deadline: nil}} =
              RunConfig.new(
                workflow_environment: workflow,
-               mission_environment: mission,
+               missions: %{"default" => mission},
                input: %{},
                limits: limits,
                event_sink: generic_sink,
@@ -830,7 +830,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:error, :invalid_run_config} =
              RunConfig.new(
                workflow_environment: workflow,
-               mission_environment: mission,
+               missions: %{"default" => mission},
                input: %{},
                limits: limits,
                event_sink: active_sink,
@@ -861,7 +861,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:error, :invalid_run_config} =
              RunConfig.new(
                workflow_environment: workflow,
-               mission_environment: mission,
+               missions: %{"default" => mission},
                input: %{},
                limits: limits,
                event_sink: sink,
@@ -886,7 +886,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
           result =
             RunConfig.new(
               workflow_environment: workflow,
-              mission_environment: mission,
+              missions: %{"default" => mission},
               input: %{},
               limits: limits,
               event_sink: sink,
@@ -984,7 +984,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
           result =
             RunConfig.new(
               workflow_environment: workflow,
-              mission_environment: mission,
+              missions: %{"default" => mission},
               input: %{},
               limits: limits,
               event_sink: sink
@@ -1063,7 +1063,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:ok, _config} =
              RunConfig.new(
                workflow_environment: workflow,
-               mission_environment: mission,
+               missions: %{"default" => mission},
                input: %{},
                limits: limits,
                event_sink: sink
@@ -1076,7 +1076,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     {:ok, limits} =
       Limits.new(
-        event_payload_bytes: 5_900,
+        event_payload_bytes: 7_000,
         normal_event_count: 4,
         normal_event_bytes: 100_000
       )
@@ -1086,7 +1086,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:ok, _config} =
              RunConfig.new(
                workflow_environment: workflow,
-               mission_environment: mission,
+               missions: %{"default" => mission},
                input: %{},
                limits: limits,
                event_sink: sink
@@ -1107,7 +1107,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       assert {:error, :invalid_run_config} =
                RunConfig.new(
                  workflow_environment: workflow,
-                 mission_environment: mission,
+                 missions: %{"default" => mission},
                  input: %{},
                  limits: config_limits,
                  event_sink: sink
@@ -1129,7 +1129,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:error, :invalid_run_config} =
              RunConfig.new(
                workflow_environment: workflow,
-               mission_environment: mission,
+               missions: %{"default" => mission},
                input: %{},
                limits: tight_limits,
                event_sink: tight
@@ -1145,7 +1145,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1181,7 +1181,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink,
@@ -1236,7 +1236,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     config = fn close_message ->
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink,
@@ -1350,7 +1350,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1425,7 +1425,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1454,7 +1454,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1478,7 +1478,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1548,7 +1548,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       {:ok, config} =
         RunConfig.new(
           workflow_environment: workflow,
-          mission_environment: mission,
+          missions: %{"default" => mission},
           input: %{},
           limits: limits,
           event_sink: sink
@@ -1606,7 +1606,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       {:ok, config} =
         RunConfig.new(
           workflow_environment: workflow,
-          mission_environment: mission,
+          missions: %{"default" => mission},
           input: %{},
           limits: limits,
           event_sink: sink
@@ -1649,7 +1649,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1666,7 +1666,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1685,7 +1685,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1708,7 +1708,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1734,7 +1734,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1791,7 +1791,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       {:ok, config} =
         RunConfig.new(
           workflow_environment: workflow,
-          mission_environment: mission,
+          missions: %{"default" => mission},
           input: %{},
           limits: limits,
           event_sink: sink
@@ -1820,7 +1820,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1849,7 +1849,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1888,7 +1888,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -2243,7 +2243,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -2288,7 +2288,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -2533,7 +2533,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -2571,7 +2571,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -2603,7 +2603,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -2642,7 +2642,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -2670,7 +2670,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -2707,7 +2707,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -2728,7 +2728,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -2761,7 +2761,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -2781,7 +2781,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, second_config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: second_sink
@@ -2808,7 +2808,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -2905,7 +2905,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, state} = RunState.start(Limits.defaults())
     limits = Limits.defaults()
-    callback = RuntimeTools.kernel_eval(state, mission, limits, nil)
+
+    callback =
+      RuntimeTools.kernel_eval(state, %{RunState.default_mission() => mission}, limits, nil)
 
     assert %{
              status: :error,
@@ -2945,7 +2947,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -2987,7 +2989,14 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, mission} = MissionEnvironment.new([])
     limits = Limits.defaults()
     {:ok, state} = RunState.start(limits)
-    callback = RuntimeTools.kernel_check_source(state, mission, limits, nil)
+
+    callback =
+      RuntimeTools.kernel_check_source(
+        state,
+        %{RunState.default_mission() => mission},
+        limits,
+        nil
+      )
 
     assert %{status: :error, reason: :invalid_kernel_check_source_request} = callback.(%{})
 
@@ -3005,7 +3014,14 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, limits} = Limits.new(subordinate_source_checks: 3, subordinate_evaluations: 3)
     {:ok, state} = RunState.start(limits)
-    callback = RuntimeTools.kernel_check_source(state, mission, limits, nil)
+
+    callback =
+      RuntimeTools.kernel_check_source(
+        state,
+        %{RunState.default_mission() => mission},
+        limits,
+        nil
+      )
 
     for source <- ["(unclosed", "missing", "(tool/missing {})"] do
       assert %{status: :ok, value: %{outcome: :invalid, diagnostic: diagnostic}} =
@@ -3154,7 +3170,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -3186,7 +3202,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       {:ok, next_config} =
         RunConfig.new(
           workflow_environment: workflow,
-          mission_environment: mission,
+          missions: %{"default" => mission},
           input: %{},
           limits: limits,
           event_sink: next_sink
@@ -3283,7 +3299,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink

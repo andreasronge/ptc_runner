@@ -9,7 +9,9 @@ defmodule PtcRunner.Kernel.InspectionSink do
   `evaluation_id`: `execution-prints`, captured whenever the top-level
   workflow evaluation produces `println` output, whether it succeeds or
   fails; and `execution-error`, captured only when it fails with non-empty
-  error details. It normalizes atom keys and
+  error details. Version 4 requires `mission_name` on mission-owned source,
+  capability, prelude, and MCP records and forbids it on workflow-owned
+  records. It normalizes atom keys and
   enum values to JSON strings, assigns the run identity, sequence, and UTC
   timestamp, and rejects a record before retention when either its retained or
   encoded size exceeds the installed bounds.
@@ -54,7 +56,8 @@ defmodule PtcRunner.Kernel.InspectionSink do
     max_record_bytes = Keyword.get(opts, :max_record_bytes, @default_record_bytes)
     max_total_bytes = Keyword.get(opts, :max_total_bytes, @default_total_bytes)
 
-    if Keyword.keys(opts) -- allowed == [] and schema_version in [1, 2, 3] and valid_id?(run_id) and
+    if Keyword.keys(opts) -- allowed == [] and schema_version in [1, 2, 3, 4] and
+         valid_id?(run_id) and
          valid_id?(trace_id) and
          is_integer(max_record_bytes) and max_record_bytes > 0 and
          max_record_bytes <= @default_record_bytes and is_integer(max_total_bytes) and
@@ -111,7 +114,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
           {:ok, %{run_id: binary(), trace_id: binary()}} | {:error, :inspection_sink_error}
   def identity(sink), do: call(sink, :identity)
 
-  @spec schema_version(t()) :: {:ok, 1 | 2 | 3} | {:error, :inspection_sink_error}
+  @spec schema_version(t()) :: {:ok, 1 | 2 | 3 | 4} | {:error, :inspection_sink_error}
   @doc """
   Returns the sink's negotiated schema version.
 
@@ -242,7 +245,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
          true <- within_record_depth?(correlation, payload),
          {:ok, correlation} <- normalize(correlation),
          {:ok, payload} <- normalize(payload),
-         :ok <- shape(record_type, correlation, payload),
+         :ok <- shape(record_type, correlation, payload, state.schema_version),
          record <- record(state, record_type, correlation, payload),
          true <- retained_within_limit?(record, state.max_record_bytes),
          {:ok, encoded} <- Jason.encode(record),
@@ -262,6 +265,74 @@ defmodule PtcRunner.Kernel.InspectionSink do
       _reason -> {:reply, {:error, :inspection_sink_error}, %{state | failed?: true}}
     end
   end
+
+  defp shape("capability-input", %{"capability_id" => id}, payload, 4) do
+    valid? =
+      valid_id?(id) and
+        ((payload["environment"] == "workflow" and
+            exact_payload(payload, ~w(environment name arguments))) or
+           (payload["environment"] == "mission" and
+              exact_payload(payload, ~w(environment mission_name name arguments)) and
+              valid_id?(payload["mission_name"]))) and
+        valid_capability_payload?(payload, "arguments")
+
+    ok_or_error(valid?)
+  end
+
+  defp shape("capability-output", %{"capability_id" => id}, payload, 4) do
+    valid? =
+      valid_id?(id) and
+        ((payload["environment"] == "workflow" and
+            exact_payload(payload, ~w(environment name result))) or
+           (payload["environment"] == "mission" and
+              exact_payload(payload, ~w(environment mission_name name result)) and
+              valid_id?(payload["mission_name"]))) and
+        valid_capability_payload?(payload, "result")
+
+    ok_or_error(valid?)
+  end
+
+  defp shape("evaluation-source", %{"evaluation_id" => id}, payload, 4) do
+    valid? =
+      exact_payload(
+        payload,
+        ~w(environment mission_name program_kind source source_hash source_bytes)
+      ) and valid_id?(id) and valid_id?(payload["mission_name"]) and
+        payload["environment"] == "mission" and payload["program_kind"] == "ptc-lisp" and
+        is_binary(payload["source"]) and payload["source_hash"] == sha256(payload["source"]) and
+        payload["source_bytes"] == byte_size(payload["source"])
+
+    ok_or_error(valid?)
+  end
+
+  defp shape("prelude-source", %{"component_id" => id}, payload, 4) do
+    valid? =
+      valid_id?(id) and
+        ((payload["environment"] == "workflow" and
+            exact_payload(payload, ~w(environment source source_hash source_bytes))) or
+           (payload["environment"] == "mission" and
+              exact_payload(payload, ~w(environment mission_name source source_hash source_bytes)) and
+              valid_id?(payload["mission_name"]))) and is_binary(payload["source"]) and
+        payload["source_hash"] == sha256(payload["source"]) and
+        payload["source_bytes"] == byte_size(payload["source"])
+
+    ok_or_error(valid?)
+  end
+
+  defp shape(record_type, correlation, payload, 4)
+       when record_type in ["mcp-request", "mcp-response"] do
+    valid? =
+      exact_payload(correlation, ~w(capability_id request_id)) and
+        (exact_payload(payload, ~w(transport body)) or
+           (exact_payload(payload, ~w(transport body mission_name)) and
+              valid_id?(payload["mission_name"]))) and
+        valid_id?(correlation["capability_id"]) and valid_request_id?(correlation["request_id"])
+
+    ok_or_error(valid?)
+  end
+
+  defp shape(record_type, correlation, payload, _schema_version),
+    do: shape(record_type, correlation, payload)
 
   # `normalize/1` recurses, so nesting is bounded before it runs. The retained
   # record wraps correlation and payload at exactly one level, so bounding that
@@ -304,11 +375,16 @@ defmodule PtcRunner.Kernel.InspectionSink do
   end
 
   defp shape("evaluation-source", %{"evaluation_id" => id}, payload) do
+    # `space` is optional here for the same reason it is optional in the
+    # persisted artifact: a reader must accept evidence written before named
+    # missions existed.
     valid? =
-      exact_payload(
-        payload,
-        ~w(environment program_kind source source_hash source_bytes)
-      ) and valid_id?(id) and payload["environment"] == "mission" and
+      (exact_payload(payload, ~w(environment program_kind source source_hash source_bytes)) or
+         exact_payload(
+           payload,
+           ~w(environment space program_kind source source_hash source_bytes)
+         )) and valid_id?(id) and payload["environment"] == "mission" and
+        (is_nil(payload["space"]) or is_binary(payload["space"])) and
         payload["program_kind"] == "ptc-lisp" and is_binary(payload["source"]) and
         payload["source_hash"] == sha256(payload["source"]) and
         payload["source_bytes"] == byte_size(payload["source"])

@@ -17,10 +17,6 @@
     ],
     "entry": "aggregate/run"
   },
-  "mission": {
-    "components": [],
-    "data": {}
-  },
   "input": {
     "path": "repo-analyst/aggregate-input.json"
   },
@@ -34,5 +30,14 @@
   },
   "limits": {
     "run_duration_ms": 60000
+  },
+  "missions": {
+    "default": {
+      "components": [
+
+      ],
+      "data": {
+      }
+    }
   }
 }

@@ -356,9 +356,10 @@ limit.
 After every selection is normalized, the coordinator derives aggregate data
 class, flow, and event privacy, then builds
 `effective_application_digest` as SHA-256 over
-`"ptc.effective-application.v1\\0" || u64(n) || TJCS(projection)`. The literal
-projection contains final bundle hashes and ID-sorted component records,
-contract behavior hashes, entry, mission data, identity-participating limits,
+`"ptc.effective-application.v2\\0" || u64(n) || TJCS(projection)`. The literal
+projection contains the final workflow hash, a sorted map of named mission
+hashes, environment-qualified component records, contract behavior hashes,
+entry, per-mission data and provider grants, identity-participating limits,
 provider arrays in manifest order, input authority, derived event policy,
 inspection-capture choice, result projection, and semantic revision. Each
 provider record contains exactly alias, source, required installation revision,
@@ -600,7 +601,7 @@ The renderer accepts closed `CommandDiagnostic`, `CommandSource`, and
 `CommandSubject` values; it never inspects an arbitrary exception or rejected
 value. The authoritative phase/code/exit/retryability/message rows live in
 `PtcRunner.Kernel.DiagnosticCatalog`, and `mix ptc.gen_docs` projects them into
-`priv/schemas/ptc-command-envelope-v1.schema.json`.
+`priv/schemas/ptc-command-envelope-v2.schema.json`.
 `CommandOutcome` is itself sealed over its exact command mode, validated
 envelope, and exit status. Frontends render only through
 `CommandOutcome.to_map/1`; direct or nested mutation invalidates the
@@ -616,7 +617,7 @@ true, while a provider-free or provider-bearing no-op connect can remain false.
 Default doctor also binds
 provider rows to application presence: host-only groups require
 `application_required` and omit selection, while application-backed groups
-cannot use that skip. Because V1 has no public connect-mode field, the generated
+cannot use that skip. Because V2 has no public connect-mode field, the generated
 doctor branches are the union of default and connect outcomes; the sealed
 outcome is the boundary that distinguishes the two modes.
 Every attested command/coordinator value validates its exact declared field set
@@ -668,10 +669,10 @@ component source. Dynamic messages require component-source provenance and the
 published schema admits only their closed literal-plus-symbol forms. Malformed,
 oversized, absent, or ambiguous detail retains the fixed catalog message. No
 path forwards a compiler-rendered string.
-`notes` stays pinned to the empty list. The published V1 schema fixes it as
+`notes` stays pinned to the empty list. The published V2 schema fixes it as
 `{"const": []}`, so any populated array makes an envelope invalid for a strict
-V1 consumer; a diagnostic that has to report a rejected value against its bound
-needs a later envelope version, not a relaxed V1. Manifest limits that are valid
+V2 consumer; a diagnostic that has to report a rejected value against its bound
+needs a later envelope version, not a relaxed V2. Manifest limits that are valid
 under the application schema but exceed the installed ceiling therefore use
 `application/installed_limit_exceeded` with the limit's manifest path and a
 fixed remediation message; the requested value and ceiling remain internal.
@@ -939,9 +940,9 @@ Manifest-declared input failures remain attributed to `ptc.json`.
 
 `application_content_digest` is input-independent identity for captured
 application content. It uses the versioned
-`ptc.application-content.v1\0` framing documented by
+`ptc.application-content.v2\0` framing documented by
 `PtcRunner.Kernel.ApplicationPackage`: a sorted record stream covers the
-projected manifest, environment-qualified local and shipped component source,
+projected manifest, environment-and-mission-qualified local and shipped component source,
 direct dependency lists, exact contract bytes, and verified override
 identities. Override **attribution** — the resolved environment plus asserted
 authoring provenance — is deliberately excluded from that stream and travels
@@ -1252,7 +1253,10 @@ and queries. `PtcRunner.Kernel.InspectionArtifact` owns the exact private
 artifact grammar, exclusive persistence, loading, and correlation checks.
 Inspection V1 covers provider-neutral capability, source, and model evidence;
 V2 additionally admits paired decoded MCP request/response bodies correlated
-to an existing capability attempt. MCP inspection records never include
+to an existing capability attempt. V3 adds workflow execution prints and
+errors. V4 adds the exact mission name to mission-owned source, capability, and
+MCP evidence, so identical component or tool names remain distinguishable
+without changing V1–V3 readers. MCP inspection records never include
 rendered headers or subprocess environment values.
 `PtcRunner.Kernel.SafeMetadata` owns the closed labels and annotation
 vocabulary.

@@ -34,26 +34,73 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   @doc "Compiles and attests a bounded closed component set."
   def compile(components) when is_list(components) do
     with :ok <- bounded_components(components) do
-      compile_bounded(components)
+      compile_bounded(components, System.monotonic_time(:millisecond) + @compile_timeout_ms)
     end
   end
 
   def compile(_components), do: {:error, %{reason: :invalid_components}}
 
-  defp compile_bounded(components) do
-    case BoundedWorker.run(
-           fn ->
-             components
-             |> compile_unconfined()
-             |> enforce_result(@max_artifact_bytes, @max_diagnostic_bytes)
-           end,
-           timeout_ms: @compile_timeout_ms,
-           max_heap_words: @compile_heap_words
-         ) do
-      {:ok, result} -> finalize_failure_span(result, components)
-      {:error, :timeout} -> {:error, %{reason: :bundle_compile_timeout}}
-      {:error, :heap_exceeded} -> {:error, %{reason: :bundle_compile_heap_exceeded}}
-      {:error, :worker_failed} -> {:error, %{reason: :bundle_compile_failed}}
+  @doc false
+  @spec compile_named(map(), integer(), non_neg_integer(), pos_integer()) ::
+          {:ok, map()} | {:error, {map(), [Component.t()]}}
+  def compile_named(missions, deadline_ms, initial_bytes, max_bytes)
+      when is_map(missions) and is_integer(deadline_ms) and is_integer(initial_bytes) and
+             initial_bytes >= 0 and is_integer(max_bytes) and max_bytes > 0 do
+    Enum.reduce_while(
+      missions |> Enum.sort_by(&elem(&1, 0)),
+      {:ok, %{}, initial_bytes},
+      fn {name, %{components: components}}, {:ok, bundles, bytes} ->
+        result = if components == [], do: {:ok, nil}, else: compile(components, deadline_ms)
+
+        case result do
+          {:ok, bundle} ->
+            next_bytes = bytes + if(is_nil(bundle), do: 0, else: :erlang.external_size(bundle))
+
+            if next_bytes <= max_bytes,
+              do: {:cont, {:ok, Map.put(bundles, name, bundle), next_bytes}},
+              else: {:halt, {:error, {%{reason: :bundle_limit_exceeded}, components}}}
+
+          {:error, failure} ->
+            {:halt, {:error, {failure, components}}}
+        end
+      end
+    )
+    |> case do
+      {:ok, bundles, _bytes} -> {:ok, bundles}
+      {:error, {_failure, _components}} = error -> error
+    end
+  end
+
+  @doc false
+  def compile(components, deadline_ms) when is_list(components) and is_integer(deadline_ms) do
+    with :ok <- bounded_components(components) do
+      compile_bounded(
+        components,
+        min(deadline_ms, System.monotonic_time(:millisecond) + @compile_timeout_ms)
+      )
+    end
+  end
+
+  defp compile_bounded(components, deadline_ms) do
+    timeout_ms = max(deadline_ms - System.monotonic_time(:millisecond), 0)
+
+    if timeout_ms == 0 do
+      {:error, %{reason: :bundle_compile_timeout}}
+    else
+      case BoundedWorker.run(
+             fn ->
+               components
+               |> compile_unconfined()
+               |> enforce_result(@max_artifact_bytes, @max_diagnostic_bytes)
+             end,
+             timeout_ms: timeout_ms,
+             max_heap_words: @compile_heap_words
+           ) do
+        {:ok, result} -> finalize_failure_span(result, components, deadline_ms)
+        {:error, :timeout} -> {:error, %{reason: :bundle_compile_timeout}}
+        {:error, :heap_exceeded} -> {:error, %{reason: :bundle_compile_heap_exceeded}}
+        {:error, :worker_failed} -> {:error, %{reason: :bundle_compile_failed}}
+      end
     end
   end
 
@@ -410,7 +457,8 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   # span, but it cannot turn a compile error into a timeout or heap failure.
   defp finalize_failure_span(
          {:error, %{reason: :component_compile_error, id: id, span_locator: locator} = failure},
-         components
+         components,
+         deadline_ms
        ) do
     source =
       case Enum.find(components, &match?(%Component{id: ^id}, &1)) do
@@ -418,7 +466,9 @@ defmodule PtcRunner.Kernel.BundleCompiler do
         _missing -> nil
       end
 
-    span = resolve_failure_span(locator, source)
+    remaining_ms = max(deadline_ms - System.monotonic_time(:millisecond), 0)
+
+    span = resolve_failure_span(locator, source, min(@span_timeout_ms, remaining_ms))
 
     {:error,
      failure
@@ -426,11 +476,14 @@ defmodule PtcRunner.Kernel.BundleCompiler do
      |> Map.put(:span, span)}
   end
 
-  defp finalize_failure_span(result, _components), do: result
+  defp finalize_failure_span(result, _components, _deadline_ms), do: result
 
-  defp resolve_failure_span(%ValidationError{} = error, source) when is_binary(source) do
+  defp resolve_failure_span(%ValidationError{}, _source, 0), do: nil
+
+  defp resolve_failure_span(%ValidationError{} = error, source, timeout_ms)
+       when is_binary(source) and timeout_ms > 0 do
     case BoundedWorker.run(fn -> ErrorSpan.resolve(error, source) end,
-           timeout_ms: @span_timeout_ms,
+           timeout_ms: timeout_ms,
            max_heap_words: @span_heap_words
          ) do
       {:ok, resolved} -> failure_span(resolved, source)
@@ -438,7 +491,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
     end
   end
 
-  defp resolve_failure_span(_error, _source), do: nil
+  defp resolve_failure_span(_error, _source, _timeout_ms), do: nil
 
   # The byte range of the top-level form the compiler blamed, in the exclusive
   # end-offset form command diagnostics carry. Bounded against the component's

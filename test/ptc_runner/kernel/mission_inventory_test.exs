@@ -46,33 +46,26 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
     {:ok, workflow_bundle} = Kernel.compile_bundle([kernel_component])
     {:ok, workflow} = WorkflowEnvironment.new(bundle: workflow_bundle)
 
-    config_for = fn run_id ->
-      {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
-
-      {:ok, config} =
-        RunConfig.new(
-          workflow_environment: workflow,
-          mission_environment: mission,
-          input: %{},
-          limits: limits,
-          event_sink: sink
-        )
-
-      {config, sink}
-    end
+    config_for = &fresh_config(workflow, mission, limits, &1)
 
     {config, sink} = config_for.("mission-inventory")
 
-    assert config.mission_inventory.rendered == @expected
+    assert config.missions["default"].inventory.rendered == @expected
 
     assert {:ok, %{value: @expected}} =
              Kernel.run("(return (kernel/mission-inventory))", config)
 
     started = Enum.find(EventSink.events(sink), &(&1.type == "run-started"))
-    assert started.data.mission_inventory_hash == config.mission_inventory.hash
-    assert started.data.mission_inventory_bytes == byte_size(@expected)
-    assert started.data.mission_model_context_hash == config.mission_inventory.model_hash
-    assert started.data.mission_model_context_bytes == byte_size(@expected_model)
+
+    assert started.data.missions["default"].inventory_hash ==
+             config.missions["default"].inventory.hash
+
+    assert started.data.missions["default"].inventory_bytes == byte_size(@expected)
+
+    assert started.data.missions["default"].model_context_hash ==
+             config.missions["default"].inventory.model_hash
+
+    assert started.data.missions["default"].model_context_bytes == byte_size(@expected_model)
 
     # Both emitters send the one prebuilt payload, so the compact dependency
     # projection is identical for Runner and REPL by construction.
@@ -302,6 +295,22 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
                "type",
                "format"
              ])
+  end
+
+  # ex_dna:disable-for-next-line — mirrors the core contract's fresh-sink run factory
+  defp fresh_config(workflow, mission, limits, run_id) do
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {config, sink}
   end
 
   defp mission_fixture do

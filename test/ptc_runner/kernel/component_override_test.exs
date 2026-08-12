@@ -150,7 +150,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
     end
 
     @tag :tmp_dir
-    test "the descriptor accepts exactly the four documented fields", context do
+    test "the descriptor accepts exactly the five documented fields", context do
       for {mutation, expected_path} <- [
             {%{"extra" => true}, []},
             {%{"component_id" => nil}, [{:property, "component_id"}]},
@@ -209,10 +209,10 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       assert [identity] = built.config.run_started_metadata.component_overrides
 
       assert identity == %{
+               "target" => %{"environment" => "workflow"},
                "component_id" => "agent.retry",
                "base_source_hash" => hash(context.base.source),
-               "source_hash" => hash(File.read!(paths.candidate)),
-               "environment" => "workflow"
+               "source_hash" => hash(File.read!(paths.candidate))
              }
 
       refute inspect(built.config.run_started_metadata) =~ "candidate-marker"
@@ -236,16 +236,20 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
     end
 
     @tag :tmp_dir
-    test "one descriptor may not replace the same id in two environments", context do
+    test "an explicit target replaces only that qualified occurrence", context do
       paths = write_application(context, context.base, both_environments: true)
 
-      assert {:error, {:source_role, :component_override, :ambiguous_override_target}} =
+      assert {:ok, built} =
                paths.manifest
                |> ApplicationPackage.request_directory(
                  installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
                |> RunLifecycle.build(context.registry)
+
+      assert [identity] = built.config.run_started_metadata.component_overrides
+      assert identity["target"] == %{"environment" => "workflow"}
+      assert :ok = RunBuilder.close(built)
     end
   end
 
@@ -296,7 +300,11 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       # The candidate reaches the bundle and nothing else: a generated program
       # must not be able to read the source under evaluation.
       refute inspect(built.config.input) =~ "candidate-marker"
-      refute inspect(built.config.mission_environment.data) =~ "candidate-marker"
+      assert built.config.missions == %{}
+
+      refute Enum.any?(built.config.missions, fn {_name, mission} ->
+               inspect(mission.environment.data) =~ "candidate-marker"
+             end)
 
       assert :ok = RunBuilder.close(built)
     end
@@ -309,7 +317,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       identity = ComponentOverride.identity(override)
 
       assert Map.keys(identity) |> Enum.sort() ==
-               ["base_source_hash", "component_id", "source_hash"]
+               ["base_source_hash", "component_id", "source_hash", "target"]
 
       refute inspect(identity) =~ "candidate-marker"
     end
@@ -334,7 +342,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       assert attribution["prompt_hash"] == hash("authoring prompt")
       assert attribution["authored_at"] == "2026-08-03T09:15:00Z"
       assert attribution["accept_widened_effect"] == true
-      assert attribution["environment"] == "workflow"
+      assert attribution["target"] == %{"environment" => "workflow"}
     end
 
     @tag :tmp_dir
@@ -420,8 +428,9 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
                )
 
       assert [attribution] = request.package.component_overrides
-      assert Map.keys(attribution) |> Enum.sort() == ~w(base_source_hash component_id environment
-               source_hash)
+
+      assert Map.keys(attribution) |> Enum.sort() ==
+               ~w(base_source_hash component_id source_hash target)
     end
   end
 
@@ -444,6 +453,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
 
     descriptor =
       %{
+        "target" => Keyword.get(opts, :target, %{"environment" => "workflow"}),
         "component_id" => Keyword.get(opts, :component_id, base.id),
         "base_source_hash" => Keyword.get(opts, :base_source_hash, hash(base.source)),
         "source_hash" => Keyword.get(opts, :source_hash, hash(candidate)),
@@ -461,7 +471,11 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
 
     mission =
       if Keyword.get(opts, :both_environments, false),
-        do: %{"mission" => %{"components" => [%{"library" => "agent.retry"}], "data" => %{}}},
+        do: %{
+          "missions" => %{
+            "default" => %{"components" => [%{"library" => "agent.retry"}], "data" => %{}}
+          }
+        },
         else: %{}
 
     manifest =

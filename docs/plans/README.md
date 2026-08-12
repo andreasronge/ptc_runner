@@ -9,6 +9,9 @@ belongs in guides or retained specifications.
 
 ## Remaining Kernel product work
 
+- [`issue-1237-named-missions.md`](issue-1237-named-missions.md) replaces the
+  singular mission environment with bounded named missions that isolate
+  components, data, grants, continuations, prompts, and durable evidence.
 - [`lisp-kernel/generated-program-boundary.md`](lisp-kernel/generated-program-boundary.md)
   separates runtime values from subordinate program source and adds a bounded,
   mission-aware source-checking path for generated PTC-Lisp.

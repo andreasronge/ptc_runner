@@ -59,6 +59,12 @@ defmodule PtcRunner.Kernel.RunState do
 
   @history_depth 3
 
+  # Each named mission owns an independent continuation and revision. The
+  # active lease records its mission so reserve, commit, release, and source
+  # checking cannot move memory or closures across mission boundaries.
+  @default_mission "default"
+  @workflow_continuation "$workflow"
+
   @enforce_keys [:pid, :token, :provider_tracker]
   defstruct [:pid, :token, :provider_tracker]
 
@@ -223,7 +229,11 @@ defmodule PtcRunner.Kernel.RunState do
 
   @spec reserve_evaluation(t()) :: {:ok, map(), [term()], reference()} | {:error, atom()}
   @doc "Atomically reserves and returns native subordinate memory and turn history."
-  def reserve_evaluation(state), do: reserve_evaluation(state, :fail_fast)
+  def reserve_evaluation(state), do: reserve_evaluation(state, @default_mission, :fail_fast)
+
+  @doc false
+  def reserve_workflow_evaluation(state),
+    do: reserve_evaluation(state, @workflow_continuation, :fail_fast)
 
   @doc """
   Reserves the evaluation lease with the chosen admission mode.
@@ -238,24 +248,44 @@ defmodule PtcRunner.Kernel.RunState do
   """
   @spec reserve_evaluation(t(), :fail_fast | :block) ::
           {:ok, map(), [term()], reference()} | {:error, atom()}
-  def reserve_evaluation(state, :fail_fast), do: call(state, :reserve_evaluation)
+  def reserve_evaluation(state, admission) when admission in [:fail_fast, :block],
+    do: reserve_evaluation(state, @default_mission, admission)
+
+  @spec reserve_evaluation(t(), binary()) ::
+          {:ok, map(), [term()], reference()} | {:error, atom()}
+  def reserve_evaluation(state, mission_name) when is_binary(mission_name),
+    do: reserve_evaluation(state, mission_name, :fail_fast)
+
+  @spec reserve_evaluation(t(), binary(), :fail_fast | :block) ::
+          {:ok, map(), [term()], reference()} | {:error, atom()}
+  def reserve_evaluation(state, mission_name, :fail_fast) when is_binary(mission_name),
+    do: call(state, {:reserve_evaluation, mission_name})
 
   # The admission wait is bounded from the moment the caller asks, not the
   # moment the owner processes the request — time in the owner's mailbox
   # counts against the bound.
-  def reserve_evaluation(state, :block) do
+  def reserve_evaluation(state, mission_name, :block) when is_binary(mission_name) do
     requested_at = System.monotonic_time(:millisecond)
-    call_blocking(state, {:reserve_evaluation, :block, requested_at})
+    call_blocking(state, {:reserve_evaluation, mission_name, :block, requested_at})
   end
 
   @doc false
-  @spec reserve_source_check(t()) :: {:ok, map(), non_neg_integer()} | {:error, atom()}
-  def reserve_source_check(state), do: call(state, :reserve_source_check)
+  @spec reserve_source_check(t(), binary()) :: {:ok, map(), non_neg_integer()} | {:error, atom()}
+  def reserve_source_check(state, mission_name \\ @default_mission) when is_binary(mission_name),
+    do: call(state, {:reserve_source_check, mission_name})
 
   @doc false
+  @spec finish_source_check(t(), binary(), non_neg_integer()) :: :ok | {:error, atom()}
+  def finish_source_check(state, mission_name, revision)
+      when is_binary(mission_name) and is_integer(revision) and revision >= 0,
+      do: call(state, {:finish_source_check, mission_name, revision})
+
   @spec finish_source_check(t(), non_neg_integer()) :: :ok | {:error, atom()}
-  def finish_source_check(state, revision) when is_integer(revision) and revision >= 0,
-    do: call(state, {:finish_source_check, revision})
+  def finish_source_check(state, revision),
+    do: finish_source_check(state, @default_mission, revision)
+
+  @doc false
+  def default_mission, do: @default_mission
 
   @spec commit_evaluation(t(), reference(), map(), [term()]) :: :ok | {:error, atom()}
   @doc "Atomically commits one bounded native memory/history continuation candidate."
@@ -420,13 +450,13 @@ defmodule PtcRunner.Kernel.RunState do
        calls: %{workflow: %{}, mission: %{}},
        totals: %{workflow: 0, mission: 0},
        evaluations: 0,
+       evaluations_by_mission: %{},
        source_checks: 0,
        protocol_errors: 0,
        terminal_failure: nil,
-       memory: %{},
-       history: [],
-       continuation_revision: 0,
+       continuations: %{},
        evaluation_lease: nil,
+       evaluation_mission: nil,
        evaluation_release_waiter: nil,
        evaluation_terminal_provider_failure?: false,
        evaluation_terminal_host_failure?: false,
@@ -552,7 +582,11 @@ defmodule PtcRunner.Kernel.RunState do
     {:reply, :ok, state}
   end
 
-  def handle_call({token, :reserve_evaluation}, {caller, _tag}, %{token: token} = state) do
+  def handle_call(
+        {token, {:reserve_evaluation, mission}},
+        {caller, _tag},
+        %{token: token} = state
+      ) do
     cond do
       state.closed? ->
         {:reply, {:error, :run_closed}, state}
@@ -569,11 +603,13 @@ defmodule PtcRunner.Kernel.RunState do
       true ->
         lease = {make_ref(), caller, Process.monitor(caller)}
 
-        {:reply, {:ok, state.memory, state.history, elem(lease, 0)},
+        continuation = continuation(state, mission)
+
+        {:reply, {:ok, continuation.memory, continuation.history, elem(lease, 0)},
          %{
-           state
-           | evaluations: state.evaluations + 1,
-             evaluation_lease: lease,
+           record_evaluation(state, mission)
+           | evaluation_lease: lease,
+             evaluation_mission: mission,
              evaluation_release_waiter: nil,
              evaluation_terminal_provider_failure?: false,
              evaluation_terminal_host_failure?: false
@@ -582,7 +618,7 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   def handle_call(
-        {token, {:reserve_evaluation, :block, requested_at}},
+        {token, {:reserve_evaluation, mission, :block, requested_at}},
         {caller, _tag} = from,
         %{token: token} = state
       )
@@ -608,11 +644,13 @@ defmodule PtcRunner.Kernel.RunState do
       grantable?(state) and :queue.is_empty(state.admission_queue) ->
         lease = {make_ref(), caller, Process.monitor(caller)}
 
-        {:reply, {:ok, state.memory, state.history, elem(lease, 0)},
+        continuation = continuation(state, mission)
+
+        {:reply, {:ok, continuation.memory, continuation.history, elem(lease, 0)},
          %{
-           state
-           | evaluations: state.evaluations + 1,
-             evaluation_lease: lease,
+           record_evaluation(state, mission)
+           | evaluation_lease: lease,
+             evaluation_mission: mission,
              evaluation_release_waiter: nil,
              evaluation_terminal_provider_failure?: false
          }}
@@ -622,11 +660,13 @@ defmodule PtcRunner.Kernel.RunState do
         # a grantable lease behind a non-empty queue: the FIFO head is
         # admitted, which may be this caller.
         {:noreply,
-         admit_from_queue(enqueue_admission_waiter(state, from, caller, admission_deadline))}
+         admit_from_queue(
+           enqueue_admission_waiter(state, from, caller, mission, admission_deadline)
+         )}
     end
   end
 
-  def handle_call({token, :reserve_source_check}, _from, %{token: token} = state) do
+  def handle_call({token, {:reserve_source_check, mission}}, _from, %{token: token} = state) do
     cond do
       state.closed? ->
         {:reply, {:error, :run_closed}, state}
@@ -641,20 +681,22 @@ defmodule PtcRunner.Kernel.RunState do
         {:reply, {:error, :limit_exceeded}, state}
 
       true ->
-        {:reply, {:ok, state.memory, state.continuation_revision},
+        continuation = continuation(state, mission)
+
+        {:reply, {:ok, continuation.memory, continuation.revision},
          %{state | source_checks: state.source_checks + 1}}
     end
   end
 
   def handle_call(
-        {token, {:finish_source_check, revision}},
+        {token, {:finish_source_check, mission, revision}},
         _from,
         %{token: token} = state
       ) do
     cond do
       state.closed? -> {:reply, {:error, :run_closed}, state}
       deadline_expired?(state) -> {:reply, {:error, :deadline_expired}, state}
-      state.continuation_revision != revision -> {:reply, {:error, :stale}, state}
+      continuation(state, mission).revision != revision -> {:reply, {:error, :stale}, state}
       true -> {:reply, :ok, state}
     end
   end
@@ -668,11 +710,28 @@ defmodule PtcRunner.Kernel.RunState do
       {^lease, ^caller, monitor_ref} ->
         Process.demonitor(monitor_ref, [:flush])
 
+        mission = state.evaluation_mission
+
+        # Per-mission bytes AND the run-wide total are both held under the same
+        # ceiling. Enforcing only the per-mission figure would silently multiply
+        # the run's retained heap by the number of missions.
         memory_bytes =
-          RetainedSize.bytes_with_cap(memory, state.limits.evaluation_memory_bytes)
+          mission_and_total_bytes(
+            state.continuations,
+            mission,
+            :memory,
+            memory,
+            state.limits.evaluation_memory_bytes
+          )
 
         history_bytes =
-          RetainedSize.bytes_with_cap(history, state.limits.evaluation_history_bytes)
+          mission_and_total_bytes(
+            state.continuations,
+            mission,
+            :history,
+            history,
+            state.limits.evaluation_history_bytes
+          )
 
         history_values_valid? =
           length(history) <= @history_depth and
@@ -713,12 +772,18 @@ defmodule PtcRunner.Kernel.RunState do
             {:reply, {:error, :history_exceeded}, clear_evaluation(state)}
 
           true ->
+            previous = continuation(state, mission)
+
+            committed = %{
+              memory: RetainedSize.detach_binaries(memory),
+              history: RetainedSize.detach_binaries(history),
+              revision: previous.revision + 1
+            }
+
             {:reply, :ok,
              %{
                state
-               | memory: RetainedSize.detach_binaries(memory),
-                 history: RetainedSize.detach_binaries(history),
-                 continuation_revision: state.continuation_revision + 1
+               | continuations: Map.put(state.continuations, mission, committed)
              }
              |> clear_evaluation()}
         end
@@ -860,7 +925,10 @@ defmodule PtcRunner.Kernel.RunState do
         {caller, _tag},
         %{token: token, owner: caller} = state
       ),
-      do: {:reply, Lisp.externalize_memory(state.memory), state}
+      # Workflow REPL memory is held in its own continuation, outside missions.
+      do:
+        {:reply, Lisp.externalize_memory(continuation(state, @workflow_continuation).memory),
+         state}
 
   def handle_call(
         {token, :evaluation_memory_observation},
@@ -1172,6 +1240,7 @@ defmodule PtcRunner.Kernel.RunState do
     %{
       state
       | evaluation_lease: nil,
+        evaluation_mission: nil,
         evaluation_terminal_provider_failure?: false,
         evaluation_terminal_host_failure?: false
     }
@@ -1202,7 +1271,7 @@ defmodule PtcRunner.Kernel.RunState do
     )
   end
 
-  defp enqueue_admission_waiter(state, from, caller, deadline_mono) do
+  defp enqueue_admission_waiter(state, from, caller, mission_name, deadline_mono) do
     monitor_ref = Process.monitor(caller)
     delay = max(deadline_mono - System.monotonic_time(:millisecond), 0)
     timer_ref = Process.send_after(self(), {:admission_deadline, monitor_ref}, delay)
@@ -1213,6 +1282,7 @@ defmodule PtcRunner.Kernel.RunState do
     waiter = %{
       from: from,
       caller: caller,
+      mission_name: mission_name,
       monitor_ref: monitor_ref,
       timer_ref: timer_ref,
       deadline_mono: deadline_mono
@@ -1262,12 +1332,17 @@ defmodule PtcRunner.Kernel.RunState do
   defp grant_admission(state, waiter) do
     Process.cancel_timer(waiter.timer_ref)
     lease = {make_ref(), waiter.caller, waiter.monitor_ref}
-    GenServer.reply(waiter.from, {:ok, state.memory, state.history, elem(lease, 0)})
+    continuation = continuation(state, waiter.mission_name)
+
+    GenServer.reply(
+      waiter.from,
+      {:ok, continuation.memory, continuation.history, elem(lease, 0)}
+    )
 
     %{
-      state
-      | evaluations: state.evaluations + 1,
-        evaluation_lease: lease,
+      record_evaluation(state, waiter.mission_name)
+      | evaluation_lease: lease,
+        evaluation_mission: waiter.mission_name,
         evaluation_release_waiter: nil,
         evaluation_terminal_provider_failure?: false,
         evaluation_terminal_host_failure?: false
@@ -1295,6 +1370,40 @@ defmodule PtcRunner.Kernel.RunState do
     end)
   end
 
+  defp continuation(state, mission_name),
+    do: Map.get(state.continuations, mission_name, %{memory: %{}, history: [], revision: 0})
+
+  defp record_evaluation(state, @workflow_continuation),
+    do: %{state | evaluations: state.evaluations + 1}
+
+  defp record_evaluation(state, mission_name) do
+    %{
+      state
+      | evaluations: state.evaluations + 1,
+        evaluations_by_mission:
+          Map.update(state.evaluations_by_mission, mission_name, 1, &(&1 + 1))
+    }
+  end
+
+  defp mission_and_total_bytes(continuations, mission_name, key, candidate, limit) do
+    own = RetainedSize.bytes_with_cap(candidate, limit)
+
+    others = continuations |> Map.delete(mission_name) |> continuations_total(key, limit)
+
+    if is_integer(own) and is_integer(others), do: own + others, else: :oversized
+  end
+
+  defp continuations_total(continuations, key, limit) do
+    Enum.reduce(continuations, 0, &add_retained_size(&1, &2, key, limit))
+  end
+
+  defp add_retained_size({_name, held}, acc, key, limit) do
+    case {acc, RetainedSize.bytes_with_cap(Map.fetch!(held, key), limit)} do
+      {left, right} when is_integer(left) and is_integer(right) -> left + right
+      _ -> :oversized
+    end
+  end
+
   defp unavailable?(state),
     do: state.closed? or deadline_expired?(state)
 
@@ -1316,27 +1425,35 @@ defmodule PtcRunner.Kernel.RunState do
       remaining_ms: max(state.deadline_ms - System.monotonic_time(:millisecond), 0),
       capability_calls: state.calls,
       subordinate_evaluations: state.evaluations,
+      evaluations_by_mission: state.evaluations_by_mission |> Enum.sort() |> Map.new(),
       subordinate_source_checks: state.source_checks,
       protocol_errors: state.protocol_errors,
       evaluation_memory_bytes:
-        RetainedSize.bytes_with_cap(state.memory, state.limits.evaluation_memory_bytes),
+        continuations_total(state.continuations, :memory, state.limits.evaluation_memory_bytes),
       evaluation_history_bytes:
-        RetainedSize.bytes_with_cap(state.history, state.limits.evaluation_history_bytes),
+        continuations_total(state.continuations, :history, state.limits.evaluation_history_bytes),
       evaluation_continuation_bytes: continuation_bytes(state),
+      evaluation_missions:
+        state.continuations
+        |> Map.keys()
+        |> Enum.reject(&(&1 == @workflow_continuation))
+        |> Enum.sort(),
       evaluation_busy?: not is_nil(state.evaluation_lease)
     }
   end
 
   defp continuation_summary(state) do
     memory_bytes =
-      RetainedSize.bytes_with_cap(state.memory, state.limits.evaluation_memory_bytes)
+      continuations_total(state.continuations, :memory, state.limits.evaluation_memory_bytes)
 
     history_bytes =
-      RetainedSize.bytes_with_cap(state.history, state.limits.evaluation_history_bytes)
+      continuations_total(state.continuations, :history, state.limits.evaluation_history_bytes)
 
     %{
-      defined_count: map_size(state.memory),
-      history_count: length(state.history),
+      defined_count:
+        Enum.reduce(state.continuations, 0, fn {_n, c}, acc -> acc + map_size(c.memory) end),
+      history_count:
+        Enum.reduce(state.continuations, 0, fn {_n, c}, acc -> acc + length(c.history) end),
       memory_bytes: memory_bytes,
       history_bytes: history_bytes,
       bytes: sum_retained_bytes(memory_bytes, history_bytes)

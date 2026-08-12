@@ -2,16 +2,18 @@
   "version": 1,
   "workflow": {
     "components": [
-      {"id": "tutorial.agent", "path": "agent.clj", "dependencies": ["agent.core"]},
-      {"library": "agent.core"}
+      {
+        "id": "tutorial.agent",
+        "path": "agent.clj",
+        "dependencies": [
+          "agent.core"
+        ]
+      },
+      {
+        "library": "agent.core"
+      }
     ],
     "entry": "tutorial.agent/run"
-  },
-  "mission": {
-    "components": [
-      {"id": "tutorial.files", "path": "files.clj"}
-    ],
-    "data": {}
   },
   "input": {
     "value": {
@@ -20,16 +22,34 @@
   },
   "providers": {
     "workflow": [
-      {"name": "deepseek"}
+      {
+        "name": "deepseek"
+      }
     ],
     "mission": [
-      {"name": "workspace"}
+      {
+        "name": "workspace"
+      }
     ]
   },
   "labels": {
     "name": "tutorial-deepseek-file-agent",
     "model": "openrouter:deepseek/deepseek-v4-flash",
     "provider": "openrouter",
-    "tags": {"mode": "agent"}
+    "tags": {
+      "mode": "agent"
+    }
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {
+          "id": "tutorial.files",
+          "path": "files.clj"
+        }
+      ],
+      "data": {
+      }
+    }
   }
 }

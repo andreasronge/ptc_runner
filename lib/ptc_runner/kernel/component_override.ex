@@ -9,8 +9,9 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   deliberate operator act, so the candidate bytes must not be reachable through
   anything a run can influence.
 
-  The descriptor carries `component_id`, `base_source_hash`, `source_hash`, and
-  `path`, plus an optional closed `provenance` object recording who authored the
+  The descriptor carries a required `target` naming either the workflow or one
+  exact mission, plus `component_id`, `base_source_hash`, `source_hash`, and
+  `path`. An optional closed `provenance` object records who authored the
   candidate. Provenance is operator-asserted and verified by nothing here: a
   `run_id` is a claim about origin, not evidence of it. It is kept out of
   `identity/1` so content identity stays derived from content. Verification of
@@ -40,7 +41,7 @@ defmodule PtcRunner.Kernel.ComponentOverride do
 
   @max_descriptor_bytes 65_536
   @max_source_bytes 1_048_576
-  @required_keys ~w(component_id base_source_hash source_hash path)
+  @required_keys ~w(target component_id base_source_hash source_hash path)
   @optional_keys ~w(provenance)
   @keys @required_keys ++ @optional_keys
   @provenance_keys ~w(run_id prompt_hash authored_at accept_widened_effect)
@@ -53,6 +54,25 @@ defmodule PtcRunner.Kernel.ComponentOverride do
     "required" => @required_keys,
     "properties" => %{
       "component_id" => %{"type" => "string", "pattern" => "^[a-z][a-z0-9._-]{0,127}$"},
+      "target" => %{
+        "oneOf" => [
+          %{
+            "type" => "object",
+            "additionalProperties" => false,
+            "required" => ["environment"],
+            "properties" => %{"environment" => %{"const" => "workflow"}}
+          },
+          %{
+            "type" => "object",
+            "additionalProperties" => false,
+            "required" => ["environment", "mission"],
+            "properties" => %{
+              "environment" => %{"const" => "mission"},
+              "mission" => %{"type" => "string", "pattern" => "^[a-z][a-z0-9._-]{0,127}$"}
+            }
+          }
+        ]
+      },
       "base_source_hash" => %{"type" => "string", "pattern" => "^sha256:[0-9a-f]{64}$"},
       "source_hash" => %{"type" => "string", "pattern" => "^sha256:[0-9a-f]{64}$"},
       "path" => %{"type" => "string"},
@@ -70,6 +90,7 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   }
 
   @enforce_keys [
+    :target,
     :component_id,
     :base_source_hash,
     :source_hash,
@@ -84,6 +105,7 @@ defmodule PtcRunner.Kernel.ComponentOverride do
 
   @type t :: %__MODULE__{
           component_id: binary(),
+          target: map(),
           base_source_hash: binary(),
           source_hash: binary(),
           source: binary(),
@@ -125,16 +147,7 @@ defmodule PtcRunner.Kernel.ComponentOverride do
          :ok <- valid_candidate_name(decoded["path"]),
          {:ok, source} <- read_source(directory, decoded["path"]),
          :ok <- verify_source_hash(source, decoded["source_hash"]) do
-      {:ok,
-       %__MODULE__{
-         component_id: decoded["component_id"],
-         base_source_hash: decoded["base_source_hash"],
-         source_hash: decoded["source_hash"],
-         source: source,
-         origin: "component-override",
-         provenance: decoded["provenance"],
-         descriptor_bytes: byte_size(raw)
-       }}
+      {:ok, override(decoded, raw, source)}
     else
       {:error, {:component_override_path, _path, :invalid_override_descriptor}} = error ->
         error
@@ -268,6 +281,7 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   @spec identity(t()) :: map()
   def identity(%__MODULE__{} = override) do
     %{
+      "target" => override.target,
       "component_id" => override.component_id,
       "base_source_hash" => override.base_source_hash,
       "source_hash" => override.source_hash
@@ -303,6 +317,7 @@ defmodule PtcRunner.Kernel.ComponentOverride do
 
   defp override(decoded, descriptor, source) do
     %__MODULE__{
+      target: decoded["target"],
       component_id: decoded["component_id"],
       base_source_hash: decoded["base_source_hash"],
       source_hash: decoded["source_hash"],
@@ -339,6 +354,9 @@ defmodule PtcRunner.Kernel.ComponentOverride do
       @required_keys -- keys != [] ->
         descriptor_violation([])
 
+      not valid_target?(value["target"]) ->
+        descriptor_violation([{:property, "target"}])
+
       not valid_provenance?(value) ->
         descriptor_violation([{:property, "provenance"}])
 
@@ -360,6 +378,13 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   end
 
   defp decode_value(_value), do: descriptor_violation([])
+
+  defp valid_target?(%{"environment" => "workflow"} = target), do: map_size(target) == 1
+
+  defp valid_target?(%{"environment" => "mission", "mission" => name} = target),
+    do: map_size(target) == 2 and valid_component_id?(name)
+
+  defp valid_target?(_target), do: false
 
   defp descriptor_violation(path),
     do: {:error, {:component_override_path, path, :invalid_override_descriptor}}

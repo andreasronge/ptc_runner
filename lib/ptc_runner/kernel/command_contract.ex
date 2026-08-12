@@ -1,6 +1,6 @@
 defmodule PtcRunner.Kernel.CommandContract do
   @moduledoc """
-  Generated-in-source JSON Schema for the V1 command envelope.
+  Generated-in-source JSON Schema for the V2 command envelope.
 
   The checked-in JSON artifact is produced from this module. Diagnostic
   phase/code/retryability/message rows come only from `DiagnosticCatalog`.
@@ -12,7 +12,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.JSONValue
 
-  @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v1.schema.json"
+  @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v2.schema.json"
   @non_run_schema_modes [
     {"help", :help, false, false},
     {"version", :version, false, false},
@@ -72,7 +72,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     %{
       "$schema" => "https://json-schema.org/draft/2020-12/schema",
       "$id" => @id,
-      "title" => "PtcRunner command envelope V1",
+      "title" => "PtcRunner command envelope V2",
       "oneOf" =>
         Enum.map(@non_run_schema_modes, fn {command, mode, provider_activity, compound?} ->
           error_envelope(command, diagnostic_rows(mode), provider_activity, compound?)
@@ -688,7 +688,7 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp base_properties(commands, status) do
     %{
-      "schema_version" => %{"const" => 1},
+      "schema_version" => %{"const" => 2},
       "command" => %{"enum" => commands},
       "status" => %{"const" => status},
       "run_ref" => %{"type" => "string", "pattern" => @run_ref}
@@ -913,11 +913,12 @@ defmodule PtcRunner.Kernel.CommandContract do
     event_counts = count_map(@event_type, ["$overflow"])
 
     closed(
-      ~w(remaining_ms capability_calls subordinate_evaluations protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped),
+      ~w(remaining_ms capability_calls subordinate_evaluations evaluations_by_mission protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped),
       %{
         "remaining_ms" => nonnegative_integer(),
         "capability_calls" => capability_counts,
         "subordinate_evaluations" => nonnegative_integer(),
+        "evaluations_by_mission" => count_map(@alias),
         "protocol_errors" => nonnegative_integer(),
         "evaluation_memory_bytes" => nonnegative_integer(),
         "evaluation_history_bytes" => nonnegative_integer(),
@@ -979,16 +980,18 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp validate_result do
     closed(
-      ~w(application_content_digest effective_application_digest workflow_bundle_hash mission_bundle_hash provider_activity),
+      ~w(application_content_digest effective_application_digest workflow_bundle_hash mission_bundle_hashes provider_activity),
       %{
         "application_content_digest" => %{"type" => "string", "pattern" => @digest},
         "effective_application_digest" => %{"type" => "string", "pattern" => @digest},
         "workflow_bundle_hash" => %{"type" => "string", "pattern" => @hash},
-        "mission_bundle_hash" => %{
-          "oneOf" => [
-            %{"type" => "null"},
-            %{"type" => "string", "pattern" => @hash}
-          ]
+        "mission_bundle_hashes" => %{
+          "type" => "object",
+          "propertyNames" => %{"pattern" => "^[a-z][a-z0-9._-]{0,127}$"},
+          "additionalProperties" => %{
+            "oneOf" => [%{"type" => "null"}, %{"type" => "string", "pattern" => @hash}]
+          },
+          "maxProperties" => 16
         },
         "provider_activity" => %{"const" => false}
       }

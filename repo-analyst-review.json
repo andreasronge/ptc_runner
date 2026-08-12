@@ -2,33 +2,73 @@
   "$schema": "./priv/schemas/ptc-application-manifest.schema.json",
   "version": 1,
   "workflow": {
-    "components": [{"library": "agent.main"}],
+    "components": [
+      {
+        "library": "agent.main"
+      }
+    ],
     "entry": "agent.main/run"
   },
-  "mission": {
-    "components": [
-      {"library": "cap"},
-      {"id": "repo", "path": "repo-analyst/repo.clj", "dependencies": ["cap"]},
-      {"id": "runs", "path": "repo-analyst/runs.clj", "dependencies": ["cap"]}
-    ],
-    "data": {}
-  },
   "providers": {
-    "workflow": [{"name": "deepseek"}],
+    "workflow": [
+      {
+        "name": "deepseek"
+      }
+    ],
     "mission": [
-      {"name": "workspace"},
-      {"name": "history"},
-      {"name": "private-history"}
+      {
+        "name": "workspace"
+      },
+      {
+        "name": "history"
+      },
+      {
+        "name": "private-history"
+      }
     ]
   },
-  "input": {"path": "repo-analyst/review-input.json"},
+  "input": {
+    "path": "repo-analyst/review-input.json"
+  },
   "contracts": {
-    "result_schema": {"path": "repo-analyst/review.schema.json"}
+    "result_schema": {
+      "path": "repo-analyst/review.schema.json"
+    }
   },
   "limits": {
     "run_duration_ms": 120000,
     "workflow_timeout_ms": 110000,
     "evaluation_timeout_ms": 20000,
     "mission_capability_calls": 64
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {
+          "library": "cap"
+        },
+        {
+          "id": "repo",
+          "path": "repo-analyst/repo.clj",
+          "dependencies": [
+            "cap"
+          ]
+        },
+        {
+          "id": "runs",
+          "path": "repo-analyst/runs.clj",
+          "dependencies": [
+            "cap"
+          ]
+        }
+      ],
+      "data": {
+      },
+      "providers": [
+        "workspace",
+        "history",
+        "private-history"
+      ]
+    }
   }
 }

@@ -201,6 +201,7 @@ defmodule PtcRunner.Kernel.CandidatePromotionTest do
       "candidate.clj" => candidate_source,
       "override.json" =>
         Jason.encode!(%{
+          "target" => %{"environment" => "workflow"},
           "component_id" => "helper",
           "base_source_hash" => hash(@base),
           "source_hash" => hash(candidate_source),

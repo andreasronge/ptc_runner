@@ -4262,6 +4262,30 @@ and creates an avoidable code-injection boundary. Parameter values and source
 text are withheld from the public effect ledger; only deterministic byte-size
 and SHA-256 identity metadata is retained.
 
+#### Named mission selection
+
+Legacy Kernel helpers select the explicitly declared mission named `default`.
+Named variants take the mission name first:
+
+```clojure
+(kernel/eval-in "reader" (program (return 1)))
+(kernel/eval-source-in "reader" generated-source)
+(kernel/eval-with-in "reader" (program (return data/params)) params)
+(kernel/eval-source-with-in "reader" generated-source params)
+(kernel/check-source-in "reader" generated-source)
+(kernel/mission-inventory-in "reader")
+(kernel/mission-model-context-in "reader")
+```
+
+The reserved request object carries an optional non-null `mission` string.
+Unknown names return a bounded protocol error listing the sorted declared
+names, without dispatching an evaluation or provider call. Each mission owns
+its own data, definitions, value history, source revision, frozen API, and
+direct provider grants; workflows can deliberately reuse a continuation only
+by selecting the same mission again. The run retains one FIFO evaluation lease,
+so concurrent named requests serialize only while evaluating and preserve the
+mission selected by each queued caller.
+
 #### Mission-aware source checking
 
 `(kernel/check-source source)` runs the production compiler against the frozen

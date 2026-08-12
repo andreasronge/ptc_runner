@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.SourceCheck do
 
   @spec check(RunState.t(), struct(), binary(), map(), term(), keyword()) :: map()
   def check(state, mission, source, limits, event_sink, opts \\ []) when is_binary(source) do
+    mission_name = Keyword.get(opts, :mission_name, RunState.default_mission())
     source_bytes = byte_size(source)
 
     if source_bytes > limits.subordinate_source_bytes do
@@ -26,14 +27,14 @@ defmodule PtcRunner.Kernel.SourceCheck do
         source_bytes: source_bytes
       }
 
-      case RunState.reserve_source_check(state) do
+      case RunState.reserve_source_check(state, mission_name) do
         {:ok, memory, revision} ->
           compile_and_finish(
             state,
             {mission, source, limits, event_sink},
             {memory, revision},
             identity,
-            opts
+            Keyword.put(opts, :mission_name, mission_name)
           )
 
         {:error, reason} ->
@@ -70,7 +71,7 @@ defmodule PtcRunner.Kernel.SourceCheck do
 
     :ok = after_compile(Keyword.get(opts, :after_compile))
 
-    case RunState.finish_source_check(state, revision) do
+    case RunState.finish_source_check(state, Keyword.fetch!(opts, :mission_name), revision) do
       :ok -> Map.merge(identity, compile_projection(compile_result))
       {:error, reason} -> Map.merge(identity, finish_failure(reason))
     end

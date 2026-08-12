@@ -242,10 +242,12 @@ defmodule PtcRunner.Kernel.Dispatcher do
            validation_heap_words: validation_heap_words,
            evaluation_lease: evaluation_lease,
            validation_deadline_ms: validation_deadline_ms
-         },
+         } = dispatch_context,
          event_sink,
          inspection_sink
        ) do
+    mission_name = Map.get(dispatch_context, :mission_name)
+
     validation_deadline_ms =
       shared_validation_deadline(
         validation_deadline_ms,
@@ -282,6 +284,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
              validation_heap_words,
              validation_deadline_ms
            ),
+         invocation = put_mission_name(invocation, environment, mission_name),
          :ok <- RunState.reserve_capability(state, environment, name, evaluation_lease) do
       invoke_with_events(
         state,
@@ -297,7 +300,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
         %{status: :error, kind: :capability_denied, reason: :capability_absent, retryable?: false}
 
       {:error, :invalid_arguments, []} ->
-        protocol_error(state, event_sink, :invalid_arguments, environment, evaluation_lease)
+        protocol_error(
+          state,
+          event_sink,
+          :invalid_arguments,
+          environment,
+          evaluation_lease,
+          nil,
+          mission_name
+        )
 
       {:error, :invalid_arguments, violations} ->
         protocol_error(
@@ -306,11 +317,20 @@ defmodule PtcRunner.Kernel.Dispatcher do
           :invalid_arguments,
           environment,
           evaluation_lease,
-          violations
+          violations,
+          mission_name
         )
 
       {:error, :invalid_arguments} ->
-        protocol_error(state, event_sink, :invalid_arguments, environment, evaluation_lease)
+        protocol_error(
+          state,
+          event_sink,
+          :invalid_arguments,
+          environment,
+          evaluation_lease,
+          nil,
+          mission_name
+        )
 
       {:error, :input_validation_unavailable} ->
         _ = mark_terminal_host_failure(state, environment, evaluation_lease)
@@ -333,19 +353,35 @@ defmodule PtcRunner.Kernel.Dispatcher do
         }
 
       {:error, :argument_exceeded} ->
-        protocol_error(state, event_sink, :argument_exceeded, environment, evaluation_lease)
+        protocol_error(
+          state,
+          event_sink,
+          :argument_exceeded,
+          environment,
+          evaluation_lease,
+          nil,
+          mission_name
+        )
 
       {:error, reason, details} when is_atom(reason) and is_binary(details) ->
-        protocol_error(state, event_sink, reason, environment, evaluation_lease, details)
+        protocol_error(
+          state,
+          event_sink,
+          reason,
+          environment,
+          evaluation_lease,
+          details,
+          mission_name
+        )
 
       {:error, :limit_exceeded} ->
-        limit_error(state, event_sink, :capability_quota)
+        limit_error(state, event_sink, :capability_quota, environment, mission_name)
 
       {:error, :live_task_limit} ->
-        limit_error(state, event_sink, :live_provider_tasks)
+        limit_error(state, event_sink, :live_provider_tasks, environment, mission_name)
 
       {:error, :reservation_held} ->
-        limit_error(state, event_sink, :reservation_held)
+        limit_error(state, event_sink, :reservation_held, environment, mission_name)
 
       false ->
         stale_evaluation_error()
@@ -354,9 +390,17 @@ defmodule PtcRunner.Kernel.Dispatcher do
         stale_evaluation_error()
 
       {:error, :run_closed} ->
-        limit_error(state, event_sink, :run_closed)
+        limit_error(state, event_sink, :run_closed, environment, mission_name)
     end
   end
+
+  defp put_mission_name(invocation, :mission, mission_name) when is_binary(mission_name),
+    do: %{
+      invocation
+      | event_attributes: Map.put(invocation.event_attributes, :mission_name, mission_name)
+    }
+
+  defp put_mission_name(invocation, _environment, _mission_name), do: invocation
 
   defp authenticated?(_state, :workflow, _lease), do: true
 
@@ -401,10 +445,18 @@ defmodule PtcRunner.Kernel.Dispatcher do
                  capability_id,
                  environment,
                  public_name,
-                 arguments
+                 arguments,
+                 invocation.event_attributes[:mission_name]
                ) do
             :ok ->
-              context = invocation_context(event_sink, inspection_sink, capability_id)
+              context =
+                invocation_context(
+                  event_sink,
+                  inspection_sink,
+                  capability_id,
+                  invocation.event_attributes[:mission_name]
+                )
+
               {invoke(state, capability, arguments, timeout_ms, context, environment), true}
 
             {:error, :inspection_sink_error} ->
@@ -418,7 +470,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
                    capability_id,
                    environment,
                    public_name,
-                   result
+                   result,
+                   invocation.event_attributes[:mission_name]
                  ) do
               :ok ->
                 result
@@ -432,7 +485,14 @@ defmodule PtcRunner.Kernel.Dispatcher do
             result
           end
 
-        _ = maybe_emit_limit(state, event_sink, result)
+        _ =
+          maybe_emit_limit(
+            state,
+            event_sink,
+            result,
+            environment,
+            invocation.event_attributes[:mission_name]
+          )
 
         stopped_data =
           invocation.event_attributes
@@ -452,30 +512,48 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
       {:error, :event_sink_error} ->
         RunState.release_provider_slot(state)
-        limit_error(state, nil, :run_closed)
+
+        limit_error(
+          state,
+          nil,
+          :run_closed,
+          environment,
+          invocation.event_attributes[:mission_name]
+        )
     end
   end
 
-  defp inspection_input(nil, _capability_id, _environment, _name, _arguments), do: :ok
+  defp inspection_input(nil, _capability_id, _environment, _name, _arguments, _mission_name),
+    do: :ok
 
-  defp inspection_input(sink, capability_id, environment, name, arguments) do
+  defp inspection_input(sink, capability_id, environment, name, arguments, mission_name) do
     InspectionSink.emit(
       sink,
       "capability-input",
       %{capability_id: capability_id},
-      %{environment: environment, name: name, arguments: arguments}
+      capability_inspection_payload(environment, name, :arguments, arguments, mission_name)
     )
   end
 
-  defp inspection_output(nil, _capability_id, _environment, _name, _result), do: :ok
+  defp inspection_output(nil, _capability_id, _environment, _name, _result, _mission_name),
+    do: :ok
 
-  defp inspection_output(sink, capability_id, environment, name, result) do
+  defp inspection_output(sink, capability_id, environment, name, result, mission_name) do
     InspectionSink.emit(
       sink,
       "capability-output",
       %{capability_id: capability_id},
-      %{environment: environment, name: name, result: result}
+      capability_inspection_payload(environment, name, :result, result, mission_name)
     )
+  end
+
+  defp capability_inspection_payload(environment, name, key, value, mission_name) do
+    %{key => value, environment: environment, name: name}
+    |> then(fn payload ->
+      if environment == :mission and is_binary(mission_name),
+        do: Map.put(payload, :mission_name, mission_name),
+        else: payload
+    end)
   end
 
   defp inspection_failure(state) do
@@ -489,7 +567,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
     }
   end
 
-  defp invocation_context(event_sink, inspection_sink, capability_id) do
+  defp invocation_context(event_sink, inspection_sink, capability_id, mission_name) do
     traceparent =
       case event_sink && EventSink.identity(event_sink) do
         {:ok, %{trace_id: trace_id}} -> Events.traceparent(trace_id, capability_id)
@@ -501,6 +579,9 @@ defmodule PtcRunner.Kernel.Dispatcher do
       inspection_sink: inspection_sink,
       traceparent: traceparent
     }
+    |> then(fn context ->
+      if is_binary(mission_name), do: Map.put(context, :mission_name, mission_name), else: context
+    end)
   end
 
   defp invoke(state, capability, arguments, requested_timeout_ms, context, environment) do
@@ -963,7 +1044,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
   # Authentication and accounting are one atomic owner operation: a mission
   # call whose evaluation died mid-validation must not spend the next
   # evaluation's shared protocol-error budget.
-  defp protocol_error(state, event_sink, reason, environment, lease, details \\ nil) do
+  defp protocol_error(
+         state,
+         event_sink,
+         reason,
+         environment,
+         lease,
+         details \\ nil,
+         mission_name \\ nil
+       ) do
     case RunState.protocol_error(state, environment, lease) do
       :ok ->
         result = %{status: :error, kind: :protocol_error, reason: reason, retryable?: false}
@@ -973,21 +1062,43 @@ defmodule PtcRunner.Kernel.Dispatcher do
         stale_evaluation_error()
 
       {:error, :protocol_error_limit} ->
-        limit_error(state, event_sink, :protocol_errors)
+        limit_error(state, event_sink, :protocol_errors, environment, mission_name)
     end
   end
 
-  defp limit_error(state, event_sink, reason) do
-    _ = Events.emit(state, event_sink, "limit-exceeded", %{reason: reason})
+  defp limit_error(state, event_sink, reason, environment \\ nil, mission_name \\ nil) do
+    data = limit_event_data(reason, environment, mission_name)
+    _ = Events.emit(state, event_sink, "limit-exceeded", data)
     %{status: :error, kind: :limit_exceeded, reason: reason, retryable?: false}
   end
 
-  defp maybe_emit_limit(state, event_sink, %{kind: kind, reason: reason})
+  defp maybe_emit_limit(
+         state,
+         event_sink,
+         %{kind: kind, reason: reason},
+         environment,
+         mission_name
+       )
        when kind in [:timeout, :result_exceeded, :limit_exceeded] do
-    Events.emit(state, event_sink, "limit-exceeded", %{reason: reason})
+    Events.emit(
+      state,
+      event_sink,
+      "limit-exceeded",
+      limit_event_data(reason, environment, mission_name)
+    )
   end
 
-  defp maybe_emit_limit(_state, _event_sink, _result), do: :ok
+  defp maybe_emit_limit(_state, _event_sink, _result, _environment, _mission_name), do: :ok
+
+  defp limit_event_data(reason, :mission, mission_name) do
+    %{reason: reason, environment: :mission}
+    |> Map.put(:mission_name, mission_name || RunState.default_mission())
+  end
+
+  defp limit_event_data(reason, :workflow, _mission_name),
+    do: %{reason: reason, environment: :workflow}
+
+  defp limit_event_data(reason, _environment, _mission_name), do: %{reason: reason}
 
   defp normalize_exit(:killed), do: :provider_heap_exceeded
   defp normalize_exit(_reason), do: :provider_exit

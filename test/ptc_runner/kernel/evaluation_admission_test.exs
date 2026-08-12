@@ -489,7 +489,7 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     send(
       state.pid,
       {:"$gen_call", {self(), reply_ref},
-       {state.token, {:reserve_evaluation, :block, stale_request}}}
+       {state.token, {:reserve_evaluation, "default", :block, stale_request}}}
     )
 
     assert_receive {^reply_ref, {:error, :admission_timeout}}, 1_000
@@ -828,7 +828,8 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     send(
       state.pid,
       {:"$gen_call", {self(), reply_ref},
-       {state.token, {:reserve_evaluation, :block, System.monotonic_time(:millisecond)}}}
+       {state.token,
+        {:reserve_evaluation, "default", :block, System.monotonic_time(:millisecond)}}}
     )
 
     await_queued(state, 1)
@@ -851,7 +852,8 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     send(
       state.pid,
       {:"$gen_call", {self(), reply_ref},
-       {state.token, {:reserve_evaluation, :block, System.monotonic_time(:millisecond)}}}
+       {state.token,
+        {:reserve_evaluation, "default", :block, System.monotonic_time(:millisecond)}}}
     )
 
     await_queued(state, 1)

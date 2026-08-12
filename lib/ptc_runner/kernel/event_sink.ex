@@ -345,7 +345,7 @@ defmodule PtcRunner.Kernel.EventSink do
 
   defp terminal_envelope_bytes(type) do
     envelope = %{
-      schema_version: 1,
+      schema_version: 2,
       run_id: String.duplicate("r", 256),
       trace_id: String.duplicate("t", 256),
       sequence: @drop_count_limit,

@@ -47,7 +47,7 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
 
       assert manifest.providers.workflow == []
       assert manifest.providers.mission == []
-      assert manifest.mission_components == []
+      assert manifest.missions["default"].components == []
 
       # A component that could reach a model could re-run a trial rather than
       # count it, which would make its verdict another opinion.
@@ -101,7 +101,7 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
       {:ok, config} =
         RunConfig.new(
           workflow_environment: workflow,
-          mission_environment: mission,
+          missions: %{"default" => mission},
           input: %{"input" => input},
           limits: limits,
           event_sink: sink
@@ -230,7 +230,7 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
 
       refute ValueContract.valid?(
                contract,
-               update_in(valid, ["run_identity"], &Map.delete(&1, "mission_bundle_hash"))
+               update_in(valid, ["run_identity"], &Map.delete(&1, "mission_bundle_hashes"))
              )
     end
 
@@ -660,7 +660,7 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{"input" => input},
         limits: limits,
         event_sink: sink
@@ -677,7 +677,7 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
         "run_id" => "run-#{subject}-#{id}-#{System.unique_integer([:positive])}",
         "result_hash" => "sha256:" <> String.duplicate("1", 64),
         "workflow_bundle_hash" => "sha256:bundle",
-        "mission_bundle_hash" => "sha256:mission",
+        "mission_bundle_hashes" => %{"default" => "sha256:mission"},
         "provider_snapshot_hashes" => ["sha256:p"],
         "content_snapshot_hashes" => ["sha256:content"],
         "fixture_set_hash" => "sha256:fixtures"
@@ -746,7 +746,7 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{"input" => %{"trials" => trials, "plan" => plan}},
         limits: limits,
         event_sink: sink
@@ -818,7 +818,7 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink

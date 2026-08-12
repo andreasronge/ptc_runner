@@ -246,7 +246,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
       |> directory_request(registry)
       |> RunLifecycle.build()
 
-    assert built.config.mission_environment.capabilities
+    assert built.config.missions["default"].environment.capabilities
            |> Map.values()
            |> Enum.map(& &1.name)
            |> Enum.sort() == ["consumer", "producer"]
@@ -864,7 +864,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
       {:ok, config} =
         RunConfig.new(
           workflow_environment: workflow,
-          mission_environment: mission,
+          missions: %{"default" => mission},
           input: %{},
           limits: limits,
           event_sink: sink,
@@ -965,7 +965,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink,
@@ -998,7 +998,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
       {:ok, config} =
         RunConfig.new(
           workflow_environment: workflow,
-          mission_environment: mission,
+          missions: %{"default" => mission},
           input: %{},
           limits: limits,
           event_sink: sink,
@@ -1029,7 +1029,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     {:ok, run_config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: run_sink,
@@ -1052,7 +1052,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     {:ok, repl_config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: repl_sink,
@@ -1078,7 +1078,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink,
@@ -1114,7 +1114,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
       {:ok, config} =
         RunConfig.new(
           workflow_environment: workflow,
-          mission_environment: mission,
+          missions: %{"default" => mission},
           input: %{},
           limits: limits,
           event_sink: sink,
@@ -1144,7 +1144,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink,
@@ -1202,7 +1202,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink,
@@ -1261,7 +1261,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink,
@@ -1312,7 +1312,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink,
@@ -1350,7 +1350,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
       {:ok, config} =
         RunConfig.new(
           workflow_environment: workflow,
-          mission_environment: mission,
+          missions: %{"default" => mission},
           input: %{},
           limits: limits,
           event_sink: sink,
@@ -1403,7 +1403,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink,
@@ -1553,6 +1553,9 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
         "entry" => "app/run"
       },
       "input" => %{"value" => %{}},
+      "missions" => %{
+        "default" => %{"providers" => Enum.map(mission_providers, & &1["name"])}
+      },
       "providers" => %{"workflow" => workflow_providers, "mission" => mission_providers}
     }
 

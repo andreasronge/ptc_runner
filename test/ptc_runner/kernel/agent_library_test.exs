@@ -46,7 +46,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -88,7 +88,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       {:ok, config} =
         RunConfig.new(
           workflow_environment: workflow,
-          mission_environment: mission,
+          missions: %{"default" => mission},
           input: %{"response" => response},
           limits: limits,
           event_sink: sink
@@ -184,7 +184,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -720,7 +720,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, config} = agent_config([response])
 
     assert {:ok, _result} =
-             Kernel.run(~S|(agent.core/run "Use no mission API" {"max_turns" 1})|, config)
+             Kernel.run(
+               ~S|(agent.core/run "Use no mission API" {"max_turns" 1 "mission" nil})|,
+               config
+             )
 
     assert_receive {:agent_request, %{"system" => system}}
     assert system =~ ~r/\nAvailable API\n\z/
@@ -788,7 +791,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{},
         limits: limits,
         event_sink: sink
@@ -1130,13 +1133,13 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert_receive {:agent_request, second_request}
     assert_receive {:agent_request, third_request}
 
-    model_context = config.mission_inventory.model_rendered
+    model_context = config.missions["default"].inventory.model_rendered
 
     for request <- [first_request, second_request, third_request] do
       assert request["system"] =~ "PTC_AGENT_PROMPT_V1"
       assert request["system"] =~ "PTC-Lisp"
       refute request["system"] =~ model_context
-      refute request["system"] =~ config.mission_inventory.rendered
+      refute request["system"] =~ config.missions["default"].inventory.rendered
       refute request["system"] =~ "Mission API and limits (deterministic JSON)"
       refute request["system"] =~ "\nLimits\n"
     end
@@ -1816,9 +1819,9 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert system =~ "Effect: write"
     refute system =~ "Docs: Search.\nAvailable API"
     refute system =~ "\nLimits\n"
-    refute system =~ config.mission_inventory.model_rendered
+    refute system =~ config.missions["default"].inventory.model_rendered
 
-    model_context = Jason.decode!(config.mission_inventory.model_rendered)
+    model_context = Jason.decode!(config.missions["default"].inventory.model_rendered)
     fetch = Enum.find(model_context["entries"], &(&1["form"] == "(api/fetch query)"))
     assert fetch["effect"] == "write"
 
@@ -2140,7 +2143,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     config_opts = [
       workflow_environment: workflow,
-      mission_environment: mission,
+      missions: %{"default" => mission},
       input: Keyword.get(opts, :input, %{}),
       limits: limits,
       event_sink: sink,
@@ -2172,7 +2175,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     RunConfig.new(
       workflow_environment: workflow,
-      mission_environment: mission,
+      missions: %{"default" => mission},
       input: %{},
       limits: limits,
       event_sink: sink
@@ -2190,7 +2193,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        missions: %{"default" => mission},
         input: %{"evaluation" => evaluation, "max_chars" => max_chars},
         limits: limits,
         event_sink: sink

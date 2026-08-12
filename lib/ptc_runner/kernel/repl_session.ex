@@ -170,7 +170,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   end
 
   defp eval_open(session, source) do
-    case RunState.reserve_evaluation(session.state) do
+    case RunState.reserve_workflow_evaluation(session.state) do
       {:ok, memory, history, lease} ->
         session = Map.merge(session, %{memory: memory, history: history})
         eval_reserved(session, source, memory, history, lease)
@@ -376,7 +376,7 @@ defmodule PtcRunner.Kernel.ReplSession do
          {:ok, sink} <- EventSink.start(:normal, limits) do
       case RunConfig.new(
              workflow_environment: workflow,
-             mission_environment: mission,
+             missions: %{"default" => mission},
              input: %{},
              limits: limits,
              event_sink: sink,
@@ -625,7 +625,7 @@ defmodule PtcRunner.Kernel.ReplSession do
         "kernel-eval",
         RuntimeTools.kernel_eval(
           session.state,
-          session.config.mission_environment,
+          Map.new(session.config.missions, fn {name, mission} -> {name, mission.environment} end),
           session.config.limits,
           session.config.event_sink,
           session.config.inspection_sink
@@ -641,7 +641,7 @@ defmodule PtcRunner.Kernel.ReplSession do
         "kernel-check-source",
         RuntimeTools.kernel_check_source(
           session.state,
-          session.config.mission_environment,
+          Map.new(session.config.missions, fn {name, mission} -> {name, mission.environment} end),
           session.config.limits,
           session.config.event_sink
         )
@@ -656,7 +656,9 @@ defmodule PtcRunner.Kernel.ReplSession do
         "kernel-mission-inventory",
         RuntimeTools.mission_inventory(
           session.state,
-          session.config.mission_inventory.rendered
+          Map.new(session.config.missions, fn {name, mission} ->
+            {name, mission.inventory.rendered}
+          end)
         )
       )
     )
@@ -669,7 +671,9 @@ defmodule PtcRunner.Kernel.ReplSession do
         "kernel-mission-model-context",
         RuntimeTools.mission_model_context(
           session.state,
-          session.config.mission_inventory.model_rendered
+          Map.new(session.config.missions, fn {name, mission} ->
+            {name, mission.inventory.model_rendered}
+          end)
         )
       )
     )

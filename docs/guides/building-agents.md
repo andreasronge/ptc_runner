@@ -115,7 +115,8 @@ local workflow can remain small:
 (ns my.agent)
 
 (defn run [input]
-  (agent.core/run (get input "task") {"max_turns" 4}))
+  (agent.core/run (get input "task")
+                  {"max_turns" 4 "mission" "research"}))
 ```
 
 Select the installed library and declare the dependency in the manifest:
@@ -154,6 +155,13 @@ error. Provider, prompt, transcript, quota, and other host failures still fail
 the workflow. This distinction prevents a candidate crash from disappearing
 while also preventing a provider outage from being scored against a candidate.
 `run-value` retains its existing fail-on-subject-failure behavior.
+
+All four public `agent.core` entries accept `mission` independently of `model`.
+Omitting it or supplying `nil` selects `default`; a non-empty string selects
+that named mission for both prompt API rendering and every generated-program
+evaluation. `agent.main/run` passes the nested `input.agent` map through with
+the same rule. An empty, non-string, or unknown selector fails without silently
+falling back to another mission.
 
 A subordinate evaluation that is never admitted is one of those host failures.
 A run holds a single evaluation lease, but a concurrent `kernel/eval-source`
@@ -242,9 +250,10 @@ without a declared default the call fails and lists the available aliases.
 implicit fallback to a different alias. The router removes `model` before
 calling the selected provider, so replay request hashes remain provider-neutral.
 
-`agent.core` accepts the same selector as `"model"` in its configuration and
-adds it to every turn. Credentials, sampling parameters, byte ceilings, and
-timeouts remain host-owned rather than being supplied by PTC-Lisp.
+`agent.core` adds the `model` selector to every model turn and independently
+uses `mission` for prompt rendering and evaluation. Credentials, sampling
+parameters, byte ceilings, and timeouts remain host-owned rather than being
+supplied by PTC-Lisp.
 
 A successful response has `content` and may contain `tool_calls` and `tokens`.
 Each tool call uses `id`, `name`, and `args`; the normalized field is `args`,

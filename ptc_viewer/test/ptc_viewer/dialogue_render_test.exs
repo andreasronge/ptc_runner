@@ -536,6 +536,57 @@ defmodule PtcViewer.DialogueRenderTest do
     end
   end
 
+  describe "named missions" do
+    test "renders mission-specific evaluations, preludes, and inventories" do
+      mission = fn component, hash ->
+        %{
+          "prelude" => %{
+            "component_ids" => [component],
+            "dependency_indices" => [[]],
+            "hash" => hash
+          },
+          "inventory_hash" => hash,
+          "inventory_bytes" => 42,
+          "model_context_hash" => hash,
+          "model_context_bytes" => 24
+        }
+      end
+
+      rendered =
+        render_fixtures(%{
+          metadata: fn metadata ->
+            Map.put(metadata, "missions", %{
+              "reader" => mission.("example.reader", String.duplicate("a", 64)),
+              "writer" => mission.("example.writer", String.duplicate("b", 64))
+            })
+          end,
+          turns: fn turns ->
+            update_in(turns, ["items"], fn items ->
+              Enum.map(items, fn event ->
+                name =
+                  case event["data"]["evaluation_id"] do
+                    "mission-evaluation-22" -> "reader"
+                    "mission-evaluation-27" -> "writer"
+                    _other -> nil
+                  end
+
+                if event["data"]["environment"] == "mission" and name,
+                  do: put_in(event, ["data", "mission_name"], name),
+                  else: event
+              end)
+            end)
+          end
+        })
+
+      assert rendered =~ "Mission evaluation · reader"
+      assert rendered =~ "Mission evaluation · writer"
+      assert rendered =~ "Mission prelude · reader"
+      assert rendered =~ "Mission prelude · writer"
+      assert rendered =~ "Mission inventory · reader"
+      assert rendered =~ "Mission inventory · writer"
+    end
+  end
+
   describe "token spend" do
     test "reports totals and estimated input composition", %{rendered: rendered} do
       assert rendered =~ "LLM token spend"

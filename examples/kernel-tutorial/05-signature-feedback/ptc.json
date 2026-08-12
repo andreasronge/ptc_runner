@@ -5,17 +5,32 @@
       {
         "id": "tutorial.signature-feedback",
         "path": "feedback.clj",
-        "dependencies": ["agent.feedback", "kernel"]
+        "dependencies": [
+          "agent.feedback",
+          "kernel"
+        ]
       },
-      {"library": "agent.feedback"},
-      {"library": "kernel"}
+      {
+        "library": "agent.feedback"
+      },
+      {
+        "library": "kernel"
+      }
     ],
     "entry": "tutorial.signature-feedback/run"
   },
-  "mission": {
-    "components": [
-      {"id": "tutorial.signatures", "path": "signatures.clj"}
-    ]
+  "input": {
+    "value": {
+    }
   },
-  "input": {"value": {}}
+  "missions": {
+    "default": {
+      "components": [
+        {
+          "id": "tutorial.signatures",
+          "path": "signatures.clj"
+        }
+      ]
+    }
+  }
 }
