@@ -1,5 +1,8 @@
 # Coding agent review workflow
 
+**Audience: people changing PtcRunner itself.** It describes how this
+repository reviews its own changes.
+
 Use this workflow when a change requires an independent Codex review. Its goal
 is to find substantive defects without repeatedly paying for cold reviews of
 the same code. Review complements design, tests, Dialyzer, and repository

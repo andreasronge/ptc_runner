@@ -1,12 +1,15 @@
 # Kernel maintainer guide
 
+**Audience: people changing PtcRunner itself.** Nothing here is needed to build
+an application on it.
+
 This guide is the architectural map for the implemented Kernel. It explains
 ownership and responsibility boundaries without duplicating field-level API
 reference. Exact options, return values, limits, state transitions, and error
 atoms belong in the owning `PtcRunner.Kernel.*` or `PtcRunner.Lisp.*` module
 documentation.
 
-For application authoring, start with
+For application authoring, start with the [Quickstart](quickstart.md),
 [Getting started](getting-started.md), the
 [manifest guide](manifests-and-capabilities.md),
 [Host configuration](host-configuration.md),

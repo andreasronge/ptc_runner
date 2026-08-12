@@ -5,7 +5,8 @@ Kernel provides bounded execution and authority; PTC-Lisp libraries define how
 an agent prompts a model, handles feedback, retries, delegates work, remembers
 successful state, and decides when to return or fail.
 
-Read [Getting started](getting-started.md) first for a credential-free run.
+Read [Getting started](getting-started.md) first for a credential-free run, or
+the [Quickstart](quickstart.md) if you only need the commands.
 [Manifests and capabilities](manifests-and-capabilities.md) documents the
 manifest keys used throughout this guide,
 [Host configuration](host-configuration.md) documents the operator document and

@@ -35,7 +35,13 @@ rendering paths.
 [Getting started](getting-started.md#create-a-minimal-application).
 Initialization validates the scaffold before filesystem access and publishes
 the completed directory atomically without replacing an existing directory or
-symlink.
+symlink. A refused initialization leaves the filesystem untouched and names the
+condition that stopped it: `publication/initialization_target_exists` for an
+existing target, `publication/initialization_parent_missing` or
+`publication/initialization_parent_unusable` for the parent directory, and
+`publication/initialization_failed` when no safe public cause can be disclosed.
+Every failure reported before publication can be retried once its condition is
+resolved.
 
 Run `mix ptc help COMMAND` or `bin/ptc help COMMAND` for help generated from the
 same per-command declarations the strict parser accepts.
