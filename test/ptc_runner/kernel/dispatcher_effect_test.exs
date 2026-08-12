@@ -152,17 +152,60 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
              EventSink.events(sink) |> Enum.find(&(&1.type == "limit-exceeded"))
   end
 
-  test "mission callback raises, exits, and process deaths are effect-aware" do
+  test "raised mission callbacks are non-retryable" do
+    assert_unclassified_mission_failure(fn -> raise "private failure" end, :exception)
+  end
+
+  test "exiting mission callbacks are non-retryable" do
+    assert_unclassified_mission_failure(fn -> exit(:private_failure) end, :exit)
+  end
+
+  test "throwing mission callbacks are non-retryable" do
+    assert_unclassified_mission_failure(fn -> throw(:private_failure) end, :throw)
+  end
+
+  test "killed mission provider processes are non-retryable" do
+    assert_unclassified_mission_failure(
+      fn -> Process.exit(self(), :kill) end,
+      :provider_heap_exceeded
+    )
+  end
+
+  test "abnormally exiting mission provider processes are non-retryable" do
+    assert_unclassified_mission_failure(
+      fn ->
+        spawn_link(fn -> exit(:private_failure) end)
+
+        receive do
+          :never -> {:ok, nil}
+        end
+      end,
+      :provider_exit
+    )
+  end
+
+  test "unclassified workflow callback termination is non-retryable" do
     cases = [
       {fn -> raise "private failure" end, :exception},
       {fn -> exit(:private_failure) end, :exit},
-      {fn -> Process.exit(self(), :kill) end, :provider_heap_exceeded}
+      {fn -> throw(:private_failure) end, :throw},
+      {fn -> Process.exit(self(), :kill) end, :provider_heap_exceeded},
+      {fn ->
+         spawn_link(fn -> exit(:private_failure) end)
+
+         receive do
+           :never -> {:ok, nil}
+         end
+       end, :provider_exit}
     ]
 
-    for {callback, reason} <- cases,
-        effect <- @effects do
-      result = dispatch_mission(effect, callback)
-      assert_effect_failure(result, effect, %{kind: :provider_error, reason: reason}, true)
+    for {callback, reason} <- cases do
+      assert %{
+               status: :error,
+               kind: :provider_error,
+               reason: ^reason,
+               retryable?: false
+             } = dispatch_workflow(callback)
     end
   end
 
@@ -471,6 +514,14 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
     )
   end
 
+  defp dispatch_workflow(callback) do
+    {:ok, state} = RunState.start(Limits.defaults())
+    {:ok, capability} = capability(:read, callback)
+    {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
+
+    Dispatcher.dispatch(state, :workflow, environment, capability.name, %{}, 100)
+  end
+
   defp dispatch_mission_with_events(limit_opts, timeout_ms, callback) do
     {:ok, limits} = Limits.new(limit_opts)
     {:ok, state} = RunState.start(limits)
@@ -521,6 +572,19 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
     else
       assert result.retryable? == false
       assert result.mutation_state == :indeterminate
+    end
+  end
+
+  defp assert_unclassified_mission_failure(callback, reason) do
+    for effect <- @effects do
+      result = dispatch_mission(effect, callback)
+
+      assert_effect_failure(
+        result,
+        effect,
+        %{kind: :provider_error, reason: reason},
+        false
+      )
     end
   end
 end

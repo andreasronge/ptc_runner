@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.CoreContractTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Component
@@ -374,12 +376,55 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(limits)
 
     for _attempt <- 1..4 do
-      assert %{status: :error, kind: :provider_error, reason: :provider_exit} =
-               Dispatcher.dispatch(state, :workflow, environment, "tiny-heap", %{}, 100)
+      assert %{
+               status: :error,
+               kind: :provider_error,
+               reason: :provider_exit,
+               retryable?: false
+             } =
+               dispatch_after_provider_down(state, fn ->
+                 Dispatcher.dispatch(state, :workflow, environment, "tiny-heap", %{}, 100)
+               end)
     end
 
     assert :ok = RunState.reserve_capability(state, :workflow, "tiny-heap")
     assert :ok = RunState.release_provider_slot(state)
+  end
+
+  test "write mission provider death before tracker attachment omits mutation state" do
+    {:ok, capability} =
+      Capability.new(
+        name: "tiny-heap-write",
+        input_schema: @input_schema,
+        effect: :write,
+        callback: fn _ -> {:ok, true} end
+      )
+
+    {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
+    {:ok, limits} = Limits.new(provider_heap_words: 100)
+    {:ok, state} = RunState.start(limits)
+    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state)
+
+    assert %{
+             status: :error,
+             kind: :provider_error,
+             reason: :provider_exit,
+             retryable?: false
+           } =
+             result =
+             dispatch_after_provider_down(state, fn ->
+               Dispatcher.dispatch_with_lease(
+                 state,
+                 :mission,
+                 environment,
+                 "tiny-heap-write",
+                 %{},
+                 100,
+                 {nil, nil, lease}
+               )
+             end)
+
+    refute Map.has_key?(result, :mutation_state)
   end
 
   test "provider attachment after run closure is rejected and releases its reservation" do
@@ -3365,5 +3410,41 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert :ok = RunState.reserve_capability(state, :workflow, "read")
     assert :ok = RunState.close(state)
     assert {:error, :run_closed} = RunState.finish_provider(state)
+  end
+
+  defp dispatch_after_provider_down(state, dispatch) do
+    tracker = state.provider_tracker.pid
+    :ok = :sys.suspend(tracker)
+
+    task =
+      Task.async(fn ->
+        receive do
+          :dispatch -> dispatch.()
+        end
+      end)
+
+    try do
+      send(task.pid, :dispatch)
+
+      assert_eventually(fn -> is_pid(pending_provider_attachment(tracker)) end)
+      provider = pending_provider_attachment(tracker)
+      provider_ref = Process.monitor(provider)
+      assert_receive {:DOWN, ^provider_ref, :process, ^provider, _reason}
+
+      :ok = :sys.resume(tracker)
+      Task.await(task)
+    after
+      if Process.alive?(tracker), do: :sys.resume(tracker)
+      if Process.alive?(task.pid), do: Task.shutdown(task, :brutal_kill)
+    end
+  end
+
+  defp pending_provider_attachment(tracker) do
+    {:messages, messages} = Process.info(tracker, :messages)
+
+    Enum.find_value(messages, fn
+      {:"$gen_call", _from, {_token, {:attach, provider}}} -> provider
+      _message -> nil
+    end)
   end
 end

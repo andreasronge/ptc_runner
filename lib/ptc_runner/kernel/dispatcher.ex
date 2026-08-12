@@ -9,12 +9,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
   run closure so late results cannot re-enter Lisp.
 
   Mission failures after callback entry are classified with the capability's
-  declared effect. Read failures keep their provider retry policy. Write and
-  unknown failures are non-retryable and carry
-  `mutation_state: :indeterminate` when invocation may have reached external
-  state. A trusted `ProviderError` with `dispatch_provenance: :not_dispatched`
-  preserves its specific pre-dispatch policy without exposing that internal
-  provenance. Workflow capabilities retain their provider-owned retry policy.
+  declared effect. Read failures keep an explicit typed provider retry policy.
+  Unclassified callback raises, exits, throws, and monitored process deaths
+  default to non-retryable in both environments; Dispatcher-owned provider
+  timeouts remain retryable. Write and unknown failures are non-retryable and
+  carry `mutation_state: :indeterminate` when invocation may have reached
+  external state. A trusted `ProviderError` with
+  `dispatch_provenance: :not_dispatched` preserves its specific pre-dispatch
+  policy without exposing that internal provenance. Workflow capabilities also
+  retain explicit provider-owned retry policy.
   Before a mission provider publishes a terminal policy failure, its monitored
   callback records that classification in RunState so a subsequent evaluator
   kill cannot make the agent repeat the call.
@@ -693,7 +696,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
       status: :error,
       kind: :provider_error,
       reason: normalize_exit(reason),
-      retryable?: true
+      retryable?: false
     }
   end
 
@@ -763,7 +766,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp normalize_result(_state, environment, capability, {:raised, reason}) do
     post_invocation_failure(
-      %{status: :error, kind: :provider_error, reason: reason, retryable?: true},
+      %{status: :error, kind: :provider_error, reason: reason, retryable?: false},
       environment,
       capability
     )
