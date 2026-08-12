@@ -47,7 +47,8 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
         "source_hash" => @source_hash,
         "source_bytes" => byte_size(@source)
       }),
-      event(run_id, 5, "run-stopped", %{"outcome" => "ok"})
+      workflow_evaluation_event(run_id, 5),
+      event(run_id, 6, "run-stopped", %{"outcome" => "failed"})
     ]
   end
 
@@ -56,7 +57,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
       InspectionSink.start(
         run_id: run_id,
         trace_id: "trace-#{run_id}",
-        schema_version: 2
+        schema_version: 3
       )
 
     emit!(sink, "capability-input", %{capability_id: "llm-#{run_id}"}, %{
@@ -122,10 +123,37 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
       source_bytes: byte_size(@source)
     })
 
+    emit_execution_diagnostics!(sink, run_id)
+
     {:ok, records} = InspectionSink.records(sink)
     path = Path.join(directory, "#{run_id}.inspection.jsonl")
     :ok = InspectionArtifact.persist(path, records, events)
     :ok = InspectionSink.stop(sink)
+  end
+
+  def emit_execution_diagnostics!(sink, run_id) do
+    emit!(sink, "execution-prints", %{evaluation_id: "workflow-eval-#{run_id}"}, %{
+      environment: :workflow,
+      prints: ["private-print-#{run_id}"],
+      truncated: false
+    })
+
+    emit!(sink, "execution-error", %{evaluation_id: "workflow-eval-#{run_id}"}, %{
+      environment: :workflow,
+      kind: :limit_exceeded,
+      reason: :timeout,
+      details: %{"limit" => "run_duration_ms", "limit_ms" => 1_000}
+    })
+  end
+
+  def workflow_evaluation_event(run_id, sequence) do
+    event(run_id, sequence, "evaluation-started", %{
+      "evaluation_id" => "workflow-eval-#{run_id}",
+      "environment" => "workflow",
+      "program_kind" => "ptc-lisp",
+      "source_hash" => @source_hash,
+      "source_bytes" => byte_size(@source)
+    })
   end
 
   defp emit!(sink, type, correlation, payload),

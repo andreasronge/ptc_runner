@@ -27,3 +27,13 @@
   (cap/unwrap!
     (tool/inspection-provider-exchanges
       (cap/with-cursor {"run_id" run-id "limit" 100} cursor))))
+
+(defn execution-prints [run-id cursor]
+  (cap/unwrap!
+    (tool/inspection-execution-prints
+      (cap/with-cursor {"run_id" run-id "limit" 100} cursor))))
+
+(defn execution-errors [run-id cursor]
+  (cap/unwrap!
+    (tool/inspection-execution-errors
+      (cap/with-cursor {"run_id" run-id "limit" 100} cursor))))

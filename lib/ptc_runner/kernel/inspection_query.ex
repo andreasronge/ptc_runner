@@ -20,9 +20,9 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   be copied into `base_source_hash` without reinterpretation.
 
   V3 execution-phase diagnostics (`execution-prints`, `execution-error`) are
-  counted in each `list_runs` row's `counts` but are not an independent
-  collection: a raw artifact load remains the way to read their bounded
-  `prints` list and `details` map for one `evaluation_id`.
+  exposed as run-scoped collections alongside their counts in each `list_runs`
+  row. Their items retain the correlated `evaluation_id`, sequence, timestamp,
+  environment, and exact bounded diagnostic payload.
   V4 projections include `mission_name` on every mission-owned result so
   repeated component and capability names remain unambiguous.
   """
@@ -36,7 +36,9 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     :capability_calls,
     :generated_sources,
     :effective_preludes,
-    :provider_exchanges
+    :provider_exchanges,
+    :execution_prints,
+    :execution_errors
   ]
 
   @type operation ::
@@ -46,6 +48,8 @@ defmodule PtcRunner.Kernel.InspectionQuery do
           | :generated_sources
           | :effective_preludes
           | :provider_exchanges
+          | :execution_prints
+          | :execution_errors
 
   @spec compile([[map()]], binary()) ::
           {:ok, %{source_id: binary(), collections: map()}} | {:error, atom()}
@@ -103,14 +107,24 @@ defmodule PtcRunner.Kernel.InspectionQuery do
         |> records_of_type("prelude-source")
         |> Enum.map(&prelude_item/1)
 
+      execution_prints =
+        records
+        |> records_of_type("execution-prints")
+        |> Enum.map(&execution_item/1)
+
+      execution_errors =
+        records
+        |> records_of_type("execution-error")
+        |> Enum.map(&execution_item/1)
+
       counts = %{
         "model_exchanges" => length(model_exchanges),
         "capability_calls" => length(capability_calls),
         "generated_sources" => length(generated_sources),
         "effective_preludes" => length(effective_preludes),
         "provider_exchanges" => length(provider_pairs),
-        "execution_prints" => length(records_of_type(records, "execution-prints")),
-        "execution_errors" => length(records_of_type(records, "execution-error"))
+        "execution_prints" => length(execution_prints),
+        "execution_errors" => length(execution_errors)
       }
 
       {:ok,
@@ -128,7 +142,9 @@ defmodule PtcRunner.Kernel.InspectionQuery do
          capability_calls: capability_calls,
          generated_sources: generated_sources,
          effective_preludes: effective_preludes,
-         provider_exchanges: provider_pairs
+         provider_exchanges: provider_pairs,
+         execution_prints: execution_prints,
+         execution_errors: execution_errors
        }}
     end
   end
@@ -271,6 +287,17 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     }
   end
 
+  defp execution_item(record) do
+    %{
+      "run_id" => record["run_id"],
+      "trace_id" => record["trace_id"],
+      "evaluation_id" => record["correlation"]["evaluation_id"],
+      "sequence" => record["sequence"],
+      "timestamp" => record["timestamp"]
+    }
+    |> Map.merge(record["payload"])
+  end
+
   defp descriptor_hash(hash), do: "sha256:" <> hash
 
   defp model_exchange?(%{"environment" => "workflow", "name" => "llm-request"}), do: true
@@ -286,7 +313,9 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       capability_calls: merge_collection(compiled, :capability_calls),
       generated_sources: merge_collection(compiled, :generated_sources),
       effective_preludes: merge_collection(compiled, :effective_preludes),
-      provider_exchanges: merge_collection(compiled, :provider_exchanges)
+      provider_exchanges: merge_collection(compiled, :provider_exchanges),
+      execution_prints: merge_collection(compiled, :execution_prints),
+      execution_errors: merge_collection(compiled, :execution_errors)
     }
   end
 
@@ -313,7 +342,9 @@ defmodule PtcRunner.Kernel.InspectionQuery do
               :capability_calls,
               :generated_sources,
               :effective_preludes,
-              :provider_exchanges
+              :provider_exchanges,
+              :execution_prints,
+              :execution_errors
             ] do
     with :ok <- validate_keys(arguments, ~w(run_id limit cursor order)),
          true <- valid_string?(run_id),

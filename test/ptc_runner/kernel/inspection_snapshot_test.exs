@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceSnapshot
+  alias PtcRunner.TestSupport.PrivateInspectionFixture
   alias PtcRunner.TestSupport.RunLifecycle
 
   @source "(return 42)"
@@ -248,6 +249,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       %{"run_id" => "v2-run"},
       %{"run_id" => "v2-run"},
       %{"run_id" => "v2-run"},
+      %{"run_id" => "v2-run"},
+      %{"run_id" => "v2-run"},
       %{"run_id" => "v2-run"}
     ]
 
@@ -263,6 +266,49 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
                "run_id" => "v2-run",
                "limit" => 1
              })
+  end
+
+  @tag :tmp_dir
+  test "V3 execution diagnostics are exposed as bounded run-scoped queries", %{tmp_dir: root} do
+    {trace, inspection} = source_directories(root)
+    write_run(trace, inspection, "v3-run", 3)
+
+    {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
+
+    {:ok, snapshot} =
+      InspectionSnapshot.start({:directory, inspection}, trace_snapshot, owner: self())
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(snapshot)
+      TraceSnapshot.stop(trace_snapshot)
+    end)
+
+    assert {:ok,
+            %{
+              "items" => [
+                %{
+                  "evaluation_id" => "workflow-eval-v3-run",
+                  "environment" => "workflow",
+                  "prints" => ["private-print-v3-run"],
+                  "truncated" => false
+                }
+              ],
+              "next_cursor" => nil
+            }} = InspectionSnapshot.query(snapshot, :execution_prints, %{"run_id" => "v3-run"})
+
+    assert {:ok,
+            %{
+              "items" => [
+                %{
+                  "evaluation_id" => "workflow-eval-v3-run",
+                  "environment" => "workflow",
+                  "kind" => "limit_exceeded",
+                  "reason" => "timeout",
+                  "details" => %{"limit" => "run_duration_ms", "limit_ms" => 1_000}
+                }
+              ],
+              "next_cursor" => nil
+            }} = InspectionSnapshot.query(snapshot, :execution_errors, %{"run_id" => "v3-run"})
   end
 
   @tag :tmp_dir
@@ -331,7 +377,9 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
              "inspection-capability-calls",
              "inspection-generated-sources",
              "inspection-effective-preludes",
-             "inspection-provider-exchanges"
+             "inspection-provider-exchanges",
+             "inspection-execution-prints",
+             "inspection-execution-errors"
            ]
 
     assert Enum.map(provider_capabilities, & &1.name) == [
@@ -340,10 +388,13 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
              "private.capability-calls",
              "private.generated-sources",
              "private.effective-preludes",
-             "private.provider-exchanges"
+             "private.provider-exchanges",
+             "private.execution-prints",
+             "private.execution-errors"
            ]
 
-    provider_exchange = List.last(provider_capabilities)
+    provider_exchange =
+      Enum.find(provider_capabilities, &(&1.name == "private.provider-exchanges"))
 
     assert {:ok, %{"items" => []}} =
              provider_exchange.callback.(%{"run_id" => "named"})
@@ -766,7 +817,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       arguments: %{"path" => "private-#{run_id}.txt"}
     })
 
-    if version == 2 do
+    if version in [2, 3] do
       emit!(sink, "mcp-request", %{capability_id: "tool-#{run_id}", request_id: 7}, %{
         transport: :stdio,
         body: %{
@@ -837,6 +888,10 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       source_bytes: byte_size(@source)
     })
 
+    if version == 3 do
+      PrivateInspectionFixture.emit_execution_diagnostics!(sink, run_id)
+    end
+
     {:ok, records} = InspectionSink.records(sink)
     path = Path.join(directory, "#{run_id}.inspection.jsonl")
     :ok = InspectionArtifact.persist(path, records, events)
@@ -894,7 +949,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
         "source_hash" => @source_hash,
         "source_bytes" => byte_size(@source)
       }),
-      event(run_id, 5, "run-stopped", %{"outcome" => "ok"})
+      PrivateInspectionFixture.workflow_evaluation_event(run_id, 5),
+      event(run_id, 6, "run-stopped", %{"outcome" => "ok"})
     ]
   end
 

@@ -44,3 +44,17 @@
   (cap/collect-pages
     (fn [cursor] (inspection/provider-exchanges run-id cursor))
     max-pages))
+
+(defn all-execution-prints
+  "Reads one run's execution prints until exhausted or `max-pages` is reached."
+  [run-id max-pages]
+  (cap/collect-pages
+    (fn [cursor] (inspection/execution-prints run-id cursor))
+    max-pages))
+
+(defn all-execution-errors
+  "Reads one run's execution errors until exhausted or `max-pages` is reached."
+  [run-id max-pages]
+  (cap/collect-pages
+    (fn [cursor] (inspection/execution-errors run-id cursor))
+    max-pages))
