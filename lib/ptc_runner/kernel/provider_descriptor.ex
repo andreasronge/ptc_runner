@@ -21,7 +21,15 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.SelectionRules
 
-  @sources [:mcp, :llm, :llm_replay, :ptc_trace_snapshot, :ptc_inspection_snapshot, :custom]
+  @sources [
+    :mcp,
+    :llm,
+    :llm_replay,
+    :ptc_trace_snapshot,
+    :ptc_private_trace_snapshot,
+    :ptc_inspection_snapshot,
+    :custom
+  ]
   @data_classes [:normal, :private_inspection]
   @destinations [:workflow, :mission]
   @revision ~r/\A[a-z][a-z0-9._-]{0,127}\z/
@@ -53,6 +61,7 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
           | :llm
           | :llm_replay
           | :ptc_trace_snapshot
+          | :ptc_private_trace_snapshot
           | :ptc_inspection_snapshot
           | :custom
   @type data_policy :: %{
@@ -260,6 +269,14 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
       descriptor.destinations == [:mission] and not descriptor.workflow_llm? and
         descriptor.authorization_mode == :none and descriptor.connectivity_mode == :none and
         descriptor.provides == [:canonical_trace_snapshot] and descriptor.data_class == :normal and
+        descriptor.accepts_data == [:normal, :private_inspection]
+
+  defp shipped_consistent?(%{source: :ptc_private_trace_snapshot} = descriptor),
+    do:
+      descriptor.destinations == [:mission] and not descriptor.workflow_llm? and
+        descriptor.authorization_mode == :none and descriptor.connectivity_mode == :none and
+        descriptor.provides == [:canonical_trace_snapshot] and
+        descriptor.data_class == :private_inspection and
         descriptor.accepts_data == [:normal, :private_inspection]
 
   defp shipped_consistent?(%{source: :ptc_inspection_snapshot} = descriptor),

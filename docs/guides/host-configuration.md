@@ -139,7 +139,7 @@ store.
 
 ## Provider sources
 
-There are five closed source identifiers. Each one may only be installed into
+There are six closed source identifiers. Each one may only be installed into
 one environment, and that placement is enforced at assembly:
 
 | `source` | Purpose | Required keys | Environment |
@@ -148,6 +148,7 @@ one environment, and that placement is enforced at assembly:
 | `llm_replay` | Frozen model responses | `installation_revision`, `fixtures` | Workflow only |
 | `mcp` | External tool server | `installation_revision`, `transport`, `tools` | Mission only |
 | `ptc_trace_snapshot` | Canonical trace queries | `installation_revision`, `directory` | Mission only |
+| `ptc_private_trace_snapshot` | Private-authorized canonical trace queries | `installation_revision`, `directory` | Mission only |
 | `ptc_inspection_snapshot` | Private inspection queries | `installation_revision`, `directory` | Mission only |
 
 Selecting an alias into the wrong environment fails with
@@ -509,7 +510,7 @@ reading an immutable capture rather than live files.
 
 ```json
 "history": {
-  "source": "ptc_trace_snapshot",
+  "source": "ptc_private_trace_snapshot",
   "installation_revision": "history-v1",
   "directory": "traces",
   "ceilings": {"max_source_bytes": 8000000, "max_result_bytes": 1048576}
@@ -531,9 +532,17 @@ once; later queries use the frozen capture even if the path contents change.
 Result ceilings have a floor of 158 bytes, which is the smallest response that
 can carry the reserved content hash plus an empty page.
 
+`ptc_trace_snapshot` captures ordinary `*.jsonl` traces only.
+`ptc_private_trace_snapshot` captures the immutable union of ordinary and
+`*.private.jsonl` traces, reports each run's source class, excludes
+`*.inspection.jsonl`, and fixes the installation data class to
+`private_inspection`. Neither source accepts configurable `data_class`,
+`accepts_data`, or private-mode fields.
+
 Selecting an inspection snapshot also requires exactly one trace snapshot: the
 canonical capture is taken first, and every private artifact is validated
-against it. [Manifests and capabilities](manifests-and-capabilities.md#providers-come-from-the-host-not-the-manifest)
+against it. Selecting both trace source kinds with inspection is therefore an
+invalid duplicate service. [Manifests and capabilities](manifests-and-capabilities.md#providers-come-from-the-host-not-the-manifest)
 lists the derived capability names,
 [TraceLog contract](../trace-log-contract.md#query-contract) is normative for
 the query contract, and [Running and debugging](running-and-debugging.md) covers
@@ -562,11 +571,11 @@ fails with `provider_data_class_denied` before anything opens.
 
 The effect is a fail-closed contamination rule. A vendor connector left at the
 defaults can never be selected into a run that also touches private inspection
-data, because it does not accept `private_inspection`. Two source kinds fix
-their class rather than declaring it: `ptc_trace_snapshot` is always `normal`,
-and `ptc_inspection_snapshot` is always `private_inspection` while accepting
-both. A run whose effective class is `private_inspection` is forced onto the
-private event policy.
+data, because it does not accept `private_inspection`. Three source kinds fix
+their class rather than declaring it: `ptc_trace_snapshot` is always `normal`;
+`ptc_private_trace_snapshot` and `ptc_inspection_snapshot` are always
+`private_inspection`; all three accept both classes. A run whose effective
+class is `private_inspection` is forced onto the private event policy.
 
 ## Installed ceilings
 

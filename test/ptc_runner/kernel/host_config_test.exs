@@ -133,12 +133,36 @@ defmodule PtcRunner.Kernel.HostConfigTest do
           {"llm", "llm"},
           {"replay", "llm_replay"},
           {"trace", "ptc_trace_snapshot"},
+          {"private-trace", "ptc_private_trace_snapshot"},
           {"inspection", "ptc_inspection_snapshot"}
         ] do
       document = %{"install" => %{name => %{"source" => source}}}
 
       assert {:error, {:installation_revision_missing, ^name}} =
                HostConfig.decode_command(document, "/tmp")
+    end
+  end
+
+  @tag :tmp_dir
+  test "loads the fixed private-authorized trace snapshot installation", %{tmp_dir: dir} do
+    config = %{
+      "install" => %{
+        "private-history" => %{
+          "source" => "ptc_private_trace_snapshot",
+          "directory" => "traces",
+          "installation_revision" => "private-history-v1"
+        }
+      }
+    }
+
+    assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
+    installation = host.install["private-history"]
+    assert installation.source == :ptc_private_trace_snapshot
+    assert installation.directory == "traces"
+
+    for forbidden <- ["data_class", "accepts_data", "private"] do
+      invalid = put_in(config, ["install", "private-history", forbidden], true)
+      assert {:error, :invalid_host_config} = HostConfig.decode(invalid, dir)
     end
   end
 

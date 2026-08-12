@@ -495,7 +495,11 @@ defmodule PtcRunner.ReplFrontend do
          {:source_retained_limit_exceeded,
           %{source: source, measured_bytes: measured_bytes, limit_bytes: limit_bytes}}
        )
-       when source in [:ptc_trace_snapshot, :ptc_inspection_snapshot] and
+       when source in [
+              :ptc_trace_snapshot,
+              :ptc_private_trace_snapshot,
+              :ptc_inspection_snapshot
+            ] and
               is_integer(measured_bytes) and is_integer(limit_bytes) do
     "ptc repl profile setup failed: #{source} retains #{measured_bytes} bytes " <>
       "(limit: #{limit_bytes} bytes)"

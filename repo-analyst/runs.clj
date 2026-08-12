@@ -1,16 +1,18 @@
 (ns runs "Bounded evidence from completed PtcRunner runs." {:visibility :prompt})
 
-;; Two installed sources back this facade. `history` reads canonical trace
-;; JSONL, which is public run metadata. `private-history` reads exact private
-;; inspection artifacts: model exchanges, generated programs, capability
-;; arguments and results, effective preludes, and provider wire records.
+;; Two private-authorized installed sources back this facade. `history` reads
+;; payload-free canonical metadata from ordinary and private trace JSONL.
+;; `private-history` reads exact private inspection artifacts: model exchanges,
+;; generated programs, capability arguments and results, effective preludes,
+;; and provider wire records.
 ;;
-;; The split is authority, not convenience. A manifest that selects only
-;; `history` can call the first two functions and nothing else; the remaining
-;; five require an installation that accepts private inspection data, and the
-;; run's result must reach an authorized private sink. Keeping both behind one
-;; namespace lets a reviewer follow a slow or repeated public event straight to
-;; its exact private exchange without guessing a second facade's name.
+;; The split is evidence precision, not a public/private authority split.
+;; Selecting `history` already classifies the run as private_inspection, so any
+;; manifest using this facade needs an authorized private result destination.
+;; The separate inspection source grants exact records and must correlate them
+;; to the same canonical capture. Keeping both behind one namespace lets a
+;; reviewer follow a slow or repeated payload-free event straight to its exact
+;; private exchange without guessing a second facade's name.
 ;;
 ;; Every function reads one page. Pass nil first, then the previous response's
 ;; `next_cursor`; a response with no `next_cursor` is the last page. Cursors are
@@ -50,7 +52,7 @@
     "missions" (get run "missions")))
 
 (defn list-runs
-  "Read one public run page. Pass nil first, then only the exact returned
+  "Read one payload-free canonical run page. Pass nil first, then only the exact returned
   next_cursor; nil means the catalog is complete. This page is an intermediate
   compact catalog for choosing run IDs, not a final review result.
 

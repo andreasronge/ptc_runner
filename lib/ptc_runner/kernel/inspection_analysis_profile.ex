@@ -2,11 +2,14 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfile do
   @moduledoc """
   Fixed private authority recipe for correlated trace and inspection analysis.
 
-  `inspection-analysis-v2` captures one canonical trace directory and one
-  private inspection directory, validates the private records against the
-  captured canonical runs, and exposes the shipped primitive and bounded
-  traversal functions for both sources. It grants no model, filesystem,
-  network, MCP, write, or inspection-capture authority.
+  `inspection-analysis-v2` captures one private-authorized canonical trace
+  directory and one private inspection directory, validates the private
+  records against the captured canonical runs, and exposes the shipped
+  primitive and bounded traversal functions for both sources. The trace
+  capture admits normal and private canonical files but not inspection files;
+  the analysis session's own event trace remains sanitized and payload-free.
+  The profile grants no model, filesystem, network, MCP, write, or
+  inspection-capture authority.
   """
 
   alias PtcRunner.Kernel.AnalysisProfile
@@ -41,6 +44,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfile do
   @capabilities Enum.sort(@trace_capabilities ++ @inspection_capabilities)
   @persistence "canonical-trace-on-close"
   @result_policy "private-terminal-v1"
+  @trace_capture_policy "private-authorized-canonical-v1"
 
   @spec id() :: binary()
   def id, do: @id
@@ -67,7 +71,8 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfile do
   def identity_extension do
     %{
       "source_data_class" => "private_inspection",
-      "result_data_class" => "private_inspection"
+      "result_data_class" => "private_inspection",
+      "trace_capture_policy" => @trace_capture_policy
     }
   end
 
@@ -126,8 +131,8 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfile do
       "resources" => %{
         "traces" => %{
           "required" => true,
-          "kind" => "normal-trace-directory",
-          "summary" => "Immutable capture of canonical sanitized trace files"
+          "kind" => "private-authorized-trace-directory",
+          "summary" => "Immutable capture of canonical normal and private trace files"
         },
         "inspection" => %{
           "required" => true,
@@ -141,6 +146,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfile do
       "limits" => limits() |> Map.from_struct() |> stringify_keys(),
       "source_data_class" => "private_inspection",
       "result_data_class" => "private_inspection",
+      "trace_capture_policy" => @trace_capture_policy,
       "persistence_policy" => @persistence,
       "result_policy" => @result_policy
     }
@@ -172,7 +178,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfile do
       when map_size(resources) == 2 and is_binary(inspection) and is_binary(traces) and
              is_list(opts) do
     with {:ok, trace_snapshot} <-
-           TraceSnapshot.start({:directory, traces},
+           TraceSnapshot.start({:private_authorized_directory, traces},
              owner: self(),
              capture_hook: Keyword.get(opts, :capture_hook),
              listing_hook: Keyword.get(opts, :listing_hook)

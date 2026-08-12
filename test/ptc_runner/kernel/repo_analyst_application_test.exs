@@ -48,7 +48,11 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
                ["deepseek", "history", "private-history", "replay-llm", "workspace"]
 
       assert host.install["workspace"].source == :mcp
-      assert host.install["history"].source == :ptc_trace_snapshot
+      assert host.install["history"].source == :ptc_private_trace_snapshot
+
+      assert host.install["history"].installation_revision ==
+               "repo-analyst-private-trace-v2"
+
       assert host.install["private-history"].source == :ptc_inspection_snapshot
       assert host.install["deepseek"].source == :llm
       assert host.install["replay-llm"].source == :llm_replay

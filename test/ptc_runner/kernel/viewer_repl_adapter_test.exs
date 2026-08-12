@@ -161,6 +161,16 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
                   limit_bytes: 1_024
                 }}
              )
+
+    assert :repl_start_failed =
+             ViewerReplBackend.normalize_start_error(
+               {:source_retained_limit_exceeded,
+                %{
+                  source: :ptc_private_trace_snapshot,
+                  measured_bytes: 4_096,
+                  limit_bytes: 1_024
+                }}
+             )
   end
 
   @tag :tmp_dir

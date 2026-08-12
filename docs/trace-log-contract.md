@@ -121,14 +121,16 @@ pathname replacement is a collision and is never acknowledged as successful.
 Observed failure paths remove the temporary sibling. This publication contract
 is for host-selected destinations only and does not grant Lisp write authority.
 
-### Immutable normal-directory captures
+### Immutable canonical-directory captures
 
-An internal trace-snapshot owner can pin one host-selected normal directory for
-a bounded analysis session. It is not an additional public
-`PtcRunner.Kernel.TraceLog.source()` form and cannot capture a file, private
-directory, or inspection artifact.
+An internal trace-snapshot owner can pin one host-selected canonical trace
+directory for a bounded analysis session. It is not an additional public
+`PtcRunner.Kernel.TraceLog.source()` form and cannot capture a file or
+inspection artifact. The constructor fixes whether that directory is ordinary
+normal-only input or private-authorized canonical input; a caller cannot widen
+an existing snapshot handle or relabel it for another analysis profile.
 
-Capture enumerates supported normal `.jsonl` names in canonical sorted order,
+Ordinary capture enumerates supported normal `.jsonl` names in canonical sorted order,
 records a pre-read directory/file inventory, opens only regular files, compares
 path and descriptor identity, retains the baseline bytes, and performs a second
 byte-for-byte verification around a final inventory check, followed by one last
@@ -137,11 +139,15 @@ content change between the baseline and final verification returns
 `:source_changed`; it never installs a mixed capture. The complete
 decoded event set is normalized and validated exactly once before the owner
 becomes queryable. Private `.private.jsonl` and `.inspection.jsonl` artifacts
-remain excluded by the ordinary normal-directory discovery rules.
+remain excluded by the ordinary normal-directory discovery rules. The internal
+private-authorized capture instead selects both ordinary and
+`.private.jsonl` traces, records `sanitized` or `private` provenance per run,
+and still rejects inspection artifacts. A run cannot be split across the two
+trace classes.
 
 The default aggregate encoded-source ceiling remains 8,000,000 bytes. Capture
 enumerates under a fixed heap and time bound, and rejects directories above
-4,096 total entries or 1,024 selected normal trace files before sorting,
+4,096 total entries or 1,024 selected trace files before sorting,
 stating, opening, or verifying selected files. Snapshot retention independently
 limits the decoded representation to 32,000,000 retained bytes, and query
 results retain the existing 1,000,000-byte default. These values are hard
@@ -171,9 +177,10 @@ terminal REPL frontends. Its mission bundle contains `cap`, `log.core`, and
 `trace-get-run`, `trace-list-turns`, and `trace-counters`; and ordinary implicit
 mission introspection remains available. Filesystem, network, LLM, agent,
 workflow, MCP, private-inspection, and nested `kernel-eval` authority are
-absent. The separate `inspection-analysis-v2` profile adds the validated
-private-inspection source, both inspection components, and a private terminal
-gate.
+absent. The separate `inspection-analysis-v2` profile uses the
+private-authorized canonical capture, adds the validated private-inspection
+source and both inspection components, and requires a private terminal gate.
+Its own session trace remains a sanitized normal analysis artifact.
 
 Each session queries one immutable snapshot and records its own canonical events
 in the same owner process that holds its continuation and quotas, under a
