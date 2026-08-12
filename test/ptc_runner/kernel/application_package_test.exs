@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.TypedCanonicalJSON
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.TestHelpers
 
   @source "(ns app) (defn run [input] (return input))"
   @schema ~S({"type":"object","properties":{"answer":{"type":"integer"}},"additionalProperties":false})
@@ -761,7 +762,8 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
       {:error, :stop_after_context}
     end
 
-    {:ok, registry} = ProviderRegistry.new(%{"capture" => builder})
+    {:ok, registry} =
+      ProviderRegistry.new(%{"capture" => TestHelpers.staged_provider(builder)})
 
     assert {:error, :stop_after_context} =
              manifest_path

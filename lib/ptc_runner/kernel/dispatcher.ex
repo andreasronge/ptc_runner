@@ -47,58 +47,17 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   @validation_handoff_ms 25
 
-  @doc "Dispatches one environment-local capability with optional event collection."
-  @spec dispatch(RunState.t(), :workflow | :mission, map(), binary(), map(), non_neg_integer()) ::
-          map()
-  def dispatch(state, environment, %{capabilities: capabilities}, name, arguments, timeout_ms)
-      when environment in [:workflow, :mission] and is_binary(name) and is_map(arguments) and
-             is_integer(timeout_ms) do
-    dispatch(state, environment, %{capabilities: capabilities}, name, arguments, timeout_ms, nil)
-  end
-
+  @doc "Dispatches one capability through the bounded, context-aware boundary."
   @spec dispatch(
           RunState.t(),
           :workflow | :mission,
           map(),
           binary(),
           map(),
-          non_neg_integer(),
+          map(),
+          term(),
           term()
         ) :: map()
-  def dispatch(
-        state,
-        environment,
-        %{capabilities: _capabilities},
-        _name,
-        %AmbiguousArguments{},
-        _timeout_ms,
-        event_sink
-      )
-      when environment in [:workflow, :mission] do
-    protocol_error(state, event_sink, :ambiguous_arguments, environment, nil)
-  end
-
-  def dispatch(
-        state,
-        environment,
-        environment_value,
-        name,
-        arguments,
-        timeout_ms,
-        event_sink
-      ) do
-    dispatch(
-      state,
-      environment,
-      environment_value,
-      name,
-      arguments,
-      timeout_ms,
-      event_sink,
-      nil
-    )
-  end
-
   def dispatch(
         state,
         environment,
@@ -109,7 +68,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
           timeout_ms: timeout_ms,
           validation_heap_words: validation_heap_words,
           evaluation_lease: evaluation_lease,
-          validation_deadline_ms: validation_deadline_ms
+          validation_deadline_ms: validation_deadline_ms,
+          mission_name: mission_name
         } = dispatch_context,
         event_sink,
         inspection_sink
@@ -119,7 +79,9 @@ defmodule PtcRunner.Kernel.Dispatcher do
              is_integer(timeout_ms) and is_integer(validation_heap_words) and
              validation_heap_words > 0 and
              (is_reference(evaluation_lease) or is_nil(evaluation_lease)) and
-             (is_integer(validation_deadline_ms) or is_nil(validation_deadline_ms)) do
+             (is_integer(validation_deadline_ms) or is_nil(validation_deadline_ms)) and
+             ((environment == :workflow and is_nil(mission_name)) or
+                (environment == :mission and is_binary(mission_name))) do
     dispatch_with_context(
       state,
       environment,
@@ -138,100 +100,13 @@ defmodule PtcRunner.Kernel.Dispatcher do
         %{capabilities: _capabilities},
         _name,
         %AmbiguousArguments{},
-        %{evaluation_lease: evaluation_lease},
+        %{evaluation_lease: evaluation_lease, mission_name: mission_name},
         event_sink,
         _inspection_sink
       )
-      when environment in [:workflow, :mission] do
+      when (environment == :workflow and is_nil(mission_name)) or
+             (environment == :mission and is_binary(mission_name)) do
     protocol_error(state, event_sink, :ambiguous_arguments, environment, evaluation_lease)
-  end
-
-  def dispatch(
-        state,
-        environment,
-        %{capabilities: _capabilities},
-        _name,
-        %AmbiguousArguments{},
-        _timeout_ms,
-        event_sink,
-        _inspection_sink
-      )
-      when environment in [:workflow, :mission] do
-    protocol_error(state, event_sink, :ambiguous_arguments, environment, nil)
-  end
-
-  def dispatch(
-        state,
-        environment,
-        environment_value,
-        name,
-        arguments,
-        timeout_ms,
-        event_sink,
-        inspection_sink
-      )
-      when is_integer(timeout_ms) do
-    dispatch_with_lease(
-      state,
-      environment,
-      environment_value,
-      name,
-      arguments,
-      timeout_ms,
-      {event_sink, inspection_sink, nil}
-    )
-  end
-
-  @doc """
-  Dispatches with an authenticated evaluation lease.
-
-  The final argument bundles `{event_sink, inspection_sink, lease}`. A
-  mission capability call carries the lease of the evaluation that
-  constructed its tool grant; `RunState` rejects the reservation when that
-  lease is no longer current, so a dead evaluation's lingering sandbox
-  cannot attribute a late call to the next admitted evaluation.
-  """
-  def dispatch_with_lease(
-        state,
-        environment,
-        %{capabilities: _capabilities},
-        _name,
-        %AmbiguousArguments{},
-        _timeout_ms,
-        {event_sink, _inspection_sink, lease}
-      )
-      when environment in [:workflow, :mission] do
-    protocol_error(state, event_sink, :ambiguous_arguments, environment, lease)
-  end
-
-  def dispatch_with_lease(
-        state,
-        environment,
-        %{capabilities: capabilities},
-        name,
-        arguments,
-        timeout_ms,
-        {event_sink, inspection_sink, lease}
-      )
-      when environment in [:workflow, :mission] and is_binary(name) and is_map(arguments) and
-             is_integer(timeout_ms) do
-    limits = state_limits(state)
-
-    dispatch(
-      state,
-      environment,
-      %{capabilities: capabilities},
-      name,
-      arguments,
-      %{
-        timeout_ms: timeout_ms,
-        validation_heap_words: validation_heap_words(limits, environment),
-        evaluation_lease: lease,
-        validation_deadline_ms: nil
-      },
-      event_sink,
-      inspection_sink
-    )
   end
 
   defp dispatch_with_context(
@@ -937,9 +812,6 @@ defmodule PtcRunner.Kernel.Dispatcher do
     min(timeout_ms, max(remaining_ms, 0))
   end
 
-  defp validation_heap_words(limits, :workflow), do: limits.workflow_heap_words
-  defp validation_heap_words(limits, :mission), do: limits.evaluation_heap_words
-
   defp mark_terminal_host_failure(state, :mission, evaluation_lease)
        when is_reference(evaluation_lease),
        do: RunState.mark_evaluation_terminal_host_failure(state, evaluation_lease)
@@ -1094,8 +966,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
   defp maybe_emit_limit(_state, _event_sink, _result, _environment, _mission_name), do: :ok
 
   defp limit_event_data(reason, :mission, mission_name) do
-    %{reason: reason, environment: :mission}
-    |> Map.put(:mission_name, mission_name || RunState.default_mission())
+    %{reason: reason, environment: :mission, mission_name: mission_name}
   end
 
   defp limit_event_data(reason, :workflow, _mission_name),

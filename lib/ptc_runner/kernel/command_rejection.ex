@@ -3,8 +3,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
   Closed phase-1 parser rejection.
 
   Unknown switches are deliberately not retained. The value may carry only a
-  declaration-owned accepted list or a declaration-owned retired switch and
-  replacement. Destination failures and collisions retain only
+  declaration-owned accepted list. Destination failures and collisions retain only
   declaration-owned switch names, never caller-owned paths.
   """
 
@@ -18,8 +17,6 @@ defmodule PtcRunner.Kernel.CommandRejection do
     :code,
     :kind,
     :accepted,
-    :retired,
-    :replacement,
     :destination,
     :conflicts
   ]
@@ -31,14 +28,11 @@ defmodule PtcRunner.Kernel.CommandRejection do
           kind:
             :generic
             | :unknown_switch
-            | :retired_switch
             | :invalid_destination
             | :destination_collision
             | :private_output_recovery_collision
             | :init_destination_collision,
           accepted: [binary()],
-          retired: binary() | nil,
-          replacement: binary() | nil,
           destination: binary() | nil,
           conflicts: [binary()]
         }
@@ -50,8 +44,6 @@ defmodule PtcRunner.Kernel.CommandRejection do
       code: code,
       kind: :generic,
       accepted: [],
-      retired: nil,
-      replacement: nil,
       destination: nil,
       conflicts: []
     }
@@ -64,8 +56,6 @@ defmodule PtcRunner.Kernel.CommandRejection do
       code: :invalid_arguments,
       kind: :unknown_switch,
       accepted: accepted_switches(command, frontend),
-      retired: nil,
-      replacement: nil,
       destination: nil,
       conflicts: []
     }
@@ -75,27 +65,6 @@ defmodule PtcRunner.Kernel.CommandRejection do
 
   defp accepted_switches(command, frontend),
     do: CommandDeclaration.accepted_switches(command, frontend)
-
-  @spec retired_switch(
-          CommandDeclaration.command(),
-          binary(),
-          binary(),
-          CommandDeclaration.frontend()
-        ) :: t()
-  def retired_switch(command, switch, replacement, frontend) do
-    {:ok, ^replacement} = CommandDeclaration.retired_switch(command, switch)
-
-    %__MODULE__{
-      command: command,
-      code: :invalid_arguments,
-      kind: :retired_switch,
-      accepted: CommandDeclaration.accepted_switches(command, frontend),
-      retired: switch,
-      replacement: replacement,
-      destination: nil,
-      conflicts: []
-    }
-  end
 
   @spec invalid_destination(
           CommandDeclaration.command(),
@@ -109,8 +78,6 @@ defmodule PtcRunner.Kernel.CommandRejection do
       code: :invalid_arguments,
       kind: :invalid_destination,
       accepted: [],
-      retired: nil,
-      replacement: nil,
       destination: CommandDeclaration.option_switch!(command, frontend, :envelope),
       conflicts: []
     }
@@ -133,8 +100,6 @@ defmodule PtcRunner.Kernel.CommandRejection do
       code: :conflicting_arguments,
       kind: :destination_collision,
       accepted: [],
-      retired: nil,
-      replacement: nil,
       destination: nil,
       conflicts: [first, second]
     }
@@ -147,8 +112,6 @@ defmodule PtcRunner.Kernel.CommandRejection do
       code: :conflicting_arguments,
       kind: :private_output_recovery_collision,
       accepted: [],
-      retired: nil,
-      replacement: nil,
       destination: nil,
       conflicts: [CommandDeclaration.option_switch!(:run, frontend, :private_output)]
     }
@@ -161,8 +124,6 @@ defmodule PtcRunner.Kernel.CommandRejection do
       code: :conflicting_arguments,
       kind: :init_destination_collision,
       accepted: [],
-      retired: nil,
-      replacement: nil,
       destination: nil,
       conflicts: [CommandDeclaration.option_switch!(:init, frontend, :envelope)]
     }

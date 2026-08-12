@@ -55,18 +55,15 @@ defmodule PtcRunner.Lisp.KeywordRepresentationTest do
     refute Map.has_key?(memory, :def964probe)
   end
 
-  test "a bounded builtin def-bound memory key still externalizes as an atom" do
+  test "a bounded builtin def-bound memory key uses the canonical binary representation" do
     {:ok, %{memory: memory}} = Lisp.run("(def map {})")
 
-    assert memory == %{map: %{}}
+    assert memory == %{"map" => %{}}
   end
 
-  test "redefining legacy atom-keyed memory emits one canonical binary key" do
-    assert {:ok, %{memory: memory}} =
-             Lisp.run("(def counter (+ counter 1))", memory: %{counter: 10})
-
-    assert memory == %{"counter" => 11}
-    refute Map.has_key?(memory, :counter)
+  test "atom-keyed continuation memory is not a variable-binding alias" do
+    assert {:error, %{fail: %{reason: :unbound_var}}} =
+             Lisp.run("counter", memory: %{counter: 10})
   end
 
   test "lookups still resolve regardless of the externalized key shape" do

@@ -33,8 +33,8 @@ defmodule PtcRunner.Kernel.NamedMissionsParallelTest do
   (defn run [_input]
     (return
       (pcalls
-        #(kernel/eval-source-in "one" "(return 1)")
-        #(kernel/eval-source-in "two" "(return 2)"))))
+        #(kernel/eval-source "one" "(return 1)")
+        #(kernel/eval-source "two" "(return 2)"))))
   """
 
   @sequential_evals """
@@ -42,8 +42,8 @@ defmodule PtcRunner.Kernel.NamedMissionsParallelTest do
 
   (defn run [_input]
     (return
-      [(kernel/eval-source-in "one" "(return 1)")
-       (kernel/eval-source-in "two" "(return 2)")]))
+      [(kernel/eval-source "one" "(return 1)")
+       (kernel/eval-source "two" "(return 2)")]))
   """
 
   defp stub_capability do

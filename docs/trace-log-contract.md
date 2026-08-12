@@ -81,7 +81,7 @@ Do not maintain a second authoritative session/run database.
 
 ## Storage sources
 
-V1 and V2 support:
+The current trace schema supports:
 
 - append-only JSONL files;
 - explicitly granted directories containing JSONL files;
@@ -295,14 +295,10 @@ start late, stop twice, or continue after stopping fail closed as
 Grouping does not depend only on filenames. Duplicate events may be
 deduplicated only by a documented stable identity such as `{trace_id, seq}`.
 
-One run identity uses exactly one canonical schema version. A source may hold
-separate V1 and V2 runs, but events from both versions under one `run_id` are
-malformed. V2 `run-started` requires the plural `missions` metadata map and
-forbids the retired singular mission fields. Every V2 event whose
-`environment` is `mission` requires `mission_name`; workflow and lifecycle
-events forbid it. A retained V1 mission event without a name is interpreted as
-`default` only for mission filtering and V2 query projection. Missing fields on
-a V2 event are never repaired by legacy inference.
+Every event uses schema version 2. `run-started` requires the plural
+`missions` metadata map. Every event whose `environment` is `mission` requires
+`mission_name`; workflow and lifecycle events forbid it. Unsupported versions
+and missing current fields fail closed rather than being inferred or projected.
 
 ## Required run metadata
 
@@ -322,13 +318,11 @@ a run without loading its turns:
   finite canonical tag keys and enumerated values;
 - the effective workflow prelude plus a sorted `missions` map. Each mission
   entry contains its prelude component IDs, hashes, compact dependency
-  projection, and full/model inventory hashes and byte counts. V1 singular
-  mission metadata projects under `missions.default`; and
+  projection, and full/model inventory hashes and byte counts; and
 - effective workflow and mission prelude component IDs, hashes, and the
   compact dependency projection (`dependency_indices`, positionally aligned
   with `component_ids`; every entry lists unique ascending indices strictly
-  earlier than its own position). Legacy events without the projection are
-  served verbatim; the query layer never invents missing edges;
+  earlier than its own position);
 - the run-started event's positive sequence in `positions`, so start-derived
   provenance such as component overrides and prelude identities is directly
   citable without a second turn query. Outcome, error, and aggregate-count
@@ -374,12 +368,11 @@ Examples:
 select runs first, then mission matching retains only events attributed to that
 mission. Counters—including event/error/run counts, evaluations,
 `evaluations_by_mission`, capability calls, and LLM usage—are derived from that
-narrowed event set. Workflow and lifecycle events never match a mission filter;
-V1 mission events without a name match only `default`.
+narrowed event set. Workflow and lifecycle events never match a mission filter.
 
 ### `log/runs`
 
-Discovers runs in the granted source. V1 filters are limited to run/trace ID,
+Discovers runs in the granted source. Filters are limited to run/trace ID,
 status, bounded exact-match tags, workflow/agent name, model/provider when
 present, timestamp range, limit, and cursor.
 
@@ -394,7 +387,7 @@ It does not return all turns implicitly.
 ### `log/turns`
 
 Returns bounded canonical turn/subordinate-evaluation projections for one run.
-V1 filters include status, evaluation/turn ID, capability name, limit, and
+Filters include status, evaluation/turn ID, capability name, limit, and
 cursor. Ordering is ascending canonical sequence.
 
 ### `log/counters`
@@ -500,7 +493,7 @@ JSON object with this exact envelope:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 4,
   "run_id": "run-id",
   "trace_id": "trace-id",
   "sequence": 1,
@@ -517,7 +510,7 @@ of `capability_id`, `evaluation_id`, or `component_id`. Capability and
 evaluation values must occur in the canonical trace for the same run unless
 that trace explicitly proves the corresponding start events were dropped. A
 component value must occur in the canonical `run-started` prelude component
-IDs for the record's environment. V1 record types and payloads are:
+IDs for the record's environment. The current record types and payloads are:
 
 | Record type | Correlation | Exact payload fields |
 | --- | --- | --- |
@@ -525,23 +518,17 @@ IDs for the record's environment. V1 record types and payloads are:
 | `capability-output` | `capability_id` | `environment`, `name`, `result` |
 | `evaluation-source` | `evaluation_id` | `environment`, `program_kind`, `source`, `source_hash`, `source_bytes` |
 | `prelude-source` | `component_id` | `environment`, `source`, `source_hash`, `source_bytes` |
-
-V3 adds two workflow execution-phase diagnostics, correlated by the top-level
-workflow evaluation's `evaluation_id` rather than a capability or subordinate
-evaluation:
-
-| Record type | Correlation | Exact payload fields |
-| --- | --- | --- |
+| `mcp-request` | `capability_id`, `request_id` | `transport`, `body` |
+| `mcp-response` | `capability_id`, `request_id` | `transport`, `body` |
 | `execution-prints` | `evaluation_id` | `environment`, `prints`, `truncated` |
 | `execution-error` | `evaluation_id` | `environment`, `kind`, `reason`, `details` |
 
-V4 makes named-mission ownership explicit. Mission `capability-input`,
+Named-mission ownership is explicit. Mission `capability-input`,
 `capability-output`, `evaluation-source`, `prelude-source`, `mcp-request`, and
 `mcp-response` payloads require `mission_name`; workflow payloads forbid it.
 Prelude uniqueness is `(environment, mission_name, component_id)`, so the same
-component ID can be inspected independently in multiple missions. Every V4
-mission-owned query result preserves `mission_name`. Loaders retain V1-V3 and
-infer `default` only for legacy mission matching; writers emit V4.
+component ID can be inspected independently in multiple missions. Every
+mission-owned query result preserves `mission_name`.
 
 Enums and map keys are normalized to JSON strings before retention. `result` is
 the bounded Dispatcher envelope returned to Lisp, so `llm-request` input/output
@@ -698,7 +685,7 @@ returned as bounded context with `:inspection_persistence_failed`, matching the
 existing trace-persistence distinction; persistence failure is not rewritten
 as workflow failure.
 
-## V1 non-goals
+## Non-goals
 
 - ambient search over all host traces;
 - arbitrary filesystem browsing;

@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandContractAuthority
+  alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandEntry
@@ -36,6 +37,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractClassification
   alias PtcRunner.TestSupport.LLMSupport
+  alias PtcRunner.TestSupport.TestHelpers
 
   @zero_entropy <<0::128>>
   @stdio_root Path.expand("../../..", __DIR__)
@@ -322,7 +324,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     File.write!(
       Path.join(Path.dirname(success), "main.clj"),
-      ~S|(ns app) (defn run [_input] (return (get (kernel/eval-source-in "reader" "(return 1)") :value)))|
+      ~S|(ns app) (defn run [_input] (return (get (kernel/eval-source "reader" "(return 1)") :value)))|
     )
 
     assert {:ok, %CommandOutcome{} = success_outcome} = CommandEngine.dispatch(["run", success])
@@ -334,7 +336,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     File.write!(
       Path.join(Path.dirname(failed), "main.clj"),
-      ~S|(ns app) (defn run [_input] (do (kernel/eval-source-in "reader" "(return 1)") (fail :nope)))|
+      ~S|(ns app) (defn run [_input] (do (kernel/eval-source "reader" "(return 1)") (fail :nope)))|
     )
 
     assert {:error, %CommandOutcome{} = failed_outcome} = CommandEngine.dispatch(["run", failed])
@@ -1414,15 +1416,16 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     refute inspect(second) =~ "secret-second"
   end
 
-  test "retired switches are command-specific and carry fixed replacements" do
+  test "removed switches are ordinary unknown input" do
     assert {:error, rejection} =
              CommandParser.parse(["run", "ptc.json", "--trace", "run.jsonl"])
 
     assert rejection.command == :run
     assert rejection.code == :invalid_arguments
-    assert rejection.kind == :retired_switch
-    assert rejection.retired == "--trace"
-    assert rejection.replacement == "--trace-dir"
+    assert rejection.kind == :unknown_switch
+
+    assert rejection.accepted ==
+             CommandDeclaration.accepted_switches(:run, :standalone)
   end
 
   test "undeclared raw spellings are unknown rather than normalized by OptionParser" do
@@ -1437,8 +1440,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         ] do
       assert {:error, rejection} = CommandParser.parse(argv)
       assert rejection.kind == :unknown_switch
-      assert rejection.retired == nil
-      assert rejection.replacement == nil
       assert rejection.accepted != []
     end
   end
@@ -3123,7 +3124,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       {:error, :should_not_run}
     end
 
-    assert {:ok, provider_registry} = ProviderRegistry.new(%{"probe" => builder})
+    assert {:ok, provider_registry} =
+             ProviderRegistry.new(%{"probe" => TestHelpers.staged_provider(builder)})
 
     provider_manifest =
       valid_manifest(%{

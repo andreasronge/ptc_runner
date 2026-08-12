@@ -170,8 +170,9 @@ defmodule PtcRunner.Kernel.AnalysisSession do
 
     if state.lifecycle == :open do
       detailed =
-        Evaluation.evaluate_source_detailed(
+        Evaluation.evaluate_source(
           state.run_state,
+          "default",
           state.config.missions["default"].environment,
           source,
           state.config.limits.evaluation_timeout_ms,

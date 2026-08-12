@@ -87,13 +87,6 @@ defmodule PtcRunner.Kernel.CommandRenderer do
     do: "; unknown switch; accepted: " <> Enum.join(accepted, ", ")
 
   defp rejection_suffix(%CommandRejection{
-         kind: :retired_switch,
-         retired: retired,
-         replacement: replacement
-       }),
-       do: "; retired switch #{retired}; use #{replacement}"
-
-  defp rejection_suffix(%CommandRejection{
          kind: :invalid_destination,
          destination: destination
        }),

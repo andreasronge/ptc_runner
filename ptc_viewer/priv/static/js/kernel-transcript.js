@@ -473,8 +473,8 @@ function splitPromptSections(system) {
   const lines = system.split('\n');
   const version = lines.shift();
   const fixedHeadings = ['Instructions', 'PTC-Lisp', 'Examples'];
-  const apiHeadings = ['Available API', 'Mission API and limits (deterministic JSON)'];
-  const headings = new Set([...fixedHeadings, ...apiHeadings]);
+  const apiHeading = 'Available API';
+  const headings = new Set([...fixedHeadings, apiHeading]);
   const items = [];
   let current = null;
 
@@ -491,7 +491,7 @@ function splitPromptSections(system) {
   if (current) items.push({ ...current, body: current.lines.join('\n').trim() });
   const found = new Set(items.map(item => item.heading));
   const complete = fixedHeadings.every(heading => found.has(heading)) &&
-    apiHeadings.filter(heading => found.has(heading)).length === 1 &&
+    found.has(apiHeading) &&
     items.length === fixedHeadings.length + 1;
   return complete ? { version, items } : null;
 }

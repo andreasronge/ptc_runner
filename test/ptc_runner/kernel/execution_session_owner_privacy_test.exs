@@ -174,7 +174,13 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwnerPrivacyTest do
   defp notify(url), do: flunk("unexpected authorization notice for #{url} #{@authorization_url}")
 
   defp provider_fixture(opts \\ []) do
-    acquire = Keyword.get(opts, :acquire, fn _credentials -> fixture_capability() end)
+    acquire =
+      Keyword.get(opts, :acquire, fn _credentials ->
+        with {:ok, capability} <- fixture_capability() do
+          {:ok, %{capabilities: [capability]}}
+        end
+      end)
+
     {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
 
     {:ok, descriptor} =

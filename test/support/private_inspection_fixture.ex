@@ -24,6 +24,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
   def canonical_events(run_id) do
     [
       event(run_id, 1, "run-started", %{
+        "missions" => %{"default" => %{}},
         "workflow_prelude" => %{
           "component_ids" => ["component-#{run_id}"],
           "dependency_indices" => [],
@@ -38,11 +39,13 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
       event(run_id, 3, "capability-started", %{
         "capability_id" => "tool-#{run_id}",
         "environment" => "mission",
+        "mission_name" => "default",
         "name" => "workspace.read"
       }),
       event(run_id, 4, "evaluation-started", %{
         "evaluation_id" => "eval-#{run_id}",
         "environment" => "mission",
+        "mission_name" => "default",
         "program_kind" => "ptc-lisp",
         "source_hash" => @source_hash,
         "source_bytes" => byte_size(@source)
@@ -53,12 +56,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
   end
 
   defp write_inspection!(directory, run_id, events) do
-    {:ok, sink} =
-      InspectionSink.start(
-        run_id: run_id,
-        trace_id: "trace-#{run_id}",
-        schema_version: 3
-      )
+    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
 
     emit!(sink, "capability-input", %{capability_id: "llm-#{run_id}"}, %{
       environment: :workflow,
@@ -74,11 +72,13 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
 
     emit!(sink, "capability-input", %{capability_id: "tool-#{run_id}"}, %{
       environment: :mission,
+      mission_name: "default",
       name: "workspace.read",
       arguments: %{"path" => "private-#{run_id}.txt"}
     })
 
     emit!(sink, "mcp-request", %{capability_id: "tool-#{run_id}", request_id: 7}, %{
+      mission_name: "default",
       transport: :stdio,
       body: %{
         "jsonrpc" => "2.0",
@@ -92,6 +92,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     })
 
     emit!(sink, "mcp-response", %{capability_id: "tool-#{run_id}", request_id: 7}, %{
+      mission_name: "default",
       transport: :stdio,
       body: %{
         "jsonrpc" => "2.0",
@@ -104,12 +105,14 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
 
     emit!(sink, "capability-output", %{capability_id: "tool-#{run_id}"}, %{
       environment: :mission,
+      mission_name: "default",
       name: "workspace.read",
       result: %{status: :ok, value: %{"text" => "private-tool-result-#{run_id}"}}
     })
 
     emit!(sink, "evaluation-source", %{evaluation_id: "eval-#{run_id}"}, %{
       environment: :mission,
+      mission_name: "default",
       program_kind: :"ptc-lisp",
       source: @source,
       source_hash: @source_hash,
@@ -161,7 +164,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
 
   defp event(run_id, sequence, type, data) do
     %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "run_id" => run_id,
       "trace_id" => "trace-#{run_id}",
       "sequence" => sequence,

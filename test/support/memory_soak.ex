@@ -295,14 +295,6 @@ defmodule PtcRunner.TestSupport.MemorySoak do
     :ok
   end
 
-  @doc "Legacy: warmup then measured iterations, no snapshot. Prefer `measure/3`."
-  def loop(n, warmup \\ nil, fun) when is_function(fun, 1) do
-    warmup = warmup || warmup_count()
-    Enum.each(1..warmup, fn i -> fun.({:warmup, i}) end)
-    Enum.each(1..n, fn i -> fun.({:measured, i}) end)
-    :ok
-  end
-
   @doc "Pretty-print a snapshot."
   def format(%{
         mem: mem,

@@ -729,7 +729,9 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       {:ok,
        %{
          credential_names: [],
-         preflight: fn -> {:ok, fn %{} -> {:ok, capability} end} end
+         preflight: fn ->
+           {:ok, fn %{} -> {:ok, %{capabilities: [capability]}} end}
+         end
        }}
     end
 
@@ -811,7 +813,9 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       {:ok,
        %{
          credential_names: [],
-         preflight: fn -> {:ok, fn %{} -> {:ok, capability} end} end
+         preflight: fn ->
+           {:ok, fn %{} -> {:ok, %{capabilities: [capability]}} end}
+         end
        }}
     end
 

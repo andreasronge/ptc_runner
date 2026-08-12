@@ -283,7 +283,7 @@ defmodule PtcRunner.Lisp.Java.ProjectTest do
         saved <- [%{malformed => 1}, %Result{return: %{malformed => 1}}] do
       assert {:error, %{fail: %{reason: :invalid_symbol_ref}}} =
                Lisp.run_native("(tool/sink {:payload saved})",
-                 memory: %{saved: saved},
+                 memory: %{"saved" => saved},
                  tools: %{"sink" => {tool, :skip}}
                )
     end
@@ -356,7 +356,7 @@ defmodule PtcRunner.Lisp.Java.ProjectTest do
 
     assert {:ok, %{return: :ok}} =
              Lisp.run_native("(tool/sink saved)",
-               memory: %{saved: %{{{:symbol_ref, "foo"}} => 1}},
+               memory: %{"saved" => %{{{:symbol_ref, "foo"}} => 1}},
                tools: %{"sink" => {tool, :skip}}
              )
 
@@ -364,7 +364,7 @@ defmodule PtcRunner.Lisp.Java.ProjectTest do
 
     assert {:ok, %{return: :ok}} =
              Lisp.run_native("(tool/sink saved)",
-               memory: %{saved: %{[int] => :vector, {int} => :tuple}},
+               memory: %{"saved" => %{[int] => :vector, {int} => :tuple}},
                tools: %{"sink" => {tool, :skip}}
              )
 
@@ -377,7 +377,7 @@ defmodule PtcRunner.Lisp.Java.ProjectTest do
         ] do
       assert {:error, %{fail: %{reason: :invalid_symbol_ref}}} =
                Lisp.run_native("(tool/sink saved)",
-                 memory: %{saved: %{malformed_key => 1}},
+                 memory: %{"saved" => %{malformed_key => 1}},
                  tools: %{"sink" => {tool, :skip}}
                )
     end
@@ -389,7 +389,7 @@ defmodule PtcRunner.Lisp.Java.ProjectTest do
         ] do
       assert {:error, %{fail: %{reason: :tool_error}}} =
                Lisp.run_native("(tool/sink saved)",
-                 memory: %{saved: %{malformed_key => 1}},
+                 memory: %{"saved" => %{malformed_key => 1}},
                  tools: %{"sink" => {tool, :skip}}
                )
     end

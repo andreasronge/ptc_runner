@@ -14,7 +14,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
     test "memory values become available as user_ns symbols" do
       # Previous memory values become available in user_ns during evaluation.
-      mem = %{previous: 50}
+      mem = %{"previous" => 50}
       source = "previous"
       {:ok, %{return: result, memory: _}} = Lisp.run(source, memory: mem)
       assert result == 50
@@ -46,7 +46,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
                Lisp.run("(= data/ref 'x)", context: %{ref: quoted})
 
       assert {:ok, %{return: true}} =
-               Lisp.run("(= saved 'x)", memory: %{saved: quoted})
+               Lisp.run("(= saved 'x)", memory: %{"saved" => quoted})
     end
 
     test "evaluation errors preserve native continuation memory" do
@@ -106,7 +106,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
                )
 
       assert {:error, %{fail: %{reason: :symbol_ref_collision}, memory: %{}}} =
-               Lisp.run("saved", memory: %{saved: colliding})
+               Lisp.run("saved", memory: %{"saved" => colliding})
     end
 
     test "public input conversion rejects malformed symbol wrappers" do
@@ -125,7 +125,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
                  )
 
         assert {:error, %{fail: %{reason: :invalid_symbol_ref}, memory: %{}}} =
-                 Lisp.run("saved", memory: %{saved: malformed})
+                 Lisp.run("saved", memory: %{"saved" => malformed})
       end
     end
 
@@ -154,7 +154,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
             {:symbol_ref, "λ"}
           ] do
         assert {:error, %{fail: %{reason: :invalid_symbol_ref}, memory: %{}}} =
-                 Lisp.run("saved", memory: %{saved: malformed_native})
+                 Lisp.run("saved", memory: %{"saved" => malformed_native})
       end
     end
 
@@ -168,7 +168,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
                )
 
       assert {:error, %{fail: %{reason: :invalid_keyword}, memory: %{}}} =
-               Lisp.run("saved", memory: %{saved: malformed})
+               Lisp.run("saved", memory: %{"saved" => malformed})
 
       assert {:error, {:lisp_value_projection_error, {:invalid_keyword, []}}} =
                Lisp.externalize_value(malformed)
@@ -196,7 +196,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
                )
 
       assert {:error, %{fail: %{reason: :invalid_lisp_list}, memory: %{}}} =
-               Lisp.run("saved", memory: %{saved: malformed})
+               Lisp.run("saved", memory: %{"saved" => malformed})
 
       assert {:error, %{fail: %{reason: :invalid_lisp_list}, memory: %{kept: true}}} =
                Lisp.run("*1", turn_history: [malformed], memory: %{kept: true})

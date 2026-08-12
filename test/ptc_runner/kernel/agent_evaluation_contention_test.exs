@@ -42,7 +42,7 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
     # starts, so the agent's first `kernel/eval-source` is refused admission.
     source = ~S"""
     (do
-      (kernel/eval-source "(return 1)")
+      (kernel/eval-source "default" "(return 1)")
       (return (agent.core/run-value "task" {"max_turns" 4})))
     """
 

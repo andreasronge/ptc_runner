@@ -117,7 +117,7 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
         state,
         :workflow,
         environment,
-        dispatch_context(validation_heap_words: 233),
+        dispatch_context(validation_heap_words: 233, mission_name: nil),
         nil,
         nil
       )
@@ -148,7 +148,7 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
 
     {:ok, environment} = MissionEnvironment.new(capabilities: [checked])
     {:ok, state} = RunState.start(Limits.defaults())
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
 
     grant =
       ToolGrant.capability_callbacks(
@@ -201,7 +201,8 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
         timeout_ms: 1_000,
         validation_heap_words: Limits.defaults().evaluation_heap_words,
         evaluation_lease: nil,
-        validation_deadline_ms: nil
+        validation_deadline_ms: nil,
+        mission_name: "default"
       },
       Map.new(overrides)
     )

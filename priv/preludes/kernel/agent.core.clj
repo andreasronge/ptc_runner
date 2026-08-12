@@ -104,7 +104,7 @@
               {:turn turn :kind (get action :kind)})
             (case (get action :kind)
               :tool-call
-              (let [evaluation (kernel/eval-source-in mission-name (get action :program))]
+              (let [evaluation (kernel/eval-source mission-name (get action :program))]
                 ;; Host policy and malformed/provider-initiated MCP exchanges
                 ;; are not argument mistakes the model can correct. The Kernel
                 ;; derives this provenance from the private capability ledger,

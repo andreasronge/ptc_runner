@@ -34,8 +34,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--version"],
           description: "show the command version"
         }
-      ],
-      retired: %{}
+      ]
     },
     init: %{
       usage: ["ptc init DIRECTORY"],
@@ -47,8 +46,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           description: "atomically publish the V2 command envelope"
         },
         @help_option
-      ],
-      retired: %{}
+      ]
     },
     validate: %{
       usage: ["ptc validate ptc.json [--host-config HOST.json]"],
@@ -66,8 +64,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           description: "atomically publish the V2 command envelope"
         },
         @help_option
-      ],
-      retired: %{}
+      ]
     },
     run: %{
       usage: ["ptc run ptc.json [OPTIONS]"],
@@ -136,13 +133,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           repeatable: true
         },
         @help_option
-      ],
-      retired: %{
-        "--mission" => "--input",
-        "--private-mission" => "--private-input",
-        "--trace" => "--trace-dir",
-        "--check" => "ptc validate"
-      }
+      ]
     },
     doctor: %{
       usage: [
@@ -174,8 +165,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           description: "atomically publish the V2 command envelope"
         },
         @help_option
-      ],
-      retired: %{}
+      ]
     },
     models: %{
       usage: ["ptc models --host-config HOST.json"],
@@ -193,8 +183,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           description: "atomically publish the V2 command envelope"
         },
         @help_option
-      ],
-      retired: %{}
+      ]
     },
     repl: %{
       usage: ["ptc repl [OPTIONS] [SCRIPT|-]"],
@@ -290,8 +279,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           description: "show repl help without starting a session",
           aliases: [:h]
         }
-      ],
-      retired: %{}
+      ]
     }
   }
 
@@ -420,16 +408,6 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
       }
     end)
   end
-
-  @spec retired_switch(command(), binary()) :: {:ok, binary()} | :error
-  def retired_switch(command, switch) when command in @commands and is_binary(switch) do
-    @declarations
-    |> Map.fetch!(command)
-    |> Map.fetch!(:retired)
-    |> Map.fetch(switch)
-  end
-
-  def retired_switch(_command, _switch), do: :error
 
   defp options(topic, frontend) when topic in @topics and frontend in @shared_frontends do
     @declarations

@@ -1610,14 +1610,20 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   defp restore_env(key, value), do: Application.put_env(:ptc_runner, key, value)
 
   defp trace_event(run_id, sequence, type) do
+    data =
+      case type do
+        "run-started" -> %{"missions" => %{}}
+        "run-stopped" -> %{"outcome" => "ok"}
+      end
+
     %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "run_id" => run_id,
       "trace_id" => "trace-#{run_id}",
       "sequence" => sequence,
       "timestamp" => "2026-07-26T12:00:00Z",
       "type" => type,
-      "data" => if(type == "run-stopped", do: %{"outcome" => "ok"}, else: %{})
+      "data" => data
     }
   end
 end

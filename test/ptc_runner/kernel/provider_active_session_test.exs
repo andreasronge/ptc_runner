@@ -329,7 +329,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
             fn %{"secret" => "value"} ->
               send(parent, :credential_acquired)
               {:ok, capability} = fixture_capability()
-              {:ok, capability}
+              {:ok, %{capabilities: [capability]}}
             end}
          end
        }}
@@ -435,7 +435,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
               fn %{} ->
                 block.(:acquisition)
                 {:ok, capability} = fixture_capability()
-                {:ok, capability}
+                {:ok, %{capabilities: [capability]}}
               end}
            end
          }}
@@ -1417,7 +1417,9 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
       {:ok,
        %{
          credential_names: [],
-         preflight: fn -> {:ok, fn %{} -> {:ok, capability} end} end
+         preflight: fn ->
+           {:ok, fn %{} -> {:ok, %{capabilities: [capability]}} end}
+         end
        }}
     end
 
@@ -1433,7 +1435,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
            {:ok,
             fn %{"secret" => "value"} ->
               {:ok, capability} = fixture_capability()
-              {:ok, capability}
+              {:ok, %{capabilities: [capability]}}
             end}
          end
        }}

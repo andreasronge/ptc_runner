@@ -70,11 +70,11 @@ defmodule PtcRunner.Kernel.NamedMissionsAuthorityE2ETest do
       (ns app "Two spaces with different authority.")
 
       (defn run [_input]
-        (let [wrote (kernel/eval-source-in "writing"
+        (let [wrote (kernel/eval-source "writing"
                       "(return (tool/notes.commit {\\"path\\" \\"lib/note.txt\\"}))")
-              review-write (kernel/eval-source-in "review"
+              review-write (kernel/eval-source "review"
                              "(return (tool/notes.commit {\\"path\\" \\"lib/note.txt\\"}))")
-              reviewed (kernel/eval-source-in "review"
+              reviewed (kernel/eval-source "review"
                          "(return (tool/notes.read {\\"path\\" \\"lib/note.txt\\"}))")]
           (return
             {"wrote" wrote

@@ -37,120 +37,20 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.TrustedTool
 
-  @doc "Evaluates bounded subordinate source with optional canonical event collection."
-  @spec evaluate_source(RunState.t(), map(), binary(), non_neg_integer()) :: map()
-  def evaluate_source(state, mission_environment, source, timeout_ms) when is_binary(source) do
-    state
-    |> evaluate_source_detailed(mission_environment, source, timeout_ms, nil, nil)
-    |> legacy_projection()
-  end
-
-  @spec evaluate_source(RunState.t(), map(), binary(), non_neg_integer(), term()) :: map()
-  def evaluate_source(state, mission_environment, source, timeout_ms, event_sink)
-      when is_binary(source) do
-    state
-    |> evaluate_source_detailed(mission_environment, source, timeout_ms, event_sink, nil)
-    |> legacy_projection()
-  end
-
-  @spec evaluate_source(RunState.t(), map(), binary(), non_neg_integer(), term(), term()) :: map()
-  def evaluate_source(
-        state,
-        mission_environment,
-        source,
-        timeout_ms,
-        event_sink,
-        inspection_sink
-      )
-      when is_binary(source) do
-    state
-    |> evaluate_source_detailed(
-      mission_environment,
-      source,
-      timeout_ms,
-      event_sink,
-      inspection_sink
-    )
-    |> legacy_projection()
-  end
-
+  @doc "Evaluates bounded subordinate source for an explicitly named mission."
   @spec evaluate_source(
           RunState.t(),
+          binary(),
           map(),
           binary(),
           non_neg_integer(),
           term(),
           term(),
-          term()
+          keyword()
         ) :: map()
   def evaluate_source(
         state,
-        mission_environment,
-        source,
-        timeout_ms,
-        event_sink,
-        inspection_sink,
-        params
-      )
-      when is_binary(source) do
-    state
-    |> evaluate_source_detailed(
-      mission_environment,
-      source,
-      timeout_ms,
-      event_sink,
-      inspection_sink,
-      params: params
-    )
-    |> legacy_projection()
-  end
-
-  @doc false
-  @spec evaluate_mission(
-          RunState.t(),
-          binary(),
-          map(),
-          binary(),
-          non_neg_integer(),
-          term(),
-          term(),
-          keyword()
-        ) :: map()
-  def evaluate_mission(
-        state,
         mission_name,
-        mission_environment,
-        source,
-        timeout_ms,
-        event_sink,
-        inspection_sink,
-        opts \\ []
-      )
-      when is_binary(mission_name) and is_binary(source) and is_list(opts) do
-    state
-    |> evaluate_source_detailed(
-      mission_environment,
-      source,
-      timeout_ms,
-      event_sink,
-      inspection_sink,
-      Keyword.put(opts, :mission_name, mission_name)
-    )
-    |> legacy_projection()
-  end
-
-  @doc false
-  @spec evaluate_source_detailed(
-          RunState.t(),
-          map(),
-          binary(),
-          non_neg_integer(),
-          term(),
-          term(),
-          keyword()
-        ) :: map()
-  def evaluate_source_detailed(
-        state,
         mission_environment,
         source,
         timeout_ms,
@@ -158,7 +58,7 @@ defmodule PtcRunner.Kernel.Evaluation do
         inspection_sink \\ nil,
         opts \\ []
       )
-      when is_binary(source) and is_list(opts) do
+      when is_binary(mission_name) and is_binary(source) and is_list(opts) do
     evaluation_id = Events.id("mission-evaluation")
     started_ms = System.monotonic_time(:millisecond)
 
@@ -186,7 +86,7 @@ defmodule PtcRunner.Kernel.Evaluation do
           projection_boundary,
           Keyword.fetch(opts, :params)
         },
-        Keyword.get(opts, :mission_name, RunState.default_mission())
+        mission_name
       )
 
     result
@@ -789,9 +689,9 @@ defmodule PtcRunner.Kernel.Evaluation do
         timeout_ms,
         event_sink,
         inspection_sink,
-        evaluation_lease \\ nil,
-        validation_deadline_ms \\ nil,
-        mission_name \\ nil
+        evaluation_lease,
+        validation_deadline_ms,
+        mission_name
       ) do
     limits = RunState.limits(state)
 
@@ -827,17 +727,6 @@ defmodule PtcRunner.Kernel.Evaluation do
     result
   end
 
-  @doc false
-  @spec legacy_projection(map()) :: map()
-  def legacy_projection(result) do
-    result
-    |> Map.drop([:continuation_effect, :duration_ms, :evaluation_id])
-    |> maybe_drop_terminal_prints()
-  end
-
-  defp maybe_drop_terminal_prints(%{outcome: :continued} = result), do: result
-  defp maybe_drop_terminal_prints(result), do: Map.delete(result, :prints)
-
   defp maybe_emit_limit(state, event_sink, %{outcome: outcome} = result, mission_name)
        when outcome in [
               :timeout,
@@ -846,8 +735,12 @@ defmodule PtcRunner.Kernel.Evaluation do
               :result_exceeded,
               :limit_exceeded
             ] do
-    data = %{reason: Map.get(result, :reason, outcome), environment: :mission}
-    data = if is_binary(mission_name), do: Map.put(data, :mission_name, mission_name), else: data
+    data = %{
+      reason: Map.get(result, :reason, outcome),
+      environment: :mission,
+      mission_name: mission_name
+    }
+
     Events.emit(state, event_sink, "limit-exceeded", data)
   end
 

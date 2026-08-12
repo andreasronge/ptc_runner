@@ -10,11 +10,7 @@
 
 import { html, Fragment } from './preact.js';
 
-const INVENTORY_MARKERS = [
-  'Frozen mission inventory (JSON):',
-  'Mission API and limits (deterministic JSON)',
-  'Available API'
-];
+const INVENTORY_HEADING = 'Available API';
 
 const USAGE_KEYS = ['input', 'output', 'cache_read', 'cache_creation', 'total_cost'];
 
@@ -124,7 +120,7 @@ function inventoryHeadingOffset(system) {
   let offset = 0;
 
   for (const line of system.split('\n')) {
-    if (INVENTORY_MARKERS.includes(line)) return offset;
+    if (line === INVENTORY_HEADING) return offset;
     offset += line.length + 1;
   }
 

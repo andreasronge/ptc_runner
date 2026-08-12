@@ -118,8 +118,7 @@ defmodule PtcRunner.LLM do
     end
   end
 
-  @doc false
-  def consume_stream(stream, on_chunk) do
+  defp consume_stream(stream, on_chunk) do
     {content, tokens} =
       Enum.reduce(stream, {"", nil}, fn
         %{delta: text}, {acc, tok} ->
@@ -151,33 +150,6 @@ defmodule PtcRunner.LLM do
   @spec call(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def call(model, request) do
     adapter!().call(model, request)
-  end
-
-  @doc """
-  Stream an LLM response using the configured adapter.
-
-  Returns `{:ok, stream}` where stream emits `%{delta: text}` and `%{done: true, tokens: map()}`.
-
-  ## Examples
-
-      {:ok, stream} = PtcRunner.LLM.stream("openrouter:anthropic/claude-haiku-4.5", %{
-        system: "You are helpful.",
-        messages: [%{role: :user, content: "Tell me a story"}]
-      })
-      stream |> Stream.each(fn
-        %{delta: text} -> IO.write(text)
-        %{done: true} -> IO.puts("")
-      end) |> Stream.run()
-  """
-  @spec stream(String.t(), map()) :: {:ok, Enumerable.t()} | {:error, term()}
-  def stream(model, request) do
-    adapter = adapter!()
-
-    if function_exported?(adapter, :stream, 2) do
-      adapter.stream(model, request)
-    else
-      {:error, :streaming_not_supported}
-    end
   end
 
   @doc """

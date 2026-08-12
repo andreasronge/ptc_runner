@@ -26,64 +26,16 @@ defmodule PtcRunner.LLM.Registry do
   """
   @callback resolve(String.t()) :: {:ok, String.t()} | {:error, String.t()}
 
-  @doc "Resolve a model name, raising on error."
-  @callback resolve!(String.t()) :: String.t()
-
-  @doc "Get the default model using the default provider."
-  @callback default_model() :: String.t()
-
-  @doc "Get the default provider atom."
-  @callback default_provider() :: atom()
-
-  @doc "Get list of all alias names."
-  @callback aliases() :: [String.t()]
-
-  @doc "List all models with availability status."
-  @callback list_models() :: [map()]
-
-  @doc "Get model presets for a provider as alias -> model_id map."
-  @callback preset_models(atom()) :: %{String.t() => String.t()}
-
-  @doc "Get list of available providers based on environment."
-  @callback available_providers() :: [atom()]
-
-  @doc "Extract the provider atom from a model string."
-  @callback provider_from_model(String.t()) :: atom() | nil
-
-  @doc "Validate a model string format."
-  @callback validate(String.t()) :: :ok | {:error, String.t()}
-
-  # Delegate to configured implementation
-
   @doc false
   def resolve(name), do: impl().resolve(name)
 
   @doc false
-  def resolve!(name), do: impl().resolve!(name)
-
-  @doc false
-  def default_model, do: impl().default_model()
-
-  @doc false
-  def default_provider, do: impl().default_provider()
-
-  @doc false
-  def aliases, do: impl().aliases()
-
-  @doc false
-  def list_models, do: impl().list_models()
-
-  @doc false
-  def preset_models(provider \\ default_provider()), do: impl().preset_models(provider)
-
-  @doc false
-  def available_providers, do: impl().available_providers()
-
-  @doc false
-  def provider_from_model(model), do: impl().provider_from_model(model)
-
-  @doc false
-  def validate(model_string), do: impl().validate(model_string)
+  def resolve!(name) do
+    case resolve(name) do
+      {:ok, model_id} -> model_id
+      {:error, reason} -> raise ArgumentError, reason
+    end
+  end
 
   defp impl do
     case Application.get_env(:ptc_runner, :model_registry) do

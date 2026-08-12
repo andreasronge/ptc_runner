@@ -353,9 +353,7 @@ defmodule PtcRunner.Kernel.Runner do
   # capture and fail-closed-on-sink-error rule `capture_execution_failure/5`
   # applies on the error paths.
   defp capture_execution_prints(config, state, evaluation_id, prints) do
-    case with_v3_sink(config.inspection_sink, fn sink ->
-           emit_execution_prints(sink, evaluation_id, prints)
-         end) do
+    case emit_execution_prints(config.inspection_sink, evaluation_id, prints) do
       :ok ->
         :ok
 
@@ -366,33 +364,13 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp emit_execution_diagnostics(nil, _evaluation_id, _prints, _error), do: :ok
 
-  # A sink built before V3 does not understand these record types. A workflow
-  # failure is not an opt-in feature the way selecting an MCP provider is —
-  # every run eventually fails one — so an older sink skips capture the same
-  # as a `nil` sink would, instead of failing every such run closed.
   defp emit_execution_diagnostics(sink, evaluation_id, prints, error) do
-    with_v3_sink(sink, fn sink ->
-      with :ok <- emit_execution_prints(sink, evaluation_id, prints) do
-        emit_execution_error(sink, evaluation_id, error)
-      end
-    end)
-  end
-
-  defp with_v3_sink(nil, _fun), do: :ok
-
-  defp with_v3_sink(sink, fun) do
-    case InspectionSink.schema_version(sink) do
-      {:ok, schema_version} when schema_version >= 3 ->
-        fun.(sink)
-
-      {:ok, _older_schema_version} ->
-        :ok
-
-      {:error, :inspection_sink_error} = error ->
-        error
+    with :ok <- emit_execution_prints(sink, evaluation_id, prints) do
+      emit_execution_error(sink, evaluation_id, error)
     end
   end
 
+  defp emit_execution_prints(nil, _evaluation_id, _prints), do: :ok
   defp emit_execution_prints(_sink, _evaluation_id, []), do: :ok
 
   defp emit_execution_prints(sink, evaluation_id, prints) do
@@ -451,7 +429,8 @@ defmodule PtcRunner.Kernel.Runner do
         timeout_ms: config.limits.workflow_timeout_ms,
         validation_heap_words: config.limits.workflow_heap_words,
         evaluation_lease: nil,
-        validation_deadline_ms: validation_deadline_ms
+        validation_deadline_ms: validation_deadline_ms,
+        mission_name: nil
       },
       config.event_sink,
       config.inspection_sink

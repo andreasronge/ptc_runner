@@ -291,7 +291,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     assert {:error, :unsupported_version} =
              TraceSnapshot.start({:directory, directory}, owner: self())
 
-    File.write!(path, ~s({"schema_version":1,"schema_version":1}\n))
+    File.write!(path, ~s({"schema_version":2,"schema_version":2}\n))
 
     assert {:error, :malformed_source} =
              TraceSnapshot.start({:directory, directory}, owner: self())
@@ -529,14 +529,21 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   end
 
   defp event(run_id, sequence, type) do
+    data =
+      case type do
+        "run-started" -> %{"missions" => %{}}
+        "run-stopped" -> %{"outcome" => "ok"}
+        _other -> %{}
+      end
+
     %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "run_id" => run_id,
       "trace_id" => "trace-#{run_id}",
       "sequence" => sequence,
       "timestamp" => "2026-07-19T12:00:00Z",
       "type" => type,
-      "data" => if(type == "run-stopped", do: %{"outcome" => "ok"}, else: %{})
+      "data" => data
     }
   end
 end

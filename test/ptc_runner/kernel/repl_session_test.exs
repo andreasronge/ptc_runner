@@ -129,7 +129,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert {:ok, step, _session} =
              ReplSession.eval(
                session,
-               ~S|(tool/kernel-eval {:kind :source :source "(return 42)" :params {"id" "secret-evidence"}})|
+               ~S|(tool/kernel-eval {:mission "default" :kind :source :source "(return 42)" :params {"id" "secret-evidence"}})|
              )
 
     assert [%{name: "kernel-eval", args: arguments}] = step.tool_calls
@@ -165,7 +165,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
               return: %{outcome: :busy, reason: :evaluation_in_progress},
               tool_calls: [%{name: "kernel-check-source", args: arguments}]
             }, session} =
-             ReplSession.eval(session, ~S|(kernel/check-source "(return 42)")|)
+             ReplSession.eval(session, ~S|(kernel/check-source "default" "(return 42)")|)
 
     assert %{"source" => %{"bytes" => 11, "sha256" => "sha256:" <> _}} = arguments
     refute inspect(arguments) =~ "(return 42)"

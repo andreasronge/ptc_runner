@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.TestSupport.TestHelpers
 
   @effects [:read, :write, :unknown]
   @input_schema %{"type" => "object", "additionalProperties" => false}
@@ -114,7 +115,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "mission-quota-attribution")
     {:ok, capability} = capability(:read, fn -> {:ok, 1} end)
     {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
-    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "reader")
+    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "reader", :fail_fast)
 
     context = %{
       timeout_ms: 100,
@@ -269,18 +270,22 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
         end)
 
       {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
-      {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state)
+      {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
 
       task =
         Task.async(fn ->
-          Dispatcher.dispatch_with_lease(
+          Dispatcher.dispatch(
             state,
             :mission,
             environment,
             capability.name,
             %{},
-            3_000,
-            {nil, nil, lease}
+            TestHelpers.dispatch_context(state, :mission, 3_000,
+              lease: lease,
+              mission_name: "default"
+            ),
+            nil,
+            nil
           )
         end)
 
@@ -353,18 +358,22 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
       {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
       {:ok, state} = RunState.start(Limits.defaults())
-      {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state)
+      {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
 
       assert %{status: :error, kind: :protocol_error, reason: :invalid_arguments} =
                result =
-               Dispatcher.dispatch_with_lease(
+               Dispatcher.dispatch(
                  state,
                  :mission,
                  environment,
                  capability.name,
                  %{},
-                 100,
-                 {nil, nil, lease}
+                 TestHelpers.dispatch_context(state, :mission, 100,
+                   lease: lease,
+                   mission_name: "default"
+                 ),
+                 nil,
+                 nil
                )
 
       refute Map.has_key?(result, :mutation_state)
@@ -429,7 +438,16 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
              retryable?: true
            } =
              result =
-             Dispatcher.dispatch(state, :workflow, environment, "llm-request", %{}, 100)
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               environment,
+               "llm-request",
+               %{},
+               TestHelpers.dispatch_context(state, :workflow, 100),
+               nil,
+               nil
+             )
 
     refute Map.has_key?(result, :mutation_state)
   end
@@ -501,16 +519,23 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
     # Mission dispatch only happens under an evaluation lease in production;
     # the reservation is authenticated against it.
-    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state)
+    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
 
-    Dispatcher.dispatch_with_lease(
+    Dispatcher.dispatch(
       state,
       :mission,
       environment,
       capability.name,
       %{},
-      Keyword.get(opts, :timeout_ms, 100),
-      {nil, Keyword.get(opts, :inspection_sink), lease}
+      TestHelpers.dispatch_context(
+        state,
+        :mission,
+        Keyword.get(opts, :timeout_ms, 100),
+        lease: lease,
+        mission_name: "default"
+      ),
+      nil,
+      Keyword.get(opts, :inspection_sink)
     )
   end
 
@@ -519,7 +544,16 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
     {:ok, capability} = capability(:read, callback)
     {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
 
-    Dispatcher.dispatch(state, :workflow, environment, capability.name, %{}, 100)
+    Dispatcher.dispatch(
+      state,
+      :workflow,
+      environment,
+      capability.name,
+      %{},
+      TestHelpers.dispatch_context(state, :workflow, 100),
+      nil,
+      nil
+    )
   end
 
   defp dispatch_mission_with_events(limit_opts, timeout_ms, callback) do
@@ -528,7 +562,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "mission-limit-attribution")
     {:ok, capability} = capability(:read, callback)
     {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
-    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "reader")
+    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "reader", :fail_fast)
 
     result =
       Dispatcher.dispatch(

@@ -89,7 +89,7 @@ defmodule PtcRunner.Kernel.MCPRemoteE2ETest do
       )
 
     source =
-      ~S|(return (tool/kernel-eval {"kind" :source "source" "(return (pmap (fn [city] (tool/time.city {\"city\" city \"delay_ms\" 100})) [\"nyc\" \"sf\" \"boston\" \"nyc\"]))"}))|
+      ~S|(return (tool/kernel-eval {"mission" "default" "kind" :source "source" "(return (pmap (fn [city] (tool/time.city {\"city\" city \"delay_ms\" 100})) [\"nyc\" \"sf\" \"boston\" \"nyc\"]))"}))|
 
     assert {:ok,
             %{

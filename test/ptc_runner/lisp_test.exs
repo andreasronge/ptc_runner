@@ -649,7 +649,7 @@ defmodule PtcRunner.LispTest do
     test "memory vars from previous turns are allowed" do
       # Definitions committed by an earlier turn are available to the next turn.
       assert {:ok, %{return: 11}} =
-               Lisp.run("(+ counter 1)", memory: %{counter: 10})
+               Lisp.run("(+ counter 1)", memory: %{"counter" => 10})
     end
 
     test "undefined vars inside or are allowed (safe memory default pattern)" do

@@ -49,10 +49,10 @@ defmodule PtcRunner.Kernel.NamedMissionsContinuationTest do
 
     source = """
     (do
-      (kernel/eval-source-in "research" "(def secret 42)")
+      (kernel/eval-source "research" "(def secret 42)")
       (return
-        {"same-mission" (get (kernel/eval-source-in "research" "(return secret)") :value)
-         "other-mission" (get (kernel/eval-source-in "review" "(return secret)") :outcome)}))
+        {"same-mission" (get (kernel/eval-source "research" "(return secret)") :value)
+         "other-mission" (get (kernel/eval-source "review" "(return secret)") :outcome)}))
     """
 
     assert {:ok, %{value: value}} = Kernel.run(source, config)
@@ -65,11 +65,11 @@ defmodule PtcRunner.Kernel.NamedMissionsContinuationTest do
 
     source = """
     (do
-      (kernel/eval-source-in "research" "(def role \\"gatherer\\")")
-      (kernel/eval-source-in "review" "(def role \\"checker\\")")
+      (kernel/eval-source "research" "(def role \\"gatherer\\")")
+      (kernel/eval-source "review" "(def role \\"checker\\")")
       (return
-        {"research" (get (kernel/eval-source-in "research" "(return role)") :value)
-         "review" (get (kernel/eval-source-in "review" "(return role)") :value)}))
+        {"research" (get (kernel/eval-source "research" "(return role)") :value)
+         "review" (get (kernel/eval-source "review" "(return role)") :value)}))
     """
 
     assert {:ok, %{value: value}} = Kernel.run(source, config)
@@ -81,11 +81,11 @@ defmodule PtcRunner.Kernel.NamedMissionsContinuationTest do
 
     source = """
     (do
-      (kernel/eval-source-in "research" "(+ 1 1)")
-      (kernel/eval-source-in "review" "(+ 10 10)")
+      (kernel/eval-source "research" "(+ 1 1)")
+      (kernel/eval-source "review" "(+ 10 10)")
       (return
-        {"research" (get (kernel/eval-source-in "research" "(return *1)") :value)
-         "review" (get (kernel/eval-source-in "review" "(return *1)") :value)}))
+        {"research" (get (kernel/eval-source "research" "(return *1)") :value)
+         "review" (get (kernel/eval-source "review" "(return *1)") :value)}))
     """
 
     assert {:ok, %{value: value}} = Kernel.run(source, config)
@@ -95,7 +95,7 @@ defmodule PtcRunner.Kernel.NamedMissionsContinuationTest do
   test "an undeclared mission is refused rather than falling back to the default" do
     {config, _sink} = config(two_missions())
 
-    source = ~S|(return (kernel/eval-source-in "nope" "(return 1)"))|
+    source = ~S|(return (kernel/eval-source "nope" "(return 1)"))|
 
     assert {:ok, %{value: value}} = Kernel.run(source, config)
     assert value["status"] == "error"
@@ -107,8 +107,8 @@ defmodule PtcRunner.Kernel.NamedMissionsContinuationTest do
 
     source = """
     (do
-      (kernel/eval-source "(def kept 7)")
-      (return (get (kernel/eval-source "(return kept)") :value)))
+      (kernel/eval-source "default" "(def kept 7)")
+      (return (get (kernel/eval-source "default" "(return kept)") :value)))
     """
 
     assert {:ok, %{value: 7}} = Kernel.run(source, config)
@@ -119,9 +119,9 @@ defmodule PtcRunner.Kernel.NamedMissionsContinuationTest do
 
     source = """
     (do
-      (kernel/eval-source-in "research" "(def a 1)")
-      (kernel/eval-source-in "research" "(return a)")
-      (kernel/eval-source-in "review" "(return 9)")
+      (kernel/eval-source "research" "(def a 1)")
+      (kernel/eval-source "research" "(return a)")
+      (kernel/eval-source "review" "(return 9)")
       (return :done))
     """
 
@@ -163,7 +163,7 @@ defmodule PtcRunner.Kernel.NamedMissionsContinuationTest do
   test "mission evaluation events carry the mission that ran them" do
     {config, sink} = config(two_missions())
 
-    source = ~S|(return (get (kernel/eval-source-in "review" "(return 1)") :value))|
+    source = ~S|(return (get (kernel/eval-source "review" "(return 1)") :value))|
 
     assert {:ok, _result} = Kernel.run(source, config)
 
@@ -184,7 +184,7 @@ defmodule PtcRunner.Kernel.NamedMissionsContinuationTest do
     oversized = String.duplicate("x", 65)
 
     assert %{reason: :subordinate_source_bytes} =
-             Evaluation.evaluate_mission(
+             Evaluation.evaluate_source(
                state,
                "review",
                mission,

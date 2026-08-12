@@ -299,9 +299,7 @@ defmodule PtcRunner.Lisp.Eval do
     with :error <- resolve_local(name, locals, env, eval_ctx),
          :error <- resolve_user_ns(name, user_ns, eval_ctx),
          :error <- resolve_env(name, env, eval_ctx),
-         :error <- resolve_builtin(name, eval_ctx),
-         :error <- resolve_legacy_user_ns(name, user_ns, eval_ctx),
-         :error <- resolve_legacy_env(name, env, eval_ctx) do
+         :error <- resolve_builtin(name, eval_ctx) do
       unresolved_var(name)
     end
   end
@@ -403,30 +401,24 @@ defmodule PtcRunner.Lisp.Eval do
       # persist ephemeral private-tool authority from a value-position prelude ref.
       value = value |> merge_docstring_into_closure(opts) |> strip_prelude_tool_authority()
 
-      new_user_ns =
-        eval_ctx2.user_ns
-        |> delete_legacy_user_ns_key(name)
-        |> Map.put(name, value)
+      new_user_ns = Map.put(eval_ctx2.user_ns, user_ns_key(name), value)
 
       {:ok, %Var{name: name}, EvalContext.update_user_ns(eval_ctx2, new_user_ns)}
     end
-  end
-
-  # Backward compatibility: 3-tuple format without opts
-  defp do_eval({:def, name, value_ast}, %EvalContext{} = eval_ctx) do
-    do_eval({:def, name, value_ast, %{}}, eval_ctx)
   end
 
   # Idempotent define: (defonce name value opts)
   # Binds name only if not already defined in user_ns.
   # Value expression is NOT evaluated when name is already bound.
   defp do_eval({:defonce, name, value_ast, opts}, %EvalContext{user_ns: user_ns} = eval_ctx) do
-    if Map.has_key?(user_ns, name) or (is_binary(name) and legacy_var_present?(user_ns, name)) do
+    key = user_ns_key(name)
+
+    if Map.has_key?(user_ns, key) do
       {:ok, %Var{name: name}, eval_ctx}
     else
       with {:ok, value, eval_ctx2} <- eval_child(value_ast, eval_ctx) do
         value = value |> merge_docstring_into_closure(opts) |> strip_prelude_tool_authority()
-        new_user_ns = Map.put(eval_ctx2.user_ns, name, value)
+        new_user_ns = Map.put(eval_ctx2.user_ns, key, value)
         {:ok, %Var{name: name}, EvalContext.update_user_ns(eval_ctx2, new_user_ns)}
       end
     end
@@ -919,15 +911,9 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp resolve_user_ns(name, user_ns, eval_ctx) do
-    cond do
-      Map.has_key?(user_ns, name) ->
-        {:ok, Map.get(user_ns, name), eval_ctx}
-
-      is_atom(name) and Map.has_key?(user_ns, Atom.to_string(name)) ->
-        {:ok, Map.get(user_ns, Atom.to_string(name)), eval_ctx}
-
-      true ->
-        :error
+    case Map.fetch(user_ns, user_ns_key(name)) do
+      {:ok, value} -> {:ok, value, eval_ctx}
+      :error -> :error
     end
   end
 
@@ -951,26 +937,6 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp zero_number?(n) when is_number(n), do: n == 0
   defp zero_number?(_), do: false
-
-  defp resolve_legacy_user_ns(name, user_ns, eval_ctx) do
-    with true <- is_binary(name),
-         {:ok, atom} <- safe_to_existing_atom(name),
-         {:ok, value} <- Map.fetch(user_ns, atom) do
-      {:ok, value, eval_ctx}
-    else
-      _ -> :error
-    end
-  end
-
-  defp resolve_legacy_env(name, env, eval_ctx) do
-    with true <- is_binary(name),
-         {:ok, atom} <- safe_to_existing_atom(name),
-         {:ok, value} <- Map.fetch(env, atom) do
-      {:ok, unwrap_binding(value), eval_ctx}
-    else
-      _ -> :error
-    end
-  end
 
   defp unwrap_binding(%CapabilityResult{value: value}), do: value
   defp unwrap_binding(value), do: unwrap_constant(value)
@@ -1973,22 +1939,11 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp capture_referenced_binding(name, env, locals, initial, acc) do
-    name
-    |> referenced_env_keys()
-    |> Enum.reduce(acc, fn key, inner_acc ->
-      with {:ok, value} <- Map.fetch(env, key),
-           true <- MapSet.member?(locals, key) or not Map.has_key?(initial, key) do
-        Map.put(inner_acc, key, value)
-      else
-        _ -> inner_acc
-      end
-    end)
-  end
-
-  defp referenced_env_keys(name) when is_binary(name) do
-    case safe_to_existing_atom(name) do
-      {:ok, atom} -> [name, atom]
-      :error -> [name]
+    with {:ok, value} <- Map.fetch(env, name),
+         true <- MapSet.member?(locals, name) or not Map.has_key?(initial, name) do
+      Map.put(acc, name, value)
+    else
+      _ -> acc
     end
   end
 
@@ -2008,25 +1963,6 @@ defmodule PtcRunner.Lisp.Eval do
   defp keyword_runtime?(atom) when is_atom(atom), do: not is_nil(atom) and not is_boolean(atom)
   defp keyword_runtime?(_), do: false
 
-  defp legacy_var_present?(map, name) when is_map(map) and is_binary(name) do
-    case safe_to_existing_atom(name) do
-      {:ok, atom} -> Map.has_key?(map, atom)
-      :error -> false
-    end
-  end
-
-  defp delete_legacy_user_ns_key(map, name) when is_map(map) and is_binary(name) do
-    case safe_to_existing_atom(name) do
-      {:ok, atom} -> Map.delete(map, atom)
-      :error -> map
-    end
-  end
-
-  defp delete_legacy_user_ns_key(map, _name), do: map
-
-  defp safe_to_existing_atom(name) do
-    {:ok, String.to_existing_atom(name)}
-  rescue
-    ArgumentError -> :error
-  end
+  defp user_ns_key(name) when is_atom(name), do: Atom.to_string(name)
+  defp user_ns_key(name), do: name
 end

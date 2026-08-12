@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.TraceCapability
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.TestSupport.TestHelpers
 
   test "routes by alias, uses the declared default, and strips model before invocation" do
     parent = self()
@@ -78,8 +79,9 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
                  workflow,
                  "llm-request",
                  arguments,
-                 1_000,
-                 sink
+                 TestHelpers.dispatch_context(state, :workflow, 1_000),
+                 sink,
+                 nil
                )
     end
 
@@ -112,7 +114,16 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              reason: :model_alias_required,
              details: details
            } =
-             Dispatcher.dispatch(state, :workflow, workflow, "llm-request", %{}, 1_000)
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               %{},
+               TestHelpers.dispatch_context(state, :workflow, 1_000),
+               nil,
+               nil
+             )
 
     assert byte_size(details) <= 4_096
     assert details =~ "32 model aliases selected ("
@@ -144,7 +155,17 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              kind: :capability_unavailable,
              reason: :resolver_unavailable,
              retryable?: false
-           } = Dispatcher.dispatch(state, :workflow, workflow, "route", %{}, 1_000)
+           } =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "route",
+               %{},
+               TestHelpers.dispatch_context(state, :workflow, 1_000),
+               nil,
+               nil
+             )
 
     assert RunState.usage(state).capability_calls.workflow == %{}
   end
@@ -209,7 +230,16 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              reason: :resolver_unavailable,
              retryable?: false
            } =
-             Dispatcher.dispatch(state, :workflow, workflow, "public-route", %{}, 1_000, sink)
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "public-route",
+               %{},
+               TestHelpers.dispatch_context(state, :workflow, 1_000),
+               sink,
+               nil
+             )
 
     assert EventSink.events(sink) == []
     assert RunState.usage(state).capability_calls.workflow == %{}

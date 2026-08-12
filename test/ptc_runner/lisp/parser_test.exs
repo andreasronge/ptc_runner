@@ -490,7 +490,7 @@ defmodule PtcRunner.Lisp.ParserTest do
   end
 
   describe "multiple top-level expressions" do
-    test "single expression returns unwrapped (backward compatible)" do
+    test "single expression returns unwrapped" do
       assert {:ok, 42} = Parser.parse("42")
       assert {:ok, {:symbol, "x"}} = Parser.parse("x")
     end

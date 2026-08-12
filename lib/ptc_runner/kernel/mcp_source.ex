@@ -46,6 +46,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   alias PtcRunner.Kernel.MCPRequestContext
   alias PtcRunner.Kernel.MCPStdioTransport
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.ProviderRegistry
 
   @protocol "2026-07-28"
   @client_info %{"name" => "ptc_runner", "version" => "0.x"}
@@ -68,7 +69,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @sse_event_separator ~r/(?:\r\n|\r|\n)(?:\r\n|\r|\n)/
 
-  @type builder :: PtcRunner.Kernel.ProviderRegistry.builder()
+  @type builder :: PtcRunner.Kernel.ProviderRegistry.staged_builder()
 
   @spec builder(keyword()) :: builder()
   @doc """
@@ -217,12 +218,29 @@ defmodule PtcRunner.Kernel.MCPSource do
   """
   def builder(opts) when is_list(opts) do
     case installed_config(opts) do
-      {:ok, installed} -> fn selection, context -> build(installed, selection, context) end
-      {:error, reason} -> raise ArgumentError, "invalid MCP source: #{reason}"
+      {:ok, installed} ->
+        ProviderRegistry.staged(fn selection, context ->
+          {:ok,
+           %{
+             credential_names: [],
+             preflight: fn -> {:ok, fn %{} -> build(installed, selection, context) end} end
+           }}
+        end)
+
+      {:error, reason} ->
+        raise ArgumentError, "invalid MCP source: #{reason}"
     end
   end
 
   def builder(_opts), do: raise(ArgumentError, "invalid MCP source")
+
+  @doc false
+  def acquire(opts, selection, context) when is_list(opts) do
+    case installed_config(opts) do
+      {:ok, installed} -> build(installed, selection, context)
+      {:error, reason} -> raise ArgumentError, "invalid MCP source: #{reason}"
+    end
+  end
 
   defp installed_config(opts) do
     allowed = [

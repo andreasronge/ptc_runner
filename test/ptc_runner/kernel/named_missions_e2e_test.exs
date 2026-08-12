@@ -69,7 +69,7 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
          "Call (return value) as soon as you have the answer.\\n"
          "Only the API below exists. Do not invent other functions.\\n"
          "Example turn: (return (some.ns/some-fn))\\n\\n"
-         (kernel/mission-model-context-in space)))
+         (kernel/mission-model-context space)))
 
   (defn- correlate [messages action content]
     (conj
@@ -98,7 +98,7 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
                            {"role" "user"
                             "content" (agent.feedback/protocol-error action)}))
               (fail {:kind :protocol-error}))
-            (let [evaluation (kernel/eval-source-in space (get action :program))]
+            (let [evaluation (kernel/eval-source space (get action :program))]
               (case (get evaluation :outcome)
                 :returned (get evaluation :value)
                 :continued (recur (inc turn)
@@ -119,13 +119,13 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
                             "You verify one claim."
                             (str "Does this claim contain a numeric identifier? Claim: " fact)
                             4)
-          leaked (kernel/eval-source-in "review" "(return (res/record))")]
+          leaked (kernel/eval-source "review" "(return (res/record))")]
       (return
         {"fact" fact
          "verdict" verdict
          "cross-space-call" (get leaked :outcome)
-         "research-api" (kernel/mission-model-context-in "research")
-         "review-api" (kernel/mission-model-context-in "review")})))
+         "research-api" (kernel/mission-model-context "research")
+         "review-api" (kernel/mission-model-context "review")})))
   """
 
   setup_all do

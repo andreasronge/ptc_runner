@@ -147,10 +147,10 @@ Provider names select unique occurrences already declared in
 Across workflow and all missions, a manifest admits at most 128 component
 occurrences, 512 dependency edges, and 2,000,000 component-source bytes.
 
-Workflow code selects a mission explicitly with `kernel/eval-in`,
-`kernel/eval-source-in`, `kernel/eval-with-in`,
-`kernel/eval-source-with-in`, `kernel/check-source-in`,
-`kernel/mission-inventory-in`, or `kernel/mission-model-context-in`. The
+Workflow code selects a mission explicitly with `kernel/eval`,
+`kernel/eval-source`, `kernel/eval-with`,
+`kernel/eval-source-with`, `kernel/check-source`,
+`kernel/mission-inventory`, or `kernel/mission-model-context`. The
 shipped `agent.core` loop accepts a `{"mission" "name"}` selector and uses
 `"default"` only when that option is omitted; the selected mission must exist.
 Definitions and `*1`/`*2`/`*3` history committed in one mission are invisible

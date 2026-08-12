@@ -3,8 +3,40 @@ defmodule PtcRunner.TestSupport.TestHelpers do
   Shared test helper functions used across multiple test files.
   """
 
+  alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.RunState
+
   @doc "Dummy tool that ignores name and args and returns :ok"
   def dummy_tool(_name, _args), do: :ok
+
+  @doc "Builds the complete canonical dispatch context used by Kernel tests."
+  def dispatch_context(state, environment, timeout_ms, opts \\ [])
+      when environment in [:workflow, :mission] do
+    limits = RunState.limits(state)
+
+    %{
+      timeout_ms: timeout_ms,
+      validation_heap_words:
+        if(environment == :workflow,
+          do: limits.workflow_heap_words,
+          else: limits.evaluation_heap_words
+        ),
+      evaluation_lease: Keyword.get(opts, :lease),
+      validation_deadline_ms: Keyword.get(opts, :validation_deadline_ms),
+      mission_name: Keyword.get(opts, :mission_name)
+    }
+  end
+
+  @doc "Builds a current staged provider whose acquisition returns a normalized build map."
+  def staged_provider(acquire) when is_function(acquire, 2) do
+    ProviderRegistry.staged(fn config, context ->
+      {:ok,
+       %{
+         credential_names: [],
+         preflight: fn -> {:ok, fn %{} -> acquire.(config, context) end} end
+       }}
+    end)
+  end
 
   @doc """
   Stops a process (Agent/GenServer) started in test setup, tolerating the

@@ -301,7 +301,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
         assert {:ok, %{value: %{"outcome" => "returned", "value" => value}}} =
                  Kernel.run(
-                   "(return (kernel/eval (program (return #{function}))))",
+                   "(return (kernel/eval \"default\" (program (return #{function}))))",
                    run_config(mission)
                  ),
                "#{function} did not evaluate"
@@ -372,7 +372,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
       assert {:ok, %{value: %{"outcome" => "returned", "value" => value}}} =
                Kernel.run(
-                 ~S|(return (kernel/eval (program (return (runs/review-seed "run-1")))))|,
+                 ~S|(return (kernel/eval "default" (program (return (runs/review-seed "run-1")))))|,
                  run_config(mission)
                )
 
@@ -453,7 +453,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
           ] do
         assert {:ok, %{value: %{"outcome" => "returned", "value" => value}}} =
                  Kernel.run(
-                   "(return (kernel/eval (program (return #{expression}))))",
+                   "(return (kernel/eval \"default\" (program (return #{expression}))))",
                    run_config(mission)
                  )
 
@@ -489,7 +489,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
                 }
               }} =
                Kernel.run(
-                 ~S|(return (kernel/eval (program (return (repo/ls "" nil)))))|,
+                 ~S|(return (kernel/eval "default" (program (return (repo/ls "" nil)))))|,
                  run_config(mission)
                )
     end

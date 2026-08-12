@@ -62,7 +62,6 @@ defmodule PtcRunner.Kernel.RunState do
   # Each named mission owns an independent continuation and revision. The
   # active lease records its mission so reserve, commit, release, and source
   # checking cannot move memory or closures across mission boundaries.
-  @default_mission "default"
   @workflow_continuation "$workflow"
 
   @enforce_keys [:pid, :token, :provider_tracker]
@@ -227,10 +226,6 @@ defmodule PtcRunner.Kernel.RunState do
   def mark_evaluation_terminal_host_failure(state, evaluation_lease),
     do: safe_call(state, {:mark_evaluation_terminal_host_failure, evaluation_lease}, :ok)
 
-  @spec reserve_evaluation(t()) :: {:ok, map(), [term()], reference()} | {:error, atom()}
-  @doc "Atomically reserves and returns native subordinate memory and turn history."
-  def reserve_evaluation(state), do: reserve_evaluation(state, @default_mission, :fail_fast)
-
   @doc false
   def reserve_workflow_evaluation(state),
     do: reserve_evaluation(state, @workflow_continuation, :fail_fast)
@@ -246,16 +241,6 @@ defmodule PtcRunner.Kernel.RunState do
   bounded server-side by `evaluation_admission_timeout_ms` and the run
   deadline, so the blocking call itself uses an infinite client timeout.
   """
-  @spec reserve_evaluation(t(), :fail_fast | :block) ::
-          {:ok, map(), [term()], reference()} | {:error, atom()}
-  def reserve_evaluation(state, admission) when admission in [:fail_fast, :block],
-    do: reserve_evaluation(state, @default_mission, admission)
-
-  @spec reserve_evaluation(t(), binary()) ::
-          {:ok, map(), [term()], reference()} | {:error, atom()}
-  def reserve_evaluation(state, mission_name) when is_binary(mission_name),
-    do: reserve_evaluation(state, mission_name, :fail_fast)
-
   @spec reserve_evaluation(t(), binary(), :fail_fast | :block) ::
           {:ok, map(), [term()], reference()} | {:error, atom()}
   def reserve_evaluation(state, mission_name, :fail_fast) when is_binary(mission_name),
@@ -271,7 +256,7 @@ defmodule PtcRunner.Kernel.RunState do
 
   @doc false
   @spec reserve_source_check(t(), binary()) :: {:ok, map(), non_neg_integer()} | {:error, atom()}
-  def reserve_source_check(state, mission_name \\ @default_mission) when is_binary(mission_name),
+  def reserve_source_check(state, mission_name) when is_binary(mission_name),
     do: call(state, {:reserve_source_check, mission_name})
 
   @doc false
@@ -279,13 +264,6 @@ defmodule PtcRunner.Kernel.RunState do
   def finish_source_check(state, mission_name, revision)
       when is_binary(mission_name) and is_integer(revision) and revision >= 0,
       do: call(state, {:finish_source_check, mission_name, revision})
-
-  @spec finish_source_check(t(), non_neg_integer()) :: :ok | {:error, atom()}
-  def finish_source_check(state, revision),
-    do: finish_source_check(state, @default_mission, revision)
-
-  @doc false
-  def default_mission, do: @default_mission
 
   @spec commit_evaluation(t(), reference(), map(), [term()]) :: :ok | {:error, atom()}
   @doc "Atomically commits one bounded native memory/history continuation candidate."

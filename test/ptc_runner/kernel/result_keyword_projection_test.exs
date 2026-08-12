@@ -124,8 +124,7 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
     {:ok, inspection} =
       InspectionSink.start(
         run_id: "keyword-projection-inspection",
-        trace_id: "keyword-projection-inspection",
-        schema_version: 3
+        trace_id: "keyword-projection-inspection"
       )
 
     assert {:error,

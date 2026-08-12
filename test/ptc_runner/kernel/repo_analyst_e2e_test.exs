@@ -158,7 +158,7 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
     # command that will not resolve or an argument the server rejects.
     File.write!(
       Path.join(dir, "workflow.clj"),
-      ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"kind" :source "source" (get input "program")})))|
+      ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"mission" "default" "kind" :source "source" (get input "program")})))|
     )
 
     program = """
@@ -277,7 +277,7 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
       Keyword.get(
         opts,
         :workflow,
-        ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"kind" :source "source" (get input "program")})))|
+        ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"mission" "default" "kind" :source "source" (get input "program")})))|
       )
 
     File.write!(Path.join(dir, "workflow.clj"), workflow_source)

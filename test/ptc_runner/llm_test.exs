@@ -144,45 +144,6 @@ defmodule PtcRunner.LLMTest do
     end
   end
 
-  describe "stream/2" do
-    test "returns a stream of chunks" do
-      {:ok, stream} = PtcRunner.LLM.stream("ollama:test-model", %{system: "hi", messages: []})
-
-      chunks = Enum.to_list(stream)
-      assert [%{delta: "hello "}, %{delta: "world"}, %{done: true, tokens: _}] = chunks
-    end
-
-    test "returns error when adapter doesn't support streaming" do
-      defmodule NoStreamAdapter do
-        @behaviour PtcRunner.LLM
-
-        @impl true
-        def call(_model, _req), do: {:ok, %{content: "ok", tokens: %{}}}
-      end
-
-      Application.put_env(:ptc_runner, :llm_adapter, NoStreamAdapter)
-
-      assert {:error, :streaming_not_supported} =
-               PtcRunner.LLM.stream("ollama:test-model", %{system: "hi", messages: []})
-    end
-  end
-
-  describe "consume_stream/2" do
-    test "returns error tuple on exception in stream" do
-      bad_stream = Stream.map([1], fn _ -> raise "boom" end)
-
-      assert {:error, {:stream_error, %RuntimeError{message: "boom"}}} =
-               PtcRunner.LLM.consume_stream(bad_stream, fn _ -> :ok end)
-    end
-
-    test "returns error tuple on exception in on_chunk callback" do
-      stream = [%{delta: "hi"}]
-
-      assert {:error, {:stream_error, %RuntimeError{message: "chunk error"}}} =
-               PtcRunner.LLM.consume_stream(stream, fn _ -> raise "chunk error" end)
-    end
-  end
-
   describe "adapter!/0" do
     test "returns configured adapter" do
       assert PtcRunner.LLM.adapter!() == MockAdapter

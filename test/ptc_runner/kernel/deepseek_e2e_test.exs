@@ -155,10 +155,11 @@ defmodule PtcRunner.Kernel.DeepSeekE2ETest do
           action (agent.native/normalize response 4096)]
       (if (= :tool-call (get action :kind))
         (let [generated-source (get action :program)
-              check (kernel/check-source generated-source)]
+              check (kernel/check-source "default" generated-source)]
           (if (= :valid (get check :outcome))
             (let [evaluation
                   (kernel/eval-source-with
+                    "default"
                     generated-source
                     {"prefix" data/prefix "number" data/number})]
               (if (= :returned (get evaluation :outcome))

@@ -108,6 +108,13 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     test "rejects malformed entries", %{tmp_dir: dir} do
       {:ok, key} = LLMReplay.request_hash(@request)
 
+      File.write!(
+        Path.join(dir, "replay.jsonl"),
+        Jason.encode!(%{"request_hash" => key, "response" => %{}}) <> "\n"
+      )
+
+      assert {:error, :invalid_replay_fixtures} = start(dir)
+
       for entry <- [
             %{"request_hash" => "not-a-hash", "response" => %{}},
             %{"request_hash" => key, "response" => "not an object"},
@@ -327,13 +334,21 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
       File.write!(
         Path.join(dir, "replay.jsonl"),
-        Jason.encode!(%{"request_hash" => key, "response" => %{"content" => "first"}}) <>
+        Jason.encode!(%{
+          "schema_version" => 1,
+          "request_hash" => key,
+          "response" => %{"content" => "first"}
+        }) <>
           "\n"
       )
 
       File.write!(
         Path.join(dir, "second.jsonl"),
-        Jason.encode!(%{"request_hash" => key, "response" => %{"content" => "second"}}) <>
+        Jason.encode!(%{
+          "schema_version" => 1,
+          "request_hash" => key,
+          "response" => %{"content" => "second"}
+        }) <>
           "\n"
       )
 
@@ -534,7 +549,8 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   defp write(dir, entries) do
     File.write!(
       Path.join(dir, "replay.jsonl"),
-      Enum.map_join(entries, "\n", &Jason.encode!/1) <> "\n"
+      Enum.map_join(entries, "\n", &Jason.encode!(Map.put_new(&1, "schema_version", 1))) <>
+        "\n"
     )
   end
 
