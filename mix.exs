@@ -175,6 +175,7 @@ defmodule PtcRunner.MixProject do
 
   defp aliases do
     [
+      ptc: &run_ptc/1,
       precommit: [
         "format --check-formatted",
         "compile --warnings-as-errors",
@@ -245,6 +246,22 @@ defmodule PtcRunner.MixProject do
       ]
     ]
   end
+
+  defp run_ptc(args) do
+    Mix.Task.run(ptc_prepare_task(args), ["--no-deps-check"])
+    Mix.Task.run("ptc", args)
+  end
+
+  # These raw forms are only preparation hints; the shared parser remains the
+  # authority for acceptance and rendering. They cover the common commands
+  # whose frontend deliberately never starts the application runtime.
+  defp ptc_prepare_task([]), do: "compile"
+
+  defp ptc_prepare_task([command | _rest])
+       when command in ["help", "version", "--version", "repl"],
+       do: "compile"
+
+  defp ptc_prepare_task(_args), do: "app.config"
 
   defp releases do
     [

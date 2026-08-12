@@ -994,18 +994,27 @@ spellings. Exact raw contract bytes remain part of content identity, while the
 `ptc_semantic_revision` is `sem1-` plus lowercase SHA-256 over the generated
 semantic-build projection and the exact Elixir, OTP, ERTS, BEAM architecture,
 compiled scheduler-derived pmap default, conditionally compiled semantic-module
-presence, and consuming-build dependency-artifact projection. Dependency
+presence, and an explicit runtime-dependency verification mode. Development
+and test builds use `build_projection` mode: the checked-in publisher dependency
+projection remains part of the identity, but constructing a short-lived command
+does not reopen and hash every compiled dependency artifact. All other build
+environments use `verified` mode and add the consuming-build dependency-artifact
+projection, so custom release environments such as `staging` remain safe by
+default. The modes are part of the hashed input and therefore cannot collide.
+
+Verified mode starts from audited runtime roots, traverses required, included,
+and optional `.app` metadata, records absent optional applications, and follows
+the required closure of every application that is present. Dependency
 presence, regular-file identity, the complete owner/group/other execute mask,
 and the bytes under each present dependency's compiled `ebin` and `priv`
-directories are captured once under the trusted immutable-build assumption.
-Artifact bytes are hashed in bounded chunks, so runtime revision construction
-does not retain the complete dependency closure in memory.
-Starting from audited runtime roots, the projection traverses required,
-included, and optional `.app` metadata, records absent optional applications,
-and follows the required closure of every application that is present.
-Compatible downstream resolutions, scheduler-dependent compiled defaults,
-conditional-compilation outcomes, optional-dependency presence, and
-execute-mask changes therefore cannot reuse the publisher's revision.
+directories are captured once under the trusted immutable-release assumption.
+Artifact bytes are hashed in bounded chunks, so revision construction does not
+retain the complete dependency closure in memory. Compatible downstream
+resolutions, scheduler-dependent compiled defaults, conditional-compilation
+outcomes, optional-dependency presence, and execute-mask changes therefore
+cannot reuse a verified release revision. Repository releases are compiled with
+`MIX_ENV=prod`; the standalone-release verification asserts that verified mode
+was compiled into the artifact.
 `priv/semantic_build_inventory.exs` owns the classified source boundaries,
 code-owned Mix application defaults, explicit semantic files, conditionally
 compiled semantic modules, runtime roots, publisher dependency closure, and
@@ -1026,12 +1035,13 @@ cover the whole source closure, so regenerating it per branch made every pair
 of concurrent branches conflict. Between releases the committed projection may
 therefore lag the tree. That is safe for the checks that consume it —
 `ApplicationPackage.valid?/1` compares a package's recorded revision against
-`SemanticRevision.current()`, and both read the same compiled constant, so the
-comparison stays self-consistent regardless of the file's age. What lags is the
-accuracy of the identity as a description of the source, which is precisely
-what the release gate re-establishes. This revision is conservative:
-comments, refactors, dependency changes, or runtime patch changes may produce a
-new value even when observed behavior is unchanged.
+`SemanticRevision.current()`, and both read the same compiled constant and
+mode, so the comparison stays self-consistent regardless of the file's age.
+What lags in a development build is the accuracy of the identity as a
+description of the source and consuming dependency artifacts, which is
+precisely what the production compile and release gate re-establish. A verified
+revision is conservative: comments, refactors, dependency changes, or runtime
+patch changes may produce a new value even when observed behavior is unchanged.
 
 ## Bundles, environments, and capabilities
 

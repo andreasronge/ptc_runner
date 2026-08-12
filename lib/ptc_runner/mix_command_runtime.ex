@@ -1,6 +1,8 @@
 defmodule PtcRunner.MixCommandRuntime do
   @moduledoc false
 
+  @root_project :"Elixir.PtcRunner.MixProject"
+
   alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandRuntime
@@ -17,7 +19,7 @@ defmodule PtcRunner.MixCommandRuntime do
   @doc false
   @spec bootstrap() :: :ok | {:error, :command_bootstrap_failed}
   def bootstrap do
-    Mix.Task.run("app.config")
+    Mix.Task.run("app.config", app_config_args())
 
     case Application.ensure_all_started(:ptc_runner) do
       {:ok, _started} -> :ok
@@ -28,6 +30,15 @@ defmodule PtcRunner.MixCommandRuntime do
   catch
     _kind, _reason -> {:error, :command_bootstrap_failed}
   end
+
+  @doc false
+  @spec app_config_args() :: [binary()]
+  def app_config_args, do: app_config_args(Mix.Project.get())
+
+  @doc false
+  @spec app_config_args(module() | nil) :: [binary()]
+  def app_config_args(@root_project), do: ["--no-deps-check"]
+  def app_config_args(_project), do: []
 
   @doc false
   @spec options() :: keyword()

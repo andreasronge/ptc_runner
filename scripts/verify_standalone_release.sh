@@ -84,6 +84,9 @@ MIX_ENV=prod mix release ptc_runner --overwrite --path "$release_root"
 test -x "$command_bin"
 test -d "$release_root/erts-$(elixir -e 'IO.write(:erlang.system_info(:version))')"
 find "$release_root/lib" -maxdepth 1 -type d -name 'req_llm-*' -print -quit | grep -q .
+"$release_root/bin/ptc_runner" eval '
+  true = PtcRunner.Kernel.SemanticRevision.runtime_dependency_artifacts_verified?()
+'
 
 "$command_bin" --version > "$release_tmp_dir/version.stdout"
 grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' "$release_tmp_dir/version.stdout"
