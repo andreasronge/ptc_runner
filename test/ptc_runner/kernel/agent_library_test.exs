@@ -136,6 +136,32 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:provider_closed, :terminal_success}
   end
 
+  test "default prompt concisely advertises bounded Java interop" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "java-interop",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(return (Integer/parseInt "42"))|}
+        }
+      ]
+    }
+
+    {:ok, config} = agent_config([response])
+
+    assert {:ok, %{value: %{"ok" => true, "value" => 42}}} =
+             Kernel.run(~S|(agent.core/run "Parse an integer" {"max_turns" 1})|, config)
+
+    assert_receive {:agent_request, request}
+
+    assert request["system"] =~
+             "Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API."
+
+    refute request["system"] =~ "general Java interop"
+    refute request["system"] =~ "closed documented subset"
+  end
+
   test "agent.core threads its configured model alias through every LLM turn" do
     parent = self()
 
