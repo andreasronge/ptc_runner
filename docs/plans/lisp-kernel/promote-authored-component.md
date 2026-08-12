@@ -48,7 +48,7 @@ commit this plan was written on, so review need not re-derive them.
 | An export with no requirements and no declared effect resolves to `:unknown`, not `:read`, because `join_effects([])` falls through to `:unknown` | `compiler.ex:1030`, `compiler.ex:1511-1517` |
 | Secure publication already exists: exclusive link, refuse-clobber, 0700 temp sibling, 0600 for private, ancestor ownership and permission checks | `result_artifact.ex:12-30` |
 | `SourceCheck` fingerprints source with the same `sha256:` convention a descriptor carries | `source_check.ex:143` |
-| `run --check` exists today but is deleted by the accepted stable-CLI grammar, which keeps `--component-override-descriptor` | `ptc.run.ex:70`, `stable-cli-contract.md` command surface |
+| Static validation and runtime component override are separate command operations; promotion must not require provider acquisition | `command_declaration.ex`, `component_override.ex` |
 
 ## Scope note
 
@@ -139,9 +139,8 @@ influence — the property `ComponentOverride` depends on.
 
 ### D3 — The gate is relative and static, and says so
 
-The accepted stable-CLI grammar deletes `run --check`, so building on it would
-build on something scheduled for removal. But the replacement must not
-overclaim either.
+The promotion gate is a static operation and must not be hidden inside runtime
+execution or provider acquisition. It must not overclaim either.
 
 The gate **cannot check capability grants at all**, and does not try.
 `Environment.assemble/4` needs real `%Capability{}` values, and those — with

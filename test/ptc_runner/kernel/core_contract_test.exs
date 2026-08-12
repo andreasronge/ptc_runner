@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.TestSupport.ProviderSessionFixture
+  alias PtcRunner.TestSupport.TestHelpers
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
 
@@ -105,10 +106,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   test "only one evaluation lease is granted and failed candidates preserve memory" do
     {:ok, limits} = Limits.new(subordinate_evaluations: 2, evaluation_memory_bytes: 1_000)
     {:ok, state} = RunState.start(limits)
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
-    assert {:error, :busy} = RunState.reserve_evaluation(state)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:error, :busy} = RunState.reserve_evaluation(state, "default", :fail_fast)
     assert :ok = RunState.release_evaluation(state, lease)
-    assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state)
+    assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
     assert :ok = RunState.commit_evaluation(state, next_lease, %{"x" => 42}, [41])
     assert %{evaluation_memory_bytes: memory_bytes} = RunState.usage(state)
     assert memory_bytes > 0
@@ -129,22 +130,22 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, limits} = Limits.new(subordinate_source_checks: 2)
     {:ok, state} = RunState.start(limits)
 
-    assert {:ok, %{}, revision} = RunState.reserve_source_check(state)
-    assert :ok = RunState.finish_source_check(state, revision)
+    assert {:ok, %{}, revision} = RunState.reserve_source_check(state, "default")
+    assert :ok = RunState.finish_source_check(state, "default", revision)
 
-    assert {:ok, %{}, stale_revision} = RunState.reserve_source_check(state)
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
+    assert {:ok, %{}, stale_revision} = RunState.reserve_source_check(state, "default")
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
     assert :ok = RunState.commit_evaluation(state, lease, %{"retained" => 42}, [])
-    assert {:error, :stale} = RunState.finish_source_check(state, stale_revision)
-    assert {:error, :limit_exceeded} = RunState.reserve_source_check(state)
+    assert {:error, :stale} = RunState.finish_source_check(state, "default", stale_revision)
+    assert {:error, :limit_exceeded} = RunState.reserve_source_check(state, "default")
 
     assert %{subordinate_source_checks: 2} = RunState.usage(state)
   end
 
   test "source checks refuse an active evaluation lease without consuming quota" do
     {:ok, state} = RunState.start(Limits.defaults())
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
-    assert {:error, :busy} = RunState.reserve_source_check(state)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:error, :busy} = RunState.reserve_source_check(state, "default")
     assert %{subordinate_source_checks: 0} = RunState.usage(state)
     assert :ok = RunState.release_evaluation(state, lease)
   end
@@ -155,7 +156,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     evaluation_owner =
       spawn_link(fn ->
-        {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
+        {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
         send(parent, {:evaluation_ready, self(), lease})
 
         receive do
@@ -187,14 +188,18 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     dispatch =
       Task.async(fn ->
-        Dispatcher.dispatch_with_lease(
+        Dispatcher.dispatch(
           state,
           :mission,
           mission,
           "blocked",
           %{},
-          2_000,
-          {nil, nil, lease}
+          TestHelpers.dispatch_context(state, :mission, 2_000,
+            lease: lease,
+            mission_name: "default"
+          ),
+          nil,
+          nil
         )
       end)
 
@@ -214,7 +219,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                        terminal_host_failure?: false
                      }}}
 
-    assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state)
+    assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
 
     assert {:ok,
             %{
@@ -226,7 +231,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
   test "evaluation host-failure status is scoped to the exact active lease" do
     {:ok, state} = RunState.start(Limits.defaults())
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
 
     assert :ok = RunState.mark_evaluation_terminal_host_failure(state, make_ref())
 
@@ -236,7 +241,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
               terminal_host_failure?: false
             }} = RunState.release_evaluation_status(state, lease)
 
-    assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state)
+    assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
     assert :ok = RunState.mark_evaluation_terminal_host_failure(state, next_lease)
 
     assert {:ok,
@@ -260,10 +265,12 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       )
 
     {:ok, state} = RunState.start(limits)
-    assert {:ok, %{}, [], first_lease} = RunState.reserve_evaluation(state)
+    assert {:ok, %{}, [], first_lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
     assert :ok = RunState.commit_evaluation(state, first_lease, memory, [])
 
-    assert {:ok, ^memory, [], history_lease} = RunState.reserve_evaluation(state)
+    assert {:ok, ^memory, [], history_lease} =
+             RunState.reserve_evaluation(state, "default", :fail_fast)
+
     assert :ok = RunState.commit_evaluation(state, history_lease, memory, [history_value])
 
     assert %{
@@ -275,7 +282,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert combined_bytes > memory_limit
 
     assert {:ok, ^memory, [^history_value], rejected_lease} =
-             RunState.reserve_evaluation(state)
+             RunState.reserve_evaluation(state, "default", :fail_fast)
 
     assert {:error, :history_exceeded} =
              RunState.commit_evaluation(
@@ -286,7 +293,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              )
 
     assert {:ok, ^memory, [^history_value], release_lease} =
-             RunState.reserve_evaluation(state)
+             RunState.reserve_evaluation(state, "default", :fail_fast)
 
     assert :ok = RunState.release_evaluation(state, release_lease)
   end
@@ -303,11 +310,11 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       )
 
     {:ok, state} = RunState.start(limits)
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
     assert :ok = RunState.commit_evaluation(state, lease, %{"slice" => slice}, [slice])
 
     assert {:ok, %{"slice" => retained}, [history], next_lease} =
-             RunState.reserve_evaluation(state)
+             RunState.reserve_evaluation(state, "default", :fail_fast)
 
     assert :binary.referenced_byte_size(retained) == 1_000
     assert :binary.referenced_byte_size(history) == 1_000
@@ -346,13 +353,40 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(Limits.defaults())
 
     assert %{status: :error, kind: :provider_error, reason: :unavailable, retryable?: true} =
-             Dispatcher.dispatch(state, :workflow, environment, "unavailable", %{}, 100)
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               environment,
+               "unavailable",
+               %{},
+               TestHelpers.dispatch_context(state, :workflow, 100),
+               nil,
+               nil
+             )
 
     assert %{status: :error, kind: :result_exceeded, reason: :provider_result_limit} =
-             Dispatcher.dispatch(state, :workflow, environment, "invalid", %{}, 100)
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               environment,
+               "invalid",
+               %{},
+               TestHelpers.dispatch_context(state, :workflow, 100),
+               nil,
+               nil
+             )
 
     assert %{status: :error, kind: :result_exceeded, reason: :provider_result_limit} =
-             Dispatcher.dispatch(state, :workflow, environment, "malformed-struct", %{}, 100)
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               environment,
+               "malformed-struct",
+               %{},
+               TestHelpers.dispatch_context(state, :workflow, 100),
+               nil,
+               nil
+             )
   end
 
   test "provider death before tracker attachment releases every reserved slot" do
@@ -383,7 +417,16 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                retryable?: false
              } =
                dispatch_after_provider_down(state, fn ->
-                 Dispatcher.dispatch(state, :workflow, environment, "tiny-heap", %{}, 100)
+                 Dispatcher.dispatch(
+                   state,
+                   :workflow,
+                   environment,
+                   "tiny-heap",
+                   %{},
+                   TestHelpers.dispatch_context(state, :workflow, 100),
+                   nil,
+                   nil
+                 )
                end)
     end
 
@@ -403,7 +446,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
     {:ok, limits} = Limits.new(provider_heap_words: 100)
     {:ok, state} = RunState.start(limits)
-    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state)
+
+    {:ok, _memory, _history, lease} =
+      RunState.reserve_evaluation(state, "default", :fail_fast)
 
     assert %{
              status: :error,
@@ -413,14 +458,21 @@ defmodule PtcRunner.Kernel.CoreContractTest do
            } =
              result =
              dispatch_after_provider_down(state, fn ->
-               Dispatcher.dispatch_with_lease(
+               Dispatcher.dispatch(
                  state,
                  :mission,
                  environment,
                  "tiny-heap-write",
                  %{},
-                 100,
-                 {nil, nil, lease}
+                 TestHelpers.dispatch_context(
+                   state,
+                   :mission,
+                   100,
+                   lease: lease,
+                   mission_name: "default"
+                 ),
+                 nil,
+                 nil
                )
              end)
 
@@ -477,13 +529,31 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     # scheduler — collapses it to zero and reports the validator as
     # unavailable instead of the provider as timed out.
     assert %{status: :error, kind: :timeout, reason: :provider_timeout} =
-             Dispatcher.dispatch(state, :workflow, environment, "slow", %{}, 100)
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               environment,
+               "slow",
+               %{},
+               TestHelpers.dispatch_context(state, :workflow, 100),
+               nil,
+               nil
+             )
 
     assert_received :started
     assert :ok = RunState.close(state)
 
     assert %{status: :error, kind: :limit_exceeded, reason: :run_closed} =
-             Dispatcher.dispatch(state, :workflow, environment, "slow", %{}, 100)
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               environment,
+               "slow",
+               %{},
+               TestHelpers.dispatch_context(state, :workflow, 100),
+               nil,
+               nil
+             )
   end
 
   test "provider results are invalidated when the run closes during a callback" do
@@ -506,7 +576,18 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(Limits.defaults())
 
     task =
-      Task.async(fn -> Dispatcher.dispatch(state, :workflow, environment, "gate", %{}, 1_000) end)
+      Task.async(fn ->
+        Dispatcher.dispatch(
+          state,
+          :workflow,
+          environment,
+          "gate",
+          %{},
+          TestHelpers.dispatch_context(state, :workflow, 1_000),
+          nil,
+          nil
+        )
+      end)
 
     assert_receive {:provider_started, provider_pid}
     assert :ok = RunState.close(state)
@@ -641,7 +722,18 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(limits)
 
     caller =
-      spawn(fn -> Dispatcher.dispatch(state, :workflow, environment, "slow", %{}, 30_000) end)
+      spawn(fn ->
+        Dispatcher.dispatch(
+          state,
+          :workflow,
+          environment,
+          "slow",
+          %{},
+          TestHelpers.dispatch_context(state, :workflow, 30_000),
+          nil,
+          nil
+        )
+      end)
 
     assert_receive {:provider_started, provider}, 1_000
     provider_ref = Process.monitor(provider)
@@ -676,7 +768,17 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       spawn(fn ->
         {:ok, state} = RunState.start(Limits.defaults())
         send(parent, {:state, state})
-        Dispatcher.dispatch(state, :workflow, environment, "slow", %{}, 30_000)
+
+        Dispatcher.dispatch(
+          state,
+          :workflow,
+          environment,
+          "slow",
+          %{},
+          TestHelpers.dispatch_context(state, :workflow, 30_000),
+          nil,
+          nil
+        )
       end)
 
     assert_receive {:state, state}, 1_000
@@ -1540,6 +1642,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
            } =
              Evaluation.evaluate_source(
                state,
+               "default",
                mission,
                "(do (def parser Boolean/parseBoolean) parser)",
                100
@@ -1560,8 +1663,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert :ok = EventSink.emit(event_sink, "occupied", %{})
 
     assert %{outcome: :evaluation_error, reason: :event_sink_error} =
-             Evaluation.evaluate_source_detailed(
+             Evaluation.evaluate_source(
                state,
+               "default",
                mission,
                "(return 42)",
                100,
@@ -1618,14 +1722,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                continuation_effect: :preserved,
                retryable?: false
              } =
-               Evaluation.evaluate_source_detailed(
-                 state,
-                 mission,
-                 expression,
-                 100,
-                 nil,
-                 nil
-               )
+               Evaluation.evaluate_source(state, "default", mission, expression, 100, nil, nil)
 
       assert %{defined_count: 0, history_count: 0} =
                RunState.evaluation_memory_summary(state)
@@ -1670,14 +1767,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                continuation_effect: :preserved,
                retryable?: false
              } =
-               Evaluation.evaluate_source_detailed(
-                 state,
-                 mission,
-                 "data/bad",
-                 100,
-                 nil,
-                 nil
-               )
+               Evaluation.evaluate_source(state, "default", mission, "data/bad", 100, nil, nil)
 
       assert %{defined_count: 0, history_count: 0} =
                RunState.evaluation_memory_summary(state)
@@ -1977,6 +2067,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
            } =
              Evaluation.evaluate_source(
                state,
+               "default",
                mission,
                ~S|(return (tool/capture {"path" "a" :path "b"}))|,
                100
@@ -2006,6 +2097,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{outcome: :evaluation_error, retryable?: true} =
              Evaluation.evaluate_source(
                state,
+               "default",
                mission,
                ~S|(do (tool/page {}) (reduce (fn [acc i] (conj acc (range 0 4096))) [] (range 0 4096)))|,
                5_000
@@ -2031,6 +2123,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
            } =
              Evaluation.evaluate_source(
                state,
+               "default",
                mission,
                ~S|(do (tool/page {}) (pmap (fn [_] (pmap inc [1 2])) (range 0 16)))|,
                5_000
@@ -2054,6 +2147,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       assert %{outcome: :evaluation_error, retryable?: false} =
                Evaluation.evaluate_source(
                  state,
+                 "default",
                  mission,
                  ~S|(do (tool/commit {}) (reduce (fn [acc i] (conj acc (range 0 4096))) [] (range 0 4096)))|,
                  5_000
@@ -2090,6 +2184,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              } =
                Evaluation.evaluate_source(
                  state,
+                 "default",
                  mission,
                  ~S|(fail (tool/lookup {}))|,
                  5_000
@@ -2106,6 +2201,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                } =
                  Evaluation.evaluate_source(
                    copied_state,
+                   "default",
                    mission,
                    ~S|(let [response (tool/lookup {}) copied (into {} response)] (fail copied))|,
                    5_000
@@ -2129,6 +2225,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{outcome: :failed, capability_failure?: true, retryable?: true} =
              Evaluation.evaluate_source(
                cap_state,
+               "default",
                cap_mission,
                ~S|(cap/unwrap! (tool/lookup {}))|,
                5_000
@@ -2139,6 +2236,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{outcome: :failed, capability_failure?: true, retryable?: true} =
              Evaluation.evaluate_source(
                bound_cap_state,
+               "default",
                cap_mission,
                ~S|(let [response (tool/lookup {})] (cap/unwrap! response))|,
                5_000
@@ -2175,6 +2273,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{outcome: :failed, capability_failure?: true, retryable?: true} =
              Evaluation.evaluate_source(
                facade_state,
+               "default",
                facade_mission,
                ~S|(facade/lookup)|,
                5_000
@@ -2185,6 +2284,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{outcome: :failed, capability_failure?: false, retryable?: true} =
              Evaluation.evaluate_source(
                copied_facade_state,
+               "default",
                facade_mission,
                ~S|(facade/copied-lookup)|,
                5_000
@@ -2195,6 +2295,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{outcome: :failed, capability_failure?: false, retryable?: true} =
              Evaluation.evaluate_source(
                copied_cap_state,
+               "default",
                cap_mission,
                ~S|(let [response (tool/lookup {}) copied (into {} response)] (cap/unwrap! copied))|,
                5_000
@@ -2211,6 +2312,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
            } =
              Evaluation.evaluate_source(
                state,
+               "default",
                mission,
                ~S|(fail {:status :error :kind :provider-error :reason :not-found})|,
                5_000
@@ -2250,13 +2352,13 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(limits)
 
     assert %{outcome: :continued} =
-             Evaluation.evaluate_source(state, mission, "(def x 40)", 100)
+             Evaluation.evaluate_source(state, "default", mission, "(def x 40)", 100)
 
     assert %{outcome: :returned, value: 42} =
-             Evaluation.evaluate_source(state, mission, "(return (+ x 2))", 100)
+             Evaluation.evaluate_source(state, "default", mission, "(return (+ x 2))", 100)
 
     assert %{outcome: :evaluation_error} =
-             Evaluation.evaluate_source(state, mission, "(tool/workflow-only {})", 100)
+             Evaluation.evaluate_source(state, "default", mission, "(tool/workflow-only {})", 100)
 
     assert %{capability_calls: %{workflow: %{}, mission: %{}}} = RunState.usage(state)
     assert workflow.capabilities["workflow-only"]
@@ -2272,6 +2374,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{outcome: :continued, value: %Format.Fn{params: "..."}, prints: []} =
              Evaluation.evaluate_source(
                state,
+               "default",
                mission,
                ~S|(let [secret "sentinel-projection-secret"] (fn [named-parameter] secret))|,
                100
@@ -2280,6 +2383,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{outcome: :failed, value: %Format.Fn{params: "..."}} =
              Evaluation.evaluate_source(
                state,
+               "default",
                mission,
                ~S|(let [secret "sentinel-projection-secret"] (fail (fn [] secret)))|,
                100
@@ -2370,6 +2474,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{outcome: :failed, value: "stop"} =
              Evaluation.evaluate_source(
                state,
+               "default",
                mission,
                "(do (def leaked 42) (fail \"stop\"))",
                100
@@ -2383,11 +2488,12 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(Limits.defaults())
 
     assert %{outcome: :continued, value: %Format.Var{name: "committed"}, prints: []} =
-             Evaluation.evaluate_source(state, mission, "(def committed 1)", 100)
+             Evaluation.evaluate_source(state, "default", mission, "(def committed 1)", 100)
 
     assert %{outcome: :returned, value: 2} =
              Evaluation.evaluate_source(
                state,
+               "default",
                mission,
                "(def returned 2) (return returned)",
                100
@@ -2396,16 +2502,23 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{outcome: :failed, value: 3} =
              Evaluation.evaluate_source(
                state,
+               "default",
                mission,
                "(def leaked 3) (fail leaked)",
                100
              )
 
     assert %{outcome: :returned, value: [1, 2]} =
-             Evaluation.evaluate_source(state, mission, "(return [committed returned])", 100)
+             Evaluation.evaluate_source(
+               state,
+               "default",
+               mission,
+               "(return [committed returned])",
+               100
+             )
 
     assert %{outcome: :evaluation_error} =
-             Evaluation.evaluate_source(state, mission, "leaked", 100)
+             Evaluation.evaluate_source(state, "default", mission, "leaked", 100)
   end
 
   test "subordinate continuation retains exact three-value history and rolls failures back" do
@@ -2413,24 +2526,30 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(Limits.defaults())
 
     assert %{outcome: :continued, value: 40} =
-             Evaluation.evaluate_source(state, mission, "40", 100)
+             Evaluation.evaluate_source(state, "default", mission, "40", 100)
 
     assert %{outcome: :continued, value: 41} =
-             Evaluation.evaluate_source(state, mission, "(+ *1 1)", 100)
+             Evaluation.evaluate_source(state, "default", mission, "(+ *1 1)", 100)
 
     assert %{outcome: :returned, value: 81} =
-             Evaluation.evaluate_source(state, mission, "(return (+ *1 *2))", 100)
+             Evaluation.evaluate_source(state, "default", mission, "(return (+ *1 *2))", 100)
 
     for value <- [42, 43] do
       assert %{outcome: :continued, value: ^value} =
-               Evaluation.evaluate_source(state, mission, Integer.to_string(value), 100)
+               Evaluation.evaluate_source(
+                 state,
+                 "default",
+                 mission,
+                 Integer.to_string(value),
+                 100
+               )
     end
 
     assert %{outcome: :evaluation_error} =
-             Evaluation.evaluate_source(state, mission, "(do 999 missing)", 100)
+             Evaluation.evaluate_source(state, "default", mission, "(do 999 missing)", 100)
 
     assert %{outcome: :returned, value: [43, 42, 41]} =
-             Evaluation.evaluate_source(state, mission, "(return [*1 *2 *3])", 100)
+             Evaluation.evaluate_source(state, "default", mission, "(return [*1 *2 *3])", 100)
 
     assert %{history_count: 3, history_bytes: history_bytes, bytes: combined_bytes} =
              RunState.evaluation_memory_summary(state)
@@ -2444,10 +2563,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(Limits.defaults())
 
     assert %{outcome: :continued, value: %Format.Fn{params: "..."}} =
-             Evaluation.evaluate_source(state, mission, "(fn [x] (+ x 1))", 100)
+             Evaluation.evaluate_source(state, "default", mission, "(fn [x] (+ x 1))", 100)
 
     assert %{outcome: :returned, value: 42} =
-             Evaluation.evaluate_source(state, mission, "(return (*1 41))", 100)
+             Evaluation.evaluate_source(state, "default", mission, "(return (*1 41))", 100)
   end
 
   test "ordinary evaluation errors expose capability activity and preserve committed memory" do
@@ -2468,7 +2587,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(Limits.defaults())
 
     assert %{outcome: :continued} =
-             Evaluation.evaluate_source(state, mission, "(def retained 42)", 100)
+             Evaluation.evaluate_source(state, "default", mission, "(def retained 42)", 100)
 
     # `capability_activity?` is still reported, because a reviewer wants to know
     # something happened. It no longer decides retryability by itself: `touch`
@@ -2477,6 +2596,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     activity_result =
       Evaluation.evaluate_source(
         state,
+        "default",
         mission,
         ~S|(do (def leaked 99) (tool/touch {}) (+ {} 1))|,
         100
@@ -2488,10 +2608,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert_receive :mission_touch_called
 
     assert %{outcome: :returned, value: 42} =
-             Evaluation.evaluate_source(state, mission, "(return retained)", 100)
+             Evaluation.evaluate_source(state, "default", mission, "(return retained)", 100)
 
     assert %{outcome: :evaluation_error, details: %{capability_activity?: false}} =
-             Evaluation.evaluate_source(state, mission, "leaked", 100)
+             Evaluation.evaluate_source(state, "default", mission, "leaked", 100)
   end
 
   test "sandbox kills retain terminal provider-failure provenance outside the evaluator" do
@@ -2518,6 +2638,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     result =
       Evaluation.evaluate_source(
         state,
+        "default",
         mission,
         ~S|(do (tool/blocked {}) (reduce + (range 0 100000000)))|,
         500
@@ -2555,6 +2676,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     result =
       Evaluation.evaluate_source(
         state,
+        "default",
         mission,
         ~S|(do (tool/unstable {}) (reduce + (range 0 100000000)))|,
         500
@@ -2592,7 +2714,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
               }
             }} =
              Kernel.run(
-               "(return (tool/kernel-eval {:kind :source :source \"(return 42)\"}))",
+               ~S|(return (tool/kernel-eval {:mission "default" :kind :source :source "(return 42)"}))|,
                config
              )
 
@@ -2623,7 +2745,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       )
 
     source = ~S"""
-    (let [nested (tool/kernel-eval {:kind :source :source "(return 'server/tool)"})
+    (let [nested (tool/kernel-eval {:mission "default" :kind :source :source "(return 'server/tool)"})
           returned (get (get nested :value) :value)]
       (return [(= returned 'server/tool) {returned :found}]))
     """
@@ -2659,6 +2781,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{outcome: :evaluation_error} =
              Evaluation.evaluate_source(
                RunState.start(limits) |> elem(1),
+               "default",
                mission,
                "(workflow/answer)",
                100
@@ -2701,7 +2824,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
               }
             }} =
              Kernel.run(
-               "(return (tool/kernel-eval {:kind :embedded :program (program (return (+ 40 2)))}))",
+               "(return (tool/kernel-eval {:mission \"default\" :kind :embedded :program (program (return (+ 40 2)))}))",
                config
              )
   end
@@ -2722,10 +2845,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       )
 
     source = """
-    (let [dynamic-ordinary (tool/kernel-eval {:kind :source :source "(+ 1 1)"})
-          embedded-ordinary (tool/kernel-eval {:kind :embedded :program (program (+ 2 2))})
-          dynamic-return (tool/kernel-eval {:kind :source :source "(return 6)"})
-          embedded-fail (tool/kernel-eval {:kind :embedded :program (program (fail 7))})]
+    (let [dynamic-ordinary (tool/kernel-eval {:mission "default" :kind :source :source "(+ 1 1)"})
+          embedded-ordinary (tool/kernel-eval {:mission "default" :kind :embedded :program (program (+ 2 2))})
+          dynamic-return (tool/kernel-eval {:mission "default" :kind :source :source "(return 6)"})
+          embedded-fail (tool/kernel-eval {:mission "default" :kind :embedded :program (program (fail 7))})]
       (return [(get dynamic-ordinary :value)
                (get embedded-ordinary :value)
                (get dynamic-return :value)
@@ -2790,7 +2913,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
               }
             }} =
              Kernel.run(
-               "(let [x 42] (return (tool/kernel-eval {:kind :embedded :program (program (return x))})))",
+               "(let [x 42] (return (tool/kernel-eval {:mission \"default\" :kind :embedded :program (program (return x))})))",
                config
              )
   end
@@ -2814,8 +2937,8 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     source = """
     (do
-      (kernel/eval-source "(def retained 40)")
-      (return (kernel/eval (program (return (+ retained 2))))))
+      (kernel/eval-source "default" "(def retained 40)")
+      (return (kernel/eval "default" (program (return (+ retained 2))))))
     """
 
     assert {:ok, %{value: %{"outcome" => "returned", "value" => 42}}} =
@@ -2839,7 +2962,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                 "reason" => "invalid_kernel_eval_request"
               }
             }} =
-             Kernel.run("(return (kernel/eval \"(return 42)\"))", second_config)
+             Kernel.run(~S|(return (kernel/eval "default" "(return 42)"))|, second_config)
   end
 
   test "shipped kernel helpers splice structured parameters without changing source" do
@@ -2862,10 +2985,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     source = ~S"""
     (let [dynamic-source "(return (get data/params \"id\"))"
           embedded (program (return (get data/params "id")))
-          prior (kernel/eval embedded)
-          first (kernel/eval-source-with dynamic-source {"id" "evidence-1"})
-          second (kernel/eval-source-with dynamic-source {"id" "evidence-2"})
-          third (kernel/eval-with embedded {"id" "evidence-3"})]
+          prior (kernel/eval "default" embedded)
+          first (kernel/eval-source-with "default" dynamic-source {"id" "evidence-1"})
+          second (kernel/eval-source-with "default" dynamic-source {"id" "evidence-2"})
+          third (kernel/eval-with "default" embedded {"id" "evidence-3"})]
       (return [(get prior :value)
                (get first :value)
                (get second :value)
@@ -2952,7 +3075,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     limits = Limits.defaults()
 
     callback =
-      RuntimeTools.kernel_eval(state, %{RunState.default_mission() => mission}, limits, nil)
+      RuntimeTools.kernel_eval(state, %{"default" => mission}, limits, nil)
 
     assert %{
              status: :error,
@@ -2999,8 +3122,8 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       )
 
     source = ~S"""
-    (let [valid (kernel/check-source "(return (tool/lookup {}))")
-          invalid (kernel/check-source "(return (tool/missing {}))")
+    (let [valid (kernel/check-source "default" "(return (tool/lookup {}))")
+          invalid (kernel/check-source "default" "(return (tool/missing {}))")
           usage (tool/runtime-usage {})]
       (return [valid invalid usage]))
     """
@@ -3038,7 +3161,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     callback =
       RuntimeTools.kernel_check_source(
         state,
-        %{RunState.default_mission() => mission},
+        %{"default" => mission},
         limits,
         nil
       )
@@ -3048,7 +3171,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     oversized = String.duplicate("x", limits.subordinate_source_bytes + 1)
 
     assert %{status: :ok, value: %{outcome: :limit_exceeded, source_bytes: bytes} = result} =
-             callback.(%{"source" => oversized})
+             callback.(%{"mission" => "default", "source" => oversized})
 
     assert bytes == byte_size(oversized)
     refute Map.has_key?(result, :source_hash)
@@ -3063,17 +3186,17 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     callback =
       RuntimeTools.kernel_check_source(
         state,
-        %{RunState.default_mission() => mission},
+        %{"default" => mission},
         limits,
         nil
       )
 
     for source <- ["(unclosed", "missing", "(tool/missing {})"] do
       assert %{status: :ok, value: %{outcome: :invalid, diagnostic: diagnostic}} =
-               callback.(%{"source" => source})
+               callback.(%{"mission" => "default", "source" => source})
 
       assert %{outcome: :evaluation_error, kind: kind, details: %{message: message}} =
-               Evaluation.evaluate_source(state, mission, source, 1_000)
+               Evaluation.evaluate_source(state, "default", mission, source, 1_000)
 
       assert diagnostic.kind == kind
       assert diagnostic.message == message
@@ -3090,7 +3213,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     source = "(quote [\"#{String.duplicate(grapheme, 300)}\"])"
 
     assert %{outcome: :invalid, diagnostic: %{message: message}} =
-             SourceCheck.check(state, mission, source, limits, nil)
+             SourceCheck.check(state, "default", mission, source, limits, nil)
 
     assert byte_size(message) in 4_000..4_096
     assert String.valid?(message)
@@ -3113,7 +3236,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       {:ok, check_state} = RunState.start(limits)
       {:ok, evaluation_state} = RunState.start(limits)
 
-      checked = SourceCheck.check(check_state, mission, source, limits, nil)
+      checked = SourceCheck.check(check_state, "default", mission, source, limits, nil)
       checked_reason = get_in(checked, [:diagnostic, :kind]) || Map.get(checked, :reason)
 
       assert checked.outcome == outcome
@@ -3122,6 +3245,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       assert %{outcome: :evaluation_error, kind: ^reason} =
                Evaluation.evaluate_source(
                  evaluation_state,
+                 "default",
                  mission,
                  source,
                  limits.evaluation_timeout_ms
@@ -3132,7 +3256,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, timeout_state} = RunState.start(limits)
 
     assert %{outcome: :limit_exceeded, reason: :compile_timeout} =
-             SourceCheck.check(timeout_state, mission, "42", limits, nil, compile_timeout: 0)
+             SourceCheck.check(timeout_state, "default", mission, "42", limits, nil,
+               compile_timeout: 0
+             )
 
     assert {:error, %{fail: %{reason: :compile_timeout}}} =
              PtcRunner.Lisp.run_native("42", compile_timeout: 0)
@@ -3143,24 +3269,46 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(Limits.defaults())
 
     assert %{outcome: :continued} =
-             Evaluation.evaluate_source(state, mission, "(def retained 42)", 1_000)
+             Evaluation.evaluate_source(state, "default", mission, "(def retained 42)", 1_000)
 
     assert %{outcome: :valid} =
-             SourceCheck.check(state, mission, "(return retained)", Limits.defaults(), nil)
+             SourceCheck.check(
+               state,
+               "default",
+               mission,
+               "(return retained)",
+               Limits.defaults(),
+               nil
+             )
 
     assert %{outcome: :evaluation_error, kind: :unbound_var} =
              Evaluation.evaluate_source(
                state,
+               "default",
                mission,
                "(do (def leaked 9) (+ missing 1))",
                1_000
              )
 
     assert %{outcome: :invalid, diagnostic: %{kind: :unbound_var}} =
-             SourceCheck.check(state, mission, "(return leaked)", Limits.defaults(), nil)
+             SourceCheck.check(
+               state,
+               "default",
+               mission,
+               "(return leaked)",
+               Limits.defaults(),
+               nil
+             )
 
     assert %{outcome: :valid} =
-             SourceCheck.check(state, mission, "(return retained)", Limits.defaults(), nil)
+             SourceCheck.check(
+               state,
+               "default",
+               mission,
+               "(return retained)",
+               Limits.defaults(),
+               nil
+             )
   end
 
   test "source-check finish rejects a compile result after continuation commit or closure" do
@@ -3171,7 +3319,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     checking =
       Task.async(fn ->
-        SourceCheck.check(state, mission, "(return 42)", limits, nil,
+        SourceCheck.check(state, "default", mission, "(return 42)", limits, nil,
           after_compile: fn ->
             send(parent, :source_compiled)
 
@@ -3183,14 +3331,14 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       end)
 
     assert_receive :source_compiled
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
     assert :ok = RunState.commit_evaluation(state, lease, %{"changed" => true}, [])
     send(checking.pid, :finish_source_check)
 
     assert %{outcome: :stale, reason: :continuation_changed} = Task.await(checking)
 
     assert %{outcome: :limit_exceeded, reason: :run_closed} =
-             SourceCheck.check(state, mission, "42", limits, nil,
+             SourceCheck.check(state, "default", mission, "42", limits, nil,
                after_compile: fn -> RunState.close(state) end
              )
   end
@@ -3360,7 +3508,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(retained_limits)
 
     assert %{outcome: :continued} =
-             Evaluation.evaluate_source(state, mission, "(def retained 42)", 100)
+             Evaluation.evaluate_source(state, "default", mission, "(def retained 42)", 100)
 
     assert %{defined_count: 1, bytes: bytes} = RunState.evaluation_memory_summary(state)
     assert bytes > 0
@@ -3396,10 +3544,28 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(limits)
 
     assert %{kind: :protocol_error} =
-             Dispatcher.dispatch(state, :workflow, environment, "checked", %{}, 100)
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               environment,
+               "checked",
+               %{},
+               TestHelpers.dispatch_context(state, :workflow, 100),
+               nil,
+               nil
+             )
 
     assert %{kind: :limit_exceeded, reason: :protocol_errors} =
-             Dispatcher.dispatch(state, :workflow, environment, "checked", %{}, 100)
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               environment,
+               "checked",
+               %{},
+               TestHelpers.dispatch_context(state, :workflow, 100),
+               nil,
+               nil
+             )
 
     assert %{closed?: true, protocol_errors: 2} = RunState.usage(state)
   end

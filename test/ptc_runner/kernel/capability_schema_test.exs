@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.TestSupport.TestHelpers
 
   @accepted_schema %{
     "type" => "object",
@@ -112,14 +113,32 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
     {:ok, state} = RunState.start(Limits.defaults())
 
     assert %{status: :ok, value: %{}} =
-             Dispatcher.dispatch(state, :workflow, environment, "checked", @valid_arguments, 100)
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               environment,
+               "checked",
+               @valid_arguments,
+               TestHelpers.dispatch_context(state, :workflow, 100),
+               nil,
+               nil
+             )
 
     assert_receive {:called, @valid_arguments}
 
     invalid_schema = Map.put(@valid_arguments, "extra", true)
 
     assert %{status: :error, kind: :protocol_error, reason: :invalid_arguments} =
-             Dispatcher.dispatch(state, :workflow, environment, "checked", invalid_schema, 100)
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               environment,
+               "checked",
+               invalid_schema,
+               TestHelpers.dispatch_context(state, :workflow, 100),
+               nil,
+               nil
+             )
 
     semantic_rejection = Map.put(@valid_arguments, "count", 3)
 
@@ -130,7 +149,9 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
                environment,
                "checked",
                semantic_rejection,
-               100
+               TestHelpers.dispatch_context(state, :workflow, 100),
+               nil,
+               nil
              )
 
     refute_received {:called, ^invalid_schema}
@@ -158,7 +179,17 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
              kind: :invalid_result,
              reason: :output_schema_mismatch,
              retryable?: false
-           } = Dispatcher.dispatch(state, :workflow, environment, "bad-output", %{}, 100)
+           } =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               environment,
+               "bad-output",
+               %{},
+               TestHelpers.dispatch_context(state, :workflow, 100),
+               nil,
+               nil
+             )
   end
 
   test "rejects unsupported keywords, union types, and non-object roots" do

@@ -96,19 +96,19 @@ defmodule Mix.Tasks.PtcTest do
   end
 
   @tag :tmp_dir
-  test "renders fixed replacement guidance for retired run switches", %{tmp_dir: dir} do
+  test "treats removed run switches as ordinary unknown input", %{tmp_dir: dir} do
     manifest_path = write_manifest(dir, %{"value" => 1})
 
-    for {removed, replacement} <- [
-          {["--" <> "mission", "input.json"], "--input"},
-          {["--private-" <> "mission", "input.json"], "--private-input"},
-          {["--trace", "run.jsonl"], "--trace-dir"},
-          {["--check"], "ptc validate"}
+    for removed <- [
+          ["--" <> "mission", "input.json"],
+          ["--private-" <> "mission", "input.json"],
+          ["--trace", "run.jsonl"],
+          ["--check"]
         ] do
       message = failed_message(["run", manifest_path | removed])
       assert message =~ "arguments/invalid_arguments"
-      assert message =~ "retired switch"
-      assert message =~ "use #{replacement}"
+      assert message =~ "; unknown switch; accepted:"
+      refute message =~ "retired switch"
     end
   end
 

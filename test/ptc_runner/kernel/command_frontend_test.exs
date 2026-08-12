@@ -623,7 +623,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   test "structured argument rejections and envelope publication match exact fixtures" do
     for {name, argv} <- [
           {"unknown_switch", ["run", "ptc.json", "--caller-secret", "value"]},
-          {"retired_switch", ["run", "ptc.json", "--trace", "trace.jsonl"]}
+          {"unknown_switch", ["run", "ptc.json", "--trace", "trace.jsonl"]}
         ] do
       assert {:error, entry} = CommandEntry.open_with_ref(argv, :standalone, @run_ref)
 

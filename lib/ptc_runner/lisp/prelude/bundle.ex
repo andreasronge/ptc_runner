@@ -13,22 +13,20 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.Prelude.ValidationError
 
+  @selection_keys [:source, :id, :origin, "source", "id", "origin"]
+
   @type origin :: String.t() | atom() | {:file, Path.t()} | {:memory, term()} | nil
 
   @type selection ::
           %{
             required(:source) => String.t(),
             optional(:id) => String.t(),
-            optional(:version) => pos_integer(),
-            optional(:checksum) => String.t(),
             optional(:origin) => origin()
           }
           | map()
 
   @type component :: %{
           id: String.t() | nil,
-          version: pos_integer() | nil,
-          checksum: String.t() | nil,
           source_hash: String.t(),
           namespaces: [String.t()],
           origin: String.t() | nil
@@ -53,29 +51,6 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
     {:error, ValidationError.new(:compile_error, "prelude bundle selections must be a list")}
   end
 
-  @doc false
-  # `compile_opts` are forwarded to the ONE aggregate `Compiler.compile/2`
-  # call — the store-resolved attach path passes `namespace_deps:` derived
-  # from recorded pins so dependent components compile with their declared
-  # dependency scope. The raw selection-list path
-  # (`compile/1`) stays dep-blind by design.
-  @spec compile_precompiled([map()], keyword()) ::
-          {:ok, Prelude.t()} | {:error, ValidationError.t()}
-  def compile_precompiled(selections, compile_opts \\ [])
-
-  def compile_precompiled(selections, compile_opts)
-      when is_list(selections) and is_list(compile_opts) do
-    with {:ok, components} <- normalize_precompiled(selections),
-         :ok <- reject_duplicate_namespaces(components) do
-      compile_components(components, compile_opts)
-    end
-  end
-
-  def compile_precompiled(_other, _compile_opts) do
-    {:error,
-     ValidationError.new(:compile_error, "precompiled prelude bundle selections must be a list")}
-  end
-
   defp compile_components(components, compile_opts) do
     source = concatenate_sources(components)
 
@@ -92,47 +67,14 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
     selections
     |> Enum.reduce_while({:ok, []}, fn selection, {:ok, acc} ->
       with {:ok, normalized} <- normalize_selection(selection),
-           {:ok, %Prelude{} = prelude} <- Compiler.compile(normalized.source),
-           :ok <- validate_checksum(normalized.checksum, prelude.source_hash) do
+           {:ok, %Prelude{} = prelude} <- Compiler.compile(normalized.source) do
         component = %{
           source: normalized.source,
           prelude: prelude,
           provenance: %{
             id: normalized.id,
-            version: normalized.version,
-            checksum: normalized.checksum || prelude.source_hash,
             source_hash: prelude.source_hash,
             namespaces: prelude.namespaces,
-            origin: normalize_origin(normalized.origin)
-          }
-        }
-
-        {:cont, {:ok, [component | acc]}}
-      else
-        {:error, %ValidationError{}} = error -> {:halt, error}
-      end
-    end)
-    |> case do
-      {:ok, components} -> {:ok, Enum.reverse(components)}
-      {:error, _} = error -> error
-    end
-  end
-
-  defp normalize_precompiled(selections) do
-    selections
-    |> Enum.reduce_while({:ok, []}, fn selection, {:ok, acc} ->
-      with {:ok, normalized} <- normalize_precompiled_selection(selection),
-           :ok <- validate_precompiled_source(normalized.source, normalized.prelude),
-           :ok <- validate_checksum(normalized.checksum, normalized.prelude.source_hash) do
-        component = %{
-          source: normalized.source,
-          prelude: normalized.prelude,
-          provenance: %{
-            id: normalized.id,
-            version: normalized.version,
-            checksum: normalized.checksum || normalized.prelude.source_hash,
-            source_hash: normalized.prelude.source_hash,
-            namespaces: normalized.prelude.namespaces,
             origin: normalize_origin(normalized.origin)
           }
         }
@@ -151,11 +93,16 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
   defp normalize_selection(selection) when is_map(selection) do
     source = Map.get(selection, :source) || Map.get(selection, "source")
     id = Map.get(selection, :id) || Map.get(selection, "id")
-    version = Map.get(selection, :version) || Map.get(selection, "version")
-    checksum = Map.get(selection, :checksum) || Map.get(selection, "checksum")
     origin = Map.get(selection, :origin) || Map.get(selection, "origin")
 
     cond do
+      not valid_selection_keys?(selection) ->
+        {:error,
+         ValidationError.new(
+           :compile_error,
+           "prelude bundle selection contains unsupported or duplicate fields"
+         )}
+
       not is_binary(source) ->
         {:error, ValidationError.new(:compile_error, "prelude bundle selection requires source")}
 
@@ -163,19 +110,8 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
         {:error,
          ValidationError.new(:compile_error, "prelude bundle selection id must be a string")}
 
-      not (is_nil(version) or (is_integer(version) and version > 0)) ->
-        {:error,
-         ValidationError.new(
-           :compile_error,
-           "prelude bundle selection version must be a positive integer"
-         )}
-
-      not (is_nil(checksum) or is_binary(checksum)) ->
-        {:error,
-         ValidationError.new(:compile_error, "prelude bundle selection checksum must be a string")}
-
       true ->
-        {:ok, %{id: id, source: source, version: version, checksum: checksum, origin: origin}}
+        {:ok, %{id: id, source: source, origin: origin}}
     end
   end
 
@@ -187,110 +123,11 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
      )}
   end
 
-  defp normalize_precompiled_selection(selection) when is_map(selection) do
-    with {:ok, source} <- precompiled_source(selection),
-         {:ok, prelude} <- precompiled_prelude(selection),
-         {:ok, id} <- optional_string_field(selection, :id, "precompiled prelude selection id"),
-         {:ok, version} <- optional_version_field(selection),
-         {:ok, checksum} <-
-           optional_string_field(selection, :checksum, "precompiled prelude selection checksum") do
-      {:ok,
-       %{
-         id: id,
-         source: source,
-         prelude: prelude,
-         version: version,
-         checksum: checksum,
-         origin: get_field(selection, :origin)
-       }}
-    end
-  end
-
-  defp normalize_precompiled_selection(other) do
-    {:error,
-     ValidationError.new(
-       :compile_error,
-       "unsupported precompiled prelude selection: #{inspect(other, limit: 5)}"
-     )}
-  end
-
-  defp precompiled_source(selection) do
-    case get_field(selection, :source) do
-      source when is_binary(source) ->
-        {:ok, source}
-
-      _other ->
-        {:error,
-         ValidationError.new(:compile_error, "precompiled prelude selection requires source")}
-    end
-  end
-
-  defp precompiled_prelude(selection) do
-    case get_field(selection, :prelude) do
-      %Prelude{} = prelude ->
-        {:ok, prelude}
-
-      _other ->
-        {:error,
-         ValidationError.new(
-           :compile_error,
-           "precompiled prelude selection requires a compiled prelude"
-         )}
-    end
-  end
-
-  defp optional_string_field(selection, key, label) do
-    case get_field(selection, key) do
-      nil -> {:ok, nil}
-      value when is_binary(value) -> {:ok, value}
-      _other -> {:error, ValidationError.new(:compile_error, "#{label} must be a string")}
-    end
-  end
-
-  defp optional_version_field(selection) do
-    case get_field(selection, :version) do
-      nil ->
-        {:ok, nil}
-
-      version when is_integer(version) and version > 0 ->
-        {:ok, version}
-
-      _other ->
-        {:error,
-         ValidationError.new(
-           :compile_error,
-           "precompiled prelude selection version must be a positive integer"
-         )}
-    end
-  end
-
-  defp get_field(map, key), do: Map.get(map, key) || Map.get(map, Atom.to_string(key))
-
-  defp validate_precompiled_source(source, %Prelude{source_hash: source_hash}) do
-    actual_hash = source_hash(source)
-
-    if actual_hash == source_hash do
-      :ok
-    else
-      {:error,
-       ValidationError.new(
-         :compile_error,
-         "precompiled prelude selection source hash #{inspect(actual_hash)} does not match " <>
-           "compiled source hash #{inspect(source_hash)}"
-       )}
-    end
-  end
-
-  defp validate_checksum(nil, _source_hash), do: :ok
-  defp validate_checksum(source_hash, source_hash), do: :ok
-
-  defp validate_checksum(checksum, source_hash) do
-    {:error,
-     ValidationError.new(
-       :compile_error,
-       "prelude bundle selection checksum #{inspect(checksum)} does not match source hash " <>
-         inspect(source_hash)
-     )}
+  defp valid_selection_keys?(selection) do
+    Enum.all?(Map.keys(selection), &(&1 in @selection_keys)) and
+      Enum.all?([:source, :id, :origin], fn key ->
+        not (Map.has_key?(selection, key) and Map.has_key?(selection, Atom.to_string(key)))
+      end)
   end
 
   defp reject_duplicate_namespaces(components) do
@@ -325,10 +162,6 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
 
   defp concatenate_sources(components) do
     Enum.map_join(components, "\n\n;; --- ptc_runner prelude component ---\n\n", & &1.source)
-  end
-
-  defp source_hash(source) do
-    :crypto.hash(:sha256, source) |> Base.encode16(case: :lower)
   end
 
   defp normalize_origin(nil), do: nil

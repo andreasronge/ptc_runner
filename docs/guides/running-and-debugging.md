@@ -414,8 +414,8 @@ Delivery begins at a successful parse. Once the arguments parse, every later
 failure — including a recoverable startup failure — delivers its envelope to the
 named destination. Rejected arguments produce no envelope: the command exits
 `2`, the arguments phase's status, and writes one closed stderr line — naming an
-unknown switch's accepted list or a retired switch's replacement where those
-apply, since a missing positional or a malformed value names neither. A VM abort
+unknown switch's accepted list where applicable, since a missing positional or
+a malformed value names neither. A VM abort
 produces no envelope either.
 
 The command therefore requires no outer process wrapper, no private envelope

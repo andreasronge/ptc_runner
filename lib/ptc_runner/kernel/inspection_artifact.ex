@@ -14,13 +14,9 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   revalidates its identity, and performs two exact whole-file reads through EOF
   whose bytes must match. It rejects symlinks,
   changed files, content above 16 MB, any record above 2,000,000 encoded bytes,
-  excessive structural depth, malformed lines, mixed identities or schema
-  versions, non-contiguous sequences, and records outside the exact V1 through
-  V4 vocabulary. V2 adds paired MCP request/response bodies correlated to an
-  existing capability attempt. V3 adds `execution-prints` and `execution-error`,
-  correlated by a canonical workflow `evaluation-started` event's
-  `evaluation_id` rather than a capability attempt. V4 replaces the implicit
-  mission with a required `mission_name` on mission-owned source and capability
+  excessive structural depth, malformed lines, mixed identities, non-contiguous
+  sequences, and records outside the exact V4 vocabulary. Private records use
+  a required `mission_name` on mission-owned source and capability
   records while forbidding it on workflow-owned records. A missing capability or
   evaluation correlation is accepted only when the same canonical trace's
   `events-dropped` marker and terminal usage agree on enough dropped events of
@@ -445,7 +441,6 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   defp mission_join?({"mission", mission_name, _name}, mission_name) when is_binary(mission_name),
     do: true
 
-  defp mission_join?({"mission", nil, _name}, nil), do: true
   defp mission_join?({"workflow", nil, _name}, nil), do: true
   defp mission_join?(_input, _mission_name), do: false
 
@@ -464,7 +459,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   defp valid_record?(record, run_id, trace_id, schema_version, sequence) do
     MCPProtocol.within_inspection_document_depth?(record) and
       is_map(record) and Map.keys(record) |> Enum.sort() == Enum.sort(@envelope_keys) and
-      schema_version in [1, 2, 3, 4] and record["schema_version"] == schema_version and
+      schema_version == 4 and record["schema_version"] == schema_version and
       record["run_id"] == run_id and
       record["trace_id"] == trace_id and is_binary(run_id) and is_binary(trace_id) and
       record["sequence"] == sequence and valid_timestamp?(record["timestamp"]) and
@@ -500,11 +495,15 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          4
        )
        when record_type in ["mcp-request", "mcp-response"] do
+    request_id = correlation["request_id"]
+
     exact_keys?(correlation, ~w(capability_id request_id)) and
-      valid_id?(correlation["capability_id"]) and valid_request_id?(correlation["request_id"]) and
+      valid_id?(correlation["capability_id"]) and valid_request_id?(request_id) and
       (exact_keys?(payload, ~w(transport body)) or
          (exact_keys?(payload, ~w(transport body mission_name)) and
-            valid_id?(payload["mission_name"])))
+            valid_id?(payload["mission_name"]))) and
+      payload["transport"] in ["stdio", "streamable_http"] and
+      MCPProtocol.valid_inspection_exchange?(record_type, payload["body"], request_id)
   end
 
   defp valid_shape?(
@@ -541,104 +540,35 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       payload["source_hash"] == sha256(payload["source"])
   end
 
-  defp valid_shape?(record, _schema_version), do: valid_shape?(record)
-
-  defp valid_shape?(%{
-         "record_type" => "capability-input",
-         "correlation" => %{"capability_id" => id},
-         "payload" => payload
-       }),
-       do:
-         valid_id?(id) and exact_keys?(payload, ~w(environment name arguments)) and
-           valid_capability_payload?(payload, "arguments")
-
-  defp valid_shape?(%{
-         "record_type" => "capability-output",
-         "correlation" => %{"capability_id" => id},
-         "payload" => payload
-       }),
-       do:
-         valid_id?(id) and exact_keys?(payload, ~w(environment name result)) and
-           valid_capability_payload?(payload, "result")
-
-  defp valid_shape?(%{
-         "record_type" => "evaluation-source",
-         "correlation" => %{"evaluation_id" => id},
-         "payload" => payload
-       }) do
-    # `space` is optional: an artifact written before named missions has
-    # no such key, and persisted evidence must stay readable. Present means it
-    # must be a string.
-    (exact_keys?(payload, ~w(environment program_kind source source_hash source_bytes)) or
-       exact_keys?(payload, ~w(environment space program_kind source source_hash source_bytes))) and
-      valid_id?(id) and payload["environment"] == "mission" and
-      (is_nil(payload["space"]) or is_binary(payload["space"])) and
-      payload["program_kind"] == "ptc-lisp" and is_binary(payload["source"]) and
-      payload["source_bytes"] == byte_size(payload["source"]) and
-      payload["source_hash"] == sha256(payload["source"])
-  end
-
-  defp valid_shape?(%{
-         "record_type" => "mcp-request",
-         "correlation" =>
-           %{"capability_id" => capability_id, "request_id" => request_id} =
-             correlation,
-         "payload" => payload
-       }) do
-    exact_keys?(correlation, ~w(capability_id request_id)) and
-      exact_keys?(payload, ~w(transport body)) and valid_id?(capability_id) and
-      valid_request_id?(request_id) and payload["transport"] in ["stdio", "streamable_http"] and
-      MCPProtocol.valid_exchange_request?(payload["body"], request_id)
-  end
-
-  defp valid_shape?(%{
-         "record_type" => "mcp-response",
-         "correlation" =>
-           %{"capability_id" => capability_id, "request_id" => request_id} =
-             correlation,
-         "payload" => payload
-       }) do
-    exact_keys?(correlation, ~w(capability_id request_id)) and
-      exact_keys?(payload, ~w(transport body)) and valid_id?(capability_id) and
-      valid_request_id?(request_id) and payload["transport"] in ["stdio", "streamable_http"] and
-      MCPProtocol.valid_exchange_response?(payload["body"], request_id)
-  end
-
-  defp valid_shape?(%{
-         "record_type" => "prelude-source",
-         "correlation" => %{"component_id" => id},
-         "payload" => payload
-       }) do
-    exact_keys?(payload, ~w(environment source source_hash source_bytes)) and
-      valid_id?(id) and payload["environment"] in ["workflow", "mission"] and
-      is_binary(payload["source"]) and
-      payload["source_bytes"] == byte_size(payload["source"]) and
-      payload["source_hash"] == sha256(payload["source"])
-  end
-
-  defp valid_shape?(%{
-         "record_type" => "execution-prints",
-         "correlation" => %{"evaluation_id" => id},
-         "payload" => payload
-       }) do
+  defp valid_shape?(
+         %{
+           "record_type" => "execution-prints",
+           "correlation" => %{"evaluation_id" => id},
+           "payload" => payload
+         },
+         4
+       ) do
     exact_keys?(payload, ~w(environment prints truncated)) and
       valid_id?(id) and payload["environment"] == "workflow" and
       is_list(payload["prints"]) and Enum.all?(payload["prints"], &is_binary/1) and
       is_boolean(payload["truncated"])
   end
 
-  defp valid_shape?(%{
-         "record_type" => "execution-error",
-         "correlation" => %{"evaluation_id" => id},
-         "payload" => payload
-       }) do
+  defp valid_shape?(
+         %{
+           "record_type" => "execution-error",
+           "correlation" => %{"evaluation_id" => id},
+           "payload" => payload
+         },
+         4
+       ) do
     exact_keys?(payload, ~w(environment kind reason details)) and
       valid_id?(id) and payload["environment"] == "workflow" and
       valid_id?(payload["kind"]) and valid_id?(payload["reason"]) and
       is_map(payload["details"])
   end
 
-  defp valid_shape?(_record), do: false
+  defp valid_shape?(_record, 4), do: false
 
   @spec validate_correlations([map()], [map()]) :: :ok | {:error, :inspection_correlation_missing}
   @doc "Validates every record identity and correlation against one canonical event set."
@@ -655,7 +585,6 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
         Enum.reduce(events, %{}, fn event, acc ->
           acc
           |> merge_prelude_ids({"workflow", nil}, event_data(event, :workflow_prelude))
-          |> merge_prelude_ids({"mission", nil}, event_data(event, :mission_prelude))
           |> merge_named_prelude_ids(event_data(event, :missions))
         end)
 
@@ -1141,7 +1070,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     do: match?({:ok, _datetime, 0}, DateTime.from_iso8601(timestamp))
 
   defp valid_timestamp?(_timestamp), do: false
-  defp record_types(schema_version), do: InspectionRecordTypes.for_schema_version(schema_version)
+  defp record_types(4), do: InspectionRecordTypes.all()
   defp valid_request_id?(id), do: is_integer(id) and id > 0
   defp valid_id?(id), do: is_binary(id) and byte_size(id) in 1..256 and String.valid?(id)
   defp sha256(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)

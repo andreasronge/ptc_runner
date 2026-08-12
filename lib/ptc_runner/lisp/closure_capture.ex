@@ -5,11 +5,12 @@ defmodule PtcRunner.Lisp.ClosureCapture do
 
   alias PtcRunner.Lisp.CoreAST
 
-  # Collects the free `{:var, _}` names in a CoreAST subtree, normalized to
-  # strings. Known binding forms are handled with their lexical scope; any
-  # unrecognized tuple/list/map is still recursed into so a future AST node
-  # cannot silently cause a referenced var to be missed.
-  @spec referenced_vars(term(), CoreAST.fn_params(), [CoreAST.name()]) :: MapSet.t(String.t())
+  # Collects the free `{:var, _}` names in a CoreAST subtree, preserving each
+  # name's CoreAST representation. Known binding forms are handled with their
+  # lexical scope; any unrecognized tuple/list/map is still recursed into so a
+  # future AST node cannot silently cause a referenced var to be missed.
+  @spec referenced_vars(term(), CoreAST.fn_params(), [CoreAST.name()]) ::
+          MapSet.t(CoreAST.name())
   def referenced_vars(ast, params, extra_bound_names \\ []) do
     initial_bound =
       params
@@ -20,9 +21,7 @@ defmodule PtcRunner.Lisp.ClosureCapture do
   end
 
   defp collect_free_var_refs({:var, name}, acc, bound) do
-    name = to_string(name)
-
-    if MapSet.member?(bound, name) do
+    if MapSet.member?(bound, to_string(name)) do
       acc
     else
       MapSet.put(acc, name)

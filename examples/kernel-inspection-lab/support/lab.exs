@@ -128,43 +128,49 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   defp registry(endpoint, program, wrapper?, directory) do
     turn = :atomics.new(1, signed: false)
 
-    scripted = fn config, _context ->
-      if config == %{} do
-        LLMCapability.new(
-          requester: fn _request ->
-            current = :atomics.add_get(turn, 1, 1)
-            generated = if current == 1, do: "(missing/function)", else: program
-            {:ok, model_response(generated, current)}
-          end
-        )
-      else
-        {:error, :invalid_scripted_model_config}
-      end
-    end
+    scripted =
+      staged_provider(fn config, _context ->
+        if config == %{} do
+          with {:ok, capability} <-
+                 LLMCapability.new(
+                   requester: fn _request ->
+                     current = :atomics.add_get(turn, 1, 1)
+                     generated = if current == 1, do: "(missing/function)", else: program
+                     {:ok, model_response(generated, current)}
+                   end
+                 ),
+               do: {:ok, %{capabilities: [capability]}}
+        else
+          {:error, :invalid_scripted_model_config}
+        end
+      end)
 
-    native = fn config, _context ->
-      if config in [%{}, %{"model_visible" => false}] do
-        Capability.new(
-          name: "native-echo",
-          description: "Return one fixture string through the native provider seam",
-          model_visible: Map.get(config, "model_visible", true),
-          effect: :read,
-          input_schema: %{
-            "type" => "object",
-            "properties" => %{"value" => %{"type" => "string"}},
-            "required" => ["value"]
-          },
-          output_schema: %{
-            "type" => "object",
-            "properties" => %{"echo" => %{"type" => "string"}},
-            "required" => ["echo"]
-          },
-          callback: fn %{"value" => value} -> {:ok, %{"echo" => value}} end
-        )
-      else
-        {:error, :invalid_native_config}
-      end
-    end
+    native =
+      staged_provider(fn config, _context ->
+        if config in [%{}, %{"model_visible" => false}] do
+          with {:ok, capability} <-
+                 Capability.new(
+                   name: "native-echo",
+                   description: "Return one fixture string through the native provider seam",
+                   model_visible: Map.get(config, "model_visible", true),
+                   effect: :read,
+                   input_schema: %{
+                     "type" => "object",
+                     "properties" => %{"value" => %{"type" => "string"}},
+                     "required" => ["value"]
+                   },
+                   output_schema: %{
+                     "type" => "object",
+                     "properties" => %{"echo" => %{"type" => "string"}},
+                     "required" => ["echo"]
+                   },
+                   callback: fn %{"value" => value} -> {:ok, %{"echo" => value}} end
+                 ),
+               do: {:ok, %{capabilities: [capability]}}
+        else
+          {:error, :invalid_native_config}
+        end
+      end)
 
     mcp =
       MCPSource.builder(
@@ -211,6 +217,16 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
       })
 
     registry
+  end
+
+  defp staged_provider(acquire) do
+    ProviderRegistry.staged(fn config, context ->
+      {:ok,
+       %{
+         credential_names: [],
+         preflight: fn -> {:ok, fn %{} -> acquire.(config, context) end} end
+       }}
+    end)
   end
 
   defp manifest(name, mission_components, wrapper?) do

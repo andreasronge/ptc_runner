@@ -130,11 +130,18 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
         sink,
         "capability-input",
         %{capability_id: "cap-1"},
-        %{environment: :mission, name: "read", arguments: %{"value" => markers.sink}}
+        %{
+          environment: :mission,
+          mission_name: "default",
+          name: "read",
+          arguments: %{"value" => markers.sink}
+        }
       )
 
     {:ok, run_state} = RunState.start(Limits.defaults())
-    {:ok, %{}, [], evaluation_lease} = RunState.reserve_evaluation(run_state)
+
+    {:ok, %{}, [], evaluation_lease} =
+      RunState.reserve_evaluation(run_state, "default", :fail_fast)
 
     :ok =
       RunState.commit_evaluation(

@@ -50,7 +50,10 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
     # workflow model is therefore registered directly, the way the registry's
     # own built-in did before host-only registries replaced it.
     {:ok, registry} =
-      ProviderRegistry.new(%{"remote-time" => builder, "llm" => &build_llm/2})
+      ProviderRegistry.new(%{
+        "remote-time" => builder,
+        "llm" => staged_llm_builder()
+      })
 
     File.write!(Path.join(dir, "agent.clj"), ~S"""
     (ns e2e.agent "Remote MCP e2e entry." {:visibility :prompt})
@@ -190,15 +193,29 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
            end)
   end
 
-  defp build_llm(%{"model" => model}, _context) do
-    requester = PtcRunner.LLM.callback(model, api_key: System.get_env("OPENROUTER_API_KEY"))
+  defp staged_llm_builder do
+    ProviderRegistry.staged(fn %{"model" => model}, _context ->
+      {:ok,
+       %{
+         credential_names: [],
+         preflight: fn ->
+           {:ok,
+            fn %{} ->
+              requester =
+                PtcRunner.LLM.callback(model, api_key: System.get_env("OPENROUTER_API_KEY"))
 
-    LLMCapability.new(
-      requester: fn request ->
-        request
-        |> ProviderRegistry.adapter_request()
-        |> requester.()
-      end
-    )
+              with {:ok, capability} <-
+                     LLMCapability.new(
+                       requester: fn request ->
+                         request
+                         |> ProviderRegistry.adapter_request()
+                         |> requester.()
+                       end
+                     ),
+                   do: {:ok, %{capabilities: [capability]}}
+            end}
+         end
+       }}
+    end)
   end
 end

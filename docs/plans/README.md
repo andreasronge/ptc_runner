@@ -9,39 +9,18 @@ belongs in guides or retained specifications.
 
 ## Remaining Kernel product work
 
-- [`issue-1237-named-missions.md`](issue-1237-named-missions.md) replaces the
-  singular mission environment with bounded named missions that isolate
-  components, data, grants, continuations, prompts, and durable evidence.
-- [`lisp-kernel/generated-program-boundary.md`](lisp-kernel/generated-program-boundary.md)
-  separates runtime values from subordinate program source and adds a bounded,
-  mission-aware source-checking path for generated PTC-Lisp.
 - [`lisp-kernel/promote-authored-component.md`](lisp-kernel/promote-authored-component.md)
   closes the loop from model-authored runtime source to an attested component:
-  host-side materialization, descriptor provenance, and a promotion gate that
-  does not depend on the removed `run --check`.
+  host-side materialization, descriptor provenance, and a promotion gate.
 - [`lisp-kernel/stable-cli-contract.md`](lisp-kernel/stable-cli-contract.md)
-  turns the product-readiness CLI slice into an implementation-ordered
-  protocol, diagnostics, and filesystem-independent application-source plan.
+  retains only the unfinished macOS/container distribution and final
+  acceptance work for the completed standalone command.
 - [`lisp-kernel/product-readiness.md`](lisp-kernel/product-readiness.md)
   tracks the remaining command-line, diagnostics, model-boundary,
   distribution, and release work.
 - [`lisp-kernel/real-flow-e2e-hardening.md`](lisp-kernel/real-flow-e2e-hardening.md)
   tracks the unfinished private-sink, overflow, real-pagination, and
   cache-usage journeys.
-- [`lisp-kernel/private-analysis-agent-access.md`](lisp-kernel/private-analysis-agent-access.md)
-  fixes the capability-memory bug blocking `inspection-analysis-v2`
-  evaluation and adds `--private-unattended` so a coding agent can use it
-  non-interactively.
-- [`mcp-oauth.md`](mcp-oauth.md) plans principal-scoped OAuth authorization for
-  remote Streamable HTTP MCP servers without weakening host authority or tool
-  replay safety.
-
-## Runtime quality
-
-- [`memory-observability.md`](memory-observability.md) restores the orphaned
-  soak gate, adds a committed per-use-case heap baseline, and extends leak
-  detection to the long-lived owner lifecycle the current soak tests never
-  reach.
 
 ## Future, trigger-gated
 

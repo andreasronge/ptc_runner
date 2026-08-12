@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.TestHelpers
 
   describe "InspectionArtifact.preflight_destination/1" do
     @tag :tmp_dir
@@ -131,7 +132,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         {:error, :should_not_run}
       end
 
-      {:ok, registry} = ProviderRegistry.new(%{"probe" => builder})
+      {:ok, registry} = ProviderRegistry.new(%{"probe" => TestHelpers.staged_provider(builder)})
 
       manifest_path =
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
@@ -198,7 +199,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         {:error, :should_not_run}
       end
 
-      {:ok, registry} = ProviderRegistry.new(%{"probe" => builder})
+      {:ok, registry} = ProviderRegistry.new(%{"probe" => TestHelpers.staged_provider(builder)})
 
       manifest_path =
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
@@ -229,7 +230,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         {:error, :should_not_run}
       end
 
-      {:ok, registry} = ProviderRegistry.new(%{"probe" => builder})
+      {:ok, registry} = ProviderRegistry.new(%{"probe" => TestHelpers.staged_provider(builder)})
 
       manifest_path =
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
@@ -258,7 +259,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         {:error, :should_not_run}
       end
 
-      {:ok, registry} = ProviderRegistry.new(%{"probe" => builder})
+      {:ok, registry} = ProviderRegistry.new(%{"probe" => TestHelpers.staged_provider(builder)})
 
       manifest_path =
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
@@ -310,7 +311,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         {:error, :should_not_run}
       end
 
-      {:ok, registry} = ProviderRegistry.new(%{"probe" => builder})
+      {:ok, registry} = ProviderRegistry.new(%{"probe" => TestHelpers.staged_provider(builder)})
 
       manifest_path =
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
@@ -337,7 +338,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         {:error, :should_not_run}
       end
 
-      {:ok, registry} = ProviderRegistry.new(%{"probe" => builder})
+      {:ok, registry} = ProviderRegistry.new(%{"probe" => TestHelpers.staged_provider(builder)})
 
       manifest_path =
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
@@ -376,7 +377,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         {:error, :should_not_run}
       end
 
-      {:ok, registry} = ProviderRegistry.new(%{"probe" => builder})
+      {:ok, registry} = ProviderRegistry.new(%{"probe" => TestHelpers.staged_provider(builder)})
 
       manifest_path =
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
@@ -414,7 +415,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         {:error, :should_not_run}
       end
 
-      {:ok, registry} = ProviderRegistry.new(%{"probe" => builder})
+      {:ok, registry} = ProviderRegistry.new(%{"probe" => TestHelpers.staged_provider(builder)})
 
       manifest_path =
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
@@ -439,7 +440,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         {:error, :should_not_run}
       end
 
-      {:ok, registry} = ProviderRegistry.new(%{"probe" => builder})
+      {:ok, registry} = ProviderRegistry.new(%{"probe" => TestHelpers.staged_provider(builder)})
 
       manifest_path =
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
@@ -529,7 +530,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         {:ok, %{capabilities: [capability], snapshot: nil, close: nil}}
       end
 
-      {:ok, registry} = ProviderRegistry.new(%{"probe" => builder})
+      {:ok, registry} = ProviderRegistry.new(%{"probe" => TestHelpers.staged_provider(builder)})
 
       manifest_path =
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
@@ -565,7 +566,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         {:ok, %{capabilities: [capability], snapshot: nil, close: nil}}
       end
 
-      {:ok, registry} = ProviderRegistry.new(%{"probe" => builder})
+      {:ok, registry} = ProviderRegistry.new(%{"probe" => TestHelpers.staged_provider(builder)})
 
       manifest_path =
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
@@ -836,7 +837,12 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
                  inspection_sink,
                  "capability-input",
                  %{capability_id: "long-path-capability"},
-                 %{environment: :mission, name: "read", arguments: %{}}
+                 %{
+                   environment: :mission,
+                   mission_name: "default",
+                   name: "read",
+                   arguments: %{}
+                 }
                )
 
       assert {:ok, inspection_records} = InspectionSink.records(inspection_sink)
@@ -850,6 +856,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
           data: %{
             capability_id: "long-path-capability",
             environment: :mission,
+            mission_name: "default",
             name: "read"
           }
         }
@@ -857,13 +864,13 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       trace_events = [
         %{
-          "schema_version" => 1,
+          "schema_version" => 2,
           "run_id" => "long-path-run",
           "trace_id" => "long-path-trace",
           "sequence" => 1,
           "timestamp" => "2026-07-28T12:00:00Z",
           "type" => "run-started",
-          "data" => %{}
+          "data" => %{"missions" => %{"default" => %{}}}
         }
       ]
 
@@ -921,7 +928,12 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
                  inspection_sink,
                  "capability-input",
                  %{capability_id: "collision-capability"},
-                 %{environment: :mission, name: "read", arguments: %{}}
+                 %{
+                   environment: :mission,
+                   mission_name: "default",
+                   name: "read",
+                   arguments: %{}
+                 }
                )
 
       assert {:ok, inspection_records} = InspectionSink.records(inspection_sink)
@@ -935,6 +947,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
           data: %{
             capability_id: "collision-capability",
             environment: :mission,
+            mission_name: "default",
             name: "read"
           }
         }
@@ -942,13 +955,13 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       trace_events = [
         %{
-          "schema_version" => 1,
+          "schema_version" => 2,
           "run_id" => "collision-run",
           "trace_id" => "collision-trace",
           "sequence" => 1,
           "timestamp" => "2026-07-28T12:00:00Z",
           "type" => "run-started",
-          "data" => %{}
+          "data" => %{"missions" => %{"default" => %{}}}
         }
       ]
 

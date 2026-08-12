@@ -162,30 +162,30 @@ defmodule PtcRunner.Lisp.DefnTest do
   describe "evaluator: defn via def" do
     test "defined function can be called" do
       # (defn twice [x] (* x 2)) desugars to (def twice (fn [x] (* x 2)))
-      ast = {:def, :twice, {:fn, [{:var, :x}], {:call, {:var, :*}, [{:var, :x}, 2]}}}
+      ast = {:def, :twice, {:fn, [{:var, :x}], {:call, {:var, :*}, [{:var, :x}, 2]}}, %{}}
       env = %{*: {:variadic, &*/2, 1}}
       {:ok, result, user_ns} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
 
       assert result == %Var{name: :twice}
       # Functions are stored as closures (6-tuple with metadata)
-      assert {:closure, _, _, _, _, %{}} = user_ns[:twice]
+      assert {:closure, _, _, _, _, %{}} = user_ns["twice"]
     end
 
     test "function persists in user_ns" do
-      ast = {:def, :greet, {:fn, [], {:string, "hello"}}}
+      ast = {:def, :greet, {:fn, [], {:string, "hello"}}, %{}}
       {:ok, _result, user_ns} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
 
       # Functions are stored as closures (6-tuple with metadata)
-      assert {:closure, _, _, _, _, %{}} = user_ns[:greet]
+      assert {:closure, _, _, _, _, %{}} = user_ns["greet"]
     end
 
     test "function can reference other user-defined symbols" do
       # Define base, then double that uses base
-      base_ast = {:def, :base, 10}
+      base_ast = {:def, :base, 10, %{}}
       {:ok, _, user_ns1} = Eval.eval(base_ast, %{}, %{}, %{}, &dummy_tool/2)
 
       # (defn doubled [] (* base 2)) - references base from user_ns
-      double_ast = {:def, :doubled, {:fn, [], {:call, {:var, :*}, [{:var, :base}, 2]}}}
+      double_ast = {:def, :doubled, {:fn, [], {:call, {:var, :*}, [{:var, :base}, 2]}}, %{}}
       env = %{*: {:variadic, &*/2, 1}}
       {:ok, _, user_ns2} = Eval.eval(double_ast, %{}, user_ns1, env, &dummy_tool/2)
 
@@ -197,9 +197,9 @@ defmodule PtcRunner.Lisp.DefnTest do
     end
 
     test "defn shadows builtins (via def)" do
-      ast = {:def, :map, {:fn, [{:var, :x}], {:var, :x}}}
+      ast = {:def, :map, {:fn, [{:var, :x}], {:var, :x}}, %{}}
       {:ok, %Var{name: :map}, user_ns} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
-      assert match?({:closure, _, _, _, _, _}, user_ns[:map])
+      assert match?({:closure, _, _, _, _, _}, user_ns["map"])
     end
   end
 

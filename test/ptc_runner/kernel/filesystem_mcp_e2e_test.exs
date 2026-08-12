@@ -93,7 +93,7 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
 
     File.write!(
       Path.join(dir, "workflow.clj"),
-      ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"kind" :source "source" (get input "program")})))|
+      ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"mission" "default" "kind" :source "source" (get input "program")})))|
     )
 
     program = """

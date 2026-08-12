@@ -611,7 +611,8 @@ defmodule PtcRunner.Kernel.ReplSession do
         timeout_ms: timeout_ms,
         validation_heap_words: session.config.limits.evaluation_heap_words,
         evaluation_lease: nil,
-        validation_deadline_ms: validation_deadline_ms
+        validation_deadline_ms: validation_deadline_ms,
+        mission_name: nil
       },
       session.config.event_sink,
       session.config.inspection_sink

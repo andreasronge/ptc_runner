@@ -685,7 +685,7 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
           assert {:error, {^reason, _message, _args}, ^final_context} = outcome
       end
 
-      assert final_context.user_ns == %{:keep => 1, "memory" => 1}
+      assert final_context.user_ns == %{"keep" => 1, "memory" => 1}
       assert final_context.env == Env.initial()
       assert final_context.locals == MapSet.new()
       assert final_context.origin_stack == []
@@ -709,7 +709,7 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
       assert {:error, _reason, final_context} =
                Eval.eval_with_context(ast, %{}, %{}, Env.initial(), fn _, _ -> nil end, [], opts)
 
-      assert final_context.user_ns == %{keep: 1}, source
+      assert final_context.user_ns == %{"keep" => 1}, source
       assert final_context.env == Env.initial(), source
       assert final_context.locals == MapSet.new(), source
     end

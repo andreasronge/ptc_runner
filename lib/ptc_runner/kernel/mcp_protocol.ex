@@ -246,6 +246,16 @@ defmodule PtcRunner.Kernel.MCPProtocol do
 
   def valid_exchange_response?(_response, _id), do: false
 
+  @doc false
+  @spec valid_inspection_exchange?(binary(), term(), term()) :: boolean()
+  def valid_inspection_exchange?("mcp-request", body, request_id),
+    do: valid_exchange_request?(body, request_id)
+
+  def valid_inspection_exchange?("mcp-response", body, request_id),
+    do: valid_exchange_response?(body, request_id)
+
+  def valid_inspection_exchange?(_record_type, _body, _request_id), do: false
+
   defp classify_message(%{"id" => id} = decoded) when is_integer(id) and id > 0 do
     case {
       Map.has_key?(decoded, "method"),

@@ -10,9 +10,9 @@ defmodule PtcRunner.Kernel.SourceCheck do
 
   @diagnostic_bytes 4_096
 
-  @spec check(RunState.t(), struct(), binary(), map(), term(), keyword()) :: map()
-  def check(state, mission, source, limits, event_sink, opts \\ []) when is_binary(source) do
-    mission_name = Keyword.get(opts, :mission_name, RunState.default_mission())
+  @spec check(RunState.t(), binary(), struct(), binary(), map(), term(), keyword()) :: map()
+  def check(state, mission_name, mission, source, limits, event_sink, opts \\ [])
+      when is_binary(mission_name) and is_binary(source) and is_list(opts) do
     source_bytes = byte_size(source)
 
     if source_bytes > limits.subordinate_source_bytes do
@@ -31,10 +31,10 @@ defmodule PtcRunner.Kernel.SourceCheck do
         {:ok, memory, revision} ->
           compile_and_finish(
             state,
-            {mission, source, limits, event_sink},
+            {mission_name, mission, source, limits, event_sink},
             {memory, revision},
             identity,
-            Keyword.put(opts, :mission_name, mission_name)
+            opts
           )
 
         {:error, reason} ->
@@ -45,7 +45,7 @@ defmodule PtcRunner.Kernel.SourceCheck do
 
   defp compile_and_finish(
          state,
-         {mission, source, limits, event_sink},
+         {mission_name, mission, source, limits, event_sink},
          {memory, revision},
          identity,
          opts
@@ -56,7 +56,17 @@ defmodule PtcRunner.Kernel.SourceCheck do
     compile_result =
       Lisp.check_native(source,
         memory: memory,
-        tools: Evaluation.mission_tools(mission, state, timeout_ms, event_sink, nil),
+        tools:
+          Evaluation.mission_tools(
+            mission,
+            state,
+            timeout_ms,
+            event_sink,
+            nil,
+            nil,
+            nil,
+            mission_name
+          ),
         prelude: bundle_prelude(mission),
         timeout: timeout_ms,
         compile_timeout: compile_timeout_ms,
@@ -71,7 +81,7 @@ defmodule PtcRunner.Kernel.SourceCheck do
 
     :ok = after_compile(Keyword.get(opts, :after_compile))
 
-    case RunState.finish_source_check(state, Keyword.fetch!(opts, :mission_name), revision) do
+    case RunState.finish_source_check(state, mission_name, revision) do
       :ok -> Map.merge(identity, compile_projection(compile_result))
       {:error, reason} -> Map.merge(identity, finish_failure(reason))
     end

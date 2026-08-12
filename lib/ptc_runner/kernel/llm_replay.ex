@@ -224,7 +224,7 @@ defmodule PtcRunner.Kernel.LLMReplay do
          value = RetainedSize.detach_binaries(value),
          true <- is_map(value) and not is_struct(value),
          true <- Map.keys(value) -- @entry_keys == [],
-         @format_version <- Map.get(value, "schema_version", @format_version),
+         @format_version <- value["schema_version"],
          key when is_binary(key) <- value["request_hash"],
          true <- key =~ @hash,
          {:ok, responses} <- responses(value),

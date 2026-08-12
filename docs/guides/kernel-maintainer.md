@@ -1273,12 +1273,12 @@ terminal finalization, and the immutable terminal batch.
 `PtcRunner.Kernel.TraceLog` owns canonical validation, persistence, discovery,
 and queries. `PtcRunner.Kernel.InspectionArtifact` owns the exact private
 artifact grammar, exclusive persistence, loading, and correlation checks.
-Inspection V1 covers provider-neutral capability, source, and model evidence;
-V2 additionally admits paired decoded MCP request/response bodies correlated
-to an existing capability attempt. V3 adds workflow execution prints and
-errors. V4 adds the exact mission name to mission-owned source, capability, and
-MCP evidence, so identical component or tool names remain distinguishable
-without changing V1–V3 readers. MCP inspection records never include
+Inspection V4 covers provider-neutral capability, source, and model evidence,
+paired decoded MCP request/response bodies correlated to an existing capability
+attempt, and workflow execution prints and errors. Mission-owned source,
+capability, prelude, and MCP evidence carries the exact mission name, so
+identical component or tool names remain distinguishable. MCP inspection
+records never include
 rendered headers or subprocess environment values.
 `PtcRunner.Kernel.SafeMetadata` owns the closed labels and annotation
 vocabulary.

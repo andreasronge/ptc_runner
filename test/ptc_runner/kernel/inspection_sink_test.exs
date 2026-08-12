@@ -9,11 +9,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ViewerAdapter
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.TestHelpers
 
   @source "(return 42)"
   @source_hash :crypto.hash(:sha256, @source) |> Base.encode16(case: :lower)
 
-  test "retains only normalized exact V1 records and fails closed" do
+  test "retains only normalized exact current records and fails closed" do
     {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
 
     assert :ok =
@@ -21,7 +22,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                sink,
                "capability-input",
                %{capability_id: "cap-1"},
-               %{environment: :mission, name: "remote.read", arguments: %{"query" => "x"}}
+               %{
+                 environment: :mission,
+                 mission_name: "default",
+                 name: "remote.read",
+                 arguments: %{"query" => "x"}
+               }
              )
 
     assert :ok =
@@ -29,22 +35,20 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                sink,
                "capability-output",
                %{"capability_id" => "cap-1"},
-               %{environment: :mission, name: "remote.read", result: %{status: :ok, value: 42}}
-             )
-
-    assert :ok =
-             InspectionSink.emit(
-               sink,
-               "evaluation-source",
-               %{evaluation_id: "eval-1"},
                %{
                  environment: :mission,
-                 program_kind: :"ptc-lisp",
-                 source: @source,
-                 source_hash: @source_hash,
-                 source_bytes: byte_size(@source)
+                 mission_name: "default",
+                 name: "remote.read",
+                 result: %{status: :ok, value: 42}
                }
              )
+
+    emit!(
+      sink,
+      "evaluation-source",
+      %{evaluation_id: "eval-1"},
+      mission_evaluation_source_payload()
+    )
 
     assert :ok =
              InspectionSink.emit(
@@ -61,6 +65,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     assert {:ok, [input, output, source, prelude]} = InspectionSink.records(sink)
     assert Enum.map([input, output, source, prelude], & &1["sequence"]) == [1, 2, 3, 4]
+    assert Enum.all?([input, output, source, prelude], &(&1["schema_version"] == 4))
     assert input["payload"]["environment"] == "mission"
     assert output["payload"]["result"] == %{"status" => "ok", "value" => 42}
     assert source["payload"]["source"] == @source
@@ -73,7 +78,13 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                sink,
                "capability-input",
                %{capability_id: "cap-2"},
-               %{environment: :mission, name: "bad", arguments: %{}, extra: true}
+               %{
+                 environment: :mission,
+                 mission_name: "default",
+                 name: "bad",
+                 arguments: %{},
+                 extra: true
+               }
              )
 
     assert {:error, :inspection_sink_error} = InspectionSink.records(sink)
@@ -81,7 +92,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert :ok = InspectionSink.stop(sink)
   end
 
-  test "V2 retains paired MCP exchange records while V1 rejects them" do
+  test "retains paired MCP exchange records" do
     request = %{
       "jsonrpc" => "2.0",
       "id" => 7,
@@ -97,22 +108,11 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     correlation = %{capability_id: "cap-1", request_id: 7}
 
-    {:ok, v1} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
-
-    assert {:error, :inspection_sink_error} =
-             InspectionSink.emit(
-               v1,
-               "mcp-request",
-               correlation,
-               %{transport: :stdio, body: request}
-             )
-
-    {:ok, v2} =
-      InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 2)
+    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
 
     assert :ok =
              InspectionSink.emit(
-               v2,
+               sink,
                "mcp-request",
                correlation,
                %{transport: :stdio, body: request}
@@ -120,42 +120,51 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     assert :ok =
              InspectionSink.emit(
-               v2,
+               sink,
                "mcp-response",
                correlation,
                %{transport: :stdio, body: response}
              )
 
-    assert {:ok, [request_record, response_record]} = InspectionSink.records(v2)
-    assert request_record["schema_version"] == 2
+    assert {:ok, [request_record, response_record]} = InspectionSink.records(sink)
+    assert request_record["schema_version"] == 4
     assert request_record["payload"]["body"] == request
     assert response_record["payload"]["body"] == response
   end
 
-  test "V3 retains correlated execution-prints and execution-error records while V2 rejects them" do
-    {:ok, v2} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 2)
+  test "rejects malformed MCP exchange records" do
+    correlation = %{capability_id: "cap-1", request_id: 7}
 
-    assert {:error, :inspection_sink_error} =
+    for {record_type, payload} <- [
+          {"mcp-request",
+           %{
+             transport: :invalid,
+             body: %{"jsonrpc" => "2.0", "id" => 7, "method" => "tools/call", "params" => %{}}
+           }},
+          {"mcp-response",
+           %{transport: :stdio, body: %{"jsonrpc" => "2.0", "id" => 8, "result" => %{}}}}
+        ] do
+      {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+
+      assert {:error, :inspection_sink_error} =
+               InspectionSink.emit(sink, record_type, correlation, payload)
+    end
+  end
+
+  test "retains correlated execution prints and errors" do
+    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+
+    assert :ok =
              InspectionSink.emit(
-               v2,
+               sink,
                "execution-prints",
                %{evaluation_id: "eval-1"},
                %{environment: :workflow, prints: ["CHECKPOINT"], truncated: false}
              )
 
-    {:ok, v3} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 3)
-
     assert :ok =
              InspectionSink.emit(
-               v3,
-               "execution-prints",
-               %{evaluation_id: "eval-1"},
-               %{environment: :workflow, prints: ["CHECKPOINT"], truncated: false}
-             )
-
-    assert :ok =
-             InspectionSink.emit(
-               v3,
+               sink,
                "execution-error",
                %{evaluation_id: "eval-1"},
                %{
@@ -166,8 +175,8 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                }
              )
 
-    assert {:ok, [prints_record, error_record]} = InspectionSink.records(v3)
-    assert prints_record["schema_version"] == 3
+    assert {:ok, [prints_record, error_record]} = InspectionSink.records(sink)
+    assert prints_record["schema_version"] == 4
     assert prints_record["correlation"] == %{"evaluation_id" => "eval-1"}
 
     assert prints_record["payload"] == %{
@@ -188,16 +197,15 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     assert {:error, :inspection_sink_error} =
              InspectionSink.emit(
-               v3,
+               sink,
                "execution-prints",
                %{evaluation_id: "eval-2"},
                %{environment: :mission, prints: ["nope"], truncated: false}
              )
   end
 
-  test "V4 requires and correlates exact mission identity" do
-    {:ok, missing_name} =
-      InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 4)
+  test "current records require and correlate exact mission identity" do
+    {:ok, missing_name} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
 
     assert {:error, :inspection_sink_error} =
              InspectionSink.emit(
@@ -207,8 +215,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                %{environment: :mission, name: "read", arguments: %{}}
              )
 
-    {:ok, workflow_name} =
-      InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 4)
+    {:ok, workflow_name} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
 
     assert {:error, :inspection_sink_error} =
              InspectionSink.emit(
@@ -218,8 +225,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                %{environment: :workflow, mission_name: "reader", name: "read", arguments: %{}}
              )
 
-    {:ok, sink} =
-      InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 4)
+    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
 
     assert :ok =
              InspectionSink.emit(
@@ -286,6 +292,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                %{capability_id: "cap-1"},
                %{
                  environment: :mission,
+                 mission_name: "default",
                  name: "large",
                  arguments: %{"value" => String.duplicate("x", 1_000)}
                }
@@ -316,7 +323,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                sink,
                "capability-output",
                %{capability_id: "cap-1"},
-               %{environment: :mission, name: "read", result: %{status: :ok, value: 1}}
+               %{
+                 environment: :mission,
+                 mission_name: "default",
+                 name: "read",
+                 result: %{status: :ok, value: 1}
+               }
              )
 
     assert {:ok, [input, output]} = InspectionSink.records(sink)
@@ -326,7 +338,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
         run_id: "run-1",
         trace_id: "trace-1",
         type: "capability-started",
-        data: %{capability_id: "cap-1", environment: :mission, name: "read"}
+        data: %{
+          capability_id: "cap-1",
+          environment: :mission,
+          mission_name: "default",
+          name: "read"
+        }
       }
     ]
 
@@ -395,20 +412,14 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     {:ok, source_sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
 
+    # ex_dna:disable-for-next-line — Identical duplicate emission is the behavior under test.
     for _index <- 1..2 do
-      assert :ok =
-               InspectionSink.emit(
-                 source_sink,
-                 "evaluation-source",
-                 %{evaluation_id: "eval-1"},
-                 %{
-                   environment: :mission,
-                   program_kind: :"ptc-lisp",
-                   source: @source,
-                   source_hash: @source_hash,
-                   source_bytes: byte_size(@source)
-                 }
-               )
+      emit!(
+        source_sink,
+        "evaluation-source",
+        %{evaluation_id: "eval-1"},
+        mission_evaluation_source_payload()
+      )
     end
 
     assert {:ok, duplicate_evaluations} = InspectionSink.records(source_sink)
@@ -430,6 +441,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                  %{component_id: "tools"},
                  %{
                    environment: :mission,
+                   mission_name: "default",
                    source: @source,
                    source_hash: @source_hash,
                    source_bytes: byte_size(@source)
@@ -501,8 +513,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     assert :ok = InspectionSink.stop(sink)
 
-    {:ok, evaluation_sink} =
-      InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 3)
+    {:ok, evaluation_sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
 
     assert :ok =
              InspectionSink.emit(
@@ -511,6 +522,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                %{evaluation_id: "eval-mission"},
                %{
                  environment: :mission,
+                 mission_name: "default",
                  program_kind: :"ptc-lisp",
                  source: @source,
                  source_hash: @source_hash,
@@ -556,6 +568,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                %{capability_id: "cap-1"},
                %{
                  environment: :mission,
+                 mission_name: "default",
                  name: "remote.read",
                  arguments: %{"nested" => nested}
                }
@@ -577,7 +590,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
         sink,
         "capability-input",
         %{capability_id: "cap-1"},
-        %{environment: :mission, name: "remote.read", arguments: %{"nested" => nest.(levels)}}
+        %{
+          environment: :mission,
+          mission_name: "default",
+          name: "remote.read",
+          arguments: %{"nested" => nest.(levels)}
+        }
       )
     end
 
@@ -596,7 +614,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
         run_id: "run-1",
         trace_id: "trace-1",
         type: "capability-started",
-        data: %{capability_id: "cap-1", environment: :mission, name: "read"}
+        data: %{
+          capability_id: "cap-1",
+          environment: :mission,
+          mission_name: "default",
+          name: "read"
+        }
       }
     ]
 
@@ -651,7 +674,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
       records
       |> hd()
       |> Jason.encode!()
-      |> String.replace_prefix("{", ~S|{"schema_version":1,|)
+      |> String.replace_prefix("{", ~S|{"schema_version":4,|)
 
     File.write!(duplicate, duplicate_line <> "\n")
     assert {:error, :malformed_inspection_artifact} = InspectionArtifact.load(duplicate)
@@ -672,6 +695,71 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     )
 
     assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(wrong_type)
+
+    capability_input = %{
+      "schema_version" => 4,
+      "run_id" => "run-1",
+      "trace_id" => "trace-1",
+      "sequence" => 1,
+      "timestamp" => "2026-07-28T12:00:00Z",
+      "record_type" => "capability-input",
+      "correlation" => %{"capability_id" => "cap-1"},
+      "payload" => %{"environment" => "workflow", "name" => "remote.read", "arguments" => %{}}
+    }
+
+    valid_mcp_request = %{
+      capability_input
+      | "sequence" => 2,
+        "record_type" => "mcp-request",
+        "correlation" => %{"capability_id" => "cap-1", "request_id" => 7},
+        "payload" => %{
+          "transport" => "stdio",
+          "body" => %{"jsonrpc" => "2.0", "id" => 7, "method" => "tools/call", "params" => %{}}
+        }
+    }
+
+    invalid_mcp_request = %{
+      valid_mcp_request
+      | "sequence" => 2,
+        "payload" => %{
+          "transport" => "stdio",
+          "body" => %{"jsonrpc" => "2.0", "id" => 8, "method" => "tools/call", "params" => %{}}
+        }
+    }
+
+    invalid_mcp_response = %{
+      invalid_mcp_request
+      | "sequence" => 3,
+        "record_type" => "mcp-response",
+        "payload" => %{
+          "transport" => "stdio",
+          "body" => %{"jsonrpc" => "2.0", "id" => 8, "result" => %{}}
+        }
+    }
+
+    invalid_mcp_request_path = Path.join(dir, "invalid-mcp-request.inspection.jsonl")
+
+    File.write!(
+      invalid_mcp_request_path,
+      Enum.map_join([capability_input, invalid_mcp_request], "\n", &Jason.encode!/1) <> "\n"
+    )
+
+    assert {:error, :invalid_inspection_artifact} =
+             InspectionArtifact.load(invalid_mcp_request_path)
+
+    invalid_mcp_response_path = Path.join(dir, "invalid-mcp-response.inspection.jsonl")
+
+    File.write!(
+      invalid_mcp_response_path,
+      Enum.map_join(
+        [capability_input, valid_mcp_request, invalid_mcp_response],
+        "\n",
+        &Jason.encode!/1
+      ) <> "\n"
+    )
+
+    assert {:error, :invalid_inspection_artifact} =
+             InspectionArtifact.load(invalid_mcp_response_path)
 
     repeated_sequence = Path.join(dir, "sequence.inspection.jsonl")
 
@@ -820,7 +908,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     nested = Enum.reduce(1..64, true, fn _level, value -> [value] end)
 
     record = %{
-      "schema_version" => 1,
+      "schema_version" => 4,
       "run_id" => "deep",
       "trace_id" => "deep",
       "sequence" => 1,
@@ -829,6 +917,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
       "correlation" => %{"capability_id" => "deep-capability"},
       "payload" => %{
         "environment" => "mission",
+        "mission_name" => "default",
         "name" => "read",
         "arguments" => %{"nested" => nested}
       }
@@ -846,7 +935,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
        } do
     File.write!(
       Path.join(dir, "workflow.clj"),
-      ~S|(ns app) (defn run [input] (do (tool/kernel-eval {"kind" :source "source" (get input "program")}) "done"))|
+      ~S|(ns app) (defn run [input] (do (tool/kernel-eval {"mission" "default" "kind" :source "source" (get input "program")}) "done"))|
     )
 
     program = ~S|(return (tool/native-read {"query" "inspect me"}))|
@@ -872,24 +961,29 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     File.write!(manifest_path, Jason.encode!(manifest))
 
     builder = fn %{}, _context ->
-      Capability.new(
-        name: "native-read",
-        effect: :read,
-        input_schema: %{
-          "type" => "object",
-          "properties" => %{"query" => %{"type" => "string"}},
-          "required" => ["query"]
-        },
-        output_schema: %{
-          "type" => "object",
-          "properties" => %{"answer" => %{"type" => "string"}},
-          "required" => ["answer"]
-        },
-        callback: fn %{"query" => query} -> {:ok, %{"answer" => String.upcase(query)}} end
-      )
+      with {:ok, capability} <-
+             Capability.new(
+               name: "native-read",
+               effect: :read,
+               input_schema: %{
+                 "type" => "object",
+                 "properties" => %{"query" => %{"type" => "string"}},
+                 "required" => ["query"]
+               },
+               output_schema: %{
+                 "type" => "object",
+                 "properties" => %{"answer" => %{"type" => "string"}},
+                 "required" => ["answer"]
+               },
+               callback: fn %{"query" => query} ->
+                 {:ok, %{"answer" => String.upcase(query)}}
+               end
+             ),
+           do: {:ok, %{capabilities: [capability]}}
     end
 
-    {:ok, registry} = ProviderRegistry.new(%{"native" => builder})
+    {:ok, registry} =
+      ProviderRegistry.new(%{"native" => TestHelpers.staged_provider(builder)})
 
     assert {:ok, _result} =
              manifest_path
@@ -1163,8 +1257,22 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
       sink,
       "capability-input",
       %{capability_id: capability_id},
-      %{environment: :mission, name: "read", arguments: %{"id" => 1}}
+      %{environment: :mission, mission_name: "default", name: "read", arguments: %{"id" => 1}}
     )
+  end
+
+  defp emit!(sink, type, correlation, payload),
+    do: :ok = InspectionSink.emit(sink, type, correlation, payload)
+
+  defp mission_evaluation_source_payload do
+    %{
+      environment: :mission,
+      mission_name: "default",
+      program_kind: :"ptc-lisp",
+      source: @source,
+      source_hash: @source_hash,
+      source_bytes: byte_size(@source)
+    }
   end
 
   defp persisted_records(path, value) do
@@ -1175,7 +1283,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                sink,
                "capability-input",
                %{capability_id: "cap-1"},
-               %{environment: :mission, name: "read", arguments: %{"value" => value}}
+               %{
+                 environment: :mission,
+                 mission_name: "default",
+                 name: "read",
+                 arguments: %{"value" => value}
+               }
              )
 
     assert {:ok, records} = InspectionSink.records(sink)
@@ -1185,7 +1298,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
         run_id: "run-1",
         trace_id: "trace-1",
         type: "capability-started",
-        data: %{capability_id: "cap-1", environment: :mission, name: "read"}
+        data: %{
+          capability_id: "cap-1",
+          environment: :mission,
+          mission_name: "default",
+          name: "read"
+        }
       }
     ]
 
@@ -1196,15 +1314,17 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
   defp canonical_events do
     [
-      canonical_event(1, "run-started", %{}),
+      canonical_event(1, "run-started", %{"missions" => %{"default" => %{}}}),
       canonical_event(2, "capability-started", %{
         "capability_id" => "cap-1",
         "environment" => "mission",
+        "mission_name" => "default",
         "name" => "read"
       }),
       canonical_event(3, "capability-stopped", %{
         "capability_id" => "cap-1",
         "environment" => "mission",
+        "mission_name" => "default",
         "name" => "read"
       }),
       canonical_event(4, "run-stopped", %{"outcome" => "ok"})
@@ -1213,7 +1333,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
   defp dropped_events(counts) do
     [
-      canonical_event(1, "run-started", %{}),
+      canonical_event(1, "run-started", %{"missions" => %{"default" => %{}}}),
       canonical_event(2, "events-dropped", %{"counts" => counts}),
       canonical_event(3, "run-stopped", %{
         "outcome" => "ok",
@@ -1225,7 +1345,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
   defp canonical_event(sequence, type, data) do
     %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "run_id" => "run-1",
       "trace_id" => "trace-1",
       "sequence" => sequence,

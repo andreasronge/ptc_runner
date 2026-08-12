@@ -30,7 +30,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
          ]}
 
       assert ClosureCapture.referenced_vars(ast, [{:var, :x}], [:self]) ==
-               MapSet.new(["+", "outer"])
+               MapSet.new([:+, :outer])
     end
 
     test "handles sequential let binding scope" do
@@ -42,7 +42,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
          ], {:call, {:var, :+}, [{:var, :x}, {:var, :y}, {:var, :z}]}}
 
       assert ClosureCapture.referenced_vars(ast, [], []) ==
-               MapSet.new(["outer", "inc", "+", "z"])
+               MapSet.new([:outer, :inc, :+, :z])
     end
 
     test "treats inner function params and names as locally bound" do
@@ -50,7 +50,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
         {:fn, :walk, [{:var, :node}],
          {:call, {:var, :map}, [{:var, :walk}, {:var, :node}, {:var, :roots}]}}
 
-      assert ClosureCapture.referenced_vars(ast, [], []) == MapSet.new(["map", "roots"])
+      assert ClosureCapture.referenced_vars(ast, [], []) == MapSet.new([:map, :roots])
     end
 
     test "collects destructuring pattern names as bound" do
@@ -61,7 +61,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
             {:var, :input}}
          ], {:vector, [{:var, :keep}, {:var, :renamed}, {:var, :outside}]}}
 
-      assert ClosureCapture.referenced_vars(ast, [], []) == MapSet.new(["input", "outside"])
+      assert ClosureCapture.referenced_vars(ast, [], []) == MapSet.new([:input, :outside])
     end
   end
 
@@ -216,7 +216,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
       alias PtcRunner.Lisp.{Env, Eval}
 
       env = Map.merge(Env.initial(), %{x: :from_env})
-      user_ns = %{x: :from_user_ns}
+      user_ns = %{"x" => :from_user_ns}
 
       # (fn [] x) called with the above env/user_ns
       ast = {:call, {:fn, [], {:var, :x}}, []}

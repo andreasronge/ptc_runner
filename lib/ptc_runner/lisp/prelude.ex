@@ -136,7 +136,7 @@ defmodule PtcRunner.Lisp.Prelude do
   Trace/debug summary of a compiled prelude, for traceability.
 
   String/atom/list-only, JSON-serializable, and credential-free: it carries
-  enough to REPRODUCE the V1 capability environment without leaking captured
+  enough to identify the capability environment without leaking captured
   closures, the private prelude env, or any host secret.
 
     * `source_hash` — sha256 hex of the prelude source.
@@ -145,13 +145,9 @@ defmodule PtcRunner.Lisp.Prelude do
       whether two runs used the same compiled prelude even when source text is
       unavailable.
     * `protected_namespaces` — the selected protected namespace names (sorted).
-    * `host_policy_hash` — host policy hash/id when available; `nil` in V1
-      (no first-class host policy yet).
     * `exports` — one `export_summary` per PUBLIC export (no callables/env).
     * `components` — selected source component provenance when the artifact was
       produced by `PtcRunner.Lisp.Prelude.Bundle`; otherwise `[]`.
-    * `role_prelude_selection` — optional sanitized role-backed kernel
-      selection provenance; `nil` for direct/embedded prelude attachment.
   """
   @type export_summary :: %{
           ref: String.t(),
@@ -170,10 +166,8 @@ defmodule PtcRunner.Lisp.Prelude do
           source_hash: String.t(),
           artifact_hash: String.t(),
           protected_namespaces: [String.t()],
-          host_policy_hash: String.t() | nil,
           exports: [export_summary()],
-          components: [map()],
-          role_prelude_selection: map() | nil
+          components: [map()]
         }
 
   @doc """
@@ -183,8 +177,6 @@ defmodule PtcRunner.Lisp.Prelude do
   and contains NO captured closures, private prelude env, or credentials — only
   the protected facts needed to reproduce the capability environment.
 
-  The `host_policy_hash` slot is `nil` in V1; it is reserved for when a host
-  policy hash/id becomes available.
   """
   @spec trace_summary(t() | nil) :: trace_summary() | nil
   def trace_summary(nil), do: nil
@@ -196,10 +188,8 @@ defmodule PtcRunner.Lisp.Prelude do
       source_hash: prelude.source_hash,
       artifact_hash: artifact_hash(prelude.namespaces, export_summaries),
       protected_namespaces: prelude.namespaces,
-      host_policy_hash: nil,
       exports: export_summaries,
-      components: Map.get(prelude.metadata, :components, []),
-      role_prelude_selection: Map.get(prelude.metadata, :role_prelude_selection)
+      components: Map.get(prelude.metadata, :components, [])
     }
   end
 

@@ -377,22 +377,7 @@ defmodule PtcRunner.Kernel.CommandParser do
 
   defp reject_invalid_switch(command, invalid, frontend) do
     accepted = CommandDeclaration.accepted_switches(command, frontend)
-
-    Enum.find_value(invalid, fn {raw, _value} ->
-      switch = raw
-
-      case CommandDeclaration.retired_switch(command, switch) do
-        {:ok, replacement} ->
-          CommandRejection.retired_switch(command, switch, replacement, frontend)
-
-        :error ->
-          false
-      end
-    end)
-    |> case do
-      %CommandRejection{} = rejection -> {:error, rejection}
-      nil -> reject_unknown_or_generic(command, invalid, accepted, frontend)
-    end
+    reject_unknown_or_generic(command, invalid, accepted, frontend)
   end
 
   defp reject_unknown_or_generic(command, invalid, accepted, frontend) do

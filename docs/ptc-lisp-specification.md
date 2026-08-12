@@ -4256,19 +4256,20 @@ The shipped workflow `kernel` component exposes two code/value boundaries:
 
 ```clojure
 (kernel/eval-with
+  "default"
   (program (return (get data/params "evidence_id")))
   {"evidence_id" evidence-id})
 
-(kernel/eval-source-with generated-source
+(kernel/eval-source-with "default" generated-source
                          {"evidence_id" evidence-id})
 ```
 
-The first argument remains code: `(program ...)` captures opaque static source,
-while `eval-source-with` accepts bounded source text. The second argument must
-project to a JSON value and is available only for that mission evaluation as
-`data/params`. It replaces any mission data already stored at the `"params"`
-key for that evaluation; the one-argument `kernel/eval` and
-`kernel/eval-source` helpers leave mission data unchanged.
+After the mission name, `(program ...)` supplies opaque static source to
+`eval-with`, while `eval-source-with` accepts bounded source text. The final
+argument must project to a JSON value and is available only for that mission
+evaluation as `data/params`. It replaces any mission data already stored at
+the `"params"` key for that evaluation; `kernel/eval` and `kernel/eval-source`
+leave mission data unchanged.
 
 Use this boundary for evidence identifiers, paths, queries, and other runtime
 values. Building source strings from those values changes the program identity
@@ -4278,20 +4279,19 @@ and SHA-256 identity metadata is retained.
 
 #### Named mission selection
 
-Legacy Kernel helpers select the explicitly declared mission named `default`.
-Named variants take the mission name first:
+Kernel helpers require the mission name as their first argument:
 
 ```clojure
-(kernel/eval-in "reader" (program (return 1)))
-(kernel/eval-source-in "reader" generated-source)
-(kernel/eval-with-in "reader" (program (return data/params)) params)
-(kernel/eval-source-with-in "reader" generated-source params)
-(kernel/check-source-in "reader" generated-source)
-(kernel/mission-inventory-in "reader")
-(kernel/mission-model-context-in "reader")
+(kernel/eval "reader" (program (return 1)))
+(kernel/eval-source "reader" generated-source)
+(kernel/eval-with "reader" (program (return data/params)) params)
+(kernel/eval-source-with "reader" generated-source params)
+(kernel/check-source "reader" generated-source)
+(kernel/mission-inventory "reader")
+(kernel/mission-model-context "reader")
 ```
 
-The reserved request object carries an optional non-null `mission` string.
+The reserved request object requires a non-null `mission` string.
 Unknown names return a bounded protocol error listing the sorted declared
 names, without dispatching an evaluation or provider call. Each mission owns
 its own data, definitions, value history, source revision, frozen API, and
@@ -4302,13 +4302,13 @@ mission selected by each queued caller.
 
 #### Mission-aware source checking
 
-`(kernel/check-source source)` runs the production compiler against the frozen
-mission bundle, granted tool names, and current committed definitions, but does
-not execute the resulting AST. It consumes one `subordinate_source_checks`
-reservation, not a subordinate evaluation or mission capability call. A valid
-result carries the exact source byte count and SHA-256 identity. Compile errors
-return `:invalid` with a diagnostic containing `kind`, a message bounded to
-4,096 UTF-8 bytes, and bounded JSON-safe details.
+`(kernel/check-source mission-name source)` runs the production compiler against
+the selected frozen mission bundle, granted tool names, and current committed
+definitions, but does not execute the resulting AST. It consumes one
+`subordinate_source_checks` reservation, not a subordinate evaluation or mission
+capability call. A valid result carries the exact source byte count and SHA-256
+identity. Compile errors return `:invalid` with a diagnostic containing `kind`,
+a message bounded to 4,096 UTF-8 bytes, and bounded JSON-safe details.
 
 The remaining closed outcomes are `:limit_exceeded` for source size, check
 quota, compiler timeout/heap, deadline, or closure; `:busy` while an evaluation
@@ -4399,6 +4399,9 @@ Values stored via `def` persist across turns. Each `def` sets a single key:
 
 After Turn 2: `a=1, b={:y 20}, c=3`
 
+- Definition-memory keys use the symbol's canonical binary spelling at the
+  host boundary, including names that have a bounded internal atom spelling.
+  Atom-keyed continuation entries are not alternate variable bindings.
 - New symbols are added
 - Existing symbols are replaced (not deep-merged)
 - Symbols not referenced remain unchanged

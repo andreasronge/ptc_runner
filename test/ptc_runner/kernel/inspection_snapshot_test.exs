@@ -19,7 +19,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   @source "(return 42)"
   @source_hash :crypto.hash(:sha256, @source) |> Base.encode16(case: :lower)
 
-  test "V4 effective preludes qualify repeated component IDs by mission" do
+  test "effective preludes qualify repeated component IDs by mission" do
     records =
       ["reader", "writer"]
       |> Enum.with_index(1)
@@ -61,10 +61,10 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "mixed V1/V2 artifacts expose paired deterministic private queries", %{tmp_dir: root} do
+  test "multiple artifacts expose paired deterministic private queries", %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
-    write_run(trace, inspection, "v1-run", 1)
-    write_run(trace, inspection, "v2-run", 2)
+    write_run(trace, inspection, "basic-run", :basic)
+    write_run(trace, inspection, "mcp-run", :mcp)
 
     {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
 
@@ -81,7 +81,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert {:ok,
             %{
-              "items" => [%{"run_id" => "v1-run"}],
+              "items" => [%{"run_id" => "basic-run"}],
               "next_cursor" => cursor,
               "truncated" => true,
               "snapshot_hash" => ^snapshot_hash
@@ -89,7 +89,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert {:ok,
             %{
-              "items" => [%{"run_id" => "v2-run", "schema_version" => 2}],
+              "items" => [%{"run_id" => "mcp-run", "schema_version" => 4}],
               "next_cursor" => nil,
               "snapshot_hash" => ^snapshot_hash
             }} =
@@ -100,7 +100,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert {:error, :invalid_query} =
              InspectionSnapshot.query(snapshot, :model_exchanges, %{
-               "run_id" => "v2-run",
+               "run_id" => "mcp-run",
                "cursor" => cursor
              })
 
@@ -108,16 +108,16 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
             %{
               "items" => [
                 %{
-                  "capability_id" => "llm-v2-run",
+                  "capability_id" => "llm-mcp-run",
                   "input_sequence" => llm_input,
                   "output_sequence" => llm_output,
-                  "arguments" => %{"messages" => [%{"content" => "private-v2-run"}]},
-                  "result" => %{"status" => "ok", "value" => %{"answer" => "model-v2-run"}}
+                  "arguments" => %{"messages" => [%{"content" => "private-mcp-run"}]},
+                  "result" => %{"status" => "ok", "value" => %{"answer" => "model-mcp-run"}}
                 }
               ],
               "snapshot_hash" => ^snapshot_hash
             }} =
-             InspectionSnapshot.query(snapshot, :model_exchanges, %{"run_id" => "v2-run"})
+             InspectionSnapshot.query(snapshot, :model_exchanges, %{"run_id" => "mcp-run"})
 
     assert llm_input < llm_output
 
@@ -125,46 +125,46 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
             %{
               "items" => [
                 %{
-                  "capability_id" => "tool-v2-run",
-                  "arguments" => %{"path" => "private-v2-run.txt"},
-                  "result" => %{"status" => "ok", "value" => %{"text" => "secret-v2-run"}}
+                  "capability_id" => "tool-mcp-run",
+                  "arguments" => %{"path" => "private-mcp-run.txt"},
+                  "result" => %{"status" => "ok", "value" => %{"text" => "secret-mcp-run"}}
                 }
               ]
             }} =
-             InspectionSnapshot.query(snapshot, :capability_calls, %{"run_id" => "v2-run"})
+             InspectionSnapshot.query(snapshot, :capability_calls, %{"run_id" => "mcp-run"})
 
     assert {:ok,
             %{
               "items" => [
                 %{
-                  "evaluation_id" => "eval-v2-run",
+                  "evaluation_id" => "eval-mcp-run",
                   "source" => @source,
                   "source_hash" => "sha256:" <> @source_hash
                 }
               ]
             }} =
-             InspectionSnapshot.query(snapshot, :generated_sources, %{"run_id" => "v2-run"})
+             InspectionSnapshot.query(snapshot, :generated_sources, %{"run_id" => "mcp-run"})
 
     assert {:ok,
             %{
               "items" => [
                 %{
-                  "component_id" => "component-v2-run",
+                  "component_id" => "component-mcp-run",
                   "source" => @source,
                   "source_hash" => "sha256:" <> @source_hash
                 }
               ]
             }} =
-             InspectionSnapshot.query(snapshot, :effective_preludes, %{"run_id" => "v2-run"})
+             InspectionSnapshot.query(snapshot, :effective_preludes, %{"run_id" => "mcp-run"})
 
     assert {:ok, %{"items" => []}} =
-             InspectionSnapshot.query(snapshot, :provider_exchanges, %{"run_id" => "v1-run"})
+             InspectionSnapshot.query(snapshot, :provider_exchanges, %{"run_id" => "basic-run"})
 
     assert {:ok,
             %{
               "items" => [
                 %{
-                  "capability_id" => "tool-v2-run",
+                  "capability_id" => "tool-mcp-run",
                   "request_id" => 7,
                   "transport" => "stdio",
                   "request_sequence" => request_sequence,
@@ -175,20 +175,20 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
                     "method" => "tools/call",
                     "params" => %{
                       "name" => "read",
-                      "arguments" => %{"path" => "private-v2-run.txt"}
+                      "arguments" => %{"path" => "private-mcp-run.txt"}
                     }
                   },
                   "response" => %{
                     "jsonrpc" => "2.0",
                     "id" => 7,
-                    "result" => %{"content" => [%{"type" => "text", "text" => "secret-v2-run"}]}
+                    "result" => %{"content" => [%{"type" => "text", "text" => "secret-mcp-run"}]}
                   }
                 }
               ],
               "next_cursor" => provider_cursor
             }} =
              InspectionSnapshot.query(snapshot, :provider_exchanges, %{
-               "run_id" => "v2-run",
+               "run_id" => "mcp-run",
                "limit" => 1
              })
 
@@ -198,7 +198,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
               "next_cursor" => descending_cursor
             }} =
              InspectionSnapshot.query(snapshot, :provider_exchanges, %{
-               "run_id" => "v2-run",
+               "run_id" => "mcp-run",
                "limit" => 1,
                "order" => "desc"
              })
@@ -207,7 +207,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert {:error, :invalid_query} =
              InspectionSnapshot.query(snapshot, :provider_exchanges, %{
-               "run_id" => "v2-run",
+               "run_id" => "mcp-run",
                "order" => "newest"
              })
 
@@ -215,14 +215,14 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert {:ok, %{"items" => [%{"request_id" => 8}], "next_cursor" => nil}} =
              InspectionSnapshot.query(snapshot, :provider_exchanges, %{
-               "run_id" => "v2-run",
+               "run_id" => "mcp-run",
                "limit" => 1,
                "cursor" => provider_cursor
              })
 
     assert {:error, :invalid_query} =
              InspectionSnapshot.query(snapshot, :capability_calls, %{
-               "run_id" => "v2-run",
+               "run_id" => "mcp-run",
                "cursor" => provider_cursor
              })
 
@@ -236,7 +236,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert {:error, :source_changed} =
              InspectionSnapshot.query(snapshot, :provider_exchanges, %{
-               "run_id" => "v2-run",
+               "run_id" => "mcp-run",
                "cursor" => tampered_cursor
              })
 
@@ -245,13 +245,13 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     arguments = [
       %{"limit" => 2},
-      %{"run_id" => "v2-run"},
-      %{"run_id" => "v2-run"},
-      %{"run_id" => "v2-run"},
-      %{"run_id" => "v2-run"},
-      %{"run_id" => "v2-run"},
-      %{"run_id" => "v2-run"},
-      %{"run_id" => "v2-run"}
+      %{"run_id" => "mcp-run"},
+      %{"run_id" => "mcp-run"},
+      %{"run_id" => "mcp-run"},
+      %{"run_id" => "mcp-run"},
+      %{"run_id" => "mcp-run"},
+      %{"run_id" => "mcp-run"},
+      %{"run_id" => "mcp-run"}
     ]
 
     Enum.zip([profile_capabilities, manifest_capabilities, arguments])
@@ -259,19 +259,19 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       assert profile.callback.(query) == manifest.callback.(query)
     end)
 
-    File.write!(Path.join(inspection, "v2-run.inspection.jsonl"), "replaced")
+    File.write!(Path.join(inspection, "mcp-run.inspection.jsonl"), "replaced")
 
     assert {:ok, %{"items" => [%{"request_id" => 7}]}} =
              InspectionSnapshot.query(snapshot, :provider_exchanges, %{
-               "run_id" => "v2-run",
+               "run_id" => "mcp-run",
                "limit" => 1
              })
   end
 
   @tag :tmp_dir
-  test "V3 execution diagnostics are exposed as bounded run-scoped queries", %{tmp_dir: root} do
+  test "execution diagnostics are exposed as bounded run-scoped queries", %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
-    write_run(trace, inspection, "v3-run", 3)
+    write_run(trace, inspection, "diagnostics-run", :diagnostics)
 
     {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
 
@@ -287,20 +287,23 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
             %{
               "items" => [
                 %{
-                  "evaluation_id" => "workflow-eval-v3-run",
+                  "evaluation_id" => "workflow-eval-diagnostics-run",
                   "environment" => "workflow",
-                  "prints" => ["private-print-v3-run"],
+                  "prints" => ["private-print-diagnostics-run"],
                   "truncated" => false
                 }
               ],
               "next_cursor" => nil
-            }} = InspectionSnapshot.query(snapshot, :execution_prints, %{"run_id" => "v3-run"})
+            }} =
+             InspectionSnapshot.query(snapshot, :execution_prints, %{
+               "run_id" => "diagnostics-run"
+             })
 
     assert {:ok,
             %{
               "items" => [
                 %{
-                  "evaluation_id" => "workflow-eval-v3-run",
+                  "evaluation_id" => "workflow-eval-diagnostics-run",
                   "environment" => "workflow",
                   "kind" => "limit_exceeded",
                   "reason" => "timeout",
@@ -308,13 +311,16 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
                 }
               ],
               "next_cursor" => nil
-            }} = InspectionSnapshot.query(snapshot, :execution_errors, %{"run_id" => "v3-run"})
+            }} =
+             InspectionSnapshot.query(snapshot, :execution_errors, %{
+               "run_id" => "diagnostics-run"
+             })
   end
 
   @tag :tmp_dir
   test "an effective-prelude hash is directly usable as an override base hash", %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
-    write_run(trace, inspection, "v2-run", 2)
+    write_run(trace, inspection, "mcp-run", :mcp)
 
     {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
 
@@ -327,7 +333,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     end)
 
     assert {:ok, %{"items" => [item]}} =
-             InspectionSnapshot.query(snapshot, :effective_preludes, %{"run_id" => "v2-run"})
+             InspectionSnapshot.query(snapshot, :effective_preludes, %{"run_id" => "mcp-run"})
 
     candidate_source = item["source"] <> "\n"
     File.write!(Path.join(root, "candidate.clj"), candidate_source)
@@ -359,7 +365,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   @tag :tmp_dir
   test "capability naming supports fixed profiles and manifest aliases", %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
-    write_run(trace, inspection, "named", 1)
+    write_run(trace, inspection, "named", :basic)
     {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
     {:ok, snapshot} = InspectionSnapshot.start({:directory, inspection}, trace_snapshot)
 
@@ -409,7 +415,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   test "an ordinary manifest acquires trace before private inspection and exposes alias operations",
        %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
-    write_run(trace, inspection, "manifest-run", 2)
+    write_run(trace, inspection, "manifest-run", :mcp)
     File.write!(Path.join(root, "workflow.clj"), "(ns app) (defn run [x] (return x))")
 
     host_path = Path.join(root, "host.json")
@@ -578,13 +584,13 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     for scenario <- [:orphan, :duplicate, :incomplete, :malformed, :symlink, :replacement] do
       scenario_root = Path.join(root, Atom.to_string(scenario))
       {trace, inspection} = source_directories(scenario_root)
-      write_run(trace, inspection, "valid", 1)
+      write_run(trace, inspection, "valid", :basic)
       {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
 
       result =
         case scenario do
           :orphan ->
-            write_inspection(inspection, "orphan", 1, canonical_events("orphan"))
+            write_inspection(inspection, "orphan", :basic, canonical_events("orphan"))
             InspectionSnapshot.start({:directory, inspection}, trace_snapshot)
 
           :duplicate ->
@@ -637,7 +643,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   @tag :tmp_dir
   test "encoded, retained, result, and file ceilings are independent", %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
-    write_run(trace, inspection, "bounded", 1)
+    write_run(trace, inspection, "bounded", :basic)
     {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
     on_exit(fn -> TraceSnapshot.stop(trace_snapshot) end)
 
@@ -698,7 +704,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   @tag :tmp_dir
   test "capture heap exhaustion has the stable retained-limit error", %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
-    write_run(trace, inspection, "heap-bounded", 1)
+    write_run(trace, inspection, "heap-bounded", :basic)
     {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
     on_exit(fn -> TraceSnapshot.stop(trace_snapshot) end)
 
@@ -713,7 +719,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     tmp_dir: root
   } do
     {trace, inspection} = source_directories(root)
-    write_run(trace, inspection, "oversized", 1)
+    write_run(trace, inspection, "oversized", :basic)
     {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
 
     {:ok, snapshot} =
@@ -734,7 +740,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   @tag :tmp_dir
   test "safe metadata and owner lifecycle retain no private paths or payloads", %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
-    write_run(trace, inspection, "owned", 2)
+    write_run(trace, inspection, "owned", :mcp)
     {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
 
     owner =
@@ -785,19 +791,15 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     {trace, inspection}
   end
 
-  defp write_run(trace_directory, inspection_directory, run_id, version) do
+  defp write_run(trace_directory, inspection_directory, run_id, variant) do
     events = canonical_events(run_id)
     File.write!(Path.join(trace_directory, "#{run_id}.jsonl"), encode_jsonl(events))
-    write_inspection(inspection_directory, run_id, version, events)
+    write_inspection(inspection_directory, run_id, variant, events)
   end
 
-  defp write_inspection(directory, run_id, version, events) do
-    {:ok, sink} =
-      InspectionSink.start(
-        run_id: run_id,
-        trace_id: "trace-#{run_id}",
-        schema_version: version
-      )
+  # ex_dna:disable-for-next-line — Explicit records keep snapshot fixture failures local.
+  defp write_inspection(directory, run_id, variant, events) do
+    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
 
     emit!(sink, "capability-input", %{capability_id: "llm-#{run_id}"}, %{
       environment: :workflow,
@@ -813,12 +815,14 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     emit!(sink, "capability-input", %{capability_id: "tool-#{run_id}"}, %{
       environment: :mission,
+      mission_name: "default",
       name: "workspace.read",
       arguments: %{"path" => "private-#{run_id}.txt"}
     })
 
-    if version in [2, 3] do
+    if variant in [:mcp, :diagnostics] do
       emit!(sink, "mcp-request", %{capability_id: "tool-#{run_id}", request_id: 7}, %{
+        mission_name: "default",
         transport: :stdio,
         body: %{
           "jsonrpc" => "2.0",
@@ -832,6 +836,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       })
 
       emit!(sink, "mcp-response", %{capability_id: "tool-#{run_id}", request_id: 7}, %{
+        mission_name: "default",
         transport: :stdio,
         body: %{
           "jsonrpc" => "2.0",
@@ -843,6 +848,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       })
 
       emit!(sink, "mcp-request", %{capability_id: "tool-#{run_id}", request_id: 8}, %{
+        mission_name: "default",
         transport: :stdio,
         body: %{
           "jsonrpc" => "2.0",
@@ -856,6 +862,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       })
 
       emit!(sink, "mcp-response", %{capability_id: "tool-#{run_id}", request_id: 8}, %{
+        mission_name: "default",
         transport: :stdio,
         body: %{
           "jsonrpc" => "2.0",
@@ -869,12 +876,14 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     emit!(sink, "capability-output", %{capability_id: "tool-#{run_id}"}, %{
       environment: :mission,
+      mission_name: "default",
       name: "workspace.read",
       result: %{status: :ok, value: %{"text" => "secret-#{run_id}"}}
     })
 
     emit!(sink, "evaluation-source", %{evaluation_id: "eval-#{run_id}"}, %{
       environment: :mission,
+      mission_name: "default",
       program_kind: :"ptc-lisp",
       source: @source,
       source_hash: @source_hash,
@@ -888,7 +897,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       source_bytes: byte_size(@source)
     })
 
-    if version == 3 do
+    if variant == :diagnostics do
       PrivateInspectionFixture.emit_execution_diagnostics!(sink, run_id)
     end
 
@@ -899,11 +908,11 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   end
 
   defp write_incomplete_inspection(directory, run_id) do
-    {:ok, sink} =
-      InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}", schema_version: 1)
+    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
 
     emit!(sink, "capability-input", %{capability_id: "tool-#{run_id}"}, %{
       environment: :mission,
+      mission_name: "default",
       name: "workspace.read",
       arguments: %{"path" => "private"}
     })
@@ -923,9 +932,11 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   defp emit!(sink, type, correlation, payload),
     do: :ok = InspectionSink.emit(sink, type, correlation, payload)
 
+  # ex_dna:disable-for-next-line — Keep the compared snapshot-local trace readable here.
   defp canonical_events(run_id) do
     [
       event(run_id, 1, "run-started", %{
+        "missions" => %{"default" => %{}},
         "workflow_prelude" => %{
           "component_ids" => ["component-#{run_id}"],
           "dependency_indices" => [],
@@ -940,11 +951,13 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       event(run_id, 3, "capability-started", %{
         "capability_id" => "tool-#{run_id}",
         "environment" => "mission",
+        "mission_name" => "default",
         "name" => "workspace.read"
       }),
       event(run_id, 4, "evaluation-started", %{
         "evaluation_id" => "eval-#{run_id}",
         "environment" => "mission",
+        "mission_name" => "default",
         "program_kind" => "ptc-lisp",
         "source_hash" => @source_hash,
         "source_bytes" => byte_size(@source)
@@ -954,9 +967,10 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     ]
   end
 
+  # ex_dna:disable-for-next-line — The snapshot test owns its independent canonical-event constructor.
   defp event(run_id, sequence, type, data) do
     %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "run_id" => run_id,
       "trace_id" => "trace-#{run_id}",
       "sequence" => sequence,

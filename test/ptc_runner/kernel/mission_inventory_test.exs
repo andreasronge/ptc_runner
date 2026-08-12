@@ -53,7 +53,7 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
     assert config.missions["default"].inventory.rendered == @expected
 
     assert {:ok, %{value: @expected}} =
-             Kernel.run("(return (kernel/mission-inventory))", config)
+             Kernel.run("(return (kernel/mission-inventory \"default\"))", config)
 
     started = Enum.find(EventSink.events(sink), &(&1.type == "run-started"))
 
@@ -80,16 +80,16 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
     {model_config, _model_sink} = config_for.("mission-model-context")
 
     assert {:ok, %{value: @expected_model}} =
-             Kernel.run("(return (kernel/mission-model-context))", model_config)
+             Kernel.run("(return (kernel/mission-model-context \"default\"))", model_config)
 
     {repl_config, _repl_sink} = config_for.("mission-inventory-repl")
     {:ok, repl} = ReplSession.new(config: repl_config)
 
     assert {:ok, %{return: @expected}, repl} =
-             ReplSession.eval(repl, "(kernel/mission-inventory)")
+             ReplSession.eval(repl, "(kernel/mission-inventory \"default\")")
 
     assert {:ok, %{return: @expected_model}, repl} =
-             ReplSession.eval(repl, "(kernel/mission-model-context)")
+             ReplSession.eval(repl, "(kernel/mission-model-context \"default\")")
 
     assert {:ok, _events} = ReplSession.close(repl)
   end

@@ -469,8 +469,9 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
 
     Enum.each(sources, fn source ->
       direct =
-        Evaluation.evaluate_source_detailed(
+        Evaluation.evaluate_source(
           direct_state,
+          "default",
           session_state.config.missions["default"].environment,
           source,
           session_state.config.limits.evaluation_timeout_ms,

@@ -59,7 +59,7 @@ and is out of scope here.
 
 ## Shape
 
-A manifest-authored application on the current runtime (`mix ptc.run` today;
+A manifest-authored application on the current runtime (`mix ptc run` today;
 a `ptc init` template once the stable CLI plan delivers `init`):
 
 - **Ingestion** through read-only MCP tools only: `evidence.list_sources`,

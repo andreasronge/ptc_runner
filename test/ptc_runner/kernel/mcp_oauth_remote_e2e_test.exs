@@ -159,7 +159,7 @@ defmodule PtcRunner.Kernel.MCPOAuthRemoteE2ETest do
       )
 
     source =
-      ~S|(return (tool/kernel-eval {"kind" :source "source" "(return (tool/time.city {\"city\" \"nyc\"}))"}))|
+      ~S|(return (tool/kernel-eval {"mission" "default" "kind" :source "source" "(return (tool/time.city {\"city\" \"nyc\"}))"}))|
 
     assert {:ok,
             %{

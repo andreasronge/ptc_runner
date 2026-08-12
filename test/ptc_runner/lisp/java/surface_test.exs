@@ -794,7 +794,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
   end
 
   @tag :tmp_dir
-  test "precommit discovers current and legacy generated Java audit orphans recursively", %{
+  test "precommit discovers current generated Java audit orphans recursively", %{
     tmp_dir: dir
   } do
     precommit = Mix.Project.config() |> Keyword.fetch!(:aliases) |> Keyword.fetch!(:precommit)
@@ -803,10 +803,10 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert "ptc.conformance_report --check-inventory" in precommit
 
     current = Path.join(dir, "docs/conformance/current.md")
-    legacy = Path.join(dir, "docs/conformance/nested/legacy.md")
+    orphan = Path.join(dir, "docs/conformance/nested/orphan.md")
     unrelated = Path.join(dir, "docs/conformance/unrelated.md")
 
-    File.mkdir_p!(Path.dirname(legacy))
+    File.mkdir_p!(Path.dirname(orphan))
 
     File.write!(
       current,
@@ -814,8 +814,8 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     )
 
     File.write!(
-      legacy,
-      "<!-- Auto-generated — do not edit by hand -->\nfrom `priv/java_compat_audit.exs`\n"
+      orphan,
+      "<!-- Auto-generated — do not edit by hand -->\nfrom `priv/java_interop.exs`\n"
     )
 
     File.write!(
@@ -825,11 +825,11 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
 
     discovered = GenDocs.generated_java_audit_paths(dir)
 
-    assert discovered == [current, legacy]
+    assert discovered == [current, orphan]
 
     assert GenDocs.java_audit_path_drift([current], discovered) == %{
              missing: [],
-             orphaned: [legacy]
+             orphaned: [orphan]
            }
 
     assert GenDocs.java_audit_path_drift(

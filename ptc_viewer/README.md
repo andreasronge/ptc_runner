@@ -148,7 +148,7 @@ Authenticated remote access, multiple private artifacts, and prelude editing
 remain outside this local development mode.
 
 The checked-in dialogue fixture is generated from the current credential-free
-inspection lab. Regenerate its V2 two-call recovery artifacts from the
+inspection lab. Regenerate its trace-V2/inspection-V4 two-call recovery artifacts from the
 repository root with:
 
 ```bash

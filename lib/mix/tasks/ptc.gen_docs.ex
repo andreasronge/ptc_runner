@@ -36,6 +36,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   @host_schema_path "priv/schemas/ptc-host-config.schema.json"
   @manifest_schema_path "priv/schemas/ptc-application-manifest.schema.json"
   @command_schema_path "priv/schemas/ptc-command-envelope-v2.schema.json"
+  @generated_schema_paths [@host_schema_path, @manifest_schema_path, @command_schema_path]
 
   @audits [
     %{
@@ -114,7 +115,11 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     Mix.Task.run("app.start")
     check? = "--check" in args
 
-    if check?, do: check_java_audit_path_set!()
+    if check? do
+      check_java_audit_path_set!()
+      check_generated_schema_path_set!()
+    end
+
     validate_limit_catalog!()
 
     generate_function_reference(check?)
@@ -164,6 +169,35 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     end
   end
 
+  defp check_generated_schema_path_set! do
+    case generated_path_drift(@generated_schema_paths, generated_schema_paths()) do
+      %{missing: [], orphaned: []} ->
+        :ok
+
+      drift ->
+        Mix.raise("Generated schema path set is stale: #{inspect(drift)}")
+    end
+  end
+
+  @doc false
+  def generated_schema_paths(root \\ ".") do
+    root
+    |> Path.join("priv/schemas/ptc-*.schema.json")
+    |> Path.wildcard()
+    |> Enum.sort()
+  end
+
+  @doc false
+  def generated_path_drift(expected, actual) do
+    expected = MapSet.new(expected)
+    actual = MapSet.new(actual)
+
+    %{
+      missing: expected |> MapSet.difference(actual) |> Enum.sort(),
+      orphaned: actual |> MapSet.difference(expected) |> Enum.sort()
+    }
+  end
+
   @doc false
   def generated_java_audit_paths(root \\ ".") do
     root
@@ -175,23 +209,14 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
   @doc false
   def java_audit_path_drift(expected, actual) do
-    expected = MapSet.new(expected)
-    actual = MapSet.new(actual)
-
-    %{
-      missing: expected |> MapSet.difference(actual) |> Enum.sort(),
-      orphaned: actual |> MapSet.difference(expected) |> Enum.sort()
-    }
+    generated_path_drift(expected, actual)
   end
 
   defp generated_java_audit?(path) do
     case File.read(path) do
       {:ok, content} ->
         String.starts_with?(content, "<!-- Auto-generated") and
-          Enum.any?(
-            ["priv/java_interop.exs", "priv/java_compat_audit.exs"],
-            &String.contains?(content, "from `#{&1}`")
-          )
+          String.contains?(content, "from `priv/java_interop.exs`")
 
       {:error, _reason} ->
         false

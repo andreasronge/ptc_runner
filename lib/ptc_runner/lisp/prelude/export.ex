@@ -111,19 +111,11 @@ defmodule PtcRunner.Lisp.Prelude.Export do
   @doc """
   Renders the Lisp-facing arglist for an export.
 
-  Uses captured source parameter names when present and falls back to the old
-  arity-based synthetic names for defensive compatibility with reconstructed
-  export-like records.
+  Uses the parameter names captured from the compiled source.
   """
-  @spec signature(map()) :: String.t()
-  def signature(%{symbol: symbol} = export) do
-    params = Map.get(export, :params, [])
-
-    args =
-      case params do
-        [_ | _] -> Enum.join(params, " ")
-        _ -> synthetic_args(Map.get(export, :arity))
-      end
+  @spec signature(t()) :: String.t()
+  def signature(%__MODULE__{symbol: symbol, params: params}) do
+    args = Enum.join(params, " ")
 
     if args == "", do: "(#{symbol})", else: "(#{symbol} #{args})"
   end
@@ -139,20 +131,12 @@ defmodule PtcRunner.Lisp.Prelude.Export do
   render call forms from here, so the form a program is shown by `(doc ...)` is
   the form the prompt advertises.
   """
-  @spec call_form(map()) :: String.t()
-  def call_form(%{kind: :constant, ref: ref}), do: ref
+  @spec call_form(t()) :: String.t()
+  def call_form(%__MODULE__{kind: :constant, ref: ref}), do: ref
 
-  def call_form(%{ref: ref, symbol: symbol} = export) do
+  def call_form(%__MODULE__{ref: ref, symbol: symbol} = export) do
     export
     |> signature()
     |> String.replace_prefix("(#{symbol}", "(#{ref}")
   end
-
-  defp synthetic_args(:variadic), do: "& args"
-
-  defp synthetic_args(arity) when is_integer(arity) do
-    Enum.map_join(1..arity//1, " ", fn i -> "arg#{i}" end)
-  end
-
-  defp synthetic_args(_), do: ""
 end

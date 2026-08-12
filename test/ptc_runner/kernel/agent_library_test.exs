@@ -988,7 +988,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:agent_request, _request}
     assert_receive {:provider_closed, :transcript_rejected}
     refute_receive {:provider_closed, :transcript_rejected}
-    assert {:ok, []} = InspectionSink.records(inspection_sink)
+    assert {:ok, [diagnostic]} = InspectionSink.records(inspection_sink)
+    assert diagnostic["record_type"] == "execution-error"
+    assert diagnostic["payload"]["reason"] == "explicit_failure"
+    assert diagnostic["payload"]["details"] == %{"failure_kind" => "transcript-limit"}
 
     {:ok, bundle} = agent_bundle(prompt_source: prompt_source)
 
@@ -1035,7 +1038,9 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:agent_request, _request}
     assert_receive {:provider_closed, :encoding_rejected}
     refute_receive {:provider_closed, :encoding_rejected}
-    assert {:ok, []} = InspectionSink.records(inspection_sink)
+    assert {:ok, [diagnostic]} = InspectionSink.records(inspection_sink)
+    assert diagnostic["record_type"] == "execution-error"
+    assert diagnostic["payload"]["reason"] == "prelude_contract_error"
 
     refute Enum.any?(EventSink.events(config.event_sink), fn event ->
              event.type == "capability-started" and event.data[:name] == "llm-request"

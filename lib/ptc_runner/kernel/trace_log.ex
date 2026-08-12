@@ -1927,8 +1927,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       sequences: %{},
       run_traces: %{},
       trace_runs: %{},
-      run_lifecycles: %{},
-      run_versions: %{}
+      run_lifecycles: %{}
     }
 
     Enum.reduce_while(events, {:ok, initial}, fn event, {:ok, state} ->
@@ -1939,7 +1938,6 @@ defmodule PtcRunner.Kernel.TraceLog do
            previous = Map.get(state.sequences, trace_id, 0),
            true <- sequence > previous,
            :ok <- same_identity(state, run_id, trace_id),
-           :ok <- same_run_version(state.run_versions, run_id, event["schema_version"]),
            {:ok, run_lifecycles} <-
              advance_run_lifecycle(state.run_lifecycles, run_id, event["type"]) do
         {:cont,
@@ -1948,8 +1946,7 @@ defmodule PtcRunner.Kernel.TraceLog do
             sequences: Map.put(state.sequences, trace_id, sequence),
             run_traces: Map.put(state.run_traces, run_id, trace_id),
             trace_runs: Map.put(state.trace_runs, trace_id, run_id),
-            run_lifecycles: run_lifecycles,
-            run_versions: Map.put(state.run_versions, run_id, event["schema_version"])
+            run_lifecycles: run_lifecycles
           }}}
       else
         {:error, reason} -> {:halt, {:error, reason}}
@@ -1994,15 +1991,9 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp same_run_version(run_versions, run_id, version) do
-    if Map.get(run_versions, run_id, version) == version,
-      do: :ok,
-      else: {:error, :malformed_source}
-  end
-
   defp validate_event(event) when is_map(event) do
     with true <- Enum.sort(Map.keys(event)) == Enum.sort(@event_keys),
-         version when version in [1, 2] <- event["schema_version"],
+         2 <- event["schema_version"],
          :ok <- valid_string(event["run_id"]),
          :ok <- valid_string(event["trace_id"]),
          sequence when is_integer(sequence) and sequence > 0 <- event["sequence"],
@@ -2011,27 +2002,23 @@ defmodule PtcRunner.Kernel.TraceLog do
          type when is_binary(type) <- event["type"],
          true <- type =~ @event_type,
          true <- JSONValue.map?(event["data"]),
-         :ok <- validate_event_data(version, type, event["data"]) do
+         :ok <- validate_event_data(type, event["data"]) do
       :ok
     else
-      version when is_integer(version) and version not in [1, 2] -> {:error, :unsupported_version}
+      version when is_integer(version) and version != 2 -> {:error, :unsupported_version}
       _ -> {:error, :malformed_source}
     end
   end
 
   defp validate_event(_event), do: {:error, :malformed_source}
 
-  defp validate_event_data(version, type, data) do
-    with :ok <- validate_versioned_event_data(version, type, data) do
+  defp validate_event_data(type, data) do
+    with :ok <- validate_current_event_data(type, data) do
       validate_run_stopped_usage(type, data)
     end
   end
 
-  defp validate_versioned_event_data(1, _type, data) do
-    if Map.has_key?(data, "mission_name"), do: {:error, :malformed_source}, else: :ok
-  end
-
-  defp validate_versioned_event_data(2, "run-started", data) do
+  defp validate_current_event_data("run-started", data) do
     singular =
       ~w(mission_prelude mission_inventory_hash mission_inventory_bytes mission_model_context_hash mission_model_context_bytes)
 
@@ -2043,12 +2030,12 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp validate_versioned_event_data(2, type, data)
+  defp validate_current_event_data(type, data)
        when type in ["run-stopped", "events-dropped"] do
     if Map.has_key?(data, "mission_name"), do: {:error, :malformed_source}, else: :ok
   end
 
-  defp validate_versioned_event_data(2, _type, data) do
+  defp validate_current_event_data(_type, data) do
     environment = stringify(data["environment"])
 
     case environment do
@@ -2134,32 +2121,11 @@ defmodule PtcRunner.Kernel.TraceLog do
     }
   end
 
-  # Absent prelude data projects to an empty graph. Legacy run-started
-  # payloads without dependency_indices pass through verbatim — the query
-  # layer never invents missing edges.
+  # Absent prelude data projects to an empty graph.
   defp empty_prelude,
     do: %{"component_ids" => [], "dependency_indices" => [], "hash" => nil}
 
-  # V1 traces described one implicit mission with singular fields. The V2
-  # query projection always exposes the named map, including when its source
-  # is a retained V1 trace.
-  defp run_missions(started) do
-    case event_data(started, "missions") do
-      missions when is_map(missions) ->
-        missions
-
-      _other ->
-        %{
-          "default" => %{
-            "prelude" => event_data(started, "mission_prelude", empty_prelude()),
-            "inventory_hash" => event_data(started, "mission_inventory_hash"),
-            "inventory_bytes" => event_data(started, "mission_inventory_bytes"),
-            "model_context_hash" => event_data(started, "mission_model_context_hash"),
-            "model_context_bytes" => event_data(started, "mission_model_context_bytes")
-          }
-        }
-    end
-  end
+  defp run_missions(started), do: event_data(started, "missions", %{})
 
   defp subordinate_source_checks(%{
          "data" => %{"usage" => %{"subordinate_source_checks" => count}}
@@ -2227,13 +2193,6 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp mission_matches?(event, expected) when is_binary(expected),
     do: event_mission_name(event) == expected
-
-  defp event_mission_name(%{"schema_version" => 1} = event) do
-    if stringify(event_data(event, "environment")) == "mission" and
-         is_nil(event_data(event, "mission_name")),
-       do: "default",
-       else: nil
-  end
 
   defp event_mission_name(%{"schema_version" => 2} = event) do
     if stringify(event_data(event, "environment")) == "mission",

@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.DispatcherArgumentViolationTest do
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.CoreToSource
+  alias PtcRunner.TestSupport.TestHelpers
 
   test "schema rejection names the argument, violated keyword, and declared bound" do
     result =
@@ -388,7 +389,18 @@ defmodule PtcRunner.Kernel.DispatcherArgumentViolationTest do
     {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
     {:ok, state} = RunState.start(Limits.defaults())
 
-    result = Dispatcher.dispatch(state, :workflow, environment, capability.name, arguments, 100)
+    result =
+      Dispatcher.dispatch(
+        state,
+        :workflow,
+        environment,
+        capability.name,
+        arguments,
+        TestHelpers.dispatch_context(state, :workflow, 100),
+        nil,
+        nil
+      )
+
     refute_received {:unexpected_callback, _submitted}
     result
   end
@@ -423,7 +435,7 @@ defmodule PtcRunner.Kernel.DispatcherArgumentViolationTest do
         environment,
         capability.name,
         arguments,
-        100,
+        TestHelpers.dispatch_context(state, :workflow, 100),
         sink,
         nil
       )

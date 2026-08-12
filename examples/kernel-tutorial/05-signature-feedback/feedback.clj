@@ -2,8 +2,10 @@
 
 (defn run [_input]
   (let [invalid (kernel/eval-source
+                  "default"
                   "(tutorial.signatures/double \"21\")")
         corrected (kernel/eval-source
+                    "default"
                     "(return (tutorial.signatures/double 21))")]
     (return
       {"invalid_evaluation" invalid

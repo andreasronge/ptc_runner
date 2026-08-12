@@ -5,9 +5,9 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   A manifest can select a bounded provider name and JSON configuration; it
   cannot register a module, function, callback, command, or code URL. Builders
   receive a path-free application identity, requested workflow or mission
-  destination, building owner, and installed limits. They return either one
-  legacy `PtcRunner.Kernel.Capability` or a normalized provider build with one
-  or more capabilities, an optional safe snapshot, and an optional idempotent
+  destination, building owner, and installed limits. Acquisition returns a
+  normalized provider build with one or more capabilities, an optional safe
+  snapshot, and an optional idempotent
   close function. A close function must return exactly `:ok`; any other return,
   exception, or exit is a provider-cleanup failure. The Kernel still attempts
   every registered close function and may replace the run outcome with
@@ -42,10 +42,6 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   acquisition service. Services pass opaque values only between selected
   trusted providers after the barrier; they never enter Lisp environments,
   connector snapshots, traces, or result artifacts.
-  Legacy Elixir builders remain supported as normal-data-only providers and
-  are deferred to the acquisition phase; a classified custom provider must use
-  the staged form.
-
   There are no implicit built-ins. CLI applications receive exactly the
   aliases in their host installation, while trusted Elixir embedding can pass
   any explicit builder map. The registry also freezes the installed limit
@@ -65,16 +61,6 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   `PtcRunner.Kernel.ResourceRegistrar.handoff_root/2` only after it has stopped
   accepting work and the terminal operation has a bounded self-owner or
   adopter.
-
-  ## Adding a field to the prepared contract
-
-  A prepared map is built in two places: `normalize_prepared/1` defaults and
-  validates the staged form, and `prepare/4`'s legacy-builder branch
-  constructs one inline without passing through it. A new key must be added to
-  both, and to the `t:prepared/0` typespec — that type is exact, so a runtime
-  key it does not declare makes every later `preflight/1` clause unmatchable.
-  Adding a key to only one construction site compiles cleanly and then fails
-  at run time with `KeyError` in whatever reads it.
 
   `provides` is not a general marker. It names an acquisition service, and
   `normalize_build/2` requires the acquired build to export exactly the
@@ -142,16 +128,12 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           accepts_data: [:normal | :private_inspection],
           exports: %{optional(atom()) => term()}
         }
-  @type builder ::
-          (map(), context() ->
-             {:ok, Capability.t() | built_provider()} | {:error, term()})
   @type credential_values :: %{binary() => binary()}
   @type acquisition_services :: %{optional(atom()) => term()}
   @type acquire ::
-          (credential_values() ->
-             {:ok, Capability.t() | built_provider()} | {:error, term()})
+          (credential_values() -> {:ok, built_provider()} | {:error, term()})
           | (credential_values(), acquisition_services() ->
-               {:ok, Capability.t() | built_provider()} | {:error, term()})
+               {:ok, built_provider()} | {:error, term()})
   @type prepared :: %{
           credential_names: [binary()],
           data_class: :normal | :private_inspection,
@@ -182,7 +164,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           {:staged,
            (map(), context() ->
               {:ok, prepared()} | {:error, term()}), ProviderDescriptor.data_policy() | nil}
-  @type registry_builder :: builder() | staged_builder()
+  @type registry_builder :: staged_builder()
   @type credential_resolver ::
           ([binary()] -> {:ok, credential_values()} | {:error, term()})
   @opaque authority_owner :: struct()
@@ -194,7 +176,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
         }
 
   @spec new(map(), keyword()) :: {:ok, t()} | {:error, :invalid_provider_registry}
-  @doc "Creates a registry from explicit builder functions keyed by provider name."
+  @doc "Creates a registry from explicit staged builders keyed by provider name."
   def new(additional_builders \\ %{}, opts \\ [])
 
   def new(additional_builders, opts)
@@ -348,25 +330,11 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
         |> normalize_prepared()
         |> declared_policy_honored(declared_policy)
 
-      {:ok, builder} when is_function(builder, 2) ->
-        full_context = Map.put(context, :provider, name)
-
-        {:ok,
-         %{
-           credential_names: [],
-           data_class: :normal,
-           accepts_data: [:normal],
-           requires: [],
-           provides: [],
-           workflow_llm?: false,
-           workflow_llm_route: nil,
-           preflight: fn ->
-             {:ok, fn %{}, %{} -> builder.(config, full_context) end}
-           end
-         }}
-
       :error ->
         {:error, :unknown_provider}
+
+      {:ok, _invalid} ->
+        {:error, :invalid_provider_registry}
     end
   end
 
@@ -673,18 +641,6 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp normalize_credentials({:error, _reason} = error, _names), do: error
   defp normalize_credentials(_result, _names), do: {:error, :invalid_credential_values}
 
-  defp normalize_build({:ok, %Capability{} = capability}, []) do
-    {:ok,
-     %{
-       capabilities: [capability],
-       snapshot: nil,
-       close: nil,
-       data_class: :normal,
-       accepts_data: [:normal],
-       exports: %{}
-     }}
-  end
-
   defp normalize_build({:ok, %{capabilities: capabilities} = built}, provides) do
     snapshot = Map.get(built, :snapshot)
     close = Map.get(built, :close)
@@ -736,7 +692,6 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp default_credential_resolver([]), do: {:ok, %{}}
   defp default_credential_resolver(_names), do: {:error, :credential_resolver_missing}
 
-  defp valid_builder?(builder) when is_function(builder, 2), do: true
   defp valid_builder?({:staged, prepare, nil}) when is_function(prepare, 2), do: true
 
   defp valid_builder?({:staged, prepare, %{data_class: class, accepts_data: accepts} = policy})

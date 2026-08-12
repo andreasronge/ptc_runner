@@ -371,35 +371,6 @@ defmodule PtcViewer.DialogueRenderTest do
       assert rendered =~ "EDITED_PROMPT"
     end
 
-    test "keeps legacy mission-API prompts structured" do
-      rendered =
-        render_fixtures(%{
-          inspection: fn inspection ->
-            update_in(inspection, ["records"], fn records ->
-              Enum.map(records, fn record ->
-                if record["record_type"] == "capability-input" and
-                     record["payload"]["name"] == "llm-request" do
-                  update_in(
-                    record,
-                    ["payload", "arguments", "system"],
-                    &String.replace(
-                      &1,
-                      "Available API",
-                      "Mission API and limits (deterministic JSON)"
-                    )
-                  )
-                else
-                  record
-                end
-              end)
-            end)
-          end
-        })
-
-      assert rendered =~ "Mission API and limits (deterministic JSON)"
-      refute rendered =~ "Edited or unknown prompt format"
-    end
-
     test "keeps a canonical empty Available API section structured" do
       rendered =
         render_fixtures(%{

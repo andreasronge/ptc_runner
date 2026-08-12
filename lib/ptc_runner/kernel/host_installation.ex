@@ -1016,9 +1016,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
           transport: {:streamable_http, endpoint: transport.endpoint, headers: fn -> headers end}
         ] ++ options
 
-      options
-      |> MCPSource.builder()
-      |> then(& &1.(selected, context))
+      MCPSource.acquire(options, selected, context)
       |> classify(installation, selected, context.provider)
     end
   end
@@ -1047,9 +1045,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
         ] ++ options
 
       result =
-        source_options
-        |> MCPSource.builder()
-        |> then(& &1.(selected, context))
+        MCPSource.acquire(source_options, selected, context)
         |> classify(installation, selected, context.provider)
 
       case result do
@@ -1099,9 +1095,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
         start_timeout_ms: transport.start_timeout_ms
       ]
 
-      ([transport: {:stdio, transport_options}] ++ options)
-      |> MCPSource.builder()
-      |> then(& &1.(selected, context))
+      MCPSource.acquire(
+        [transport: {:stdio, transport_options}] ++ options,
+        selected,
+        context
+      )
       |> classify(installation, selected, context.provider)
     end
   end

@@ -235,7 +235,7 @@
 (defn render [state]
   (if (map? state)
     (let [context (json/parse-string
-                    (kernel/mission-model-context-in (or (get state :mission) "default")))]
+                    (kernel/mission-model-context (or (get state :mission) "default")))]
       (if (and (map? context) (= 2 (get context "schema_version")))
         (str "PTC_AGENT_PROMPT_V1\n\n"
              "Instructions\n"

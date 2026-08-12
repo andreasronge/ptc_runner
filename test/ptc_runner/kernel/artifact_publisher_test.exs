@@ -89,7 +89,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
 
     records = [
       %{
-        "schema_version" => 1,
+        "schema_version" => 4,
         "run_id" => run_id,
         "trace_id" => trace_id,
         "sequence" => 1,
@@ -98,6 +98,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
         "correlation" => %{"capability_id" => "cap-dropped"},
         "payload" => %{
           "environment" => "mission",
+          "mission_name" => "default",
           "name" => "evidence.get",
           "arguments" => %{"id" => 42}
         }
@@ -105,7 +106,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
     ]
 
     events = [
-      trace_event(run_id, trace_id, 1, "run-started", %{}),
+      trace_event(run_id, trace_id, 1, "run-started", %{"missions" => %{"default" => %{}}}),
       trace_event(run_id, trace_id, 2, "events-dropped", %{"counts" => counts}),
       trace_event(run_id, trace_id, 3, "run-stopped", %{
         "outcome" => "ok",
@@ -1011,20 +1012,22 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   defp fixture_parts(body), do: {body, nil}
 
   defp trace_event(run_id, sequence, type) do
+    data = if type == "run-started", do: %{"missions" => %{}}, else: %{}
+
     %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "run_id" => run_id,
       "trace_id" => "trace-#{run_id}",
       "sequence" => sequence,
       "timestamp" => "2026-07-12T12:00:00Z",
       "type" => type,
-      "data" => %{}
+      "data" => data
     }
   end
 
   defp trace_event(run_id, trace_id, sequence, type, data) do
     %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "run_id" => run_id,
       "trace_id" => trace_id,
       "sequence" => sequence,

@@ -149,7 +149,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
 
     assert {:ok, %{value: %{"outcome" => "returned", "value" => %{"items" => [metadata]}}}} =
              Kernel.run(
-               "(return (kernel/eval (program (return (log/runs {\"limit\" 1})))))",
+               ~S|(return (kernel/eval "default" (program (return (log/runs {"limit" 1})))))|,
                config
              )
 
@@ -175,13 +175,13 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   test "run summaries pass prelude dependency projections through verbatim", %{
     tmp_dir: directory
   } do
-    v2_prelude = %{
+    complete_prelude = %{
       "component_ids" => ["kernel", "llm", "agent.core"],
       "dependency_indices" => [[], [], [0, 1]],
       "hash" => "abc"
     }
 
-    legacy_prelude = %{"component_ids" => ["kernel"], "hash" => "def"}
+    minimal_prelude = %{"component_ids" => ["kernel"], "hash" => "def"}
 
     path = Path.join(directory, "trace.jsonl")
 
@@ -192,13 +192,13 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     }
 
     events = [
-      decoded_event("v2-run", 1, "run-started", %{
-        "workflow_prelude" => v2_prelude,
+      decoded_event("complete-run", 1, "run-started", %{
+        "workflow_prelude" => complete_prelude,
         "component_overrides" => [component_override]
       }),
-      decoded_event("v2-run", 2, "run-stopped", %{"outcome" => "ok"}),
-      decoded_event("legacy-run", 1, "run-started", %{"workflow_prelude" => legacy_prelude}),
-      decoded_event("legacy-run", 2, "run-stopped", %{"outcome" => "ok"})
+      decoded_event("complete-run", 2, "run-stopped", %{"outcome" => "ok"}),
+      decoded_event("minimal-run", 1, "run-started", %{"workflow_prelude" => minimal_prelude}),
+      decoded_event("minimal-run", 2, "run-stopped", %{"outcome" => "ok"})
     ]
 
     assert :ok = TraceLog.append_jsonl(path, events)
@@ -207,12 +207,11 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
 
     summaries = Map.new(items, &{&1["run_id"], &1})
 
-    # The complete nested projection survives, and a legacy payload without
-    # dependency_indices is never backfilled with invented edges.
-    assert summaries["v2-run"]["workflow_prelude"] == v2_prelude
-    assert summaries["legacy-run"]["workflow_prelude"] == legacy_prelude
-    assert summaries["v2-run"]["component_overrides"] == [component_override]
-    assert summaries["v2-run"]["positions"] == [1]
+    # Optional dependency indices are passed through rather than invented.
+    assert summaries["complete-run"]["workflow_prelude"] == complete_prelude
+    assert summaries["minimal-run"]["workflow_prelude"] == minimal_prelude
+    assert summaries["complete-run"]["component_overrides"] == [component_override]
+    assert summaries["complete-run"]["positions"] == [1]
   end
 
   @tag :tmp_dir
@@ -742,7 +741,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     assert {:error, %{kind: :invalid_request, details: "trace source changed"}} =
              list_runs.callback.(%{"limit" => 1, "cursor" => cursor})
 
-    File.write!(malformed, ~s({"schema_version":1,"schema_version":1}\n))
+    File.write!(malformed, ~s({"schema_version":2,"schema_version":2}\n))
 
     assert {:error, %{kind: :invalid_request, details: "malformed trace source"}} =
              list_runs.callback.(%{})
@@ -845,7 +844,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   end
 
   @tag :tmp_dir
-  test "V2 validation rejects mixed versions and missing or misplaced mission attribution", %{
+  test "current validation rejects missing or misplaced mission attribution", %{
     tmp_dir: directory
   } do
     query = fn events, name ->
@@ -856,18 +855,17 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     end
 
     valid = [
-      v2_event("v2", 1, "run-started", %{"missions" => %{}}),
-      v2_event("v2", 2, "evaluation-started", %{
+      decoded_event("current", 1, "run-started", %{"missions" => %{}}),
+      decoded_event("current", 2, "evaluation-started", %{
         "environment" => "mission",
         "mission_name" => "reader",
         "evaluation_id" => "e1"
       }),
-      v2_event("v2", 3, "run-stopped", %{"outcome" => "ok"})
+      decoded_event("current", 3, "run-stopped", %{"outcome" => "ok"})
     ]
 
     assert {:ok, _result} = query.(valid, "valid")
 
-    mixed = put_in(valid, [Access.at(1), "schema_version"], 1)
     missing = update_in(valid, [Access.at(1), "data"], &Map.delete(&1, "mission_name"))
 
     misplaced =
@@ -883,44 +881,43 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
       })
 
     for {label, events} <- [
-          mixed: mixed,
           missing: missing,
           misplaced: misplaced,
           singular_start: singular_start
         ] do
       case query.(events, "invalid-#{label}") do
         {:error, :malformed_source} -> :ok
-        other -> flunk("accepted invalid #{label} V2 trace: #{inspect(other)}")
+        other -> flunk("accepted invalid #{label} trace: #{inspect(other)}")
       end
     end
   end
 
-  test "mission filters narrow counters and infer default only for retained V1 events" do
-    v2_events = [
-      v2_event("v2-filter", 1, "run-started", %{"missions" => %{}}),
-      v2_event("v2-filter", 2, "evaluation-started", %{
+  test "mission filters narrow counters by explicit identity" do
+    events = [
+      decoded_event("mission-filter", 1, "run-started", %{"missions" => %{}}),
+      decoded_event("mission-filter", 2, "evaluation-started", %{
         "environment" => "mission",
         "mission_name" => "reader",
         "evaluation_id" => "reader-eval"
       }),
-      v2_event("v2-filter", 3, "capability-started", %{
+      decoded_event("mission-filter", 3, "capability-started", %{
         "environment" => "mission",
         "mission_name" => "reader",
         "capability_id" => "reader-call",
         "name" => "read"
       }),
-      v2_event("v2-filter", 4, "evaluation-started", %{
+      decoded_event("mission-filter", 4, "evaluation-started", %{
         "environment" => "mission",
         "mission_name" => "writer",
         "evaluation_id" => "writer-eval"
       }),
-      v2_event("v2-filter", 5, "run-stopped", %{"outcome" => "ok"})
+      decoded_event("mission-filter", 5, "run-stopped", %{"outcome" => "ok"})
     ]
 
     assert {:ok, counters} =
              TraceLog.query_loaded(
-               v2_events,
-               "v2-filter",
+               events,
+               "mission-filter",
                :counters,
                %{"mission_name" => "reader"},
                100_000,
@@ -934,25 +931,6 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     assert counters["mission_capability_calls"] == 1
     assert counters["workflow_capability_calls"] == 0
     assert counters["llm_usage"] == []
-
-    v1_events = [
-      decoded_event("v1-filter", 1, "run-started"),
-      decoded_event("v1-filter", 2, "evaluation-started", %{
-        "environment" => "mission",
-        "evaluation_id" => "legacy"
-      }),
-      decoded_event("v1-filter", 3, "run-stopped", %{"outcome" => "ok"})
-    ]
-
-    assert {:ok, %{"items" => [%{"type" => "evaluation-started"}]}} =
-             TraceLog.query_loaded(
-               v1_events,
-               "v1-filter",
-               :list_turns,
-               %{"run_id" => "v1-filter", "mission_name" => "default"},
-               100_000,
-               :sanitized
-             )
   end
 
   @tag :tmp_dir
@@ -1018,8 +996,15 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   end
 
   defp decoded_event(run_id, sequence, type, data \\ %{}) do
+    data =
+      case {type, data["environment"]} do
+        {"run-started", _environment} -> Map.put_new(data, "missions", %{})
+        {_type, "mission"} -> Map.put_new(data, "mission_name", "default")
+        _other -> data
+      end
+
     %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "run_id" => run_id,
       "trace_id" => "trace-#{run_id}",
       "sequence" => sequence,
@@ -1027,10 +1012,5 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
       "type" => type,
       "data" => data
     }
-  end
-
-  defp v2_event(run_id, sequence, type, data) do
-    decoded_event(run_id, sequence, type, data)
-    |> Map.put("schema_version", 2)
   end
 end

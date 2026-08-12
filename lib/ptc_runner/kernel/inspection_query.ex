@@ -19,11 +19,11 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   trusted component-override descriptors, so an effective-prelude result can
   be copied into `base_source_hash` without reinterpretation.
 
-  V3 execution-phase diagnostics (`execution-prints`, `execution-error`) are
+  Execution-phase diagnostics (`execution-prints`, `execution-error`) are
   exposed as run-scoped collections alongside their counts in each `list_runs`
   row. Their items retain the correlated `evaluation_id`, sequence, timestamp,
   environment, and exact bounded diagnostic payload.
-  V4 projections include `mission_name` on every mission-owned result so
+  Projections include `mission_name` on every mission-owned result so
   repeated component and capability names remain unambiguous.
   """
 

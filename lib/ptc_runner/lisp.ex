@@ -1638,7 +1638,7 @@ defmodule PtcRunner.Lisp do
 
   # Human-readable kill message from `PtcRunner.Sandbox.memory_exceeded_info/0`
   # diagnostics (setup-phase kills are a grant problem, not a program
-  # problem) or the legacy integer byte limit (`run_bounded/2`).
+  # problem) or the integer byte limit reported by `Sandbox.run_bounded/2`.
   defp memory_exceeded_message(%{phase: :setup} = info) do
     "killed during environment setup: granted context/memory/tools exceeded " <>
       "the #{info.limit_bytes}-byte setup ceiling (raise :setup_max_heap or shrink the grant)"
@@ -2143,10 +2143,9 @@ defmodule PtcRunner.Lisp do
     length(identities) != MapSet.size(MapSet.new(identities))
   end
 
-  # Memory keys are `def`-bound variable names. Externalize them through the
-  # same bounded vocabulary as parsed symbols: builtin names remain atoms,
-  # user-defined names remain binaries, and unrelated VM atom-table state is
-  # ignored.
+  # Memory keys are `def`-bound variable names. The evaluator stores their
+  # canonical binary spelling regardless of the parser's bounded internal atom
+  # representation.
   defp externalize_memory_entries(entries) do
     pairs =
       Enum.map(entries, fn {key, item} ->
@@ -2177,7 +2176,7 @@ defmodule PtcRunner.Lisp do
   defp externalize_memory_key(%{__struct__: LispKeyword} = keyword),
     do: externalize_lisp_values(keyword)
 
-  defp externalize_memory_key(name) when is_binary(name), do: SourceAtoms.intern(name)
+  defp externalize_memory_key(name) when is_binary(name), do: name
   defp externalize_memory_key(other), do: externalize_lisp_values(other)
 
   # Check if symbol count exceeds limit
@@ -2220,11 +2219,7 @@ defmodule PtcRunner.Lisp do
   end
 
   defp memory_binding?(memory, name) when is_binary(name) do
-    Map.has_key?(memory, name) or
-      case safe_to_existing_atom(name) do
-        {:ok, atom} -> Map.has_key?(memory, atom)
-        :error -> false
-      end
+    Map.has_key?(memory, name)
   end
 
   # Pre-execution check: reject programs that reference tools not in the provided
@@ -2872,12 +2867,6 @@ defmodule PtcRunner.Lisp do
   end
 
   defp pattern_vars(_other), do: []
-
-  defp safe_to_existing_atom(name) do
-    {:ok, String.to_existing_atom(name)}
-  rescue
-    ArgumentError -> :error
-  end
 
   defp unsupported_java_member_message(namespace, member) do
     members = JavaSurface.namespace_members(namespace)

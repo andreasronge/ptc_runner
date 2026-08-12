@@ -219,10 +219,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
            true <- is_binary(source) and map_size(rest) == 1 do
         %{
           status: :ok,
-          value:
-            SourceCheck.check(state, mission, source, limits, event_sink,
-              mission_name: mission_name
-            )
+          value: SourceCheck.check(state, mission_name, mission, source, limits, event_sink, [])
         }
       else
         :error -> protocol_error(state, :unknown_mission)
@@ -233,9 +230,6 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
   defp requested_mission(arguments) when is_map(arguments) do
     case arguments do
-      map when map_size(map) == 0 ->
-        {:ok, RunState.default_mission()}
-
       %{"mission" => mission_name} = map when is_binary(mission_name) and map_size(map) == 1 ->
         {:ok, mission_name}
 
@@ -247,15 +241,15 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   defp requested_mission(_arguments), do: {:error, :invalid_request}
 
   defp take_mission(arguments, missions) when is_map(arguments) do
-    {mission_name, rest} = Map.pop(arguments, "mission", RunState.default_mission())
+    case Map.pop(arguments, "mission") do
+      {mission_name, rest} when is_binary(mission_name) ->
+        case Map.fetch(missions, mission_name) do
+          {:ok, mission} -> {:ok, mission_name, mission, rest}
+          :error -> :error
+        end
 
-    if is_binary(mission_name) do
-      case Map.fetch(missions, mission_name) do
-        {:ok, mission} -> {:ok, mission_name, mission, rest}
-        :error -> :error
-      end
-    else
-      {:error, :invalid_request}
+      _other ->
+        {:error, :invalid_request}
     end
   end
 
@@ -316,16 +310,15 @@ defmodule PtcRunner.Kernel.RuntimeTools do
       status: :ok,
       value:
         state
-        |> Evaluation.evaluate_source_detailed(
+        |> Evaluation.evaluate_source(
+          mission_name,
           mission,
           source,
           limits.evaluation_timeout_ms,
           event_sink,
           inspection_sink,
-          admission: admission,
-          mission_name: mission_name
+          admission: admission
         )
-        |> Evaluation.legacy_projection()
     }
   end
 
@@ -345,17 +338,16 @@ defmodule PtcRunner.Kernel.RuntimeTools do
           status: :ok,
           value:
             state
-            |> Evaluation.evaluate_source_detailed(
+            |> Evaluation.evaluate_source(
+              mission_name,
               mission,
               source,
               limits.evaluation_timeout_ms,
               event_sink,
               inspection_sink,
               params: params,
-              admission: admission,
-              mission_name: mission_name
+              admission: admission
             )
-            |> Evaluation.legacy_projection()
         }
 
       {:error, _reason} ->

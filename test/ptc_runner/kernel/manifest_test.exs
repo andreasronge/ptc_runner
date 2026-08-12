@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Lisp.Format
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.TestHelpers
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
 
@@ -183,15 +184,18 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     {:ok, registry} =
       ProviderRegistry.new(%{
-        "probe" => fn _config, _context ->
-          send(parent, :provider_prepared)
+        "probe" =>
+          TestHelpers.staged_provider(fn _config, _context ->
+            send(parent, :provider_prepared)
 
-          Capability.new(
-            name: "probe",
-            input_schema: @input_schema,
-            callback: fn _arguments -> {:ok, true} end
-          )
-        end
+            with {:ok, capability} <-
+                   Capability.new(
+                     name: "probe",
+                     input_schema: @input_schema,
+                     callback: fn _arguments -> {:ok, true} end
+                   ),
+                 do: {:ok, %{capabilities: [capability]}}
+          end)
       })
 
     assert {:ok, loaded} = Manifest.load(path)
@@ -317,16 +321,19 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     {:ok, registry} =
       ProviderRegistry.new(%{
-        "probe" => fn _config, _context ->
-          Capability.new(
-            name: "probe",
-            input_schema: @input_schema,
-            callback: fn _arguments ->
-              send(parent, :provider_called)
-              {:ok, true}
-            end
-          )
-        end
+        "probe" =>
+          TestHelpers.staged_provider(fn _config, _context ->
+            with {:ok, capability} <-
+                   Capability.new(
+                     name: "probe",
+                     input_schema: @input_schema,
+                     callback: fn _arguments ->
+                       send(parent, :provider_called)
+                       {:ok, true}
+                     end
+                   ),
+                 do: {:ok, %{capabilities: [capability]}}
+          end)
       })
 
     manifest = %{
@@ -629,14 +636,17 @@ defmodule PtcRunner.Kernel.ManifestTest do
     File.write!(path, Jason.encode!(manifest))
 
     builder = fn _config, _context ->
-      Capability.new(
-        name: "llm-request",
-        input_schema: @input_schema,
-        callback: fn _request -> {:error, ProviderError.new(:unavailable)} end
-      )
+      with {:ok, capability} <-
+             Capability.new(
+               name: "llm-request",
+               input_schema: @input_schema,
+               callback: fn _request -> {:error, ProviderError.new(:unavailable)} end
+             ),
+           do: {:ok, %{capabilities: [capability]}}
     end
 
-    {:ok, registry} = ProviderRegistry.new(%{"fixture" => builder})
+    {:ok, registry} =
+      ProviderRegistry.new(%{"fixture" => TestHelpers.staged_provider(builder)})
 
     assert {:ok, built} =
              path
@@ -760,21 +770,29 @@ defmodule PtcRunner.Kernel.ManifestTest do
              |> RunLifecycle.build(registry)
 
     assert {:ok, _explicit_registry} =
-             ProviderRegistry.new(%{"llm" => fn _config, _context -> :ok end})
+             ProviderRegistry.new(%{
+               "llm" =>
+                 TestHelpers.staged_provider(fn _config, _context ->
+                   {:error, :not_selected}
+                 end)
+             })
 
     parent = self()
 
     builder = fn config, context ->
       send(parent, {:provider_built, config, context.destination})
 
-      Capability.new(
-        name: "fixture",
-        input_schema: @input_schema,
-        callback: fn _arguments -> {:ok, true} end
-      )
+      with {:ok, capability} <-
+             Capability.new(
+               name: "fixture",
+               input_schema: @input_schema,
+               callback: fn _arguments -> {:ok, true} end
+             ),
+           do: {:ok, %{capabilities: [capability]}}
     end
 
-    {:ok, custom_registry} = ProviderRegistry.new(%{"fixture" => builder})
+    {:ok, custom_registry} =
+      ProviderRegistry.new(%{"fixture" => TestHelpers.staged_provider(builder)})
 
     custom_manifest =
       put_in(manifest, ["providers", "workflow"], [

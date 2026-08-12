@@ -1390,7 +1390,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # Returns:
   #   - `{:ok, qualified_atom}` when `<ns>/<func>` resolves to an env entry
   #   - `:not_qualified` when `<ns>` is not in the qualified namespace set
-  #     (caller falls through to the legacy `normalize_clojure_namespace/3` path)
+  #     (caller falls through to Clojure namespace handling)
   defp qualified_namespace_lookup(ns, func) do
     case Map.get(@qualified_namespace_tables, ns) do
       nil ->

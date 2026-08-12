@@ -61,7 +61,7 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
 
   defp event(sequence, type, data) do
     %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "run_id" => "viewer-run",
       "trace_id" => "viewer-trace",
       "sequence" => sequence,

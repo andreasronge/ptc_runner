@@ -33,6 +33,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   alias PtcRunner.TestSupport.MCPHTTPFixture
   alias PtcRunner.TestSupport.ProviderSessionFixture
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.TestHelpers
 
   @owner_lifecycle_timeout_ms 30_000
   @max_logical_result_bytes 1_048_576
@@ -319,18 +320,22 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         terminal_reserve: EventSink.terminal_reserve(:normal, limits)
       )
 
-    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state)
+    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
 
     task =
       Task.async(fn ->
-        Dispatcher.dispatch_with_lease(
+        Dispatcher.dispatch(
           state,
           :mission,
           environment,
           capability.name,
           %{"query" => "x"},
-          500,
-          {event_sink, nil, lease}
+          TestHelpers.dispatch_context(state, :mission, 500,
+            lease: lease,
+            mission_name: "default"
+          ),
+          event_sink,
+          nil
         )
       end)
 
@@ -1364,17 +1369,21 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     capability = built.config.missions["default"].environment.capabilities["remote.structured"]
     assert :ok = RunBuilder.close(built)
     {:ok, state} = RunState.start(Limits.defaults())
-    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state)
+    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
 
     failure =
-      Dispatcher.dispatch_with_lease(
+      Dispatcher.dispatch(
         state,
         :mission,
         %{capabilities: %{capability.name => capability}},
         capability.name,
         %{"query" => "x"},
-        1_000,
-        {nil, nil, lease}
+        TestHelpers.dispatch_context(state, :mission, 1_000,
+          lease: lease,
+          mission_name: "default"
+        ),
+        nil,
+        nil
       )
 
     assert %{
@@ -1633,14 +1642,14 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   test "installation enforces transport timeout and shared response ceilings" do
     options = stdio_transport_options("/tmp/unused")
 
-    assert is_function(
+    assert match?(
+             {:staged, prepare, nil} when is_function(prepare, 2),
              MCPSource.builder(
                transport: {:stdio, options},
                tools: mappings(),
                timeout_ms: 300_000,
                max_result_bytes: 1_048_576
-             ),
-             2
+             )
            )
 
     assert_raise ArgumentError, fn ->
@@ -3007,7 +3016,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   defp manifest(dir, allow, opts \\ []) do
     File.write!(
       Path.join(dir, "workflow.clj"),
-      ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"kind" :source "source" (get input "program")})))|
+      ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"mission" "default" "kind" :source "source" (get input "program")})))|
     )
 
     program =

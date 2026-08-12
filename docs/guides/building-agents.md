@@ -80,6 +80,7 @@ of interpolating it into PTC-Lisp source:
 
 ```clojure
 (kernel/eval-with
+  "default"
   (program
     (return (workspace/read {"path" (get data/params "path")})))
   {"path" selected-path})
@@ -96,7 +97,7 @@ Before evaluating generated text, a workflow can ask the live mission compiler
 for an advisory check:
 
 ```clojure
-(kernel/check-source generated-source)
+(kernel/check-source "default" generated-source)
 ```
 
 The result is `{:outcome :valid ...}` or a bounded `:invalid` diagnostic; source
