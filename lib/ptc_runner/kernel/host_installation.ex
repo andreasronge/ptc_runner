@@ -13,10 +13,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
   reading credentials, then render credentials the command already resolved
   while acquiring the provider. An active command reads each declared credential
   exactly once, at phase-8 step 5; acquisition and the live connectivity probe
-  both consume that value rather than resolving one of their own. Live LLM model
-  resolution likewise precedes credential access. Acquisition resolves once;
-  callback construction, provider-application readiness, and the adapter all
-  receive that exact captured value.
+  both consume that value rather than resolving one of their own. Live LLM
+  validation and optional public-identity attestation likewise precede
+  credential access. Callback construction, provider-application readiness,
+  and the adapter all receive the exact captured model value.
   Native trace acquisition
   exports its opaque frozen handle only to a selected inspection source, so
   private artifacts validate against the exact already-captured canonical
@@ -30,11 +30,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   Every public provider snapshot separates the safe declaration projection
   from bounded runtime-captured acquisition facts. `acquisition_identity_hash`
-  covers the latter and bare-hex `snapshot_hash` covers both. An LLM registry
-  may explicitly attest the exact resolved adapter model as safe public
-  identity; otherwise it is omitted. Configured selectors, private resolved
-  targets, endpoints, commands, paths, credentials, and private OAuth authority
-  never enter either projection. A frozen-content provider also
+  covers the latter and bare-hex `snapshot_hash` covers both. An LLM adapter may
+  explicitly attest its exact target as safe public identity; otherwise it is
+  omitted. Unattested or private model targets, endpoints, commands, paths,
+  credentials, and private OAuth authority never enter either projection. A
+  frozen-content provider also
   publishes an algorithm-qualified `content_snapshot_hash`; native query
   results copy that content identity unchanged for citations.
   """
@@ -708,7 +708,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp preflight(_host, %{source: :llm} = installation, selection, context, _oauth_runtime) do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- llm_selection(installation, selection, context),
-         {:ok, model, public_model, adapter} <- preflight_llm(installation.model) do
+         {:ok, model, adapter} <- preflight_llm(installation.model) do
+      public_model = PtcRunner.LLM.attested_public_model(adapter, model)
+
       {:ok,
        {:private_preflight,
         fn credentials ->
@@ -870,7 +872,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp local_preflight(_host, %{source: :llm} = installation, selection, context) do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- llm_selection(installation, selection, context),
-         {:ok, _model, _public_model, _adapter} <- preflight_llm(installation.model) do
+         {:ok, _model, _adapter} <- preflight_llm(installation.model) do
       :ok
     end
   end
@@ -882,7 +884,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp prepare_llm_connectivity_probe(_host, installation, selection, context) do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- llm_selection(installation, selection, context),
-         {:ok, model, _public_model, adapter} <- preflight_llm(installation.model),
+         {:ok, model, adapter} <- preflight_llm(installation.model),
          {:ok, credential} <-
            Map.fetch(Map.get(context, :credentials, %{}), installation.credential),
          {:ok, timeout_ms, max_heap_words} <- connectivity_probe_bounds(context) do
@@ -1151,7 +1153,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          true <- Regex.match?(@model_pattern, model),
          adapter when is_atom(adapter) <- PtcRunner.LLM.adapter!(),
          true <- Code.ensure_loaded?(adapter) do
-      {:ok, model, PtcRunner.LLM.attested_public_model(adapter, model), adapter}
+      {:ok, model, adapter}
     else
       _invalid -> {:error, :invalid_llm_model}
     end

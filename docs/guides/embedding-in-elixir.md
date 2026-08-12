@@ -142,12 +142,12 @@ direct routes that need no backing application at all.
 ## Attest public model identity
 
 An embedding that replaces the LLM adapter may implement the optional
-`PtcRunner.LLM.public_model/1` callback. It receives the exact configured adapter target and
-returns `{:ok, model}` only when that exact value is safe to publish in canonical
-provider snapshots, or `:private` otherwise. PtcRunner also requires valid UTF-8,
-1–256 bytes, and byte-for-byte equality with the adapter target. A missing,
-invalid, mismatched, or raising callback keeps execution working but omits model
-identity.
+adapter `public_model/1` callback. It receives the exact configured adapter
+target and returns `{:ok, model}` only when that exact value is safe to publish
+in canonical provider snapshots, or `:private` otherwise. PtcRunner also
+requires valid UTF-8, 1–256 bytes, and byte-for-byte equality with the adapter
+target. A missing, invalid, mismatched, or raising callback keeps execution
+working but omits model identity.
 
 Attestation and execution use the same adapter and captured target, so public
 identity cannot drift from what reaches the provider. Treat this callback as an

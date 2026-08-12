@@ -186,6 +186,19 @@ defmodule PtcRunner.LLMTest do
       oversized = "provider:" <> String.duplicate("m", 256)
       assert PtcRunner.LLM.attested_public_model(PublicModelAdapter, oversized) == nil
     end
+
+    test "the built-in adapter publishes ReqLLM targets but not direct HTTP targets" do
+      adapter = PtcRunner.LLM.ReqLLMAdapter
+      model = "openrouter:deepseek/deepseek-v4-flash-0731"
+
+      assert PtcRunner.LLM.attested_public_model(adapter, model) == model
+      assert PtcRunner.LLM.attested_public_model(adapter, "ollama:local-model") == nil
+
+      assert PtcRunner.LLM.attested_public_model(
+               adapter,
+               "openai-compat:https://private.example/v1|deployment"
+             ) == nil
+    end
   end
 
   describe "call/2" do
