@@ -306,11 +306,17 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
     assert length(values) == 4
     assert Enum.all?(values, &(not is_nil(&1)))
 
-    assert sink
-           |> EventSink.events()
-           |> Enum.filter(&(&1.type == "evaluation-started"))
+    events = EventSink.events(sink)
+
+    assert events
+           |> Enum.filter(&(&1.type == "evaluation-started" and &1.data.environment == :mission))
            |> Enum.map(& &1.data[:mission_name])
            |> Enum.frequencies() == %{"research" => 2, "review" => 2}
+
+    assert Enum.count(
+             events,
+             &(&1.type == "evaluation-started" and &1.data.environment == :workflow)
+           ) == 1
   end
 
   defp workflow_bundle do
