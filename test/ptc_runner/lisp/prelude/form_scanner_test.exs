@@ -256,8 +256,8 @@ defmodule PtcRunner.Lisp.Prelude.FormScannerTest do
   end
 
   test "a stray closing paren between top-level forms fails closed" do
-    # Diverges from FastParser's top-level `skip_extra_closers/1` leniency
-    # (fast_parser.ex) on purpose — see the FormScanner moduledoc.
+    # The reader records this for positioned diagnostics; the span scanner has
+    # no recovery role and rejects it immediately. See the FormScanner moduledoc.
     source = "(defn a [] 1)\n)\n(defn b [] 2)"
 
     assert {:error, %{reason: :unexpected_byte}} = FormScanner.scan(source)

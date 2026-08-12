@@ -3,8 +3,7 @@ defmodule PtcRunner.Lisp.Parser do
   Parser entry point for PTC-Lisp.
 
   Delegates to the internal fast parser for the actual parse, adding pre-flight
-  checks for unsupported syntax and helpful delimiter-balance and
-  unsupported-pattern error messages.
+  checks for unsupported syntax and unsupported-pattern error messages.
 
   Transforms source code into AST nodes.
   """
@@ -48,58 +47,11 @@ defmodule PtcRunner.Lisp.Parser do
         {:ok, ast}
 
       {:error, reason, position} ->
-        improved_reason =
-          check_unsupported_patterns(source) ||
-            delimiter_error_or_reason(source, reason)
-
-        {:error, {:parse_error, improved_reason, position}}
+        {:error, {:parse_error, reason, position}}
     end
   rescue
     e in ArgumentError -> {:error, {:parse_error, e.message, nil}}
   end
-
-  defp delimiter_error_or_reason(source, reason) do
-    case check_delimiter_balance(source) do
-      "syntax error: could not parse expression" -> reason
-      msg -> msg
-    end
-  end
-
-  # Check for unbalanced delimiters and return a helpful error message
-  defp check_delimiter_balance(source) do
-    {parens, brackets, braces} = count_delimiters(source)
-
-    format_delimiter_error(parens, "parentheses", "(", ")") ||
-      format_delimiter_error(brackets, "brackets", "[", "]") ||
-      format_delimiter_error(braces, "braces", "{", "}") ||
-      "syntax error: could not parse expression"
-  end
-
-  defp count_delimiters(source) do
-    source
-    |> String.graphemes()
-    |> Enum.reduce({0, 0, 0}, fn char, {p, b, br} ->
-      case char do
-        "(" -> {p + 1, b, br}
-        ")" -> {p - 1, b, br}
-        "[" -> {p, b + 1, br}
-        "]" -> {p, b - 1, br}
-        "{" -> {p, b, br + 1}
-        "}" -> {p, b, br - 1}
-        _ -> {p, b, br}
-      end
-    end)
-  end
-
-  defp format_delimiter_error(count, name, open, _close) when count > 0 do
-    "unbalanced #{name}: #{count} unclosed '#{open}'"
-  end
-
-  defp format_delimiter_error(count, name, _open, close) when count < 0 do
-    "unbalanced #{name}: #{-count} extra '#{close}'"
-  end
-
-  defp format_delimiter_error(0, _name, _open, _close), do: nil
 
   # Check for unsupported syntax patterns and return a helpful error message
   defp check_unsupported_patterns(source) do

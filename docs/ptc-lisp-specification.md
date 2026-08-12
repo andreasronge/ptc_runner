@@ -148,7 +148,16 @@ Single-line comments start with `;` and extend to end of line:
 (+ 1 2) ; inline comment
 ```
 
-### 2.3 Identifiers (Symbols)
+### 2.3 Delimiters
+
+Lists, vectors, maps, sets, and short functions require matching closing
+delimiters. A surplus `)`, `]`, or `}` between top-level forms or after the
+last form is a `:parse_error`; it is never silently discarded. Diagnostics
+identify the first surplus closer by line and column. When the reader recovers
+past surplus closers and then encounters another hard syntax error, that later
+error remains the primary diagnostic.
+
+### 2.4 Identifiers (Symbols)
 
 Symbols are names that refer to values or functions:
 
@@ -174,7 +183,7 @@ Valid symbols: `filter`, `map`, `sort-by`, `empty?`, `+`, `->>`, `high-paid`, `d
 
 Reserved symbols (cannot be redefined): `nil`, `true`, `false`
 
-### 2.4 Keywords
+### 2.5 Keywords
 
 Keywords are symbolic identifiers that evaluate to themselves:
 

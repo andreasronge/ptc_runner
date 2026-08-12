@@ -27,7 +27,7 @@ defmodule PtcRunner.Lisp.FastParser do
   @doc false
   @spec parse_with_position(String.t()) :: parse_result() | positioned_error()
   def parse_with_position(source) when is_binary(source) do
-    case parse_program({source, 0, 1, 1}, []) do
+    case parse_program({source, 0, 1, 1}, [], nil) do
       {:ok, [], _cursor} -> {:ok, nil}
       {:ok, [ast], _cursor} -> {:ok, ast}
       {:ok, asts, _cursor} -> {:ok, {:program, asts}}
@@ -37,14 +37,18 @@ defmodule PtcRunner.Lisp.FastParser do
     e in ArgumentError -> {:error, e.message, nil}
   end
 
-  defp parse_program(cursor, acc) do
-    case skip_inter_expr(cursor) do
-      {"", _, _, _} = cursor ->
+  defp parse_program(cursor, acc, surplus_closers) do
+    case skip_inter_expr(cursor, surplus_closers) do
+      {{"", _, _, _} = cursor, nil} ->
         {:ok, Enum.reverse(acc), cursor}
 
-      cursor ->
-        with {:ok, ast, cursor} <- parse_expr(cursor, 0) do
-          parse_program(cursor, [ast | acc])
+      {{"", _, _, _}, surplus_closers} ->
+        surplus_closer_error(surplus_closers)
+
+      {cursor, surplus_closers} ->
+        case parse_expr(cursor, 0) do
+          {:ok, ast, cursor} -> parse_program(cursor, [ast | acc], surplus_closers)
+          {:error, _message, _position} = error -> error
         end
     end
   end
@@ -422,17 +426,67 @@ defmodule PtcRunner.Lisp.FastParser do
 
   defp take_while_length(_binary, _predicate, length), do: length
 
-  defp skip_inter_expr(cursor) do
+  defp skip_inter_expr(cursor, surplus_closers) do
     cursor
     |> skip_ws()
-    |> skip_extra_closers()
+    |> skip_extra_closers(surplus_closers)
   end
 
-  defp skip_extra_closers({<<c, rest::binary>>, offset, line, column}) when c in [?), ?], ?}] do
-    skip_extra_closers(skip_ws({rest, offset + 1, line, column + 1}))
+  defp skip_extra_closers(
+         {<<c, rest::binary>>, offset, line, column},
+         surplus_closers
+       )
+       when c in [?), ?], ?}] do
+    surplus_closers = record_surplus_closer(surplus_closers, c, offset, line, column)
+
+    {rest, offset + 1, line, column + 1}
+    |> skip_ws()
+    |> skip_extra_closers(surplus_closers)
   end
 
-  defp skip_extra_closers(cursor), do: cursor
+  defp skip_extra_closers(cursor, surplus_closers), do: {cursor, surplus_closers}
+
+  defp record_surplus_closer(nil, c, offset, line, column),
+    do: {{c, offset, line, column}, increment_closer_count({0, 0, 0}, c)}
+
+  defp record_surplus_closer({first, counts}, c, _offset, _line, _column),
+    do: {first, increment_closer_count(counts, c)}
+
+  defp increment_closer_count({parens, brackets, braces}, ?)),
+    do: {parens + 1, brackets, braces}
+
+  defp increment_closer_count({parens, brackets, braces}, ?]),
+    do: {parens, brackets + 1, braces}
+
+  defp increment_closer_count({parens, brackets, braces}, ?}),
+    do: {parens, brackets, braces + 1}
+
+  defp surplus_closer_error({{c, offset, line, column}, counts}) do
+    message =
+      case closer_counts(counts) do
+        [{count, name, delimiter}] ->
+          "unbalanced #{name}: #{count} extra '#{delimiter}' " <>
+            "(first at line #{line}, column #{column})"
+
+        closer_counts ->
+          details =
+            Enum.map_join(closer_counts, ", ", fn {count, _name, delimiter} ->
+              "#{count} '#{delimiter}'"
+            end)
+
+          total = Enum.sum(for {count, _name, _delimiter} <- closer_counts, do: count)
+
+          "unexpected closing '#{<<c>>}' at line #{line}, column #{column}; " <>
+            "#{total} surplus top-level closing delimiters: #{details}"
+      end
+
+    parse_error({"", offset, line, column}, message)
+  end
+
+  defp closer_counts({parens, brackets, braces}) do
+    [{parens, "parentheses", ")"}, {brackets, "brackets", "]"}, {braces, "braces", "}"}]
+    |> Enum.reject(fn {count, _name, _delimiter} -> count == 0 end)
+  end
 
   defp skip_ws({<<c, rest::binary>>, offset, line, column}) when c in [?\s, ?\t, ?\r, ?,],
     do: skip_ws({rest, offset + 1, line, column + 1})
