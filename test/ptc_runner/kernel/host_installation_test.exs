@@ -1091,6 +1091,10 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
         marker,
         "mcp-unicode"
       ])
+      # This test exercises locale propagation, not the default startup
+      # deadline. Booting an Elixir source fixture can exceed five seconds
+      # while the full CI suite is under load.
+      |> put_in(["install", "workspace", "transport", "start_timeout_ms"], 20_000)
       |> put_in(["install", "workspace", "transport", "inherit_environment"], true)
       |> put_in(["install", "workspace", "tools"], %{
         "unicode" => %{"as" => "workspace.unicode", "effect" => "read"}
