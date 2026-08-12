@@ -191,11 +191,13 @@ Implemented as planned. Three deviations, all from review:
 
 - The per-insertion-site cases had to move **out** of the prelude compiler and
   into `PtcRunner.LispTest`, driving `undefined_vars/2` on hand-built CoreAST.
-  Parsing one form gives params and their references the same representation,
-  and the compiler pre-seeds every namespace definition into the initial scope,
-  so a source-level test cannot reach the `def`/`defonce`/`do` insertion paths
-  or mix representations at all. The prelude-compiler cases remain as
-  acceptance checks and are labelled as such.
+  The prelude compiler does mix representations — that is the reported failing
+  path, string scope against atom body references — but a source-level test
+  cannot control *which* mix. Parsing one form gives a local binder and its
+  references the same representation, and the compiler pre-seeds every
+  namespace definition into the initial scope, so resolution never depends on
+  the `def`/`defonce`/`do` insertion paths. The prelude-compiler cases remain
+  as acceptance checks and are labelled as such.
 - Those hand-built trees are validated with `CoreAST.validate/1` before being
   asserted on. That caught a `:keys` destructuring pattern built with map
   defaults where `core_ast.ex:447` specifies a list of pairs — an impossible
