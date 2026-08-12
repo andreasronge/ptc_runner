@@ -433,7 +433,13 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     assert {:ok, settled} = DoctorPlan.settle_connect(rows, result, prepared, catalog)
     assert {:ok, checks} = DoctorPlan.checks(settled)
 
-    outcome = %{"checks" => checks, "model_aliases" => [], "provider_activity" => true}
+    outcome = %{
+      "checks" => checks,
+      "model_aliases" => [],
+      "provider_activity" => true,
+      "readiness" => "ready"
+    }
+
     assert CommandContract.valid_success_result?(:doctor, outcome)
     assert CommandContract.valid_success_semantics?(:doctor, outcome)
 

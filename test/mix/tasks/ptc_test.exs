@@ -201,6 +201,39 @@ defmodule Mix.Tasks.PtcTest do
     assert System.get_env(variable) == nil
   end
 
+  @tag :tmp_dir
+  test "an active doctor finding remains the Mix failure message", %{tmp_dir: dir} do
+    missing_env = "PTC_DOCTOR_MISSING_#{System.unique_integer([:positive])}"
+    System.delete_env(missing_env)
+    {manifest_path, host_path} = write_provider_application(dir, missing_env)
+    args = ["doctor", manifest_path, "--host-config", host_path, "--connect"]
+
+    presentation = MixCommandAdapter.execute(args)
+
+    assert presentation.exit_status == 4
+    assert presentation.stderr == ""
+
+    assert %{
+             "readiness" => "failed",
+             "checks" => checks
+           } = Jason.decode!(String.trim(presentation.stdout))
+
+    assert %{
+             "name" => "provider/workspace/credentials",
+             "status" => "fail",
+             "code" => "credential_unavailable"
+           } in checks
+
+    assert %{
+             "name" => "provider/workspace/connectivity",
+             "status" => "skipped",
+             "code" => "not_verified_due_to_failure"
+           } in checks
+
+    message = failed_message(args)
+    assert %{"readiness" => "failed", "checks" => ^checks} = Jason.decode!(message)
+  end
+
   defp run_output(args) do
     capture_io(fn ->
       Mix.Task.reenable("ptc")
@@ -243,6 +276,53 @@ defmodule Mix.Tasks.PtcTest do
     )
 
     path
+  end
+
+  defp write_provider_application(dir, missing_env) do
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [input] (return (get input "value")))|
+    )
+
+    manifest_path = Path.join(dir, "ptc.json")
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "main", "path" => "main.clj"}],
+          "entry" => "main/run"
+        },
+        "input" => %{"value" => %{}},
+        "providers" => %{"workflow" => [], "mission" => [%{"name" => "workspace"}]}
+      })
+    )
+
+    host_path = Path.join(dir, "ptc-host.json")
+
+    File.write!(
+      host_path,
+      Jason.encode!(%{
+        "credentials" => %{"key" => %{"env" => missing_env}},
+        "install" => %{
+          "workspace" => %{
+            "source" => "mcp",
+            "installation_revision" => "mix-doctor-test-v1",
+            "transport" => %{
+              "type" => "stdio",
+              "command" => System.find_executable("sh"),
+              "env" => %{"TOKEN" => %{"binding" => "key"}}
+            },
+            "tools" => %{
+              "read" => %{"as" => "workspace.read", "effect" => "read"}
+            }
+          }
+        }
+      })
+    )
+
+    {manifest_path, host_path}
   end
 
   defp reset_dotenv(variable) do

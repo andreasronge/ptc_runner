@@ -3,7 +3,10 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandContract
+  alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.ConnectivityResult
+  alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.DoctorPlan
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.MCPOAuth.Authority
@@ -14,6 +17,14 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
   alias PtcRunner.TestSupport.HostBoundFixture
 
   @environment %{runtime: :supported, viewer: :available}
+
+  test "doctor failure codes exclude diagnostics that forbid attribution" do
+    codes = DiagnosticCatalog.doctor_failure_codes_by_operation()
+
+    assert :connectivity_unavailable in Map.fetch!(codes, :connectivity)
+    assert :provider_unavailable in Map.fetch!(codes, :connectivity)
+    refute :connectivity_timeout in Map.fetch!(codes, :connectivity)
+  end
 
   test "the installed surface reports every alias without an application" do
     catalog = catalog(%{"beta" => [], "alpha" => []})
@@ -100,8 +111,8 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
   end
 
   test "a settled row cannot carry an outcome the closed contract has no code for" do
-    # There is no failing provider row in any mode, so a failing audited-local
-    # check has to fail the command rather than be reported as a row.
+    # The default settlement accepts only successful local outcomes. Connected
+    # failures go through the separately bound failure settlement.
     catalog = catalog(%{"audited" => [local_preflight: :audited_local]})
     prepared = prepared(catalog, ["audited"])
     assert {:ok, rows} = DoctorPlan.new(catalog, prepared, @environment, :default)
@@ -225,7 +236,7 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
 
     # Connect's rule is stricter than default doctor's: every provider row must
     # pass, so the contract is what proves nothing was left behind.
-    assert_contract(checks, true)
+    assert_contract(checks, true, "ready")
 
     assert %{"status" => "pass", "code" => "available"} =
              fetch_check(checks, "provider/custom/local")
@@ -245,6 +256,142 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
     # A declarative selection was never pending and keeps its own code.
     assert %{"status" => "pass", "code" => "declarative"} =
              fetch_check(checks, "provider/keyed/selection")
+  end
+
+  test "an attributable failure settles one row and leaves other pending rows unverified" do
+    catalog =
+      catalog(%{
+        "keyed" => [credential_names: ["token"]],
+        "reachable" => [connectivity_mode: :probe, probe_effect: :metadata]
+      })
+
+    prepared = prepared(catalog, ["keyed", "reachable"])
+    assert {:ok, rows} = DoctorPlan.new(catalog, prepared, @environment, :connect)
+
+    diagnostic = diagnostic(:active_preflight, :credential_unavailable, "keyed", :credentials)
+
+    assert {:ok, settled} =
+             DoctorPlan.settle_failure(rows, diagnostic, prepared, catalog, @environment)
+
+    assert {:ok, checks} = DoctorPlan.checks(settled)
+
+    assert %{"status" => "fail", "code" => "credential_unavailable"} =
+             fetch_check(checks, "provider/keyed/credentials")
+
+    assert %{"status" => "skipped", "code" => "not_verified_due_to_failure"} =
+             fetch_check(checks, "provider/reachable/connectivity")
+
+    assert %{"status" => "pass", "code" => "declarative"} =
+             fetch_check(checks, "provider/keyed/selection")
+  end
+
+  test "failure settlement reconstructs the exact sealed connect plan" do
+    catalog = catalog(%{"shared" => [credential_names: ["token"]]})
+    foreign = catalog(%{"shared" => [credential_names: ["token"], revision: "foreign-v1"]})
+    prepared = prepared(catalog, ["shared"])
+    foreign_prepared = prepared(foreign, ["shared"])
+
+    assert {:ok, rows} = DoctorPlan.new(catalog, prepared, @environment, :connect)
+    diagnostic = diagnostic(:active_preflight, :credential_unavailable, "shared", :credentials)
+
+    tampered =
+      Enum.map(rows, fn
+        %{name: "provider/shared/credentials"} = row -> %{row | operation: :connectivity}
+        row -> row
+      end)
+
+    for {candidate_rows, candidate_prepared, candidate_catalog, environment} <- [
+          {tampered, prepared, catalog, @environment},
+          {rows, foreign_prepared, foreign, @environment},
+          {rows, prepared, catalog, %{runtime: :unsupported, viewer: :available}}
+        ] do
+      assert {:error, :invalid_doctor_plan} =
+               DoctorPlan.settle_failure(
+                 candidate_rows,
+                 diagnostic,
+                 candidate_prepared,
+                 candidate_catalog,
+                 environment
+               )
+    end
+  end
+
+  test "an acquisition diagnostic maps only an acquisition connectivity declaration" do
+    acquiring = catalog(%{"provider" => [connectivity_mode: :acquisition]})
+    probing = catalog(%{"provider" => [connectivity_mode: :probe, probe_effect: :metadata]})
+    acquiring_prepared = prepared(acquiring, ["provider"])
+    probing_prepared = prepared(probing, ["provider"])
+
+    assert {:ok, acquiring_rows} =
+             DoctorPlan.new(acquiring, acquiring_prepared, @environment, :connect)
+
+    assert {:ok, probing_rows} =
+             DoctorPlan.new(probing, probing_prepared, @environment, :connect)
+
+    occurrence = %{destination: :workflow, index: 0}
+
+    diagnostic =
+      diagnostic(
+        :provider_acquisition,
+        :provider_unavailable,
+        "provider",
+        :acquisition,
+        occurrence
+      )
+
+    assert {:ok, settled} =
+             DoctorPlan.settle_failure(
+               acquiring_rows,
+               diagnostic,
+               acquiring_prepared,
+               acquiring,
+               @environment
+             )
+
+    assert {:ok, checks} = DoctorPlan.checks(settled)
+
+    assert %{"status" => "fail", "code" => "provider_unavailable"} =
+             fetch_check(checks, "provider/provider/connectivity")
+
+    assert {:error, :invalid_doctor_plan} =
+             DoctorPlan.settle_failure(
+               probing_rows,
+               diagnostic,
+               probing_prepared,
+               probing,
+               @environment
+             )
+  end
+
+  test "unattributable diagnostics cannot synthesize failed rows" do
+    catalog = catalog(%{"reachable" => [connectivity_mode: :probe, probe_effect: :metadata]})
+    prepared = prepared(catalog, ["reachable"])
+    assert {:ok, rows} = DoctorPlan.new(catalog, prepared, @environment, :connect)
+
+    {:ok, application_subject} = CommandSubject.provider("reachable", :application)
+
+    application =
+      CommandDiagnostic.new!(:active_preflight, :provider_application_unavailable,
+        subject: application_subject,
+        provider_activity: false
+      )
+
+    timeout =
+      CommandDiagnostic.new!(:active_preflight, :connectivity_timeout, provider_activity: true)
+
+    wrong_alias =
+      diagnostic(
+        :active_preflight,
+        :connectivity_unavailable,
+        "missing",
+        :connectivity,
+        %{destination: :workflow, index: 0}
+      )
+
+    for refused <- [application, timeout, wrong_alias] do
+      assert {:error, :invalid_doctor_plan} =
+               DoctorPlan.settle_failure(rows, refused, prepared, catalog, @environment)
+    end
   end
 
   test "an authorization row is never settled, because V1 has no path that could" do
@@ -281,7 +428,7 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
              )
 
     assert {:ok, checks} = DoctorPlan.checks(settled)
-    assert_contract(checks, false)
+    assert_contract(checks, false, "ready")
   end
 
   test "a connectivity row cannot be settled by a result that reached nothing" do
@@ -478,8 +625,8 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
   end
 
   test "projection refuses a row carrying an outcome the contract has no code for" do
-    # The rule that no provider row can express a failure has to hold at the
-    # boundary that renders rows, not only at the producers that build them.
+    # Failure codes are operation-specific and closed. A caller cannot invent a
+    # generic failure at the projection boundary.
     catalog = catalog(%{"alpha" => []})
     assert {:ok, rows} = DoctorPlan.new(catalog, nil, @environment, :default)
     assert {:ok, _checks} = DoctorPlan.checks(rows)
@@ -514,6 +661,15 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
 
   defp fetch_check(checks, name), do: Enum.find(checks, &(&1["name"] == name))
 
+  defp diagnostic(phase, code, name, operation, occurrence \\ nil) do
+    {:ok, subject} = CommandSubject.provider(name, operation, occurrence)
+
+    CommandDiagnostic.new!(phase, code,
+      subject: subject,
+      provider_activity: phase == :provider_acquisition or code == :connectivity_unavailable
+    )
+  end
+
   # The success projection a completed connect operation seals: one entry per
   # selected occurrence, each reporting the mode its own sealed descriptor
   # declares. `ProviderConnectivityTest` drives the real operation end to end;
@@ -538,11 +694,12 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
 
   # The contract, not this test, decides whether a row set is well formed: both
   # the generated schema and the ordering semantics it cannot express.
-  defp assert_contract(checks, provider_activity) do
+  defp assert_contract(checks, provider_activity, readiness \\ "unverified") do
     result = %{
       "checks" => checks,
       "model_aliases" => [],
-      "provider_activity" => provider_activity
+      "provider_activity" => provider_activity,
+      "readiness" => readiness
     }
 
     assert CommandContract.valid_success_result?(:doctor, result)

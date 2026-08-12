@@ -37,6 +37,13 @@ defmodule PtcRunner.Kernel.CommandRenderer do
       %{"status" => "ok", "result" => result} ->
         {:stdout, json_line(result)}
 
+      %{
+        "status" => "error",
+        "command" => "doctor",
+        "result" => %{"readiness" => "failed"} = result
+      } ->
+        {:stdout, json_line(result)}
+
       %{"status" => "error", "error" => error, "run_ref" => run_ref} ->
         {:stderr, failure_line(error, run_ref, rejection)}
     end

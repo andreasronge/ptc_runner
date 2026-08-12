@@ -34,6 +34,9 @@ defmodule PtcRunner.MixCommandAdapter do
     end
   end
 
+  defp failure_message(%CommandPresentation{stdout: stdout, stderr: ""}) when stdout != "",
+    do: String.trim_trailing(stdout, "\n")
+
   defp failure_message(%CommandPresentation{stderr: "", exit_status: status}),
     do: "ptc command failed with status #{status}"
 

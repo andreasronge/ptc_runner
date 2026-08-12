@@ -182,7 +182,10 @@ The active `doctor --connect` check for a selected live model performs one real
 minimal completion and may incur provider cost. The probe forces a one-token
 output ceiling, disables retries and redirects, and uses the installed
 credential under `doctor_connectivity_timeout_ms`; provider errors and timeouts
-fail the check instead of being reported as availability.
+produce a nonzero doctor report. An attributable diagnostic becomes the failed
+local, selection, credential, authorization, or connectivity row. Other pending
+rows are `not_verified_due_to_failure`, because the fail-fast operation retains
+no per-step success transcript.
 
 `ptc doctor` reports installed or selected workflow models in a
 `model_aliases` list, including alias, source, installation revision, default
@@ -648,6 +651,11 @@ credential, authorization, and connectivity operation, plus whether provider
 activity occurred. It exposes no endpoint, command, path, credential, OAuth
 authority, or secret-derived identifier. This operation is distinct from run;
 the removed `run --check` route is not an alias or hidden compatibility path.
+`readiness` is `ready` only when the active operation completed. An attributable
+readiness diagnostic returns `readiness: "failed"`, the failed row, and a
+nonzero status while preserving the full diagnostic in a named command
+envelope. Plain doctor reports `readiness: "unverified"` because its active rows
+remain intentionally deferred.
 
 ## Next steps
 
