@@ -22,7 +22,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   belong to the later preflight and acquisition phases.
 
   The closed V1 source identifiers are `mcp`, `llm`, `llm_replay`,
-  `ptc_trace_snapshot`, and `ptc_inspection_snapshot`. LLM credentials are explicit bindings passed to
+  `ptc_trace_snapshot`, `ptc_private_trace_snapshot`, and `ptc_inspection_snapshot`. LLM credentials are explicit bindings passed to
   the adapter per request rather than ambient provider-specific environment
   lookup. The native snapshot sources fix host-relative directories and
   expose only PtcRunner's canonical or private inspection query vocabularies.
@@ -163,6 +163,15 @@ defmodule PtcRunner.Kernel.HostConfig do
             }
           | %{
               source: :ptc_trace_snapshot,
+              directory: binary(),
+              installation_revision: binary(),
+              ceilings: %{
+                max_source_bytes: pos_integer(),
+                max_result_bytes: pos_integer()
+              }
+            }
+          | %{
+              source: :ptc_private_trace_snapshot,
               directory: binary(),
               installation_revision: binary(),
               ceilings: %{
@@ -589,12 +598,26 @@ defmodule PtcRunner.Kernel.HostConfig do
     with true <- valid_name?(name),
          true <- is_map(value) do
       case value["source"] do
-        "mcp" -> mcp_installation(value, credentials)
-        "llm" -> llm_installation(value, credentials)
-        "ptc_trace_snapshot" -> trace_snapshot_installation(value)
-        "ptc_inspection_snapshot" -> inspection_snapshot_installation(value)
-        "llm_replay" -> llm_replay_installation(value)
-        _unknown -> {:error, :invalid_installation}
+        "mcp" ->
+          mcp_installation(value, credentials)
+
+        "llm" ->
+          llm_installation(value, credentials)
+
+        "ptc_trace_snapshot" ->
+          trace_snapshot_installation(value, :ptc_trace_snapshot)
+
+        "ptc_private_trace_snapshot" ->
+          trace_snapshot_installation(value, :ptc_private_trace_snapshot)
+
+        "ptc_inspection_snapshot" ->
+          inspection_snapshot_installation(value)
+
+        "llm_replay" ->
+          llm_replay_installation(value)
+
+        _unknown ->
+          {:error, :invalid_installation}
       end
     else
       _reason -> {:error, :invalid_installation}
@@ -702,7 +725,8 @@ defmodule PtcRunner.Kernel.HostConfig do
     if Map.has_key?(value, string_key), do: Map.put(params, atom_key, normalized), else: params
   end
 
-  defp trace_snapshot_installation(value) do
+  defp trace_snapshot_installation(value, source)
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot] do
     with :ok <-
            exact_keys(
              value,
@@ -715,7 +739,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          {:ok, ceilings} <- trace_snapshot_ceilings(Map.get(value, "ceilings", %{})) do
       {:ok,
        %{
-         source: :ptc_trace_snapshot,
+         source: source,
          directory: directory,
          installation_revision: installation_revision,
          ceilings: ceilings
@@ -1245,7 +1269,8 @@ defmodule PtcRunner.Kernel.HostConfig do
       "oneOf" => [
         mcp_installation_schema(),
         llm_installation_schema(),
-        trace_snapshot_installation_schema(),
+        trace_snapshot_installation_schema("ptc_trace_snapshot"),
+        trace_snapshot_installation_schema("ptc_private_trace_snapshot"),
         inspection_snapshot_installation_schema(),
         llm_replay_installation_schema()
       ]
@@ -1306,10 +1331,10 @@ defmodule PtcRunner.Kernel.HostConfig do
     )
   end
 
-  defp trace_snapshot_installation_schema do
+  defp trace_snapshot_installation_schema(source) do
     required_object(
       %{
-        "source" => %{"const" => "ptc_trace_snapshot"},
+        "source" => %{"const" => source},
         "directory" => path_schema(),
         "installation_revision" => installation_revision_schema(),
         "ceilings" =>

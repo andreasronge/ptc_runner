@@ -8,6 +8,7 @@ defmodule PtcRunner.ReplFrontendTest do
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.MixCommandAdapter
+  alias PtcRunner.TestSupport.PrivateInspectionFixture
 
   @stdio_root Path.expand("../../..", __DIR__)
   @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
@@ -386,6 +387,54 @@ defmodule PtcRunner.ReplFrontendTest do
         run_repl(args)
       end
     end)
+  end
+
+  @tag :tmp_dir
+  test "inspection analysis recursively reads a private V5 trace and correlated result", %{
+    tmp_dir: directory
+  } do
+    value = %{"answer" => 42}
+    fixture = PrivateInspectionFixture.create_result!(directory, value, "post-mortem")
+    normal_path = Path.join(fixture.traces, "post-mortem.jsonl")
+    private_path = Path.join(fixture.traces, "post-mortem.private.jsonl")
+    File.rename!(normal_path, private_path)
+
+    output =
+      capture_io(fn ->
+        run_repl([
+          "--profile",
+          "inspection-analysis-v2",
+          "--resource",
+          "traces=#{fixture.traces}",
+          "--resource",
+          "inspection=#{fixture.inspection}",
+          "--session-trace-dir",
+          fixture.output,
+          "--private-unattended",
+          "--format",
+          "jsonl",
+          "-e",
+          ~s|(return {"run" (log/run "#{fixture.run_id}") "result" (inspection/result "#{fixture.run_id}")})|
+        ])
+      end)
+
+    records = decode_jsonl(output)
+    assert Enum.map(records, & &1["type"]) == ["session-started", "evaluation", "session-closed"]
+
+    assert %{
+             "run" => %{
+               "run_id" => "post-mortem",
+               "source" => "private",
+               "result_hash" => result_hash
+             },
+             "result" => %{
+               "run_id" => "post-mortem",
+               "value" => ^value,
+               "result_hash" => result_hash
+             }
+           } = Enum.at(records, 1)["result"]["value"]
+
+    assert result_hash == fixture.result_hash
   end
 
   @tag :tmp_dir

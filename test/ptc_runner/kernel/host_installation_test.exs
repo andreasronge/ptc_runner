@@ -1336,6 +1336,47 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
+  test "installs a private-authorized trace snapshot with private data policy", %{tmp_dir: dir} do
+    trace_directory = Path.join(dir, "traces")
+    File.mkdir_p!(trace_directory)
+
+    File.write!(
+      Path.join(trace_directory, "captured.private.jsonl"),
+      Jason.encode!(trace_event("private-run", 1, "run-started")) <>
+        "\n" <> Jason.encode!(trace_event("private-run", 2, "run-stopped")) <> "\n"
+    )
+
+    host =
+      load_host(dir, %{
+        "install" => %{
+          "history" => %{
+            "source" => "ptc_private_trace_snapshot",
+            "installation_revision" => "private-trace-v1",
+            "directory" => "traces"
+          }
+        }
+      })
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(host)
+             |> then(fn {:ok, catalog} ->
+               HostInstallation.runtime_registry(host, catalog)
+             end)
+
+    assert {:ok, built} = ProviderRegistry.build(registry, "history", %{}, context(dir, :mission))
+    list_runs = Enum.find(built.capabilities, &(&1.name == "history.list-runs"))
+
+    assert {:ok, %{"items" => [%{"run_id" => "private-run", "source" => "private"}]}} =
+             list_runs.callback.(%{})
+
+    assert built.data_class == :private_inspection
+    assert built.accepts_data == [:normal, :private_inspection]
+    assert built.snapshot["declaration"]["source"] == "ptc_private_trace_snapshot"
+    assert built.snapshot["acquisition"]["source"] == "ptc_private_trace_snapshot"
+    assert :ok = built.close.()
+  end
+
+  @tag :tmp_dir
   test "preparation exposes an installation that accepts only private data for run-level checks",
        %{
          tmp_dir: dir

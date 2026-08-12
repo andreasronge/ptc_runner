@@ -1280,7 +1280,8 @@ defmodule PtcRunner.Kernel.CommandContract do
         %{
           "alias" => %{"type" => "string", "pattern" => @alias},
           "source" => %{
-            "enum" => ~w(mcp llm llm_replay ptc_trace_snapshot ptc_inspection_snapshot custom)
+            "enum" =>
+              ~w(mcp llm llm_replay ptc_trace_snapshot ptc_private_trace_snapshot ptc_inspection_snapshot custom)
           },
           "installation_revision" => %{
             "type" => "string",

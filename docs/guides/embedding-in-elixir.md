@@ -144,7 +144,7 @@ direct routes that need no backing application at all.
 Custom provider builders are trusted Elixir functions registered through
 `PtcRunner.Kernel.ProviderRegistry.new/1`. A manifest may select their bounded
 public names and JSON configuration, but it cannot provide executable callback
-code. Register a builder only for authority the five built-in sources cannot
+code. Register a builder only for authority the six built-in sources cannot
 express; [Host configuration](host-configuration.md) covers what a plain
 operator document already installs.
 

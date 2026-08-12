@@ -363,8 +363,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp descriptor_credential_names(%{source: :llm, credential: credential}), do: [credential]
   defp descriptor_credential_names(_installation), do: []
 
-  defp descriptor_data_class(%{source: :ptc_inspection_snapshot}),
-    do: :private_inspection
+  defp descriptor_data_class(%{source: source})
+       when source in [:ptc_private_trace_snapshot, :ptc_inspection_snapshot],
+       do: :private_inspection
 
   defp descriptor_data_class(installation), do: Map.get(installation, :data_class, :normal)
 
@@ -381,7 +382,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp authority_from_transport(_transport), do: nil
 
   defp snapshot_accepts_data(source)
-       when source in [:ptc_trace_snapshot, :ptc_inspection_snapshot],
+       when source in [
+              :ptc_trace_snapshot,
+              :ptc_private_trace_snapshot,
+              :ptc_inspection_snapshot
+            ],
        do: [:normal, :private_inspection]
 
   defp snapshot_accepts_data(_source), do: [:normal]
@@ -389,7 +394,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp descriptor_requires(:ptc_inspection_snapshot), do: [:canonical_trace_snapshot]
   defp descriptor_requires(_source), do: []
 
-  defp descriptor_provides(:ptc_trace_snapshot), do: [:canonical_trace_snapshot]
+  defp descriptor_provides(source)
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot],
+       do: [:canonical_trace_snapshot]
+
   defp descriptor_provides(_source), do: []
 
   defp descriptor_destinations(source) when source in [:llm, :llm_replay], do: [:workflow]
@@ -524,7 +532,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
     )
   end
 
-  defp selection_rules(%{source: :ptc_trace_snapshot} = installation) do
+  defp selection_rules(%{source: source} = installation)
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot] do
     snapshot_selection_rules(installation, false)
   end
 
@@ -624,17 +633,18 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp prepare(
          _host,
-         %{source: :ptc_trace_snapshot} = installation,
+         %{source: source} = installation,
          selection,
          context,
          _oauth_runtime
-       ) do
+       )
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot] do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- trace_snapshot_selection(installation, selection, context) do
       {:ok,
        %{
          credential_names: [],
-         data_class: :normal,
+         data_class: descriptor_data_class(installation),
          accepts_data: [:normal, :private_inspection],
          provides: [:canonical_trace_snapshot]
        }}
@@ -720,11 +730,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp preflight(
          host,
-         %{source: :ptc_trace_snapshot} = installation,
+         %{source: source} = installation,
          selection,
          context,
          _oauth_runtime
-       ) do
+       )
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot] do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- trace_snapshot_selection(installation, selection, context),
          {:ok, directory} <-
@@ -769,10 +780,13 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp placement(%{source: :llm_replay}, _destination),
     do: {:error, :provider_destination_denied}
 
-  defp placement(%{source: :ptc_trace_snapshot}, :mission), do: :ok
+  defp placement(%{source: source}, :mission)
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot],
+       do: :ok
 
-  defp placement(%{source: :ptc_trace_snapshot}, _destination),
-    do: {:error, :provider_destination_denied}
+  defp placement(%{source: source}, _destination)
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot],
+       do: {:error, :provider_destination_denied}
 
   defp placement(%{source: :ptc_inspection_snapshot}, :mission), do: :ok
 
@@ -781,7 +795,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   @doc false
   def normalize_selection(%{source: source} = installation, value, %{limits: limits})
-      when source in [:mcp, :llm, :llm_replay, :ptc_trace_snapshot, :ptc_inspection_snapshot] do
+      when source in [
+             :mcp,
+             :llm,
+             :llm_replay,
+             :ptc_trace_snapshot,
+             :ptc_private_trace_snapshot,
+             :ptc_inspection_snapshot
+           ] do
     with {:ok, rules} <- selection_rules(installation),
          {:ok, normalized} <- SelectionRules.normalize_runtime(rules, value, limits) do
       {:ok, normalized}
@@ -815,6 +836,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp selection_error(:llm), do: :invalid_llm_selection
   defp selection_error(:llm_replay), do: :invalid_llm_replay_selection
   defp selection_error(:ptc_trace_snapshot), do: :invalid_trace_snapshot_selection
+  defp selection_error(:ptc_private_trace_snapshot), do: :invalid_trace_snapshot_selection
   defp selection_error(:ptc_inspection_snapshot), do: :invalid_inspection_snapshot_selection
 
   defp credential_names(%{type: :stdio, env: env}),
@@ -1238,7 +1260,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp acquire_trace_snapshot(directory, installation, selected, context) do
-    case TraceSnapshot.start({:directory, directory},
+    case TraceSnapshot.start(trace_snapshot_source(installation.source, directory),
            owner: context.owner,
            resource_registrar: Map.get(context, :resource_registrar),
            max_source_bytes: selected.max_source_bytes,
@@ -1265,7 +1287,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
            TraceSnapshot.stop(snapshot)
            :ok
          end,
-         data_class: :normal,
+         data_class: descriptor_data_class(installation),
          accepts_data: [:normal, :private_inspection],
          exports: %{canonical_trace_snapshot: snapshot}
        }}
@@ -1343,7 +1365,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp trace_provider_snapshot(info, installation, selected, provider) do
     acquisition = %{
-      "source" => "ptc_trace_snapshot",
+      "source" => Atom.to_string(installation.source),
       "capture_id" => info.capture_id,
       "run_count" => info.run_count,
       "source_bytes" => info.source_bytes,
@@ -1358,6 +1380,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
       info.snapshot_hash
     )
   end
+
+  defp trace_snapshot_source(:ptc_trace_snapshot, directory), do: {:directory, directory}
+
+  defp trace_snapshot_source(:ptc_private_trace_snapshot, directory),
+    do: {:private_authorized_directory, directory}
 
   defp llm_snapshot(installation, selected, provider) do
     public_snapshot(

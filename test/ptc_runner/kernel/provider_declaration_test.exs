@@ -1590,6 +1590,50 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert diagnostic.subject.occurrence == nil
   end
 
+  test "inspection rejects two selected providers for the canonical trace service", %{
+    tmp_dir: dir
+  } do
+    document = %{
+      "install" => %{
+        "normal-trace" => %{
+          "source" => "ptc_trace_snapshot",
+          "installation_revision" => "normal-v1",
+          "directory" => "traces"
+        },
+        "private-trace" => %{
+          "source" => "ptc_private_trace_snapshot",
+          "installation_revision" => "private-v1",
+          "directory" => "traces"
+        },
+        "inspection" => %{
+          "source" => "ptc_inspection_snapshot",
+          "installation_revision" => "inspection-v1",
+          "directory" => "inspection"
+        }
+      }
+    }
+
+    host_path = Path.join(dir, "host.json")
+    File.write!(host_path, Jason.encode!(document))
+    assert {:ok, host} = HostConfig.load(host_path)
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+
+    invalid_manifest =
+      put_in(manifest(), ["providers"], %{
+        "workflow" => [],
+        "mission" => [
+          %{"name" => "normal-trace"},
+          %{"name" => "private-trace"},
+          %{"name" => "inspection"}
+        ]
+      })
+
+    assert {:error, diagnostic} = prepare_identity(invalid_manifest, catalog)
+    assert diagnostic.phase == :provider_declaration
+    assert diagnostic.code == :dependency_invalid
+    assert diagnostic.subject.name == "inspection"
+  end
+
   test "provider dependency validation remains bounded for a dense near-limit DAG" do
     assert {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
 

@@ -239,7 +239,10 @@ MIX_QUIET=1 mix ptc repl \
 
 `inspection-analysis-v2` installs both core query components, both analysis
 layers, and their shared `cap` dependency. Alongside the ordinary `log/*`
-functions, it exports one-page private queries:
+functions, it reads both ordinary and `.private.jsonl` canonical traces while
+still excluding `.inspection.jsonl` from that trace resource. Each run returned
+by `log/*` retains its `sanitized` or `private` source label. It exports
+one-page private queries:
 
 - `(inspection/runs options-map)`;
 - `(inspection/model-exchanges run-id cursor)`;

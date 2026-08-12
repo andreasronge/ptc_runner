@@ -8,13 +8,16 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
   alias PtcRunner.Kernel.AnalysisSession
   alias PtcRunner.Kernel.AnalysisSessionBuilder
   alias PtcRunner.Kernel.AnalysisTerminal
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionAnalysisProfile
   alias PtcRunner.Kernel.InspectionCapability
+  alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.LogAnalysisProfile
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SessionTrace
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.TestSupport.PrivateInspectionFixture
 
   @profile_id "inspection-analysis-v2"
@@ -45,6 +48,8 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
 
     assert description["source_data_class"] == "private_inspection"
     assert description["result_data_class"] == "private_inspection"
+
+    assert description["trace_capture_policy"] == "private-authorized-canonical-v1"
 
     # The declared modes describe the attended path; the private_unattended
     # block describes the rest of the reachable surface, so a caller reading
@@ -83,6 +88,35 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
                continue_on_error: false,
                private_terminal: true,
                terminal_attached: true
+             })
+  end
+
+  @tag :tmp_dir
+  test "analysis resources reject trace snapshots from the other authority", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root)
+
+    assert {:ok, private_trace} =
+             TraceSnapshot.start({:private_authorized_directory, fixture.traces})
+
+    on_exit(fn -> TraceSnapshot.stop(private_trace) end)
+
+    assert {:error, :invalid_analysis_resources} =
+             AnalysisResources.new("log-analysis-v2", %{traces: private_trace})
+
+    assert {:ok, normal_trace} = TraceSnapshot.start({:directory, fixture.traces})
+
+    assert {:ok, inspection} =
+             InspectionSnapshot.start({:directory, fixture.inspection}, normal_trace)
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(inspection)
+      TraceSnapshot.stop(normal_trace)
+    end)
+
+    assert {:error, :invalid_analysis_resources} =
+             AnalysisResources.new("inspection-analysis-v2", %{
+               traces: normal_trace,
+               inspection: inspection
              })
   end
 
@@ -312,6 +346,18 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
 
     assert identity["source_data_class"] == "private_inspection"
     assert identity["result_data_class"] == "private_inspection"
+    assert identity["trace_capture_policy"] == "private-authorized-canonical-v1"
+
+    {:ok, old_identity_encoding} =
+      identity
+      |> Map.delete("trace_capture_policy")
+      |> DeterministicJSON.encode()
+
+    old_profile_digest =
+      "sha256:" <>
+        (:crypto.hash(:sha256, old_identity_encoding) |> Base.encode16(case: :lower))
+
+    refute info.profile_digest == old_profile_digest
     assert mission.bundle.component_ids == identity["components"]
     assert mission.data == %{}
 

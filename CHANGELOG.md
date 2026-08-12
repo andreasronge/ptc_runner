@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added the fixed, mission-only `ptc_private_trace_snapshot` provider source.
+  It immutably captures ordinary and private canonical traces with per-run
+  provenance, keeps inspection artifacts excluded, and classifies the run as
+  `private_inspection`. The private inspection-analysis profile now accepts
+  private traces recursively while preserving V5 terminal-result hash
+  correlation; ordinary trace readers remain normal-only.
+
 - Added exact successful terminal-result inspection for explicitly private
   captures. Inspection V5 binds one strictly JSON `run-result` record to the
   canonical `run-stopped.data.result_hash`; `inspection/result` exposes the value

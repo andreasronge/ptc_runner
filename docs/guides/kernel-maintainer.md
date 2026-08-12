@@ -1471,9 +1471,11 @@ have been dispatched, all three causes preserve the operator-declared effect,
 so a write remains indeterminate.
 
 PtcRunner-owned canonical traces remain native rather than passing through
-MCP. A host-installed `ptc_trace_snapshot` uses `TraceSnapshot` to capture one
-directory and `TraceCapability` to expose the same four canonical `TraceLog`
-queries used by `log-analysis-v2`. A paired private
+MCP. Host-installed `ptc_trace_snapshot` and `ptc_private_trace_snapshot`
+providers use `TraceSnapshot` to capture one directory and `TraceCapability`
+to expose the same four canonical `TraceLog` queries used by `log-analysis-v2`.
+The former admits ordinary traces only; the latter is a private-authorized
+capture of ordinary and private traces with per-run provenance. A paired private
 `ptc_inspection_snapshot` receives that already captured trace through the
 provider acquisition service, validates all artifacts and correlations before
 publication, and exposes the shared `InspectionQuery` layer through
@@ -1487,7 +1489,7 @@ closed `AnalysisProfileRegistry`. `AnalysisSessionBuilder` is the host entry;
 publication, and cleanup without letting a caller supply modules,
 capabilities, limits, or sink policy. `log-analysis-v2` remains the Viewer and
 ordinary terminal profile. `inspection-analysis-v2` adds correlated
-`TraceSnapshot` and `InspectionSnapshot` captures behind a private
+private-authorized `TraceSnapshot` and `InspectionSnapshot` captures behind a private
 interactive-terminal gate. Browser or Lisp input does not supply profile
 internals or paths.
 

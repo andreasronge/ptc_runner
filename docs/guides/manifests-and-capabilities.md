@@ -382,11 +382,12 @@ capability the model cannot see stays callable by exact name, and an ungranted
 one stays denied no matter how visible it is.
 
 [Host configuration](host-configuration.md) is the operator reference for the
-host JSON itself: credentials, all five provider sources, transports, tool
+host JSON itself: credentials, all six provider sources, transports, tool
 mappings, data classes, and installed ceilings.
 
-Two providers are native rather than MCP, and both serve PtcRunner's own
-evidence back to a mission. A `ptc_trace_snapshot` alias named `history` derives
+Three providers are native rather than MCP, and all serve PtcRunner's own
+evidence back to a mission. A `ptc_trace_snapshot` or
+`ptc_private_trace_snapshot` alias named `history` derives
 `history.list-runs`, `history.get-run`, `history.list-turns`, and
 `history.counters`. A `ptc_inspection_snapshot` alias derives `list-runs`,
 `model-exchanges`, `capability-calls`, `generated-sources`,
@@ -400,7 +401,8 @@ paging and bounds.
 Four properties matter when selecting them. Each reads its directory once, so an
 agent querying the trace of its own run sees a stable catalog instead of its own
 writes. An inspection snapshot never stands alone: it requires exactly one trace
-snapshot to validate against, and one orphaned, duplicated, malformed, or
+snapshot to validate against; selecting both trace source kinds makes that
+service ambiguous. One orphaned, duplicated, malformed, or
 oversized artifact rejects the whole private catalog rather than exposing part of
 it. Because inspection data classifies the run as `private_inspection`, every
 other selected provider must accept private data before either directory is

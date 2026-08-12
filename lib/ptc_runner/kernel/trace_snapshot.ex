@@ -25,16 +25,27 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   @type retained_limit_error ::
           {:source_retained_limit_exceeded,
            %{
-             source: :ptc_trace_snapshot,
+             source: :ptc_trace_snapshot | :ptc_private_trace_snapshot,
              measured_bytes: pos_integer(),
              limit_bytes: pos_integer()
            }}
 
-  @spec start({:directory, binary()}, keyword()) ::
+  @spec start({:directory | :private_authorized_directory, binary()}, keyword()) ::
           {:ok, t()} | {:error, atom() | retained_limit_error()}
   def start(source, opts \\ [])
 
-  def start({:directory, directory}, opts) when is_binary(directory) and is_list(opts) do
+  def start({:directory, directory}, opts),
+    do: start_directory(directory, :ptc_trace_snapshot, :sanitized, opts)
+
+  def start({:private_authorized_directory, directory}, opts),
+    do: start_directory(directory, :ptc_private_trace_snapshot, :private, opts)
+
+  def start(_source, _opts), do: {:error, :invalid_snapshot}
+
+  defp start_directory(directory, source, source_kind, opts)
+       when is_binary(directory) and
+              source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot] and
+              source_kind in [:sanitized, :private] and is_list(opts) do
     allowed = [
       :owner,
       :resource_registrar,
@@ -73,9 +84,9 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
       case GenServer.start(
              __MODULE__,
-             {directory, owner, registrar, token, max_source_bytes, max_retained_bytes,
-              max_result_bytes, max_directory_entries, max_trace_files, capture_heap_words,
-              capture_hook, listing_hook}
+             {directory, source, source_kind, owner, registrar, token, max_source_bytes,
+              max_retained_bytes, max_result_bytes, max_directory_entries, max_trace_files,
+              capture_heap_words, capture_hook, listing_hook}
            ) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
         {:error, {:source_retained_limit_exceeded, _details} = reason} -> {:error, reason}
@@ -87,7 +98,8 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     end
   end
 
-  def start(_source, _opts), do: {:error, :invalid_snapshot}
+  defp start_directory(_directory, _source, _source_kind, _opts),
+    do: {:error, :invalid_snapshot}
 
   @spec query(t(), :list_runs | :get_run | :list_turns | :counters, map()) ::
           {:ok, map()} | {:error, atom()}
@@ -100,6 +112,12 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   @spec info(t()) :: {:ok, map()} | {:error, atom()}
   def info(%__MODULE__{} = snapshot), do: call(snapshot, :info)
   def info(_snapshot), do: {:error, :invalid_snapshot}
+
+  @doc false
+  @spec source(term()) ::
+          {:ok, :ptc_trace_snapshot | :ptc_private_trace_snapshot} | {:error, atom()}
+  def source(%__MODULE__{} = snapshot), do: call(snapshot, :source)
+  def source(_snapshot), do: {:error, :invalid_snapshot}
 
   @doc false
   @spec validate_inspection(t(), [map()]) :: :ok | {:error, atom()}
@@ -139,28 +157,29 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   @impl GenServer
   def init(
-        {directory, owner, registrar, token, max_source_bytes, max_retained_bytes,
-         max_result_bytes, max_directory_entries, max_trace_files, capture_heap_words,
-         capture_hook, listing_hook}
+        {directory, source, source_kind, owner, registrar, token, max_source_bytes,
+         max_retained_bytes, max_result_bytes, max_directory_entries, max_trace_files,
+         capture_heap_words, capture_hook, listing_hook}
       ) do
     owner_ref = Process.monitor(owner)
 
+    capture_config = %{
+      source: source,
+      source_kind: source_kind,
+      max_source_bytes: max_source_bytes,
+      max_retained_bytes: max_retained_bytes,
+      max_directory_entries: max_directory_entries,
+      max_trace_files: max_trace_files
+    }
+
     capture = fn ->
-      capture(
-        directory,
-        max_source_bytes,
-        max_retained_bytes,
-        max_directory_entries,
-        max_trace_files,
-        capture_hook,
-        listing_hook
-      )
+      capture(directory, capture_config, capture_hook, listing_hook)
     end
 
     with :ok <- ResourceRegistrar.register_root(registrar),
          {:ok, capture, retained_bytes} <-
            capture_for_owner(capture, owner, owner_ref, capture_heap_words) do
-      {:ok, snapshot_state(capture, retained_bytes, token, owner_ref, max_result_bytes)}
+      {:ok, snapshot_state(capture, source, retained_bytes, token, owner_ref, max_result_bytes)}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -169,6 +188,9 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   @impl GenServer
   def handle_call({token, :info}, _from, %{token: token} = state),
     do: {:reply, {:ok, state.info}, state}
+
+  def handle_call({token, :source}, _from, %{token: token} = state),
+    do: {:reply, {:ok, state.info.source}, state}
 
   def handle_call({token, {:query, operation, arguments}}, _from, %{token: token} = state) do
     {:reply, query_with_snapshot_hash(state, operation, arguments), state}
@@ -243,35 +265,34 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   defp call(_snapshot, _request), do: {:error, :invalid_snapshot}
 
-  defp capture(
-         directory,
-         max_source_bytes,
-         max_retained_bytes,
-         max_directory_entries,
-         max_trace_files,
-         capture_hook,
-         listing_hook
-       ) do
+  defp capture(directory, config, capture_hook, listing_hook) do
     with {:ok, capture} <-
            TraceLog.capture_directory(directory,
-             max_source_bytes: max_source_bytes,
-             max_directory_entries: max_directory_entries,
-             max_trace_files: max_trace_files,
+             max_source_bytes: config.max_source_bytes,
+             max_directory_entries: config.max_directory_entries,
+             max_trace_files: config.max_trace_files,
+             source_kind: config.source_kind,
              capture_hook: capture_hook,
              listing_hook: listing_hook
            ),
-         retained_bytes when is_integer(retained_bytes) and retained_bytes <= max_retained_bytes <-
-           RetainedSize.bytes(capture.events) do
-      retained_capture = %{capture | events: RetainedSize.detach_binaries(capture.events)}
+         retained_bytes
+         when is_integer(retained_bytes) and retained_bytes <= config.max_retained_bytes <-
+           RetainedSize.bytes({capture.events, capture.run_sources}) do
+      retained_capture = %{
+        capture
+        | events: RetainedSize.detach_binaries(capture.events),
+          run_sources: RetainedSize.detach_binaries(capture.run_sources)
+      }
+
       {:ok, retained_capture, retained_bytes}
     else
       retained_bytes when is_integer(retained_bytes) ->
         {:error,
          {:source_retained_limit_exceeded,
           %{
-            source: :ptc_trace_snapshot,
+            source: config.source,
             measured_bytes: retained_bytes,
-            limit_bytes: max_retained_bytes
+            limit_bytes: config.max_retained_bytes
           }}}
 
       :oversized ->
@@ -336,17 +357,19 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     end
   end
 
-  defp snapshot_state(capture, retained_bytes, token, owner_ref, max_result_bytes) do
+  defp snapshot_state(capture, source, retained_bytes, token, owner_ref, max_result_bytes) do
     %{
       token: token,
       owner_ref: owner_ref,
       events: capture.events,
+      run_sources: capture.run_sources,
       source_id: capture.source_id,
       max_result_bytes: max_result_bytes,
       info: %{
         capture_id: capture.source_id,
         captured_at: DateTime.utc_now(),
         file_count: capture.file_count,
+        source: source,
         run_count: capture.events |> MapSet.new(& &1["run_id"]) |> MapSet.size(),
         snapshot_hash: SafeMetadata.fingerprint(capture.source_id),
         source_bytes: capture.source_bytes,
@@ -367,7 +390,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
              operation,
              arguments,
              query_bytes,
-             :sanitized
+             state.run_sources
            ) do
         {:ok, result} -> {:ok, Map.put(result, "snapshot_hash", snapshot_hash)}
         {:error, _reason} = error -> error

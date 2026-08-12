@@ -84,6 +84,85 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   end
 
   @tag :tmp_dir
+  test "private-authorized capture is a mixed immutable superset with per-run provenance", %{
+    tmp_dir: directory
+  } do
+    normal_path = Path.join(directory, "normal.jsonl")
+    private_path = Path.join(directory, "private.private.jsonl")
+    inspection_path = Path.join(directory, "ignored.inspection.jsonl")
+
+    write_events(normal_path, [event("normal", 1, "run-started")])
+    write_events(private_path, [event("private", 1, "run-started")])
+    write_events(inspection_path, [event("inspection", 1, "run-started")])
+
+    assert {:ok, snapshot} =
+             TraceSnapshot.start({:private_authorized_directory, directory}, owner: self())
+
+    on_exit(fn -> TraceSnapshot.stop(snapshot) end)
+
+    assert {:ok,
+            %{
+              source: :ptc_private_trace_snapshot,
+              file_count: 2,
+              run_count: 2,
+              snapshot_hash: snapshot_hash
+            }} = TraceSnapshot.info(snapshot)
+
+    assert {:ok, %{"items" => items, "snapshot_hash" => ^snapshot_hash}} =
+             TraceSnapshot.query(snapshot, :list_runs, %{})
+
+    assert Map.new(items, &{&1["run_id"], &1["source"]}) == %{
+             "normal" => "sanitized",
+             "private" => "private"
+           }
+
+    write_events(normal_path, [event("changed", 1, "run-started")])
+    File.rm!(private_path)
+
+    assert {:ok, %{"items" => frozen}} = TraceSnapshot.query(snapshot, :list_runs, %{})
+    assert Enum.map(frozen, & &1["run_id"]) |> Enum.sort() == ["normal", "private"]
+  end
+
+  @tag :tmp_dir
+  test "private-authorized capture rejects one run split across source classes", %{
+    tmp_dir: directory
+  } do
+    write_events(Path.join(directory, "run.jsonl"), [event("split", 1, "run-started")])
+
+    write_events(Path.join(directory, "run.private.jsonl"), [
+      event("split", 2, "run-stopped")
+    ])
+
+    assert {:error, :malformed_source} =
+             TraceSnapshot.start({:private_authorized_directory, directory}, owner: self())
+  end
+
+  @tag :tmp_dir
+  test "private capture bounds the combined normal and private catalog", %{tmp_dir: directory} do
+    write_events(Path.join(directory, "normal.jsonl"), [event("normal", 1, "run-started")])
+
+    write_events(Path.join(directory, "private.private.jsonl"), [
+      event("private", 1, "run-started")
+    ])
+
+    assert {:error, :source_limit_exceeded} =
+             TraceSnapshot.start({:private_authorized_directory, directory},
+               owner: self(),
+               max_trace_files: 1
+             )
+
+    assert {:error,
+            {:source_retained_limit_exceeded,
+             %{source: :ptc_private_trace_snapshot, measured_bytes: measured, limit_bytes: 1}}} =
+             TraceSnapshot.start({:private_authorized_directory, directory},
+               owner: self(),
+               max_retained_bytes: 1
+             )
+
+    assert measured > 1
+  end
+
+  @tag :tmp_dir
   test "snapshot cursors remain bound to the immutable capture", %{tmp_dir: directory} do
     write_events(Path.join(directory, "a.jsonl"), [event("first", 1, "run-started")])
     write_events(Path.join(directory, "b.jsonl"), [event("second", 1, "run-started")])

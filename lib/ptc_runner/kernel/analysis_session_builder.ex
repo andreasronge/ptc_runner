@@ -41,7 +41,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   @type retained_limit_error ::
           {:source_retained_limit_exceeded,
            %{
-             source: :ptc_trace_snapshot | :ptc_inspection_snapshot,
+             source: :ptc_trace_snapshot | :ptc_private_trace_snapshot | :ptc_inspection_snapshot,
              measured_bytes: pos_integer(),
              limit_bytes: pos_integer()
            }}
@@ -523,7 +523,11 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
          _recipe
        )
        when map_size(details) == 3 and
-              source in [:ptc_trace_snapshot, :ptc_inspection_snapshot] and
+              source in [
+                :ptc_trace_snapshot,
+                :ptc_private_trace_snapshot,
+                :ptc_inspection_snapshot
+              ] and
               is_integer(measured_bytes) and measured_bytes > 0 and
               is_integer(limit_bytes) and limit_bytes > 0,
        do: reason

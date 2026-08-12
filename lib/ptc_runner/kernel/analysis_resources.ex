@@ -51,7 +51,8 @@ defmodule PtcRunner.Kernel.AnalysisResources do
         profile_id: @log_profile,
         handles: %{traces: %TraceSnapshot{} = traces} = handles
       }) do
-    map_size(handles) == 1 and TraceSnapshot.valid?(traces)
+    map_size(handles) == 1 and
+      TraceSnapshot.source(traces) == {:ok, :ptc_trace_snapshot}
   end
 
   def valid?(%__MODULE__{
@@ -62,7 +63,8 @@ defmodule PtcRunner.Kernel.AnalysisResources do
             inspection: %InspectionSnapshot{} = inspection
           } = handles
       }) do
-    map_size(handles) == 2 and TraceSnapshot.valid?(traces) and
+    map_size(handles) == 2 and
+      TraceSnapshot.source(traces) == {:ok, :ptc_private_trace_snapshot} and
       InspectionSnapshot.valid?(inspection)
   end
 

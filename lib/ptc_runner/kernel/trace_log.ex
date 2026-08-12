@@ -20,10 +20,12 @@ defmodule PtcRunner.Kernel.TraceLog do
   Pagination cursors are bound to the source and operation. Every source and
   result has an aggregate byte ceiling. Normal directory sources exclude the
   reserved private filename suffix; private files require an explicit source.
+  Internal immutable capture may use a private authority that admits both
+  normal and private trace files while retaining accurate per-run provenance.
 
   The internal trace-snapshot owner uses this module's canonical validation and
-  query execution against one immutable normal directory capture. A snapshot
-  is deliberately not another public `t:source/0` variant.
+  query execution against one immutable directory capture. A snapshot is
+  deliberately not another public `t:source/0` variant.
   """
 
   alias Jason.OrderedObject
@@ -156,22 +158,44 @@ defmodule PtcRunner.Kernel.TraceLog do
           :list_runs | :get_run | :list_turns | :counters,
           map(),
           pos_integer(),
-          :sanitized | :private
+          :sanitized | :private | %{binary() => :sanitized | :private}
         ) :: {:ok, map()} | {:error, atom()}
   def query_loaded(events, source_id, operation, arguments, max_result_bytes, source_kind)
       when is_list(events) and is_binary(source_id) and
              operation in [:list_runs, :get_run, :list_turns, :counters] and is_map(arguments) and
              is_integer(max_result_bytes) and max_result_bytes > 0 and
-             source_kind in [:sanitized, :private] do
-    execute(operation, events, source_id, arguments, max_result_bytes, source_kind)
+             (source_kind in [:sanitized, :private] or is_map(source_kind)) do
+    if valid_query_source_kind?(events, source_kind),
+      do: execute(operation, events, source_id, arguments, max_result_bytes, source_kind),
+      else: {:error, :invalid_query}
   end
 
   def query_loaded(_events, _source_id, _operation, _arguments, _max_result_bytes, _source_kind),
     do: {:error, :invalid_query}
 
+  defp valid_query_source_kind?(_events, source_kind)
+       when source_kind in [:sanitized, :private],
+       do: true
+
+  defp valid_query_source_kind?(events, run_sources) when is_map(run_sources) do
+    run_ids = events |> MapSet.new(& &1["run_id"]) |> MapSet.to_list() |> Enum.sort()
+
+    Enum.sort(Map.keys(run_sources)) == run_ids and
+      Enum.all?(run_sources, fn {run_id, source_kind} ->
+        is_binary(run_id) and source_kind in [:sanitized, :private]
+      end)
+  end
+
   @doc false
   @spec capture_directory(binary(), keyword()) ::
-          {:ok, %{events: [map()], source_id: binary(), source_bytes: non_neg_integer()}}
+          {:ok,
+           %{
+             events: [map()],
+             run_sources: %{binary() => :sanitized | :private},
+             source_id: binary(),
+             source_bytes: non_neg_integer(),
+             file_count: non_neg_integer()
+           }}
           | {:error, atom()}
   def capture_directory(directory, opts \\ [])
 
@@ -182,6 +206,7 @@ defmodule PtcRunner.Kernel.TraceLog do
                :max_source_bytes,
                :max_directory_entries,
                :max_trace_files,
+               :source_kind,
                :capture_hook,
                :listing_hook
              ] == [],
@@ -197,13 +222,16 @@ defmodule PtcRunner.Kernel.TraceLog do
            ),
          max_trace_files when max_trace_files in 1..@default_capture_trace_files <-
            Keyword.get(opts, :max_trace_files, @default_capture_trace_files),
+         source_kind when source_kind in [:sanitized, :private] <-
+           Keyword.get(opts, :source_kind, :sanitized),
          capture_hook when is_nil(capture_hook) or is_function(capture_hook, 0) <-
            Keyword.get(opts, :capture_hook),
          listing_hook when is_nil(listing_hook) or is_function(listing_hook, 0) <-
            Keyword.get(opts, :listing_hook),
          {:ok, capture} <-
-           capture_normal_directory(
+           capture_directory_files(
              Path.expand(directory),
+             source_kind,
              max_source_bytes,
              max_directory_entries,
              max_trace_files,
@@ -1572,8 +1600,9 @@ defmodule PtcRunner.Kernel.TraceLog do
       not inspection_path?(name) and private_path?(name) == (source_kind == :private)
   end
 
-  defp capture_normal_directory(
+  defp capture_directory_files(
          directory,
+         source_kind,
          max_source_bytes,
          max_directory_entries,
          max_trace_files,
@@ -1581,23 +1610,44 @@ defmodule PtcRunner.Kernel.TraceLog do
          listing_hook
        ) do
     with {:ok, before_inventory} <-
-           directory_inventory(directory, max_directory_entries, max_trace_files, listing_hook),
+           directory_inventory(
+             directory,
+             source_kind,
+             max_directory_entries,
+             max_trace_files,
+             listing_hook
+           ),
          {:ok, sources, source_bytes} <-
            read_inventory(directory, before_inventory.files, max_source_bytes),
          :ok <- run_capture_hook(capture_hook),
          {:ok, after_read_inventory} <-
-           changed_inventory(directory, max_directory_entries, max_trace_files, listing_hook),
+           changed_inventory(
+             directory,
+             source_kind,
+             max_directory_entries,
+             max_trace_files,
+             listing_hook
+           ),
          :ok <- same_inventory(before_inventory, after_read_inventory),
          :ok <- verify_sources(directory, after_read_inventory.files, sources),
          {:ok, after_verify_inventory} <-
-           changed_inventory(directory, max_directory_entries, max_trace_files, listing_hook),
+           changed_inventory(
+             directory,
+             source_kind,
+             max_directory_entries,
+             max_trace_files,
+             listing_hook
+           ),
          :ok <- same_inventory(after_read_inventory, after_verify_inventory),
          :ok <- verify_sources(directory, after_verify_inventory.files, sources),
-         {:ok, events} <- decode_sources(sources),
-         {:ok, events, source_id} <- validate_loaded(events, max_source_bytes) do
+         {:ok, events, run_sources} <- decode_capture_sources(sources),
+         {:ok, events, _event_source_id} <- validate_loaded(events, max_source_bytes) do
+      source_id = digest({events, run_sources})
+
       {:ok,
        %{
          events: events,
+         run_sources: run_sources,
          source_id: source_id,
          source_bytes: source_bytes,
          file_count: length(after_verify_inventory.files)
@@ -1605,12 +1655,18 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp directory_inventory(directory, max_directory_entries, max_trace_files, listing_hook) do
+  defp directory_inventory(
+         directory,
+         source_kind,
+         max_directory_entries,
+         max_trace_files,
+         listing_hook
+       ) do
     with {:ok, %File.Stat{type: :directory} = directory_stat} <-
            File.lstat(directory, time: :posix),
          {:ok, names} <- bounded_directory_names(directory, max_directory_entries, listing_hook),
          {:ok, names} <-
-           bounded_supported_names(names, :sanitized, max_trace_files),
+           bounded_capture_names(names, source_kind, max_trace_files),
          {:ok, files} <- inventory_files(directory, names) do
       {:ok, %{directory: stat_identity(directory_stat), files: files}}
     else
@@ -1620,8 +1676,20 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp changed_inventory(directory, max_directory_entries, max_trace_files, listing_hook) do
-    case directory_inventory(directory, max_directory_entries, max_trace_files, listing_hook) do
+  defp changed_inventory(
+         directory,
+         source_kind,
+         max_directory_entries,
+         max_trace_files,
+         listing_hook
+       ) do
+    case directory_inventory(
+           directory,
+           source_kind,
+           max_directory_entries,
+           max_trace_files,
+           listing_hook
+         ) do
       {:ok, inventory} -> {:ok, inventory}
       {:error, _reason} -> {:error, :source_changed}
     end
@@ -1650,13 +1718,18 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp bounded_supported_names(names, source_kind, max_trace_files) do
-    supported = Enum.filter(names, &supported_name?(&1, source_kind))
+  defp bounded_capture_names(names, source_kind, max_trace_files) do
+    supported = Enum.filter(names, &capture_name?(&1, source_kind))
 
     if length(supported) <= max_trace_files,
       do: {:ok, Enum.sort(supported)},
       else: {:error, :source_limit_exceeded}
   end
+
+  defp capture_name?(name, :sanitized), do: supported_name?(name, :sanitized)
+
+  defp capture_name?(name, :private),
+    do: supported_name?(name, :sanitized) or supported_name?(name, :private)
 
   defp inventory_files(directory, names) do
     Enum.reduce_while(names, {:ok, []}, fn name, {:ok, files} ->
@@ -1754,18 +1827,44 @@ defmodule PtcRunner.Kernel.TraceLog do
     end)
   end
 
-  defp decode_sources(sources) do
-    Enum.reduce_while(sources, {:ok, []}, fn {_name, source}, {:ok, event_groups} ->
+  defp decode_capture_sources(sources) do
+    Enum.reduce_while(sources, {:ok, [], %{}}, fn {name, source},
+                                                  {:ok, event_groups, run_sources} ->
       case decode_jsonl(source) do
-        {:ok, events} -> {:cont, {:ok, [events | event_groups]}}
-        {:error, _reason} = error -> {:halt, error}
+        {:ok, events} ->
+          case put_run_sources(run_sources, events, filename_source_kind(name)) do
+            {:ok, run_sources} -> {:cont, {:ok, [events | event_groups], run_sources}}
+            {:error, _reason} = error -> {:halt, error}
+          end
+
+        {:error, _reason} = error ->
+          {:halt, error}
       end
     end)
     |> case do
-      {:ok, event_groups} -> {:ok, event_groups |> Enum.reverse() |> List.flatten()}
-      {:error, _reason} = error -> error
+      {:ok, event_groups, run_sources} ->
+        {:ok, event_groups |> Enum.reverse() |> List.flatten(), run_sources}
+
+      {:error, _reason} = error ->
+        error
     end
   end
+
+  defp put_run_sources(run_sources, events, source_kind) do
+    Enum.reduce_while(events, {:ok, run_sources}, fn
+      %{"run_id" => run_id}, {:ok, sources} ->
+        case Map.get(sources, run_id) do
+          nil -> {:cont, {:ok, Map.put(sources, run_id, source_kind)}}
+          ^source_kind -> {:cont, {:ok, sources}}
+          _conflicting -> {:halt, {:error, :malformed_source}}
+        end
+
+      _invalid_event, _acc ->
+        {:halt, {:error, :malformed_source}}
+    end)
+  end
+
+  defp filename_source_kind(name), do: if(private_path?(name), do: :private, else: :sanitized)
 
   defp same_inventory(inventory, inventory), do: :ok
   defp same_inventory(_before, _after), do: {:error, :source_changed}
@@ -2090,12 +2189,19 @@ defmodule PtcRunner.Kernel.TraceLog do
   defp runs(events, source_kind) do
     events
     |> Enum.group_by(& &1["run_id"])
-    |> Enum.map(fn {run_id, run_events} -> run_metadata(run_id, run_events, source_kind) end)
+    |> Enum.map(fn {run_id, run_events} ->
+      run_metadata(run_id, run_events, run_source_kind(source_kind, run_id))
+    end)
     |> Enum.sort(fn left, right ->
       {timestamp_sort_value(left["start_timestamp"]), left["run_id"]} >=
         {timestamp_sort_value(right["start_timestamp"]), right["run_id"]}
     end)
   end
+
+  defp run_source_kind(source_kind, _run_id) when source_kind in [:sanitized, :private],
+    do: source_kind
+
+  defp run_source_kind(run_sources, run_id), do: Map.fetch!(run_sources, run_id)
 
   defp run_metadata(run_id, events, source_kind) do
     started = Enum.find(events, &(&1["type"] == "run-started"))
