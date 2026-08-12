@@ -3,7 +3,7 @@ defmodule PtcRunner.Kernel.InspectionCapability do
   Fixed read-only capabilities over one private `InspectionSnapshot`.
 
   Profile-backed sessions receive stable `inspection-*` names. A manifest
-  installation derives the same six operations from its selected alias as
+  installation derives the same eight operations from its selected alias as
   `<alias>.<operation>`. Both forms retain only an opaque snapshot handle and
   delegate to the same query layer. Every result carries the frozen capture's
   `snapshot_hash`, matching the provider snapshot's `content_snapshot_hash`,
@@ -20,7 +20,9 @@ defmodule PtcRunner.Kernel.InspectionCapability do
     :capability_calls,
     :generated_sources,
     :effective_preludes,
-    :provider_exchanges
+    :provider_exchanges,
+    :execution_prints,
+    :execution_errors
   ]
 
   @doc false
@@ -64,6 +66,8 @@ defmodule PtcRunner.Kernel.InspectionCapability do
   defp capability_name(:profile, :generated_sources), do: "inspection-generated-sources"
   defp capability_name(:profile, :effective_preludes), do: "inspection-effective-preludes"
   defp capability_name(:profile, :provider_exchanges), do: "inspection-provider-exchanges"
+  defp capability_name(:profile, :execution_prints), do: "inspection-execution-prints"
+  defp capability_name(:profile, :execution_errors), do: "inspection-execution-errors"
 
   defp capability_name({:provider, provider}, operation),
     do: provider <> "." <> operation_name(operation)
@@ -74,6 +78,8 @@ defmodule PtcRunner.Kernel.InspectionCapability do
   defp operation_name(:generated_sources), do: "generated-sources"
   defp operation_name(:effective_preludes), do: "effective-preludes"
   defp operation_name(:provider_exchanges), do: "provider-exchanges"
+  defp operation_name(:execution_prints), do: "execution-prints"
+  defp operation_name(:execution_errors), do: "execution-errors"
 
   defp capability(snapshot, name, operation) do
     Capability.new(

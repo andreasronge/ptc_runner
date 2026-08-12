@@ -181,7 +181,9 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
             "inspection.analysis/all-capability-calls",
             "inspection.analysis/all-generated-sources",
             "inspection.analysis/all-effective-preludes",
-            "inspection.analysis/all-provider-exchanges"
+            "inspection.analysis/all-provider-exchanges",
+            "inspection.analysis/all-execution-prints",
+            "inspection.analysis/all-execution-errors"
           ] do
         assert {:ok, _export} = Prelude.fetch_export(bundle.prelude, ref)
       end

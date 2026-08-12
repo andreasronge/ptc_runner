@@ -390,7 +390,8 @@ evidence back to a mission. A `ptc_trace_snapshot` alias named `history` derives
 `history.list-runs`, `history.get-run`, `history.list-turns`, and
 `history.counters`. A `ptc_inspection_snapshot` alias derives `list-runs`,
 `model-exchanges`, `capability-calls`, `generated-sources`,
-`effective-preludes`, and `provider-exchanges`.
+`effective-preludes`, `provider-exchanges`, `execution-prints`, and
+`execution-errors`.
 [Kernel REPL](kernel-repl.md#private-inspection-mission-sessions) shows the
 queries in use, and the
 [TraceLog contract](../trace-log-contract.md#query-contract) is normative for

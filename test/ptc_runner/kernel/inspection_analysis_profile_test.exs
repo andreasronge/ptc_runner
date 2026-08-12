@@ -262,6 +262,8 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
       %{"run_id" => fixture.run_id},
       %{"run_id" => fixture.run_id},
       %{"run_id" => fixture.run_id},
+      %{"run_id" => fixture.run_id},
+      %{"run_id" => fixture.run_id},
       %{"run_id" => fixture.run_id}
     ]
 
@@ -270,7 +272,8 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
       assert profile.callback.(query) == manifest.callback.(query)
     end)
 
-    provider_exchanges = List.last(profile_capabilities)
+    provider_exchanges =
+      Enum.find(profile_capabilities, &(&1.name == "inspection-provider-exchanges"))
 
     assert {:ok,
             %{
@@ -374,6 +377,43 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     assert exchange["response"]["result"]["content"] == [
              %{"type" => "text", "text" => "private-tool-result-#{fixture.run_id}"}
            ]
+
+    execution_id = "workflow-eval-#{fixture.run_id}"
+    execution_print = "private-print-#{fixture.run_id}"
+
+    assert {:ok,
+            %{
+              value: %{
+                "complete?" => true,
+                "items" => [
+                  %{
+                    "evaluation_id" => ^execution_id,
+                    "prints" => [^execution_print]
+                  }
+                ]
+              }
+            }} =
+             AnalysisSession.evaluate(
+               session,
+               ~s|(inspection.analysis/all-execution-prints "#{fixture.run_id}" 2)|
+             )
+
+    assert {:ok,
+            %{
+              value: %{
+                "items" => [
+                  %{
+                    "evaluation_id" => ^execution_id,
+                    "kind" => "limit_exceeded",
+                    "reason" => "timeout"
+                  }
+                ]
+              }
+            }} =
+             AnalysisSession.evaluate(
+               session,
+               ~s|(inspection/execution-errors "#{fixture.run_id}" nil)|
+             )
 
     assert {:ok, %{lifecycle: :closed}} = AnalysisSession.close(session)
     assert File.regular?(trace_path)

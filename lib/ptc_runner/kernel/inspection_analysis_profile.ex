@@ -30,6 +30,8 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfile do
   @inspection_capabilities ~w(
     inspection-capability-calls
     inspection-effective-preludes
+    inspection-execution-errors
+    inspection-execution-prints
     inspection-generated-sources
     inspection-list-runs
     inspection-model-exchanges

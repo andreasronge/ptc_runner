@@ -237,22 +237,35 @@ mix ptc repl \
 layers, and their shared `cap` dependency. Alongside the ordinary `log/*`
 functions, it exports one-page private queries:
 
-- `inspection/runs`;
-- `inspection/model-exchanges`;
-- `inspection/capability-calls`;
-- `inspection/generated-sources`;
-- `inspection/effective-preludes`; and
-- `inspection/provider-exchanges`.
+- `(inspection/runs options-map)`;
+- `(inspection/model-exchanges run-id cursor)`;
+- `(inspection/capability-calls run-id cursor)`;
+- `(inspection/generated-sources run-id cursor)`;
+- `(inspection/effective-preludes run-id cursor)`;
+- `(inspection/provider-exchanges run-id cursor)`;
+- `(inspection/execution-prints run-id cursor)`; and
+- `(inspection/execution-errors run-id cursor)`.
 
-Each collection returns an opaque `next_cursor` for a later page. The
-`inspection.analysis/*` namespace provides bounded whole-result variants:
+Pass `nil` as the initial cursor for a run-scoped query. Each collection
+returns an opaque `next_cursor`; pass that value to the same function to read a
+later page:
 
-- `inspection.analysis/all-runs`;
-- `inspection.analysis/all-model-exchanges`;
-- `inspection.analysis/all-capability-calls`;
-- `inspection.analysis/all-generated-sources`;
-- `inspection.analysis/all-effective-preludes`; and
-- `inspection.analysis/all-provider-exchanges`.
+```clojure
+(def page (inspection/model-exchanges run-id nil))
+(inspection/model-exchanges run-id (get page "next_cursor"))
+```
+
+The `inspection.analysis/*` namespace provides bounded whole-result variants.
+Its last argument is the maximum number of pages to collect:
+
+- `(inspection.analysis/all-runs options-map max-pages)`;
+- `(inspection.analysis/all-model-exchanges run-id max-pages)`;
+- `(inspection.analysis/all-capability-calls run-id max-pages)`;
+- `(inspection.analysis/all-generated-sources run-id max-pages)`;
+- `(inspection.analysis/all-effective-preludes run-id max-pages)`;
+- `(inspection.analysis/all-provider-exchanges run-id max-pages)`;
+- `(inspection.analysis/all-execution-prints run-id max-pages)`; and
+- `(inspection.analysis/all-execution-errors run-id max-pages)`.
 
 For example:
 
@@ -262,12 +275,13 @@ For example:
 (inspection.analysis/all-model-exchanges run-id 10)
 (inspection.analysis/all-generated-sources run-id 10)
 (inspection.analysis/all-provider-exchanges run-id 10)
+(inspection.analysis/all-execution-errors run-id 10)
 ```
 
 Exact model messages, generated source, capability arguments/results,
-effective preludes, and MCP request/response bodies may appear on the
-authorized terminal. They are private data: do not paste or redirect them to a
-public sink.
+effective preludes, MCP request/response bodies, execution prints, and
+execution error details may appear on the authorized terminal. They are
+private data: do not paste or redirect them to a public sink.
 
 The attached-terminal check is an **accident guard, not access control**. It
 cannot distinguish a human terminal from a pseudo-terminal allocated by

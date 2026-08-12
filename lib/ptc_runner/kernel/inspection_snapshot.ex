@@ -39,7 +39,9 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
     :capability_calls,
     :generated_sources,
     :effective_preludes,
-    :provider_exchanges
+    :provider_exchanges,
+    :execution_prints,
+    :execution_errors
   ]
 
   @enforce_keys [:pid, :token]
