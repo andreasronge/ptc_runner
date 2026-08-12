@@ -308,7 +308,11 @@ omitted according to the adapter.
 Canonical `capability-started` and `capability-stopped` events identify the
 selected alias and installation revision. Successful stopped events also carry
 the closed token map as `usage`, without response content. `log/counters`
-aggregates those values per alias and revision.
+preserves aggregation per alias and revision in `llm_usage`. It additionally
+returns `llm_usage_by_model`, using an empty list when no model is attributable.
+Entries require an adapter-attested `resolved_model` in the run-started provider
+snapshot. `unattributed_model_calls` counts otherwise eligible calls that cannot
+be mapped uniquely. Model identity is not repeated on each capability event.
 
 `llm/request` unwraps successful capability envelopes. A recoverable provider
 failure remains the ordinary bounded error envelope returned by the

@@ -342,6 +342,8 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert stopped.data.alias == "metered"
     assert stopped.data.installation_revision == "metered-v3"
     assert stopped.data.usage == %{"input" => 4, "output" => 2}
+    refute Map.has_key?(started.data, :resolved_model)
+    refute Map.has_key?(stopped.data, :resolved_model)
     refute inspect(events) =~ "answer"
 
     assert {:ok, trace_capabilities} =
@@ -362,7 +364,9 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
                   "missing_usage_calls" => 0,
                   "usage" => %{"input" => 4, "output" => 2}
                 }
-              ]
+              ],
+              "llm_usage_by_model" => [],
+              "unattributed_model_calls" => 1
             }} = counters.callback.(%{"run_id" => "routing-events"})
   end
 

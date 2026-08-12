@@ -2,9 +2,9 @@ defmodule PtcRunner.LLM do
   @moduledoc """
   Provider-neutral LLM adapter boundary used by trusted Kernel provider builders.
 
-  `callback/2` resolves a configured model and returns a one-argument provider
-  callback. Kernel policy, retries, prompt construction, and protocol recovery
-  live in shipped Lisp libraries rather than this transport adapter.
+  `callback/2` binds a configured full model identifier into a one-argument
+  provider callback. Kernel policy, retries, prompt construction, and protocol
+  recovery live in shipped Lisp libraries rather than this transport adapter.
   """
 
   @type message :: %{role: :system | :user | :assistant | :tool, content: String.t()}
@@ -82,7 +82,38 @@ defmodule PtcRunner.LLM do
   """
   @callback provider_application(model :: String.t()) :: :req_llm | nil
 
-  @optional_callbacks [stream: 2, ensure_ready: 0, provider_application: 1]
+  @doc """
+  Attests that the exact adapter target is safe to publish in canonical traces.
+
+  Optional. Return `{:ok, model}` only when the complete value is public model
+  identity. Return `:private` for local, endpoint-bearing, deployment-private,
+  or otherwise sensitive targets. PtcRunner rejects altered, malformed, or
+  oversized values and treats a missing or raising callback as private.
+  """
+  @callback public_model(model :: String.t()) :: {:ok, String.t()} | :private
+
+  @optional_callbacks [stream: 2, ensure_ready: 0, provider_application: 1, public_model: 1]
+
+  @doc false
+  @spec attested_public_model(module(), String.t()) :: String.t() | nil
+  def attested_public_model(adapter, model) when is_atom(adapter) and is_binary(model) do
+    if function_exported?(adapter, :public_model, 1) do
+      case adapter.public_model(model) do
+        {:ok, ^model}
+        when byte_size(model) in 1..256 ->
+          if String.valid?(model), do: model
+
+        _private_or_invalid ->
+          nil
+      end
+    end
+  rescue
+    _exception -> nil
+  catch
+    _kind, _reason -> nil
+  end
+
+  def attested_public_model(_adapter, _model), do: nil
 
   @doc """
   Creates a normalized callback for a configured model.

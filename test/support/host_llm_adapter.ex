@@ -29,8 +29,24 @@ defmodule PtcRunner.TestSupport.HostLLMAdapter do
 
   # Defaults to nil so every other test keeps the unclassified transport path.
   @impl true
-  def provider_application(_model),
-    do: Application.get_env(:ptc_runner, :host_llm_test_provider_application)
+  def provider_application(model) do
+    if owner = Application.get_env(:ptc_runner, :host_llm_provider_application_owner) do
+      send(owner, {:host_llm_provider_application, model})
+    end
+
+    Application.get_env(:ptc_runner, :host_llm_test_provider_application)
+  end
+
+  @impl true
+  def public_model(model) do
+    if owner = Application.get_env(:ptc_runner, :host_llm_public_model_owner) do
+      send(owner, {:host_llm_public_model, model})
+    end
+
+    if Application.get_env(:ptc_runner, :host_llm_test_public_model, false),
+      do: {:ok, model},
+      else: :private
+  end
 
   @impl true
   def ensure_ready do

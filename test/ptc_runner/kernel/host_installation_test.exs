@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.ProviderSnapshot
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.TestSupport.RunLifecycle
@@ -815,17 +816,29 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
-  test "installs live LLM aliases only in workflow with explicit credential and safe identity", %{
+  test "installs live LLM aliases with adapter-attested model identity", %{
     tmp_dir: dir
   } do
     previous_adapter = Application.get_env(:ptc_runner, :llm_adapter)
     previous_owner = Application.get_env(:ptc_runner, :host_llm_test_owner)
+    previous_public_model = Application.get_env(:ptc_runner, :host_llm_test_public_model)
+    previous_public_model_owner = Application.get_env(:ptc_runner, :host_llm_public_model_owner)
+
+    previous_provider_application_owner =
+      Application.get_env(:ptc_runner, :host_llm_provider_application_owner)
+
     Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
     Application.put_env(:ptc_runner, :host_llm_test_owner, self())
+    Application.put_env(:ptc_runner, :host_llm_test_public_model, true)
+    Application.put_env(:ptc_runner, :host_llm_public_model_owner, self())
+    Application.put_env(:ptc_runner, :host_llm_provider_application_owner, self())
 
     on_exit(fn ->
       restore_env(:llm_adapter, previous_adapter)
       restore_env(:host_llm_test_owner, previous_owner)
+      restore_env(:host_llm_test_public_model, previous_public_model)
+      restore_env(:host_llm_public_model_owner, previous_public_model_owner)
+      restore_env(:host_llm_provider_application_owner, previous_provider_application_owner)
     end)
 
     config = %{
@@ -911,11 +924,17 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert credentials == %{"openrouter_key" => "test-llm-secret"}
     assert {:ok, built} = ProviderRegistry.acquire(preflighted, credentials)
 
+    assert_receive {:host_llm_public_model, "openrouter:deepseek/deepseek-v4-flash-0731"}
+
     assert [%{name: "llm-request"} = capability] = built.capabilities
     assert built.accepts_data == [:normal, :private_inspection]
     assert built.data_class == :normal
     assert built.snapshot["provider"] == "deepseek"
-    assert built.snapshot["acquisition"] == %{"source" => "llm"}
+
+    assert built.snapshot["acquisition"] == %{
+             "source" => "llm",
+             "resolved_model" => "openrouter:deepseek/deepseek-v4-flash-0731"
+           }
 
     assert built.snapshot["declaration"] == %{
              "name" => "deepseek",
@@ -933,8 +952,14 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert built.snapshot["acquisition_identity_hash"] =~ ~r/\A[0-9a-f]{64}\z/
     assert built.snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/
-    refute inspect(built.snapshot) =~ "openrouter"
     refute inspect(built.snapshot) =~ "test-llm-secret"
+
+    assert {:ok,
+            %{
+              alias: "deepseek",
+              installation_revision: "model-policy-v2",
+              resolved_model: "openrouter:deepseek/deepseek-v4-flash-0731"
+            }} = ProviderSnapshot.llm_identity(built.snapshot)
 
     assert {:ok, response} =
              capability.callback.(%{
@@ -945,11 +970,38 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert response["content"] == "ok"
 
     assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash-0731", request}
+    assert_receive {:host_llm_provider_application, "openrouter:deepseek/deepseek-v4-flash-0731"}
     assert request.api_key == "test-llm-secret"
     assert request.cache == false
     assert request.temperature == 0.15
     assert request.seed == 73
     assert request.max_tokens == 2_048
+
+    Application.put_env(:ptc_runner, :host_llm_test_public_model, false)
+    private_host = load_host(Path.join(dir, "private"), config)
+    assert {:ok, private_catalog} = HostInstallation.catalog(private_host)
+
+    assert {:ok, private_registry} =
+             HostInstallation.runtime_registry(private_host, private_catalog)
+
+    assert {:ok, private_prepared} =
+             ProviderRegistry.prepare(private_registry, "deepseek", %{}, context(dir, :workflow))
+
+    assert {:ok, private_preflighted} = ProviderRegistry.preflight(private_prepared)
+
+    assert {:ok, private_credentials} =
+             ProviderRegistry.resolve_credentials(
+               private_registry,
+               private_prepared.credential_names
+             )
+
+    assert {:ok, private_built} =
+             ProviderRegistry.acquire(private_preflighted, private_credentials)
+
+    assert_receive {:host_llm_public_model, "openrouter:deepseek/deepseek-v4-flash-0731"}
+    assert private_built.snapshot["acquisition"] == %{"source" => "llm"}
+    refute Map.has_key?(private_built.snapshot["acquisition"], "resolved_model")
+    assert :error = ProviderSnapshot.llm_identity(private_built.snapshot)
   end
 
   @tag :tmp_dir

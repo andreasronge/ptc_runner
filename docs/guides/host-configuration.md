@@ -106,8 +106,10 @@ missing variable, unreadable file, or empty value fails the run with
 
 Credentials never belong in a manifest, in PTC-Lisp, in a canonical trace, or
 in a committed project file. A safe provider snapshot records the public
-installation revision and normalized selected policy, never the raw model
-selector or secret.
+installation revision and normalized selected policy. For a live LLM it also
+records `acquisition.resolved_model` only when the active adapter explicitly
+attests that exact target as safe public identity. Private targets and secrets
+remain absent.
 
 A command-owned VM disables dependency `.env` readers before starting the
 selected provider application. A reused host-owned application keeps whatever
@@ -178,6 +180,20 @@ parameters the installed model actually implements.
 `cache` is the host's fixed cache policy. A workflow may express a `cache`
 preference in its request, but this setting takes precedence. Request and
 response ceilings default to 1,000,000 bytes and cannot exceed 1,048,576.
+
+Live acquisition validates and captures the configured full model identifier
+once. Attestation, callback construction, provider readiness, and execution use
+that same value. The built-in ReqLLM adapter publishes its ReqLLM-routed model
+identifiers, while endpoint-bearing `openai-compat` and local Ollama targets
+remain private. Custom adapters publish nothing unless they implement the
+optional attestation callback. Private calls still appear in alias/revision
+usage and count as unattributed in model-grouped usage.
+
+The resolved model, when public, is part of both provider snapshot hashes. A
+model change therefore changes canonical provider snapshot identity even when
+the operator forgets to change `installation_revision`. The revision remains
+the operator's policy/deployment label rather than the sole evidence of the
+execution target.
 
 The active `doctor --connect` check for a selected live model performs one real
 minimal completion and may incur provider cost. The probe forces a one-token

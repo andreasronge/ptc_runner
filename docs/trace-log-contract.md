@@ -339,7 +339,9 @@ a run without loading its turns:
   base-source, and effective-source identities, so run discovery exposes
   treatment assignment rather than requiring one provenance query per run;
 - safe connector snapshots containing public names, effects, schema hashes, and
-  snapshot hashes, but no endpoint or session data;
+  snapshot hashes, plus an exact resolved LLM model only when the active model
+  adapter attested it as public; no private target,
+  endpoint, or session data is included;
 - an optional server-owned session-profile ID and SHA-256 authority digest;
 - completeness and truncation indicators;
 - schema version;
@@ -411,6 +413,29 @@ with valid usage, successful calls missing usage, and sums of the closed
 `input`, `output`, `cache_creation`, `cache_read`, and `total_cost` fields. A
 revision change creates a separate row rather than silently combining unlike
 deployments.
+
+`llm_usage_by_model` groups the same eligible stopped calls by the exact
+adapter-attested `resolved_model` stored in that run's LLM provider snapshot.
+Rows use the same call, success, usage-presence, and closed usage-sum fields as
+`llm_usage`, replacing alias and revision with `resolved_model`, and sort by that
+string. Equal model targets combine across aliases and installation revisions;
+different targets remain separate even when an operator reused one revision.
+
+Correlation is run-scoped through `{run_id, alias, installation_revision}` and
+accepts exactly one current LLM snapshot whose closed shape and two identity
+hashes verify. Missing, private, legacy, malformed, hash-inconsistent, replay,
+custom, or duplicated mappings do not fail the query. Their otherwise
+`llm_usage`-eligible calls increment `unattributed_model_calls`. Consequently:
+
+```text
+sum(llm_usage_by_model[*].calls) + unattributed_model_calls
+  == sum(llm_usage[*].calls)
+```
+
+Snapshot lookup uses all events from the run-filter-selected runs before a
+mission filter narrows counted calls. Capability events continue to carry only
+alias/revision routing identity; they do not duplicate model identity. The
+additional rows remain subject to the existing aggregate result-byte limit.
 
 ## Pagination, ordering, and bounds
 

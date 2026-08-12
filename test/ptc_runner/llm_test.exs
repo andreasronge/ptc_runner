@@ -42,6 +42,36 @@ defmodule PtcRunner.LLMTest do
     def call(_model, _req), do: {:ok, %{content: "", tokens: %{}}}
   end
 
+  defmodule PublicModelAdapter do
+    @behaviour PtcRunner.LLM
+
+    @impl true
+    def call(_model, _request), do: {:ok, %{content: "", tokens: %{}}}
+
+    @impl true
+    def public_model(model), do: {:ok, model}
+  end
+
+  defmodule MismatchingPublicModelAdapter do
+    @behaviour PtcRunner.LLM
+
+    @impl true
+    def call(_model, _request), do: {:ok, %{content: "", tokens: %{}}}
+
+    @impl true
+    def public_model(_model), do: {:ok, "provider:different"}
+  end
+
+  defmodule RaisingPublicModelAdapter do
+    @behaviour PtcRunner.LLM
+
+    @impl true
+    def call(_model, _request), do: {:ok, %{content: "", tokens: %{}}}
+
+    @impl true
+    def public_model(_model), do: raise("private adapter detail")
+  end
+
   setup do
     prev = Application.get_env(:ptc_runner, :llm_adapter)
     Application.put_env(:ptc_runner, :llm_adapter, MockAdapter)
@@ -134,6 +164,27 @@ defmodule PtcRunner.LLMTest do
       {:ok, resp} = callback.(%{system: "test", messages: [], stream: fn _ -> :ok end})
       # Stream was used, so we get the streamed content
       assert resp.content == "hello world"
+    end
+  end
+
+  describe "attested_public_model/2" do
+    test "accepts only the exact bounded model value" do
+      model = "provider:public-model"
+
+      assert PtcRunner.LLM.attested_public_model(PublicModelAdapter, model) == model
+      assert PtcRunner.LLM.attested_public_model(MismatchingPublicModelAdapter, model) == nil
+      assert PtcRunner.LLM.attested_public_model(MockAdapter, model) == nil
+    end
+
+    test "treats adapter failures and malformed values as private" do
+      assert PtcRunner.LLM.attested_public_model(RaisingPublicModelAdapter, "provider:model") ==
+               nil
+
+      invalid_utf8 = <<"provider:", 255>>
+      assert PtcRunner.LLM.attested_public_model(PublicModelAdapter, invalid_utf8) == nil
+
+      oversized = "provider:" <> String.duplicate("m", 256)
+      assert PtcRunner.LLM.attested_public_model(PublicModelAdapter, oversized) == nil
     end
   end
 
