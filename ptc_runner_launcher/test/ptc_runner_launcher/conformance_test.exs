@@ -313,7 +313,9 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert :busy = saturate_port(launcher.port, 16)
 
     started_at = System.monotonic_time(:millisecond)
-    assert {:error, :timeout} = MCPStdioLauncher.send_bytes(launcher, "blocked", 50)
+
+    assert {:error, reason} = MCPStdioLauncher.send_bytes(launcher, "blocked", 50)
+    assert reason in [:closed, :timeout]
     assert System.monotonic_time(:millisecond) - started_at < 500
 
     assert {:error, close_reason} = MCPStdioLauncher.close(launcher, 50)

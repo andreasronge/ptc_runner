@@ -13,8 +13,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
   reading credentials, then render credentials the command already resolved
   while acquiring the provider. An active command reads each declared credential
   exactly once, at phase-8 step 5; acquisition and the live connectivity probe
-  both consume that value rather than resolving one of their own. Live LLM model
-  resolution likewise precedes credential access.
+  both consume that value rather than resolving one of their own. Live LLM
+  validation and optional public-identity attestation likewise precede
+  credential access. Callback construction, provider-application readiness,
+  and the adapter all receive the exact captured model value.
   Native trace acquisition
   exports its opaque frozen handle only to a selected inspection source, so
   private artifacts validate against the exact already-captured canonical
@@ -28,9 +30,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   Every public provider snapshot separates the safe declaration projection
   from bounded runtime-captured acquisition facts. `acquisition_identity_hash`
-  covers the latter and bare-hex `snapshot_hash` covers both. Raw model
-  selectors, endpoints, commands, paths, credentials, and private OAuth
-  authority never enter either projection. A frozen-content provider also
+  covers the latter and bare-hex `snapshot_hash` covers both. An LLM adapter may
+  explicitly attest its exact target as safe public identity; otherwise it is
+  omitted. Unattested or private model targets, endpoints, commands, paths,
+  credentials, and private OAuth authority never enter either projection. A
+  frozen-content provider also
   publishes an algorithm-qualified `content_snapshot_hash`; native query
   results copy that content identity unchanged for citations.
   """
@@ -705,10 +709,20 @@ defmodule PtcRunner.Kernel.HostInstallation do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- llm_selection(installation, selection, context),
          {:ok, model, adapter} <- preflight_llm(installation.model) do
+      public_model = PtcRunner.LLM.attested_public_model(adapter, model)
+
       {:ok,
        {:private_preflight,
         fn credentials ->
-          acquire_llm(installation, selected, context, model, adapter, credentials)
+          acquire_llm(
+            installation,
+            selected,
+            context,
+            model,
+            public_model,
+            adapter,
+            credentials
+          )
         end}}
     end
   end
@@ -1135,6 +1149,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp preflight_llm(model) do
     with true <- is_binary(model) and byte_size(model) in 1..256,
+         true <- String.valid?(model),
          true <- Regex.match?(@model_pattern, model),
          adapter when is_atom(adapter) <- PtcRunner.LLM.adapter!(),
          true <- Code.ensure_loaded?(adapter) do
@@ -1146,7 +1161,15 @@ defmodule PtcRunner.Kernel.HostInstallation do
     _exception -> {:error, :invalid_llm_model}
   end
 
-  defp acquire_llm(installation, selected, context, model, adapter, credentials) do
+  defp acquire_llm(
+         installation,
+         selected,
+         context,
+         model,
+         public_model,
+         adapter,
+         credentials
+       ) do
     with {:ok, credential} <- Map.fetch(credentials, installation.credential),
          requester =
            PtcRunner.LLM.callback(
@@ -1169,7 +1192,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
              max_request_bytes: selected.max_request_bytes,
              max_response_bytes: selected.max_response_bytes
            ),
-         {:ok, snapshot} <- llm_snapshot(installation, selected, context.provider) do
+         {:ok, snapshot} <-
+           llm_snapshot(installation, selected, context.provider, public_model) do
       {:ok,
        %{
          capabilities: [capability],
@@ -1393,15 +1417,24 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp trace_snapshot_source(:ptc_private_trace_snapshot, directory),
     do: {:private_authorized_directory, directory}
 
-  defp llm_snapshot(installation, selected, provider) do
+  defp llm_snapshot(installation, selected, provider, public_model) do
+    acquisition =
+      %{"source" => "llm"}
+      |> maybe_put_resolved_model(public_model)
+
     public_snapshot(
       installation,
       provider,
       selected,
-      %{"source" => "llm"},
+      acquisition,
       nil
     )
   end
+
+  defp maybe_put_resolved_model(acquisition, nil), do: acquisition
+
+  defp maybe_put_resolved_model(acquisition, model),
+    do: Map.put(acquisition, "resolved_model", model)
 
   defp classify({:ok, built}, installation, selected, provider) do
     acquisition =

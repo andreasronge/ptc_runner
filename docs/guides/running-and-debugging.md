@@ -184,8 +184,10 @@ four required fields and one optional provenance object:
 must parse as RFC 3339 in UTC. It records **who authored** a candidate and is
 **operator-asserted, verified by nothing** — a `run_id` is a claim about
 origin, not evidence of it. There is no model-id field, because a descriptor is
-a published artifact and raw model selectors must not be published; the
-authoring model is reachable through the run id. Provenance is deliberately
+a published artifact and does not carry provider configuration; an
+adapter-attested public execution model may be reached through the run id's
+canonical provider snapshot, while private targets remain intentionally absent.
+Provenance is deliberately
 kept out of content identity, so adding it never changes
 `application_content_digest`.
 

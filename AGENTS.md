@@ -39,6 +39,7 @@ reason when the repetition is deliberate. See the
 
 Code documentation must not link to `docs/plans/`; plans are disposable. Move
 durable contracts into module docs, guides, or retained specifications first.
+Remove completed plan files before submitting the final PR.
 
 ## Commit Messages
 

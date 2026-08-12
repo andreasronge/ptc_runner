@@ -66,6 +66,17 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
+    # ReqLLM model selectors are provider/model identifiers. Direct HTTP routes
+    # can contain local names or operator endpoints, so they remain private.
+    @impl true
+    @spec public_model(String.t()) :: {:ok, String.t()} | :private
+    def public_model(model) do
+      case parse_provider(model) do
+        {:req_llm, _model_id} -> {:ok, model}
+        _direct_http -> :private
+      end
+    end
+
     @impl true
     @spec call(String.t(), map()) :: {:ok, map()} | {:error, term()}
     def call(model, %{schema: schema} = req) when is_map(schema) do

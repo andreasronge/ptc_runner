@@ -91,7 +91,9 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
               "evaluations_by_mission" => %{},
               "workflow_capability_calls" => 0,
               "mission_capability_calls" => 0,
-              "llm_usage" => []
+              "llm_usage" => [],
+              "llm_usage_by_model" => [],
+              "unattributed_model_calls" => 0
             }} = callbacks["trace-counters"].(%{"run_id" => "visible"})
 
     assert {:error, %{kind: :invalid_request}} =
@@ -967,6 +969,115 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     assert counters["mission_capability_calls"] == 1
     assert counters["workflow_capability_calls"] == 0
     assert counters["llm_usage"] == []
+    assert counters["llm_usage_by_model"] == []
+    assert counters["unattributed_model_calls"] == 0
+  end
+
+  test "counters group eligible LLM usage by each run's validated resolved model" do
+    first = llm_snapshot("writer", "stable-v1", "openrouter:vendor/model-a")
+    second = llm_snapshot("writer", "stable-v1", "openrouter:vendor/model-b")
+    reviewer = llm_snapshot("reviewer", "review-v2", "openrouter:vendor/model-a")
+
+    events =
+      llm_counter_run("first", first, "ok", %{"input" => 3, "output" => 2}) ++
+        llm_counter_run("second", second, "ok", %{"input" => 5}) ++
+        llm_counter_run("review", reviewer, "ok", %{"input" => 7}, "reviewer", "review-v2") ++
+        llm_counter_run("private", nil, "error", nil)
+
+    assert {:ok, counters} =
+             TraceLog.query_loaded(events, "models", :counters, %{}, 100_000, :sanitized)
+
+    assert counters["llm_usage"] == [
+             %{
+               "alias" => "reviewer",
+               "installation_revision" => "review-v2",
+               "calls" => 1,
+               "successful_calls" => 1,
+               "usage_calls" => 1,
+               "missing_usage_calls" => 0,
+               "usage" => %{"input" => 7}
+             },
+             %{
+               "alias" => "writer",
+               "installation_revision" => "stable-v1",
+               "calls" => 3,
+               "successful_calls" => 2,
+               "usage_calls" => 2,
+               "missing_usage_calls" => 0,
+               "usage" => %{"input" => 8, "output" => 2}
+             }
+           ]
+
+    assert counters["llm_usage_by_model"] == [
+             %{
+               "resolved_model" => "openrouter:vendor/model-a",
+               "calls" => 2,
+               "successful_calls" => 2,
+               "usage_calls" => 2,
+               "missing_usage_calls" => 0,
+               "usage" => %{"input" => 10, "output" => 2}
+             },
+             %{
+               "resolved_model" => "openrouter:vendor/model-b",
+               "calls" => 1,
+               "successful_calls" => 1,
+               "usage_calls" => 1,
+               "missing_usage_calls" => 0,
+               "usage" => %{"input" => 5}
+             }
+           ]
+
+    assert counters["unattributed_model_calls"] == 1
+
+    assert Enum.sum(Enum.map(counters["llm_usage_by_model"], & &1["calls"])) +
+             counters["unattributed_model_calls"] ==
+             Enum.sum(Enum.map(counters["llm_usage"], & &1["calls"]))
+
+    assert {:ok, filtered} =
+             TraceLog.query_loaded(
+               events,
+               "models",
+               :counters,
+               %{"run_id" => "second"},
+               100_000,
+               :sanitized
+             )
+
+    assert Enum.map(filtered["llm_usage_by_model"], & &1["resolved_model"]) == [
+             "openrouter:vendor/model-b"
+           ]
+
+    assert {:error, :result_limit_exceeded} =
+             TraceLog.query_loaded(events, "models", :counters, %{}, 100, :sanitized)
+  end
+
+  test "invalid or ambiguous LLM snapshots make calls unattributed without failing counters" do
+    valid = llm_snapshot("writer", "stable-v1", "openrouter:vendor/model-a")
+    tampered = put_in(valid, ["acquisition", "resolved_model"], "openrouter:vendor/model-b")
+
+    for {label, snapshots} <- [
+          duplicate: [valid, valid],
+          tampered: [tampered],
+          legacy: [Map.delete(valid, "snapshot_hash")],
+          missing: []
+        ] do
+      events = llm_counter_run(to_string(label), snapshots, "ok", %{"input" => 1})
+
+      assert {:ok,
+              %{
+                "llm_usage_by_model" => [],
+                "unattributed_model_calls" => 1,
+                "llm_usage" => [%{"calls" => 1}]
+              }} =
+               TraceLog.query_loaded(
+                 events,
+                 to_string(label),
+                 :counters,
+                 %{},
+                 100_000,
+                 :sanitized
+               )
+    end
   end
 
   @tag :tmp_dir
@@ -1053,5 +1164,74 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   defp result_hash(value) do
     {:ok, encoded} = DeterministicJSON.encode(value)
     "sha256:" <> Base.encode16(:crypto.hash(:sha256, encoded), case: :lower)
+  end
+
+  defp llm_counter_run(
+         run_id,
+         snapshot_or_snapshots,
+         status,
+         usage,
+         alias_name \\ "writer",
+         revision \\ "stable-v1"
+       ) do
+    snapshots =
+      case snapshot_or_snapshots do
+        nil -> []
+        snapshots when is_list(snapshots) -> snapshots
+        snapshot -> [snapshot]
+      end
+
+    stopped_data = %{
+      "environment" => "workflow",
+      "name" => "llm-request",
+      "alias" => alias_name,
+      "installation_revision" => revision,
+      "status" => status
+    }
+
+    stopped_data = if is_nil(usage), do: stopped_data, else: Map.put(stopped_data, "usage", usage)
+
+    [
+      decoded_event(run_id, 1, "run-started", %{
+        "missions" => %{},
+        "connector_snapshots" => snapshots
+      }),
+      decoded_event(run_id, 2, "capability-stopped", stopped_data),
+      decoded_event(run_id, 3, "run-stopped", %{"outcome" => "ok"})
+    ]
+  end
+
+  defp llm_snapshot(alias_name, revision, model) do
+    declaration = %{
+      "name" => alias_name,
+      "source" => "llm",
+      "installation_revision" => revision,
+      "data_class" => "normal",
+      "accepts_data" => ["normal"],
+      "authorization_mode" => "none",
+      "config" => %{
+        "default" => false,
+        "max_request_bytes" => 1_000_000,
+        "max_response_bytes" => 1_000_000
+      }
+    }
+
+    acquisition = %{"source" => "llm", "resolved_model" => model}
+    acquisition_hash = canonical_sha256(acquisition)
+
+    identity = %{
+      "declaration" => declaration,
+      "acquisition" => acquisition,
+      "acquisition_identity_hash" => acquisition_hash
+    }
+
+    identity
+    |> Map.put("provider", alias_name)
+    |> Map.put("snapshot_hash", canonical_sha256(identity))
+  end
+
+  defp canonical_sha256(value) do
+    {:ok, bytes} = DeterministicJSON.encode(value)
+    :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
   end
 end

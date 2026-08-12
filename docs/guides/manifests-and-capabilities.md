@@ -495,8 +495,11 @@ selection — so most small manifests should omit them entirely.
 Because the manifest author supplies labels, the Kernel does not treat them as
 authoritative. They are never inferred from the providers actually selected, so
 a label claiming `"model": "deepseek"` proves nothing about which model ran. For
-runtime accounting or security decisions, read the real provider configuration
-and the canonical capability events instead.
+runtime accounting, use the canonical provider snapshot's adapter-attested
+`resolved_model` and `log/counters` model grouping. Calls whose target is private
+remain attributable only by the canonical capability events' alias and
+installation revision. Neither form should be repurposed as an authorization
+decision.
 
 The fields serve different purposes:
 
