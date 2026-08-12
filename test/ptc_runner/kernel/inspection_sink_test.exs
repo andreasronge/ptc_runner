@@ -791,6 +791,25 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(wrong_type)
 
+    unsupported = Path.join(dir, "unsupported.inspection.jsonl")
+
+    File.write!(
+      unsupported,
+      Enum.map_join(records, "\n", fn record ->
+        record |> Map.put("schema_version", 4) |> Jason.encode!()
+      end) <> "\n"
+    )
+
+    assert {:error,
+            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 5}}} =
+             InspectionArtifact.load(unsupported)
+
+    mixed = Path.join(dir, "mixed-schema.inspection.jsonl")
+    first = records |> hd() |> Map.put("schema_version", 4)
+    second = Map.put(hd(records), "sequence", 2)
+    File.write!(mixed, Enum.map_join([first, second], "\n", &Jason.encode!/1) <> "\n")
+    assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(mixed)
+
     capability_input = %{
       "schema_version" => 5,
       "run_id" => "run-1",

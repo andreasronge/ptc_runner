@@ -274,6 +274,15 @@ defmodule PtcViewer.Server do
 
   defp normalize_pin_result({:ok, source}) when not is_nil(source), do: {:ok, source}
   defp normalize_pin_result({:error, reason}) when is_atom(reason), do: {:error, reason}
+
+  defp normalize_pin_result(
+         {:error,
+          {:unsupported_inspection_schema_version,
+           %{artifact_version: artifact_version, supported_version: supported_version}}} = error
+       )
+       when is_integer(artifact_version) and is_integer(supported_version),
+       do: error
+
   defp normalize_pin_result(_invalid), do: {:error, :inspection_adapter_failure}
 
   defp attach_inspection_store(nil, _owner), do: :ok

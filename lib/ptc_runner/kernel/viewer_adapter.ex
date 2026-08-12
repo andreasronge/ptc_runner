@@ -20,7 +20,8 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
   @opaque inspection_grant :: {:inspection_v1, binary(), [map()]}
 
   @spec pin_inspection(binary(), TraceLog.source()) ::
-          {:ok, inspection_grant()} | {:error, atom()}
+          {:ok, inspection_grant()}
+          | {:error, atom() | InspectionArtifact.unsupported_schema_error()}
   @doc "Pins one artifact only after validating it against its canonical run."
   def pin_inspection(path, trace_source) when is_binary(path) do
     with {:ok, [%{"run_id" => run_id, "trace_id" => trace_id} | _rest] = records} <-

@@ -438,6 +438,37 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
+  test "inspection profile setup explains an unsupported artifact schema", %{
+    tmp_dir: directory
+  } do
+    fixture = PrivateInspectionFixture.create!(directory, "old-schema")
+    PrivateInspectionFixture.rewrite_schema!(fixture.inspection, 4)
+
+    message =
+      ~r/ptc repl profile setup failed: an inspection artifact declares schema version 4; this build supports version 5/
+
+    capture_io(fn ->
+      assert_raise Mix.Error, message, fn ->
+        run_repl([
+          "--profile",
+          "inspection-analysis-v2",
+          "--resource",
+          "traces=#{fixture.traces}",
+          "--resource",
+          "inspection=#{fixture.inspection}",
+          "--session-trace-dir",
+          fixture.output,
+          "--private-unattended",
+          "--format",
+          "jsonl",
+          "-e",
+          "(return 42)"
+        ])
+      end
+    end)
+  end
+
+  @tag :tmp_dir
   test "profile evals share mission state and persist outside the source", %{tmp_dir: directory} do
     source = Path.join(directory, "source")
     output_directory = Path.join(directory, "output")

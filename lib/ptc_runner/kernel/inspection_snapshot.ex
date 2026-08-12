@@ -66,8 +66,10 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
              limit_bytes: pos_integer()
            }}
 
+  @type unsupported_schema_error :: InspectionArtifact.unsupported_schema_error()
+
   @spec start({:directory, binary()}, trace_snapshot(), keyword()) ::
-          {:ok, t()} | {:error, atom() | retained_limit_error()}
+          {:ok, t()} | {:error, atom() | retained_limit_error() | unsupported_schema_error()}
   def start(source, trace_snapshot, opts \\ [])
 
   def start({:directory, directory}, %TraceSnapshot{} = trace_snapshot, opts)
@@ -117,6 +119,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
            ) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
         {:error, {:source_retained_limit_exceeded, _details} = reason} -> {:error, reason}
+        {:error, {:unsupported_inspection_schema_version, _details} = reason} -> {:error, reason}
         {:error, reason} when is_atom(reason) -> {:error, reason}
         {:error, _reason} -> {:error, :source_unavailable}
       end
@@ -313,6 +316,9 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
 
       :oversized ->
         {:error, :source_retained_limit_exceeded}
+
+      {:error, {:unsupported_inspection_schema_version, _details} = reason} ->
+        {:error, reason}
 
       {:error, reason} when is_atom(reason) ->
         {:error, normalize_capture_error(reason)}
