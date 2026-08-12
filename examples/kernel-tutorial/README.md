@@ -1,10 +1,12 @@
 # Kernel tutorial examples
 
-Run these examples from the repository root. Start with the credential-free
-walkthrough in
-[`docs/guides/getting-started.md`](../../docs/guides/getting-started.md), then
-use [`docs/guides/building-agents.md`](../../docs/guides/building-agents.md)
-for the live model examples.
+Run these examples from the repository root.
+[`docs/guides/quickstart.md`](../../docs/guides/quickstart.md) is the shortest
+path from a clone to a live model run;
+[`docs/guides/getting-started.md`](../../docs/guides/getting-started.md) walks
+through the same examples in detail, and
+[`docs/guides/building-agents.md`](../../docs/guides/building-agents.md)
+explains the agent examples.
 
 Examples 01 and 05 are credential-free and select no providers:
 

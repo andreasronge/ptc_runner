@@ -1,8 +1,12 @@
 # Getting started
 
-This guide runs a complete credential-free PtcRunner workflow. The workflow is
-written in PTC-Lisp, receives JSON input, and returns a bounded JSON value plus
-runtime usage. No model key and no host code are required.
+This guide runs a complete PtcRunner workflow and reads it line by line. It
+starts credential-free — the first workflow is written in PTC-Lisp, receives
+JSON input, and returns a bounded JSON value plus runtime usage — and ends at a
+live model call.
+
+If you would rather see that model call first and read afterwards, the
+[Quickstart](quickstart.md) gets there in four commands.
 
 PTC-Lisp is a small, eager, bounded subset of Clojure, with a few additions for
 agent execution such as `return`, `fail`, `tool/...` capability calls, and the
@@ -16,7 +20,7 @@ runtime-included release through `bin/ptc`.
 
 ## Create a minimal application
 
-The shared command surface accepts `ptc init DIRECTORY`. From a source checkout:
+`ptc init DIRECTORY` creates an empty application. From a source checkout:
 
 ```console
 mix ptc init hello-ptc
@@ -50,13 +54,10 @@ stable contract:
 }
 ```
 
-The complete scaffold is validated in memory and assembled in an owner-only
-sibling directory. Publication uses an atomic no-replace rename, so an
-existing directory or symlink is never merged, overwritten, or removed. A
-failed initialization remains path-free, but distinguishes an existing target,
-a missing parent directory, and an unusable parent directory. Other staging or
-publication failures return `initialization_failed`; a clean pre-publication
-failure can be retried.
+The scaffold is validated before any filesystem access and published with an
+atomic no-replace rename, so an existing directory or symlink is never merged
+or overwritten. [Running and debugging](running-and-debugging.md#commands)
+lists what a refused initialization reports.
 
 ## Run the example
 
@@ -78,9 +79,10 @@ The command prints the compact JSON result value:
 }
 ```
 
-The rest of the result reports remaining time, capability calls, subordinate
-evaluations, protocol errors, retained continuation state, and dropped events.
-Values such as remaining time vary between runs.
+The rest of the result reports usage — remaining time, capability calls,
+evaluations, and dropped events — which
+[Running and debugging](running-and-debugging.md#understand-results-and-errors)
+breaks down field by field. Values such as remaining time vary between runs.
 
 ## Read the project
 
@@ -152,11 +154,11 @@ mix ptc repl \
   -e '(log.analysis/all-runs {"limit" 50} 10)'
 ```
 
-The profile receives an immutable capture and has no filesystem, network,
-model, private-inspection, or nested-evaluation authority. The final argument
-is a page bound. The result carries the immutable source's `snapshot_hash`.
-The returned `complete?` field is `false` if that bound stops the traversal
-before the captured source is exhausted.
+The profile queries one frozen capture of that directory and has no filesystem,
+network, model, private-inspection, or nested-evaluation authority. The final
+argument is a page bound; the
+[Kernel REPL guide](kernel-repl.md#log-analysis-mission-sessions) documents the
+`complete?` and `snapshot_hash` fields the result carries.
 
 ## Try the language directly
 
@@ -169,21 +171,62 @@ mix ptc repl \
   -e '(+ *1 5)'
 ```
 
-Successful definitions and the three most recent ordinary values persist for
-one session. Failed forms do not publish their candidate definitions.
+Successful definitions and the three most recent values persist for one
+session, and a failed form leaves that state untouched. The
+[Kernel REPL guide](kernel-repl.md) covers the other session modes.
+
+## Call a model
+
+Everything above is deterministic. Adding a model takes one credential and one
+extra flag.
+
+Copy `.env.example` to the Git-ignored `.env` and set `OPENROUTER_API_KEY` to
+your [OpenRouter](https://openrouter.ai/keys) key. That is the only setup step;
+[Host configuration](host-configuration.md#credentials) documents the three
+declaration forms and how to move off `.env` for a real deployment.
+
+```console
+mix ptc run examples/kernel-tutorial/02-deepseek-extract/ptc.json \
+  --host-config examples/kernel-tutorial/ptc-host.json
+```
+
+```json
+{"model_output":"{\"project\":\"Atlas\",\"owner\":\"Priya\",\"risk\":\"delayed vendor security approval\"}","note":"model_output is model text; validate or parse it before production use"}
+```
+
+The model's exact wording varies between runs; the result shape does not.
+
+`--host-config` names the operator document that gives the manifest's
+`deepseek` alias a model and a credential. The manifest selects that alias and
+may narrow it, but cannot name a model, endpoint, or key. Here the human wrote
+the request and owns the output policy; the model only returned data, and that
+data is untrusted text until you parse and validate it.
+
+Let the model write the program instead:
+
+```console
+mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
+  --host-config examples/kernel-tutorial/ptc-host.json
+```
+
+```json
+{"ok":true,"value":42}
+```
+
+The model authored PTC-Lisp across two turns and the runtime evaluated it in
+the confined mission environment.
 
 ## Next steps
 
 Continue in this order:
 
-1. [Manifests and capabilities](manifests-and-capabilities.md) documents the
+1. [Building agents](building-agents.md) explains the agent loop, the
+   correction protocol, and confined model-authored mission programs.
+2. [Manifests and capabilities](manifests-and-capabilities.md) documents the
    declarative authority boundary — components, input, contracts, providers,
    limits, and event policy.
-2. [Host configuration](host-configuration.md) is the operator document that
-   installs providers and supplies credentials. You need it before any example
-   that calls a model.
-3. [Building agents](building-agents.md) explains model calls and confined
-   model-authored mission programs.
+3. [Host configuration](host-configuration.md) is the operator document that
+   installs providers, supplies credentials, and sets ceilings.
 4. [Running and debugging](running-and-debugging.md) covers commands, traces,
    private inspection, and the development Viewer.
 

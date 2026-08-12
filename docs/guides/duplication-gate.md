@@ -1,5 +1,8 @@
 # Duplication gate
 
+**Audience: people changing PtcRunner itself.** This gate runs over this
+repository's own source; it is not part of the runtime an application uses.
+
 `mix precommit` and CI run `scripts/duplication_gate.sh check`, which detects
 copy-pasted code with [ExDNA](https://github.com/elixir-vibe/ex_dna) and
 compares the result against `.duplication-baseline.json`.

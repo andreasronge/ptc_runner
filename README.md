@@ -15,6 +15,20 @@ anything dangerous in the first place.
 > PtcRunner is a 0.x project under active development. Breaking changes are
 > expected.
 
+## Try it
+
+From the repository root:
+
+```console
+mix deps.get
+mix ptc run examples/kernel-tutorial/01-orders/ptc.json
+```
+
+The example loads JSON input, runs a PTC-Lisp function, and returns a JSON
+result. It needs no model credentials and no host code. Two more commands add
+an API key and get a model to write the program instead:
+[Quickstart](docs/guides/quickstart.md).
+
 ## Why it is safe
 
 Most code-mode implementations generate Python or JavaScript and put a container
@@ -162,21 +176,6 @@ promoted preludes automatically is future work. The important property holds
 either way: a candidate can change how existing tools are used, but cannot grant
 itself new tools or credentials.
 
-## Try it
-
-From the repository root:
-
-```console
-mix deps.get
-mix ptc run examples/kernel-tutorial/01-orders/ptc.json
-```
-
-The example loads JSON input, runs a PTC-Lisp function, and returns a JSON
-result. It needs no model credentials and no host code. See
-[Getting started](docs/guides/getting-started.md) for the walkthrough and trace
-commands, then [Building agents](docs/guides/building-agents.md) for a live
-model-generated program.
-
 ## Availability
 
 The product runs from a source checkout with Elixir and Mix or as a locally
@@ -194,16 +193,18 @@ the target machine.
 
 Read these in order. Each one owns its topic and links onward.
 
-1. [Getting started](docs/guides/getting-started.md) — run a credential-free
+1. [Quickstart](docs/guides/quickstart.md) — four commands from a clone to a
+   live model writing and running a program.
+2. [Getting started](docs/guides/getting-started.md) — run a credential-free
    PTC-Lisp workflow and inspect its result and trace.
-2. [Manifests and capabilities](docs/guides/manifests-and-capabilities.md) —
+3. [Manifests and capabilities](docs/guides/manifests-and-capabilities.md) —
    assemble components, data, providers, limits, contracts, and event policy.
-3. [Host configuration](docs/guides/host-configuration.md) — the operator
+4. [Host configuration](docs/guides/host-configuration.md) — the operator
    document: credentials, provider sources, transports, data classes, and
    installed ceilings.
-4. [Building agents](docs/guides/building-agents.md) — put orchestration and
+5. [Building agents](docs/guides/building-agents.md) — put orchestration and
    agent policy in PTC-Lisp while keeping mission authority narrow.
-5. [Running and debugging](docs/guides/running-and-debugging.md) — the
+6. [Running and debugging](docs/guides/running-and-debugging.md) — the
    commands, results, traces, private inspection, and development Viewer.
 
 ### Going further
@@ -219,17 +220,26 @@ Read these in order. Each one owns its topic and links onward.
 ### Examples
 
 Runnable projects live under
-[`examples/kernel-tutorial/`](examples/kernel-tutorial/README.md) and
-[`examples/kernel-inspection-lab/`](examples/kernel-inspection-lab/README.md).
+[`examples/kernel-tutorial/`](examples/kernel-tutorial/README.md),
+[`examples/kernel-inspection-lab/`](examples/kernel-inspection-lab/README.md),
+and
+[`examples/named-mission-reader-writer/`](examples/named-mission-reader-writer/README.md).
 
 ### Reference
 
 [PTC-Lisp specification](docs/ptc-lisp-specification.md),
 [function reference](docs/function-reference.md),
 [signature syntax](docs/signature-syntax.md),
-[TraceLog contract](docs/trace-log-contract.md),
-[conformance report](docs/conformance/index.md), and the
-[Kernel maintainer guide](docs/guides/kernel-maintainer.md).
+[TraceLog contract](docs/trace-log-contract.md), and the
+[conformance report](docs/conformance/index.md).
+
+### Maintainers
+
+For changing PtcRunner rather than using it:
+[Kernel maintainer guide](docs/guides/kernel-maintainer.md),
+[coding agent review workflow](docs/guides/coding-agent-review-workflow.md),
+[duplication gate](docs/guides/duplication-gate.md), and
+[documentation guidelines](docs/guides/documentation-guidelines.md).
 
 ## Development
 

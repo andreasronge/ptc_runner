@@ -386,6 +386,7 @@ defmodule PtcRunner.MixProject do
           "docs/signature-syntax.md",
           "docs/trace-log-contract.md",
           "docs/conformance/index.md",
+          "docs/guides/quickstart.md",
           "docs/guides/getting-started.md",
           "docs/guides/manifests-and-capabilities.md",
           "docs/guides/host-configuration.md",
@@ -401,7 +402,7 @@ defmodule PtcRunner.MixProject do
         ] ++ Path.wildcard("docs/conformance/*-audit.md"),
       groups_for_extras: [
         Maintainers:
-          ~r/docs\/guides\/(coding-agent-review-workflow|duplication-gate|kernel-maintainer)\.md/,
+          ~r/docs\/guides\/(coding-agent-review-workflow|documentation-guidelines|duplication-gate|kernel-maintainer)\.md/,
         Contracts: ~r/docs\/trace-log-contract\.md/,
         Guides: ~r/docs\/guides\/.+\.md/,
         Reference: ~r/docs\/(ptc-lisp|clojure|function-reference|java-|signature-).+\.md/,

@@ -49,7 +49,10 @@
         }
       ],
       "data": {
-      }
+      },
+      "providers": [
+        "workspace"
+      ]
     }
   }
 }

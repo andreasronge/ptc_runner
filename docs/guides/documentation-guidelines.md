@@ -1,7 +1,8 @@
 # Documentation guidelines
 
-Use this guide when writing module documentation, guides, specifications, and
-plans. `AGENTS.md` remains the canonical repository instruction file.
+**Audience: people changing PtcRunner itself.** Use this guide when writing
+module documentation, guides, specifications, and plans in this repository.
+`AGENTS.md` remains the canonical repository instruction file.
 
 ## Choose the right documentation layer
 
