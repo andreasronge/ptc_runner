@@ -16,13 +16,21 @@ on:
           - 'e2e'
           - 'integration'
         default: 'e2e'
+  # A prelude edit can change the exact system prompt/request a model
+  # receives without changing any Elixir source, which silently invalidates
+  # deterministic replay fixtures keyed on that request (see #1328) and can
+  # change live-model behavior. Neither is caught by any other PR gate, so
+  # run the full e2e suite whenever a prelude changes.
+  pull_request:
+    paths:
+      - 'priv/preludes/**'
 
 permissions:
   contents: read
 
 concurrency:
   group: integration-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   integration:
@@ -31,6 +39,11 @@ jobs:
     env:
       MIX_ENV: test
       PTC_TEST_MCP_2026_ENDPOINT: http://127.0.0.1:8000
+      # A pull_request from a fork runs without repository secrets, so
+      # OPENROUTER_API_KEY would be empty and the credential check below
+      # would hard-fail through no fault of the contributor. Only run the
+      # live e2e suite for pull_request when it has secret access.
+      RUN_E2E: ${{ github.event_name == 'schedule' || inputs.test_type == 'e2e' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
 
     steps:
       - name: Checkout repository
@@ -40,7 +53,7 @@ jobs:
         uses: ./.github/actions/setup-elixir
 
       - name: Setup pinned Go toolchain
-        if: github.event_name == 'schedule' || inputs.test_type == 'e2e'
+        if: env.RUN_E2E == 'true'
         uses: actions/setup-go@v6
         with:
           go-version-file: test/support/mcp_go_stateless/go.mod
@@ -50,13 +63,13 @@ jobs:
         run: mix compile
 
       - name: Verify E2E configuration
-        if: github.event_name == 'schedule' || inputs.test_type == 'e2e'
+        if: env.RUN_E2E == 'true'
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: test -n "$OPENROUTER_API_KEY"
 
       - name: Install pinned GitHub MCP Server
-        if: github.event_name == 'schedule' || inputs.test_type == 'e2e'
+        if: env.RUN_E2E == 'true'
         env:
           GITHUB_MCP_ARCHIVE_SHA256: b653a2a01f33e9a726b581fa0d8a8d9a05a86af419e5ab33b8e26858366d1d66
         run: |
@@ -75,7 +88,7 @@ jobs:
           PTC_TEST_GITHUB_MCP_BINARY: ${{ runner.temp }}/github-mcp-server
           PTC_TEST_GITHUB_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.test_type }}" = "e2e" ]; then
+          if [ "$RUN_E2E" = "true" ]; then
             bash test/support/mcp_go_stateless/with_server.sh \
               mix test --include e2e --trace
             PTC_TEST_MCP_OAUTH=1 \
