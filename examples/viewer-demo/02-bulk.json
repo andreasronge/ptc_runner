@@ -35,7 +35,7 @@
   },
   "labels": {
     "name": "viewer-demo-bulk",
-    "model": "openrouter:deepseek/deepseek-v4-flash",
+    "model": "openrouter:deepseek/deepseek-v4-flash-0731",
     "provider": "openrouter",
     "tags": {
       "mode": "agent"

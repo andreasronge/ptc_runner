@@ -36,7 +36,7 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
   alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.Env
 
-  @default_model "openrouter:google/gemini-3.1-flash-lite-preview"
+  @default_model "openrouter:google/gemini-3.1-flash-lite"
   @default_chunk_size 10
 
   @namespace_configs %{

@@ -19,7 +19,7 @@
   },
   "labels": {
     "name": "tutorial-deepseek-multi-turn-agent",
-    "model": "openrouter:deepseek/deepseek-v4-flash",
+    "model": "openrouter:deepseek/deepseek-v4-flash-0731",
     "provider": "openrouter",
     "tags": {"mode": "agent"}
   },

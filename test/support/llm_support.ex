@@ -11,10 +11,9 @@ defmodule PtcRunner.TestSupport.LLMSupport do
 
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProviderApplicationGate
-  alias PtcRunner.LLM.Registry
   alias PtcRunner.LLM.ReqLLMAdapter
 
-  @default_model "deepseek"
+  @default_model "openrouter:deepseek/deepseek-v4-flash-0731"
   @timeout 60_000
   @req_opts [retry: :transient, max_retries: 3]
 
@@ -95,27 +94,13 @@ defmodule PtcRunner.TestSupport.LLMSupport do
 
   @doc """
   Get the current model from PTC_TEST_MODEL env var or return default.
+
+  The value is a full provider-qualified identifier, such as
+  `"openrouter:deepseek/deepseek-v4-flash-0731"`.
   """
   @spec model() :: String.t()
   def model do
-    case System.get_env("PTC_TEST_MODEL") do
-      nil -> resolve_model(@default_model)
-      name -> resolve_model(name)
-    end
-  end
-
-  @doc """
-  Resolve a model name using the Registry.
-
-  If the name is an alias, returns the full model ID.
-  If resolution fails, returns the name as-is.
-  """
-  @spec resolve_model(String.t()) :: String.t()
-  def resolve_model(name) do
-    case Registry.resolve(name) do
-      {:ok, model_id} -> model_id
-      {:error, _} -> name
-    end
+    System.get_env("PTC_TEST_MODEL") || @default_model
   end
 
   @doc """

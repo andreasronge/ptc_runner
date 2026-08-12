@@ -30,7 +30,7 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
   @repo_facade Path.join(@root, "repo-analyst/repo.clj")
   @answer_schema Path.join(@root, "repo-analyst/answer.schema.json")
   @filesystem_server Path.join(@root, "examples/mcp/filesystem/dist/server.js")
-  @deepseek_model "openrouter:deepseek/deepseek-v4-flash"
+  @deepseek_model "openrouter:deepseek/deepseek-v4-flash-0731"
   @workspace_revision "filesystem-sample-0.1.0"
 
   setup_all do

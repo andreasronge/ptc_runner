@@ -5,8 +5,8 @@
   "install": {
     "agent_model": {
       "source": "llm",
-      "installation_revision": "named-missions-example-v1",
-      "model": "openrouter:deepseek/deepseek-v4-flash",
+      "installation_revision": "named-missions-example-v2",
+      "model": "openrouter:deepseek/deepseek-v4-flash-0731",
       "credential": "openrouter_key",
       "cache": false
     },

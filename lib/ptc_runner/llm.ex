@@ -87,9 +87,10 @@ defmodule PtcRunner.LLM do
   @doc """
   Creates a normalized callback for a configured model.
 
-  Model aliases are resolved through `PtcRunner.LLM.Registry`. The optional
-  `:adapter` setting selects a transport explicitly; other options are merged
-  into every request.
+  `model` is a full provider-qualified identifier such as
+  `"openrouter:deepseek/deepseek-v4-flash-0731"`. The optional `:adapter`
+  setting selects a transport explicitly; other options are merged into every
+  request.
   """
   @spec callback(String.t(), keyword()) :: (map() -> {:ok, map()} | {:error, term()})
   def callback(model, opts \\ []) do
@@ -99,7 +100,6 @@ defmodule PtcRunner.LLM do
     # Keep the idempotent call here for direct embedding paths that construct a
     # capability without that gate.
     if function_exported?(adapter, :ensure_ready, 0), do: adapter.ensure_ready()
-    model = PtcRunner.LLM.Registry.resolve!(model)
     merged_opts = Map.new(opts)
 
     fn req ->
