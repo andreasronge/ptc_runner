@@ -14,14 +14,14 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       source = "(filter :active data/users"
 
       assert {:error, %Step{fail: %{reason: :parse_error, message: message}}} = Lisp.run(source)
-      assert message =~ "unbalanced parentheses"
+      assert message =~ "unclosed list at line 1, column"
     end
 
     test "unbalanced brackets" do
       source = "[1 2 3"
 
       assert {:error, %Step{fail: %{reason: :parse_error, message: message}}} = Lisp.run(source)
-      assert message =~ "unbalanced brackets"
+      assert message =~ "unclosed vector at line 1, column"
     end
 
     test "invalid token" do
@@ -303,6 +303,15 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
   end
 
   describe "invalid programs - common LLM mistakes" do
+    test "surplus closers return specific correction feedback without executing" do
+      source = "(def x 1)) (+ x 2)"
+
+      assert {:error, %Step{fail: %{reason: :parse_error, message: message}, memory: %{}}} =
+               Lisp.run(source)
+
+      assert message == "unbalanced parentheses: 1 extra ')' (first at line 1, column 10)"
+    end
+
     test "using quoted list syntax instead of vector" do
       # PTC-Lisp uses vectors [1 2 3], not quoted lists '(1 2 3)
       source = "'(1 2 3)"

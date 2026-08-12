@@ -29,6 +29,21 @@ defmodule PtcRunner.ReplFrontendTest do
     assert output =~ "value\n42\n43\n"
   end
 
+  test "direct eval reports the first surplus closer to developers" do
+    output =
+      capture_io(:stderr, fn ->
+        error = assert_raise Mix.Error, fn -> run_repl(["-e", "(+ 1 2))"]) end
+
+        assert error.message =~
+                 "Error (parse_error): unbalanced parentheses: 1 extra ')' " <>
+                   "(first at line 1, column 8)"
+      end)
+
+    assert output ==
+             "Error (parse_error): unbalanced parentheses: 1 extra ')' " <>
+               "(first at line 1, column 8)\n"
+  end
+
   test "interactive mode prints output and exits on EOF" do
     output = capture_io("(println 42)\n", fn -> run_repl([]) end)
     assert output =~ "42\nnil"

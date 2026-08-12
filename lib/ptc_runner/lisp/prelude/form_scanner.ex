@@ -64,14 +64,12 @@ defmodule PtcRunner.Lisp.Prelude.FormScanner do
 
   ## Design decisions (fail-closed, on purpose)
 
-  1. **Diverges from `FastParser`'s top-level `skip_extra_closers/1`
-     leniency.** The real reader silently discards a stray closing
-     delimiter found BETWEEN top-level forms (`skip_inter_expr/1` in
-     `lib/ptc_runner/lisp/fast_parser.ex`) — error-recovery behavior, not a
-     lexical construct. This scanner does not replicate it: a stray `)`/`]`/
-     `}` between forms is an unclassifiable byte and fails closed
-     (`%{reason: :unexpected_byte}`) rather than being silently skipped. No
-     prelude/example/test source in this repo relies on that leniency.
+  1. **Fails closed on surplus top-level delimiters.** The real reader records
+     a stray `)`/`]`/`}` between top-level forms while scanning onward so a
+     later hard syntax failure can remain the primary diagnostic. If no later
+     failure occurs, the reader rejects the recorded closers. This scanner has
+     no diagnostic-recovery role, so it rejects the first stray closer directly
+     as `%{reason: :unexpected_byte}`.
   2. **Character literals classify as `"string"`, not `"char_literal"`.**
      The reader itself has no separate character-literal AST node — `\a`
      and `"a"` both parse to `{:string, "a"}` (see `FastParser.parse_char/1`
