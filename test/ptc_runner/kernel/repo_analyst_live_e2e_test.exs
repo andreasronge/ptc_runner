@@ -347,7 +347,7 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
                      [
                        %{
                          "role" => "assistant",
-                         "content" => nil,
+                         "content" => value["content"],
                          "tool_calls" => [tool_call]
                        },
                        %{
