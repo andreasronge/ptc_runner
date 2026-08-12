@@ -31,6 +31,8 @@ defmodule PtcRunner.Kernel.ValueContract do
   @max_contract_bytes 65_536
   @max_discriminator_bytes 128
   @max_violations 8
+  @max_diagnostic_names 32
+  @max_diagnostic_name_bytes 4_096
 
   @enforce_keys [:schema, :validator, :attestation]
   defstruct @enforce_keys
@@ -105,9 +107,10 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   Every reported name comes from the compiled schema rather than from the
   value: the discriminator's name, the branch whose `const` the value carries,
-  and the schema-declared required keys that branch did not find. The only
-  facts derived from the value itself are its JSON kind and the count of keys
-  the branch does not declare — a type name and a number, never content.
+  and bounded, sorted allowed and missing key lists at retained object paths.
+  The only facts derived from the value itself are its JSON kind, required-key
+  absence, and per-object counts of keys the schema does not declare — types,
+  booleans, and numbers, never caller-authored content.
 
   A rejected result is deliberately withheld from the public error, so without
   this an operator cannot tell a missing key from a wrong shape without
@@ -115,7 +118,13 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   `violations` locates faults, it does not enumerate them: when several array
   elements fail the same way, the reported set may name fewer of them than
-  actually failed. It is a diagnosis, not a validation report.
+  actually failed. It is a diagnosis, not a validation report. At most eight
+  violations are retained. One violation at each retained object path carries
+  applicable local facts. Closed paths add `allowed_keys` and any undeclared
+  count; actual objects add any missing required keys. Open paths never label
+  valid extension keys undeclared. Schema-name lists keep at most 32 names and
+  4,096 encoded bytes; truncated lists carry their total count and an explicit
+  truncation flag.
   """
   def classify(%__MODULE__{} = contract, value) do
     if not sealed?(contract), do: raise(ArgumentError, "invalid value contract")
@@ -140,8 +149,11 @@ defmodule PtcRunner.Kernel.ValueContract do
     shape =
       case Map.fetch(schema, "oneOf") do
         {:ok, branches} -> classify_union(branches, value)
-        :error -> classify_object(schema, value)
+        :error -> %{}
       end
+
+    branch_index = Map.get(shape, :branch_index)
+    path_schema = selected_path_schema(schema, branch_index)
 
     classification =
       shape
@@ -154,10 +166,12 @@ defmodule PtcRunner.Kernel.ValueContract do
       |> Map.put(:json_value, JSONValue.value?(value))
       |> Map.put(
         :violations,
-        violations(validator, value, schema, Map.get(shape, :branch_index))
+        validator
+        |> violations(value, schema, branch_index)
+        |> enrich_object_violations(path_schema, value)
       )
 
-    {classification, classification_evidence(contract, Map.get(shape, :branch_index))}
+    {classification, classification_evidence(contract, branch_index)}
   rescue
     _exception -> {%{value_kind: :unknown}, nil}
   end
@@ -363,16 +377,168 @@ defmodule PtcRunner.Kernel.ValueContract do
     end
   end
 
+  # Object guidance is attached to the existing schema-authorized violation
+  # path so input classifications keep using the same attested CommandPath
+  # channel. JSV can emit several keywords for one object; enrich only the first
+  # retained record at each path so long schema names are not repeated.
+  defp enrich_object_violations(violations, schema, value) when is_map(schema) do
+    {enriched, _seen} =
+      Enum.map_reduce(violations, MapSet.new(), fn violation, seen ->
+        segments = Map.get(violation, :segments)
+
+        if not is_list(segments) or MapSet.member?(seen, segments) do
+          {violation, seen}
+        else
+          case schema_value_at_path(schema, value, segments) do
+            {:ok, %{"type" => "object"} = object_schema, object_value} ->
+              {
+                object_diagnostic(violation, object_schema, object_value),
+                MapSet.put(seen, segments)
+              }
+
+            :error ->
+              {violation, seen}
+
+            {:ok, _other_schema, _other_value} ->
+              {violation, seen}
+          end
+        end
+      end)
+
+    enriched
+  end
+
+  defp enrich_object_violations(violations, _schema, _value), do: violations
+
+  defp schema_value_at_path(schema, value, []), do: {:ok, schema, value}
+
+  defp schema_value_at_path(
+         %{"type" => "object", "properties" => properties},
+         value,
+         [{:property, name} | rest]
+       )
+       when is_map(properties) and is_map(value) and not is_struct(value) do
+    with {:ok, child_schema} <- Map.fetch(properties, name),
+         {:ok, child_value} <- Map.fetch(value, name) do
+      schema_value_at_path(child_schema, child_value, rest)
+    end
+  end
+
+  defp schema_value_at_path(
+         %{"type" => "array", "items" => items},
+         value,
+         [{:index, index} | rest]
+       )
+       when is_list(value) and is_integer(index) and index >= 0 do
+    case Enum.fetch(value, index) do
+      {:ok, child_value} -> schema_value_at_path(items, child_value, rest)
+      :error -> :error
+    end
+  end
+
+  defp schema_value_at_path(_schema, _value, _segments), do: :error
+
+  defp object_diagnostic(violation, schema, value) do
+    violation
+    |> put_missing_required(schema, value)
+    |> put_closed_object_diagnostic(schema, value)
+  end
+
+  defp put_missing_required(violation, schema, value)
+       when is_map(value) and not is_struct(value) do
+    missing_required =
+      schema
+      |> Map.get("required", [])
+      |> Enum.reject(&Map.has_key?(value, &1))
+      |> Enum.sort()
+
+    maybe_put_missing_required(violation, missing_required)
+  end
+
+  defp put_missing_required(violation, _schema, _value), do: violation
+
+  defp put_closed_object_diagnostic(violation, %{"additionalProperties" => false} = schema, value) do
+    allowed_keys = schema |> Map.get("properties", %{}) |> Map.keys() |> Enum.sort()
+
+    violation
+    |> put_name_diagnostic(
+      :allowed_keys,
+      :allowed_key_count,
+      :allowed_keys_truncated,
+      allowed_keys
+    )
+    |> put_undeclared_key_count(value, MapSet.new(allowed_keys))
+  end
+
+  defp put_closed_object_diagnostic(violation, _schema, _value), do: violation
+
+  defp put_undeclared_key_count(violation, value, allowed)
+       when is_map(value) and not is_struct(value) do
+    undeclared_key_count =
+      Enum.count(value, fn {name, _child} -> not MapSet.member?(allowed, name) end)
+
+    maybe_put_undeclared_key_count(violation, undeclared_key_count)
+  end
+
+  defp put_undeclared_key_count(violation, _value, _allowed), do: violation
+
+  defp maybe_put_missing_required(violation, []), do: violation
+
+  defp maybe_put_missing_required(violation, missing_required) do
+    put_name_diagnostic(
+      violation,
+      :missing_required,
+      :missing_required_count,
+      :missing_required_truncated,
+      missing_required
+    )
+  end
+
+  defp maybe_put_undeclared_key_count(violation, 0), do: violation
+
+  defp maybe_put_undeclared_key_count(violation, count),
+    do: Map.put(violation, :undeclared_key_count, count)
+
+  defp put_name_diagnostic(violation, list_key, count_key, truncated_key, names) do
+    {retained, encoded_bytes} =
+      Enum.reduce_while(names, {[], 2}, fn name, {retained, bytes} ->
+        separator_bytes = if retained == [], do: 0, else: 1
+
+        case DeterministicJSON.encode(name) do
+          {:ok, encoded} ->
+            next_bytes = bytes + separator_bytes + byte_size(encoded)
+
+            if length(retained) < @max_diagnostic_names and
+                 next_bytes <= @max_diagnostic_name_bytes do
+              {:cont, {[name | retained], next_bytes}}
+            else
+              {:halt, {retained, bytes}}
+            end
+
+          {:error, _reason} ->
+            {:halt, {retained, bytes}}
+        end
+      end)
+
+    retained = Enum.reverse(retained)
+    violation = Map.put(violation, list_key, retained)
+
+    if length(retained) == length(names) and encoded_bytes <= @max_diagnostic_name_bytes do
+      violation
+    else
+      violation
+      |> Map.put(count_key, length(names))
+      |> Map.put(truncated_key, true)
+    end
+  end
+
   defp classify_union(branches, value) do
     with {:ok, name} <- shared_discriminator(branches),
          true <- is_map(value),
          {:ok, tag} when is_binary(tag) <- Map.fetch(value, name),
          index when is_integer(index) <-
            Enum.find_index(branches, &(get_in(&1, ["properties", name, "const"]) == tag)) do
-      Map.merge(
-        %{discriminator: name, matched_branch: tag, branch_index: index},
-        classify_object(Enum.at(branches, index), value)
-      )
+      %{discriminator: name, matched_branch: tag, branch_index: index}
     else
       _other ->
         %{
@@ -382,19 +548,6 @@ defmodule PtcRunner.Kernel.ValueContract do
         }
     end
   end
-
-  defp classify_object(schema, value) when is_map(value) do
-    required = Map.get(schema, "required", [])
-    declared = schema |> Map.get("properties", %{}) |> Map.keys() |> MapSet.new()
-
-    %{
-      missing_required: Enum.reject(required, &Map.has_key?(value, &1)),
-      undeclared_key_count: Enum.count(Map.keys(value), &(not MapSet.member?(declared, &1)))
-    }
-  end
-
-  defp classify_object(schema, _value),
-    do: %{missing_required: Map.get(schema, "required", []), undeclared_key_count: 0}
 
   defp discriminator_name(branches) do
     case shared_discriminator(branches) do

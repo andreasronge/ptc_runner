@@ -233,7 +233,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
           id: "invalid-result",
           name: "run_ptc_lisp",
           args: %{
-            "program" => ~S|(return {"decision" "propose-change" "evidence" [{"resource" ""}]})|
+            "program" =>
+              ~S|(return {"decision" "propose-change" "evidence" [{"uri" "private-value"}]})|
           }
         }
       ]
@@ -298,10 +299,84 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert_receive {:agent_request, _first_request}
     assert_receive {:agent_request, second_request}
 
-    assert List.last(second_request["messages"])["content"] =~
-             "did not satisfy the application result contract"
+    correction = List.last(second_request["messages"])["content"]
 
-    assert List.last(second_request["messages"])["content"] =~ "minLength"
+    assert correction =~ "did not satisfy the application result contract"
+    assert correction =~ "allowed_keys"
+    assert correction =~ "missing_required"
+    assert correction =~ "resource"
+    refute correction =~ "uri"
+    refute correction =~ "private-value"
+  end
+
+  test "agent.main bounds escape-heavy result-contract correction feedback" do
+    long_key = String.duplicate(~S|\"|, 2_500)
+    encoded_key = Jason.encode!(long_key)
+    invalid_items = Enum.map_join(1..8, " ", fn _index -> "42" end)
+    corrected_items = Enum.map_join(1..8, " ", fn _index -> ~S|{"answer" 1}| end)
+
+    invalid = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "large-invalid-result",
+          name: "run_ptc_lisp",
+          args: %{"program" => "(return {#{encoded_key} [#{invalid_items}]})"}
+        }
+      ]
+    }
+
+    corrected = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "large-corrected-result",
+          name: "run_ptc_lisp",
+          args: %{"program" => "(return {#{encoded_key} [#{corrected_items}]})"}
+        }
+      ]
+    }
+
+    assert {:ok, result_contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "properties" => %{
+                 long_key => %{
+                   "type" => "array",
+                   "items" => %{
+                     "type" => "object",
+                     "properties" => %{"answer" => %{"type" => "integer"}},
+                     "required" => ["answer"]
+                   }
+                 }
+               },
+               "required" => [long_key]
+             })
+
+    input = %{
+      "input" => %{
+        "task" => "Return one application value",
+        "agent" => %{"max_turns" => 2}
+      }
+    }
+
+    {:ok, config} =
+      agent_config([invalid, corrected], [],
+        agent_main: true,
+        input: input,
+        result_contract: result_contract
+      )
+
+    assert {:ok, %{value: value}} = Kernel.run("(agent.main/run data/input)", config)
+    assert length(value[long_key]) == 8
+
+    assert_receive {:agent_request, _first_request}
+    assert_receive {:agent_request, second_request}
+
+    correction = List.last(second_request["messages"])["content"]
+    assert correction =~ "... (contract diagnostics truncated)"
+    assert String.length(correction) <= 33_000
+    assert byte_size(Jason.encode!(second_request)) < 262_144
   end
 
   test "agent.main validates keyword-keyed candidates through the kernel JSON projection" do

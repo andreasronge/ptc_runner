@@ -199,8 +199,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
     assert nil == loaded.contracts.result
 
     assert {:error,
-            {:source_role, :external_input,
-             {:input_contract_failed, %{missing_required: ["question"]}}}} =
+            {:source_role, :external_input, {:input_contract_failed, external_classification}}} =
              path
              |> ApplicationPackage.request_directory(
                installed_limits: registry.installed_limits,
@@ -208,6 +207,11 @@ defmodule PtcRunner.Kernel.ManifestTest do
                input_authority: :normal
              )
              |> RunLifecycle.build(registry)
+
+    assert Enum.any?(
+             external_classification.violations,
+             &(&1[:missing_required] == ["question"])
+           )
 
     refute_receive :provider_prepared
 
@@ -226,10 +230,15 @@ defmodule PtcRunner.Kernel.ManifestTest do
     invalid_initial = put_in(manifest, ["input", "value"], %{"other" => "invalid"})
     File.write!(path, Jason.encode!(invalid_initial))
 
-    assert {:error, {:input_contract_failed, %{missing_required: ["question"]}}} =
+    assert {:error, {:input_contract_failed, initial_classification}} =
              path
              |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
+
+    assert Enum.any?(
+             initial_classification.violations,
+             &(&1[:missing_required] == ["question"])
+           )
 
     refute_receive :provider_prepared
   end

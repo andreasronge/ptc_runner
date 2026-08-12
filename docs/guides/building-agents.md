@@ -454,6 +454,17 @@ executable values cross only as inert display labels.
 shows a complete credential-free run of this protocol against a signature
 violation.
 
+When `agent.main` rejects a terminal candidate against the manifest result
+contract, the correlated tool result instead carries bounded structural
+diagnostics. At each retained failing closed-object path it can name the sorted
+keys that schema allows, the required schema keys missing there, and only the
+count of undeclared submitted keys. An open-object path can still name missing
+required schema keys, but never treats valid extension keys as undeclared. It
+never echoes an undeclared key or submitted value. The rendered diagnostic is
+capped at 32,768 characters with an explicit truncation marker before it enters
+model history, then the whole prospective request is checked against
+`max_transcript_chars` as usual.
+
 The loop also bounds the whole prospective request before dispatch.
 `max_transcript_chars` defaults to 262,144, accepts positive values through
 1,000,000, and measures the JSON-encoded `system`, accumulated correlated

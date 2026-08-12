@@ -478,6 +478,15 @@ survives when `pmap` or `pcalls` rejects a worker's `fail` control signal; the
 parallel error remains the terminal reason while its safe failure taxonomy
 identifies the underlying framework failure.
 
+Input and result contract failures follow the same public/private split. Their
+public classification may name schema-declared missing keys at a safe typed
+path. At a closed-object path it may also name allowed keys and count undeclared
+keys; an open-object path never classifies extension keys as undeclared. It
+never names an undeclared submitted key or copies a submitted value. Use
+private inspection when the exact rejected candidate is authorized and
+necessary; normal command diagnostics and agent correction feedback remain
+schema-derived and bounded.
+
 **When provider-backed detail is needed**, rerun with `--inspect`:
 
 ```console
