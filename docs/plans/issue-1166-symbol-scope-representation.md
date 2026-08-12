@@ -1,6 +1,6 @@
 # Issue #1166 item 2 — a user definition whose name interns to an atom is reported undefined
 
-Status: proposed
+Status: implemented — see the Outcome section at the end.
 Scope: `lib/ptc_runner/lisp.ex` static undefined-variable check only.
 
 ## Symptom
@@ -184,3 +184,37 @@ vocabulary — the very case this bug is about.
 4. **Negative control**: an actually-undefined variable must still be
    rejected, with its name in the message.
 5. `mix precommit`.
+
+## Outcome
+
+Implemented as planned. Three deviations, all from review:
+
+- The per-insertion-site cases had to move **out** of the prelude compiler and
+  into `PtcRunner.LispTest`, driving `undefined_vars/2` on hand-built CoreAST.
+  Parsing one form gives params and their references the same representation,
+  and the compiler pre-seeds every namespace definition into the initial scope,
+  so a source-level test cannot reach the `def`/`defonce`/`do` insertion paths
+  or mix representations at all. The prelude-compiler cases remain as
+  acceptance checks and are labelled as such.
+- Those hand-built trees are validated with `CoreAST.validate/1` before being
+  asserted on. That caught a `:keys` destructuring pattern built with map
+  defaults where `core_ast.ex:447` specifies a list of pairs — an impossible
+  tree the assertion had been passing on.
+- `SourceAtoms`' moduledoc needed a fuller rewrite than "correct the claim":
+  the section framed table membership as a property of the *binding category*
+  when it is a property of the *spelling*.
+
+Measured: 68 of the 380 table keys failed the probe before, 0 after; end-to-end
+`mix ptc validate` and `mix ptc run` over a component defining and calling both
+`parse` and `text`; `mix precommit` green.
+
+### Residuals
+
+- `priv/java_interop.exs` still mixes atom and string `source_name`s
+  (`:parse` vs `"parseInt"`) with no stated rule. Harmless now that the
+  resolver is representation-agnostic, but it is why `parse` was in the table
+  and `parseInt` was not.
+- The runtime resolver reaches the same outcome by a different route —
+  `Eval.resolve_user_ns/3` and `resolve_legacy_user_ns/3` keep a two-way
+  atom/binary bridge rather than normalising. Not a bug (verified end-to-end),
+  but it is the same asymmetry left standing in a second place.
