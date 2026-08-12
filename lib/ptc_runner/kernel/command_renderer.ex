@@ -1,6 +1,10 @@
 defmodule PtcRunner.Kernel.CommandRenderer do
   @moduledoc """
   Deterministic, privacy-preserving human projection of sealed command outcomes.
+
+  Provider failures include the validated provider subject already present in
+  the public command envelope. Rendering never derives labels from a rejected
+  value, provider response, credential, or path.
   """
 
   alias PtcRunner.Kernel.CommandOutcome
@@ -77,11 +81,31 @@ defmodule PtcRunner.Kernel.CommandRenderer do
 
   defp failure_line(error, run_ref, rejection) do
     base =
-      "error: #{error["phase"]}/#{error["code"]}: #{error["message"]} " <>
+      "error: #{error["phase"]}/#{error["code"]}: " <>
+        subject_prefix(error["subject"]) <>
+        "#{error["message"]} " <>
         "(run_ref: #{run_ref})"
 
     base <> rejection_suffix(rejection) <> "\n"
   end
+
+  defp subject_prefix(%{
+         "kind" => "provider",
+         "name" => name,
+         "operation" => operation,
+         "occurrence" => nil
+       }),
+       do: "provider/#{name}/#{operation}: "
+
+  defp subject_prefix(%{
+         "kind" => "provider",
+         "name" => name,
+         "operation" => operation,
+         "occurrence" => %{"destination" => destination, "index" => index}
+       }),
+       do: "provider/#{name}/#{operation} at #{destination}[#{index}]: "
+
+  defp subject_prefix(nil), do: ""
 
   defp rejection_suffix(%CommandRejection{kind: :unknown_switch, accepted: accepted}),
     do: "; unknown switch; accepted: " <> Enum.join(accepted, ", ")

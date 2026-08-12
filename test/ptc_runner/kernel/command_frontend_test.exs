@@ -620,6 +620,39 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     end
   end
 
+  test "human failures render the complete provider subject" do
+    {:ok, credential_subject} = CommandSubject.provider("deepseek", :credentials)
+
+    credential_outcome =
+      valid_outcome(
+        CommandDiagnostic.new!(:active_preflight, :credential_unavailable,
+          subject: credential_subject
+        )
+      )
+
+    assert CommandRenderer.render(credential_outcome) ==
+             {:stderr,
+              "error: active_preflight/credential_unavailable: " <>
+                "provider/deepseek/credentials: a required provider credential is unavailable " <>
+                "(run_ref: #{@run_ref})\n"}
+
+    {:ok, selection_subject} =
+      CommandSubject.provider("workspace", :selection, %{destination: :mission, index: 2})
+
+    selection_outcome =
+      valid_outcome(
+        CommandDiagnostic.new!(:provider_declaration, :selection_invalid,
+          subject: selection_subject
+        )
+      )
+
+    assert CommandRenderer.render(selection_outcome) ==
+             {:stderr,
+              "error: provider_declaration/selection_invalid: " <>
+                "provider/workspace/selection at mission[2]: the provider selection is invalid " <>
+                "(run_ref: #{@run_ref})\n"}
+  end
+
   test "structured argument rejections and envelope publication match exact fixtures" do
     for {name, argv} <- [
           {"unknown_switch", ["run", "ptc.json", "--caller-secret", "value"]},
