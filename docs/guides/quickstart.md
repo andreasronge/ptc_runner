@@ -63,14 +63,13 @@ out in the [README](../../README.md#why-it-is-safe).
 A missing or unreadable key aborts before the run:
 
 ```text
-** (Mix) error: active_preflight/credential_unavailable: a required provider
-credential is unavailable
+** (Mix) error: active_preflight/credential_unavailable: provider/deepseek/credentials: a required provider credential is unavailable (run_ref: cmd-00000000000000000000000000)
 ```
 
-It means `OPENROUTER_API_KEY` was not visible to the command. The message does
-not yet name the variable or the alias
-([#1166](https://github.com/andreasronge/ptc_runner/issues/1166)). Use the active
-doctor operation to identify the failed readiness check:
+The `provider/deepseek/credentials` subject identifies the provider alias and
+the operation that failed. In this example it means `OPENROUTER_API_KEY` was
+not visible to the command. Use the active doctor operation to inspect the
+complete readiness report:
 
 ```console
 mix ptc doctor examples/kernel-tutorial/04-multi-turn-agent/ptc.json \

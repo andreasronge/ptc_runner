@@ -304,10 +304,13 @@ bounded classifications at the Kernel boundary.
 
 Mix and release failures use the same bounded human renderer. Failures returned
 by the shared preparation and runtime path render only the closed diagnostic
-catalog or fixed argument guidance; they never inspect a rejected runtime term.
-Name `--envelope` when a caller also needs the stable JSON result and exit
-status in a file. Envelope publication is additive: it never redirects,
-suppresses, or replaces the command's normal terminal rendering.
+catalog, their validated provider subject when present, or fixed argument
+guidance; they never inspect a rejected runtime term. A provider subject renders
+as `provider/<alias>/<operation>` and adds `at workflow[<index>]` or
+`at mission[<index>]` when the failing occurrence is known. Name `--envelope`
+when a caller also needs the stable JSON result and exit status in a file.
+Envelope publication is additive: it never redirects, suppresses, or replaces
+the command's normal terminal rendering.
 
 ### Stable standalone process contract
 
