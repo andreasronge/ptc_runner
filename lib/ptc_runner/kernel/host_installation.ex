@@ -1126,12 +1126,19 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  # A model is a full provider-qualified identifier such as
+  # "openrouter:deepseek/deepseek-v4-flash-0731". Requiring the provider prefix
+  # here keeps a mistyped host entry a bounded preflight failure instead of a
+  # live provider call that fails after the run clock has started. The adapter
+  # remains the authority on whether the provider and model actually exist.
+  @model_pattern ~r/\A[a-z][a-z0-9_-]*:\S/
+
   defp preflight_llm(model) do
-    with {:ok, resolved} <- PtcRunner.LLM.Registry.resolve(model),
-         true <- is_binary(resolved) and byte_size(resolved) in 1..256,
+    with true <- is_binary(model) and byte_size(model) in 1..256,
+         true <- Regex.match?(@model_pattern, model),
          adapter when is_atom(adapter) <- PtcRunner.LLM.adapter!(),
          true <- Code.ensure_loaded?(adapter) do
-      {:ok, resolved, adapter}
+      {:ok, model, adapter}
     else
       _invalid -> {:error, :invalid_llm_model}
     end

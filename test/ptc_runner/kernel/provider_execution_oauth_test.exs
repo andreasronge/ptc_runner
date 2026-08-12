@@ -772,7 +772,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
     %{
       "source" => "llm",
       "installation_revision" => "credentialed-v1",
-      "model" => "openrouter:deepseek/deepseek-v4-flash",
+      "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
       "credential" => "missing"
     }
   end

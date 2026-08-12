@@ -621,7 +621,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
         "live" => %{
           "source" => "llm",
           "installation_revision" => "live-v1",
-          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "key"
         }
       }
@@ -781,7 +781,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
           "live" => %{
             "source" => "llm",
             "installation_revision" => "live-v1",
-            "model" => "openrouter:deepseek/deepseek-v4-flash",
+            "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
             "credential" => "key"
           }
         }
@@ -833,7 +833,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
-          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
           "params" => %{"temperature" => 0.15, "seed" => 73, "max_tokens" => 2_048},
           "installation_revision" => "model-policy-v2",
@@ -944,7 +944,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert response["content"] == "ok"
 
-    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash", request}
+    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash-0731", request}
     assert request.api_key == "test-llm-secret"
     assert request.cache == false
     assert request.temperature == 0.15
@@ -978,7 +978,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
           "live" => %{
             "source" => "llm",
             "installation_revision" => "live-v1",
-            "model" => "openrouter:deepseek/deepseek-v4-flash",
+            "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
             "credential" => "key",
             "params" => %{"max_tokens" => 99}
           }
@@ -1016,7 +1016,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert :ok = implementation.connectivity_probe.(selection, probe_context, runtime_services)
 
     assert_receive {:host_llm_ensure_ready, warmup_pid}
-    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash", request}
+    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash-0731", request}
     request_pid = Map.fetch!(request, :probe_pid)
     refute warmup_pid == request_pid
     assert request.api_key == "pre-resolved-secret"
@@ -1032,7 +1032,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert {:error, :llm_connectivity_unavailable} =
              implementation.connectivity_probe.(selection, probe_context, runtime_services)
 
-    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash", _request}
+    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash-0731", _request}
     refute_receive {:host_llm_request, _, _}
 
     # No fallback: the credential this installation declares is resolvable from
@@ -1437,7 +1437,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
-          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "key",
           "installation_revision" => "unstarted-v1"
         }

@@ -206,7 +206,7 @@ defmodule PtcRunner.Kernel.ConcurrentAgentContentionLiveE2ETest do
       update_in(host.install["deepseek"], fn installation ->
         %{
           installation
-          | model: LLMSupport.resolve_model("deepseek"),
+          | model: LLMSupport.model(),
             params: %{temperature: 0.0, max_tokens: 1_024}
         }
       end)

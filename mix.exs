@@ -74,7 +74,6 @@ defmodule PtcRunner.MixProject do
       mod: {PtcRunner.Application, []},
       extra_applications: [:crypto, :logger, :public_key, :ssl],
       env: [
-        model_registry: PtcRunner.LLM.DefaultRegistry,
         llm_adapter: PtcRunner.LLM.ReqLLMAdapter
       ]
     ]
@@ -369,8 +368,6 @@ defmodule PtcRunner.MixProject do
         ],
         LLM: [
           PtcRunner.LLM,
-          PtcRunner.LLM.Registry,
-          PtcRunner.LLM.DefaultRegistry,
           PtcRunner.LLM.ReqLLMAdapter
         ]
       ],

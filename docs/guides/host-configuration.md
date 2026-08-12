@@ -32,7 +32,7 @@ the later preflight and acquisition phases.
     "deepseek": {
       "source": "llm",
       "installation_revision": "deepseek-policy-v1",
-      "model": "openrouter:deepseek/deepseek-v4-flash",
+      "model": "openrouter:deepseek/deepseek-v4-flash-0731",
       "credential": "openrouter_key",
       "cache": false
     },
@@ -161,7 +161,7 @@ model-authored mission code.
 "deepseek": {
   "source": "llm",
   "installation_revision": "deepseek-policy-v1",
-  "model": "openrouter:deepseek/deepseek-v4-flash",
+  "model": "openrouter:deepseek/deepseek-v4-flash-0731",
   "credential": "openrouter_key",
   "cache": false,
   "params": {"temperature": 0.2, "seed": 42, "max_tokens": 4096},

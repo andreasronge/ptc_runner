@@ -66,7 +66,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
-          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
           "cache" => false,
           "params" => %{"temperature" => 0.2, "seed" => 42, "max_tokens" => 4_096},
@@ -84,7 +84,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     assert host.install["deepseek"] == %{
              source: :llm,
-             model: "openrouter:deepseek/deepseek-v4-flash",
+             model: "openrouter:deepseek/deepseek-v4-flash-0731",
              credential: "openrouter_key",
              cache: false,
              params: %{temperature: 0.2, seed: 42, max_tokens: 4_096},
@@ -448,7 +448,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
         "deepseek" => %{
           "source" => "llm",
           "installation_revision" => "deepseek-v1",
-          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "key"
         }
       }

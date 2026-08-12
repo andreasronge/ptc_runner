@@ -581,7 +581,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
           "live-llm" => %{
             "source" => "llm",
             "installation_revision" => "live-v1",
-            "model" => "openrouter:deepseek/deepseek-v4-flash",
+            "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
             "credential" => "key"
           }
         }

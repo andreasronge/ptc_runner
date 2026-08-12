@@ -105,7 +105,7 @@ defmodule Mix.Tasks.Ptc.RunDownstreamTest do
         "deepseek" => %{
           "source" => "llm",
           "installation_revision" => "downstream-llm-v1",
-          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "key"
         }
       }
