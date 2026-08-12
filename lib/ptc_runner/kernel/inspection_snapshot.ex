@@ -41,7 +41,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
     :effective_preludes,
     :provider_exchanges,
     :execution_prints,
-    :execution_errors
+    :execution_errors,
+    :result
   ]
 
   @enforce_keys [:pid, :token]
@@ -563,13 +564,34 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
              arguments,
              query_bytes
            ) do
-        {:ok, result} -> {:ok, Map.put(result, "snapshot_hash", snapshot_hash)}
-        {:error, _reason} = error -> error
+        {:ok, result} ->
+          result = Map.put(result, "snapshot_hash", snapshot_hash)
+
+          if result_within_limit?(result, operation, state.max_result_bytes),
+            do: {:ok, result},
+            else: {:error, :result_limit_exceeded}
+
+        {:error, _reason} = error ->
+          error
       end
     else
       {:error, :result_limit_exceeded}
     end
   end
+
+  defp result_within_limit?(result, operation, max_result_bytes) do
+    byte_size(Jason.encode!(result)) <= max_result_bytes and
+      retained_result_within_limit?(result, operation, max_result_bytes)
+  end
+
+  defp retained_result_within_limit?(result, :result, max_result_bytes) do
+    match?(
+      bytes when is_integer(bytes) and bytes <= max_result_bytes,
+      RetainedSize.bytes_with_cap(result, max_result_bytes)
+    )
+  end
+
+  defp retained_result_within_limit?(_result, _operation, _max_result_bytes), do: true
 
   defp redact_status(status) do
     Map.new(status, fn

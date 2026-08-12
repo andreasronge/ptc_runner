@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
@@ -59,6 +60,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     assert metadata["mission_capability_calls"] == 0
     assert metadata["error_count"] == 0
     assert is_integer(metadata["duration_ms"])
+    assert metadata["result_hash"] == result_hash(42)
 
     assert metadata["workflow_prelude"] ==
              %{"component_ids" => [], "dependency_indices" => [], "hash" => nil}
@@ -94,6 +96,40 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
 
     assert {:error, %{kind: :invalid_request}} =
              callbacks["trace-list-runs"].(%{"cursor" => 1})
+  end
+
+  @tag :tmp_dir
+  test "run-result hashes are projected only from valid successful canonical completion", %{
+    tmp_dir: directory
+  } do
+    query = fn events, name ->
+      path = Path.join(directory, "result-hash-#{name}.jsonl")
+      File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+      {:ok, log} = TraceLog.new(source: {:file, path})
+      TraceLog.query(log, :get_run, %{"run_id" => name})
+    end
+
+    hash = result_hash(%{"answer" => 42})
+
+    valid = [
+      decoded_event("valid", 1, "run-started"),
+      decoded_event("valid", 2, "run-stopped", %{
+        "outcome" => "ok",
+        "result_hash" => hash
+      })
+    ]
+
+    assert {:ok, %{"result_hash" => ^hash}} = query.(valid, "valid")
+
+    invalid_hash =
+      put_in(valid, [Access.at(1), "data", "result_hash"], "sha256:" <> String.duplicate("A", 64))
+
+    failed_with_hash = put_in(valid, [Access.at(1), "data", "outcome"], "error")
+    unsupported = put_in(valid, [Access.at(0), "schema_version"], 3)
+
+    assert {:error, :malformed_source} = query.(invalid_hash, "invalid-hash")
+    assert {:error, :malformed_source} = query.(failed_with_hash, "failed-with-hash")
+    assert {:error, :unsupported_version} = query.(unsupported, "unsupported")
   end
 
   test "a trace grant never discovers runs in another sink" do
@@ -1012,5 +1048,10 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
       "type" => type,
       "data" => data
     }
+  end
+
+  defp result_hash(value) do
+    {:ok, encoded} = DeterministicJSON.encode(value)
+    "sha256:" <> Base.encode16(:crypto.hash(:sha256, encoded), case: :lower)
   end
 end

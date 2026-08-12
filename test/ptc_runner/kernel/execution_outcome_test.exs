@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
@@ -9,6 +10,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.ValueContract
+  alias PtcRunner.Lisp.Format.SymbolRef
 
   setup do
     {:ok, limits} = Limits.new([])
@@ -85,6 +87,82 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
     assert :ok = InspectionSink.stop(inspection)
     assert :ok = EventSink.stop(sink)
     assert open!(outcome, authority).inspection == {:ok, []}
+  end
+
+  test "captures one strict-JSON terminal result in the inspection sink", %{
+    limits: limits,
+    authority: authority
+  } do
+    value = %{"answer" => 42}
+    result_hash = result_hash(value)
+    {:ok, sink} = EventSink.start(:private, limits)
+
+    {:ok, inspection} =
+      InspectionSink.start(run_id: "outcome-result", trace_id: "trace-outcome-result")
+
+    terminal_batch =
+      {:ok,
+       [
+         %{
+           "run_id" => "outcome-result",
+           "trace_id" => "trace-outcome-result",
+           "type" => "run-stopped",
+           "data" => %{"outcome" => "ok", "result_hash" => result_hash}
+         }
+       ]}
+
+    assert {:ok, outcome} =
+             ExecutionOutcome.capture(
+               result(value),
+               terminal_batch,
+               sink,
+               inspection,
+               nil,
+               authority
+             )
+
+    assert {:ok, [record]} = open!(outcome, authority).inspection
+    assert record["record_type"] == "run-result"
+    assert record["correlation"] == %{}
+    assert record["payload"] == %{"result_hash" => result_hash, "value" => value}
+
+    assert :ok = InspectionSink.stop(inspection)
+    assert :ok = EventSink.stop(sink)
+  end
+
+  test "does not emit run results for hashable native non-JSON values", %{
+    limits: limits,
+    authority: authority
+  } do
+    value = %SymbolRef{name: "answer"}
+    result_hash = result_hash(value)
+    {:ok, sink} = EventSink.start(:private, limits)
+
+    {:ok, inspection} =
+      InspectionSink.start(run_id: "outcome-native", trace_id: "trace-outcome-native")
+
+    terminal_batch =
+      {:ok,
+       [
+         %{
+           "type" => "run-stopped",
+           "data" => %{"outcome" => "ok", "result_hash" => result_hash}
+         }
+       ]}
+
+    assert {:ok, outcome} =
+             ExecutionOutcome.capture(
+               result(value),
+               terminal_batch,
+               sink,
+               inspection,
+               nil,
+               authority
+             )
+
+    assert open!(outcome, authority).inspection == {:ok, []}
+    assert :ok = InspectionSink.stop(inspection)
+    assert :ok = EventSink.stop(sink)
   end
 
   test "captures result-contract decisions", %{limits: limits, authority: authority} do
@@ -228,5 +306,10 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
 
   defp error_result do
     {:error, %Error{kind: :event_sink_error, reason: :event_sink_error, details: %{}, usage: %{}}}
+  end
+
+  defp result_hash(value) do
+    {:ok, encoded} = DeterministicJSON.encode(value)
+    "sha256:" <> Base.encode16(:crypto.hash(:sha256, encoded), case: :lower)
   end
 end

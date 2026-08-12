@@ -36,6 +36,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfile do
     inspection-list-runs
     inspection-model-exchanges
     inspection-provider-exchanges
+    inspection-result
   )
   @capabilities Enum.sort(@trace_capabilities ++ @inspection_capabilities)
   @persistence "canonical-trace-on-close"

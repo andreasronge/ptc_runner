@@ -3,11 +3,19 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.Error
+  alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.PublicationAuthority
+  alias PtcRunner.Kernel.Result
+  alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ViewerAdapter
+  alias PtcRunner.Lisp.Format.SymbolRef
   alias PtcRunner.TestSupport.RunLifecycle
   alias PtcRunner.TestSupport.TestHelpers
 
@@ -65,7 +73,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     assert {:ok, [input, output, source, prelude]} = InspectionSink.records(sink)
     assert Enum.map([input, output, source, prelude], & &1["sequence"]) == [1, 2, 3, 4]
-    assert Enum.all?([input, output, source, prelude], &(&1["schema_version"] == 4))
+    assert Enum.all?([input, output, source, prelude], &(&1["schema_version"] == 5))
     assert input["payload"]["environment"] == "mission"
     assert output["payload"]["result"] == %{"status" => "ok", "value" => 42}
     assert source["payload"]["source"] == @source
@@ -127,7 +135,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
 
     assert {:ok, [request_record, response_record]} = InspectionSink.records(sink)
-    assert request_record["schema_version"] == 4
+    assert request_record["schema_version"] == 5
     assert request_record["payload"]["body"] == request
     assert response_record["payload"]["body"] == response
   end
@@ -176,7 +184,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
 
     assert {:ok, [prints_record, error_record]} = InspectionSink.records(sink)
-    assert prints_record["schema_version"] == 4
+    assert prints_record["schema_version"] == 5
     assert prints_record["correlation"] == %{"evaluation_id" => "eval-1"}
 
     assert prints_record["payload"] == %{
@@ -274,6 +282,93 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                records,
                [put_in(event, [:data, :mission_name], "writer")]
              )
+  end
+
+  test "retains exactly one strict-JSON run result" do
+    value = %{"answer" => [42, true, nil]}
+    {:ok, encoded} = DeterministicJSON.encode(value)
+    hash = "sha256:" <> Base.encode16(:crypto.hash(:sha256, encoded), case: :lower)
+
+    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+
+    assert :ok =
+             InspectionSink.emit(sink, "run-result", %{}, %{result_hash: hash, value: value})
+
+    assert {:ok, [record]} = InspectionSink.records(sink)
+    assert record["schema_version"] == 5
+    assert record["correlation"] == %{}
+    assert record["payload"] == %{"result_hash" => hash, "value" => value}
+
+    assert {:error, :inspection_sink_error} =
+             InspectionSink.emit(sink, "run-result", %{}, %{result_hash: hash, value: value})
+  end
+
+  test "rejects native run results before generic inspection normalization" do
+    {:ok, atom_value} =
+      InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+
+    assert {:error, :inspection_sink_error} =
+             InspectionSink.emit(
+               atom_value,
+               "run-result",
+               %{},
+               %{result_hash: result_hash("native"), value: :native}
+             )
+
+    {:ok, atom_key} =
+      InspectionSink.start(run_id: "run-2", trace_id: "trace-2")
+
+    assert {:error, :inspection_sink_error} =
+             InspectionSink.emit(
+               atom_key,
+               "run-result",
+               %{},
+               %{result_hash: result_hash(%{"answer" => 42}), value: %{answer: 42}}
+             )
+  end
+
+  @tag :tmp_dir
+  test "artifacts self-validate result hashes and bind them to canonical completion", %{
+    tmp_dir: dir
+  } do
+    value = %{"answer" => 42}
+    {:ok, encoded} = DeterministicJSON.encode(value)
+    hash = "sha256:" <> Base.encode16(:crypto.hash(:sha256, encoded), case: :lower)
+
+    {:ok, sink} =
+      InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+
+    assert :ok =
+             InspectionSink.emit(sink, "run-result", %{}, %{result_hash: hash, value: value})
+
+    assert {:ok, [record] = records} = InspectionSink.records(sink)
+
+    events = [
+      canonical_event(1, "run-started", %{}),
+      canonical_event(2, "run-stopped", %{
+        "outcome" => "ok",
+        "result_hash" => hash
+      })
+    ]
+
+    path = Path.join(dir, "result.inspection.jsonl")
+    assert :ok = InspectionArtifact.validate_correlations(records, events)
+    assert :ok = InspectionArtifact.persist(path, records, events)
+    assert {:ok, ^records} = InspectionArtifact.load(path)
+
+    tampered_path = Path.join(dir, "tampered.inspection.jsonl")
+    tampered = put_in(record, ["payload", "value"], %{"answer" => 43})
+    File.write!(tampered_path, Jason.encode!(tampered) <> "\n")
+    assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(tampered_path)
+
+    mismatched =
+      put_in(events, [Access.at(1), "data", "result_hash"], result_hash(%{"answer" => 0}))
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(records, mismatched)
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(records, [hd(events)])
   end
 
   test "enforces installed per-record and aggregate encoded byte ceilings" do
@@ -674,7 +769,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
       records
       |> hd()
       |> Jason.encode!()
-      |> String.replace_prefix("{", ~S|{"schema_version":4,|)
+      |> String.replace_prefix("{", ~S|{"schema_version":5,|)
 
     File.write!(duplicate, duplicate_line <> "\n")
     assert {:error, :malformed_inspection_artifact} = InspectionArtifact.load(duplicate)
@@ -697,7 +792,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(wrong_type)
 
     capability_input = %{
-      "schema_version" => 4,
+      "schema_version" => 5,
       "run_id" => "run-1",
       "trace_id" => "trace-1",
       "sequence" => 1,
@@ -908,7 +1003,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     nested = Enum.reduce(1..64, true, fn _level, value -> [value] end)
 
     record = %{
-      "schema_version" => 4,
+      "schema_version" => 5,
       "run_id" => "deep",
       "trace_id" => "deep",
       "sequence" => 1,
@@ -999,7 +1094,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
              |> RunLifecycle.execute()
 
-    assert {:ok, [prelude, source, input, output] = records} =
+    assert {:ok, [prelude, source, input, output, result] = records} =
              InspectionArtifact.load(inspection_path)
 
     assert prelude["record_type"] == "prelude-source"
@@ -1023,6 +1118,9 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              "status" => "ok",
              "value" => %{"answer" => "INSPECT ME"}
            }
+
+    assert result["record_type"] == "run-result"
+    assert result["payload"]["value"] == "done"
 
     trace_lines = trace_path |> File.read!() |> String.split("\n", trim: true)
     refute Enum.any?(trace_lines, &String.contains?(&1, "inspect me"))
@@ -1085,7 +1183,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     inspection_path = Path.join(dir, "run.inspection.jsonl")
     File.write!(manifest_path, Jason.encode!(checkpoint_manifest()))
 
-    assert {:error, %PtcRunner.Kernel.Error{kind: :workflow_failed}} =
+    assert {:error, %Error{kind: :workflow_failed}} =
              execute_checkpoint(manifest_path, trace_path, inspection_path)
 
     assert {:ok, records} = InspectionArtifact.load(inspection_path)
@@ -1163,7 +1261,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     {:ok, registry} = ProviderRegistry.new(%{})
 
-    assert {:ok, %PtcRunner.Kernel.Result{value: %{"ok" => true}}} =
+    assert {:ok, %Result{value: %{"ok" => true}}} =
              manifest_path
              |> ApplicationPackage.request_directory(
                inspection_capture: true,
@@ -1180,6 +1278,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert {:ok, records} = InspectionArtifact.load(inspection_path)
 
     prints_record = Enum.find(records, &(&1["record_type"] == "execution-prints"))
+    result_record = Enum.find(records, &(&1["record_type"] == "run-result"))
     refute Enum.any?(records, &(&1["record_type"] == "execution-error"))
 
     assert prints_record["payload"] == %{
@@ -1187,6 +1286,8 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              "prints" => [~S|CHECKPOINT {:seen {"seen" "checkpoint-input"}}|],
              "truncated" => false
            }
+
+    assert result_record["payload"]["value"] == %{"ok" => true}
 
     trace_lines = trace_path |> File.read!() |> String.split("\n", trim: true)
     refute Enum.any?(trace_lines, &String.contains?(&1, "CHECKPOINT"))
@@ -1199,8 +1300,126 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
         &(&1["type"] == "evaluation-started" and &1["data"]["environment"] == "workflow")
       )
 
+    run_stopped =
+      trace_lines
+      |> Enum.map(&Jason.decode!/1)
+      |> Enum.find(&(&1["type"] == "run-stopped"))
+
+    assert result_record["payload"]["result_hash"] == run_stopped["data"]["result_hash"]
+
+    assert {:ok, trace_log} = TraceLog.new(source: {:private_file, trace_path})
+
+    assert {:ok, %{"result_hash" => result_hash}} =
+             TraceLog.query(trace_log, :get_run, %{"run_id" => run_stopped["run_id"]})
+
+    assert result_hash == result_record["payload"]["result_hash"]
+
     assert evaluation_started["data"]["evaluation_id"] ==
              prints_record["correlation"]["evaluation_id"]
+  end
+
+  @tag :tmp_dir
+  test "an escape-heavy terminal result fails inspection and withholds result publication", %{
+    tmp_dir: dir
+  } do
+    File.write!(
+      Path.join(dir, "workflow.clj"),
+      ~S|(ns app)
+         (defn run [input]
+           (return (replace (get input "value") #"x" (json/parse-string "\"\\u0000\""))))|
+    )
+
+    value = String.duplicate("x", 400_000)
+    File.write!(Path.join(dir, "input.json"), Jason.encode!(%{"value" => value}))
+
+    manifest =
+      checkpoint_manifest()
+      |> Map.put("input", %{"path" => "input.json"})
+      |> Map.put("limits", %{"workflow_heap_words" => 32_000_000})
+
+    manifest_path = Path.join(dir, "ptc.json")
+    trace_path = Path.join(dir, "run.private.jsonl")
+    inspection_path = Path.join(dir, "run.inspection.jsonl")
+    result_path = Path.join(dir, "run.result.json")
+    File.write!(manifest_path, Jason.encode!(manifest))
+
+    {:ok, installed_limits} =
+      Limits.new(workflow_heap_words: 32_000_000)
+
+    {:ok, registry} = ProviderRegistry.new(%{}, installed_limits: installed_limits)
+
+    assert {:error,
+            {:inspection_persistence_failed, :inspection_sink_error,
+             {:ok, %Result{value: :redacted}}}} =
+             manifest_path
+             |> ApplicationPackage.request_directory(
+               inspection_capture: true,
+               result_projection: :json,
+               installed_limits: registry.installed_limits
+             )
+             |> RunLifecycle.build(registry,
+               trace_path: trace_path,
+               inspect: inspection_path,
+               private_output: result_path
+             )
+             |> RunLifecycle.execute()
+
+    escape_heavy_result = :binary.copy(<<0>>, 400_000)
+    assert :erlang.external_size(escape_heavy_result) < 1_000_000
+    assert byte_size(Jason.encode!(escape_heavy_result)) > 2_000_000
+    assert File.regular?(trace_path)
+
+    assert trace_path
+           |> File.stream!()
+           |> Enum.map(&Jason.decode!/1)
+           |> Enum.any?(
+             &(&1["type"] == "run-stopped" and &1["data"]["outcome"] == "ok" and
+                 is_binary(&1["data"]["result_hash"]))
+           )
+
+    refute File.exists?(inspection_path)
+    refute File.exists?(result_path)
+  end
+
+  @tag :tmp_dir
+  test "an inspected native symbol result remains successful without a result record", %{
+    tmp_dir: dir
+  } do
+    File.write!(Path.join(dir, "workflow.clj"), ~S|(ns app) (defn run [_input] (return 'answer))|)
+    manifest_path = Path.join(dir, "ptc.json")
+    File.write!(manifest_path, Jason.encode!(checkpoint_manifest()))
+    {:ok, registry} = ProviderRegistry.new(%{})
+
+    assert {:ok, built} =
+             manifest_path
+             |> ApplicationPackage.request_directory(
+               inspection_capture: true,
+               result_projection: :native,
+               installed_limits: registry.installed_limits
+             )
+             |> RunLifecycle.build(registry,
+               trace_path: Path.join(dir, "run.private.jsonl"),
+               inspect: Path.join(dir, "run.inspection.jsonl")
+             )
+
+    authority = built.publication_authority
+    on_exit(fn -> PublicationAuthority.abort(authority) end)
+
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+
+    assert {:ok,
+            %{
+              result: {:ok, %Result{value: %SymbolRef{name: "answer"}}},
+              inspection: {:ok, records},
+              terminal_batch: {:ok, terminal_events}
+            }} = ExecutionOutcome.open(outcome, authority)
+
+    refute Enum.any?(records, &(&1["record_type"] == "run-result"))
+
+    assert Enum.any?(
+             terminal_events,
+             &(&1.type == "run-stopped" and is_binary(&1.data.result_hash))
+           )
   end
 
   @tag :tmp_dir
@@ -1215,7 +1434,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     inspection_path = Path.join(dir, "run.inspection.jsonl")
     File.write!(manifest_path, Jason.encode!(checkpoint_manifest("normal")))
 
-    assert {:error, %PtcRunner.Kernel.Error{kind: :workflow_failed}} =
+    assert {:error, %Error{kind: :workflow_failed}} =
              execute_checkpoint(manifest_path, trace_path, inspection_path)
 
     assert {:ok, records} = InspectionArtifact.load(inspection_path)
@@ -1353,6 +1572,11 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
       "type" => type,
       "data" => data
     }
+  end
+
+  defp result_hash(value) do
+    {:ok, encoded} = DeterministicJSON.encode(value)
+    "sha256:" <> Base.encode16(:crypto.hash(:sha256, encoded), case: :lower)
   end
 
   defp resequence(records) do

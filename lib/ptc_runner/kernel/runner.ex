@@ -8,13 +8,13 @@ defmodule PtcRunner.Kernel.Runner do
   """
 
   alias PtcRunner.Kernel.BoundedPrints
-  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.Result
+  alias PtcRunner.Kernel.ResultIdentity
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
@@ -531,8 +531,8 @@ defmodule PtcRunner.Kernel.Runner do
   defp terminal_reason({:error, %Error{reason: reason}}), do: reason
 
   defp maybe_put_result_hash(stopped_data, {:ok, %Result{value: value}}) do
-    case DeterministicJSON.encode(value) do
-      {:ok, encoded} -> Map.put(stopped_data, :result_hash, sha256(encoded))
+    case ResultIdentity.hash(value) do
+      {:ok, result_hash} -> Map.put(stopped_data, :result_hash, result_hash)
       {:error, _reason} -> stopped_data
     end
   end
@@ -553,9 +553,6 @@ defmodule PtcRunner.Kernel.Runner do
   end
 
   defp maybe_put_failure_taxonomy(stopped_data, _result), do: stopped_data
-
-  defp sha256(value),
-    do: "sha256:" <> Base.encode16(:crypto.hash(:sha256, value), case: :lower)
 
   defp put_result_usage({:ok, %Result{} = result}, usage), do: {:ok, %{result | usage: usage}}
   defp put_result_usage({:error, %Error{} = error}, usage), do: {:error, %{error | usage: usage}}

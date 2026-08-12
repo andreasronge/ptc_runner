@@ -3,6 +3,9 @@
 (defn runs [options]
   (cap/unwrap! (tool/inspection-list-runs options)))
 
+(defn result [run-id]
+  (cap/unwrap! (tool/inspection-result {"run_id" run-id})))
+
 (defn model-exchanges [run-id cursor]
   (cap/unwrap!
     (tool/inspection-model-exchanges

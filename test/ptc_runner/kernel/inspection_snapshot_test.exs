@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.ComponentOverride
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InspectionArtifact
@@ -11,13 +12,99 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   alias PtcRunner.Kernel.InspectionQuery
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InspectionSnapshot
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceSnapshot
+  alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.TestSupport.PrivateInspectionFixture
   alias PtcRunner.TestSupport.RunLifecycle
 
   @source "(return 42)"
   @source_hash :crypto.hash(:sha256, @source) |> Base.encode16(case: :lower)
+
+  @tag :tmp_dir
+  test "exposes one canonical terminal result through the singular query", %{tmp_dir: root} do
+    {trace, inspection} = source_directories(root)
+    run_id = "result-run"
+    value = %{"answer" => 42, "evidence" => List.duplicate(0, 200)}
+    result_hash = result_hash(value)
+
+    events = [
+      event(run_id, 1, "run-started", %{"missions" => %{}}),
+      event(run_id, 2, "run-stopped", %{
+        "outcome" => "ok",
+        "result_hash" => result_hash
+      })
+    ]
+
+    File.write!(Path.join(trace, "#{run_id}.jsonl"), encode_jsonl(events))
+
+    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
+
+    assert :ok =
+             InspectionSink.emit(
+               sink,
+               "run-result",
+               %{},
+               %{result_hash: result_hash, value: value}
+             )
+
+    {:ok, records} = InspectionSink.records(sink)
+
+    assert :ok =
+             InspectionArtifact.persist(
+               Path.join(inspection, "#{run_id}.inspection.jsonl"),
+               records,
+               events
+             )
+
+    {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
+
+    {:ok, snapshot} =
+      InspectionSnapshot.start({:directory, inspection}, trace_snapshot, owner: self())
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(snapshot)
+      TraceSnapshot.stop(trace_snapshot)
+    end)
+
+    assert {:ok,
+            %{
+              "run_id" => ^run_id,
+              "trace_id" => "trace-result-run",
+              "result_hash" => ^result_hash,
+              "value" => ^value,
+              "snapshot_hash" => "sha256:" <> _
+            } = result} = InspectionSnapshot.query(snapshot, :result, %{"run_id" => run_id})
+
+    assert {:error, :not_found} =
+             InspectionSnapshot.query(snapshot, :result, %{"run_id" => "unknown"})
+
+    {:ok, capabilities} = InspectionCapability.from_snapshot(snapshot)
+    result_capability = Enum.find(capabilities, &(&1.name == "inspection-result"))
+    assert {:ok, %{"value" => ^value}} = result_capability.callback.(%{"run_id" => run_id})
+
+    encoded_bytes = result |> Jason.encode!() |> byte_size()
+    retained_bytes = RetainedSize.bytes(result)
+    assert retained_bytes > encoded_bytes
+    retained_limit = div(encoded_bytes + retained_bytes, 2)
+
+    {:ok, limited_snapshot} =
+      InspectionSnapshot.start({:directory, inspection}, trace_snapshot,
+        owner: self(),
+        max_result_bytes: retained_limit
+      )
+
+    on_exit(fn -> InspectionSnapshot.stop(limited_snapshot) end)
+    {:ok, limited_capabilities} = InspectionCapability.from_snapshot(limited_snapshot)
+    limited_result = Enum.find(limited_capabilities, &(&1.name == "inspection-result"))
+
+    assert {:error,
+            %ProviderError{
+              kind: :invalid_request,
+              details: "inspection result limit exceeded"
+            }} = limited_result.callback.(%{"run_id" => run_id})
+  end
 
   test "effective preludes qualify repeated component IDs by mission" do
     records =
@@ -25,7 +112,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       |> Enum.with_index(1)
       |> Enum.map(fn {mission_name, sequence} ->
         %{
-          "schema_version" => 4,
+          "schema_version" => 5,
           "run_id" => "qualified-preludes",
           "trace_id" => "trace-qualified-preludes",
           "sequence" => sequence,
@@ -89,7 +176,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert {:ok,
             %{
-              "items" => [%{"run_id" => "mcp-run", "schema_version" => 4}],
+              "items" => [%{"run_id" => "mcp-run", "schema_version" => 5}],
               "next_cursor" => nil,
               "snapshot_hash" => ^snapshot_hash
             }} =
@@ -103,6 +190,9 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
                "run_id" => "mcp-run",
                "cursor" => cursor
              })
+
+    assert {:error, :result_not_found} =
+             InspectionSnapshot.query(snapshot, :result, %{"run_id" => "basic-run"})
 
     assert {:ok,
             %{
@@ -385,7 +475,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
              "inspection-effective-preludes",
              "inspection-provider-exchanges",
              "inspection-execution-prints",
-             "inspection-execution-errors"
+             "inspection-execution-errors",
+             "inspection-result"
            ]
 
     assert Enum.map(provider_capabilities, & &1.name) == [
@@ -396,7 +487,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
              "private.effective-preludes",
              "private.provider-exchanges",
              "private.execution-prints",
-             "private.execution-errors"
+             "private.execution-errors",
+             "private.result"
            ]
 
     provider_exchange =
@@ -981,4 +1073,9 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   end
 
   defp encode_jsonl(events), do: Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n"))
+
+  defp result_hash(value) do
+    {:ok, encoded} = DeterministicJSON.encode(value)
+    "sha256:" <> Base.encode16(:crypto.hash(:sha256, encoded), case: :lower)
+  end
 end

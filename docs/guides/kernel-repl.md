@@ -248,17 +248,25 @@ functions, it exports one-page private queries:
 - `(inspection/effective-preludes run-id cursor)`;
 - `(inspection/provider-exchanges run-id cursor)`;
 - `(inspection/execution-prints run-id cursor)`; and
-- `(inspection/execution-errors run-id cursor)`.
+- `(inspection/execution-errors run-id cursor)`; and
+- `(inspection/result run-id)`.
 
-`inspection/runs` takes its cursor inside the options map. The other seven
-queries take a run ID and cursor as separate arguments. Pass `nil` as the
-initial cursor, then pass the opaque `next_cursor` from the returned page to
-read the next page:
+`inspection/runs` takes its cursor inside the options map. The seven
+collection queries take a run ID and cursor as separate arguments. Pass `nil`
+as the initial cursor, then pass the opaque `next_cursor` from the returned
+page to read the next page. `inspection/result` is singular and takes only the
+run ID:
 
 ```clojure
 (def first-page (inspection/model-exchanges "cmd-..." nil))
 (inspection/model-exchanges "cmd-..." (get first-page "next_cursor"))
+(inspection/result "cmd-...")
 ```
+
+The singular result contains the exact strictly JSON terminal `value`, its
+canonical `result_hash`, record identity, and `snapshot_hash`. It exists only
+for a successful V5 capture. A successful native value that cannot be
+represented as strict JSON is intentionally not captured.
 
 The `inspection.analysis/*` namespace provides bounded whole-result variants.
 Its last argument is the maximum number of pages to collect:
@@ -284,9 +292,10 @@ For example:
 ```
 
 Exact model messages, generated source, capability arguments/results,
-effective preludes, MCP request/response bodies, execution prints, and
-execution error details may appear on the authorized terminal. They are
-private data: do not paste or redirect them to a public sink.
+effective preludes, MCP request/response bodies, execution prints, execution
+error details, and terminal result values may appear on the authorized
+terminal. They are private data: do not paste or redirect them to a public
+sink.
 
 The attached-terminal check is an **accident guard, not access control**. It
 cannot distinguish a human terminal from a pseudo-terminal allocated by
