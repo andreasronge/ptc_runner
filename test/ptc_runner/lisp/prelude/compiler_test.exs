@@ -226,6 +226,104 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
   end
 
   # ============================================================
+  # Definition names that `SourceAtoms.intern/1` returns as atoms (#1166)
+  #
+  # `intern/1` yields an atom for the bounded vocabulary and a binary for
+  # everything else, so one form can mix representations. The static
+  # undefined-var scope must not care which one a name got — 68 of the 380
+  # table entries, including `parse`, `text` and `p1`, are legal definition
+  # names.
+  # ============================================================
+
+  describe "compile/1 definition names inside the bounded vocabulary" do
+    test "a private helper named `parse` resolves from a sibling definition" do
+      assert {:ok, prelude} =
+               Compiler.compile("""
+               (ns t "Interned-name probe." {:visibility :prompt})
+
+               (defn- parse [x] x)
+
+               (defn run [input] (parse input))
+               """)
+
+      assert Map.has_key?(prelude.private_env["t"], "parse")
+    end
+
+    test "an exported definition named `parse` resolves from a private caller" do
+      assert {:ok, prelude} =
+               Compiler.compile("""
+               (ns t "Interned-name probe." {:visibility :prompt})
+
+               (defn parse "Public." [x] x)
+
+               (defn- wrap [x] (parse x))
+
+               (defn run [input] (wrap input))
+               """)
+
+      assert "t/parse" in Enum.map(prelude.exports, & &1.ref)
+    end
+
+    test "names from every table source are accepted, not just Java members" do
+      for name <- ~w(parse between currentTimeMillis text string json core p1) do
+        assert {:ok, _} =
+                 Compiler.compile("""
+                 (ns t "Interned-name probe." {:visibility :prompt})
+
+                 (defn- #{name} [x] x)
+
+                 (defn run [input] (#{name} input))
+                 """),
+               "expected a definition named #{name} to compile"
+      end
+    end
+
+    # Acceptance only: parsing one form gives params and their references the
+    # same representation, so this passes with or without the scope fix. The
+    # representation mixing itself is covered by the `undefined_vars/2` tests
+    # in `PtcRunner.LispTest`.
+    test "interned names are accepted as fn params and let/loop bindings" do
+      assert {:ok, _} =
+               Compiler.compile("""
+               (ns t "Interned-name probe." {:visibility :prompt})
+
+               (defn run [text]
+                 (let [json (str text)]
+                   (loop [string json acc 0]
+                     (if (= acc 1) string (recur string 1)))))
+               """)
+    end
+
+    test "an interned name works as a def constant and across sibling forms" do
+      assert {:ok, _} =
+               Compiler.compile("""
+               (ns t "Interned-name probe." {:visibility :prompt})
+
+               (def text "hello")
+
+               (defn- shout [x] (str x "!"))
+
+               (defn run [_input] (shout text))
+               """)
+    end
+
+    test "a genuinely undefined name is still rejected and named" do
+      assert {:error, %Prelude.ValidationError{reason: :unbound_var} = error} =
+               Compiler.compile("""
+               (ns t "Interned-name probe." {:visibility :prompt})
+
+               (defn- parse [x] x)
+
+               (defn run [input] (parse (typo input)))
+               """)
+
+      assert error.details.unbound_names == ["typo"]
+      assert error.message =~ "typo"
+      refute error.message =~ "parse"
+    end
+  end
+
+  # ============================================================
   # form_graph (prelude form-edit/introspection plan, Phase 1)
   # ============================================================
 

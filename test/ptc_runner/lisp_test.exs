@@ -2,6 +2,7 @@ defmodule PtcRunner.LispTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env.Builtin, as: EnvBuiltin
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.RuntimeCallable
@@ -502,6 +503,73 @@ defmodule PtcRunner.LispTest do
     test "definition-only forms report every undefined name, hint and all" do
       assert {:error, names} = Lisp.validate("(defn- g [x] (* x 3)) (g 14)")
       assert names == ["defn-", "g", "x"]
+    end
+  end
+
+  # `SourceAtoms.intern/1` returns an atom for the bounded vocabulary and a
+  # binary for everything else, so a definition name and a reference to it can
+  # arrive in either representation — and the prelude compiler stringifies spec
+  # names before seeding the scope, mixing them within one check. Parsing real
+  # source cannot produce every combination, so these drive the CoreAST
+  # directly, one case per scope-insertion site (#1166). The atom-reference
+  # cases are the ones that were broken; the binary-reference cases guard the
+  # direction that already worked against a regression from the fix.
+  describe "undefined_vars/2 is indifferent to name representation" do
+    # Every hand-built tree goes through `CoreAST.validate/1` first, so a shape
+    # the analyzer could never emit fails here rather than silently passing.
+    defp undefined(core, scope \\ []) do
+      assert :ok = CoreAST.validate(core)
+      Lisp.undefined_vars(core, MapSet.new(scope))
+    end
+
+    test "an atom reference resolves against a binary in the seeded scope" do
+      assert undefined({:var, :parse}, ["parse"]) == []
+    end
+
+    test "a binary reference resolves against an atom in the seeded scope" do
+      assert undefined({:var, "parse"}, [:parse]) == []
+    end
+
+    test "fn params bind in either representation" do
+      assert undefined({:fn, [{:var, :text}], {:var, "text"}}) == []
+      assert undefined({:fn, [{:var, "text"}], {:var, :text}}) == []
+    end
+
+    test "a named fn binds its own name for recursion" do
+      body = {:call, {:var, "parse"}, [{:var, "x"}]}
+      assert undefined({:fn, :parse, [{:var, "x"}], body}) == []
+    end
+
+    test "let and loop bindings bind in either representation" do
+      assert undefined({:let, [{:binding, {:var, :text}, 1}], {:var, "text"}}) == []
+      assert undefined({:loop, [{:binding, {:var, "text"}, 1}], {:var, :text}}) == []
+    end
+
+    test "destructured binding names bind in either representation" do
+      pattern = {:destructure, {:keys, [:text], []}}
+
+      assert undefined({:let, [{:binding, pattern, {:var, "src"}}], {:var, "text"}}, ["src"]) ==
+               []
+    end
+
+    test "def and defonce bind their own name for a recursive body" do
+      assert undefined({:def, :parse, {:call, {:var, "parse"}, []}, %{}}) == []
+      assert undefined({:defonce, "parse", {:call, {:var, :parse}, []}, %{}}) == []
+    end
+
+    test "a def is visible to the sibling forms that follow it" do
+      program = {:do, [{:def, :text, 1, %{}}, {:var, "text"}]}
+      assert undefined(program) == []
+    end
+
+    test "a genuinely undefined name is still reported, as a string" do
+      assert undefined({:let, [{:binding, {:var, :text}, 1}], {:var, "typo"}}) == ["typo"]
+      assert undefined({:fn, [{:var, :text}], {:var, :parse}}) == ["parse"]
+    end
+
+    test "a binding does not leak out of the form that introduced it" do
+      program = {:do, [{:fn, [{:var, :text}], {:var, "text"}}, {:var, "text"}]}
+      assert undefined(program) == ["text"]
     end
   end
 

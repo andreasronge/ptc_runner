@@ -2609,19 +2609,31 @@ defmodule PtcRunner.Lisp do
 
   @doc false
   # Returns the unresolved variable names in `core_ast` given an initial scope
-  # (a `MapSet` of in-scope names). Exposed so the prelude compiler can run the
-  # SAME static undefined-var check on captured definition bodies.
+  # (a `MapSet` of in-scope names, atoms or binaries). Exposed so the prelude
+  # compiler can run the SAME static undefined-var check on captured definition
+  # bodies.
   @spec undefined_vars(term(), MapSet.t()) :: [String.t()]
   def undefined_vars(core_ast, %MapSet{} = scope) do
-    core_ast |> collect_undefined_vars(scope) |> Enum.uniq()
+    core_ast |> collect_undefined_vars(normalize_scope(scope)) |> Enum.uniq()
   end
+
+  # The scope holds names as binaries, never atoms. `SourceAtoms.intern/1`
+  # returns an atom for the bounded vocabulary and a binary for everything
+  # else, so one form can carry both representations of ordinary user names —
+  # `(defn- parse …)` parses as `:parse` while `(defn- parse-report …)` parses
+  # as `"parse-report"`. Comparing raw representations reported a definition
+  # whose spelling happens to be interned as undefined (#1166).
+  defp normalize_scope(%MapSet{} = scope), do: MapSet.new(scope, &to_string/1)
+
+  defp put_scope(scope, name), do: MapSet.put(scope, to_string(name))
 
   # Variable reference — check builtins and local scope
   defp collect_undefined_vars({:var, name}, scope) do
     name_str = to_string(name)
 
     # Skip interop method names (e.g., .toString) — validity checked at runtime
-    if String.starts_with?(name_str, ".") or Env.builtin?(name) or scope_member?(scope, name) do
+    if String.starts_with?(name_str, ".") or Env.builtin?(name) or
+         MapSet.member?(scope, name_str) do
       []
     else
       [name_str]
@@ -2649,7 +2661,7 @@ defmodule PtcRunner.Lisp do
   # fn — extend scope with param vars
   defp collect_undefined_vars({:fn, params, body}, scope) do
     param_names = fn_param_vars(params)
-    extended_scope = Enum.reduce(param_names, scope, &MapSet.put(&2, &1))
+    extended_scope = Enum.reduce(param_names, scope, &put_scope(&2, &1))
     collect_undefined_vars(body, extended_scope)
   end
 
@@ -2659,7 +2671,7 @@ defmodule PtcRunner.Lisp do
     extended_scope =
       [name | param_names]
       |> Enum.reject(&is_nil/1)
-      |> Enum.reduce(scope, &MapSet.put(&2, &1))
+      |> Enum.reduce(scope, &put_scope(&2, &1))
 
     collect_undefined_vars(body, extended_scope)
   end
@@ -2707,11 +2719,11 @@ defmodule PtcRunner.Lisp do
 
   # def / defonce — add name to scope before recursing (enables recursive defn)
   defp collect_undefined_vars({:def, name, value, _meta}, scope) do
-    collect_undefined_vars(value, MapSet.put(scope, name))
+    collect_undefined_vars(value, put_scope(scope, name))
   end
 
   defp collect_undefined_vars({:defonce, name, value, _opts}, scope) do
-    collect_undefined_vars(value, MapSet.put(scope, name))
+    collect_undefined_vars(value, put_scope(scope, name))
   end
 
   # Control flow
@@ -2724,7 +2736,7 @@ defmodule PtcRunner.Lisp do
     {errors, _final_scope} =
       Enum.reduce(exprs, {[], scope}, fn expr, {errs, sc} ->
         new_errs = collect_undefined_vars(expr, sc)
-        new_sc = Enum.reduce(extract_def_names(expr), sc, &MapSet.put(&2, &1))
+        new_sc = Enum.reduce(extract_def_names(expr), sc, &put_scope(&2, &1))
         {errs ++ new_errs, new_sc}
       end)
 
@@ -2801,7 +2813,7 @@ defmodule PtcRunner.Lisp do
   defp reduce_bindings(bindings, scope) do
     Enum.reduce(bindings, {[], scope}, fn {:binding, pattern, value}, {errs, sc} ->
       value_errs = collect_undefined_vars(value, sc)
-      new_scope = Enum.reduce(pattern_vars(pattern), sc, &MapSet.put(&2, &1))
+      new_scope = Enum.reduce(pattern_vars(pattern), sc, &put_scope(&2, &1))
       {errs ++ value_errs, new_scope}
     end)
   end
@@ -2860,15 +2872,6 @@ defmodule PtcRunner.Lisp do
   end
 
   defp pattern_vars(_other), do: []
-
-  defp scope_member?(scope, name) do
-    MapSet.member?(scope, name) or
-      (is_binary(name) and
-         case safe_to_existing_atom(name) do
-           {:ok, atom} -> MapSet.member?(scope, atom)
-           :error -> false
-         end)
-  end
 
   defp safe_to_existing_atom(name) do
     {:ok, String.to_existing_atom(name)}
