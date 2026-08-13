@@ -214,6 +214,9 @@ Read these in order. Each one owns its topic and links onward.
 - [Components and preludes](docs/guides/components-and-preludes.md) —
   namespaces, dependencies, exports, signatures, and tool requirements for
   reusable PTC-Lisp libraries.
+- [Agent library reference](docs/agent-library-reference.md) — exact entry
+  functions, options, turn protocol, feedback, and retry rules for the shipped
+  `agent.core` and `agent.main` libraries.
 - [Embedding in Elixir](docs/guides/embedding-in-elixir.md) — drive the same
   Kernel directly from a host application instead of the command line.
 

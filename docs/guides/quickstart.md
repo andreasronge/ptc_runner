@@ -1,7 +1,7 @@
 # Quickstart
 
-Four commands, from a clone to a program the model wrote and the runtime ran.
-This page only performs the steps; every "why" is a link.
+This is the shortest path from a clone to a program written by a model and run
+by the Kernel. This page gives only the commands; follow the links for detail.
 
 You need Elixir and Erlang/OTP, and an
 [OpenRouter](https://openrouter.ai/keys) API key for the model step. `mise
@@ -21,9 +21,8 @@ mix ptc run examples/kernel-tutorial/01-orders/ptc.json
 {"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}
 ```
 
-That is a PTC-Lisp function reading JSON input. No model, no host document, no
-network. The first run compiles the dependencies and the project, which took
-about 90 seconds from a fresh clone; later runs start in a few seconds.
+That is a PTC-Lisp function reading JSON input. It needs no model, host
+document, or network access.
 
 ## 2. Supply a model credential
 
@@ -34,7 +33,7 @@ chmod 600 .env
 
 Set `OPENROUTER_API_KEY` in `.env` to your key. `.env` is Git-ignored, and
 credentials never belong in a manifest, a PTC-Lisp file, or a trace.
-[Host configuration](host-configuration.md#credentials) documents the three
+[Host configuration](host-configuration.md#declare-credentials-once) documents the three
 declaration forms and how to move off `.env` for a real deployment.
 
 ## 3. Let the model write the program
@@ -49,8 +48,7 @@ mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
 ```
 
 The model was given a task, wrote PTC-Lisp, and the runtime evaluated that
-program in the confined mission environment over two turns. Two live model
-calls cost a fraction of a cent.
+program in the confined mission environment over two turns.
 
 [`ptc-host.json`](../../examples/kernel-tutorial/ptc-host.json) is the operator
 document: it maps the `deepseek` alias to a model and binds it to the
@@ -60,32 +58,26 @@ out in the [README](../../README.md#why-it-is-safe).
 
 ## If step 3 fails
 
-A missing or unreadable key aborts before the run:
+A missing or unreadable key aborts before execution with
+`active_preflight/credential_unavailable`. The
+`provider/deepseek/credentials` subject identifies the alias and operation; in
+this example `OPENROUTER_API_KEY` was not visible to the command.
 
-```text
-** (Mix) error: active_preflight/credential_unavailable: provider/deepseek/credentials: a required provider credential is unavailable (run_ref: cmd-00000000000000000000000000)
-```
-
-The `provider/deepseek/credentials` subject identifies the provider alias and
-the operation that failed. In this example it means `OPENROUTER_API_KEY` was
-not visible to the command. Use the active doctor operation to inspect the
-complete readiness report:
+Inspect the complete readiness report with active doctor:
 
 ```console
 mix ptc doctor examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
   --host-config examples/kernel-tutorial/ptc-host.json --connect
 ```
 
-With no key it exits nonzero and reports
-`provider/deepseek/credentials` as `fail/credential_unavailable`. Checks for
-which the failed operation retained no evidence are
-`skipped/not_verified_due_to_failure`; they are not claims that those checks
-did or did not run. The report's `readiness` is `failed`.
+With no key it exits nonzero, marks the credential check failed, and reports
+`readiness: "failed"`. With the key in place it performs real provider work
+and reports `readiness: "ready"`. Plain `ptc doctor` performs no active
+provider work and reports `readiness: "unverified"`.
 
-Once the key is in place, the same command exits successfully, every check
-reports `pass`, including `provider/deepseek/credentials`, and `readiness` is
-`ready`. Plain `ptc doctor` performs no active provider work and therefore
-reports `readiness: "unverified"`.
+`doctor --connect` may make provider requests and incur cost. See
+[Running and debugging](running-and-debugging.md#choose-a-command) for the command and
+failure contracts.
 
 ## Next
 
