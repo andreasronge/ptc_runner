@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.HostConfig
-  alias PtcRunner.Kernel.TraceCapability
+  alias PtcRunner.Kernel.RunAnalysisCapability
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.TraceSnapshot
 
@@ -481,8 +481,8 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
     assert {:ok, snapshot} = TraceSnapshot.start({:directory, directory}, owner: owner)
     snapshot_ref = Process.monitor(snapshot.pid)
-    assert {:ok, capabilities} = TraceCapability.from_snapshot(snapshot)
-    list_runs = Enum.find(capabilities, &(&1.name == "trace-list-runs"))
+    assert {:ok, capabilities} = RunAnalysisCapability.from_snapshots(snapshot)
+    list_runs = Enum.find(capabilities, &(&1.name == "analysis-runs"))
 
     forged = %{snapshot | token: make_ref()}
     assert {:error, :invalid_snapshot} = TraceSnapshot.info(forged)
@@ -493,7 +493,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     assert :ok = TraceSnapshot.stop(snapshot)
     assert :ok = TraceSnapshot.stop(snapshot)
 
-    assert {:error, %{kind: :internal, details: "trace source unavailable"} = error} =
+    assert {:error, %{kind: :internal, details: "analysis snapshot unavailable"} = error} =
              list_runs.callback.(%{})
 
     refute inspect(error) =~ directory
@@ -587,13 +587,18 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
     assert {:ok, snapshot} = TraceSnapshot.start({:directory, directory}, owner: self())
     on_exit(fn -> TraceSnapshot.stop(snapshot) end)
-    assert {:ok, capabilities} = TraceCapability.from_snapshot(snapshot)
+    assert {:ok, capabilities} = RunAnalysisCapability.from_snapshots(snapshot)
 
-    list_runs = Enum.find(capabilities, &(&1.name == "trace-list-runs"))
+    list_runs = Enum.find(capabilities, &(&1.name == "analysis-runs"))
     assert {:ok, %{"items" => [%{"run_id" => "capability"}]}} = list_runs.callback.(%{})
 
     {:env, closure_environment} = :erlang.fun_info(list_runs.callback, :env)
-    assert Enum.any?(closure_environment, &match?(%TraceSnapshot{}, &1))
+
+    assert Enum.any?(closure_environment, fn
+             %PtcRunner.Kernel.RunAnalysis{traces: %TraceSnapshot{}} -> true
+             _other -> false
+           end)
+
     refute inspect(closure_environment) =~ directory
   end
 

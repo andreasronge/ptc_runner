@@ -32,7 +32,7 @@
         "type": "stdio",
         "command": "elixir",
         "cwd": ".",
-        "args": ["writer_server.exs", "writer-state"],
+        "args": ["--erl", "+S 1:1", "writer_server.exs", "writer-state"],
         "start_timeout_ms": 15000,
         "inherit_environment": true,
         "env": {}

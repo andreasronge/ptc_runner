@@ -6,5 +6,5 @@ defmodule PtcViewer.TestInspectionAdapter do
      {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 5}}}
   end
 
-  def inspection(_source, _run_id), do: {:error, :not_called}
+  def conversation(_source, _run_id), do: {:error, :not_called}
 end

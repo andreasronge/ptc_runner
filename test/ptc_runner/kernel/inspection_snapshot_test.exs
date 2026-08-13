@@ -8,11 +8,11 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InspectionArtifact
-  alias PtcRunner.Kernel.InspectionCapability
   alias PtcRunner.Kernel.InspectionQuery
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.RunAnalysisCapability
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.Lisp.RetainedSize
@@ -80,9 +80,11 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     assert {:error, :not_found} =
              InspectionSnapshot.query(snapshot, :result, %{"run_id" => "unknown"})
 
-    {:ok, capabilities} = InspectionCapability.from_snapshot(snapshot)
-    result_capability = Enum.find(capabilities, &(&1.name == "inspection-result"))
-    assert {:ok, %{"value" => ^value}} = result_capability.callback.(%{"run_id" => run_id})
+    {:ok, capabilities} = RunAnalysisCapability.from_snapshots(trace_snapshot, snapshot)
+    result_capability = Enum.find(capabilities, &(&1.name == "analysis-overview"))
+
+    assert {:ok, %{"result" => %{"value" => ^value}}} =
+             result_capability.callback.(%{"run_id" => run_id})
 
     encoded_bytes = result |> Jason.encode!() |> byte_size()
     retained_bytes = RetainedSize.bytes(result)
@@ -96,13 +98,16 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       )
 
     on_exit(fn -> InspectionSnapshot.stop(limited_snapshot) end)
-    {:ok, limited_capabilities} = InspectionCapability.from_snapshot(limited_snapshot)
-    limited_result = Enum.find(limited_capabilities, &(&1.name == "inspection-result"))
+
+    {:ok, limited_capabilities} =
+      RunAnalysisCapability.from_snapshots(trace_snapshot, limited_snapshot)
+
+    limited_result = Enum.find(limited_capabilities, &(&1.name == "analysis-overview"))
 
     assert {:error,
             %ProviderError{
               kind: :invalid_request,
-              details: "inspection result limit exceeded"
+              details: "analysis result limit exceeded"
             }} = limited_result.callback.(%{"run_id" => run_id})
   end
 
@@ -330,13 +335,14 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
                "cursor" => tampered_cursor
              })
 
-    {:ok, profile_capabilities} = InspectionCapability.from_snapshot(snapshot)
-    {:ok, manifest_capabilities} = InspectionCapability.from_snapshot(snapshot, "private")
+    {:ok, profile_capabilities} =
+      RunAnalysisCapability.from_snapshots(trace_snapshot, snapshot)
+
+    {:ok, manifest_capabilities} =
+      RunAnalysisCapability.from_snapshots(trace_snapshot, snapshot, "private")
 
     arguments = [
       %{"limit" => 2},
-      %{"run_id" => "mcp-run"},
-      %{"run_id" => "mcp-run"},
       %{"run_id" => "mcp-run"},
       %{"run_id" => "mcp-run"},
       %{"run_id" => "mcp-run"},
@@ -464,37 +470,33 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       TraceSnapshot.stop(trace_snapshot)
     end)
 
-    assert {:ok, profile_capabilities} = InspectionCapability.from_snapshot(snapshot)
-    assert {:ok, provider_capabilities} = InspectionCapability.from_snapshot(snapshot, "private")
+    assert {:ok, profile_capabilities} =
+             RunAnalysisCapability.from_snapshots(trace_snapshot, snapshot)
+
+    assert {:ok, provider_capabilities} =
+             RunAnalysisCapability.from_snapshots(trace_snapshot, snapshot, "private")
 
     assert Enum.map(profile_capabilities, & &1.name) == [
-             "inspection-list-runs",
-             "inspection-model-exchanges",
-             "inspection-capability-calls",
-             "inspection-generated-sources",
-             "inspection-effective-preludes",
-             "inspection-provider-exchanges",
-             "inspection-execution-prints",
-             "inspection-execution-errors",
-             "inspection-result"
+             "analysis-runs",
+             "analysis-overview",
+             "analysis-activity",
+             "analysis-conversation",
+             "analysis-failure",
+             "analysis-source"
            ]
 
     assert Enum.map(provider_capabilities, & &1.name) == [
-             "private.list-runs",
-             "private.model-exchanges",
-             "private.capability-calls",
-             "private.generated-sources",
-             "private.effective-preludes",
-             "private.provider-exchanges",
-             "private.execution-prints",
-             "private.execution-errors",
-             "private.result"
+             "private.runs",
+             "private.overview",
+             "private.activity",
+             "private.conversation",
+             "private.failure",
+             "private.source"
            ]
 
-    provider_exchange =
-      Enum.find(provider_capabilities, &(&1.name == "private.provider-exchanges"))
+    provider_exchange = Enum.find(provider_capabilities, &(&1.name == "private.activity"))
 
-    assert {:ok, %{"items" => []}} =
+    assert {:ok, %{"private" => %{"provider_exchanges" => []}}} =
              provider_exchange.callback.(%{"run_id" => "named"})
 
     snapshot_ref = Process.monitor(snapshot.pid)
@@ -587,16 +589,19 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     capability =
       Map.fetch!(
         built.config.missions["default"].environment.capabilities,
-        "private-history.provider-exchanges"
+        "private-history.activity"
       )
 
     assert {:ok,
             %{
-              "items" => [%{"request_id" => 7}],
-              "snapshot_hash" => content_snapshot_hash
+              "private" => %{
+                "snapshot_hash" => content_snapshot_hash,
+                "provider_exchanges" => provider_exchanges
+              }
             }} =
              capability.callback.(%{"run_id" => "manifest-run", "limit" => 1})
 
+    assert Enum.map(provider_exchanges, & &1["request_id"]) == [7, 8]
     assert private_snapshot["content_snapshot_hash"] == content_snapshot_hash
     assert :ok = RunBuilder.close(built)
   end

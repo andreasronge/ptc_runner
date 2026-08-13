@@ -145,19 +145,18 @@ mix ptc run examples/kernel-tutorial/01-orders/ptc.json \
 ```
 
 The JSON Lines file records the run, workflow evaluation, outcome, usage, and
-limits. Query the captured directory through the fixed log-analysis profile:
+limits. Query the captured directory through the fixed run-analysis profile:
 
 ```console
 mix ptc repl \
-  --profile log-analysis-v2 \
+  --profile run-analysis-v1 \
   --resource traces=tmp/tutorial-traces \
-  -e '(log.analysis/all-runs {"limit" 50} 10)'
+  -e '(analysis/runs {"limit" 50})'
 ```
 
 The profile queries one frozen capture of that directory and has no filesystem,
-network, model, private-inspection, or nested-evaluation authority. The final
-argument is a page bound; the
-[Kernel REPL guide](kernel-repl.md#log-analysis-mission-sessions) documents the
+network, model, private-inspection, or nested-evaluation authority. The
+[Kernel REPL guide](kernel-repl.md#run-analysis-mission-sessions) documents the
 `complete?` and `snapshot_hash` fields the result carries.
 
 ## Try the language directly

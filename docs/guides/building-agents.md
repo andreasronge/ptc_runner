@@ -307,9 +307,10 @@ omitted according to the adapter.
 
 Canonical `capability-started` and `capability-stopped` events identify the
 selected alias and installation revision. Successful stopped events also carry
-the closed token map as `usage`, without response content. `log/counters`
-preserves aggregation per alias and revision in `llm_usage`. It additionally
-returns `llm_usage_by_model`, using an empty list when no model is attributable.
+the closed token map as `usage`, without response content. The internal counter
+projection, consumed by semantic run analysis, preserves aggregation per alias
+and revision in `llm_usage`. It additionally returns `llm_usage_by_model`, using
+an empty list when no model is attributable.
 Entries require an adapter-attested `resolved_model` in the run-started provider
 snapshot. `unattributed_model_calls` counts otherwise eligible calls that cannot
 be mapped uniquely. Model identity is not repeated on each capability event.
@@ -689,20 +690,19 @@ model response, generated source, or file payload in the canonical log. The
 zero `history_count` is expected: the first mission program used `return`, so
 there was no ordinary intermediate value to retain as `*1`.
 
-Inspect the run through the bounded log-analysis REPL:
+Inspect the run through the bounded run-analysis REPL:
 
 ```console
 mix ptc repl \
-  --profile log-analysis-v2 \
+  --profile run-analysis-v1 \
   --resource traces=tmp/file-agent-traces \
-  -e '(def run-id (get-in (log/runs {}) ["items" 0 "run_id"]))' \
-  -e '(log/run run-id)' \
-  -e '(log/turns run-id {"limit" 100})' \
-  -e '(log/counters {})'
+  -e '(def run-id (get-in (analysis/runs {}) ["items" 0 "run_id"]))' \
+  -e '(analysis/overview run-id)' \
+  -e '(analysis/activity run-id {"limit" 100})'
 ```
 
-Because this directory contains one run, index `0` selects it. `log/run` shows
-the complete status and capability/evaluation counters; `log/turns` shows the
+Because this directory contains one run, index `0` selects it. `overview` shows
+the complete status and capability/evaluation counters; `activity` shows the
 ordered sanitized events. Exact prompts, model responses, generated PTC-Lisp,
 and capability payloads require an explicitly enabled private inspection
 artifact; see [Running and debugging](running-and-debugging.md).

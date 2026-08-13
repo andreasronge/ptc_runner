@@ -1354,10 +1354,12 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
              )
 
     assert Enum.map(built.capabilities, & &1.name) == [
-             "history.list-runs",
-             "history.get-run",
-             "history.list-turns",
-             "history.counters"
+             "history.runs",
+             "history.overview",
+             "history.activity",
+             "history.conversation",
+             "history.failure",
+             "history.source"
            ]
 
     callbacks = Map.new(built.capabilities, &{&1.name, &1.callback})
@@ -1366,7 +1368,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
             %{
               "items" => [%{"run_id" => "captured"}],
               "snapshot_hash" => content_snapshot_hash
-            }} = callbacks["history.list-runs"].(%{})
+            }} = callbacks["history.runs"].(%{})
 
     File.write!(
       Path.join(trace_directory, "run.jsonl"),
@@ -1377,7 +1379,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
             %{
               "items" => [%{"run_id" => "captured"}],
               "snapshot_hash" => ^content_snapshot_hash
-            }} = callbacks["history.list-runs"].(%{})
+            }} = callbacks["history.runs"].(%{})
 
     assert built.data_class == :normal
     assert built.accepts_data == [:normal, :private_inspection]
@@ -1420,7 +1422,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
              end)
 
     assert {:ok, built} = ProviderRegistry.build(registry, "history", %{}, context(dir, :mission))
-    list_runs = Enum.find(built.capabilities, &(&1.name == "history.list-runs"))
+    list_runs = Enum.find(built.capabilities, &(&1.name == "history.runs"))
 
     assert {:ok, %{"items" => [%{"run_id" => "private-run", "source" => "private"}]}} =
              list_runs.callback.(%{})

@@ -79,6 +79,13 @@ defmodule PtcRunner.Kernel.GitHubMCPE2ETest do
         "components" => [%{"id" => "app", "path" => "workflow.clj"}],
         "entry" => "app/run"
       },
+      "missions" => %{
+        "default" => %{
+          "components" => [],
+          "data" => %{},
+          "providers" => ["github"]
+        }
+      },
       "input" => %{"value" => %{"program" => program}},
       "providers" => %{
         "mission" => [

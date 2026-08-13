@@ -5,6 +5,7 @@ defmodule PtcRunner.MixCommandAdapter do
   alias PtcRunner.Kernel.CommandRouter
   alias PtcRunner.MixCommandRuntime
   alias PtcRunner.ReplFrontend
+  alias PtcRunner.TranscriptFrontend
 
   @doc false
   @spec execute([binary()]) :: CommandPresentation.t()
@@ -14,10 +15,16 @@ defmodule PtcRunner.MixCommandAdapter do
         args,
         :mix,
         &MixCommandRuntime.bootstrap/1,
-        &ReplFrontend.run/2
+        &run_one_shot/2
       )
 
   def execute(_args), do: execute([])
+
+  defp run_one_shot(%{command: :repl} = arguments, runtime),
+    do: ReplFrontend.run(arguments, runtime)
+
+  defp run_one_shot(%{command: :transcript} = arguments, runtime),
+    do: TranscriptFrontend.run(arguments, runtime)
 
   @doc false
   @spec run_task([binary()]) :: CommandPresentation.t() | no_return()

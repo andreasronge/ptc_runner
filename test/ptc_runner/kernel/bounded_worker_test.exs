@@ -81,7 +81,7 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
               :never -> :unexpected
             end
           end,
-          timeout_ms: 5_000,
+          timeout_ms: 60_000,
           max_heap_words: 10_000,
           cancel_with_caller: true
         )

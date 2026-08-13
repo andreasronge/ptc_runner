@@ -1,7 +1,7 @@
 defmodule PtcViewer do
   @moduledoc """
   Local web UI for browsing canonical PTC traces and, when explicitly enabled
-  by the host, running one bounded log-analysis REPL profile.
+  by the host, running one bounded run-analysis REPL profile.
   """
 
   alias PtcViewer.ReplAdapter

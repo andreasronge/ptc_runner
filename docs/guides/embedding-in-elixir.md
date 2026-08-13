@@ -54,7 +54,7 @@ installed closure before compiling it:
 
 ```elixir
 {:ok, components} =
-  PtcRunner.Kernel.Library.resolve_components([{:library, "log.analysis"}])
+  PtcRunner.Kernel.Library.resolve_components([{:library, "analysis"}])
 
 {:ok, bundle} = PtcRunner.Kernel.compile_bundle(components)
 ```

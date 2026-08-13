@@ -15,8 +15,8 @@ defmodule PtcViewer.TestReplAdapter do
     {:ok, backend,
      %{
        "enabled" => true,
-       "profile_id" => "log-analysis-v2",
-       "namespaces" => ["cap", "log", "log.analysis"],
+       "profile_id" => "run-analysis-v1",
+       "namespaces" => ["analysis", "cap"],
        "source_limit_bytes" => 65_536
      }}
   end
@@ -141,8 +141,8 @@ defmodule PtcViewer.TestReplAdapter do
 
   @impl true
   def template(_backend, _session, kind, run_id) when kind in [:run, :turns] do
-    suffix = if kind == :run, do: ")", else: " {})"
-    {:ok, %{source: "(log/#{kind} #{inspect(run_id)}#{suffix}"}}
+    {operation, suffix} = if kind == :run, do: {"overview", ")"}, else: {"activity", " {})"}
+    {:ok, %{source: "(analysis/#{operation} #{inspect(run_id)}#{suffix}"}}
   end
 
   @impl true
@@ -273,9 +273,9 @@ defmodule PtcViewer.TestReplAdapter do
     %{
       session_id: session_id,
       lifecycle: lifecycle,
-      profile_id: "log-analysis-v2",
+      profile_id: "run-analysis-v1",
       profile_digest: String.duplicate("a", 64),
-      namespaces: ["cap", "log", "log.analysis"],
+      namespaces: ["analysis", "cap"],
       snapshot: %{
         capture_id: "capture",
         captured_at: DateTime.utc_now(),

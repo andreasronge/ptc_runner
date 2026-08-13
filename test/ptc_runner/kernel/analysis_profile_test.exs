@@ -3,15 +3,15 @@ defmodule PtcRunner.Kernel.AnalysisProfileTest do
 
   alias PtcRunner.Kernel.AnalysisProfile
   alias PtcRunner.Kernel.Component
-  alias PtcRunner.Kernel.InspectionAnalysisProfile
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
-  alias PtcRunner.Kernel.LogAnalysisProfile
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.PrivateRunAnalysisProfile
+  alias PtcRunner.Kernel.PublicRunAnalysisProfile
   alias PtcRunner.TestSupport.ReorderedAnalysisProfileRecipe
 
   test "fixed profile declarations match their resolved contracts" do
-    for recipe <- [LogAnalysisProfile, InspectionAnalysisProfile] do
+    for recipe <- [PublicRunAnalysisProfile, PrivateRunAnalysisProfile] do
       {:ok, components} = Library.resolve_components(recipe.component_selections())
       {:ok, bundle} = PtcRunner.Kernel.compile_bundle(components)
       capabilities = Enum.map(recipe.explicit_capabilities(), &%{name: &1})

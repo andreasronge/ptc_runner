@@ -4,8 +4,8 @@ defmodule PtcRunner.Kernel.AnalysisResources do
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.TraceSnapshot
 
-  @log_profile "log-analysis-v2"
-  @inspection_profile "inspection-analysis-v2"
+  @public_profile "run-analysis-v1"
+  @private_profile "private-run-analysis-v1"
 
   @enforce_keys [:profile_id, :handles]
   defstruct [:profile_id, :handles]
@@ -20,15 +20,15 @@ defmodule PtcRunner.Kernel.AnalysisResources do
 
   @doc false
   @spec new(binary(), map()) :: {:ok, t()} | {:error, :invalid_analysis_resources}
-  def new(@log_profile, %{traces: %TraceSnapshot{} = traces} = handles)
+  def new(@public_profile, %{traces: %TraceSnapshot{} = traces} = handles)
       when map_size(handles) == 1 do
-    resources = %__MODULE__{profile_id: @log_profile, handles: %{traces: traces}}
+    resources = %__MODULE__{profile_id: @public_profile, handles: %{traces: traces}}
 
     if valid?(resources), do: {:ok, resources}, else: {:error, :invalid_analysis_resources}
   end
 
   def new(
-        @inspection_profile,
+        @private_profile,
         %{
           traces: %TraceSnapshot{} = traces,
           inspection: %InspectionSnapshot{} = inspection
@@ -36,7 +36,7 @@ defmodule PtcRunner.Kernel.AnalysisResources do
       )
       when map_size(handles) == 2 do
     resources = %__MODULE__{
-      profile_id: @inspection_profile,
+      profile_id: @private_profile,
       handles: %{traces: traces, inspection: inspection}
     }
 
@@ -48,7 +48,7 @@ defmodule PtcRunner.Kernel.AnalysisResources do
   @doc false
   @spec valid?(term()) :: boolean()
   def valid?(%__MODULE__{
-        profile_id: @log_profile,
+        profile_id: @public_profile,
         handles: %{traces: %TraceSnapshot{} = traces} = handles
       }) do
     map_size(handles) == 1 and
@@ -56,7 +56,7 @@ defmodule PtcRunner.Kernel.AnalysisResources do
   end
 
   def valid?(%__MODULE__{
-        profile_id: @inspection_profile,
+        profile_id: @private_profile,
         handles:
           %{
             traces: %TraceSnapshot{} = traces,
@@ -78,13 +78,13 @@ defmodule PtcRunner.Kernel.AnalysisResources do
 
   @doc false
   @spec info(t()) :: {:ok, map()} | {:error, atom()}
-  def info(%__MODULE__{profile_id: @log_profile} = resources) do
+  def info(%__MODULE__{profile_id: @public_profile} = resources) do
     resources
     |> handle(:traces)
     |> TraceSnapshot.info()
   end
 
-  def info(%__MODULE__{profile_id: @inspection_profile} = resources) do
+  def info(%__MODULE__{profile_id: @private_profile} = resources) do
     with {:ok, trace_info} <- resources |> handle(:traces) |> TraceSnapshot.info(),
          {:ok, inspection_info} <-
            resources |> handle(:inspection) |> InspectionSnapshot.info() do
@@ -97,7 +97,7 @@ defmodule PtcRunner.Kernel.AnalysisResources do
   @doc false
   @spec transfer_owner(t(), pid()) :: :ok | {:error, atom()}
   def transfer_owner(
-        %__MODULE__{profile_id: @log_profile, handles: %{traces: traces}} = resources,
+        %__MODULE__{profile_id: @public_profile, handles: %{traces: traces}} = resources,
         owner
       )
       when is_pid(owner) do
@@ -112,7 +112,7 @@ defmodule PtcRunner.Kernel.AnalysisResources do
 
   def transfer_owner(
         %__MODULE__{
-          profile_id: @inspection_profile,
+          profile_id: @private_profile,
           handles: %{traces: traces, inspection: inspection}
         } = resources,
         owner
@@ -132,13 +132,13 @@ defmodule PtcRunner.Kernel.AnalysisResources do
 
   @doc false
   @spec stop(t()) :: :ok
-  def stop(%__MODULE__{profile_id: @log_profile, handles: %{traces: traces}}) do
+  def stop(%__MODULE__{profile_id: @public_profile, handles: %{traces: traces}}) do
     TraceSnapshot.stop(traces)
     :ok
   end
 
   def stop(%__MODULE__{
-        profile_id: @inspection_profile,
+        profile_id: @private_profile,
         handles: %{traces: traces, inspection: inspection}
       }) do
     InspectionSnapshot.stop(inspection)
@@ -150,11 +150,11 @@ defmodule PtcRunner.Kernel.AnalysisResources do
 
   @doc false
   @spec alive?(t()) :: boolean()
-  def alive?(%__MODULE__{profile_id: @log_profile, handles: %{traces: traces}}),
+  def alive?(%__MODULE__{profile_id: @public_profile, handles: %{traces: traces}}),
     do: TraceSnapshot.alive?(traces)
 
   def alive?(%__MODULE__{
-        profile_id: @inspection_profile,
+        profile_id: @private_profile,
         handles: %{traces: traces, inspection: inspection}
       }),
       do: TraceSnapshot.alive?(traces) or InspectionSnapshot.alive?(inspection)

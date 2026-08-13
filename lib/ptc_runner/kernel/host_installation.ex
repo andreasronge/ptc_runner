@@ -45,7 +45,6 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.HostRuntimePayload
-  alias PtcRunner.Kernel.InspectionCapability
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LLMCapability
@@ -59,8 +58,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSnapshot
+  alias PtcRunner.Kernel.RunAnalysisCapability
   alias PtcRunner.Kernel.SelectionRules
-  alias PtcRunner.Kernel.TraceCapability
   alias PtcRunner.Kernel.TraceSnapshot
 
   @inherited_compatibility_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
@@ -573,7 +572,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
           maximum: installation.ceilings.max_files
         })
       else
-        fields
+        Map.put(fields, "expose", %{type: :boolean, input: true, default: true})
       end
 
     SelectionRules.new(
@@ -1306,7 +1305,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp finish_trace_snapshot(snapshot, installation, selected, provider) do
-    with {:ok, capabilities} <- TraceCapability.from_snapshot(snapshot, provider),
+    with {:ok, capabilities} <- trace_analysis_capabilities(snapshot, selected, provider),
          {:ok, info} <- TraceSnapshot.info(snapshot),
          {:ok, provider_snapshot} <-
            trace_provider_snapshot(info, installation, selected, provider) do
@@ -1329,6 +1328,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  defp trace_analysis_capabilities(snapshot, %{expose: true}, provider),
+    do: RunAnalysisCapability.from_snapshots(snapshot, nil, provider)
+
+  defp trace_analysis_capabilities(_snapshot, %{expose: false}, _provider), do: {:ok, []}
+
   defp acquire_inspection_snapshot(
          directory,
          trace_snapshot,
@@ -1344,15 +1348,22 @@ defmodule PtcRunner.Kernel.HostInstallation do
            max_result_bytes: selected.max_result_bytes
          ) do
       {:ok, snapshot} ->
-        finish_inspection_snapshot(snapshot, installation, selected, context.provider)
+        finish_inspection_snapshot(
+          snapshot,
+          trace_snapshot,
+          installation,
+          selected,
+          context.provider
+        )
 
       {:error, _reason} = error ->
         error
     end
   end
 
-  defp finish_inspection_snapshot(snapshot, installation, selected, provider) do
-    with {:ok, capabilities} <- InspectionCapability.from_snapshot(snapshot, provider),
+  defp finish_inspection_snapshot(snapshot, trace_snapshot, installation, selected, provider) do
+    with {:ok, capabilities} <-
+           RunAnalysisCapability.from_snapshots(trace_snapshot, snapshot, provider),
          {:ok, info} <- InspectionSnapshot.info(snapshot),
          {:ok, provider_snapshot} <-
            inspection_provider_snapshot(info, installation, selected, provider) do

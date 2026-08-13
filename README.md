@@ -144,11 +144,11 @@ Every run emits structured events: outcomes, errors, tool use, evaluations,
 limits, and resource use. They deliberately contain no prompts, model responses,
 tool payloads, or generated source.
 
-Analyzing them is itself a bounded run. The shipped `log.core` prelude exposes
-`log/runs`, `log/run`, `log/turns`, and `log/counters` to a mission whose only
-authority is querying one frozen capture of a trace directory — no filesystem,
-network, or model. An investigation can start as a REPL expression and graduate
-into a reusable analysis prelude.
+Analyzing them is itself a bounded run. The shipped `analysis` prelude exposes
+six question-shaped reads—runs, overview, activity, conversation, failure, and
+source—over one frozen evidence capture. A public recipe has only sanitized
+trace authority; a private recipe may additionally use a correlated inspection
+snapshot. Neither recipe gains filesystem, network, or model authority.
 
 When you need the exact prompt and the exact generated code, that is a separate
 opt-in artifact written with owner-only permissions, kept out of normal trace

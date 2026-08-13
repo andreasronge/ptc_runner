@@ -295,17 +295,17 @@ defmodule PtcRunner.ReplFrontendTest do
     end
   end
 
-  test "describes the fixed log-analysis profile as safe JSONL" do
+  test "describes the fixed run-analysis profile as safe JSONL" do
     output =
       capture_io(fn ->
-        run_repl(["--describe-profile", "log-analysis-v2", "--format", "jsonl"])
+        run_repl(["--describe-profile", "run-analysis-v1", "--format", "jsonl"])
       end)
 
     assert [description] = decode_jsonl(output)
     assert description["type"] == "profile"
-    assert description["id"] == "log-analysis-v2"
-    assert description["components"] == ["cap", "log.core", "log.analysis"]
-    assert description["namespaces"] == ["cap", "log", "log.analysis"]
+    assert description["id"] == "run-analysis-v1"
+    assert description["components"] == ["cap", "analysis"]
+    assert description["namespaces"] == ["analysis", "cap"]
     assert description["resources"]["traces"]["required"] == true
     assert description["frontend"]["output_formats"] == ["clojure", "jsonl"]
     refute output =~ "#Function<"
@@ -314,7 +314,7 @@ defmodule PtcRunner.ReplFrontendTest do
 
   test "unknown profiles report the accepted profile ids" do
     assert_raise Mix.Error,
-                 ~r/unsupported session profile; accepted: inspection-analysis-v2, log-analysis-v2/,
+                 ~r/unsupported session profile; accepted: private-run-analysis-v1, run-analysis-v1/,
                  fn ->
                    run_repl(["--describe-profile", "missing-profile"])
                  end
@@ -323,7 +323,7 @@ defmodule PtcRunner.ReplFrontendTest do
   test "private profile frontend policy fails before opening declared sources" do
     missing_resources = [
       "--profile",
-      "inspection-analysis-v2",
+      "private-run-analysis-v1",
       "--resource",
       "traces=/definitely/missing/private-traces",
       "--resource",
@@ -348,7 +348,7 @@ defmodule PtcRunner.ReplFrontendTest do
   test "private_unattended admits eval and jsonl output, reaching source preflight" do
     args = [
       "--profile",
-      "inspection-analysis-v2",
+      "private-run-analysis-v1",
       "--resource",
       "traces=/definitely/missing/private-traces",
       "--resource",
@@ -370,7 +370,7 @@ defmodule PtcRunner.ReplFrontendTest do
   test "private_unattended with jsonl and no input is rejected, not silently interactive" do
     args = [
       "--profile",
-      "inspection-analysis-v2",
+      "private-run-analysis-v1",
       "--resource",
       "traces=/definitely/missing/private-traces",
       "--resource",
@@ -403,7 +403,7 @@ defmodule PtcRunner.ReplFrontendTest do
       capture_io(fn ->
         run_repl([
           "--profile",
-          "inspection-analysis-v2",
+          "private-run-analysis-v1",
           "--resource",
           "traces=#{fixture.traces}",
           "--resource",
@@ -414,7 +414,7 @@ defmodule PtcRunner.ReplFrontendTest do
           "--format",
           "jsonl",
           "-e",
-          ~s|(return {"run" (log/run "#{fixture.run_id}") "result" (inspection/result "#{fixture.run_id}")})|
+          ~s|(return (analysis/overview "#{fixture.run_id}"))|
         ])
       end)
 
@@ -428,6 +428,7 @@ defmodule PtcRunner.ReplFrontendTest do
                "result_hash" => result_hash
              },
              "result" => %{
+               "available?" => true,
                "run_id" => "post-mortem",
                "value" => ^value,
                "result_hash" => result_hash
@@ -451,7 +452,7 @@ defmodule PtcRunner.ReplFrontendTest do
       assert_raise Mix.Error, message, fn ->
         run_repl([
           "--profile",
-          "inspection-analysis-v2",
+          "private-run-analysis-v1",
           "--resource",
           "traces=#{fixture.traces}",
           "--resource",
@@ -481,13 +482,13 @@ defmodule PtcRunner.ReplFrontendTest do
       capture_io(fn ->
         run_repl([
           "--profile",
-          "log-analysis-v2",
+          "run-analysis-v1",
           "--resource",
           "traces=#{source}",
           "--session-trace-dir",
           output_directory,
           "-e",
-          "(def runs (log/runs {}))",
+          "(def runs (analysis/runs {}))",
           "-e",
           "(count (get runs \"items\"))"
         ])
@@ -499,7 +500,7 @@ defmodule PtcRunner.ReplFrontendTest do
     assert output =~ "Analysis trace:"
     assert File.ls!(source) == ["seed.jsonl"]
     assert [trace_name] = File.ls!(output_directory)
-    assert String.starts_with?(trace_name, "log-analysis-")
+    assert String.starts_with?(trace_name, "run-analysis-")
     assert String.ends_with?(trace_name, ".jsonl")
     assert log_analysis_session_pids() == before_sessions
 
@@ -509,9 +510,66 @@ defmodule PtcRunner.ReplFrontendTest do
     assert {:ok, %{"items" => [%{"name" => name, "session_profile" => profile}]}} =
              TraceLog.query(trace, :list_runs, %{})
 
-    assert name == SafeMetadata.fingerprint("ptc.log-analysis.repl")
-    assert profile["id"] == "log-analysis-v2"
+    assert name == SafeMetadata.fingerprint("ptc.run-analysis.repl")
+    assert profile["id"] == "run-analysis-v1"
     assert profile["digest"] =~ ~r/\Asha256:[0-9a-f]{64}\z/
+  end
+
+  @tag :tmp_dir
+  test "one public profile evaluation publishes its value atomically", %{tmp_dir: directory} do
+    source = Path.join(directory, "source")
+    traces = Path.join(directory, "analysis-traces")
+    results = Path.join(directory, "results")
+    Enum.each([source, traces, results], &File.mkdir!/1)
+    seed_trace(source, "seed")
+    output = Path.join(results, "overview.json")
+
+    capture_io(fn ->
+      run_repl([
+        "--profile",
+        "run-analysis-v1",
+        "--resource",
+        "traces=#{source}",
+        "--session-trace-dir",
+        traces,
+        "--output",
+        output,
+        "-e",
+        ~s|(analysis/overview "seed")|
+      ])
+    end)
+
+    assert %{"run" => %{"run_id" => "seed"}} = output |> File.read!() |> Jason.decode!()
+    assert File.stat!(output).mode |> Bitwise.band(0o777) == 0o600
+  end
+
+  @tag :tmp_dir
+  test "one unattended private profile evaluation requires private output", %{tmp_dir: directory} do
+    fixture = PrivateInspectionFixture.create!(directory, "private-output")
+    results = Path.join(directory, "results")
+    File.mkdir!(results)
+    output = Path.join(results, "conversation.private.json")
+
+    capture_io(fn ->
+      run_repl([
+        "--profile",
+        "private-run-analysis-v1",
+        "--resource",
+        "traces=#{fixture.traces}",
+        "--resource",
+        "inspection=#{fixture.inspection}",
+        "--session-trace-dir",
+        fixture.output,
+        "--private-unattended",
+        "--private-output",
+        output,
+        "-e",
+        ~s|(analysis/conversation "#{fixture.run_id}" {"limit" 100})|
+      ])
+    end)
+
+    assert %{"streams" => [%{"turns" => [_]}]} = output |> File.read!() |> Jason.decode!()
+    assert File.stat!(output).mode |> Bitwise.band(0o777) == 0o600
   end
 
   @tag :tmp_dir
@@ -531,9 +589,10 @@ defmodule PtcRunner.ReplFrontendTest do
              "(+ loaded 1)"
            ], "42"},
           {"script", "",
-           [write_file(directory, "script.clj", "(count (get (log/runs {}) \"items\"))")], "1"},
-          {"stdin", "(count (get (log/runs {}) \"items\"))", ["-"], "1"},
-          {"interactive", "(count (get (log/runs {}) \"items\"))\n", [], "1"}
+           [write_file(directory, "script.clj", "(count (get (analysis/runs {}) \"items\"))")],
+           "1"},
+          {"stdin", "(count (get (analysis/runs {}) \"items\"))", ["-"], "1"},
+          {"interactive", "(count (get (analysis/runs {}) \"items\"))\n", [], "1"}
         ] do
       output_directory = Path.join(directory, suffix)
       File.mkdir!(output_directory)
@@ -541,7 +600,7 @@ defmodule PtcRunner.ReplFrontendTest do
       command =
         [
           "--profile",
-          "log-analysis-v2",
+          "run-analysis-v1",
           "--resource",
           "traces=#{source}",
           "--session-trace-dir",
@@ -570,7 +629,7 @@ defmodule PtcRunner.ReplFrontendTest do
         assert_raise Mix.Error, ~r/one or more profile evaluations failed/, fn ->
           run_repl([
             "--profile",
-            "log-analysis-v2",
+            "run-analysis-v1",
             "--resource",
             "traces=#{source}",
             "--session-trace-dir",
@@ -714,7 +773,7 @@ defmodule PtcRunner.ReplFrontendTest do
       capture_io(fn ->
         run_repl([
           "--profile",
-          "log-analysis-v2",
+          "run-analysis-v1",
           "--resource",
           "traces=#{source}",
           "--format",
@@ -771,20 +830,20 @@ defmodule PtcRunner.ReplFrontendTest do
           ["--resource", "traces=tmp"],
           ["--no-continue-on-error", "-e", "42"],
           ["--profile", "unknown", "--resource", "traces=tmp"],
-          ["--profile", "log-analysis-v2", "--manifest", "ptc.json", "--resource", "traces=tmp"],
+          ["--profile", "run-analysis-v1", "--manifest", "ptc.json", "--resource", "traces=tmp"],
           [
             "--profile",
-            "log-analysis-v2",
+            "run-analysis-v1",
             "--resource",
             "traces=tmp",
             "--resource",
             "traces=tmp"
           ],
-          ["--profile", "log-analysis-v2", "--resource", "other=tmp"],
-          ["--profile", "log-analysis-v2", "--resource", "traces=tmp", "--format", "jsonl"],
+          ["--profile", "run-analysis-v1", "--resource", "other=tmp"],
+          ["--profile", "run-analysis-v1", "--resource", "traces=tmp", "--format", "jsonl"],
           [
             "--profile",
-            "log-analysis-v2",
+            "run-analysis-v1",
             "--resource",
             "traces=tmp",
             "--continue-on-error",
@@ -840,7 +899,7 @@ defmodule PtcRunner.ReplFrontendTest do
           "ptc",
           "repl",
           "--profile",
-          "log-analysis-v2",
+          "run-analysis-v1",
           "--resource",
           "traces=#{source}",
           "--session-trace-dir",
@@ -848,7 +907,7 @@ defmodule PtcRunner.ReplFrontendTest do
           "--format",
           "jsonl",
           "-e",
-          "(count (get (log/runs {}) \"items\"))"
+          "(count (get (analysis/runs {}) \"items\"))"
         ],
         cd: File.cwd!(),
         env: [{"MIX_ENV", "test"}, {"MIX_QUIET", "1"}]
@@ -865,7 +924,7 @@ defmodule PtcRunner.ReplFrontendTest do
   defp profile_args(source, output_directory) do
     [
       "--profile",
-      "log-analysis-v2",
+      "run-analysis-v1",
       "--resource",
       "traces=#{source}",
       "--session-trace-dir",

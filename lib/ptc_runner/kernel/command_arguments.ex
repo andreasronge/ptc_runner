@@ -19,7 +19,8 @@ defmodule PtcRunner.Kernel.CommandArguments do
   ]
   defstruct @enforce_keys
 
-  @type command :: :help | :version | :init | :validate | :run | :doctor | :models | :repl
+  @type command ::
+          :help | :version | :init | :validate | :run | :doctor | :models | :transcript | :repl
   @type t :: %__MODULE__{
           command: command(),
           application: binary() | nil,

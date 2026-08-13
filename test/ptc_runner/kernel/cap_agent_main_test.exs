@@ -148,44 +148,22 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
   end
 
   describe "analysis prelude composition" do
-    test "primitive and analysis components declare their direct shared dependencies" do
-      assert {:ok, log_core} = Library.component("log.core")
-      assert {:ok, inspection_core} = Library.component("inspection.core")
-      assert {:ok, log_analysis} = Library.component("log.analysis")
-      assert {:ok, inspection_analysis} = Library.component("inspection.analysis")
+    test "one analysis component declares its shared dependency and six exports" do
+      assert {:ok, analysis} = Library.component("analysis")
+      assert analysis.dependencies == ["cap"]
 
-      assert log_core.dependencies == ["cap"]
-      assert inspection_core.dependencies == ["cap"]
-      assert log_analysis.dependencies == ["cap", "log.core"]
-      assert inspection_analysis.dependencies == ["cap", "inspection.core"]
-
-      assert {:ok, components} =
-               Library.resolve_components([
-                 {:library, "log.analysis"},
-                 {:library, "inspection.analysis"}
-               ])
-
-      assert Enum.map(components, & &1.id) == [
-               "cap",
-               "inspection.analysis",
-               "inspection.core",
-               "log.analysis",
-               "log.core"
-             ]
+      assert {:ok, components} = Library.resolve_components([{:library, "analysis"}])
+      assert Enum.map(components, & &1.id) == ["analysis", "cap"]
 
       assert {:ok, bundle} = Kernel.compile_bundle(components)
 
       for ref <- [
-            "log.analysis/all-runs",
-            "log.analysis/all-turns",
-            "inspection.analysis/all-runs",
-            "inspection.analysis/all-model-exchanges",
-            "inspection.analysis/all-capability-calls",
-            "inspection.analysis/all-generated-sources",
-            "inspection.analysis/all-effective-preludes",
-            "inspection.analysis/all-provider-exchanges",
-            "inspection.analysis/all-execution-prints",
-            "inspection.analysis/all-execution-errors"
+            "analysis/runs",
+            "analysis/overview",
+            "analysis/activity",
+            "analysis/conversation",
+            "analysis/failure",
+            "analysis/source"
           ] do
         assert {:ok, _export} = Prelude.fetch_export(bundle.prelude, ref)
       end

@@ -63,8 +63,8 @@ defmodule PtcViewer.ReplAdapter do
   def validate_features(
         %{
           "enabled" => true,
-          "profile_id" => "log-analysis-v2",
-          "namespaces" => ["cap", "log", "log.analysis"],
+          "profile_id" => "run-analysis-v1",
+          "namespaces" => ["analysis", "cap"],
           "source_limit_bytes" => 65_536
         } = features
       )

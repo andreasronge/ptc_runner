@@ -9,18 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Replaced the split log/inspection analysis vocabularies with one six-operation
+  `analysis/*` read model shared by PTC-Lisp, the Viewer, Elixir embedders, and
+  the new one-shot `ptc transcript` command. Public and private authority remain
+  separate sealed recipes; private conversation reconstruction and failure
+  bundles no longer require callers to understand inspection record shapes.
+
 - Added the fixed, mission-only `ptc_private_trace_snapshot` provider source.
   It immutably captures ordinary and private canonical traces with per-run
   provenance, keeps inspection artifacts excluded, and classifies the run as
-  `private_inspection`. The private inspection-analysis profile now accepts
+  `private_inspection`. The private run-analysis profile now accepts
   private traces recursively while preserving V5 terminal-result hash
   correlation; ordinary trace readers remain normal-only.
 
 - Added exact successful terminal-result inspection for explicitly private
   captures. Inspection V5 binds one strictly JSON `run-result` record to the
-  canonical `run-stopped.data.result_hash`; `inspection/result` exposes the value
-  and hash through the bounded private analysis profile, while ordinary traces
-  retain only the hash.
+  canonical `run-stopped.data.result_hash`; `analysis/overview` exposes the
+  value and hash through the bounded private analysis profile, while ordinary
+  traces retain only the hash.
 
 - Added explicit named mission environments: manifests declare a bounded
   `missions` map with isolated data, continuations, APIs, and provider grants;
@@ -75,13 +81,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grapheme-based. Oversized or unrepresentable String operations now return the
   documented bounded condition; locale-sensitive `.toLowerCase` and
   `.toUpperCase` and all legacy Java String aliases were removed.
-- Added the code-owned `log-analysis-v2` profile to `mix ptc repl`, with
+- Added the code-owned `run-analysis-v1` profile to `mix ptc repl`, with
   bounded multi-turn mission evaluation over an immutable trace capture,
   explicit whole-result cursor traversal, deterministic JSONL output for
   coding agents, safe profile discovery, and separate atomic analysis-trace
   persistence. Rejected log and inspection queries now fail instead of looking
-  like empty results, and both analysis profiles reuse the shipped `cap`
-  envelope and pagination helpers.
+  like empty results. The public and private authority recipes reuse the
+  shipped `cap` envelope and one semantic analysis component.
 - Added one typed MCP source with equivalent stateless Streamable HTTP and
   owned stdio transports. Stdio uses the optional precompiled
   `ptc_runner_launcher` companion, freezes launcher and server digests, and

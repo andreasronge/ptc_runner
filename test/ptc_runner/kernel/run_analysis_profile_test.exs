@@ -1,4 +1,4 @@
-defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
+defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.AnalysisAssembly
@@ -10,41 +10,28 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
   alias PtcRunner.Kernel.AnalysisTerminal
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
-  alias PtcRunner.Kernel.InspectionAnalysisProfile
-  alias PtcRunner.Kernel.InspectionCapability
   alias PtcRunner.Kernel.InspectionSnapshot
-  alias PtcRunner.Kernel.LogAnalysisProfile
+  alias PtcRunner.Kernel.PrivateRunAnalysisProfile
+  alias PtcRunner.Kernel.PublicRunAnalysisProfile
+  alias PtcRunner.Kernel.RunAnalysisCapability
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SessionTrace
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.TestSupport.PrivateInspectionFixture
 
-  @profile_id "inspection-analysis-v2"
+  @profile_id "private-run-analysis-v1"
 
   test "the profile registry is closed and describes fixed private authority" do
-    assert AnalysisProfileRegistry.ids() == ["inspection-analysis-v2", "log-analysis-v2"]
+    assert AnalysisProfileRegistry.ids() == ["private-run-analysis-v1", "run-analysis-v1"]
     assert {:error, :unsupported_analysis_profile} = AnalysisProfileRegistry.fetch("custom")
     assert {:error, :unsupported_analysis_profile} = AnalysisProfileRegistry.fetch(nil)
 
     assert {:ok, description} = AnalysisProfileRegistry.description(@profile_id)
     assert description["resources"] |> Map.keys() |> Enum.sort() == ["inspection", "traces"]
 
-    assert description["components"] == [
-             "cap",
-             "inspection.core",
-             "inspection.analysis",
-             "log.core",
-             "log.analysis"
-           ]
-
-    assert description["namespaces"] == [
-             "cap",
-             "inspection",
-             "inspection.analysis",
-             "log",
-             "log.analysis"
-           ]
+    assert description["components"] == ["cap", "analysis"]
+    assert description["namespaces"] == ["analysis", "cap"]
 
     assert description["source_data_class"] == "private_inspection"
     assert description["result_data_class"] == "private_inspection"
@@ -66,7 +53,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
            }
 
     assert description["explicit_capabilities"] ==
-             InspectionAnalysisProfile.explicit_capabilities()
+             PrivateRunAnalysisProfile.explicit_capabilities()
 
     {:ok, recipe} = AnalysisProfileRegistry.fetch(@profile_id)
 
@@ -101,7 +88,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     on_exit(fn -> TraceSnapshot.stop(private_trace) end)
 
     assert {:error, :invalid_analysis_resources} =
-             AnalysisResources.new("log-analysis-v2", %{traces: private_trace})
+             AnalysisResources.new("run-analysis-v1", %{traces: private_trace})
 
     assert {:ok, normal_trace} = TraceSnapshot.start({:directory, fixture.traces})
 
@@ -114,7 +101,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     end)
 
     assert {:error, :invalid_analysis_resources} =
-             AnalysisResources.new("inspection-analysis-v2", %{
+             AnalysisResources.new("private-run-analysis-v1", %{
                traces: normal_trace,
                inspection: inspection
              })
@@ -215,8 +202,8 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
                })
              )
 
-    # A profile that forbids the terminal (log-analysis-v2) forbids unattended too.
-    {:ok, log_recipe} = AnalysisProfileRegistry.fetch("log-analysis-v2")
+    # A profile that forbids the terminal (run-analysis-v1) forbids unattended too.
+    {:ok, log_recipe} = AnalysisProfileRegistry.fetch("run-analysis-v1")
 
     assert {:error, :private_terminal_unsupported} =
              AnalysisProfileRegistry.authorize_frontend(
@@ -242,7 +229,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     # Unattended bypasses the terminal-attachment check entirely and reaches
     # source preflight instead - a different, later failure than the gate
     # itself, proving the gate was actually crossed.
-    assert {:error, :invalid_inspection_analysis_source} =
+    assert {:error, :invalid_private_run_analysis_source} =
              AnalysisSessionBuilder.start(
                @profile_id,
                resources,
@@ -280,15 +267,14 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
 
     on_exit(fn -> AnalysisResources.stop(resources) end)
 
-    {:ok, all_profile_capabilities} = InspectionAnalysisProfile.capabilities(resources)
-
-    profile_capabilities =
-      Enum.filter(all_profile_capabilities, &String.starts_with?(&1.name, "inspection-"))
-
-    inspection_snapshot = AnalysisResources.handle(resources, :inspection)
+    {:ok, all_profile_capabilities} = PrivateRunAnalysisProfile.capabilities(resources)
 
     {:ok, manifest_capabilities} =
-      InspectionCapability.from_snapshot(inspection_snapshot, "private")
+      RunAnalysisCapability.from_snapshots(
+        AnalysisResources.handle(resources, :traces),
+        AnalysisResources.handle(resources, :inspection),
+        "private"
+      )
 
     arguments = [
       %{"limit" => 10},
@@ -296,30 +282,28 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
       %{"run_id" => fixture.run_id},
       %{"run_id" => fixture.run_id},
       %{"run_id" => fixture.run_id},
-      %{"run_id" => fixture.run_id},
-      %{"run_id" => fixture.run_id},
-      %{"run_id" => fixture.run_id},
       %{"run_id" => fixture.run_id}
     ]
 
-    Enum.zip([profile_capabilities, manifest_capabilities, arguments])
+    Enum.zip([all_profile_capabilities, manifest_capabilities, arguments])
     |> Enum.each(fn {profile, manifest, query} ->
       assert profile.callback.(query) == manifest.callback.(query)
     end)
 
-    provider_exchanges =
-      Enum.find(profile_capabilities, &(&1.name == "inspection-provider-exchanges"))
+    activity = Enum.find(all_profile_capabilities, &(&1.name == "analysis-activity"))
 
     assert {:ok,
             %{
-              "items" => [
-                %{
-                  "request_id" => 7,
-                  "request" => %{"method" => "tools/call"},
-                  "response" => %{"result" => %{"content" => [_ | _]}}
-                }
-              ]
-            }} = provider_exchanges.callback.(%{"run_id" => fixture.run_id})
+              "private" => %{
+                "provider_exchanges" => [
+                  %{
+                    "request_id" => 7,
+                    "request" => %{"method" => "tools/call"},
+                    "response" => %{"result" => %{"content" => [_ | _]}}
+                  }
+                ]
+              }
+            }} = activity.callback.(%{"run_id" => fixture.run_id})
   end
 
   @tag :tmp_dir
@@ -336,13 +320,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     identity = state.profile.identity
     mission = state.config.missions["default"].environment
 
-    assert identity["components"] == [
-             "cap",
-             "inspection.core",
-             "inspection.analysis",
-             "log.core",
-             "log.analysis"
-           ]
+    assert identity["components"] == ["cap", "analysis"]
 
     assert identity["source_data_class"] == "private_inspection"
     assert identity["result_data_class"] == "private_inspection"
@@ -362,63 +340,53 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     assert mission.data == %{}
 
     assert mission.capabilities |> Map.keys() |> Enum.sort() ==
-             InspectionAnalysisProfile.explicit_capabilities()
+             PrivateRunAnalysisProfile.explicit_capabilities()
 
     assert {:ok,
             %{
               status: :ok,
-              value: %{"items" => [model_exchange]},
+              value: %{
+                "streams" => [
+                  %{"turns" => [%{"messages_added" => messages, "response" => model_result}]}
+                ]
+              },
               usage: %{capability_calls: capability_calls} = usage
             }} =
              AnalysisSession.evaluate(
                session,
-               ~s|(inspection/model-exchanges "#{fixture.run_id}" nil)|
+               ~s|(analysis/conversation "#{fixture.run_id}" {})|
              )
 
     refute Map.has_key?(usage, :trace_calls)
-    assert capability_calls["inspection-model-exchanges"].used == 1
+    assert capability_calls["analysis-conversation"].used == 1
 
-    assert model_exchange["arguments"] == %{
-             "messages" => [%{"content" => "private-prompt-#{fixture.run_id}"}]
-           }
+    assert messages == [%{"content" => "private-prompt-#{fixture.run_id}"}]
 
-    assert model_exchange["result"] == %{
+    assert model_result == %{
              "status" => "ok",
-             "value" => %{"answer" => "private-answer-#{fixture.run_id}"}
+             "value" => %{
+               "answer" => "private-answer-#{fixture.run_id}",
+               "tool_calls" => [
+                 %{"id" => "program-#{fixture.run_id}", "args" => %{"program" => "(return 42)"}}
+               ]
+             }
            }
 
-    assert {:ok, %{value: %{"items" => [source]}}} =
+    assert {:ok, %{value: %{"generated_programs" => [source]}}} =
              AnalysisSession.evaluate(
                session,
-               ~s|(inspection/generated-sources "#{fixture.run_id}" nil)|
+               ~s|(analysis/source "#{fixture.run_id}" {})|
              )
 
     assert source["source"] == "(return 42)"
 
     assert {:ok, %{status: :error, outcome: :failed}} =
-             AnalysisSession.evaluate(session, ~S|(inspection/runs {"limit" 1001})|)
+             AnalysisSession.evaluate(session, ~S|(analysis/runs {"limit" 1001})|)
 
-    assert {:ok,
-            %{
-              value: %{
-                "complete?" => true,
-                "items" => [collected_exchange],
-                "pages" => 1,
-                "snapshot_hash" => inspection_snapshot_hash
-              }
-            }} =
+    assert {:ok, %{value: %{"private" => %{"provider_exchanges" => [exchange]}}}} =
              AnalysisSession.evaluate(
                session,
-               ~s|(inspection.analysis/all-model-exchanges "#{fixture.run_id}" 2)|
-             )
-
-    assert collected_exchange == model_exchange
-    assert inspection_snapshot_hash =~ ~r/\Asha256:[0-9a-f]{64}\z/
-
-    assert {:ok, %{value: %{"items" => [exchange]}}} =
-             AnalysisSession.evaluate(
-               session,
-               ~s|(inspection/provider-exchanges "#{fixture.run_id}" nil)|
+               ~s|(analysis/activity "#{fixture.run_id}" {})|
              )
 
     assert exchange["response"]["result"]["content"] == [
@@ -431,35 +399,23 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     assert {:ok,
             %{
               value: %{
-                "complete?" => true,
-                "items" => [
-                  %{
-                    "evaluation_id" => ^execution_id,
-                    "prints" => [^execution_print]
-                  }
-                ]
+                "private" => %{
+                  "execution_prints" => [
+                    %{"evaluation_id" => ^execution_id, "prints" => [^execution_print]}
+                  ],
+                  "execution_errors" => [
+                    %{
+                      "evaluation_id" => ^execution_id,
+                      "kind" => "limit_exceeded",
+                      "reason" => "timeout"
+                    }
+                  ]
+                }
               }
             }} =
              AnalysisSession.evaluate(
                session,
-               ~s|(inspection.analysis/all-execution-prints "#{fixture.run_id}" 2)|
-             )
-
-    assert {:ok,
-            %{
-              value: %{
-                "items" => [
-                  %{
-                    "evaluation_id" => ^execution_id,
-                    "kind" => "limit_exceeded",
-                    "reason" => "timeout"
-                  }
-                ]
-              }
-            }} =
-             AnalysisSession.evaluate(
-               session,
-               ~s|(inspection/execution-errors "#{fixture.run_id}" nil)|
+               ~s|(analysis/activity "#{fixture.run_id}" {})|
              )
 
     assert {:ok, %{lifecycle: :closed}} = AnalysisSession.close(session)
@@ -469,7 +425,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     refute encoded_trace =~ "private-prompt"
     refute encoded_trace =~ "private-answer"
     refute encoded_trace =~ "private-tool-result"
-    refute encoded_trace =~ "inspection/model-exchanges"
+    refute encoded_trace =~ "analysis/conversation"
     refute encoded_trace =~ "(return 42)"
 
     assert {:ok, trace} = TraceLog.new(source: {:file, trace_path})
@@ -493,12 +449,14 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
             %{
               status: :ok,
               value: %{
-                "run_id" => run_id,
-                "result_hash" => result_hash,
-                "value" => ^value,
-                "snapshot_hash" => snapshot_hash
+                "run" => %{"run_id" => run_id},
+                "result" => %{
+                  "result_hash" => result_hash,
+                  "value" => ^value,
+                  "snapshot_hash" => snapshot_hash
+                }
               }
-            }} = AnalysisSession.evaluate(session, ~s|(inspection/result "#{fixture.run_id}")|)
+            }} = AnalysisSession.evaluate(session, ~s|(analysis/overview "#{fixture.run_id}")|)
 
     assert run_id == fixture.run_id
     assert result_hash == fixture.result_hash
@@ -564,21 +522,21 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     File.cp_r!(fixture.inspection, Path.join(nested_inspection, "run-tag"))
 
     assert {:error, :empty_traces_resource} =
-             InspectionAnalysisProfile.capture(
+             PrivateRunAnalysisProfile.capture(
                %{"traces" => nested_traces, "inspection" => fixture.inspection},
                []
              )
 
     assert {:error, :empty_inspection_resource} =
-             InspectionAnalysisProfile.capture(
+             PrivateRunAnalysisProfile.capture(
                %{"traces" => fixture.traces, "inspection" => nested_inspection},
                []
              )
 
     assert {:error, :empty_traces_resource} =
-             LogAnalysisProfile.capture(%{"traces" => nested_traces}, [])
+             PublicRunAnalysisProfile.capture(%{"traces" => nested_traces}, [])
 
-    assert {:ok, resources} = LogAnalysisProfile.capture(%{"traces" => fixture.traces}, [])
+    assert {:ok, resources} = PublicRunAnalysisProfile.capture(%{"traces" => fixture.traces}, [])
     assert {:ok, %{file_count: 1, run_count: 1}} = AnalysisResources.info(resources)
     AnalysisResources.stop(resources)
 
@@ -599,7 +557,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     File.mkdir_p!(traces)
     File.write!(Path.join(traces, "empty.jsonl"), "")
 
-    assert {:ok, resources} = LogAnalysisProfile.capture(%{"traces" => traces}, [])
+    assert {:ok, resources} = PublicRunAnalysisProfile.capture(%{"traces" => traces}, [])
     assert {:ok, %{file_count: 1, run_count: 0}} = AnalysisResources.info(resources)
     AnalysisResources.stop(resources)
   end
@@ -613,7 +571,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     monitoring_before = monitoring_processes()
 
     assert {:error, :empty_inspection_resource} =
-             InspectionAnalysisProfile.capture(
+             PrivateRunAnalysisProfile.capture(
                %{"traces" => fixture.traces, "inspection" => empty_inspection},
                []
              )
@@ -672,7 +630,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
             capture(fixture)
 
           :replaced ->
-            InspectionAnalysisProfile.capture(
+            PrivateRunAnalysisProfile.capture(
               %{"traces" => fixture.traces, "inspection" => fixture.inspection},
               inspection_capture_hook: fn ->
                 File.write!(inspection_path, File.read!(inspection_path) <> "\n")
@@ -693,7 +651,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
   end
 
   defp capture(fixture) do
-    InspectionAnalysisProfile.capture(
+    PrivateRunAnalysisProfile.capture(
       %{"traces" => fixture.traces, "inspection" => fixture.inspection},
       []
     )
@@ -701,8 +659,8 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
 
   defp start_internal_session(fixture) do
     {:ok, resources} = capture(fixture)
-    limits = InspectionAnalysisProfile.limits()
-    run_id = "inspection-analysis-test-" <> Integer.to_string(System.unique_integer([:positive]))
+    limits = PrivateRunAnalysisProfile.limits()
+    run_id = "private-run-analysis-test-" <> Integer.to_string(System.unique_integer([:positive]))
     destination = Path.join(fixture.output, run_id <> ".jsonl")
     reserve = EventSink.terminal_reserve(:normal, limits)
 
@@ -729,7 +687,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     :ok = RunState.transfer_owner(run_state, session_trace.pid)
 
     {:ok, %{config: config, profile: profile}} =
-      InspectionAnalysisProfile.assemble(resources, sink)
+      PrivateRunAnalysisProfile.assemble(resources, sink)
 
     assembly = AnalysisAssembly.seal(config, profile, resources, session_trace, run_state)
     {:ok, session} = AnalysisSession.start(assembly)

@@ -209,6 +209,7 @@ defmodule PtcRunner.Kernel.TraceLog do
                :max_directory_entries,
                :max_trace_files,
                :source_kind,
+               :include_sanitized,
                :capture_hook,
                :listing_hook
              ] == [],
@@ -226,6 +227,8 @@ defmodule PtcRunner.Kernel.TraceLog do
            Keyword.get(opts, :max_trace_files, @default_capture_trace_files),
          source_kind when source_kind in [:sanitized, :private] <-
            Keyword.get(opts, :source_kind, :sanitized),
+         include_sanitized when is_boolean(include_sanitized) <-
+           Keyword.get(opts, :include_sanitized, source_kind == :private),
          capture_hook when is_nil(capture_hook) or is_function(capture_hook, 0) <-
            Keyword.get(opts, :capture_hook),
          listing_hook when is_nil(listing_hook) or is_function(listing_hook, 0) <-
@@ -237,6 +240,7 @@ defmodule PtcRunner.Kernel.TraceLog do
              max_source_bytes,
              max_directory_entries,
              max_trace_files,
+             include_sanitized,
              capture_hook,
              listing_hook
            ) do
@@ -251,6 +255,49 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   def capture_directory(_directory, _opts), do: {:error, :invalid_trace_log}
+
+  @doc false
+  @spec capture_file(binary(), keyword()) ::
+          {:ok,
+           %{
+             events: [map()],
+             run_sources: %{binary() => :sanitized | :private},
+             source_id: binary(),
+             source_bytes: non_neg_integer(),
+             file_count: 1
+           }}
+          | {:error, atom()}
+  def capture_file(path, opts \\ [])
+
+  def capture_file(path, opts) when is_binary(path) and is_list(opts) do
+    with true <-
+           Keyword.keys(opts) -- [:max_source_bytes, :source_kind, :capture_hook] == [],
+         true <- String.valid?(path),
+         max_source_bytes when max_source_bytes in 1..@default_source_bytes <-
+           Keyword.get(opts, :max_source_bytes, @default_source_bytes),
+         source_kind when source_kind in [:sanitized, :private] <-
+           Keyword.get(opts, :source_kind, :sanitized),
+         capture_hook when is_nil(capture_hook) or is_function(capture_hook, 0) <-
+           Keyword.get(opts, :capture_hook),
+         path = Path.expand(path),
+         {:ok, before_inventory} <- file_inventory(path, source_kind) do
+      capture_inventory(
+        Path.dirname(path),
+        before_inventory,
+        max_source_bytes,
+        capture_hook,
+        fn -> changed_file_inventory(path, source_kind) end
+      )
+    else
+      false -> {:error, :invalid_trace_log}
+      {:error, _reason} = error -> error
+      _ -> {:error, :invalid_trace_log}
+    end
+  rescue
+    _exception -> {:error, :source_unavailable}
+  end
+
+  def capture_file(_path, _opts), do: {:error, :invalid_trace_log}
 
   @doc """
   Appends canonical events to one admin-selected JSONL file under a total byte
@@ -1613,6 +1660,7 @@ defmodule PtcRunner.Kernel.TraceLog do
          max_source_bytes,
          max_directory_entries,
          max_trace_files,
+         include_sanitized,
          capture_hook,
          listing_hook
        ) do
@@ -1622,29 +1670,43 @@ defmodule PtcRunner.Kernel.TraceLog do
              source_kind,
              max_directory_entries,
              max_trace_files,
+             include_sanitized,
              listing_hook
-           ),
+           ) do
+      capture_inventory(
+        directory,
+        before_inventory,
+        max_source_bytes,
+        capture_hook,
+        fn ->
+          changed_inventory(
+            directory,
+            source_kind,
+            max_directory_entries,
+            max_trace_files,
+            include_sanitized,
+            listing_hook
+          )
+        end
+      )
+    end
+  end
+
+  defp capture_inventory(
+         directory,
+         before_inventory,
+         max_source_bytes,
+         capture_hook,
+         refresh_inventory
+       ) do
+    with true <- is_function(refresh_inventory, 0),
          {:ok, sources, source_bytes} <-
            read_inventory(directory, before_inventory.files, max_source_bytes),
          :ok <- run_capture_hook(capture_hook),
-         {:ok, after_read_inventory} <-
-           changed_inventory(
-             directory,
-             source_kind,
-             max_directory_entries,
-             max_trace_files,
-             listing_hook
-           ),
+         {:ok, after_read_inventory} <- refresh_inventory.(),
          :ok <- same_inventory(before_inventory, after_read_inventory),
          :ok <- verify_sources(directory, after_read_inventory.files, sources),
-         {:ok, after_verify_inventory} <-
-           changed_inventory(
-             directory,
-             source_kind,
-             max_directory_entries,
-             max_trace_files,
-             listing_hook
-           ),
+         {:ok, after_verify_inventory} <- refresh_inventory.(),
          :ok <- same_inventory(after_read_inventory, after_verify_inventory),
          :ok <- verify_sources(directory, after_verify_inventory.files, sources),
          {:ok, events, run_sources} <- decode_capture_sources(sources),
@@ -1662,18 +1724,39 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
+  defp file_inventory(path, source_kind) do
+    name = Path.basename(path)
+
+    with true <- capture_file_name?(name, source_kind),
+         {:ok, %File.Stat{type: :regular} = stat} <- File.lstat(path, time: :posix) do
+      {:ok, %{files: [{name, stat_identity(stat)}]}}
+    else
+      false -> {:error, :invalid_trace_log}
+      {:ok, %File.Stat{}} -> {:error, :malformed_source}
+      {:error, _reason} -> {:error, :source_unavailable}
+    end
+  end
+
+  defp changed_file_inventory(path, source_kind) do
+    case file_inventory(path, source_kind) do
+      {:ok, inventory} -> {:ok, inventory}
+      {:error, _reason} -> {:error, :source_changed}
+    end
+  end
+
   defp directory_inventory(
          directory,
          source_kind,
          max_directory_entries,
          max_trace_files,
+         include_sanitized,
          listing_hook
        ) do
     with {:ok, %File.Stat{type: :directory} = directory_stat} <-
            File.lstat(directory, time: :posix),
          {:ok, names} <- bounded_directory_names(directory, max_directory_entries, listing_hook),
          {:ok, names} <-
-           bounded_capture_names(names, source_kind, max_trace_files),
+           bounded_capture_names(names, source_kind, include_sanitized, max_trace_files),
          {:ok, files} <- inventory_files(directory, names) do
       {:ok, %{directory: stat_identity(directory_stat), files: files}}
     else
@@ -1688,6 +1771,7 @@ defmodule PtcRunner.Kernel.TraceLog do
          source_kind,
          max_directory_entries,
          max_trace_files,
+         include_sanitized,
          listing_hook
        ) do
     case directory_inventory(
@@ -1695,6 +1779,7 @@ defmodule PtcRunner.Kernel.TraceLog do
            source_kind,
            max_directory_entries,
            max_trace_files,
+           include_sanitized,
            listing_hook
          ) do
       {:ok, inventory} -> {:ok, inventory}
@@ -1725,18 +1810,27 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp bounded_capture_names(names, source_kind, max_trace_files) do
-    supported = Enum.filter(names, &capture_name?(&1, source_kind))
+  defp bounded_capture_names(names, source_kind, include_sanitized, max_trace_files) do
+    supported = Enum.filter(names, &capture_name?(&1, source_kind, include_sanitized))
 
     if length(supported) <= max_trace_files,
       do: {:ok, Enum.sort(supported)},
       else: {:error, :source_limit_exceeded}
   end
 
-  defp capture_name?(name, :sanitized), do: supported_name?(name, :sanitized)
+  defp capture_name?(name, :sanitized, _include_sanitized),
+    do: supported_name?(name, :sanitized)
 
-  defp capture_name?(name, :private),
+  defp capture_name?(name, :private, true),
     do: supported_name?(name, :sanitized) or supported_name?(name, :private)
+
+  defp capture_name?(name, :private, false), do: supported_name?(name, :private)
+
+  defp capture_file_name?(name, :sanitized),
+    do: Path.basename(name) == name and not reserved_path?(name)
+
+  defp capture_file_name?(name, :private),
+    do: Path.basename(name) == name and private_path?(name)
 
   defp inventory_files(directory, names) do
     Enum.reduce_while(names, {:ok, []}, fn name, {:ok, files} ->

@@ -1,4 +1,4 @@
-# TraceLog and Log Prelude — V2 Contract
+# TraceLog and Run Analysis — V2 Contract
 
 **Status:** implemented retained product contract, including the local 0.x
 inspection increment. Complements the
@@ -18,7 +18,7 @@ TraceLog
   stores, sanitizes, loads, indexes, filters, and bounds event queries
 
 Consumers
-  ptc_viewer, CLI/debug tools, and a swappable log/ capability prelude
+  ptc_viewer, CLI/debug tools, and the shared analysis/* capability surface
 ```
 
 Kernel does not know how traces are stored or queried. TraceLog does not control
@@ -33,7 +33,8 @@ PtcRunner keeps four observability concerns separate:
 - `:telemetry` reports low-cardinality measurements for embedders and host
   monitoring. It is not an event store or an authorization boundary.
 - `Kernel.EventSink` and `Kernel.TraceLog` own the canonical bounded run event
-  journal consumed by `ptc_viewer`, CLI diagnostics, and `log/` capabilities.
+  journal consumed by `ptc_viewer`, CLI diagnostics, and `analysis/*`
+  capabilities.
 - the opt-in `Kernel.InspectionSink` owns exact sensitive development
   payloads under the separate controls below.
 
@@ -171,15 +172,14 @@ new canonical events from mutating the source it is paging.
 
 ### Local analysis sessions
 
-The server-owned `log-analysis-v2` profile is shared by the Viewer and ordinary
-terminal REPL frontends. Its mission bundle contains `cap`, `log.core`, and
-`log.analysis`; its explicit authority contains only `trace-list-runs`,
-`trace-get-run`, `trace-list-turns`, and `trace-counters`; and ordinary implicit
+The server-owned `run-analysis-v1` profile is shared by the Viewer and ordinary
+terminal REPL frontends. Its mission bundle contains `cap` and `analysis`; its
+explicit authority contains the six `analysis-*` capabilities; and ordinary implicit
 mission introspection remains available. Filesystem, network, LLM, agent,
 workflow, MCP, private-inspection, and nested `kernel-eval` authority are
-absent. The separate `inspection-analysis-v2` profile uses the
+absent. The separate `private-run-analysis-v1` profile uses the
 private-authorized canonical capture, adds the validated private-inspection
-source and both inspection components, and requires a private terminal gate.
+source while retaining the same analysis component, and requires a private terminal gate.
 Its own session trace remains a sanitized normal analysis artifact.
 
 Each session queries one immutable snapshot and records its own canonical events
@@ -280,7 +280,7 @@ The implementation:
 - keeps private canonical event-source access separate and explicit;
 - never infers access from visible names, tags, or run IDs.
 
-The `log/` prelude contains no authority. It requires host trace-query
+The `analysis` prelude contains no authority. It requires host run-analysis
 capabilities whose source grant provides authority. Missing requirements fail
 before workflow code runs.
 
@@ -309,8 +309,8 @@ and missing current fields fail closed rather than being inferred or projected.
 
 ## Required run metadata
 
-`log/runs` and `log/run` expose bounded sanitized metadata sufficient to select
-a run without loading its turns:
+`analysis/runs` and `analysis/overview` expose bounded sanitized metadata
+sufficient to select a run without loading its activity:
 
 - run ID and trace ID;
 - start and stop timestamps;
@@ -354,33 +354,35 @@ messages/tool results. Absent optional facts remain absent or `nil`.
 
 ## Query contract
 
-The shipped default prelude exposes:
+The shipped analysis prelude exposes one question-shaped namespace:
 
 ```clojure
-(log/runs options)
-(log/run run-id)
-(log/turns run-id options)
-(log/counters options)
+(analysis/runs options)
+(analysis/overview run-id)
+(analysis/activity run-id options)
+(analysis/conversation run-id options)
+(analysis/failure run-id options)
+(analysis/source run-id options)
 ```
 
 Examples:
 
 ```clojure
-(log/runs {:status :error :tags {:stage "failed"} :limit 20})
-(log/run "run-id")
-(log/turns "run-id" {:status :error :limit 20})
-(log/turns "run-id" {:mission_name "reader" :limit 20})
-(log/counters {:run "run-id"})
-(log/counters {:mission_name "writer"})
+(analysis/runs {"status" "error" "tags" {"stage" "failed"} "limit" 20})
+(analysis/overview "run-id")
+(analysis/activity "run-id" {"limit" 100})
+(analysis/conversation "run-id" {"limit" 1000})
+(analysis/failure "run-id" {"limit" 1000})
+(analysis/source "run-id" {"limit" 1000})
 ```
 
-`trace-list-turns` and `trace-counters` accept `mission_name`. Run filters
+The internal canonical turn and counter readers accept `mission_name`. Run filters
 select runs first, then mission matching retains only events attributed to that
 mission. Counters—including event/error/run counts, evaluations,
 `evaluations_by_mission`, capability calls, and LLM usage—are derived from that
 narrowed event set. Workflow and lifecycle events never match a mission filter.
 
-### `log/runs`
+### `analysis/runs`
 
 Discovers runs in the granted source. Filters are limited to run/trace ID,
 status, bounded exact-match tags, workflow/agent name, model/provider when
@@ -389,23 +391,26 @@ present, timestamp range, limit, and cursor.
 Default ordering is deterministic: newest start timestamp first, with run ID as
 a stable tie-breaker.
 
-### `log/run`
+### `analysis/overview`
 
 Returns metadata for one source-visible run or a uniform not-found/denied error.
 It does not return all turns implicitly.
 
-### `log/turns`
+### `analysis/activity`
 
-Returns bounded canonical turn/subordinate-evaluation projections for one run.
-Filters include status, evaluation/turn ID, capability name, limit, and
-cursor. Ordering is ascending canonical sequence.
+Returns bounded canonical activity plus authorized private facets for one run.
+The public arguments are `run_id` and an optional per-read page size `limit`;
+the read model follows source-bound primitive cursors internally and either
+returns a complete aggregate or a stable result-limit error. Ordering is
+ascending canonical sequence.
 
-### `log/counters`
+### Private semantic operations
 
-Returns bounded aggregate counters using the same source and filters as run
-discovery. Counters may include run status, errors, evaluations, and
-workflow/mission capability calls by bounded name. They are reproducible from
-the selected canonical events.
+`analysis/conversation` reconstructs cumulative model requests as one or more
+explicit streams. `analysis/failure` returns diagnostics and program candidates
+with conservative relationship labels. `analysis/source` returns exact
+generated and effective component sources. Public recipes reject those exact
+private reads without changing authority.
 
 For routed `llm-request` calls, `llm_usage` groups stopped events by model alias
 and installation revision. Each row reports total and successful calls, calls
@@ -464,29 +469,15 @@ memory diffs, and program source follow their own projection ceilings.
 
 ## Capabilities and swappable preludes
 
-Host query capabilities follow the standard Kernel envelope and may be named:
+Analysis capabilities follow the standard Kernel envelope and are named:
 
-- `trace-list-runs`;
-- `trace-get-run`;
-- `trace-list-turns`;
-- `trace-counters`.
+- `analysis-runs`, `analysis-overview`, `analysis-activity`;
+- `analysis-conversation`, `analysis-failure`, `analysis-source`.
 
-The default `log.core` prelude requires them and provides the regular one-page
-Lisp API. The shipped `log.analysis` layer composes it with the pure pagination
-helpers in `cap`:
-
-```text
-log.analysis
-  depends: cap, log.core
-  traverses through log.core: trace-list-runs, trace-list-turns
-```
-
-`log.analysis/all-runs` and `log.analysis/all-turns` take an explicit positive
-page bound and return `items`, `pages`, `complete?`, and `snapshot_hash`. A
-bound-limited prefix is always marked `complete? false`. The aggregate
-preserves the source's `snapshot_hash`, and a changed snapshot identity fails
-traversal. Capability error envelopes fail evaluation rather than flowing into
-projections as ordinary empty data.
+All six delegate to `PtcRunner.Kernel.RunAnalysis`. The `analysis` prelude is a
+thin `cap/unwrap!` layer; Viewer, CLI, and embedders call the same read model.
+Capability error envelopes fail evaluation rather than flowing into projections
+as ordinary empty data.
 
 Preludes may change ergonomics, projections, defaults, or analysis policy. They
 cannot expand the source grant, bypass bounds/sanitization, or acquire private
@@ -516,9 +507,9 @@ Sanitized subordinate `evaluation-started` data adds:
 - `program_kind: "ptc-lisp"` alongside the existing
   `environment: "mission"` and `evaluation_id`.
 
-It must not contain exact source. `trace-list-turns` returns canonical event
+It must not contain exact source. `analysis/activity` returns canonical event
 data, so embedding source in a supposedly private event would collapse source
-authorization into the ordinary turns query.
+authorization into the ordinary activity query.
 
 Optional sensitive development capture uses a separate private inspection
 record stream, not a canonical event. Every `.inspection.jsonl` line is one
@@ -677,19 +668,18 @@ canonical-only trace, a complete private overlay, and incomplete or failed
 inspection states.
 
 The inspection artifact is absent from TraceLog file/directory discovery and
-from every `log/` query. Normal discovery explicitly rejects or omits the
+from every primitive TraceLog query. Normal discovery explicitly rejects or omits the
 `.inspection.jsonl` suffix rather than accidentally parsing it as canonical
 JSONL.
 
-A host-installed inspection snapshot exposes bounded collections plus the
-singular successful result query. `inspection-result` accepts exactly one
-`run_id`; it returns the immutable value, canonical `result_hash`, record
-identity, and snapshot hash without pagination. An unknown run and a known run
-without an eligible V5 result remain distinct internally. Both encoded and
-retained result sizes must fit the snapshot's result ceiling. Possessing
-`trace-list-turns`, a private canonical event source, local Viewer access, or
-the active run does not imply this capability. Calls emit ordinary bounded
-capability facts without copying returned payloads into the trace.
+A host-installed inspection snapshot composes its correlated canonical trace
+through the six semantic operations. `analysis/overview` includes an eligible
+immutable V5 result value and canonical `result_hash`; an unknown run and a
+known run without an eligible result remain distinct internally. Both encoded
+and retained sizes must fit the snapshot result ceiling. Possessing a private
+canonical event source, local Viewer access, or the active run does not imply
+inspection authority. Calls emit ordinary bounded capability facts without
+copying returned payloads into the trace.
 
 Active-run trace self-query remains unsupported. Every trace capability call
 adds events to the same sink, while pagination cursors are source-digest-bound;
@@ -701,9 +691,9 @@ no caller-defined keys or string values, and cannot forge canonical events.
 
 ## Viewer and CLI sharing
 
-`ptc_viewer`, CLI debugging, and the model-facing `log/` capability share the
-same loader, metadata derivation, filtering, ordering, and pagination code where
-practical.
+`ptc_viewer`, CLI debugging, and the model-facing `analysis/*` capabilities
+share the same loader, metadata derivation, filtering, ordering, pagination,
+and question-shaped `RunAnalysis` projections where practical.
 
 The viewer may render richer presentations, but it is not a second canonical
 query implementation or authority source. An explicit loopback-only development
@@ -742,7 +732,7 @@ as workflow failure.
 
 - ambient search over all host traces;
 - arbitrary filesystem browsing;
-- write/update/delete through `log/`;
+- write/update/delete through `analysis/*`;
 - a mutable authoritative run database;
 - unbounded full-text search or arbitrary query expressions;
 - automatic access to the current run's private events or source records;
@@ -757,7 +747,7 @@ as workflow failure.
 - Load sorted directory files under one aggregate byte cap.
 - Reject path traversal and symlink escape.
 - Discover runs with every required metadata field.
-- Verify `log/run`, turn filters, counters, ordering, and pagination.
+- Verify semantic overview/activity, internal canonical filters, ordering, and pagination.
 - Verify stable cursors and source-change invalidation.
 - Delete an index and rebuild identical results from canonical events.
 - Reject malformed events and unsupported versions.
@@ -771,7 +761,7 @@ as workflow failure.
   stable cursors after source mutation, and owner-driven idempotent cleanup.
 - Prove snapshot-backed trace capability closures retain only the opaque token
   and return the same four canonical query projections as TraceLog.
-- Prove the fixed log-analysis profile's positive and negative authority
+- Prove the fixed run-analysis profile's positive and negative authority
   inventory, direct Evaluation parity, exact continuation behavior, bounded
   result/accounting projection, terminal-budget lifecycle, and path/source
   redaction.

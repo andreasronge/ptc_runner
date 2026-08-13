@@ -1,6 +1,6 @@
 import { html, mount } from './preact.js';
 import { renderKernelTranscript } from './kernel-transcript.js';
-import { renderInspection } from './inspection.js';
+import { renderSemanticConversation } from './semantic-conversation.js';
 import { createAnalyzeButton, createReplController, nextTabName, readViewerConfig } from './repl.js';
 import { createRunCatalog } from './run-catalog.js';
 import { truncate } from './utils.js';
@@ -226,10 +226,9 @@ async function applyRoute() {
   await loadRun(route.runId);
 }
 
-// Bounded page budget for the eager turn fetch. Run-level projections
-// (metrics, dialogue, token spend) must not silently summarize a prefix, so
-// all pages are loaded up front; a run exceeding the budget keeps its
-// next_cursor and is explicitly rendered as partial.
+// Bounded page budget for the eager turn fetch. Run-level canonical metrics
+// must not silently summarize a prefix, so all pages are loaded up front; a
+// run exceeding the budget keeps its next_cursor and is explicitly partial.
 const MAX_TURN_PAGES = 20;
 
 async function fetchAllTurns(runId) {
@@ -255,10 +254,10 @@ async function fetchAllTurns(runId) {
 }
 
 async function loadRun(runId) {
-  const [runResponse, turnsResult, inspectionResponse] = await Promise.all([
+  const [runResponse, turnsResult, conversationResponse] = await Promise.all([
     fetch(`/api/kernel/runs/${encodeURIComponent(runId)}`),
     fetchAllTurns(runId),
-    fetch(`/api/inspection/runs/${encodeURIComponent(runId)}`)
+    fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/conversation`)
   ]);
 
   if (!runResponse.ok || turnsResult.failed) {
@@ -267,27 +266,26 @@ async function loadRun(runId) {
     return;
   }
 
-  const inspection = inspectionResponse.ok ? await inspectionResponse.json() : null;
-  let inspectionStatus;
-  if (inspectionResponse.ok) {
-    inspectionStatus = { state: 'loaded', status: inspectionResponse.status };
-  } else {
-    const reason = await safeBodyText(inspectionResponse);
-    inspectionStatus = {
-      state: reason === 'Inspection artifact unavailable' ? 'not-configured' : 'error',
-      status: inspectionResponse.status,
-      reason
-    };
-  }
+  const conversation = conversationResponse.ok
+    ? await conversationResponse.json()
+    : {
+        'available?': false,
+        status: conversationResponse.status,
+        reason: await safeBodyText(conversationResponse)
+      };
   renderRun(
-    { metadata: await runResponse.json(), turns: turnsResult.turns, inspection, inspectionStatus },
+    {
+      metadata: await runResponse.json(),
+      turns: turnsResult.turns,
+      conversation
+    },
     { fresh: true }
   );
 }
 
 function renderRun(data, { fresh = false } = {}) {
   state.currentRun = data;
-  const { metadata, turns, inspection, inspectionStatus } = data;
+  const { metadata, turns, conversation } = data;
   const breadcrumb = document.getElementById('breadcrumb');
   breadcrumb.replaceChildren();
 
@@ -330,13 +328,12 @@ function renderRun(data, { fresh = false } = {}) {
       // disclosures and the reading position are kept.
       renderRun({
         metadata,
-        inspection,
-        inspectionStatus,
+        conversation,
         turns: { ...nextPage, items: [...(turns.items || []), ...(nextPage.items || [])] }
       });
     }
   });
-  renderInspection(container, inspection);
+  renderSemanticConversation(container, conversation);
 
   if (!fresh) return;
   if (state.activeTab === 'runs') window.scrollTo({ top: 0, behavior: 'auto' });

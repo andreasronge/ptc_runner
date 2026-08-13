@@ -14,7 +14,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   alias PtcRunner.Kernel.RoutedCapability
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
-  alias PtcRunner.Kernel.TraceCapability
+  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.TestSupport.TestHelpers
 
@@ -346,10 +346,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     refute Map.has_key?(stopped.data, :resolved_model)
     refute inspect(events) =~ "answer"
 
-    assert {:ok, trace_capabilities} =
-             TraceCapability.new(source: config.event_sink, max_result_bytes: 100_000)
-
-    counters = Enum.find(trace_capabilities, &(&1.name == "trace-counters"))
+    assert {:ok, trace_log} = TraceLog.new(source: config.event_sink, max_result_bytes: 100_000)
 
     assert {:ok,
             %{
@@ -367,7 +364,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
               ],
               "llm_usage_by_model" => [],
               "unattributed_model_calls" => 1
-            }} = counters.callback.(%{"run_id" => "routing-events"})
+            }} = TraceLog.query(trace_log, :counters, %{"run_id" => "routing-events"})
   end
 
   test "capability discovery names aliases and the default" do

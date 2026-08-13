@@ -3,9 +3,9 @@
 `mix ptc repl` provides deliberately different PTC-Lisp session modes:
 
 - direct and manifest-backed sessions are workflow scratchpads;
-- `log-analysis-v2` is a fixed mission session for querying an immutable
+- `run-analysis-v1` is a fixed mission session for querying an immutable
   capture of canonical traces; and
-- `inspection-analysis-v2` is a fixed private mission session for correlating
+- `private-run-analysis-v1` is a fixed private mission session for correlating
   canonical traces with exact private inspection evidence.
 
 All modes retain successful definitions and exact `*1`, `*2`, and `*3`
@@ -96,13 +96,13 @@ are stopped last. If trace persistence fails after finalization, programmatic
 `:trace_persistence_failed` so an embedding host can retain or recover that
 evidence.
 
-## Log-analysis mission sessions
+## Run-analysis mission sessions
 
 Select the code-owned profile and supply its required trace resource:
 
 ```bash
 mix ptc repl \
-  --profile log-analysis-v2 \
+  --profile run-analysis-v1 \
   --resource traces=tmp/tutorial-traces
 ```
 
@@ -131,27 +131,21 @@ Captured traces: 12 files, 12 runs
 With `--format jsonl` the same counts appear under `capture` in the
 `session-started` record.
 
-`log-analysis-v2` installs `cap`, `log.core`, and `log.analysis`. It grants
-only:
-
-- `trace-list-runs` through `log/runs`;
-- `trace-get-run` through `log/run`;
-- `trace-list-turns` through `log/turns`;
-- `trace-counters` through `log/counters`.
-
-The four `log/*` functions return one bounded page. Use the matching analysis
-functions when you need the complete selected result:
+`run-analysis-v1` installs one `analysis` namespace with six question-shaped
+functions:
 
 ```clojure
-(log.analysis/all-runs {"limit" 50} 10)
-(log.analysis/all-turns "run-id" {"limit" 100} 20)
+(analysis/runs {"limit" 50})
+(analysis/overview "run-id")
+(analysis/activity "run-id" {"limit" 100})
+(analysis/failure "run-id" {"limit" 100})
 ```
 
-The final argument is an explicit page bound. Results contain `items`, `pages`,
-`complete?`, and the source `snapshot_hash`. `complete?` is `true` only when
-the source was exhausted; a page-bound stop returns the collected prefix with
-`complete? false`. Invalid or rejected source queries fail the form instead of
-returning an error map that can be mistaken for an empty result.
+Public captures can answer those four questions from sanitized canonical
+traces. `analysis/conversation` and `analysis/source` require the private
+recipe and return an evidence-unavailable error here. Results are bounded and
+carry `complete?`; a false value means the caller must narrow the question or
+raise the bound, never that omitted evidence did not exist.
 
 Ordinary bounded mission introspection such as `(tool/runtime-usage {})` and
 `(tool/cap-list {})` is also available. Filesystem, network, LLM, agent,
@@ -163,13 +157,13 @@ interactive form already holds the sole continuation lease.
 One session can build up an investigation interactively:
 
 ```clojure
-(def runs (log.analysis/all-runs {"limit" 50} 10))
+(def runs (analysis/runs {"limit" 50}))
 (def items (get runs "items"))
 (def ok-runs (filter #(= "ok" (get % "status")) items))
 (map #(select-keys % ["run_id" "duration_ms" "mission_capability_calls"])
      ok-runs)
 (def slowest (first (sort-by #(get % "duration_ms") > items)))
-(log.analysis/all-turns (get slowest "run_id") {"limit" 100} 20)
+(analysis/activity (get slowest "run_id") {"limit" 100})
 ```
 
 Loaded files, repeated `--eval` forms, positional scripts, stdin, and
@@ -182,9 +176,9 @@ reading an unbounded source into the Mix task.
 
 ```bash
 mix ptc repl \
-  --profile log-analysis-v2 \
+  --profile run-analysis-v1 \
   --resource traces=tmp/tutorial-traces \
-  -e '(def runs (log/runs {}))' \
+  -e '(def runs (analysis/runs {}))' \
   -e '(count (get runs "items"))'
 ```
 
@@ -199,7 +193,7 @@ that terminal as the private result sink:
 
 ```bash
 mix ptc repl \
-  --profile inspection-analysis-v2 \
+  --profile private-run-analysis-v1 \
   --resource traces=tmp/tutorial-traces \
   --resource inspection=tmp/tutorial-inspection \
   --session-trace-dir tmp/analysis-traces \
@@ -232,71 +226,53 @@ executable and container entry point do not have that Mix build stream.
 
 ```bash
 MIX_QUIET=1 mix ptc repl \
-  --profile inspection-analysis-v2 \
+  --profile private-run-analysis-v1 \
   --resource traces=tmp/tutorial-traces \
   --resource inspection=tmp/tutorial-inspection \
   --session-trace-dir tmp/analysis-traces \
   --private-unattended \
   --format jsonl \
-  -e '(inspection/runs {})' >tmp/private-analysis.jsonl
+  -e '(analysis/conversation "run-id" {"limit" 1000})' \
+  >tmp/private-analysis.jsonl
 ```
 
-`inspection-analysis-v2` installs both core query components, both analysis
-layers, and their shared `cap` dependency. Alongside the ordinary `log/*`
-functions, it reads both ordinary and `.private.jsonl` canonical traces while
-still excluding `.inspection.jsonl` from that trace resource. Each run returned
-by `log/*` retains its `sanitized` or `private` source label. It exports
-one-page private queries:
-
-- `(inspection/runs options-map)`;
-- `(inspection/model-exchanges run-id cursor)`;
-- `(inspection/capability-calls run-id cursor)`;
-- `(inspection/generated-sources run-id cursor)`;
-- `(inspection/effective-preludes run-id cursor)`;
-- `(inspection/provider-exchanges run-id cursor)`;
-- `(inspection/execution-prints run-id cursor)`; and
-- `(inspection/execution-errors run-id cursor)`; and
-- `(inspection/result run-id)`.
-
-`inspection/runs` takes its cursor inside the options map. The seven
-collection queries take a run ID and cursor as separate arguments. Pass `nil`
-as the initial cursor, then pass the opaque `next_cursor` from the returned
-page to read the next page. `inspection/result` is singular and takes only the
-run ID:
+`private-run-analysis-v1` installs the same `analysis` namespace and reads both
+ordinary and `.private.jsonl` canonical traces, still excluding inspection
+files from the trace resource. Private authority enriches the same result
+shapes instead of requiring another vocabulary:
 
 ```clojure
-(def first-page (inspection/model-exchanges "cmd-..." nil))
-(inspection/model-exchanges "cmd-..." (get first-page "next_cursor"))
-(inspection/result "cmd-...")
-```
-
-The singular result contains the exact strictly JSON terminal `value`, its
-canonical `result_hash`, record identity, and `snapshot_hash`. It exists only
-for a successful V5 capture. A successful native value that cannot be
-represented as strict JSON is intentionally not captured.
-
-The `inspection.analysis/*` namespace provides bounded whole-result variants.
-Its last argument is the maximum number of pages to collect:
-
-- `(inspection.analysis/all-runs options-map max-pages)`;
-- `(inspection.analysis/all-model-exchanges run-id max-pages)`;
-- `(inspection.analysis/all-capability-calls run-id max-pages)`;
-- `(inspection.analysis/all-generated-sources run-id max-pages)`;
-- `(inspection.analysis/all-effective-preludes run-id max-pages)`;
-- `(inspection.analysis/all-provider-exchanges run-id max-pages)`;
-- `(inspection.analysis/all-execution-prints run-id max-pages)`; and
-- `(inspection.analysis/all-execution-errors run-id max-pages)`.
-
-For example:
-
-```clojure
-(def runs (inspection.analysis/all-runs {"limit" 20} 10))
+(def runs (analysis/runs {"limit" 20}))
 (def run-id (get (first (get runs "items")) "run_id"))
-(inspection.analysis/all-model-exchanges run-id 10)
-(inspection.analysis/all-generated-sources run-id 10)
-(inspection.analysis/all-provider-exchanges run-id 10)
-(inspection.analysis/all-execution-errors run-id 10)
+(analysis/overview run-id)
+(analysis/conversation run-id {"limit" 1000})
+(analysis/failure run-id {"limit" 1000})
+(analysis/source run-id {"limit" 1000})
 ```
+
+`conversation` reconstructs cumulative model requests into ordered streams and
+preserves the terminal response, generated programs, feedback, system prompt,
+and token usage without exposing inspection record shapes. Independent model
+calls remain separate streams; an equal maximal predecessor is reported as
+ambiguous. `failure` returns the private evaluator diagnostic and relevant
+programs with an explicit `direct`, `same_workflow_evaluation`, `preceding`, or
+`unknown` relationship. `overview` includes the exact strictly JSON terminal
+value when V5 captured one. `activity` includes exact non-LLM capability,
+provider, print, and error facets.
+
+For the flagship dialogue journey, avoid a REPL entirely:
+
+```bash
+ptc transcript run-id \
+  --traces tmp/tutorial-traces \
+  --inspection tmp/tutorial-inspection \
+  --private-unattended \
+  --private-output tmp/transcript.private.json
+```
+
+The destination is reserved with owner-only permissions before either source
+is captured. An incomplete or ambiguous conversation fails without publishing
+the file.
 
 Exact model messages, generated source, capability arguments/results,
 effective preludes, MCP request/response bodies, execution prints, execution
@@ -352,15 +328,15 @@ input tree. Supply an existing physically separate output directory:
 
 ```bash
 mix ptc repl \
-  --profile log-analysis-v2 \
+  --profile run-analysis-v1 \
   --resource traces=tmp/tutorial-traces \
   --session-trace-dir tmp/analysis-traces \
-  -e '(log/counters {})'
+  -e '(analysis/overview "run-id")'
 ```
 
 Without `--session-trace-dir`, the task creates a private `0700` directory
 under the operating system temporary directory. On close it reports the
-absolute `<log-analysis-id>.jsonl` path. The file is published atomically,
+absolute `<run-analysis-id>.jsonl` path. The file is published atomically,
 never appended, and contains the profile ID and effective digest. Evaluated
 source and exact trace-query payloads are not copied into canonical events.
 
@@ -374,11 +350,11 @@ Coding agents can avoid PTY and prompt handling by repeating `-e` with
 
 ```bash
 MIX_QUIET=1 mix ptc repl \
-  --profile log-analysis-v2 \
+  --profile run-analysis-v1 \
   --resource traces=tmp/tutorial-traces \
   --session-trace-dir tmp/analysis-traces \
   --format jsonl \
-  -e '(def runs (log/runs {}))' \
+  -e '(def runs (analysis/runs {}))' \
   -e '(count (get runs "items"))'
 ```
 
@@ -407,11 +383,11 @@ form error, use `--continue-on-error` with at least two `-e` arguments:
 
 ```bash
 MIX_QUIET=1 mix ptc repl \
-  --profile log-analysis-v2 \
+  --profile run-analysis-v1 \
   --resource traces=tmp/tutorial-traces \
   --format jsonl \
   --continue-on-error \
-  -e '(def runs (log/runs {}))' \
+  -e '(def runs (analysis/runs {}))' \
   -e 'missing-name' \
   -e '(count (get runs "items"))'
 ```
@@ -424,8 +400,8 @@ Inspect the safe static contract without capturing traces or starting a
 session:
 
 ```bash
-mix ptc repl --describe-profile log-analysis-v2
-MIX_QUIET=1 mix ptc repl --describe-profile log-analysis-v2 --format jsonl
+mix ptc repl --describe-profile run-analysis-v1
+MIX_QUIET=1 mix ptc repl --describe-profile run-analysis-v1 --format jsonl
 ```
 
 The description lists the required resources, complete component closure,

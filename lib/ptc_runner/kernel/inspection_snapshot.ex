@@ -84,7 +84,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
       :max_files,
       :capture_heap_words,
       :capture_hook,
-      :listing_hook
+      :listing_hook,
+      :artifact_verification_hook
     ]
 
     with true <- Keyword.keys(opts) -- allowed == [],
@@ -108,14 +109,17 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
          capture_hook when is_nil(capture_hook) or is_function(capture_hook, 0) <-
            Keyword.get(opts, :capture_hook),
          listing_hook when is_nil(listing_hook) or is_function(listing_hook, 0) <-
-           Keyword.get(opts, :listing_hook) do
+           Keyword.get(opts, :listing_hook),
+         artifact_verification_hook
+         when is_nil(artifact_verification_hook) or is_function(artifact_verification_hook, 0) <-
+           Keyword.get(opts, :artifact_verification_hook) do
       token = make_ref()
 
       case GenServer.start(
              __MODULE__,
              {Path.expand(directory), trace_snapshot, owner, registrar, token, max_source_bytes,
               max_retained_bytes, max_result_bytes, max_directory_entries, max_files,
-              capture_heap_words, capture_hook, listing_hook}
+              capture_heap_words, capture_hook, listing_hook, artifact_verification_hook}
            ) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
         {:error, {:source_retained_limit_exceeded, _details} = reason} -> {:error, reason}
@@ -141,6 +145,11 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   @spec info(t()) :: {:ok, map()} | {:error, atom()}
   def info(%__MODULE__{} = snapshot), do: call(snapshot, :info)
   def info(_snapshot), do: {:error, :invalid_snapshot}
+
+  @doc false
+  @spec result_limit(t()) :: {:ok, pos_integer()} | {:error, atom()}
+  def result_limit(%__MODULE__{} = snapshot), do: call(snapshot, :result_limit)
+  def result_limit(_snapshot), do: {:error, :invalid_snapshot}
 
   @doc false
   @spec transfer_owner(t(), pid()) :: :ok | {:error, atom()}
@@ -174,10 +183,16 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   def init(
         {directory, trace_snapshot, owner, registrar, token, max_source_bytes, max_retained_bytes,
          max_result_bytes, max_directory_entries, max_files, capture_heap_words, capture_hook,
-         listing_hook}
+         listing_hook, artifact_verification_hook}
       ) do
     owner_ref = Process.monitor(owner)
     trace_ref = Process.monitor(trace_snapshot.pid)
+
+    hooks = %{
+      capture: capture_hook,
+      listing: listing_hook,
+      artifact_verification: artifact_verification_hook
+    }
 
     capture = fn ->
       capture(
@@ -187,8 +202,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
         max_retained_bytes,
         max_directory_entries,
         max_files,
-        capture_hook,
-        listing_hook
+        hooks
       )
     end
 
@@ -211,6 +225,9 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   @impl GenServer
   def handle_call({token, :info}, _from, %{token: token} = state),
     do: {:reply, {:ok, state.info}, state}
+
+  def handle_call({token, :result_limit}, _from, %{token: token} = state),
+    do: {:reply, {:ok, state.max_result_bytes}, state}
 
   def handle_call({token, {:query, operation, arguments}}, _from, %{token: token} = state) do
     {:reply, query_with_snapshot_hash(state, operation, arguments), state}
@@ -272,16 +289,16 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
          max_retained_bytes,
          max_directory_entries,
          max_files,
-         capture_hook,
-         listing_hook
+         hooks
        ) do
     with {:ok, trace_info} <- TraceSnapshot.info(trace_snapshot),
-         {:ok, before} <- inventory(directory, max_directory_entries, max_files, listing_hook),
+         {:ok, before} <- inventory(directory, max_directory_entries, max_files, hooks.listing),
          true <- before.source_bytes <= max_source_bytes,
-         {:ok, artifacts} <- load_artifacts(directory, before.files),
-         :ok <- run_capture_hook(capture_hook),
+         {:ok, artifacts} <-
+           load_artifacts(directory, before.files, hooks.artifact_verification),
+         :ok <- run_capture_hook(hooks.capture),
          {:ok, after_capture} <-
-           changed_inventory(directory, max_directory_entries, max_files, listing_hook),
+           changed_inventory(directory, max_directory_entries, max_files, hooks.listing),
          :ok <- same_inventory(before, after_capture),
          :ok <- validate_unique_runs(artifacts),
          :ok <- validate_correlations(artifacts, trace_snapshot),
@@ -399,11 +416,15 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
     end
   end
 
-  defp load_artifacts(directory, files) do
+  defp load_artifacts(directory, files, artifact_verification_hook) do
     Enum.reduce_while(files, {:ok, []}, fn {name, expected}, {:ok, artifacts} ->
       path = Path.join(directory, name)
 
-      case InspectionArtifact.load(path, max_bytes: min(expected.size, @max_artifact_bytes)) do
+      case InspectionArtifact.load(
+             path,
+             [max_bytes: min(expected.size, @max_artifact_bytes)],
+             artifact_verification_hook
+           ) do
         {:ok, records} -> {:cont, {:ok, [records | artifacts]}}
         {:error, _reason} = error -> {:halt, error}
       end
@@ -471,6 +492,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
               :duplicate_inspection_run
             ],
        do: reason
+
+  defp normalize_capture_error(:inspection_source_changed), do: :source_changed
 
   defp normalize_capture_error(_reason), do: :invalid_snapshot
 

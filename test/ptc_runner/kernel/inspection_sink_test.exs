@@ -900,7 +900,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     trace_path = Path.join(dir, "run.jsonl")
     assert :ok = TraceLog.append_jsonl(trace_path, canonical_events())
     assert {:ok, grant} = ViewerAdapter.pin_inspection(path, {:file, trace_path})
-    assert {:error, :inspection_run_mismatch} = ViewerAdapter.inspection(grant, "another-run")
+    assert {:error, :inspection_run_mismatch} = ViewerAdapter.conversation(grant, "another-run")
 
     orphan = Path.join(dir, "pin-orphan.inspection.jsonl")
     orphan_record = put_in(hd(records), ["correlation", "capability_id"], "missing-capability")
@@ -916,7 +916,9 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     first_path = Path.join(dir, "pinned.inspection.jsonl")
     private_marker = "PRIVATE_VIEWER_MARKER"
     first_records = persisted_records(first_path, private_marker)
-    assert :ok = TraceLog.append_jsonl(Path.join(dir, "canonical.jsonl"), canonical_events())
+
+    assert :ok =
+             TraceLog.append_jsonl(Path.join(dir, "canonical.jsonl"), canonical_model_events())
 
     telemetry_id = "inspection-telemetry-#{System.unique_integer([:positive])}"
 
@@ -963,10 +965,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     assert {:ok, {_address, port}} = PtcViewer.listener_info(viewer)
 
-    response = Req.get!("http://127.0.0.1:#{port}/api/inspection/runs/run-1")
+    response =
+      Req.get!("http://127.0.0.1:#{port}/api/analysis/runs/run-1/conversation")
+
     assert response.status == 200
-    assert response.body["records"] == first_records
     assert inspect(response.body) =~ private_marker
+    refute inspect(response.body) =~ "replacement"
 
     assert_receive {:logger_probe, startup_event}
     refute inspect(startup_event) =~ private_marker
@@ -1113,7 +1117,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
              |> RunLifecycle.execute()
 
-    assert {:ok, [prelude, source, input, output, result] = records} =
+    assert {:ok, [prelude, source, input, output, result]} =
              InspectionArtifact.load(inspection_path)
 
     assert prelude["record_type"] == "prelude-source"
@@ -1168,25 +1172,10 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert {:ok, inspection_source} =
              ViewerAdapter.pin_inspection(inspection_path, {:private_file, trace_path})
 
-    {:ok, inspection_store} = PtcViewer.InspectionStore.start(inspection_source)
+    assert {:ok, %{"complete?" => true, "streams" => []}} =
+             ViewerAdapter.conversation(inspection_source, source["run_id"])
 
-    on_exit(fn ->
-      if Process.alive?(inspection_store), do: PtcViewer.InspectionStore.stop(inspection_store)
-    end)
-
-    viewer_opts = [
-      trace_dir: dir,
-      kernel_trace_adapter: ViewerAdapter,
-      inspection_store: inspection_store,
-      inspection_adapter: ViewerAdapter
-    ]
-
-    response =
-      Plug.Test.conn(:get, "/api/inspection/runs/#{source["run_id"]}")
-      |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
-
-    assert response.status == 200
-    assert %{"records" => ^records} = Jason.decode!(response.resp_body)
+    refute function_exported?(ViewerAdapter, :inspection, 2)
   end
 
   @tag :tmp_dir
@@ -1241,27 +1230,8 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert {:ok, inspection_source} =
              ViewerAdapter.pin_inspection(inspection_path, {:private_file, trace_path})
 
-    {:ok, inspection_store} = PtcViewer.InspectionStore.start(inspection_source)
-
-    on_exit(fn ->
-      if Process.alive?(inspection_store), do: PtcViewer.InspectionStore.stop(inspection_store)
-    end)
-
-    viewer_opts = [
-      trace_dir: dir,
-      kernel_trace_adapter: ViewerAdapter,
-      inspection_store: inspection_store,
-      inspection_adapter: ViewerAdapter
-    ]
-
-    response =
-      Plug.Test.conn(:get, "/api/inspection/runs/#{evaluation_started["run_id"]}")
-      |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
-
-    assert response.status == 200
-    assert %{"records" => viewed_records} = Jason.decode!(response.resp_body)
-    assert Enum.any?(viewed_records, &(&1["record_type"] == "execution-prints"))
-    assert Enum.any?(viewed_records, &(&1["record_type"] == "execution-error"))
+    assert {:ok, %{"complete?" => true, "streams" => []}} =
+             ViewerAdapter.conversation(inspection_source, evaluation_started["run_id"])
   end
 
   @tag :tmp_dir
@@ -1522,10 +1492,24 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                "capability-input",
                %{capability_id: "cap-1"},
                %{
-                 environment: :mission,
-                 mission_name: "default",
-                 name: "read",
-                 arguments: %{"value" => value}
+                 environment: :workflow,
+                 name: :"llm-request",
+                 arguments: %{
+                   system: "system",
+                   messages: [%{role: :user, content: value}]
+                 }
+               }
+             )
+
+    assert :ok =
+             InspectionSink.emit(
+               sink,
+               "capability-output",
+               %{capability_id: "cap-1"},
+               %{
+                 environment: :workflow,
+                 name: :"llm-request",
+                 result: %{status: :ok, value: %{content: "answer"}}
                }
              )
 
@@ -1538,9 +1522,18 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
         type: "capability-started",
         data: %{
           capability_id: "cap-1",
-          environment: :mission,
-          mission_name: "default",
-          name: "read"
+          environment: :workflow,
+          name: "llm-request"
+        }
+      },
+      %{
+        run_id: "run-1",
+        trace_id: "trace-1",
+        type: "capability-stopped",
+        data: %{
+          capability_id: "cap-1",
+          environment: :workflow,
+          name: "llm-request"
         }
       }
     ]
@@ -1564,6 +1557,23 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
         "environment" => "mission",
         "mission_name" => "default",
         "name" => "read"
+      }),
+      canonical_event(4, "run-stopped", %{"outcome" => "ok"})
+    ]
+  end
+
+  defp canonical_model_events do
+    [
+      canonical_event(1, "run-started", %{"missions" => %{"default" => %{}}}),
+      canonical_event(2, "capability-started", %{
+        "capability_id" => "cap-1",
+        "environment" => "workflow",
+        "name" => "llm-request"
+      }),
+      canonical_event(3, "capability-stopped", %{
+        "capability_id" => "cap-1",
+        "environment" => "workflow",
+        "name" => "llm-request"
       }),
       canonical_event(4, "run-stopped", %{"outcome" => "ok"})
     ]

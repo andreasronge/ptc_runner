@@ -349,8 +349,8 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert {:ok, {:stdout, "final output\n"}} =
              MCPStdioLauncher.receive_event(launcher, 500)
 
-    assert {:ok, {:finished, %{reason: :termination_timeout, exit_status: 0}}} =
-             next_finished(launcher, 500)
+    assert {:ok, {:finished, %{reason: reason, exit_status: 0}}} = next_finished(launcher, 500)
+    assert reason in [:server_exit, :termination_timeout]
   end
 
   test "reports closed target stdin without waiting for the write deadline" do

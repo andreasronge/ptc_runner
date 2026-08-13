@@ -30,13 +30,13 @@ defmodule PtcViewer.ApiTest do
              PtcViewer.Api.kernel_query(config, :list_runs, %{})
   end
 
-  test "inspection delegates only the exact configured file and run", %{trace_dir: trace_dir} do
+  test "conversation delegates only the exact configured file and run", %{trace_dir: trace_dir} do
     parent = self()
     source = {:pinned, "run.inspection.jsonl"}
 
     adapter = fn pinned_source, run_id ->
       send(parent, {:inspection, pinned_source, run_id})
-      {:ok, %{"run_id" => run_id, "records" => []}}
+      {:ok, %{"run_id" => run_id, "streams" => []}}
     end
 
     {:ok, store} = PtcViewer.InspectionStore.start(source)
@@ -49,11 +49,11 @@ defmodule PtcViewer.ApiTest do
       inspection_adapter: adapter
     ]
 
-    assert {:ok, %{"run_id" => "run-1", "records" => []}} =
-             PtcViewer.Api.inspection(config, "run-1")
+    assert {:ok, %{"run_id" => "run-1", "streams" => []}} =
+             PtcViewer.Api.conversation(config, "run-1")
 
     assert_receive {:inspection, ^source, "run-1"}
-    assert {:error, :unavailable} = PtcViewer.Api.inspection([], "run-1")
+    assert {:error, :unavailable} = PtcViewer.Api.conversation([], "run-1")
   end
 
   test "start rejects an adapter that does not implement the query contract" do

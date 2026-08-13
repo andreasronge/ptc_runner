@@ -1,10 +1,10 @@
 # PTC Kernel Viewer
 
 A local web UI for canonical PtcRunner Kernel traces. Its Runs tab is read-only
-and uses the same source-scoped `Kernel.TraceLog` projections as `log.core`, so
+and uses the same validated trace projections as the semantic analysis layer, so
 run metadata, turns, filters, counters, pagination, and validation have one
 implementation. When launched from the PtcRunner root, it also enables a
-bounded log-analysis REPL backed by Core.
+bounded run-analysis REPL backed by Core.
 
 The Viewer accepts only the canonical Kernel event model. Trace loading,
 validation, run derivation, filtering, and pagination remain owned by
@@ -24,110 +24,39 @@ local server on port 4123, and opens the browser. Use `--port`, `--trace-dir`,
 always binds to loopback.
 
 The REPL evaluates PTC-Lisp against an immutable capture of the selected trace
-directory. The server fixes the `log-analysis-v2` profile: normal bounded
-PTC-Lisp built-ins, one-page `log/*` queries, bounded whole-result
-`log.analysis/all-runs` and `log.analysis/all-turns` queries, their shared
-`cap` helpers, four read-only trace capabilities, and the ordinary
+directory. The server fixes the `run-analysis-v1` profile: normal bounded
+PTC-Lisp built-ins, the six question-shaped `analysis/*` queries, their shared
+`cap` helpers, six read-only analysis capabilities, and the ordinary
 runtime/capability introspection routes. It does not grant filesystem, network,
 LLM, MCP, workflow-event, or arbitrary prelude authority.
 
-Forms such as `(log/runs {})`, `(log/run "run-id")`, and
-`(log.analysis/all-turns "run-id" {"limit" 100} 20)` return bounded values,
+Forms such as `(analysis/runs {})`, `(analysis/overview "run-id")`, and
+`(analysis/activity "run-id" {"limit" 100})` return bounded values,
 prints, errors, continuation effects, duration, and remaining usage. The
 server-owned transcript survives a page reload. Reset first closes and persists
 the analysis run, then captures a new snapshot and starts with fresh
 definitions; Close persists the analysis trace and ends further evaluation.
 
-Entered human-REPL source and returned inspection payloads are not copied into
-the canonical analysis trace. Model-generated PTC-Lisp and the feedback sent
-back to a model are visible only when the original run has an explicitly pinned
-private inspection artifact, in the Runs tab's model dialogue. The human REPL
-transcript is separate presentation state.
+Entered human-REPL source and returned private values are not copied into the
+canonical analysis trace. The human REPL transcript is separate presentation
+state.
 
 The UI first lists bounded canonical run summaries, identified by run ID and
-filterable by ID, status or bundle hash. Selecting a run loads its metadata and
-turn events through the shared Kernel query layer, and puts the run in the URL
-(`#/run/<run-id>`), so a run view can be bookmarked, shared and reloaded and
-Back returns to the list. The run view leads with identity, metrics,
-provenance, token spend and the model dialogue; preludes, mission inventory and
-connector fingerprints, the captured system prompt, and the canonical execution
-transcript sit behind labelled disclosures below it. The execution transcript
-opens by default only when there is no private overlay, because then it is the
-whole run rather than its detail. Sanitized traces do not
-contain prompts, provider responses,
-capability arguments/results, or private prelude source; the UI identifies
-those omissions rather than inferring or reconstructing payloads. Starting the
-Viewer without a Kernel adapter leaves canonical queries unavailable; it does
-not expose raw files through a second trace format.
+filterable by ID, status, or bundle hash. Selecting a run loads its metadata
+and canonical activity, plus one semantic `conversation` result when the Viewer
+was started with an authorized inspection artifact. The URL carries
+`#/run/<run-id>`, so a run view can be bookmarked and reloaded.
 
-Private canonical traces use the reserved `.private.jsonl` suffix. The
-standard viewer directory source and raw-file routes omit that suffix;
-accessing private data requires a separate host-controlled private source grant
-outside this UI.
-
-An explicitly selected `.inspection.jsonl` file is different. It can contain
-exact model exchanges, generated source, and capability arguments/results. The
-host fixes one exact file when it starts the Viewer; the browser cannot choose
-a server path or discover other inspection files. Startup loads the artifact
-into an immutable grant and validates its identity and correlations against the
-selected canonical trace source, so replacing the path after startup cannot
-change what requests inspect. The bounded loader rejects symlinks, changed
-files, aggregate input above 16 MB, records above 2,000,000 encoded bytes,
-malformed records, and a requested run ID that does not match the artifact. The
-UI renders one state-aware provenance notice for the selected run. It
-distinguishes canonical-only, complete private-overlay, incomplete/interrupted,
-selected-run mismatch, and fetch-failure states instead of showing
-contradictory sanitized and sensitive warnings.
-
-When the artifact is pinned, the run view joins its records to canonical IDs
-and renders private additions alongside the sanitized transcript:
-
-- a **captured model request** disclosure showing the first exact system
-  prompt. Known `PTC_AGENT_PROMPT_V1` text is split into readable sections with
-  the exact prompt retained; edited/unknown formats fall back to opaque exact
-  text. Each provider-neutral request remains available under **Raw captured
-  request** because adapters may transform it before transport. A system prompt
-  that changes mid-run is reported as a line diff against the first call with
-  unchanged stretches elided, plus that call's exact prompt, rather than as
-  another full copy of the prompt;
-
-- an **LLM token spend** panel summarizing the run's provider-reported usage:
-  total input/output tokens, cache reads/creation, and reported cost, with a
-  per-call table and an input-composition breakdown (base system text,
-  embedded frozen mission inventory, tool schemas, and message history by
-  role). Providers report only aggregate counts, so section tokens apportion
-  each call's reported input tokens by character share and are labeled as
-  estimates; runs without input token counts fall back to exact character
-  proportions, and calls without reported usage are labeled rather than
-  counted as zero;
-- a **model dialogue** that replays the agent loop turn by turn — the messages
-  sent to the model (highlighting tool-role feedback about the previous
-  program), any prose the model wrote alongside its tool call, the generated
-  PTC-Lisp program from each response, and the canonical outcome of the mission
-  evaluation whose captured source exactly matches that response's generated
-  program. Prose is shown both as the model's own response and where that turn
-  is replayed as assistant history, always next to the generated source rather
-  than instead of it. A window without an exact match renders as unpaired
-  rather than positionally inferred;
-- a **program source** panel inside each subordinate evaluation, verifying the
-  captured source hash against the canonical `evaluation-started`
-  `source_hash` and flagging any mismatch;
-- **arguments/result** panels inside each captured capability call;
-- expandable **component source** inside each prelude card, joining
-  `prelude-source` records to the frozen component IDs of the matching
-  environment;
-- one closed **Advanced/private records** disclosure with counts by record
-  type. Exact JSON uses preserved whitespace and horizontal scrolling, so long
-  identifiers are not visually split into invented whitespace.
-
-Every joined panel carries a `private` marker; runs without a pinned artifact
-render a canonical-only provenance notice. Join counts use canonical
-capability starts as their denominator, and input-only stopped calls are
-reported as interrupted rather than complete. The viewer eagerly loads all
-bounded canonical event pages before deriving run-level projections; a run
-exceeding the page budget keeps its cursor and its dialogue and spend panels
-are explicitly labeled partial instead of presenting a prefix as the whole
-run.
+The canonical transcript remains sanitized and never joins private records.
+Private model requests and responses appear only in the separate **Model
+conversation** panel produced by `RunAnalysis`; ambiguous exchanges are
+omitted from streams and reported by the semantic result rather than guessed
+into a turn. The browser cannot choose a server path or discover inspection
+files. Startup pins the operator-selected artifact, validates it against the
+captured canonical trace, and retains an immutable grant, so replacing the
+original path cannot change later responses. Symlinks, changed files,
+oversized or malformed records, correlation failures, and mismatched run IDs
+fail closed.
 
 The prelude cards list effective workflow and mission components in frozen
 load order (dependencies before dependants) with the bundle hash. When run
@@ -147,14 +76,6 @@ mix ptc.viewer --trace-dir traces \
 Authenticated remote access, multiple private artifacts, and prelude editing
 remain outside this local development mode.
 
-The checked-in dialogue fixture is generated from the current credential-free
-inspection lab. Regenerate its trace-V2/inspection-V5 two-call recovery artifacts from the
-repository root with:
-
-```bash
-mix run ptc_viewer/scripts/generate_dialogue_fixture.exs
-```
-
 ## Frontend
 
 `priv/static` is served verbatim; there is no build step and no
@@ -166,9 +87,7 @@ the components with `render`, so re-rendering a run — loading a further event
 page — diffs into the existing tree and keeps open disclosures and the reading
 position; `renderKernelTranscriptMarkup` renders the same components to a
 string for the test harness, which therefore runs under plain node with no DOM
-stub. Interpolated values are escaped by the `html` tag; the only raw markup
-embedded is the syntax highlighter's output, which is a pure escaping string
-transform.
+stub. Interpolated values are escaped by the `html` tag.
 
 The REPL panel keeps its imperative controller. Its authoritative-read poll is
 a GET that never changes `mutation_nonce`, so it does not gate the controls;
@@ -210,10 +129,10 @@ Runs-only UI.
 | `GET /api/kernel/runs/:run_id` | `get_run` |
 | `GET /api/kernel/runs/:run_id/turns` | `list_turns` with bounded filters and pagination |
 | `GET /api/kernel/counters` | `counters` |
-| `GET /api/inspection/runs/:run_id` | Fixed private artifact records for the exact run |
+| `GET /api/analysis/runs/:run_id/conversation` | Semantic `RunAnalysis.conversation` result |
 | `GET /api/repl` | Bootstrap or refresh the server-owned analysis session |
 | `POST /api/repl/evaluations` | Evaluate one bounded PTC-Lisp form |
-| `POST /api/repl/templates` | Format an inert `log/run` or `log/turns` editor template |
+| `POST /api/repl/templates` | Format an inert `analysis/overview` or `analysis/activity` editor template |
 | `POST /api/repl/reset` | Persist the current session and capture a replacement |
 | `DELETE /api/repl` | Close and persist the current analysis session |
 
@@ -223,14 +142,12 @@ query, unavailable-adapter, and adapter-failure classifications.
 
 ## Architecture
 
-The root-owned adapter constructs a `Kernel.TraceLog` from the configured
-directory for every query. The viewer owns only HTTP argument decoding and
-rendering; it does not duplicate trace validation or run derivation. Adapter
-configuration is passed through the Bandit/Plug instance rather than global
-application environment. No browser route reads an arbitrary trace filename,
-and the separate inspection adapter receives only the startup-pinned opaque
-grant and URL run ID. Private records are held in a dedicated process; Bandit
-plug options and request Logger/Telemetry metadata contain only that process
-PID. After sending an inspection response, the returned connection is scrubbed
-of its response body before Bandit emits stop metadata. The frontend contains
-no parser or renderer for the retired raw event format.
+The root-owned adapter constructs immutable Kernel snapshots from the
+configured sources. The Viewer owns only HTTP argument decoding and rendering;
+it does not duplicate trace validation, run derivation, conversation joins, or
+ambiguity policy. Adapter configuration is passed through the Bandit/Plug
+instance rather than global application environment. No browser route reads an
+arbitrary trace filename or returns raw inspection records. Private records are
+held in a dedicated process; Bandit plug options and request Logger/Telemetry
+metadata contain only that process PID. The frontend contains no parser or
+renderer for raw inspection record families.

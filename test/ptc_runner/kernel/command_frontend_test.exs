@@ -42,7 +42,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
     presentation =
       CommandRouter.execute(
-        ["repl", "--describe-profile", "log-analysis-v2", "--load", "caller-value"],
+        ["repl", "--describe-profile", "run-analysis-v1", "--load", "caller-value"],
         :standalone,
         fn _arguments ->
           send(parent, :unexpected_bootstrap)
@@ -60,6 +60,46 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     refute presentation.stderr =~ "caller-value"
     refute_received :unexpected_bootstrap
     refute_received :unexpected_repl
+  end
+
+  @tag :tmp_dir
+  test "transcript startup and internal failures retain transcript diagnostics", %{tmp_dir: dir} do
+    argv = [
+      "transcript",
+      "run-1",
+      "--traces",
+      Path.join(dir, "traces"),
+      "--inspection",
+      Path.join(dir, "inspection"),
+      "--private-unattended",
+      "--private-output",
+      Path.join(dir, "transcript.private.json")
+    ]
+
+    startup =
+      CommandRouter.execute(
+        argv,
+        :standalone,
+        fn _arguments -> {:error, :command_bootstrap_failed} end,
+        fn _arguments, _runtime -> :ok end
+      )
+
+    assert startup.exit_status == 70
+    assert startup.stderr =~ "error: transcript/startup_failed:"
+    refute startup.stderr =~ "repl/"
+
+    internal =
+      CommandRouter.execute(
+        argv,
+        :standalone,
+        fn _arguments -> {:ok, CommandRuntime.standalone()} end,
+        fn _arguments, _runtime -> raise "private detail" end
+      )
+
+    assert internal.exit_status == 70
+    assert internal.stderr =~ "error: transcript/internal_error:"
+    refute internal.stderr =~ "private detail"
+    refute internal.stderr =~ "repl/"
   end
 
   test "the one-shot frontend rejects repl without invoking bootstrap" do

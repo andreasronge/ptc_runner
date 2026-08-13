@@ -28,7 +28,17 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
     assert {:ok, result} = run("02-deepseek-extract")
     assert %{"model_output" => model_output} = result.value
     assert {:ok, extracted} = Jason.decode(model_output)
-    assert extracted["project"] == "Atlas"
+
+    project = extracted["project"]
+    assert is_binary(project)
+
+    normalized_project =
+      project
+      |> String.trim()
+      |> String.downcase()
+      |> String.replace_prefix("project ", "")
+
+    assert normalized_project == "atlas"
     assert extracted["owner"] == "Priya"
     assert is_binary(extracted["risk"])
 

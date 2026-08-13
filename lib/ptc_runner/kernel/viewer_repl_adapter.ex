@@ -1,6 +1,6 @@
 defmodule PtcRunner.Kernel.ViewerReplAdapter do
   @moduledoc """
-  Local connected backend for the standalone Viewer's log-analysis REPL.
+  Local connected backend for the standalone Viewer's run-analysis REPL.
 
   The connected backend owns Core session handles and an idempotent bounded
   operation ledger. Browser-facing code receives only opaque backend/session
@@ -10,7 +10,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapter do
 
   alias PtcRunner.Kernel.ViewerReplBackend
 
-  @profile_id "log-analysis-v2"
+  @profile_id "run-analysis-v1"
 
   # The standalone Viewer validates this callback contract dynamically. The
   # root library deliberately does not depend on the nested Viewer project.
@@ -23,7 +23,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapter do
        %{
          "enabled" => true,
          "profile_id" => @profile_id,
-         "namespaces" => ["cap", "log", "log.analysis"],
+         "namespaces" => ["analysis", "cap"],
          "source_limit_bytes" => 65_536
        }}
     else

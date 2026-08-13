@@ -4,10 +4,10 @@ const POLL_INTERVAL_MS = 1000;
 const RELOAD_MARKER = 'ptc-viewer-repl-reload-attempted';
 
 const EXAMPLES = [
-  ['Runs', '(log/runs {})'],
-  ['Run', '(log/run "run-id")'],
-  ['Turns', '(log/turns "run-id" {})'],
-  ['Counters', '(log/counters {})']
+  ['Runs', '(analysis/runs {})'],
+  ['Run', '(analysis/overview "run-id")'],
+  ['Turns', '(analysis/activity "run-id" {})'],
+  ['Failure', '(analysis/failure "run-id" {})']
 ];
 
 const STOPPED_RETRY_ERRORS = new Map([

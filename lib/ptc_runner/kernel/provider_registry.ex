@@ -650,8 +650,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
     if Map.keys(built) --
          [:capabilities, :snapshot, :close, :data_class, :accepts_data, :exports] == [] and
-         capabilities != [] and length(capabilities) <= 128 and
-         Enum.all?(capabilities, &match?(%Capability{}, &1)) and
+         valid_capabilities?(capabilities, provides) and
          (is_nil(snapshot) or JSONValue.map?(snapshot)) and
          (is_nil(close) or is_function(close, 0)) and
          data_class in [:normal, :private_inspection] and
@@ -674,6 +673,13 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   defp normalize_build({:error, _reason} = error, _provides), do: error
   defp normalize_build(_result, _provides), do: {:error, :invalid_provider_build}
+
+  defp valid_capabilities?(capabilities, provides) when is_list(capabilities) do
+    (capabilities != [] or provides != []) and length(capabilities) <= 128 and
+      Enum.all?(capabilities, &match?(%Capability{}, &1))
+  end
+
+  defp valid_capabilities?(_capabilities, _provides), do: false
 
   defp invoke(function, failure) do
     function.()

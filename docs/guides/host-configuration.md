@@ -564,6 +564,12 @@ lists the derived capability names,
 the query contract, and [Running and debugging](running-and-debugging.md) covers
 producing the artifacts in the first place.
 
+A manifest that selects the trace snapshot only as the inspection provider's
+acquisition dependency may set its provider config to `{"expose": false}`.
+The trace provider still exports its opaque frozen snapshot to the paired
+inspection provider, but contributes no duplicate prompt-visible analysis
+capabilities.
+
 ## Data classes
 
 Every installation carries a data class and a set of classes it accepts:

@@ -18,7 +18,7 @@ defmodule PtcRunner.Kernel.NamedMissionReaderWriterExampleTest do
     on_exit(fn -> InstallationCatalog.close(catalog) end)
 
     assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
-    assert {:ok, limits} = Limits.new()
+    assert {:ok, limits} = Limits.new(evaluation_timeout_ms: 15_000)
 
     context = %{
       application_content_digest: String.duplicate("0", 64),

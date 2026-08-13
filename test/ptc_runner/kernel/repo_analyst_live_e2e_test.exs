@@ -138,8 +138,8 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
       count_source
     )
 
-    assert_exact_conversation(records, task)
-    assert_required_exploration(records, paths.source_path)
+    assert_exact_conversation(records, task, paths.max_turns)
+    assert_required_exploration(records, paths.source_path, paths.max_turns)
 
     for citation <- citations do
       assert Map.keys(citation) |> Enum.sort() ==
@@ -207,7 +207,7 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
       @manifest_template
       |> File.read!()
       |> Jason.decode!()
-      |> put_in(["mission", "components"], [
+      |> put_in(["missions", "default", "components"], [
         %{"library" => "cap"},
         %{"id" => "repo", "path" => "repo.clj", "dependencies" => ["cap"]}
       ])
@@ -240,7 +240,8 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
       manifest: manifest_path,
       source: source,
       source_path: source_path,
-      task: Map.fetch!(input, "task")
+      task: Map.fetch!(input, "task"),
+      max_turns: input |> Map.fetch!("agent") |> Map.fetch!("max_turns")
     }
   end
 
@@ -281,7 +282,7 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
            end)
   end
 
-  defp assert_exact_conversation(records, task) do
+  defp assert_exact_conversation(records, task, max_turns) do
     inputs =
       records
       |> Enum.filter(&capability_record?(&1, "capability-input", "llm-request"))
@@ -300,8 +301,12 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
       |> Map.values()
       |> Enum.min_by(& &1["sequence"])
 
+    initial_task =
+      task <>
+        "\n\nTURN BUDGET: #{max_turns} turns remain, including the next program."
+
     assert initial_input["payload"]["arguments"]["messages"] == [
-             %{"role" => "user", "content" => task}
+             %{"role" => "user", "content" => initial_task}
            ]
 
     for {id, input} <- inputs do
@@ -347,7 +352,7 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
                      [
                        %{
                          "role" => "assistant",
-                         "content" => value["content"],
+                         "content" => normalized_rationale(value["content"]),
                          "tool_calls" => [tool_call]
                        },
                        %{
@@ -369,23 +374,37 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
         assert [%{"role" => "user", "content" => correction}] =
                  Enum.drop(messages, length(current_messages))
 
+        turns_remaining = max_turns - index - 1
+
+        turn_budget =
+          if turns_remaining == 1,
+            do: "1 turn remains",
+            else: "#{turns_remaining} turns remain"
+
         assert String.starts_with?(correction, "Protocol error: ")
 
         assert String.ends_with?(
                  correction,
-                 ". Call run_ptc_lisp exactly once with one program string."
+                 ". Call run_ptc_lisp exactly once with one program string.\n\n" <>
+                   "TURN BUDGET: #{turn_budget}, including the next program."
                )
       end
     end
   end
 
-  defp assert_required_exploration(records, source_path) do
+  defp normalized_rationale(content) when is_binary(content) do
+    if String.trim(content) == "", do: nil, else: content
+  end
+
+  defp normalized_rationale(_content), do: nil
+
+  defp assert_required_exploration(records, source_path, max_turns) do
     evaluations =
       records
       |> Enum.filter(&(&1["record_type"] == "evaluation-source"))
       |> Enum.sort_by(& &1["sequence"])
 
-    assert length(evaluations) in 1..8
+    assert length(evaluations) in 1..max_turns
     terminal = List.last(evaluations)
 
     discovery_names = ~w(workspace.list workspace.find workspace.search)
