@@ -86,8 +86,17 @@ defmodule PtcRunner.Kernel.CommandRenderer do
         "#{error["message"]} " <>
         "(run_ref: #{run_ref})"
 
-    base <> rejection_suffix(rejection) <> "\n"
+    base <> diagnostic_suffix(error) <> rejection_suffix(rejection) <> "\n"
   end
+
+  defp diagnostic_suffix(%{
+         "phase" => "active_preflight",
+         "code" => "credential_unavailable",
+         "subject" => %{"operation" => "credentials"}
+       }),
+       do: "; export it, pass --env-file PATH, or use a host file credential"
+
+  defp diagnostic_suffix(_error), do: ""
 
   defp subject_prefix(%{
          "kind" => "provider",

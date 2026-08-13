@@ -527,11 +527,12 @@ connect answer skips the coordinator. Anything that fails renders one
 catalogued diagnostic and no rows at all. Before active connect work, the
 frontend runtime runs its environment-setup callback only when inert
 preparation proves that a selected LLM installation uses an environment
-credential. The Mix frontend may therefore load `.env`; the standalone
-frontend has no environment-setup callback. The runtime's provider-application
-mode then controls optional applications: `:command_vm` starts a selected
-application inside the active provider session, while `:host_owned` requires
-the application to be running already.
+credential. Both command frontends install that callback only when
+`--env-file FILE` explicitly names the exact dotenv input; neither frontend
+searches for one. The runtime's provider-application mode then controls
+optional applications: `:command_vm` starts a selected application inside the
+active provider session, while `:host_owned` requires the application to be
+running already.
 Successful `models` is terminal as well. It loads one bounded host document,
 constructs its inert installation catalog, and projects
 `PtcRunner.Kernel.InstallationCatalog.public_installations/1` in alias order. It
@@ -1328,12 +1329,13 @@ the session into the run lifecycle. Exact
 declarative selection grammar belongs in `SelectionRules`; active transport
 behavior belongs in each provider module and the later runtime dispatcher.
 
-Ambient `.env` acquisition belongs to the CLI frontend, not the Kernel. The
-Mix adapter decides once, before entering shared run dispatch, whether a
-selected live-LLM installation declares an environment-backed credential, and
-loads the nearest `.env` there, containing a loader failure as a closed command
-diagnostic. No Kernel module loads it, so an embedding acquires ambient
-environment state only when it chooses to.
+Explicit dotenv acquisition belongs to the CLI frontend, not the Kernel. A
+frontend anchors the `--env-file FILE` path at command entry and installs its
+environment-setup callback before entering shared run dispatch. The callback
+runs only when inert preparation proves that a selected live-LLM installation
+declares an environment-backed credential. No Kernel module searches for or
+loads dotenv input, so an embedding acquires environment state only when it
+chooses to.
 
 Provider occurrence contexts are path-free. They carry safe display identity,
 application content and effective digests, final bundle hashes, input

@@ -115,20 +115,22 @@ A command-owned VM disables dependency `.env` readers before starting the
 selected provider application. A reused host-owned application keeps whatever
 its own start applied, because it was already running.
 
-For a selected shipped LLM whose declared credential uses `env`, the Mix
-frontend loads the nearest `.env` through `PtcRunner.Dotenv` once, after
-preparation has established which providers are selected and before any
-execution owner, provider session, or run clock exists. Loading is command
-setup rather than bounded run work: it reads the filesystem and mutates the VM
-environment, so it can be neither deadline-cancelled nor rolled back, and it
-never consumes the run budget. One declared credential
-triggers the load, but the load is not scoped to it: the loader walks up from
-the invocation directory to the filesystem root and sets every variable in the
-first `.env` it finds. This happens once per VM and those variables persist for
-the process lifetime, so a later invocation in the same VM keeps them. Existing
-process variables take precedence. Embedded hosts do not load `.env`
-implicitly; export an `env` credential before invoking them, or use a
-shell-local environment manager or explicit secret source:
+`mix ptc` and the standalone `bin/ptc` accept `--env-file FILE` on `run`, active
+`doctor`, and manifest-backed `repl` commands. The path is anchored at command
+entry and selects that exact file; neither frontend searches the current
+directory or its parents. For a selected shipped LLM whose declared credential
+uses `env`, the frontend loads the named file after preparation has established
+which providers are selected and before any execution owner, provider session,
+or run clock exists. Without `--env-file`, no dotenv file is read.
+
+Loading is command setup rather than bounded run work: it reads the filesystem
+and mutates the VM environment, so it can be neither deadline-cancelled nor
+rolled back, and it never consumes the run budget. The load is not scoped to
+the selected credential: every variable in the file is imported and persists
+for the process lifetime. Existing process variables take precedence. Embedded
+hosts do not load dotenv files implicitly; export an `env` credential before
+invoking them, or use a shell-local environment manager or explicit secret
+source:
 
 ```console
 export OPENROUTER_API_KEY="$(secret-tool lookup service openrouter)"
@@ -137,7 +139,8 @@ mix ptc run ptc.json --host-config ptc-host.json
 
 Tools such as `direnv` may populate the process environment before the command
 starts. A `.env` file being Git-ignored does not make it a safe plaintext secret
-store.
+store. For deployment, prefer a secret manager that injects the process
+environment or mounts an owner-readable file for the `file` credential form.
 
 ## Provider sources
 

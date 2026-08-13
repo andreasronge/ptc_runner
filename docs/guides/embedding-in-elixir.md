@@ -135,9 +135,10 @@ no provider implementation, so it admits every shipped LLM installation against
 `:req_llm` regardless of route. A host-owned run therefore still expects that
 application even for a direct `ollama:` or `openai-compat:` model.
 
-Credential loading is decided separately. `mix ptc run` reads the nearest `.env`
-whenever a selected LLM installation declares an `env` credential, including for
-direct routes that need no backing application at all.
+Credential loading is decided separately. `mix ptc` and `bin/ptc` read only the
+exact file named by `--env-file` when a selected LLM installation declares an
+`env` credential, including for direct routes that need no backing application
+at all. Without the flag, neither frontend searches for a dotenv file.
 
 ## Attest public model identity
 

@@ -32,7 +32,9 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Set `OPENROUTER_API_KEY` in `.env` to your key. `.env` is Git-ignored, and
+Set `OPENROUTER_API_KEY` in `.env` to your key. The command names that exact
+file with `--env-file`; neither command frontend searches for `.env`
+implicitly. `.env` is Git-ignored, and
 credentials never belong in a manifest, a PTC-Lisp file, or a trace.
 [Host configuration](host-configuration.md#credentials) documents the three
 declaration forms and how to move off `.env` for a real deployment.
@@ -41,6 +43,7 @@ declaration forms and how to move off `.env` for a real deployment.
 
 ```console
 mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
+  --env-file .env \
   --host-config examples/kernel-tutorial/ptc-host.json
 ```
 
@@ -63,7 +66,7 @@ out in the [README](../../README.md#why-it-is-safe).
 A missing or unreadable key aborts before the run:
 
 ```text
-** (Mix) error: active_preflight/credential_unavailable: provider/deepseek/credentials: a required provider credential is unavailable (run_ref: cmd-00000000000000000000000000)
+** (Mix) error: active_preflight/credential_unavailable: provider/deepseek/credentials: a required provider credential is unavailable (run_ref: cmd-00000000000000000000000000); export it, pass --env-file PATH, or use a host file credential
 ```
 
 The `provider/deepseek/credentials` subject identifies the provider alias and
@@ -73,6 +76,7 @@ complete readiness report:
 
 ```console
 mix ptc doctor examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
+  --env-file .env \
   --host-config examples/kernel-tutorial/ptc-host.json --connect
 ```
 

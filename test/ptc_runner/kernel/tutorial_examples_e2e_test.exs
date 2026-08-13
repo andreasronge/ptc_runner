@@ -14,7 +14,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
   @host Path.join(@examples, "ptc-host.json")
 
   setup_all do
-    :ok = PtcRunner.Dotenv.load()
+    :ok = LLMSupport.load_dotenv()
     :ok = LLMSupport.admit_provider_application!()
 
     if System.get_env("OPENROUTER_API_KEY") do
