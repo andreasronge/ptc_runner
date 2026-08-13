@@ -52,12 +52,10 @@ PtcRunner then calls `snapshot_info` once during provider assembly and publishes
 the value as `content_snapshot_hash` in the safe provider snapshot. Two things
 consume it. Snapshot-backed capability results carry it, so a citation stays
 bound to the exact bytes queried. And an evaluation harness can require it to
-match before treating two runs as comparable — `repo-analyst/aggregate.clj`
-rejects a baseline and candidate pair whose content hashes differ. Install the
-field when a run's conclusions will be cited or compared against another run,
-and omit it otherwise.
+match before treating two runs as comparable. Install the field when a run's
+conclusions will be cited or compared against another run, and omit it
+otherwise.
 
-`repo-analyst.host.json` in the repository root is a working installation.
 [Host configuration](../../../docs/guides/host-configuration.md#mcp-servers) is
 the full reference.
 

@@ -738,25 +738,6 @@
       ],
       "type": "type_i"
     },
-    "bee5487fd5c242a94e571d47d06ff203469efd01ee3400e7948fa69b1f59d26a": {
-      "describe": "type_i mass=41 test/ptc_runner/kernel/repo_analyst_application_test.exs:695 <-> test/ptc_runner/kernel/repo_analyst_evaluation_test.exs:612",
-      "files": [
-        "test/ptc_runner/kernel/repo_analyst_application_test.exs",
-        "test/ptc_runner/kernel/repo_analyst_evaluation_test.exs"
-      ],
-      "mass": 41,
-      "occurrences": [
-        {
-          "file": "test/ptc_runner/kernel/repo_analyst_application_test.exs",
-          "snippet": "009aa26d6e249596b3dc27779d60e0c8877f9db1609aaa4e1989209fbb1a9d2a"
-        },
-        {
-          "file": "test/ptc_runner/kernel/repo_analyst_evaluation_test.exs",
-          "snippet": "009aa26d6e249596b3dc27779d60e0c8877f9db1609aaa4e1989209fbb1a9d2a"
-        }
-      ],
-      "type": "type_i"
-    },
     "d388ee45943cbbb3b013288e599e6c5d3616c640330d592ca3918319788c1214": {
       "describe": "type_i mass=31 lib/ptc_runner/lisp/java/surface/validator.ex:1857 <-> lib/ptc_runner/lisp/java/surface/validator.ex:1882 <-> lib/ptc_runner/lisp/java/surface/validator.ex:1920",
       "files": [

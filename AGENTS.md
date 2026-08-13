@@ -142,9 +142,6 @@ load-sensitive failures.
   `mix ptc run` works.
 - `bench/` — benchmarks (`mix bench.check`, `mix bench.heap`) with committed
   baselines in `bench/baselines/`.
-- `repo-analyst/` — the repo-analysis manifest suite PtcRunner dogfoods; its
-  host configs and fixtures are `repo-analyst*.json` at the repo root.
-
 ## Conventions
 
 - Timestamps: `:utc_datetime`, never `:naive_datetime`. Durations: integer
