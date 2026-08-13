@@ -1,9 +1,9 @@
 # Components and preludes
 
-A component is one immutable PTC-Lisp module. It declares a single namespace
-and may depend only on the component IDs listed in its `dependencies` field.
-Components compile together into the frozen bundle a run executes; preludes are
-the shipped components a project selects instead of writing its own.
+A component is one immutable PTC-Lisp module with one namespace. Its declared
+component dependencies define the only namespaces it may call while compiling.
+Components compile into a frozen bundle; shipped components are selected as
+libraries instead of copied into an application.
 
 A project names its components in the manifest:
 
@@ -19,19 +19,16 @@ A project names its components in the manifest:
 (defn double [x] (* x 2))
 ```
 
-Public `defn` and `def` forms become qualified exports. `defn-` remains
-private to its namespace. Cross-component calls require both a declared
-component dependency and a public export in the dependency.
+Public `defn` and `def` forms become qualified exports. `defn-` remains private
+to its namespace. A cross-component call needs both a declared dependency and
+a public export in that dependency.
 
-Dependencies are real composition boundaries, not authority grants. A
-component can call only the public namespaces of its direct dependencies. Once
-the whole bundle is installed, evaluated PTC-Lisp can call every public export
-in that bundle. `:visibility :discoverable` keeps an export out of model prompt
-inventory; it does not make the export inaccessible. Evaluated code finds such
-an export at runtime with `(dir)`, `(dir "ns")`, and `(apropos "term")`, and
-reads its documentation with `(doc "ns/name")` or `(export-meta "ns/name")`.
-Use it for exports that other components compose but a model should not have to
-read past in every prompt.
+Dependencies are composition boundaries, not authority grants. Once a bundle
+is installed, evaluated PTC-Lisp can call every public export in it.
+`:visibility :discoverable` removes an export from prompt inventory, not from
+the callable surface. Code can find it with `dir` or `apropos` and inspect it
+with `doc` or `export-meta`. Use this visibility for support APIs that remain
+available without consuming prompt space.
 
 ## Declare runtime contracts
 
@@ -51,36 +48,34 @@ Public exports may declare contracts in their ordinary metadata map:
   10)
 ```
 
-The compiler parses the contract once, rejects malformed declarations,
-duplicate parameter or normalized field names, signature/arity mismatches,
-invalid effects, and constant values that do not match `:type`. At runtime a
-signed function validates positional arguments before entering its body and
-validates every successful result, including an export-local `(return ...)`.
-An explicit `(fail ...)` is not a successful result and its payload is not
-output-validated. Unsigned exports retain dynamic behavior.
+The compiler parses contracts and rejects malformed declarations,
+signature/arity mismatches, invalid effects, and incompatible constants. A
+signed function validates arguments before its body and validates every
+successful result, including an export-local `return`. `fail` is not a
+successful result, so its payload is not output-validated. Unsigned exports
+remain dynamic.
 
-Contract syntax is a string with its own small type grammar; Clojure reader
-metadata such as `^{:signature ...}` is not supported. `:int?` accepts an
-integer or `nil`; it does not make a positional argument omittable. In shaped
-maps, an optional field may be omitted or `nil`. Function signatures currently
-apply only to fixed-arity exports; the grammar has no rest-parameter contract.
+The contract is a string in its own type grammar, not Clojure reader metadata.
+Signatures cover fixed arity only. A nullable type such as `:int?` accepts
+`nil`; it does not make a positional argument optional.
+
 See [Signature syntax](../signature-syntax.md) for the complete grammar and the
-[PTC-Lisp specification](../ptc-lisp-specification.md#98-public-component-contracts).
-[Manifests and capabilities](manifests-and-capabilities.md#test-a-signed-mission-function-without-a-model)
-walks a credential-free run of a signature rejection and its model feedback.
+[PTC-Lisp specification](../ptc-lisp-specification.md#98-public-component-contracts)
+for normative behavior. The
+[manifest guide](manifests-and-capabilities.md#compose-components-and-libraries)
+links to a credential-free rejection and correction example.
 
 ## Tool authority is explicit
 
 Every `tool/name` used by an export is recorded as `tool:name`, including calls
-reached through private helpers or component dependencies. Environment assembly
-rejects a bundle unless the destination environment grants every required tool.
-Requirements validate authority; they never create it.
+through private helpers and dependencies. Environment assembly rejects a bundle
+unless the destination environment grants every requirement. Requirements
+validate authority; they never create it.
 
 ## Select a shipped prelude
 
-Shipped libraries such as `runtime`, `cap`, `kernel`, `llm`, `fs`, `analysis`,
-and the agent and result libraries are selected by ID rather than copied into
-the project:
+Shipped libraries such as `runtime`, `cap`, `kernel`, `llm`, `analysis`, and
+the agent and result libraries are selected by ID:
 
 ```json
 "components": [
@@ -89,50 +84,38 @@ the project:
 ]
 ```
 
-Their transitive dependencies are frozen into the same compiled bundle as local
-components. Unknown IDs, repeated selections, and local/library ID collisions
-are rejected. Workflow and mission bundles compile separately and attach to
-structurally distinct environments.
+Transitive library dependencies join local components in the same frozen
+bundle. Unknown IDs, repeated selections, and local/library ID collisions are
+rejected. Workflow and mission bundles remain separate.
 
-Manifest library selections and `Library.resolve_components/1` expand shipped
-dependencies automatically. `Library.component/1` intentionally returns only
-the requested component; an embedder passing components directly to
-`PtcRunner.Kernel.compile_bundle/1` must first assemble a closed dependency set.
+Manifests and `PtcRunner.Kernel.Library.resolve_components/1` expand shipped
+dependencies. `Library.component/1` intentionally returns only one component;
+direct `PtcRunner.Kernel.compile_bundle/1` callers must supply a closed graph.
 
-Shipped components reuse lower-level components in the same way as application
-components. The analysis stack is a concrete example:
+Shipped components use the same dependency rules. For example:
 
 | Component | Purpose |
 | --- | --- |
 | `cap` | Fail-safe capability-envelope handling and bounded cursor traversal |
 | `analysis` | Six question-shaped public/private run-analysis operations |
 
-`analysis` depends on `cap`. Its Elixir read model joins validated canonical
-and private snapshots; the Lisp layer only unwraps the six bounded semantic
-capabilities. Adding an installed dependency
-does widen the resolved bundle and its callable namespaces, so fixed profiles
-pin the complete resolved component list and version user-visible surface
-changes.
+`analysis` depends on `cap`. Adding an installed dependency widens the callable
+surface, so fixed profiles pin the complete resolved component list and must
+version public surface changes.
 
 [Building agents](building-agents.md) covers the `agent.core` loop and the
 `agent.prompt` policy seam these libraries provide.
 
 ## Boundaries
 
-The manifest selects component sources and trusted provider names; executable
-callbacks stay in the host-owned provider registry. The current manifest
-supports built-in or embedder-registered capability builders, including the
-host-installed MCP source described in the
-[Kernel maintainer guide](kernel-maintainer.md). Future OpenAPI, database, or
-command sources must resolve to the same immutable capability boundary without
-granting manifests arbitrary endpoints, credentials, SQL, commands, or
-callbacks.
+The manifest selects component sources and trusted provider aliases;
+executable callbacks stay in the host-owned provider registry. New provider
+types must preserve this boundary: manifests must not introduce endpoints,
+credentials, SQL, commands, or callbacks.
 
-Human inspection is a separate host-selected private artifact, described in
-[Running and debugging](running-and-debugging.md). Writable prelude workspaces
-remain deferred: a candidate component is compiled from trusted host input and
-promoted into a new frozen revision for later environments, never mutated into
-the active run bundle.
+Private inspection is a separate host-selected artifact, described in
+[Running and debugging](running-and-debugging.md). An active bundle is
+immutable; any changed component must be compiled into a new bundle.
 
 Hosts that compile bundles directly rather than through a manifest use the same
 compiler; see [Embedding in Elixir](embedding-in-elixir.md).

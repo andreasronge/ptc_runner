@@ -1,28 +1,26 @@
 # Kernel REPL
 
-`mix ptc repl` provides deliberately different PTC-Lisp session modes:
+`mix ptc repl` has three deliberately separate session modes:
 
-- direct and manifest-backed sessions are workflow scratchpads;
-- `run-analysis-v1` is a fixed mission session for querying an immutable
-  capture of canonical traces; and
-- `private-run-analysis-v1` is a fixed private mission session for correlating
-  canonical traces with exact private inspection evidence.
+- direct or manifest-backed workflow sessions;
+- `run-analysis-v1` over immutable canonical traces; and
+- `private-run-analysis-v1` over correlated canonical and private inspection
+  evidence.
 
-All modes retain successful definitions and exact `*1`, `*2`, and `*3`
-history for one command. Failed forms preserve the previously committed state.
-A successful evaluation is installed before its terminal event is recorded; if
-that fail-closed event write fails, the returned session reflects the committed
-continuation and is terminally closed instead of exposing a competing stale
-copy.
-They do not share authority: selecting a profile is mutually exclusive with a
-manifest.
+Successful definitions and exact `*1`, `*2`, and `*3` history persist for one
+command. A failed form preserves the previously committed state. Profile and
+manifest modes are mutually exclusive because they carry different authority.
 
-## Direct workflow sessions
+Run `mix ptc help repl` for the exact switch grammar. The canonical frontend
+behavior, including option combinations and JSON Lines records, lives in
+`PtcRunner.ReplFrontend`.
 
-Start an interactive session, repeat expressions, load setup code, or evaluate
-one script:
+## Use a workflow scratchpad
 
-```bash
+Start interactively, repeat expressions, load setup code, or evaluate one
+script:
+
+```console
 mix ptc repl
 mix ptc repl -e '(def x 40)' -e '(+ x 2)' -e '(+ *1 1)'
 mix ptc repl -l setup.clj
@@ -34,109 +32,64 @@ A successful `return` prints its value, including when it is the final form in
 a loaded setup file. The evaluator's internal return control wrapper is never
 part of REPL output.
 
-Use the same strict manifest as `mix ptc run` to attach a frozen workflow
-bundle, workflow capabilities, limits, input, labels, and event policy:
+Attach the same frozen workflow bundle, input, limits, labels, event policy,
+and workflow capabilities as `mix ptc run`:
 
-```bash
+```console
 mix ptc repl --manifest ptc.json
 mix ptc repl --manifest ptc.json --host-config ptc-host.json
 mix ptc repl --manifest ptc.json -e '(workflow/helper data/input)'
 ```
 
-The direct REPL does not accept an ambient capability catalog or arbitrary
-profile configuration. Providers and component sources are selected only by
-the manifest and trusted provider registry.
+A provider-bearing manifest requires `--host-config`. The session performs the
+same audited-local checks, acquires one provider session, and reuses it for
+every expression. Direct and profile modes reject host configuration.
 
-Manifest mode resolves `--host-config HOST.json` through the same bounded
-trusted-installation path as `mix ptc run`. A manifest that selects a provider
-requires this option; a provider-free manifest may omit it. Direct sessions and
-code-owned profile modes reject it. Provider-backed startup runs the shared
-audited-local checks before marking activity, then acquires one provider
-session which every evaluation reuses until the REPL closes.
-
-An interactive session also accepts a few meta-commands:
+Interactive meta-commands are:
 
 ```text
 :doc <name>       Show core function documentation
 :find <pattern>   Search the available function surface
-:help             List the session commands
+:help             List session commands
 ```
 
-The full language surface is in the
-[PTC-Lisp specification](../ptc-lisp-specification.md) and
-[function reference](../function-reference.md).
+See the [PTC-Lisp specification](../ptc-lisp-specification.md) and
+[function reference](../function-reference.md) for the language.
 
-Every workflow session emits canonical Kernel events. Persist them as bounded,
-append-only JSONL with:
+Persist canonical session events with `--trace`:
 
-```bash
+```console
 mix ptc repl --trace trace.jsonl
 mix ptc repl --manifest ptc.json --trace trace.jsonl
 ```
 
-Private event policies require an explicit private manifest selection; the
-REPL requires the reserved `.private.jsonl` suffix and restricts the file to
-owner read/write permissions before appending event data. Normal directory
-grants and the Viewer do not discover private-suffixed traces.
+A private manifest requires an attached terminal and
+`--private-terminal` before provider activity. It rejects scripts, stdin,
+`--eval`, `--load`, JSON Lines, and detached execution; private values and
+prints may reach only that authorized terminal. Private traces use the reserved
+`.private.jsonl` suffix and owner-only permissions.
 
-A private manifest result is interactive authority, not ordinary unattended
-stdout. Manifest mode requires an attached terminal and the explicit
-`--private-terminal` grant during destination preflight, after manifest
-classification but before audited-local checks or opening a provider session.
-It rejects `--eval`, `--load`, positional scripts, stdin, `--format jsonl`, and
-detached execution at that boundary with provider activity false and no
-provider work. Returned private values and prints may reach only that
-authorized terminal; they never enter the JSONL stream or an unauthorized
-stdout sink.
+The session owner retains the continuation, event sink, and provider resources.
+Normal close, abort, caller death, worker failure, and deadline failure converge
+on bounded cleanup before final trace persistence. Embeddings should use
+`PtcRunner.Kernel.ReplSession` rather than reproducing that lifecycle.
 
-The session owner is the only terminalization path for direct and manifest
-workflow sessions. It retains the trace grant, run state, and the manifest
-opening handle; that handle owns the active provider session and its acquired
-resources. Normal close, abort, caller death, evaluation-worker failure, and
-deadline failure converge on bounded cleanup. Provider cleanup precedes the
-single terminal event batch, trace persistence follows that batch, and sinks
-are stopped last. If trace persistence fails after finalization, programmatic
-`close/1` and `abort/2` return the frozen events alongside
-`:trace_persistence_failed` so an embedding host can retain or recover that
-evidence.
+## Query public traces
 
-## Run-analysis mission sessions
+Select the fixed public profile and its required resource:
 
-Select the code-owned profile and supply its required trace resource:
-
-```bash
+```console
 mix ptc repl \
   --profile run-analysis-v1 \
   --resource traces=tmp/tutorial-traces
 ```
 
-The `traces` value must name one normal directory of canonical sanitized JSONL
-files. The task captures it immutably when the session starts. The caller
-cannot select the profile's component, capabilities, limits, mission data,
-labels, persistence policy, or result projection.
+The `traces` resource must be a directory containing ordinary canonical JSONL
+files at its own level. Capture is immutable and one level deep. Empty capture
+is refused so a mispointed directory cannot look like a real empty result. A
+started session reports its admitted file and run counts.
 
-Capture is one directory level deep. A resource directory whose artifacts sit
-in subdirectories admits nothing, so the session refuses to start rather than
-answering every query with an empty page:
-
-```
-ptc repl profile setup failed: the traces resource directory contains no
-*.jsonl trace files at its own level; artifacts in subdirectories are not
-captured
-```
-
-A session that does start reports what it admitted, one line per resource, so
-a partial match is visible before the first query:
-
-```
-Captured traces: 12 files, 12 runs
-```
-
-With `--format jsonl` the same counts appear under `capture` in the
-`session-started` record.
-
-`run-analysis-v1` installs one `analysis` namespace with six question-shaped
-functions:
+The profile installs six question-shaped functions:
 
 ```clojure
 (analysis/runs {"limit" 50})
@@ -145,57 +98,43 @@ functions:
 (analysis/failure "run-id" {"limit" 100})
 ```
 
-Public captures can answer those four questions from sanitized canonical
-traces. `analysis/conversation` and `analysis/source` require the private
-recipe and return an evidence-unavailable error here. Results are bounded and
-carry `complete?`; a false value means the caller must narrow the question or
-raise the bound, never that omitted evidence did not exist.
+Those four return public evidence. `analysis/conversation` and
+`analysis/source` require private inspection authority and return
+`evidence_unavailable` here. Results are bounded and report `complete?`; false
+means narrow the query or raise its bound, not that omitted evidence did not
+exist.
 
-Ordinary bounded mission introspection such as `(tool/runtime-usage {})` and
-`(tool/cap-list {})` is also available. Filesystem, network, LLM, agent,
-workflow, MCP, private-inspection, and nested evaluation authority is absent.
-If an attached workflow kernel component calls `kernel/check-source`, the
-standalone REPL reports `:busy` without charging the check quota: the outer
-interactive form already holds the sole continuation lease.
-
-One session can build up an investigation interactively:
+One session can build an investigation incrementally:
 
 ```clojure
 (def runs (analysis/runs {"limit" 50}))
 (def items (get runs "items"))
-(def ok-runs (filter #(= "ok" (get % "status")) items))
-(map #(select-keys % ["run_id" "duration_ms" "mission_capability_calls"])
-     ok-runs)
 (def slowest (first (sort-by #(get % "duration_ms") > items)))
 (analysis/activity (get slowest "run_id") {"limit" 100})
 ```
 
-Loaded files, repeated `--eval` forms, positional scripts, stdin, and
-interactive forms all use the same mission continuation and aggregate budget.
+Loaded files, repeated expressions, scripts, stdin, and interactive forms use
+one serialized mission continuation and aggregate budget. Each source input is
+bounded before evaluation. The profile contains no filesystem, network, LLM,
+agent, workflow, MCP, private-inspection, or nested-evaluation authority.
 
-Each of those source inputs is bounded by the profile's
-`subordinate_source_bytes` limit before evaluation. Oversized load files,
-scripts, stdin, and accumulated interactive forms are rejected without first
-reading an unbounded source into the Mix task.
+Inspect its complete safe static contract without opening any resource:
 
-```bash
-mix ptc repl \
-  --profile run-analysis-v1 \
-  --resource traces=tmp/tutorial-traces \
-  -e '(def runs (analysis/runs {}))' \
-  -e '(count (get runs "items"))'
+```console
+mix ptc repl --describe-profile run-analysis-v1
+mix ptc repl --describe-profile run-analysis-v1 --format jsonl
 ```
 
-`return` and `fail` are per-form outcomes in this human session. They do not
-close it. A terminal deadline or Kernel budget prevents later forms; normal
-close still finalizes the session trace with the authoritative terminal reason.
+The description includes fixed resources, components, namespaces,
+capabilities, limits, and policies, but no paths, source, processes, callbacks,
+or credentials.
 
-## Private inspection mission sessions
+## Query private inspection evidence
 
-Use the private profile only on an attached terminal, and explicitly authorize
-that terminal as the private result sink:
+Interactive private analysis requires an attached terminal and explicit sink
+authorization:
 
-```bash
+```console
 mix ptc repl \
   --profile private-run-analysis-v1 \
   --resource traces=tmp/tutorial-traces \
@@ -204,31 +143,51 @@ mix ptc repl \
   --private-terminal
 ```
 
-The profile checks both terminal attachment and `--private-terminal` before it
-opens either source directory. Its `traces`, `inspection`, and analysis-trace
-directories must be physically separate, including through ancestors and
-symlink aliases. Inspection capture validates every private artifact against
-the corresponding run in the immutable canonical trace capture; malformed,
-replaced, uncorrelated, or oversized input rejects the whole private source.
-An artifact from an unsupported inspection schema also rejects the whole
-source, and setup reports both the artifact's declared version and the version
-supported by the running build. Use a matching PtcRunner build to inspect the
-retained artifact, or regenerate it with the current build.
+The trace, inspection, and analysis-trace directories must be physically
+separate, including through ancestors and symlink aliases. Capture validates
+every private artifact against its canonical run. A malformed, changed,
+uncorrelated, oversized, or unsupported artifact rejects the complete private
+source. Use the PtcRunner build matching the artifact's reported schema when
+versions differ.
+
+Private authority enriches the same six operations rather than exposing raw
+record-family APIs:
+
+```clojure
+(def runs (analysis/runs {"limit" 20}))
+(def run-id (get (first (get runs "items")) "run_id"))
+(analysis/overview run-id)
+(analysis/conversation run-id {"limit" 1000})
+(analysis/failure run-id {"limit" 1000})
+(analysis/source run-id {"limit" 1000})
+```
+
+Results may include exact model messages, generated programs, effective
+component source, capability payloads, prints, failure details, and terminal
+values. `conversation` reconstructs cumulative model requests and reports
+ambiguous predecessor relationships instead of guessing. `failure` relates
+programs conservatively to diagnostics.
+
+For one complete conversation, use the simpler one-shot command:
+
+```console
+ptc transcript RUN_ID \
+  --traces tmp/tutorial-traces \
+  --inspection tmp/tutorial-inspection \
+  --private-unattended \
+  --private-output tmp/transcript.private.json
+```
+
+The destination is reserved at owner-only mode before capture. Incomplete or
+ambiguous evidence fails without publication.
 
 ### Private analysis without a terminal
 
-For a deliberately unattended private analysis, authorize the command's own
-streams instead with `--private-unattended`. That destination permits `--eval`,
-`--load`, a positional script or stdin, and `--format jsonl`; it is mutually
-exclusive with `--private-terminal`. Because private values may then reach the
-caller-controlled stdout sink, redirect it only to an owner-authorized private
-destination and do not treat it as an ordinary public command channel:
+`--private-unattended` authorizes the command's own streams as the private
+sink. It admits expressions, setup files, scripts, stdin, and JSON Lines and is
+mutually exclusive with `--private-terminal`:
 
-In a repository checkout, set `MIX_QUIET=1` for machine-readable output so
-Mix and dependency build progress do not share stdout. The packaged `ptc`
-executable and container entry point do not have that Mix build stream.
-
-```bash
+```console
 MIX_QUIET=1 mix ptc repl \
   --profile private-run-analysis-v1 \
   --resource traces=tmp/tutorial-traces \
@@ -240,97 +199,26 @@ MIX_QUIET=1 mix ptc repl \
   >tmp/private-analysis.jsonl
 ```
 
-`private-run-analysis-v1` installs the same `analysis` namespace and reads both
-ordinary and `.private.jsonl` canonical traces, still excluding inspection
-files from the trace resource. Private authority enriches the same result
-shapes instead of requiring another vocabulary:
+Use `MIX_QUIET=1` in a checkout so Mix build progress does not share stdout.
+The packaged command has no Mix build stream.
 
-```clojure
-(def runs (analysis/runs {"limit" 20}))
-(def run-id (get (first (get runs "items")) "run_id"))
-(analysis/overview run-id)
-(analysis/conversation run-id {"limit" 1000})
-(analysis/failure run-id {"limit" 1000})
-(analysis/source run-id {"limit" 1000})
-```
+Both private switches are accident guards, not access control. A same-UID
+caller can read the source artifacts, and a pseudo-terminal can satisfy the
+terminal check. Unattended output may enter shell logs, coding-agent
+transcripts, or provider logs. Authorize every downstream sink for the same
+private data.
 
-`conversation` reconstructs cumulative model requests into ordered streams and
-preserves the terminal response, generated programs, feedback, system prompt,
-and token usage without exposing inspection record shapes. Independent model
-calls remain separate streams; an equal maximal predecessor is reported as
-ambiguous. `failure` returns the private evaluator diagnostic and relevant
-programs with an explicit `direct`, `same_workflow_evaluation`, `preceding`, or
-`unknown` relationship. `overview` includes the exact strictly JSON terminal
-value when V5 captured one. `activity` includes exact non-LLM capability,
-provider, print, and error facets.
+Private evaluation diagnostics never forward arbitrary evaluator text that
+could quote captured evidence. Safe diagnostics may rebuild names found
+verbatim in the operator's submitted source; otherwise the message is visibly
+redacted while the fault kind, continuation effect, and usage remain exact.
 
-For the flagship dialogue journey, avoid a REPL entirely:
+## Keep analysis traces separate
 
-```bash
-ptc transcript run-id \
-  --traces tmp/tutorial-traces \
-  --inspection tmp/tutorial-inspection \
-  --private-unattended \
-  --private-output tmp/transcript.private.json
-```
+Profile sessions write a separate safe canonical trace, never into their input
+tree:
 
-The destination is reserved with owner-only permissions before either source
-is captured. An incomplete or ambiguous conversation fails without publishing
-the file.
-
-Exact model messages, generated source, capability arguments/results,
-effective preludes, MCP request/response bodies, execution prints, execution
-error details, and terminal result values may appear on the authorized
-terminal. They are private data: do not paste or redirect them to a public
-sink.
-
-The attached-terminal check is an **accident guard, not access control**. It
-cannot distinguish a human terminal from a pseudo-terminal allocated by
-`script(1)`, `tmux`, or `ssh -t`, and a same-UID caller can already read the
-inspection artifact directly. `--private-unattended` makes deliberate
-non-interactive use explicit and greppable. Exact private values then become
-part of whatever consumes this command's output, including a coding agent's
-conversation transcript and potentially that agent's provider logs. Treat that
-destination with the same care as the private data itself.
-
-The separate canonical analysis trace records only safe profile identity,
-hashes, sizes, timing, outcomes, and usage. It never records the evaluated REPL
-source, returned private value, prints, or retained REPL history.
-
-### Private diagnostics
-
-A private session never forwards evaluator message text, because that text can
-quote a captured record. It does rebuild the diagnostics that describe nothing
-but the operator's own input: an undefined-variable failure reports the names
-from the submitted source, each checked to appear verbatim in it.
-
-```clojure
-(defn- g [x] (* x 3)) (return (g 14))
-;=> Error (unbound_var): Undefined variables: defn-, g, x. Hint: 'defn-'
-;   defines a private helper in component source only; use defn in dynamic
-;   source [continuation preserved]
-```
-
-A name that is not in the submitted source is dropped, and the message says so
-rather than presenting a short list as the whole cause. Every other failure
-answers with a fixed string and `message_redacted?` set, so a withheld
-diagnostic is visibly withheld rather than silently absent:
-
-```clojure
-("some-string" 1)
-;=> Error (not_callable): private evaluation failed; diagnostic withheld by
-;   the private result policy [continuation preserved]
-```
-
-The fault `kind`, the continuation effect, and every usage counter stay exact
-in both cases.
-
-### Separate analysis traces
-
-Terminal profile sessions never write their analysis trace into the captured
-input tree. Supply an existing physically separate output directory:
-
-```bash
+```console
 mix ptc repl \
   --profile run-analysis-v1 \
   --resource traces=tmp/tutorial-traces \
@@ -338,21 +226,20 @@ mix ptc repl \
   -e '(analysis/overview "run-id")'
 ```
 
-Without `--session-trace-dir`, the task creates a private `0700` directory
-under the operating system temporary directory. On close it reports the
-absolute `<run-analysis-id>.jsonl` path. The file is published atomically,
-never appended, and contains the profile ID and effective digest. Evaluated
-source and exact trace-query payloads are not copied into canonical events.
+Without `--session-trace-dir`, PtcRunner creates a private temporary directory
+and reports the final trace path on close. The file is atomically published and
+contains safe profile identity, hashes, sizes, timing, outcomes, and usage. It
+does not contain evaluated source, exact query payloads, private values, prints,
+or REPL history.
 
-The output directory cannot be the input directory, an ancestor or descendant
-of it, or the same physical directory through symlinked parents.
+The output directory cannot equal, contain, or be contained by a resource
+directory, including through physical aliases.
 
-### JSON Lines for coding agents
+## Use JSON Lines in automation
 
-Coding agents can avoid PTY and prompt handling by repeating `-e` with
-`--format jsonl`:
+Profile JSON Lines mode is non-interactive:
 
-```bash
+```console
 MIX_QUIET=1 mix ptc repl \
   --profile run-analysis-v1 \
   --resource traces=tmp/tutorial-traces \
@@ -362,30 +249,22 @@ MIX_QUIET=1 mix ptc repl \
   -e '(count (get runs "items"))'
 ```
 
-Every task-emitted stdout line is one JSON object. Records use schema version 1
-and, when their corresponding lifecycle stage is reached, appear in this order:
+When their lifecycle stages are reached, records appear in this order:
 
-1. one `session-started` record after successful session construction;
-2. one `evaluation` record per accepted source, containing `index`,
-   `input_kind`, and the bounded `AnalysisSession` result projection;
-3. one `session-closed` record only after successful close and persistence,
-   containing the persisted `trace_path`;
-4. a final `command-error` for an unsuccessful command, with category `cli`, `setup`,
-   `evaluation`, `lifecycle`, `persistence`, or `frontend`.
+1. one `session-started` after construction;
+2. one `evaluation` per accepted source;
+3. one `session-closed` after successful close and trace publication;
+4. a final `command-error` when the command is unsuccessful.
 
-Validation and setup failures can therefore produce only `command-error`;
-persistence failure follows any started/evaluation records without claiming a
-successful `session-closed` record.
+Validation or setup can therefore emit only `command-error`; persistence
+failure follows earlier records without claiming `session-closed`. Records use
+schema version 1. Evaluation records contain the bounded mission result and no
+extra raw-source copy.
 
-The task adds no raw source field or independent source copy. Returned values,
-prints, and bounded evaluator messages remain intentional public feedback and
-may naturally contain text also present in a program.
+By default, one failed expression stops later ones. Continue requested
+expressions while preserving the final nonzero status with:
 
-JSONL is non-interactive only. Any command error makes the Mix process
-unsuccessful. To collect feedback from later expressions after a recoverable
-form error, use `--continue-on-error` with at least two `-e` arguments:
-
-```bash
+```console
 MIX_QUIET=1 mix ptc repl \
   --profile run-analysis-v1 \
   --resource traces=tmp/tutorial-traces \
@@ -396,33 +275,17 @@ MIX_QUIET=1 mix ptc repl \
   -e '(count (get runs "items"))'
 ```
 
-Later forms see the state committed before the failed form. The session closes
-and persists normally, but the final process status remains non-zero because a
-requested evaluation failed.
-
-Inspect the safe static contract without capturing traces or starting a
-session:
-
-```bash
-mix ptc repl --describe-profile run-analysis-v1
-MIX_QUIET=1 mix ptc repl --describe-profile run-analysis-v1 --format jsonl
-```
-
-The description lists the required resources, complete component closure,
-callable namespaces, capabilities, fixed limits, and policies. It contains no path, snapshot,
-callback, process identifier, source, or credential.
+`--output` and `--private-output` may atomically publish the value of exactly
+one non-interactive public or private profile evaluation. They do not replace
+existing files.
 
 ## Next steps
 
-- [Running and debugging](running-and-debugging.md) owns the run command,
-  result shape, trace capture, private inspection capture, and the Viewer. For
-  a manifest entry run rather than a REPL session, use
-  `mix ptc run MANIFEST --trace-dir DIR`.
-- [Manifests and capabilities](manifests-and-capabilities.md) documents the
-  manifest that `--manifest` sessions attach to, and the trace and inspection
-  snapshot providers these profiles read.
-- [Components and preludes](components-and-preludes.md) explains the core and
-  analysis components these profiles install, dependency closure, and how to
-  package your own analysis functions the same way.
-- Hosts driving `PtcRunner.Kernel.ReplSession` programmatically should read
-  [Embedding in Elixir](embedding-in-elixir.md) for its ownership rules.
+- [Running and debugging](running-and-debugging.md) covers run artifacts and
+  the Viewer.
+- [Manifests and capabilities](manifests-and-capabilities.md) covers attached
+  manifests and snapshot providers.
+- [Components and preludes](components-and-preludes.md) explains the profile's
+  bundled analysis components.
+- [Embedding in Elixir](embedding-in-elixir.md) covers programmatic session
+  ownership.

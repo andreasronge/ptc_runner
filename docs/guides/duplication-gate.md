@@ -3,59 +3,45 @@
 **Audience: people changing PtcRunner itself.** This gate runs over this
 repository's own source; it is not part of the runtime an application uses.
 
-`mix precommit` and CI run `scripts/duplication_gate.sh check`, which detects
-copy-pasted code with [ExDNA](https://github.com/elixir-vibe/ex_dna) and
-compares the result against `.duplication-baseline.json`.
+`mix precommit` and CI run `scripts/duplication_gate.sh check`. It compares an
+[ExDNA](https://github.com/elixir-vibe/ex_dna) report with
+`.duplication-baseline.json`.
 
-The gate is a ratchet, not a threshold. Duplication already recorded in the
-baseline never fails a build; duplication that is not recorded does. That keeps
-the existing backlog out of everybody's way while stopping new copies from
-entering unnoticed.
+The gate is a ratchet: known baseline clones pass, new clones fail. Removing a
+baseline clone also passes and prompts you to update the baseline.
 
 ## What it detects
 
-Exact copies and copies with renamed variables (clone types I and II), over the
-root project's `lib/` and `test/`, for fragments of at least 30 AST nodes.
-Viewer and launcher code are outside this baseline and are not covered by this
-gate. Consecutive clauses of the same function are analysed as one unit, so a
-duplicated multi-clause function is reported once rather than as several
-forgettable fragments.
+The gate finds exact copies and copies with renamed variables (clone types I
+and II) in the root project's `lib/` and `test/`. `.ex_dna.exs` sets the
+minimum fragment mass to 30 AST nodes and excludes alias/import/require/use
+boilerplate. Viewer and launcher code are outside this baseline.
 
-It does **not** detect code that does the same thing written a different way.
-Two implementations that diverged during editing will fall out of the report.
+It does not detect equivalent logic written with different AST structure.
 
 ## When the gate fails
 
-```
-NEW  8b6747b7f283  type_i mass=86  lib/…/gate_probe_alpha.ex:4 <-> lib/…/gate_probe_beta.ex:4
-duplication: baseline=82 current=83 new=1 shrunk=0 resolved=0
-```
-
-Choose deliberately between three responses.
+Choose one of three responses.
 
 ### Extract the shared logic
 
-Correct whenever the copies encode **one piece of knowledge**: a validation
-rule, an encoding, a lattice, a security primitive. Drift between such copies is
-a defect, because a fix applied to one silently leaves the others wrong.
+Extract when copies encode one rule or policy, such as validation, encoding,
+or a security primitive. Put the shared behavior in one owner; do not copy a
+helper into another module to avoid an import.
 
 ### Suppress it, with a reason
 
-Correct when the repetition is **two independent decisions that happen to look
-alike**. Coupling those creates a false dependency, and the next change to one
-has to fight the abstraction. Put the comment above one copy:
+Suppress when independent contracts happen to look alike and extraction would
+couple them. Put a reason above one copy:
 
 ```elixir
 # ex_dna:disable-for-next-line — GenServer callback, intentionally per-module
 def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
 ```
 
-Suppressing one copy removes the whole clone from the report. Other forms are
-`disable-for-this-file`, `disable-for-previous-line`, and `disable-for-lines:N`.
-
-Cases that usually belong here: per-module OTP callbacks, helpers that mirror an
-external contract each module must satisfy independently, and test setup kept
-explicit so a failure points at one test rather than a shared helper.
+Suppressing one occurrence removes the clone from the report. Common examples
+are per-module OTP callbacks, independently owned external-contract adapters,
+and test setup intentionally kept local.
 
 ### Re-bless the baseline
 
@@ -63,26 +49,21 @@ explicit so a failure points at one test rather than a shared helper.
 scripts/duplication_gate.sh bless
 ```
 
-Reserved for duplication you are **accepting as debt** — real, worth fixing, not
-now. It records no reason, so prefer a suppression comment for anything
-deliberate. Keeping the two apart is what makes a shrinking baseline meaningful:
-permanently-acceptable repetition leaves the ledger entirely.
+Bless only real duplication accepted as debt. A baseline entry records no
+reason, so deliberate repetition should use a suppression comment instead.
 
-Re-blessing is also how you lock in an improvement. Removing duplication prints
-`resolved` and passes; bless to make the removal permanent.
+After removing duplication, `check` prints `resolved` and passes. Run `bless`
+to lock in the smaller baseline.
 
 ## Fingerprints and churn
 
-A clone is keyed by its type, file paths, and exact AST-rendered bodies, never by
-line numbers, so edits elsewhere in a file do not re-key it. Comments are
-invisible because the detector works on the AST; whitespace inside strings and
-sigils remains significant.
+A clone key covers its type, file paths, and AST-rendered bodies, not line
+numbers. Moving unrelated lines does not re-key it. Comments are invisible;
+literal string and sigil content remains significant.
 
-Editing inside a known clone re-keys it. The gate reports `shrunk` only when it
-can pair the result one-to-one with prior debt, at least one exact occurrence
-remains, and the clone added no occurrence or file, gained no AST mass, and did
-not become more exact. Ambiguous changes fail as new duplication and require an
-explicit decision; this is intentionally conservative.
+Editing a known clone re-keys it. The gate reports `shrunk` only when it can
+pair the result one-to-one with old debt and prove that no file, occurrence,
+mass, or exactness was added. Ambiguous changes fail as new duplication.
 
 ## Running it directly
 
@@ -94,8 +75,7 @@ mix ex_dna lib/ test/                # full human-readable report
 mix ex_dna.explain 3 lib/ test/      # extraction breakdown for one clone
 ```
 
-Detection takes roughly fifteen seconds over `lib/` and `test/`. Configuration
-lives in `.ex_dna.exs`; `.ex_dna_cache` is a machine-local artefact and is
+Configuration lives in `.ex_dna.exs`. ExDNA cache files are machine-local and
 ignored.
 
 ## Testing an unreleased ExDNA checkout
@@ -111,18 +91,15 @@ mix deps.compile ex_dna --force
 scripts/duplication_gate.sh check
 ```
 
-The override also enables ExDNA's opt-in result cache for the duplication gate.
-Fetch the locked dependency graph before setting the variable; running
-`mix deps.get` with the override active may legitimately re-resolve the
-candidate's transitive development dependencies. Keep the variable set for
-every subsequent Mix command in that build. Unset it and recompile to return to
-the locked Hex dependency:
+The override also enables ExDNA's opt-in result cache. Fetch the locked graph
+before setting it: `mix deps.get` with the override active may re-resolve the
+candidate's development dependencies. Keep the variable set for every Mix
+command in that build. To return to Hex:
 
 ```bash
 unset PTC_EX_DNA_PATH
 mix deps.compile ex_dna --force
 ```
 
-CI has a separate compatibility job pinned to the candidate commit. It runs the
-gate once cold and once warm and verifies that the warm run does not rewrite
-either cache artifact. Ordinary validation and release jobs remain on Hex.
+CI separately tests a pinned candidate checkout cold and warm and verifies that
+the warm run does not rewrite either cache file. Ordinary jobs remain on Hex.

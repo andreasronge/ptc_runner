@@ -1,14 +1,14 @@
 # Embedding PtcRunner in Elixir
 
-Ordinary PtcRunner users should be able to author PTC-Lisp and a manifest
-without writing Elixir. The direct Elixir API exists for applications that
-need custom installed providers, an HTTP or job frontend, application-owned
-configuration, or integration with an existing supervision tree.
+Use the Elixir API when an application needs custom providers, an HTTP or job
+frontend, application-owned configuration, or integration with an existing
+supervision tree. PTC-Lisp authors can normally use manifests and `mix ptc`
+without writing Elixir.
 
-The embedded path uses the same immutable bundles, environments, limits,
-result types, and event contracts as manifest execution.
+The embedded path uses the same immutable bundles, separate environments,
+limits, results, and event contracts as manifest execution.
 
-## Run one embedded workflow
+## Run one workflow directly
 
 ```elixir
 alias PtcRunner.Kernel
@@ -40,17 +40,31 @@ alias PtcRunner.Kernel.WorkflowEnvironment
     event_sink: sink
   )
 
-{:ok, %{value: 42}} = PtcRunner.Kernel.run("(example/run data/input)", config)
+{:ok, %{value: 42}} = Kernel.run("(example/run data/input)", config)
 events = EventSink.events(sink)
 EventSink.stop(sink)
 ```
 
-The host creates every authority-bearing value. `PtcRunner.Kernel.run/2` does not derive
-capabilities from application environment, the process dictionary, or other
-ambient state.
+The host creates every authority-bearing value. `PtcRunner.Kernel.run/2`
+derives nothing from application environment, the process dictionary, or a
+mission's sibling workflow environment. A `RunConfig` and its event sink are
+one-shot; construct fresh values for every run.
 
-The example component has no dependencies. For shipped libraries, resolve the
-installed closure before compiling it:
+The exact constructors, accepted options, and errors live with these public
+modules:
+
+- `PtcRunner.Kernel.Component`
+- `PtcRunner.Kernel.WorkflowEnvironment`
+- `PtcRunner.Kernel.MissionEnvironment`
+- `PtcRunner.Kernel.Limits`
+- `PtcRunner.Kernel.EventSink`
+- `PtcRunner.Kernel.RunConfig`
+- `PtcRunner.Kernel`
+
+## Resolve shipped libraries
+
+The direct example has no dependencies. Resolve the installed closure before
+compiling components that use a shipped library:
 
 ```elixir
 {:ok, components} =
@@ -59,182 +73,113 @@ installed closure before compiling it:
 {:ok, bundle} = PtcRunner.Kernel.compile_bundle(components)
 ```
 
-`Library.component/1` fetches exactly one component and does not expand its
-dependencies. This makes incomplete direct API usage fail at compilation
-instead of producing a partially functional bundle.
+`PtcRunner.Kernel.Library.component/1` returns one component without expanding
+dependencies. `resolve_components/1` returns the closed component set that
+`compile_bundle/1` requires.
 
-## Prefer manifests for deployable projects
+## Prefer the manifest acquisition path
 
-`PtcRunner.Kernel.ApplicationPackage` is the shared acquisition path for
-directory and in-memory applications. It produces a path-free package and
-selected `ExecutionInput`; `request_directory/2` and `request_memory/3` also
-seal the destination-free `ExecutionPolicy` into a `RunRequest`.
-`PtcRunner.Kernel.RunBuilder` consumes that request. Reuse these boundaries
-when an application wants the standard strict manifest contract. Do not build
-a parallel loader or another provider and event path in a web controller or
-job worker. Both embedding paths default to the native result projection;
-JSON-emitting commands select the JSON projection explicitly, while the REPL
-selects native continuation values explicitly. Before that choice, the Kernel
-projects every PTC-Lisp keyword key and value to its name string, so native
-Kernel results no longer depend on whether the parser interned a particular
-keyword name. Native projection still permits other non-JSON values that JSON
-projection rejects.
+Use `PtcRunner.Kernel.ApplicationPackage.request_directory/2` or
+`request_memory/3` when an embedded frontend should accept the same strict
+manifest contract as the CLI. Each returns a sealed, path-free
+`PtcRunner.Kernel.RunRequest`; pass it to
+`PtcRunner.Kernel.RunBuilder.build/3` with a trusted provider registry.
 
-A separately acquired request must use the same installed ceilings as the
-`ProviderRegistry` passed to `RunBuilder.build/3`. The builder rejects a
-mismatch by default. Trusted embedding may deliberately replace that authority
-for one construction only by supplying the same explicit `:installed_limits`
-to both package acquisition and `RunBuilder.build/3`.
+Do not create a separate manifest loader, provider path, or event path in a web
+controller or worker. `ApplicationPackage` owns bounded document acquisition
+and input selection. `RunBuilder` owns provider resolution, compilation,
+environment assembly, sinks, result projection, and cleanup.
 
-## Start a provider's backing application
+Package acquisition and the `PtcRunner.Kernel.ProviderRegistry` passed to the
+builder must use the same installed limit ceilings. Trusted embedding may
+replace them for one construction only by supplying the same
+`:installed_limits` to acquisition and `RunBuilder.build/3`.
 
-The core application deliberately starts no provider dependency on your behalf,
-so depending on `ptc_runner` never starts `req_llm` or `llm_db` inside your
-release. A run admits the application it needs through
-`PtcRunner.Kernel.ProviderApplicationGate`. `mix ptc run` reaches it through the execution-owned
-`ProviderActiveSession.open_consumed_setup/5`, where the execution-session owner
-already owns the prepared run and the session's lifecycle. There is no
-creator-owned variant.
+Direct embedding defaults to native result projection. JSON-emitting commands
+select JSON projection explicitly. Native projection supports continuation
+values that JSON projection rejects; choose the projection at the frontend
+boundary.
 
-An embedded frontend that drives `ProviderRegistry` and `RunBuilder` directly
-does not pass through that gate, so it owns the admission itself. For an
-otherwise-unconfigured default HTTP/1 ReqLLM pool:
+## Own provider applications
+
+PtcRunner does not start optional provider dependencies merely because the
+library is in your release. The CLI admits them through
+`PtcRunner.Kernel.ProviderApplicationGate`; a frontend that drives
+`ProviderRegistry` and `RunBuilder` directly owns that lifecycle.
+
+The optional `c:PtcRunner.LLM.provider_application/1` callback reports whether a
+configured model needs `:req_llm`. Start the application before dispatch. If
+the host owns credential loading, disable dependency `.env` loading first:
 
 ```elixir
-installed_limits = PtcRunner.Kernel.Limits.installed_defaults()
 Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
 Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
-Application.put_env(:req_llm, :stream_pool_count, 1, persistent: true)
-Application.put_env(:req_llm, :stream_pool_size, installed_limits.live_provider_tasks,
-  persistent: true
-)
 {:ok, _started} = Application.ensure_all_started(:req_llm)
 ```
 
-Set `load_dotenv` to `false` first if the host resolves credentials itself; that
-is what the command-owned gate branch does before starting the application, and
-it keeps the dependency from reading a `.env` the host did not choose.
-The command-owned gate also gives ReqLLM's default HTTP/1 Finch pool one shard
-with one connection per installed `live_provider_tasks` slot. It uses the
-installed ceiling because the application constructs one VM-lifetime pool;
-the first manifest's narrower effective limit must not size every later run.
-Direct and host-owned embeddings own this geometry themselves. Explicit
-ReqLLM `:finch` pools or non-HTTP/1 protocol overrides retain ReqLLM's own
-precedence.
+Command frontends read only the exact dotenv file named by `--env-file`; they
+do not search for one. Embedded hosts do not load dotenv files implicitly and
+must acquire environment-backed credentials themselves.
 
-A request issued while that application is stopped fails with a non-retryable
-`:internal` provider error naming the application, rather than a retryable
-transport outage, because retrying cannot start an OTP application. Adapters
-declare what they need through the optional `provider_application/1` callback on
-`PtcRunner.LLM`, which receives the resolved model and answers `:req_llm` or
-`nil`: one adapter may route some models through a dependency and serve others
-directly over HTTP, and only the former fail this way.
+An unstarted required application is a non-retryable host configuration error,
+not a transient model failure. Hosts that configure custom ReqLLM pools also
+own their pool geometry; the CLI uses installed `live_provider_tasks`, not one
+manifest's narrower limit, for its VM-lifetime pool.
 
-Run admission is deliberately coarser. Catalog construction is inert and invokes
-no provider implementation, so it admits every shipped LLM installation against
-`:req_llm` regardless of route. A host-owned run therefore still expects that
-application even for a direct `ollama:` or `openai-compat:` model.
+An adapter may implement `c:PtcRunner.LLM.public_model/1` to attest that its exact
+configured target is safe to publish. Missing, altered, invalid, oversized, or
+raising attestations remain private without preventing execution. Treat the
+callback as information-release policy because targets may contain private
+deployment data.
 
-Credential loading is decided separately. `mix ptc` and `bin/ptc` read only the
-exact file named by `--env-file` when a selected LLM installation declares an
-`env` credential, including for direct routes that need no backing application
-at all. Without the flag, neither frontend searches for a dotenv file.
+## Install custom providers only for native authority
 
-## Attest public model identity
+`PtcRunner.Kernel.ProviderRegistry.new/2` accepts trusted staged builders keyed
+by the bounded names a manifest may select. Register a builder only when the
+built-in host installation sources cannot express the authority; ordinary
+models, MCP servers, snapshots, traces, inspection sources, and replay belong
+in [Host configuration](host-configuration.md).
 
-An embedding that replaces the LLM adapter may implement the optional
-adapter `public_model/1` callback. It receives the exact configured adapter
-target and returns `{:ok, model}` only when that exact value is safe to publish
-in canonical provider snapshots, or `:private` otherwise. PtcRunner also
-requires valid UTF-8, 1–256 bytes, and byte-for-byte equality with the adapter
-target. A missing, invalid, mismatched, or raising callback keeps execution
-working but omits model identity.
-
-Attestation and execution use the same adapter and captured target, so public
-identity cannot drift from what reaches the provider. Treat this callback as an
-explicit information-release policy: operator-supplied values may contain
-private deployment data even when they have a provider prefix.
-
-## Install custom providers
-
-Custom provider builders are trusted Elixir functions registered through
-`PtcRunner.Kernel.ProviderRegistry.new/1`. A manifest may select their bounded
-public names and JSON configuration, but it cannot provide executable callback
-code. Register a builder only for authority the six built-in sources cannot
-express; [Host configuration](host-configuration.md) covers what a plain
-operator document already installs.
-
-Builders receive the path-free application-content digest, target environment,
-construction owner, effective limits, and installed ceilings. Application
-directories and document readers never enter provider selection context;
-provider-owned roots must come from trusted host installation. Builders may
-return capabilities and a safe connector snapshot, plus an idempotent close
-function when the provider owns live resources. The Kernel owns cleanup across
-success, failure, timeout, cancellation, and owner death. Every close function
-must return exactly `:ok`; another return, an exception, or an exit is reported
-as `:provider_cleanup_failed` and can replace a completed run with the terminal
-`:provider_cleanup_error` outcome. Cleanup still attempts every registered
-resource. `ReplSession.close/1` and `abort/2` return
-`{:error, :provider_cleanup_failed, events}` when that failure follows a
-successfully frozen terminal batch; persist those canonical events before
-surfacing the cleanup error.
-
-Keep credentials, endpoints, native handles, and close functions out of
-capability results, PTC-Lisp data, prompts, canonical events, and inspection
+Builders receive a path-free application digest, target environment, owner,
+effective limits, and installed ceilings. They return bounded capabilities,
+safe snapshots, and optional cleanup. Keep credentials, endpoints, handles,
+and cleanup functions out of Lisp values, prompts, events, and inspection
 records.
 
-## Drive REPL sessions programmatically
+The Kernel owns returned resources across success, failure, timeout,
+cancellation, and owner death. Cleanup must be idempotent and return exactly
+`:ok`; cleanup failure can replace a completed run with
+`:provider_cleanup_error`. The complete staged-builder, resource-registration,
+data-policy, and cleanup contracts live in
+`PtcRunner.Kernel.ProviderRegistry` and
+`PtcRunner.Kernel.ResourceRegistrar`.
 
-The interactive sessions described in the [Kernel REPL guide](kernel-repl.md)
-are also available through `PtcRunner.Kernel.ReplSession`. Each session must
-stay in the process that created it. That process performs every evaluation and
-the final close or abort. Sending the struct to another process does not
-transfer its continuation or cleanup authority; `eval/2`, `close/1`, and
-`abort/2` return `{:error, :session_owner_mismatch}` without changing the
-session.
+## Drive REPL sessions from one process
 
-The public value contains an opaque ID resolved through a shared table only the
-creator can read; closed entries are deleted. It contains no owner PID, token,
-continuation value, or raw run-state, configuration, sink, or provider
-capability. The internal owner binds the run state to the configured event and
-optional inspection sinks. Each `eval/2` result is an inert observation
-projection; its memory is not the authoritative continuation and must not be
-threaded back into the session. Preflight errors preserve the committed public
-memory view, and projection is validated before continuation commit.
+`PtcRunner.Kernel.ReplSession` provides the continuation used by the Kernel
+REPL. The process that calls `new/1` must also call every `eval/2`, `close/1`,
+and `abort/2`. Passing the public struct to another process does not transfer
+continuation or cleanup authority.
 
-If the internal owner terminates before or during teardown, `close/1` reports
-`{:error, :session_closed}` and `abort/2` returns `:ok`; both paths also remove
-the creator-side lookup entry for the dead session.
+Each evaluation returns an observation projection and updated public session;
+the authoritative definitions and `*1`/`*2`/`*3` history stay inside the owner.
+Call `close/1` for normal finalization or `abort/2` after an early frontend
+exit. If trace persistence or provider cleanup fails after finalization, the
+error includes the frozen terminal events so the host can preserve evidence.
+See `PtcRunner.Kernel.ReplSession` for exact return shapes and failure modes.
 
-If provider cleanup fails after terminal finalization, `close/1` and `abort/2`
-return `{:error, :provider_cleanup_failed, events}` so the host can persist the
-frozen batch before reporting the error. If an authorized trace cannot be
-persisted after finalization, `close/1` and `abort/2` similarly return
-`{:error, :trace_persistence_failed, events}` so the already frozen evidence is
-not lost. The Mix frontend reports either failure after owner cleanup. Each
-bounded worker starts a small
-monitor-only watchdog before running the workload. The watchdog cancels the
-worker when the creator exits, without changing its trap-exit behavior or
-holding an unbounded workload copy, before retained resources are closed.
+## Keep policy in PTC-Lisp
 
-## Preserve the product boundary
-
-Embedding should not move agent behavior back into Elixir. Keep prompts,
-model-turn logic, retries, delegation, feedback, and task orchestration in
-PTC-Lisp unless the behavior establishes native authority or enforces the
-sandbox boundary.
+Embedding should not move prompts, model-turn logic, retries, delegation, or
+task orchestration into Elixir. Keep those policies in PTC-Lisp unless the code
+establishes native authority or enforces the sandbox boundary.
 
 ## Next steps
 
 - [Manifests and capabilities](manifests-and-capabilities.md) defines the
-  strict manifest contract `RunBuilder` implements, so an embedded frontend
-  accepts the same projects as `mix ptc run`.
-- [Host configuration](host-configuration.md) defines the operator document
-  `HostConfig` loads and `HostInstallation` turns into a provider registry.
-- [Components and preludes](components-and-preludes.md) covers the bundle
-  compiler that `compile_bundle/1` runs.
-- [Running and debugging](running-and-debugging.md) documents the trace and
-  inspection artifacts an embedded event sink produces.
-- The [Kernel maintainer guide](kernel-maintainer.md) maps construction,
-  ownership, lifecycle, observability, and extension points. Exact contracts
-  live beside the public `PtcRunner.Kernel.*` modules.
+  strict manifest contract used by `RunBuilder`.
+- [Host configuration](host-configuration.md) defines provider installations.
+- [Running and debugging](running-and-debugging.md) covers trace and inspection
+  artifacts.
+- [Kernel maintainer](kernel-maintainer.md) maps ownership, lifecycle, and
+  extension points. Exact API contracts live with the public modules.
