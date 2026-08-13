@@ -22,13 +22,17 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.TestHelpers
+
+  if reason = TestHelpers.environment_skip_reason(["PTC_TEST_MCP_2026_ENDPOINT"]) do
+    @moduletag skip: reason
+  end
 
   setup_all do
     :ok = LLMSupport.load_dotenv()
     # Host installation admits a provider application through the prepared-run
     # path; a directly registered builder has to start it itself.
-    :ok = LLMSupport.admit_provider_application!()
-    :ok
+    LLMSupport.admit_provider_application!()
   end
 
   @tag :tmp_dir

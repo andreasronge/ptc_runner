@@ -42,14 +42,10 @@ Wording guardrails, fixed now because the demo will be scrutinized:
 
 ## Why this domain
 
-Selected 2026-07-31 from market research (verifiable-output demand, incumbent
-gap) and from this repository's own evidence: the repo-analyst experiment
-showed that runtime-enforced evidence contracts with a correction turn were
-the intervention that moved publication validity (4/4 invalid drafts
-corrected, 9/10 contract-valid publications). Incident evidence merges the two
-strongest earlier candidates — enforced-citation extraction and incident
-triage — and attaches a real compliance driver (DORA/NIS2 incident
-reporting).
+Selected 2026-07-31 from market research (verifiable-output demand and an
+incumbent gap). Incident evidence merges the two strongest earlier candidates
+— enforced-citation extraction and incident triage — and attaches a real
+compliance driver (DORA/NIS2 incident reporting).
 
 The regulatory overlay is deliberately **not** the application's identity.
 `--format dora-final` is one output template among several (generic
@@ -83,10 +79,10 @@ and tool descriptions.
 
 ### Abstraction feedback
 
-Boilerplate that this application repeats from `repo-analyst` — evidence and
-citation result contracts, timeline normalization, correctable terminal
-drafts — is a signal that the abstraction belongs in a shipped prelude.
-Record each instance; lifting is its own slice with its own review.
+Repeated evidence and citation result contracts, timeline normalization, and
+correctable terminal drafts are signals that an abstraction may belong in a
+shipped prelude. Record each instance; lifting is its own slice with its own
+review.
 
 ## Phases
 
@@ -140,12 +136,12 @@ and output schema:
    least contestable baseline; and
 4. the PtcRunner compiler.
 
-Set release bars only after this pilot. The repo-analyst E4 record shows why:
-at a floor-effect baseline the aggregate accepted a known-defective
-candidate, and ARFBench's frontier score (62.7%) says incident-evidence tasks
-are far from ceiling. Absolute targets chosen before measurement are coin
-flips. The primary claim is relative: support precision materially above the
-same-model conventional agent, with paired bootstrap confidence intervals.
+Set release bars only after this pilot. A floor-effect baseline can make a
+known-defective candidate look acceptable, and ARFBench's frontier score
+(62.7%) says incident-evidence tasks are far from ceiling. Absolute targets
+chosen before measurement are coin flips. The primary claim is relative:
+support precision materially above the same-model conventional agent, with
+paired bootstrap confidence intervals.
 
 **Exit gate:** all four systems produce scoreable output; baselines are above
 the floor on required-fact recall; bars for Phase 4 are committed in writing
@@ -163,8 +159,7 @@ release-gate number.
 
 **Exit gate:** the published result reports the pre-committed bars, paired
 confidence intervals per incident, and every metric that failed — a bounded
-comparison honest about its own power, in the style of the repo-analyst
-record.
+comparison honest about its own power.
 
 ### Phase 5. Qualification packet second act
 
@@ -179,8 +174,7 @@ the self-improvement work: suggested candidates, human promotes.
 ## Non-goals
 
 - No DORA/compliance product identity, hosted service, billing, or tenancy.
-- No autonomous promotion of candidate components; the repo-analyst plan owns
-  that research separately.
+- No autonomous promotion of candidate components.
 - No claim of better root-cause localization (RCAEval baselines may be run
   later, secondary only).
 - No live third-party integrations (PagerDuty, GitHub, Datadog) before the
@@ -194,9 +188,6 @@ the self-improvement work: suggested candidates, human promotes.
   remaining runtime product work; this plan does not gate on it.
 - [`lisp-kernel/stable-cli-contract.md`](../lisp-kernel/stable-cli-contract.md)
   — delivers `ptc init` templating this application later adopts.
-- `repo-analyst-self-improvement.md` (branch
-  `exp/self-improvement-loop-closure`) — evidence-contract and
-  candidate-evaluation mechanisms this application reuses.
 - [Manifests and capabilities](../../guides/manifests-and-capabilities.md) —
   tool effects, signed contracts, and authority validation.
 - External: [SREGym](https://github.com/SREGym/SREGym),

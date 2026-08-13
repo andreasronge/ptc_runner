@@ -111,6 +111,12 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     store_reference = Process.monitor(memory.pid)
     manager_reference = Process.monitor(manager)
 
+    # A monitor request is asynchronous. This process sends both it and the
+    # following process-info request to the manager, so the reply proves the
+    # monitor arrived before the store can be told to kill the manager.
+    assert {:monitored_by, monitoring_processes} = Process.info(manager, :monitored_by)
+    assert self() in monitoring_processes
+
     Process.exit(owner, :kill)
 
     assert_receive {:DOWN, ^store_reference, :process, _store, :normal}, 5_000

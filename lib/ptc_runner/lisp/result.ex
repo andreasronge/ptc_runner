@@ -76,6 +76,11 @@ defmodule PtcRunner.Lisp.Result do
     }
   end
 
+  @doc false
+  @spec unwrap_return(term()) :: term()
+  def unwrap_return({:__ptc_return__, value}), do: value
+  def unwrap_return(value), do: value
+
   @spec error(atom(), String.t(), map()) :: t()
   def error(reason, message, memory), do: error(reason, message, memory, %{})
 

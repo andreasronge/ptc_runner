@@ -147,3 +147,32 @@ PTC_TEST_MCP_OAUTH=1 \
 The scheduled/manual model-driven test uses the same server and additionally
 loads `OPENROUTER_API_KEY` and the optional `PTC_TEST_MODEL` from the root
 checkout's explicitly named `.env` test input.
+
+### Aggregate E2E suite
+
+`mix test --include e2e` runs the live-model tests and every optional MCP test
+whose prerequisites are configured. Missing MCP prerequisites are reported as
+skips, so a checkout configured only with `OPENROUTER_API_KEY` remains a valid
+way to run the model-backed coverage. Once a prerequisite is configured, an
+invalid binary, unreachable endpoint, authentication error, or protocol error
+still fails its test.
+
+The remote MCP tests require `PTC_TEST_MCP_2026_ENDPOINT`. The GitHub MCP test
+requires both:
+
+- `PTC_TEST_GITHUB_MCP_BINARY` — an absolute path to the pinned GitHub MCP
+  Server executable used by CI.
+- `PTC_TEST_GITHUB_TOKEN` — a GitHub token that can read this repository.
+
+The filesystem MCP tests run when a `node` executable is available on `PATH`;
+otherwise they skip with the other unavailable optional integrations.
+
+With the GitHub MCP prerequisites exported, the repository harness supplies a
+temporary remote endpoint while the aggregate suite runs:
+
+```bash
+export PTC_TEST_GITHUB_MCP_BINARY=/absolute/path/to/github-mcp-server
+export PTC_TEST_GITHUB_TOKEN=replace-with-repository-read-token
+bash test/support/mcp_go_stateless/with_server.sh \
+  mix test --include e2e --trace
+```

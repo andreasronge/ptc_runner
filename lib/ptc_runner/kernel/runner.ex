@@ -23,6 +23,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.Result, as: LispResult
   alias PtcRunner.Lisp.RetainedSize
 
   # Matches the bound `PtcRunner.Kernel.AnalysisSession` already applies when
@@ -228,7 +229,7 @@ defmodule PtcRunner.Kernel.Runner do
 
       {:ok, step} ->
         with {:ok, value} <-
-               Lisp.project_boundary_value(kernel_return_value(step.return), :kernel_json),
+               Lisp.project_boundary_value(LispResult.unwrap_return(step.return), :kernel_json),
              {:ok, value} <- project_result(value, config.result_projection) do
           if terminal_result_within_limit?(value, config.limits.terminal_result_bytes) do
             value = RetainedSize.detach_binaries(value)
@@ -508,9 +509,6 @@ defmodule PtcRunner.Kernel.Runner do
       do: :ok,
       else: {:error, :entry_source_exceeded}
   end
-
-  defp kernel_return_value({:__ptc_return__, value}), do: value
-  defp kernel_return_value(value), do: value
 
   defp terminal_result_within_limit?(value, limit) do
     case {RetainedSize.bytes_with_cap(value, limit), safe_encoded_size(value)} do

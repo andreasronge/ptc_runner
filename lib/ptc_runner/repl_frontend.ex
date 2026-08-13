@@ -81,6 +81,7 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Registry
+  alias PtcRunner.Lisp.Result, as: LispResult
   alias PtcRunner.ReplError
 
   @spec run(CommandArguments.t(), CommandRuntime.t()) :: :ok | {:error, binary()}
@@ -1309,7 +1310,7 @@ defmodule PtcRunner.ReplFrontend do
 
   defp print_step(step) do
     Enum.each(step.prints, &info/1)
-    {formatted, _truncated?} = Format.to_clojure(step.return)
+    {formatted, _truncated?} = Format.to_clojure(LispResult.unwrap_return(step.return))
     info(formatted)
   end
 
