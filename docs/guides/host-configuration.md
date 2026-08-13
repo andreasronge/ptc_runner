@@ -330,8 +330,7 @@ the digest identifies exactly the bytes the run could have read. Only the
 digest's shape is checked here; nothing verifies that the server is genuinely
 immutable. The
 [filesystem sample](../../examples/mcp/filesystem/README.md#publishing-the-content-identity)
-explains when the field is worth installing, and `repo-analyst.host.json` in the
-repository root is a working installation of it.
+explains when the field is worth installing.
 
 Ceilings default to a 5,000 ms end-to-end timeout (maximum 300,000), 128
 catalog tools, and 1,000,000 result bytes (maximum 1,048,576).

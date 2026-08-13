@@ -149,9 +149,8 @@ authority is a host grant distinct from `lisp_eval`.
   surface. A run corpus alone is not an evaluation set: qualification needs
   retained replayable inputs (the LLM replay machinery), authored cases,
   expected properties, scoring, and trustworthy outcome joins — and
-  canonical traces deliberately omit exact and private material. The
-  candidate-evaluation chain from the repo-analyst work is the engine;
-  promotion remains human.
+  canonical traces deliberately omit exact and private material. Qualification
+  needs a dedicated candidate-evaluation chain, and promotion remains human.
 
 ## Design decisions
 
@@ -240,8 +239,5 @@ tools replacing dozens of raw ones, and an attestable surface.
   first served application and the shared baseline experiment.
 - [MCP OAuth durable store](mcp-oauth-durable-store.md) — outbound
   authorization persistence a long-running gateway will eventually motivate.
-- `repo-analyst-self-improvement.md` (branch
-  `exp/self-improvement-loop-closure`) — candidate-evaluation machinery and
-  its honest state.
 - [Manifests and capabilities](../../guides/manifests-and-capabilities.md) —
   installation, narrowing, effects, and contract behavior.

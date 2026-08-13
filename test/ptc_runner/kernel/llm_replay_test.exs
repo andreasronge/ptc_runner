@@ -3,11 +3,8 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
   @moduledoc """
   Covers the `llm_replay` host source: fixture decoding, bounds, identity, and
-  owner lifecycle.
-
-  These fixtures prove the runtime. The application fixture set that an
-  evaluation recipe actually replays is `repo-analyst/evaluation/replay.jsonl`
-  and belongs to the evaluator issue.
+  owner lifecycle. Each test builds the minimal fixture set needed to prove the
+  runtime contract.
   """
 
   alias PtcRunner.Kernel.ApplicationPackage
