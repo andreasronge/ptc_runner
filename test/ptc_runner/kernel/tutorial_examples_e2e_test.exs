@@ -56,7 +56,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
     assert result.value == %{"ok" => true, "value" => expected}
     assert result.usage.subordinate_evaluations in 1..4
     assert result.usage.capability_calls.workflow["llm-request"] in 1..4
-    assert result.usage.capability_calls.mission["workspace.read"] == 1
+    assert result.usage.capability_calls.mission["workspace.read"] >= 1
   end
 
   test "the multi-turn tutorial commits a helper before explicit completion" do

@@ -17,6 +17,11 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.TestHelpers
+
+  if reason = TestHelpers.executable_skip_reason(["node"]) do
+    @moduletag skip: reason
+  end
 
   @server Path.expand("../../../examples/mcp/filesystem/dist/server.js", __DIR__)
 
