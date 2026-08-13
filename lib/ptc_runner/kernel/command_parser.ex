@@ -191,7 +191,8 @@ defmodule PtcRunner.Kernel.CommandParser do
 
   defp validate_command(:doctor, positional, options, ordered, frontend_options, frontend)
        when length(positional) <= 1 do
-    if allowed?(:doctor, options, frontend) and enabled_if_present?(options, :connect) do
+    if allowed?(:doctor, options, frontend) and enabled_if_present?(options, :connect) and
+         env_file_active_doctor?(options, frontend_options) do
       application = List.first(positional)
 
       if Map.get(options, :connect, false) and
@@ -255,10 +256,13 @@ defmodule PtcRunner.Kernel.CommandParser do
     end
   end
 
-  defp validate_command(:repl, positional, options, ordered, [], frontend)
+  defp validate_command(:repl, positional, options, ordered, frontend_options, frontend)
        when length(positional) <= 1 do
     cond do
       not allowed?(:repl, options, frontend) ->
+        reject(:repl, :invalid_arguments)
+
+      not env_file_manifest_repl?(options, frontend_options) ->
         reject(:repl, :invalid_arguments)
 
       Map.get(options, :private_terminal, false) and
@@ -276,6 +280,7 @@ defmodule PtcRunner.Kernel.CommandParser do
           application: List.first(positional),
           options: options,
           ordered_options: ordered,
+          frontend_options: frontend_options,
           frontend: frontend
         )
     end
@@ -406,11 +411,24 @@ defmodule PtcRunner.Kernel.CommandParser do
   defp enabled_if_present?(options, name),
     do: not Map.has_key?(options, name) or Map.fetch!(options, name) == true
 
+  defp env_file_active_doctor?(options, frontend_options),
+    do: not Keyword.has_key?(frontend_options, :env_file) or Map.get(options, :connect) == true
+
+  defp env_file_manifest_repl?(options, frontend_options),
+    do: not Keyword.has_key?(frontend_options, :env_file) or Map.has_key?(options, :manifest)
+
   defp frontend_options_valid?(options) do
     authorizations = Keyword.get_values(options, :authorize_mcp)
 
     length(authorizations) <= 128 and authorizations == Enum.uniq(authorizations) and
-      Enum.all?(authorizations, &valid_authorization_name?/1)
+      Enum.all?(authorizations, &valid_authorization_name?/1) and env_file_valid?(options)
+  end
+
+  defp env_file_valid?(options) do
+    case Keyword.fetch(options, :env_file) do
+      :error -> true
+      {:ok, path} -> valid_nonempty_string?(path)
+    end
   end
 
   defp valid_nonempty_string?(value),

@@ -77,7 +77,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
   defp finish(arguments, run_ref, frontend) do
     destinations = CommandDestination.capture(arguments.options)
 
-    case anchor_init_target(arguments) do
+    case anchor_entry_paths(arguments) do
       {:ok, arguments} ->
         finish(arguments, destinations, run_ref, frontend)
 
@@ -88,6 +88,23 @@ defmodule PtcRunner.Kernel.CommandEntry do
            frontend,
            CommandRejection.generic(arguments.command, :invalid_arguments)
          )}
+    end
+  end
+
+  defp anchor_entry_paths(arguments) do
+    with {:ok, arguments} <- anchor_init_target(arguments),
+         do: anchor_env_file(arguments)
+  end
+
+  defp anchor_env_file(%CommandArguments{frontend_options: options} = arguments) do
+    case Keyword.fetch(options, :env_file) do
+      :error ->
+        {:ok, arguments}
+
+      {:ok, path} ->
+        with {:ok, path} <- anchor_file(path) do
+          {:ok, %{arguments | frontend_options: Keyword.replace!(options, :env_file, path)}}
+        end
     end
   end
 

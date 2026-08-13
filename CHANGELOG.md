@@ -102,6 +102,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Both `mix ptc` and the standalone `bin/ptc` now load dotenv input only when
+  `--env-file FILE` explicitly names the exact file. Ambient parent-directory
+  discovery was removed, process environment values still take precedence,
+  and missing-credential rendering points to the supported credential sources.
 - Added the runtime-included `bin/ptc` command and replaced the separate
   `mix ptc.run` and `mix ptc.repl` tasks with the generic
   `mix ptc <command>` surface. The dotted Mix tasks were removed without

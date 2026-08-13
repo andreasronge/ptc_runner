@@ -1,60 +1,16 @@
 defmodule PtcRunner.Dotenv do
   @moduledoc """
-  Loads environment variables from `.env` files.
+  Loads environment variables from an explicitly named dotenv file.
 
-  Walks up from a starting directory to find the nearest `.env` file
-  and sets variables that aren't already present in the environment.
+  Existing process environment variables take precedence over file values.
+  Command frontends use `--env-file FILE` to choose the exact file; this module
+  does not search the invocation directory or its parents implicitly.
 
   ## Examples
 
-      # Load from nearest .env, only once per VM
-      PtcRunner.Dotenv.load()
+      PtcRunner.Dotenv.load_file(".env")
 
   """
-
-  @dotenv_loaded_key {__MODULE__, :dotenv_loaded}
-
-  @doc """
-  Load environment variables from the nearest `.env` file.
-
-  Walks up from the current working directory looking for a `.env` file.
-  Only sets variables that aren't already set (existing env vars take precedence).
-  Safe to call multiple times — only loads once per VM.
-  """
-  @spec load() :: :ok
-  def load do
-    :global.trans({@dotenv_loaded_key, self()}, fn ->
-      unless :persistent_term.get(@dotenv_loaded_key, false) do
-        case find_dotenv(File.cwd!()) do
-          nil -> :ok
-          path -> load_file(path)
-        end
-
-        :persistent_term.put(@dotenv_loaded_key, true)
-      end
-    end)
-
-    :ok
-  end
-
-  @doc """
-  Find the nearest `.env` file by walking up from `dir`.
-
-  Returns the path to the first `.env` found, or `nil` if none exists up to
-  the filesystem root.
-  """
-  @spec find_dotenv(String.t()) :: String.t() | nil
-  def find_dotenv("/"), do: nil
-
-  def find_dotenv(dir) do
-    candidate = Path.join(dir, ".env")
-
-    if File.regular?(candidate) do
-      candidate
-    else
-      find_dotenv(Path.dirname(dir))
-    end
-  end
 
   @doc """
   Parse `path` as a `.env` file and set the variables it declares.
@@ -74,6 +30,17 @@ defmodule PtcRunner.Dotenv do
       |> parse_env_line()
     end)
   end
+
+  @doc false
+  @spec environment_setup_option(keyword()) :: keyword()
+  def environment_setup_option(frontend_options) when is_list(frontend_options) do
+    case Keyword.fetch(frontend_options, :env_file) do
+      {:ok, path} when is_binary(path) -> [environment_setup: fn -> load_file(path) end]
+      _missing_or_invalid -> []
+    end
+  end
+
+  def environment_setup_option(_frontend_options), do: []
 
   defp parse_env_line(""), do: :ok
   defp parse_env_line("#" <> _), do: :ok

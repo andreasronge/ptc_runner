@@ -355,6 +355,7 @@ error into `(fail ...)` rather than accidentally treating it as model content.
 
 ```console
 mix ptc run examples/kernel-tutorial/02-deepseek-extract/ptc.json \
+  --env-file .env \
   --host-config examples/kernel-tutorial/ptc-host.json
 ```
 
@@ -376,6 +377,9 @@ cp .env.example .env
 chmod 600 .env
 # Edit .env and set OPENROUTER_API_KEY to the real key.
 ```
+
+Live commands in this guide pass `--env-file .env` explicitly. PtcRunner does
+not search the current directory or its parents for an environment file.
 
 [Host configuration](host-configuration.md#credentials) documents the three
 declaration forms and how to move off `.env` for a real deployment.
@@ -466,6 +470,7 @@ The workflow stays a thin policy boundary, narrowed to two turns:
 
 ```console
 mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
+  --env-file .env \
   --host-config examples/kernel-tutorial/ptc-host.json
 ```
 
@@ -659,6 +664,7 @@ Run it from the repository root and retain its sanitized trace:
 ```console
 mkdir -p tmp/file-agent-traces
 mix ptc run examples/kernel-tutorial/03-file-agent/ptc.json \
+  --env-file .env \
   --host-config examples/kernel-tutorial/ptc-host.json \
   --trace-dir tmp/file-agent-traces
 ```

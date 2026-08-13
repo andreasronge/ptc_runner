@@ -34,7 +34,7 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
   @workspace_revision "filesystem-sample-0.1.0"
 
   setup_all do
-    :ok = PtcRunner.Dotenv.load()
+    :ok = LLMSupport.load_dotenv()
     :ok = LLMSupport.admit_provider_application!()
     assert System.get_env("OPENROUTER_API_KEY"), "OPENROUTER_API_KEY is not configured"
     :ok

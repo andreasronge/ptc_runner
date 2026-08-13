@@ -55,7 +55,7 @@ defmodule PtcRunner.Kernel.ConcurrentAgentContentionLiveE2ETest do
   @moduletag timeout: @runs * (@run_duration_ms + 30_000)
 
   setup_all do
-    :ok = PtcRunner.Dotenv.load()
+    :ok = LLMSupport.load_dotenv()
     :ok = LLMSupport.admit_provider_application!()
     assert Application.get_env(:req_llm, :stream_pool_count) == 1
     assert Application.get_env(:req_llm, :stream_pool_size) == 8

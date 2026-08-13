@@ -145,4 +145,5 @@ PTC_TEST_MCP_OAUTH=1 \
 ```
 
 The scheduled/manual model-driven test uses the same server and additionally
-loads `OPENROUTER_API_KEY` and the optional `PTC_TEST_MODEL` from `.env`.
+loads `OPENROUTER_API_KEY` and the optional `PTC_TEST_MODEL` from the root
+checkout's explicitly named `.env` test input.

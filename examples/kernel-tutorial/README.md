@@ -20,17 +20,21 @@ installation that gives those aliases meaning:
 
 ```bash
 mix ptc run examples/kernel-tutorial/02-deepseek-extract/ptc.json \
+  --env-file .env \
   --host-config examples/kernel-tutorial/ptc-host.json
 mix ptc run examples/kernel-tutorial/03-file-agent/ptc.json \
+  --env-file .env \
   --host-config examples/kernel-tutorial/ptc-host.json
 mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
+  --env-file .env \
   --host-config examples/kernel-tutorial/ptc-host.json
 ```
 
 They require `OPENROUTER_API_KEY` in the host environment and use the trusted
 `deepseek` model alias. From the repository root, copy `.env.example` to the
 Git-ignored `.env` and replace its placeholder before running a live model
-example. Credentials never go in the manifests or PTC-Lisp files.
+example. Each live command selects it explicitly with `--env-file .env`.
+Credentials never go in the manifests or PTC-Lisp files.
 
 [`ptc-host.json`](ptc-host.json) is the shared operator document these examples
 install from;

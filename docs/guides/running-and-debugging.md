@@ -15,6 +15,7 @@ rendering paths.
 | `mix ptc validate MANIFEST` | Validate and compile a manifest without running its workflow |
 | `mix ptc run MANIFEST` | Run the manifest's qualified entry and render its public result |
 | `mix ptc run MANIFEST --host-config HOST.json` | Install the provider aliases a provider-bearing manifest selects |
+| `mix ptc run MANIFEST --env-file FILE` | Load environment-backed credentials from this exact file |
 | `mix ptc run MANIFEST --input INPUT.json` | Run with a confined alternate input object |
 | `mix ptc run MANIFEST --output VALUE.json` | Write only the validated result value |
 | `mix ptc run MANIFEST --trace-dir DIR` | Persist bounded canonical events under the command run reference (`DIR` must already exist) |
@@ -461,8 +462,11 @@ _build/prod/rel/ptc_runner/bin/ptc --version
 ```
 
 The release includes ERTS, so the target machine does not need Erlang or
-Elixir. The standalone runtime deliberately does not load `.env`; credentials
-come only from bindings declared by the trusted host document. Signed downloads,
+Elixir. Like `mix ptc`, the standalone runtime never searches for `.env`;
+`--env-file FILE` explicitly loads one exact file when the trusted host
+document declares an environment-backed credential. Without that flag,
+credentials come only from the inherited process environment or other bindings
+declared by the trusted host document. Signed downloads,
 notarization, package-manager formulas, container images, and single-file
 packaging remain separate distribution work.
 
@@ -613,6 +617,7 @@ Pass both output paths when exact development diagnostics are required:
 ```console
 mkdir -p tmp/inspection
 mix ptc run examples/kernel-tutorial/03-file-agent/ptc.json \
+  --env-file .env \
   --host-config examples/kernel-tutorial/ptc-host.json \
   --trace-dir tmp/inspection \
   --inspect tmp/inspection/run.inspection.jsonl

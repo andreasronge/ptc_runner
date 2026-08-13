@@ -21,7 +21,7 @@ defmodule PtcRunner.Kernel.DeepSeekE2ETest do
   @host Path.expand("../../../examples/kernel-tutorial/ptc-host.json", __DIR__)
 
   setup_all do
-    :ok = PtcRunner.Dotenv.load()
+    :ok = LLMSupport.load_dotenv()
     :ok = LLMSupport.admit_provider_application!()
 
     if System.get_env("OPENROUTER_API_KEY") do

@@ -104,12 +104,12 @@ defmodule PtcRunner.TestSupport.LLMSupport do
   end
 
   @doc """
-  Load environment variables from the nearest `.env` file.
-
-  Delegates to `PtcRunner.Dotenv.load/0`.
+  Load the root checkout's `.env` when it exists.
   """
   @spec load_dotenv() :: :ok
-  defdelegate load_dotenv, to: PtcRunner.Dotenv, as: :load
+  def load_dotenv do
+    if File.regular?(".env"), do: PtcRunner.Dotenv.load_file(".env"), else: :ok
+  end
 
   @doc """
   Clean LLM response text by trimming and removing markdown fences.

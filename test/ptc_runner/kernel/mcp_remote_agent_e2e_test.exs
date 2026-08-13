@@ -24,7 +24,7 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
   alias PtcRunner.TestSupport.RunLifecycle
 
   setup_all do
-    :ok = PtcRunner.Dotenv.load()
+    :ok = LLMSupport.load_dotenv()
     # Host installation admits a provider application through the prepared-run
     # path; a directly registered builder has to start it itself.
     :ok = LLMSupport.admit_provider_application!()
