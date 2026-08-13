@@ -199,6 +199,72 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   end
 
   @tag :tmp_dir
+  test "a manifest schema rejection renders its safe document path", %{tmp_dir: dir} do
+    application = write_application(dir)
+    manifest = application |> File.read!() |> Jason.decode!()
+
+    invalid_manifest =
+      put_in(
+        manifest,
+        ["workflow", "components", Access.at(0), "path"],
+        "../shared/main.clj"
+      )
+
+    File.write!(application, Jason.encode!(invalid_manifest))
+
+    presentation =
+      CommandFrontend.execute(["validate", application], :standalone, fn _arguments ->
+        {:ok, CommandRuntime.standalone()}
+      end)
+
+    assert presentation.exit_status == 3
+    assert presentation.outcome.envelope["error"]["path"] == "/workflow/components/0/path"
+
+    assert presentation.stderr ==
+             "error: application/schema_violation: " <>
+               "the application manifest does not satisfy its schema " <>
+               "at /workflow/components/0/path (run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
+
+    refute presentation.stderr =~ "../shared/main.clj"
+  end
+
+  @tag :tmp_dir
+  test "human failures do not render contract-authored control bytes", %{tmp_dir: dir} do
+    application = write_application(dir)
+    manifest = application |> File.read!() |> Jason.decode!()
+    property = "line\n\e[31m"
+
+    input_schema = %{
+      "type" => "object",
+      "properties" => %{property => %{"type" => "integer"}},
+      "required" => [property]
+    }
+
+    invalid_manifest =
+      manifest
+      |> Map.put("contracts", %{"input_schema" => %{"path" => "input.schema.json"}})
+      |> put_in(["input", "value"], %{property => "wrong"})
+
+    File.write!(application, Jason.encode!(invalid_manifest))
+    File.write!(Path.join(dir, "input.schema.json"), Jason.encode!(input_schema))
+
+    presentation =
+      CommandFrontend.execute(["validate", application], :standalone, fn _arguments ->
+        {:ok, CommandRuntime.standalone()}
+      end)
+
+    assert presentation.exit_status == 3
+    assert presentation.outcome.envelope["error"]["path"] == "/" <> property
+
+    assert presentation.stderr ==
+             "error: application/input_contract_failed: " <>
+               "the selected input does not satisfy the input contract " <>
+               "(run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
+
+    refute presentation.stderr =~ property
+  end
+
+  @tag :tmp_dir
   test "an argv rejection does not deliver an envelope or bootstrap", %{tmp_dir: dir} do
     path = Path.join(dir, "must-not-exist.json")
     parent = self()
