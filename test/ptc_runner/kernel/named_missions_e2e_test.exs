@@ -308,10 +308,18 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
 
     events = EventSink.events(sink)
 
-    assert events
-           |> Enum.filter(&(&1.type == "evaluation-started" and &1.data.environment == :mission))
-           |> Enum.map(& &1.data[:mission_name])
-           |> Enum.frequencies() == %{"research" => 2, "review" => 2}
+    mission_frequencies =
+      events
+      |> Enum.filter(&(&1.type == "evaluation-started" and &1.data.environment == :mission))
+      |> Enum.map(& &1.data[:mission_name])
+      |> Enum.frequencies()
+
+    assert mission_frequencies |> Map.keys() |> Enum.sort() == ["research", "review"]
+
+    # Each of the two agents per mission may complete on its first program or
+    # use its second permitted turn to correct or finish the result.
+    assert mission_frequencies["research"] in 2..4
+    assert mission_frequencies["review"] in 2..4
 
     assert Enum.count(
              events,
