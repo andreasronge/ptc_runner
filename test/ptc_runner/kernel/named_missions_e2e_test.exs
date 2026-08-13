@@ -129,7 +129,7 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
   """
 
   setup_all do
-    :ok = PtcRunner.Dotenv.load()
+    :ok = LLMSupport.load_dotenv()
     :ok = LLMSupport.admit_provider_application!()
 
     if System.get_env("OPENROUTER_API_KEY") do

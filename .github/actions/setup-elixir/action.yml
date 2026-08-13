@@ -37,7 +37,7 @@ runs:
           ${{ runner.os }}-${{ runner.arch }}-mix-${{ inputs.project-directory }}-env${{ env.MIX_ENV || 'dev' }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-
 
     - name: Get dependencies
-      run: mix deps.get
+      run: mix deps.get --check-locked
       working-directory: ${{ inputs.project-directory }}
       shell: bash
 

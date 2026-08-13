@@ -174,8 +174,9 @@ invent those values. Live and replayed models are workflow-only; MCP and
 snapshot sources are mission-only.
 
 Credentials never belong in PTC-Lisp, manifests, traces, or committed project
-files. For the tutorial aliases, copy `.env.example` to the Git-ignored `.env`
-and set `OPENROUTER_API_KEY`. See
+files. For the tutorial aliases, copy `.env.example` to the Git-ignored `.env`,
+set `OPENROUTER_API_KEY`, and pass `--env-file .env`. PtcRunner never searches
+for an environment file implicitly. See
 [Host configuration](host-configuration.md#declare-credentials-once) for deployment-safe
 credential sources.
 
@@ -256,6 +257,7 @@ demonstrates a two-turn definition and call:
 
 ```console
 mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
+  --env-file .env \
   --host-config examples/kernel-tutorial/ptc-host.json
 ```
 
@@ -309,6 +311,7 @@ Run it from the repository root:
 
 ```console
 mix ptc run examples/kernel-tutorial/03-file-agent/ptc.json \
+  --env-file .env \
   --host-config examples/kernel-tutorial/ptc-host.json
 ```
 

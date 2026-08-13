@@ -22,7 +22,9 @@ mix ptc run examples/kernel-tutorial/01-orders/ptc.json
 ```
 
 That is a PTC-Lisp function reading JSON input. It needs no model, host
-document, or network access.
+document, or network access. On a fresh clone, the first command performs
+normal dependency validation and compilation; later root commands use the
+fast startup path.
 
 ## 2. Supply a model credential
 
@@ -31,8 +33,9 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Set `OPENROUTER_API_KEY` in `.env` to your key. `.env` is Git-ignored, and
-credentials never belong in a manifest, a PTC-Lisp file, or a trace.
+Set `OPENROUTER_API_KEY` in `.env` to your key. The command names that exact
+file with `--env-file`; PtcRunner never searches for it implicitly. `.env` is
+Git-ignored, and credentials never belong in a manifest, PTC-Lisp, or a trace.
 [Host configuration](host-configuration.md#declare-credentials-once) documents the three
 declaration forms and how to move off `.env` for a real deployment.
 
@@ -40,6 +43,7 @@ declaration forms and how to move off `.env` for a real deployment.
 
 ```console
 mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
+  --env-file .env \
   --host-config examples/kernel-tutorial/ptc-host.json
 ```
 
@@ -67,6 +71,7 @@ Inspect the complete readiness report with active doctor:
 
 ```console
 mix ptc doctor examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
+  --env-file .env \
   --host-config examples/kernel-tutorial/ptc-host.json --connect
 ```
 

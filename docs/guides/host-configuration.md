@@ -82,12 +82,12 @@ missing, empty, or unreadable value fails with `credential_unavailable`; there
 is no ambient provider-specific fallback. Never put credentials in a manifest,
 PTC-Lisp, canonical traces, or committed files.
 
-For a selected shipped LLM with an `env` credential, the Mix frontend loads the
-nearest `.env` once per VM before provider activity. Existing process values
-win, and all values from that first `.env` persist in the VM. Embedded hosts
-and the standalone release do not load `.env`; populate the process environment
-or use an explicit credential source instead. See `PtcRunner.Dotenv` for the
-exact loading contract.
+`mix ptc` and `bin/ptc` accept `--env-file FILE` on `run`, active `doctor`, and
+manifest-backed `repl`. When a selected LLM uses an `env` credential, the
+frontend loads that exact file before provider activity; it never searches for
+one. Every imported value persists for the process lifetime, and an existing
+process value wins. Embedded hosts load no dotenv file implicitly. See
+`PtcRunner.Dotenv` for the exact contract.
 
 ## Choose a provider source
 

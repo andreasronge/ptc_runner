@@ -4,12 +4,15 @@ defmodule Mix.Tasks.PtcTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Ptc
-  alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandFrontend
   alias PtcRunner.Kernel.CommandRenderer
+  alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.MixCommandAdapter
   alias PtcRunner.MixCommandRuntime
+  alias PtcRunner.StandaloneCommandRuntime
+
+  @root Path.expand("../../..", __DIR__)
 
   test "only the root project bootstrap skips dependency checks" do
     assert MixCommandRuntime.app_config_args(PtcRunner.MixProject) == ["--no-deps-check"]
@@ -17,7 +20,53 @@ defmodule Mix.Tasks.PtcTest do
     assert MixCommandRuntime.app_config_args(nil) == []
   end
 
-  @root Path.expand("../../..", __DIR__)
+  @tag :tmp_dir
+  test "root command validates dependencies until the application has been built", %{
+    tmp_dir: directory
+  } do
+    app_path = Path.join(directory, "ptc_runner")
+    app_file = Path.join([app_path, "ebin", "ptc_runner.app"])
+
+    assert PtcRunner.MixProject.ptc_prepare_args(app_path) == []
+
+    File.mkdir_p!(Path.dirname(app_file))
+    assert PtcRunner.MixProject.ptc_prepare_args(app_path) == []
+
+    File.write!(app_file, "built")
+    assert PtcRunner.MixProject.ptc_prepare_args(app_path) == ["--no-deps-check"]
+  end
+
+  # Seed everything except one dependency so this exercises the real alias
+  # without rebuilding the entire dependency tree. The old unconditional
+  # --no-deps-check path leaves the omitted dependency uncompiled.
+  @tag :slow
+  test "a cold root command compiles dependencies before running" do
+    build_path =
+      Path.join(@root, "_build/ptc-cold-start-#{System.unique_integer([:positive, :monotonic])}")
+
+    on_exit(fn -> File.rm_rf!(build_path) end)
+    seed_incomplete_build(build_path)
+
+    {output, status} =
+      System.cmd(System.find_executable("mix"), ["ptc", "--version"],
+        cd: @root,
+        env: [
+          {"MIX_BUILD_PATH", build_path},
+          {"MIX_ENV", "test"},
+          {"MIX_QUIET", "1"}
+        ],
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+    assert output =~ Mix.Project.config()[:version]
+
+    assert File.regular?(
+             Path.join([build_path, "lib", "nimble_parsec", "ebin", "nimble_parsec.app"])
+           )
+
+    assert File.regular?(Path.join([build_path, "lib", "ptc_runner", "ebin", "ptc_runner.app"]))
+  end
 
   @tag :tmp_dir
   test "renders a normal run value as deterministic compact JSON", %{tmp_dir: dir} do
@@ -55,6 +104,18 @@ defmodule Mix.Tasks.PtcTest do
     assert message =~ "(run_ref: cmd-"
     refute message =~ dir
     refute message =~ "schema_version"
+  end
+
+  @tag :tmp_dir
+  test "an invalid inspection destination states the required filename suffix", %{tmp_dir: dir} do
+    manifest_path = write_manifest(dir, %{"value" => 1})
+    invalid_inspection = Path.join(dir, "run.jsonl")
+
+    message = failed_message(["run", manifest_path, "--inspect", invalid_inspection])
+
+    assert message =~ "destination/invalid_inspection_destination:"
+    assert message =~ ".inspection.jsonl"
+    refute message =~ invalid_inspection
   end
 
   @tag :tmp_dir
@@ -199,13 +260,45 @@ defmodule Mix.Tasks.PtcTest do
   @tag :tmp_dir
   test "provider-free runs do not read an ambient dotenv file", %{tmp_dir: dir} do
     variable = "PTC_RUN_UNUSED_DOTENV_CREDENTIAL"
-    reset_dotenv(variable)
+    track_environment(variable)
     File.write!(Path.join(dir, ".env"), "#{variable}=must-not-load\n")
     manifest_path = write_manifest(dir, %{"value" => 1})
 
     File.cd!(dir, fn -> run_output(["run", manifest_path]) end)
 
     assert System.get_env(variable) == nil
+  end
+
+  @tag :tmp_dir
+  test "the Mix runtime does not load an ambient dotenv file", %{tmp_dir: dir} do
+    variable = "PTC_RUN_AMBIENT_DOTENV_CREDENTIAL"
+    track_environment(variable)
+    File.write!(Path.join(dir, ".env"), "#{variable}=must-not-load\n")
+    assert {:ok, entry} = CommandEntry.open(["run", "ptc.json"], :mix)
+    assert {:ok, runtime} = MixCommandRuntime.runtime(entry.arguments)
+
+    assert File.cd!(dir, fn -> CommandRuntime.setup_environment(runtime) end) == :ok
+    assert System.get_env(variable) == nil
+  end
+
+  @tag :tmp_dir
+  test "command runtimes load only an explicitly named environment file", %{tmp_dir: dir} do
+    for {frontend, variable, bootstrap} <- [
+          {:mix, "PTC_RUN_EXPLICIT_MIX_CREDENTIAL", &MixCommandRuntime.bootstrap/1},
+          {:standalone, "PTC_RUN_EXPLICIT_STANDALONE_CREDENTIAL",
+           &StandaloneCommandRuntime.bootstrap/1}
+        ] do
+      track_environment(variable)
+      env_file = Path.join(dir, "#{frontend}.env")
+      File.write!(env_file, "#{variable}=loaded\n")
+
+      assert {:ok, entry} =
+               CommandEntry.open(["run", "ptc.json", "--env-file", env_file], frontend)
+
+      assert {:ok, runtime} = bootstrap.(entry.arguments)
+      assert CommandRuntime.setup_environment(runtime) == :ok
+      assert System.get_env(variable) == "loaded"
+    end
   end
 
   @tag :tmp_dir
@@ -239,6 +332,26 @@ defmodule Mix.Tasks.PtcTest do
 
     message = failed_message(args)
     assert %{"readiness" => "failed", "checks" => ^checks} = Jason.decode!(message)
+  end
+
+  defp seed_incomplete_build(build_path) do
+    source_lib_path = Path.join(Mix.Project.build_path(), "lib")
+    build_lib_path = Path.join(build_path, "lib")
+    File.mkdir_p!(build_lib_path)
+
+    source_lib_path
+    |> File.ls!()
+    |> Enum.reject(&(&1 in ["nimble_parsec", "ptc_runner"]))
+    |> Enum.each(fn dependency ->
+      File.ln_s!(
+        Path.join(source_lib_path, dependency),
+        Path.join(build_lib_path, dependency)
+      )
+    end)
+
+    runner_path = Path.join(build_lib_path, "ptc_runner")
+    File.cp_r!(Path.join(source_lib_path, "ptc_runner"), runner_path)
+    File.rm!(Path.join([runner_path, "ebin", "ptc_runner.app"]))
   end
 
   defp run_output(args) do
@@ -332,23 +445,14 @@ defmodule Mix.Tasks.PtcTest do
     {manifest_path, host_path}
   end
 
-  defp reset_dotenv(variable) do
+  defp track_environment(variable) do
     previous_value = System.get_env(variable)
-    key = {Dotenv, :dotenv_loaded}
-    previous_state = :persistent_term.get(key, :missing)
-
     System.delete_env(variable)
-    :persistent_term.erase(key)
 
     on_exit(fn ->
       if previous_value,
         do: System.put_env(variable, previous_value),
         else: System.delete_env(variable)
-
-      case previous_state do
-        :missing -> :persistent_term.erase(key)
-        state -> :persistent_term.put(key, state)
-      end
     end)
   end
 end

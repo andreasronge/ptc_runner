@@ -36,6 +36,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractClassification
+  alias PtcRunner.StandaloneCLI
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.TestHelpers
 
@@ -826,27 +827,25 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       })
 
     application = doctor_application(directory, "command-owned-model", workflow: ["model"])
-    caller = self()
+    env_file = Path.join(directory, "model.env")
+    File.write!(env_file, "#{environment_name}=test-secret\n")
 
-    assert {:ok, runtime} =
-             CommandRuntime.new(
-               provider_application_mode: :command_vm,
-               environment_setup: fn ->
-                 System.put_env(environment_name, "test-secret")
-                 send(caller, :doctor_environment_setup)
-                 :ok
-               end
-             )
+    presentation =
+      StandaloneCLI.execute([
+        "doctor",
+        application,
+        "--host-config",
+        host_path,
+        "--connect",
+        "--env-file",
+        env_file
+      ])
 
-    assert {:ok, %CommandOutcome{} = outcome} =
-             CommandEngine.dispatch(
-               ["doctor", application, "--host-config", host_path, "--connect"],
-               runtime
-             )
-
+    outcome = presentation.outcome
+    assert presentation.exit_status == 0
     assert outcome.exit_status == 0
     assert outcome.envelope["result"]["provider_activity"] == true
-    assert_received :doctor_environment_setup
+    assert System.get_env(environment_name) == "test-secret"
     assert_received {:host_llm_ensure_ready, _pid}
     assert_received {:host_llm_request, "openrouter:test/model", _request}
   end
@@ -1408,12 +1407,59 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "--private-output",
              "--inspect",
              "--component-override-descriptor",
+             "--env-file",
              "--envelope",
              "--help"
            ]
 
     refute inspect(first) =~ "secret-first"
     refute inspect(second) =~ "secret-second"
+  end
+
+  @tag :tmp_dir
+  test "environment files are explicit frontend-owned inputs", %{tmp_dir: dir} do
+    env_file = Path.join(dir, "local.env")
+
+    for frontend <- [:standalone, :mix],
+        argv <- [
+          ["run", "ptc.json", "--env-file", env_file],
+          [
+            "doctor",
+            "ptc.json",
+            "--host-config",
+            "host.json",
+            "--connect",
+            "--env-file",
+            env_file
+          ],
+          [
+            "repl",
+            "--manifest",
+            "ptc.json",
+            "--host-config",
+            "host.json",
+            "--env-file",
+            env_file
+          ]
+        ] do
+      assert {:ok, entry} = CommandEntry.open(argv, frontend)
+      assert entry.arguments.frontend_options == [env_file: env_file]
+      refute Map.has_key?(entry.arguments.options, :env_file)
+    end
+
+    assert {:error, rejection} =
+             CommandParser.parse(["validate", "ptc.json", "--env-file", env_file])
+
+    assert rejection.kind == :unknown_switch
+
+    for argv <- [
+          ["doctor", "--env-file", env_file],
+          ["repl", "--env-file", env_file],
+          ["repl", "--profile", "run-analysis-v1", "--env-file", env_file]
+        ] do
+      assert {:error, rejection} = CommandParser.parse(argv)
+      assert rejection.code == :invalid_arguments
+    end
   end
 
   test "removed switches are ordinary unknown input" do
@@ -3789,6 +3835,48 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["error"]["code"] == "invalid_result_destination"
     assert outcome.envelope["artifact_state"]["trace"] == "not_written"
     assert outcome.envelope["artifact_state"]["result"] == "not_written"
+    refute Jason.encode!(outcome.envelope) =~ directory
+  end
+
+  @tag :tmp_dir
+  test "an unavailable cwd keeps the inspection destination diagnostic accurate", %{
+    tmp_dir: directory
+  } do
+    invocation = Path.join(directory, "removed-inspection-cwd")
+    application = write_application(directory, "unavailable-inspection-cwd", valid_manifest())
+    original = File.cwd!()
+    File.mkdir!(invocation)
+
+    on_exit(fn -> File.cd!(original) end)
+
+    File.cd!(invocation)
+    File.rmdir!(invocation)
+    assert {:error, :enoent} = File.cwd()
+
+    assert {:ok, preparation} =
+             CommandEngine.prepare([
+               "run",
+               application,
+               "--inspect",
+               "run.inspection.jsonl"
+             ])
+
+    assert preparation.artifact_destinations == %{}
+    assert preparation.artifact_destination_failures == [:inspect]
+    assert CommandPreparation.valid?(preparation)
+
+    assert {:error, outcome} = CommandEngine.preflight(preparation)
+    assert outcome.exit_status == 7
+
+    assert %{
+             "phase" => "destination",
+             "code" => "invalid_inspection_destination",
+             "message" => "--inspect must name a valid destination ending in .inspection.jsonl",
+             "retryable" => false,
+             "source" => nil,
+             "subject" => nil
+           } = outcome.envelope["error"]
+
     refute Jason.encode!(outcome.envelope) =~ directory
   end
 

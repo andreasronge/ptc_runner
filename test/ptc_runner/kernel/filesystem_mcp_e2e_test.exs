@@ -17,6 +17,11 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.TestHelpers
+
+  if reason = TestHelpers.executable_skip_reason(["node"]) do
+    @moduletag skip: reason
+  end
 
   @server Path.expand("../../../examples/mcp/filesystem/dist/server.js", __DIR__)
 
@@ -71,6 +76,7 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
            } = values
 
     snapshot_hash = info["snapshot_hash"]
+    assert snapshot["content_snapshot_hash"] == snapshot_hash
     assert info["file_count"] == 2
     assert listed["snapshot_hash"] == snapshot_hash
     assert Enum.any?(listed["items"], &(&1["path"] == "lib/nested"))
@@ -82,6 +88,32 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
     assert read["snapshot_hash"] == snapshot_hash
     assert read["lines"] == [%{"line" => 2, "text" => "needle"}]
     refute inspect(values) =~ "TOP-SECRET"
+  end
+
+  @tag :tmp_dir
+  test "an invalid content identity closes provider assembly", %{tmp_dir: dir} do
+    node = System.find_executable("node") || flunk("Node.js is required for this E2E")
+    paths = write_application(dir, node)
+
+    host =
+      paths.host
+      |> File.read!()
+      |> Jason.decode!()
+      |> put_in(["install", "workspace", "snapshot_identity", "field"], "missing_hash")
+
+    File.write!(paths.host, Jason.encode!(host))
+    assert {:ok, decoded} = HostConfig.load(paths.host)
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(decoded)
+             |> then(fn {:ok, catalog} ->
+               HostInstallation.runtime_registry(decoded, catalog)
+             end)
+
+    assert {:error, :mcp_invalid_snapshot_identity} =
+             paths.manifest
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
   end
 
   defp write_application(dir, node) do
@@ -161,6 +193,10 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
               "as" => "workspace.snapshot-info",
               "effect" => "read"
             }
+          },
+          "snapshot_identity" => %{
+            "tool" => "snapshot_info",
+            "field" => "snapshot_hash"
           },
           "installation_revision" => "filesystem-sample-0.1.0",
           "ceilings" => %{

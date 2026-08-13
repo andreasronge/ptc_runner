@@ -12,6 +12,7 @@ switches.
 | `ptc init DIRECTORY` | Publish a validated minimal application without replacing an existing target |
 | `ptc validate MANIFEST` | Load and compile without executing the workflow |
 | `ptc run MANIFEST` | Execute the manifest entry |
+| `ptc run MANIFEST --env-file FILE` | Load environment-backed credentials from this exact file |
 | `ptc doctor [MANIFEST]` | Report application and provider readiness |
 | `ptc models --host-config HOST.json` | List public installed model-alias declarations |
 | `ptc transcript RUN_ID ...` | Publish one correlated private model transcript |
@@ -26,7 +27,7 @@ A provider-bearing manifest needs `--host-config`. Before running it, active
 provider checks can make real requests and may incur cost:
 
 ```console
-mix ptc doctor ptc.json --host-config ptc-host.json --connect
+mix ptc doctor ptc.json --env-file .env --host-config ptc-host.json --connect
 ```
 
 Plain doctor reports `readiness: "unverified"`. Successful active checks
@@ -42,6 +43,7 @@ mkdir -p traces
 mix ptc run ptc.json
 mix ptc run ptc.json --trace-dir traces
 mix ptc run ptc.json \
+  --env-file .env \
   --host-config ptc-host.json \
   --trace-dir traces \
   --inspect traces/run.inspection.jsonl \
@@ -58,7 +60,8 @@ Useful run switches are:
   and keeps it off stdout.
 - `--trace-dir DIR` writes `<run_ref>.jsonl` or
   `<run_ref>.private.jsonl` according to the run's artifact class.
-- `--inspect FILE` writes sensitive execution evidence to an owner-only file.
+- `--inspect FILE` writes sensitive execution evidence to an owner-only
+  `.inspection.jsonl` file.
 - `--envelope FILE` atomically adds the stable V2 command envelope.
 
 The command envelope reports the run reference and artifact class, not artifact
@@ -186,8 +189,9 @@ MIX_ENV=prod mix release ptc_runner
 _build/prod/rel/ptc_runner/bin/ptc --version
 ```
 
-The release includes ERTS and does not load `.env`; credentials come only from
-the trusted host document's bindings.
+The release includes ERTS. Like `mix ptc`, it reads only a dotenv file named by
+`--env-file`; without that flag, credentials come from the inherited process
+environment or other trusted host-document bindings.
 
 ### Diagnose a failed run
 

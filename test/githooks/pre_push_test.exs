@@ -4,6 +4,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
   alias PtcRunner.TestSupport.GitEnv
 
   @hook Path.expand("../../.githooks/pre-push", __DIR__)
+  @classifier Path.expand("../../scripts/ci/classify-changes.sh", __DIR__)
   @git_env GitEnv.clear()
 
   test "planning-only changes skip the full gate" do
@@ -37,10 +38,10 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     {output, status} = run_hook(repo, path)
 
     assert status == 0
-    assert output =~ "Launcher checks passed"
+    assert output =~ "launcher validation passed"
 
     assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
-             ["precommit"]
+             ["ci-gate launcher"]
   end
 
   test "Viewer-only changes do not run the root gate" do
@@ -50,30 +51,40 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     {output, status} = run_hook(repo, path)
 
     assert status == 0
-    assert output =~ "Project: ptc_viewer/"
-    refute output =~ "Project: root"
+    assert output =~ "Viewer validation"
+    refute output =~ "core tests"
 
     assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
-             ["test --exclude clojure"]
+             ["ci-gate viewer"]
   end
 
   @tag :slow
-  test "full gate runs tests and the canonical prepush alias once" do
+  test "full gate invokes every deterministic root entry point once" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_change("lib/example.ex")
 
     {output, status} = run_hook(repo, path)
 
-    assert status == 0
-    assert output =~ ~r/Tests passed in \d+s/
-    assert output =~ ~r/Pre-push checks passed in \d+s/
+    assert status == 0, output
+    assert output =~ ~r/core tests passed in \d+s/
+    assert output =~ ~r/core static analysis passed in \d+s/
+    assert output =~ ~r/core Dialyzer passed in \d+s/
+    assert output =~ ~r/core release verification passed in \d+s/
 
     assert output =~ "Phase timings:"
-    assert output =~ ~r/root \(:ptc_runner\) tests\s+\d+s/
-    assert output =~ ~r/root mix prepush \(incl\. dialyzer\)\s+\d+s/
+    assert output =~ ~r/core tests\s+\d+s/
+    assert output =~ ~r/core Dialyzer\s+\d+s/
 
     assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
-             ["test --exclude clojure", "prepush"]
+             [
+               "deps.get --check-locked",
+               "docs --warnings-as-errors",
+               "ci-gate core-tests",
+               "ci-gate core-static",
+               "ci-gate core-dialyzer",
+               "ci-gate core-release",
+               "ci-gate viewer"
+             ]
   end
 
   @tag :slow
@@ -87,7 +98,15 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     refute output =~ "Test concurrency"
 
     assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
-             ["test --exclude clojure", "prepush"]
+             [
+               "deps.get --check-locked",
+               "docs --warnings-as-errors",
+               "ci-gate core-tests",
+               "ci-gate core-static",
+               "ci-gate core-dialyzer",
+               "ci-gate core-release",
+               "ci-gate viewer"
+             ]
   end
 
   @tag :slow
@@ -99,14 +118,17 @@ defmodule PtcRunner.GitHooks.PrePushTest do
 
     assert status == 0
     assert output =~ "Documentation"
-    assert output =~ "Project: root"
+    assert output =~ "core tests"
 
     assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
              [
                "deps.get --check-locked",
                "docs --warnings-as-errors",
-               "test --exclude clojure",
-               "prepush"
+               "ci-gate core-tests",
+               "ci-gate core-static",
+               "ci-gate core-dialyzer",
+               "ci-gate core-release",
+               "ci-gate viewer"
              ]
   end
 
@@ -117,7 +139,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     {output, status} = run_hook(repo, path, [{"MIX_MUTATE_LOCK", "1"}])
 
     assert status != 0
-    assert output =~ "Documentation dependency setup failed"
+    assert output =~ "Documentation dependency setup or build failed"
     refute File.exists?(Path.join(repo, "mix.lock"))
 
     assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
@@ -142,6 +164,8 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     File.mkdir_p!(bin)
 
     on_exit(fn -> File.rm_rf!(root) end)
+
+    install_hook_fixture!(repo)
 
     fake_mix = Path.join(bin, "mix")
 
@@ -183,7 +207,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
       env:
         @git_env ++
           [
-            {"HOOK_PATH", @hook},
+            {"HOOK_PATH", Path.join(repo, ".githooks/pre-push")},
             {"HOOK_REFS", refs},
             {"MIX_MARKER",
              Path.join(path |> String.split(":") |> hd() |> Path.dirname(), "mix-called")},
@@ -197,6 +221,35 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     full_path = Path.join(repo, path)
     File.mkdir_p!(Path.dirname(full_path))
     File.write!(full_path, contents)
+  end
+
+  defp install_hook_fixture!(repo) do
+    copy_executable!(@hook, Path.join(repo, ".githooks/pre-push"))
+    copy_executable!(@classifier, Path.join(repo, "scripts/ci/classify-changes.sh"))
+
+    write_executable!(Path.join(repo, "scripts/ci/docs.sh"), """
+    #!/bin/sh
+    mix deps.get --check-locked && mix docs --warnings-as-errors
+    """)
+
+    for gate <- ~w(core-tests core-static core-dialyzer core-release viewer launcher) do
+      write_executable!(Path.join(repo, "scripts/ci/#{gate}.sh"), """
+      #!/bin/sh
+      mix ci-gate #{gate}
+      """)
+    end
+  end
+
+  defp copy_executable!(source, destination) do
+    File.mkdir_p!(Path.dirname(destination))
+    File.cp!(source, destination)
+    File.chmod!(destination, 0o755)
+  end
+
+  defp write_executable!(path, contents) do
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, contents)
+    File.chmod!(path, 0o755)
   end
 
   defp git!(repo, args) do

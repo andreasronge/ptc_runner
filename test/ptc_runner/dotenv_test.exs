@@ -19,31 +19,6 @@ defmodule PtcRunner.DotenvTest do
     end)
   end
 
-  describe "find_dotenv/1" do
-    test "returns the .env in the starting directory", %{tmp_dir: dir} do
-      env = Path.join(dir, ".env")
-      File.write!(env, "")
-      assert Dotenv.find_dotenv(dir) == env
-    end
-
-    test "walks up the directory tree to the nearest .env", %{tmp_dir: dir} do
-      far = Path.join(dir, ".env")
-      File.write!(far, "")
-      mid = Path.join([dir, "a", "b"])
-      File.mkdir_p!(mid)
-      File.write!(Path.join(mid, ".env"), "")
-      nested = Path.join([dir, "a", "b", "c", "d"])
-      File.mkdir_p!(nested)
-
-      # Picks the closest .env, not the one further up.
-      assert Dotenv.find_dotenv(nested) == Path.join(mid, ".env")
-    end
-
-    test "stops at the filesystem root and returns nil" do
-      assert Dotenv.find_dotenv("/") == nil
-    end
-  end
-
   describe "load_file/1" do
     test "parses KEY=VALUE pairs", %{tmp_dir: dir} do
       track_env(["PTC_DOTENV_TEST_A", "PTC_DOTENV_TEST_B"])
@@ -100,51 +75,6 @@ defmodule PtcRunner.DotenvTest do
       Dotenv.load_file(path)
 
       assert System.get_env("PTC_DOTENV_TEST_EXISTING") == "original"
-    end
-  end
-
-  describe "load/0" do
-    test "loads the .env from the current working directory", %{tmp_dir: dir} do
-      track_env(["PTC_DOTENV_TEST_LOAD"])
-      # load/0 is once-per-VM; reset the guard so this test actually loads.
-      :persistent_term.erase({Dotenv, :dotenv_loaded})
-      on_exit(fn -> :persistent_term.erase({Dotenv, :dotenv_loaded}) end)
-
-      File.write!(Path.join(dir, ".env"), "PTC_DOTENV_TEST_LOAD=yep\n")
-
-      original_cwd = File.cwd!()
-      File.cd!(dir)
-
-      try do
-        assert Dotenv.load() == :ok
-        assert System.get_env("PTC_DOTENV_TEST_LOAD") == "yep"
-      after
-        File.cd!(original_cwd)
-      end
-    end
-
-    test "is a no-op on the second call (once per VM)", %{tmp_dir: dir} do
-      track_env(["PTC_DOTENV_TEST_ONCE"])
-      :persistent_term.erase({Dotenv, :dotenv_loaded})
-      on_exit(fn -> :persistent_term.erase({Dotenv, :dotenv_loaded}) end)
-
-      File.write!(Path.join(dir, ".env"), "PTC_DOTENV_TEST_ONCE=first\n")
-      original_cwd = File.cwd!()
-      File.cd!(dir)
-
-      try do
-        Dotenv.load()
-        assert System.get_env("PTC_DOTENV_TEST_ONCE") == "first"
-
-        # Change the var and the file; a second load/0 must not re-read it.
-        System.delete_env("PTC_DOTENV_TEST_ONCE")
-        File.write!(Path.join(dir, ".env"), "PTC_DOTENV_TEST_ONCE=second\n")
-
-        assert Dotenv.load() == :ok
-        assert System.get_env("PTC_DOTENV_TEST_ONCE") == nil
-      after
-        File.cd!(original_cwd)
-      end
     end
   end
 end

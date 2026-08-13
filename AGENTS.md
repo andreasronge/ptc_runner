@@ -49,9 +49,11 @@ how it was verified.
 
 ## Commands
 
-- `mix ptc ...` — the root-project command path skips dependency validation for fast
-  startup while still compiling changed root sources and shipped preludes.
-  This optimization is root-only; downstream projects retain Mix's normal
+- `mix ptc ...` — after the root application has compiled successfully once,
+  the root-project command path skips dependency validation for fast startup
+  while still compiling changed root sources and shipped preludes. A fresh
+  build performs Mix's normal dependency validation and compilation. This
+  optimization is root-only; downstream projects always retain Mix's normal
   dependency validation.
   After changing `mix.exs`, `mix.lock`, dependency sources, or either local
   path dependency (`ptc_runner_launcher/` or `ptc_viewer/`), run a normal
@@ -62,27 +64,31 @@ how it was verified.
   staleness, root/Viewer/launcher tests, core-package and standalone release
   verification); run before every commit. Much broader than the fast,
   staged-file Git pre-commit hook; takes a few minutes in a fresh worktree.
+- `scripts/ci/core-tests.sh` — canonical core compile/test gate used by
+  `mix precommit`, pre-push, and GitHub Actions. It always sets `CI=1`, so
+  StreamData runs the same 300 cases locally and remotely, while retaining all
+  native schedulers by default. Use `scripts/ci/core-tests.sh --schedulers 4`
+  to reproduce GitHub's current CPU shape; this does not emulate Linux.
 - `MIX_ENV=dev mix docs --warnings-as-errors` — ExDoc reference and rendering
   gate; run when changing user-facing documentation. Generated-artifact
   staleness is checked separately, by both `mix precommit` and `mix prepush`.
 - `git push` — the tracked pre-push hook classifies pushed and dirty paths and
-  runs the relevant root, Viewer, launcher, or documentation gates. Root
-  changes run the root tests and `mix prepush` (credo, generated-artifact
-  staleness, upstream API audit, Dialyzer, unused-deps). Credo and the staleness
-  checks are also in `precommit`, and are repeated here because an ordinary push
-  does not run `precommit` — without them a `lib/` edit can clear every local
-  gate and still fail CI on an artifact you were never prompted to regenerate.
+  invokes the same repository-owned root, Viewer, launcher, release, and
+  documentation scripts as GitHub Actions. Root changes therefore use the
+  same compile/test flags, `CI=1` property count, static checks, Dialyzer
+  format, and release verification locally and remotely.
   When one fires, run its matching write form — `mix ptc.gen_docs` for
   generated docs and schemas, or `mix ptc.conformance_report --write-inventory`
   for `conformance_inventory.json` — then stage the result. Do not run
   `mix prepush` immediately before an ordinary push;
-  invoke it directly only for diagnosis or when hooks are unavailable. PR CI
-  runs the same checks as individual steps. The test suite uses
+  invoke it directly only for static/Dialyzer diagnosis or when hooks are
+  unavailable. PR CI runs the same scripts as individual jobs. The test suite uses
   `System.schedulers_online()` concurrent cases; do not reduce that pressure
   to make a failing push pass.
-- `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`;
-  the MCP tests also require the local server in the
-  [development setup guide](docs/development-setup.md)).
+- `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`).
+  Optional MCP tests skip unless their endpoint, binary, and token
+  prerequisites are configured as described in the
+  [development setup guide](docs/development-setup.md).
 - `mix nightly` — the `:nightly` tests, excluded from `mix test` by default.
   The `Nightly` workflow runs them daily; run it locally when you touch the
   `mix ptc run` downstream path or the benchmark task. Never add `--trace` (or
@@ -137,9 +143,6 @@ load-sensitive failures.
   `mix ptc run` works.
 - `bench/` — benchmarks (`mix bench.check`, `mix bench.heap`) with committed
   baselines in `bench/baselines/`.
-- `repo-analyst/` — the repo-analysis manifest suite PtcRunner dogfoods; its
-  host configs and fixtures are `repo-analyst*.json` at the repo root.
-
 ## Conventions
 
 - Timestamps: `:utc_datetime`, never `:naive_datetime`. Durations: integer

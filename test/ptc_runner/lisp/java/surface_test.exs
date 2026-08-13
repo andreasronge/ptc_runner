@@ -794,13 +794,15 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
   end
 
   @tag :tmp_dir
-  test "precommit discovers current generated Java audit orphans recursively", %{
+  test "precommit's shared quality gate discovers generated Java audit orphans recursively", %{
     tmp_dir: dir
   } do
     precommit = Mix.Project.config() |> Keyword.fetch!(:aliases) |> Keyword.fetch!(:precommit)
+    quality_gate = File.read!("scripts/ci/core-quality.sh")
 
-    assert "ptc.gen_docs --check" in precommit
-    assert "ptc.conformance_report --check-inventory" in precommit
+    assert "cmd scripts/ci/core-quality.sh" in precommit
+    assert quality_gate =~ "mix ptc.gen_docs --check"
+    assert quality_gate =~ "mix ptc.conformance_report --check-inventory"
 
     current = Path.join(dir, "docs/conformance/current.md")
     orphan = Path.join(dir, "docs/conformance/nested/orphan.md")

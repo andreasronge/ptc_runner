@@ -5,12 +5,9 @@
 #   1. Documentation routing: disposable plan-only changes skip the gate;
 #      other documentation-only changes run the ExDoc warnings gate.
 #   2. Otherwise: classify the affected contracts, run documentation first,
-#      then run the relevant root, Viewer, and launcher gates. Root changes
-#      invoke the canonical `mix prepush` alias for generated-artifact
-#      staleness, the upstream audit, Dialyzer, and the unused-dependency
-#      check. The staleness checks are shared with `precommit`, which an
-#      ordinary push does not run, so this hook is where a stale generated
-#      artifact is caught before CI rather than by it.
+#      then invoke the same repository-owned root, Viewer, and launcher gate
+#      scripts as GitHub Actions. The hook supplies changed paths; the scripts
+#      own commands and environment.
 #
 # Override:
 #   FORCE_FULL_PRE_PUSH=1 git push  → always run the full gate, even if
@@ -27,12 +24,10 @@ run_docs_gate() {
   echo ""
   echo "📚 Documentation"
 
-  if ! MIX_ENV=dev mix deps.get --check-locked; then
-    echo "❌ Documentation dependency setup failed. Fix the Mix error above before pushing."
+  if ! "$HOOK_REPO_ROOT/scripts/ci/docs.sh"; then
+    echo "❌ Documentation dependency setup or build failed. Fix the error above before pushing."
     return 1
   fi
-
-  MIX_ENV=dev mix docs --warnings-as-errors
 }
 
 # ----------------------------------------------------------------------
@@ -338,7 +333,8 @@ print_phase_summary() {
 }
 
 SCOPES_FILE="$(mktemp -t pre-push-scopes.XXXXXX)"
-"$HOOK_REPO_ROOT/scripts/classify_changes.sh" "$PTC_PRE_PUSH_PATHS_FILE" > "$SCOPES_FILE"
+"$HOOK_REPO_ROOT/scripts/ci/classify-changes.sh" \
+  "$PTC_PRE_PUSH_PATHS_FILE" > "$SCOPES_FILE"
 # The classifier emits only fixed boolean assignments.
 core=false
 launcher=false
@@ -354,114 +350,47 @@ rm -f "$SCOPES_FILE"
 # Documentation failures are deterministic and usually cheap to diagnose. Run
 # this gate before long test and Dialyzer stages so a bad reference does not
 # waste the rest of the push cycle.
-if [ "$docs" = true ]; then
+if [ "$docs" = true ] || [ "$core" = true ]; then
   DOCS_START=$SECONDS
   run_docs_gate
   record_phase "documentation (ExDoc)" $((SECONDS - DOCS_START))
 fi
 
-PROJECTS=()
+run_gate() {
+  local label="$1"
+  shift
+  echo ""
+  echo "📦 $label"
+  echo "  ⏳ Running repository CI entry point..."
+
+  local gate_start=$SECONDS
+  if ! "$@"; then
+    echo "  ❌ $label failed. Re-run: $*"
+    exit 1
+  fi
+
+  local gate_secs=$((SECONDS - gate_start))
+  echo "  ✅ $label passed in ${gate_secs}s"
+  record_phase "$label" "$gate_secs"
+}
+
 if [ "$core" = true ] || [ "$mcp_http" = true ] ||
    [ "$mcp_filesystem" = true ] || [ "$java" = true ]; then
-  PROJECTS+=(".")
+  run_gate "core tests" "$HOOK_REPO_ROOT/scripts/ci/core-tests.sh"
+  run_gate "core static analysis" "$HOOK_REPO_ROOT/scripts/ci/core-static.sh"
+  run_gate "core Dialyzer" "$HOOK_REPO_ROOT/scripts/ci/core-dialyzer.sh"
+  run_gate "core release verification" "$HOOK_REPO_ROOT/scripts/ci/core-release.sh"
 fi
 
 # Root trace and inspection contracts are consumed by the Viewer, so retain
 # Viewer coverage for core changes as well as Viewer-owned changes.
 if [ "$viewer" = true ] || [ "$core" = true ]; then
-  PROJECTS+=("ptc_viewer")
+  run_gate "Viewer validation" "$HOOK_REPO_ROOT/scripts/ci/viewer.sh"
 fi
 
 if [ "$launcher" = true ]; then
-  PROJECTS+=("ptc_runner_launcher")
+  run_gate "launcher validation" "$HOOK_REPO_ROOT/scripts/ci/launcher.sh"
 fi
-
-project_has_dep() {
-  local proj="$1" dep="$2"
-  grep -qE "\\{:${dep}," "${proj}/mix.exs" 2>/dev/null
-}
-
-run_project_gates() {
-  local proj="$1"
-  local label
-
-  if [ "$proj" = "." ]; then
-    label="root (:ptc_runner)"
-  else
-    label="$proj/"
-    [ -d "$proj" ] || return 0
-  fi
-
-  echo ""
-  echo "📦 Project: $label"
-
-  pushd "$proj" > /dev/null
-
-  if [ "$proj" = "ptc_runner_launcher" ]; then
-    echo "  ⏳ Running launcher package and containment gate..."
-    local launcher_start=$SECONDS
-    if ! mix precommit; then
-      echo "  ❌ Launcher checks failed. Re-run: (cd ptc_runner_launcher && mix precommit)"
-      popd > /dev/null
-      exit 1
-    fi
-    local launcher_secs=$((SECONDS - launcher_start))
-    echo "  ✅ Launcher checks passed in ${launcher_secs}s"
-    record_phase "launcher precommit" "$launcher_secs"
-    popd > /dev/null
-    return 0
-  fi
-
-  # "except `:nightly`" is not a hedge: `:nightly` tests cost tens of seconds
-  # each and run in the `Nightly` workflow instead. Every other tag this hook
-  # would otherwise skip still runs here.
-  echo "  ⏳ Running the test suite (all but :nightly)..."
-  local test_start=$SECONDS
-  if ! mix test --exclude clojure 2>&1; then
-    echo "  ❌ Tests failed in $label. Re-run: (cd $proj && mix test --exclude clojure)"
-    popd > /dev/null
-    exit 1
-  fi
-  local test_secs=$((SECONDS - test_start))
-  echo "  ✅ Tests passed in ${test_secs}s"
-  record_phase "$label tests" "$test_secs"
-
-  if [ "$proj" = "." ]; then
-    echo "  ⏳ Running canonical pre-push checks..."
-    local prepush_start=$SECONDS
-    if ! mix prepush; then
-      echo "  ❌ Pre-push checks failed in $label. Run: mix prepush"
-      popd > /dev/null
-      exit 1
-    fi
-    local prepush_secs=$((SECONDS - prepush_start))
-    echo "  ✅ Pre-push checks passed in ${prepush_secs}s"
-    record_phase "root mix prepush (incl. dialyzer)" "$prepush_secs"
-  # CWD is the project dir (we are inside `pushd "$proj"`), so check
-  # `./mix.exs` rather than `$proj/mix.exs`. Passing `$proj` here would
-  # resolve to a duplicated project path and silently skip Dialyzer for
-  # non-root projects.
-  elif project_has_dep "." "dialyxir"; then
-    echo "  ⏳ Running dialyzer (this may take a moment)..."
-    local dialyzer_start=$SECONDS
-    if ! mix dialyzer; then
-      echo "  ❌ Dialyzer found errors in $label. Run: (cd $proj && mix dialyzer)"
-      popd > /dev/null
-      exit 1
-    fi
-    local dialyzer_secs=$((SECONDS - dialyzer_start))
-    echo "  ✅ Dialyzer passed in ${dialyzer_secs}s"
-    record_phase "$label dialyzer" "$dialyzer_secs"
-  else
-    echo "  ⏭️  Dialyzer not declared in ${label}mix.exs"
-  fi
-
-  popd > /dev/null
-}
-
-for proj in "${PROJECTS[@]}"; do
-  run_project_gates "$proj"
-done
 
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))

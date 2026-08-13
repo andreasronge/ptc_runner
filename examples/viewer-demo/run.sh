@@ -2,7 +2,7 @@
 # Runs the five viewer-demo journeys against the trusted `deepseek` alias and
 # collects sanitized traces plus private inspection artifacts into one
 # directory for exercising `mix ptc.viewer`. Requires OPENROUTER_API_KEY in
-# `.env`. Journeys 01/02 must succeed and 04/05 must end in a failing run;
+# `.env`, selected explicitly below. Journeys 01/02 must succeed and 04/05 must end in a failing run;
 # journey 03's final status depends on how the model reacts to quota
 # feedback, but its trace must contain limit-exceeded events. Every journey
 # must produce non-empty trace and inspection artifacts, and any deviation
@@ -34,6 +34,7 @@ run_journey() {
 
   local status=0
   mix ptc run "$demo_dir/$journey.json" \
+    --env-file "$repo_root/.env" \
     --host-config "$demo_dir/ptc-host.json" \
     --trace-dir "$out" \
     --inspect "$out/$journey.inspection.jsonl" || status=$?

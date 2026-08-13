@@ -14,6 +14,13 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
     syntax: ["--help"],
     description: "show help for this command"
   }
+  @env_file_option %{
+    key: :env_file,
+    type: :string,
+    syntax: ["--env-file FILE"],
+    description: "load environment variables from this exact file",
+    owner: :frontend
+  }
 
   @declarations %{
     root: %{
@@ -118,6 +125,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--component-override-descriptor DESCRIPTOR.json"],
           description: "verified replacement component descriptor"
         },
+        @env_file_option,
         %{
           key: :envelope,
           type: :string,
@@ -159,6 +167,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--show-model-selectors"],
           description: "include safe configured model selectors"
         },
+        @env_file_option,
         %{
           key: :envelope,
           type: :string,
@@ -249,6 +258,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--host-config HOST.json"],
           description: "manifest-only trusted provider installation document"
         },
+        @env_file_option,
         %{
           key: :trace,
           type: :string,

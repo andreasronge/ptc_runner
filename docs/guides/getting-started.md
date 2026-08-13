@@ -174,12 +174,14 @@ Everything above is deterministic. Adding a model takes one credential and one
 extra flag.
 
 Copy `.env.example` to the Git-ignored `.env` and set `OPENROUTER_API_KEY` to
-your [OpenRouter](https://openrouter.ai/keys) key. That is the only setup step;
+your [OpenRouter](https://openrouter.ai/keys) key. Pass `--env-file .env` to
+load that exact file; PtcRunner does not search for it implicitly.
 [Host configuration](host-configuration.md#declare-credentials-once) documents the three
 declaration forms and how to move off `.env` for a real deployment.
 
 ```console
 mix ptc run examples/kernel-tutorial/02-deepseek-extract/ptc.json \
+  --env-file .env \
   --host-config examples/kernel-tutorial/ptc-host.json
 ```
 
@@ -198,6 +200,7 @@ Let the model write the program instead:
 
 ```console
 mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
+  --env-file .env \
   --host-config examples/kernel-tutorial/ptc-host.json
 ```
 

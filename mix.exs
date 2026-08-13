@@ -1,9 +1,11 @@
 defmodule PtcRunner.MixProject do
   use Mix.Project
 
+  @app :ptc_runner
+
   def project do
     [
-      app: :ptc_runner,
+      app: @app,
       version: "0.13.0",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
@@ -177,45 +179,22 @@ defmodule PtcRunner.MixProject do
     [
       ptc: &run_ptc/1,
       precommit: [
-        "format --check-formatted",
-        "compile --warnings-as-errors",
-        "xref graph --format cycles --label compile-connected --fail-above 0",
-        "credo --strict",
-        "cmd bash scripts/duplication_gate.sh check",
-        "ptc.validate_spec",
-        "ptc.gen_docs --check",
-        "ptc.conformance_report --check-inventory",
-        "test --warnings-as-errors",
-        "cmd --cd ptc_viewer mix test --color",
-        "cmd --cd ptc_runner_launcher mix precommit",
-        "cmd bash scripts/verify_core_package.sh",
-        "cmd bash scripts/verify_standalone_release.sh"
+        "cmd scripts/ci/core-quality.sh",
+        "cmd scripts/ci/core-tests.sh",
+        "cmd scripts/ci/viewer.sh",
+        "cmd scripts/ci/launcher-package.sh",
+        "cmd scripts/ci/core-release.sh"
       ],
-      # Slower checks kept out of the per-commit loop; run before pushing.
-      # PR CI runs these as individual steps. The upstream audit attests all
-      # exact Java descriptors when Java 11 or newer is available.
-      #
-      # The two staleness checks are also in `precommit`, and are repeated
-      # here on purpose. A generated artifact goes stale from an ordinary edit
-      # to the sources it projects, `AGENTS.md` tells you not to run `precommit`
-      # before an ordinary push because the hook already gates it, and the hook
-      # runs the suite and this alias rather than `precommit`. Without them a
-      # push that touches `lib/` clears every local gate and still fails CI on
-      # an artifact the author never had a chance to regenerate. They cost a few
-      # seconds inside a run that already spends minutes.
+      # Slower static and Dialyzer checks kept out of the per-commit loop.
+      # This diagnostic alias delegates to the same repository-owned scripts
+      # as the pre-push hook and GitHub Actions; it is not a second gate
+      # implementation.
       #
       # `ptc.gen_semantic_revision --check` is deliberately absent from both:
       # it is a release gate, not a per-commit one. See `.gitattributes`.
       prepush: [
-        # Credo is repeated here for the same reason as the staleness checks
-        # below: the hook runs this alias, not `precommit`, so without it a
-        # lint the CI Credo step rejects only surfaces after the push.
-        "credo --strict",
-        "ptc.gen_docs --check",
-        "ptc.conformance_report --check-inventory",
-        "ptc.audit_upstream",
-        "dialyzer",
-        "deps.unlock --check-unused"
+        "cmd scripts/ci/core-static.sh",
+        "cmd scripts/ci/core-dialyzer.sh"
       ],
       coverage: [
         "test --cover"
@@ -248,8 +227,20 @@ defmodule PtcRunner.MixProject do
   end
 
   defp run_ptc(args) do
-    Mix.Task.run(ptc_prepare_task(args), ["--no-deps-check"])
+    Mix.Task.run(ptc_prepare_task(args), ptc_prepare_args(Mix.Project.app_path()))
     Mix.Task.run("ptc", args)
+  end
+
+  @doc false
+  @spec ptc_prepare_args(binary()) :: [binary()]
+  def ptc_prepare_args(app_path) when is_binary(app_path) do
+    # The app compiler runs after the language compilers, so this artifact is
+    # an O(1) signal that the initial dependency-aware build completed. Calling
+    # Mix.Dep.cached/0 here would restore much of the warm-start cost this path
+    # deliberately avoids.
+    app_file = Path.join([app_path, "ebin", Atom.to_string(@app) <> ".app"])
+
+    if File.regular?(app_file), do: ["--no-deps-check"], else: []
   end
 
   # These raw forms are only preparation hints; the shared parser remains the

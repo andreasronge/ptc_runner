@@ -674,7 +674,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
              {:stderr,
               "error: active_preflight/credential_unavailable: " <>
                 "provider/deepseek/credentials: a required provider credential is unavailable " <>
-                "(run_ref: #{@run_ref})\n"}
+                "(run_ref: #{@run_ref}); export it, pass --env-file PATH, or use a host file credential\n"}
 
     {:ok, selection_subject} =
       CommandSubject.provider("workspace", :selection, %{destination: :mission, index: 2})

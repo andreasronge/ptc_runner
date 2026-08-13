@@ -75,13 +75,8 @@ jobs:
           cache-plt: 'false'
           install-babashka: 'false'
 
-      - name: Verify source package and process containment
-        working-directory: ptc_runner_launcher
-        run: mix precommit
-
-      - name: Build and verify precompiled artifact
-        working-directory: ptc_runner_launcher
-        run: bash scripts/verify_precompiled.sh "$RUNNER_TEMP/launcher-artifacts"
+      - name: Verify source package, process containment, and precompiled artifact
+        run: scripts/ci/launcher.sh "$RUNNER_TEMP/launcher-artifacts"
 
       - name: Upload launcher artifact
         uses: actions/upload-artifact@v6

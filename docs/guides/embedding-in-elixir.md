@@ -117,6 +117,10 @@ Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
 {:ok, _started} = Application.ensure_all_started(:req_llm)
 ```
 
+Command frontends read only the exact dotenv file named by `--env-file`; they
+do not search for one. Embedded hosts do not load dotenv files implicitly and
+must acquire environment-backed credentials themselves.
+
 An unstarted required application is a non-retryable host configuration error,
 not a transient model failure. Hosts that configure custom ReqLLM pools also
 own their pool geometry; the CLI uses installed `live_provider_tasks`, not one

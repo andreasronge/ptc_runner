@@ -288,8 +288,10 @@ installation fields and source types belong in
 its sealed descriptor, and every acquired provider resource must be committed
 to the session's cleanup stack before assembly exposes it.
 
-Ambient `.env` loading is a Mix-frontend choice made before shared dispatch.
-Kernel modules never load it. Embedders must acquire ambient environment state
+Explicit dotenv loading belongs to command frontends. They anchor the exact
+`--env-file` path at command entry and load it only when inert preparation
+proves that a selected LLM uses an environment credential. Kernel modules
+never search for or load dotenv input; embedders acquire environment state
 explicitly.
 
 `MCPSource` owns discovery and capability assembly; `MCPProtocol` owns pure
@@ -396,8 +398,9 @@ mix precommit
 MIX_ENV=dev mix docs --warnings-as-errors  # when documentation changed
 ```
 
-For an ordinary push, let the tracked pre-push hook run the relevant suites and
-`mix prepush`. Invoke `mix prepush` directly only for diagnosis or when hooks
-are unavailable. Secret-dependent and model-driven E2E tests require their
-documented credentials; deterministic tests remain the authority for
-containment, ownership, accounting, rollback, and cleanup.
+For an ordinary push, let the tracked pre-push hook invoke the same
+repository-owned root, Viewer, launcher, release, and documentation scripts as
+GitHub Actions. Invoke `mix prepush` directly only for static or Dialyzer
+diagnosis, or when hooks are unavailable. Secret-dependent and model-driven
+E2E tests require their documented credentials; deterministic tests remain the
+authority for containment, ownership, accounting, rollback, and cleanup.

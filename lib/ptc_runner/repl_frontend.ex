@@ -84,41 +84,70 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.ReplError
 
   @spec run(CommandArguments.t(), CommandRuntime.t()) :: :ok | {:error, binary()}
+  def run(arguments, runtime), do: run(arguments, runtime, [])
+
+  @doc false
+  @spec run(CommandArguments.t(), CommandRuntime.t(), keyword()) :: :ok | {:error, binary()}
   def run(
         %CommandArguments{command: :repl, application: script, ordered_options: opts},
-        %CommandRuntime{} = runtime
+        %CommandRuntime{} = runtime,
+        frontend_opts
       ) do
-    arguments = if is_binary(script), do: [script], else: []
+    if valid_frontend_opts?(frontend_opts) do
+      arguments = if is_binary(script), do: [script], else: []
+      terminal_attached? = terminal_attached?(frontend_opts)
 
-    case validate_command(opts, arguments, []) do
-      {:ok, :describe} ->
-        describe_profile(opts)
+      case validate_command(opts, arguments, [], terminal_attached?) do
+        {:ok, :describe} ->
+          describe_profile(opts)
 
-      {:ok, :profile} ->
-        run_profile_session(opts, arguments)
+        {:ok, :profile} ->
+          run_profile_session(
+            Keyword.put(opts, :terminal_attached, terminal_attached?),
+            arguments
+          )
 
-      {:ok, :manifest} ->
-        run_manifest_session(Keyword.put(opts, :command_runtime, runtime), arguments)
+        {:ok, :manifest} ->
+          opts =
+            opts
+            |> Keyword.put(:command_runtime, runtime)
+            |> Keyword.put(:terminal_attached, terminal_attached?)
 
-      {:ok, :direct} ->
-        run_direct_session(opts, arguments)
+          run_manifest_session(opts, arguments)
 
-      {:error, message} ->
-        command_error(opts, :cli, message)
+        {:ok, :direct} ->
+          run_direct_session(opts, arguments)
+
+        {:error, message} ->
+          command_error(opts, :cli, message)
+      end
+
+      :ok
+    else
+      {:error, "invalid repl frontend options"}
     end
-
-    :ok
   rescue
     error in ReplError -> {:error, error.message}
   end
 
-  defp validate_command(opts, arguments, invalid) do
+  def run(_arguments, _runtime, _frontend_opts), do: {:error, "invalid repl frontend options"}
+
+  defp valid_frontend_opts?(opts) do
+    Keyword.keyword?(opts) and Keyword.keys(opts) -- [:terminal_attached] == [] and
+      length(opts) == MapSet.size(MapSet.new(Keyword.keys(opts))) and
+      Keyword.get(opts, :terminal_attached, false) in [true, false]
+  end
+
+  defp terminal_attached?(opts),
+    do: Keyword.get_lazy(opts, :terminal_attached, &AnalysisTerminal.attached?/0)
+
+  defp validate_command(opts, arguments, invalid, terminal_attached?) do
     format = Keyword.get(opts, :format, "clojure")
     evals = Keyword.get_values(opts, :eval)
     resources = Keyword.get_values(opts, :resource)
 
     with :ok <- validate_common_command(arguments, invalid, evals, format) do
-      select_command(opts, arguments, evals, resources, format)
+      select_command(opts, arguments, evals, resources, format, terminal_attached?)
     end
   end
 
@@ -141,13 +170,20 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
-  defp select_command(opts, arguments, evals, resources, format) do
+  defp select_command(opts, arguments, evals, resources, format, terminal_attached?) do
     cond do
       opts[:describe_profile] ->
         validate_description(opts, arguments)
 
       opts[:profile] ->
-        validate_profile_command(opts, arguments, evals, resources, format)
+        validate_profile_command(
+          opts,
+          arguments,
+          evals,
+          resources,
+          format,
+          terminal_attached?
+        )
 
       opts[:manifest] ->
         validate_manifest_command(opts, resources, format)
@@ -201,7 +237,14 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
-  defp validate_profile_command(opts, arguments, evals, resources, format) do
+  defp validate_profile_command(
+         opts,
+         arguments,
+         evals,
+         resources,
+         format,
+         terminal_attached?
+       ) do
     with {:ok, recipe} <- AnalysisProfileRegistry.fetch(opts[:profile]),
          :ok <-
            validate_profile_combinations(
@@ -219,7 +262,7 @@ defmodule PtcRunner.ReplFrontend do
              continue_on_error: Keyword.get(opts, :continue_on_error, false),
              private_terminal: Keyword.get(opts, :private_terminal, false),
              private_unattended: Keyword.get(opts, :private_unattended, false),
-             terminal_attached: AnalysisTerminal.attached?()
+             terminal_attached: terminal_attached?
            }) do
       {:ok, :profile}
     else
@@ -576,7 +619,10 @@ defmodule PtcRunner.ReplFrontend do
         else: builder_options
 
     if Keyword.get(opts, :private_terminal, false),
-      do: Keyword.put(builder_options, :private_terminal, true),
+      do:
+        builder_options
+        |> Keyword.put(:private_terminal, true)
+        |> Keyword.put(:terminal_attached, Keyword.fetch!(opts, :terminal_attached)),
       else: builder_options
   end
 
@@ -1077,7 +1123,7 @@ defmodule PtcRunner.ReplFrontend do
              runtime: runtime,
              trace_path: opts[:trace],
              private_terminal: Keyword.get(opts, :private_terminal, false),
-             terminal_attached: AnalysisTerminal.attached?(),
+             terminal_attached: Keyword.fetch!(opts, :terminal_attached),
              input_mode: manifest_input_mode(opts, arguments)
            ) do
       run_workflow_session(session, opts, arguments)
