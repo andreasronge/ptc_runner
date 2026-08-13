@@ -12,13 +12,61 @@ defmodule Mix.Tasks.PtcTest do
   alias PtcRunner.MixCommandRuntime
   alias PtcRunner.StandaloneCommandRuntime
 
+  @root Path.expand("../../..", __DIR__)
+
   test "only the root project bootstrap skips dependency checks" do
     assert MixCommandRuntime.app_config_args(PtcRunner.MixProject) == ["--no-deps-check"]
     assert MixCommandRuntime.app_config_args(Downstream.MixProject) == []
     assert MixCommandRuntime.app_config_args(nil) == []
   end
 
-  @root Path.expand("../../..", __DIR__)
+  @tag :tmp_dir
+  test "root command validates dependencies until the application has been built", %{
+    tmp_dir: directory
+  } do
+    app_path = Path.join(directory, "ptc_runner")
+    app_file = Path.join([app_path, "ebin", "ptc_runner.app"])
+
+    assert PtcRunner.MixProject.ptc_prepare_args(app_path) == []
+
+    File.mkdir_p!(Path.dirname(app_file))
+    assert PtcRunner.MixProject.ptc_prepare_args(app_path) == []
+
+    File.write!(app_file, "built")
+    assert PtcRunner.MixProject.ptc_prepare_args(app_path) == ["--no-deps-check"]
+  end
+
+  # Seed everything except one dependency so this exercises the real alias
+  # without rebuilding the entire dependency tree. The old unconditional
+  # --no-deps-check path leaves the omitted dependency uncompiled.
+  @tag :slow
+  test "a cold root command compiles dependencies before running" do
+    build_path =
+      Path.join(@root, "_build/ptc-cold-start-#{System.unique_integer([:positive, :monotonic])}")
+
+    on_exit(fn -> File.rm_rf!(build_path) end)
+    seed_incomplete_build(build_path)
+
+    {output, status} =
+      System.cmd(System.find_executable("mix"), ["ptc", "--version"],
+        cd: @root,
+        env: [
+          {"MIX_BUILD_PATH", build_path},
+          {"MIX_ENV", "test"},
+          {"MIX_QUIET", "1"}
+        ],
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+    assert output =~ Mix.Project.config()[:version]
+
+    assert File.regular?(
+             Path.join([build_path, "lib", "nimble_parsec", "ebin", "nimble_parsec.app"])
+           )
+
+    assert File.regular?(Path.join([build_path, "lib", "ptc_runner", "ebin", "ptc_runner.app"]))
+  end
 
   @tag :tmp_dir
   test "renders a normal run value as deterministic compact JSON", %{tmp_dir: dir} do
@@ -272,6 +320,26 @@ defmodule Mix.Tasks.PtcTest do
 
     message = failed_message(args)
     assert %{"readiness" => "failed", "checks" => ^checks} = Jason.decode!(message)
+  end
+
+  defp seed_incomplete_build(build_path) do
+    source_lib_path = Path.join(Mix.Project.build_path(), "lib")
+    build_lib_path = Path.join(build_path, "lib")
+    File.mkdir_p!(build_lib_path)
+
+    source_lib_path
+    |> File.ls!()
+    |> Enum.reject(&(&1 in ["nimble_parsec", "ptc_runner"]))
+    |> Enum.each(fn dependency ->
+      File.ln_s!(
+        Path.join(source_lib_path, dependency),
+        Path.join(build_lib_path, dependency)
+      )
+    end)
+
+    runner_path = Path.join(build_lib_path, "ptc_runner")
+    File.cp_r!(Path.join(source_lib_path, "ptc_runner"), runner_path)
+    File.rm!(Path.join([runner_path, "ebin", "ptc_runner.app"]))
   end
 
   defp run_output(args) do

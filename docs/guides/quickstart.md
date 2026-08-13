@@ -22,8 +22,10 @@ mix ptc run examples/kernel-tutorial/01-orders/ptc.json
 ```
 
 That is a PTC-Lisp function reading JSON input. No model, no host document, no
-network. The first run compiles the dependencies and the project, which took
-about 90 seconds from a fresh clone; later runs start in a few seconds.
+network. On a fresh clone, the first `mix ptc` run performs Mix's normal
+dependency validation and compiles the dependencies and project, which took
+about 90 seconds. Once that build succeeds, later root-project commands skip
+dependency validation and start in a few seconds.
 
 ## 2. Supply a model credential
 

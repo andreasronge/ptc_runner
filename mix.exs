@@ -1,9 +1,11 @@
 defmodule PtcRunner.MixProject do
   use Mix.Project
 
+  @app :ptc_runner
+
   def project do
     [
-      app: :ptc_runner,
+      app: @app,
       version: "0.13.0",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
@@ -225,8 +227,20 @@ defmodule PtcRunner.MixProject do
   end
 
   defp run_ptc(args) do
-    Mix.Task.run(ptc_prepare_task(args), ["--no-deps-check"])
+    Mix.Task.run(ptc_prepare_task(args), ptc_prepare_args(Mix.Project.app_path()))
     Mix.Task.run("ptc", args)
+  end
+
+  @doc false
+  @spec ptc_prepare_args(binary()) :: [binary()]
+  def ptc_prepare_args(app_path) when is_binary(app_path) do
+    # The app compiler runs after the language compilers, so this artifact is
+    # an O(1) signal that the initial dependency-aware build completed. Calling
+    # Mix.Dep.cached/0 here would restore much of the warm-start cost this path
+    # deliberately avoids.
+    app_file = Path.join([app_path, "ebin", Atom.to_string(@app) <> ".app"])
+
+    if File.regular?(app_file), do: ["--no-deps-check"], else: []
   end
 
   # These raw forms are only preparation hints; the shared parser remains the
