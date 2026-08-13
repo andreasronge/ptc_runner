@@ -23,7 +23,9 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   human's terminal from a pseudo-terminal allocated by `script(1)`, `tmux`, or
   `ssh -t`, and because a same-UID caller can already read the inspection
   artifact directly. `private_unattended` makes deliberate non-interactive use
-  explicit and greppable instead of requiring that workaround.
+  explicit and greppable instead of requiring that workaround. Tests and
+  trusted embedding frontends may inject the detected state with
+  `terminal_attached:`; ordinary callers omit it and use the real terminal.
   """
 
   alias PtcRunner.Kernel.AnalysisAssembly
@@ -62,7 +64,8 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
     :inspection_capture_hook,
     :inspection_listing_hook,
     :private_terminal,
-    :private_unattended
+    :private_unattended,
+    :terminal_attached
   ]
 
   @doc """
@@ -147,7 +150,8 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   defp valid_private_terminal?(opts),
     do:
       Keyword.get(opts, :private_terminal, false) in [true, false] and
-        Keyword.get(opts, :private_unattended, false) in [true, false]
+        Keyword.get(opts, :private_unattended, false) in [true, false] and
+        Keyword.get(opts, :terminal_attached, false) in [true, false]
 
   defp valid_optional_hook?(nil, _arity), do: true
   defp valid_optional_hook?(hook, arity), do: is_function(hook, arity)
@@ -155,6 +159,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   defp authorize_private_profile(recipe, opts) do
     terminal? = Keyword.get(opts, :private_terminal, false)
     unattended? = Keyword.get(opts, :private_unattended, false)
+    terminal_attached? = Keyword.get_lazy(opts, :terminal_attached, &AnalysisTerminal.attached?/0)
 
     case recipe.frontend().private_terminal do
       :required ->
@@ -162,7 +167,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
           terminal? and unattended? -> {:error, :private_destination_conflict}
           unattended? -> :ok
           not terminal? -> {:error, :private_terminal_required}
-          not AnalysisTerminal.attached?() -> {:error, :interactive_terminal_required}
+          not terminal_attached? -> {:error, :interactive_terminal_required}
           true -> :ok
         end
 

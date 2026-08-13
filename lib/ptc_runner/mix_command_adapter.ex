@@ -9,27 +9,35 @@ defmodule PtcRunner.MixCommandAdapter do
 
   @doc false
   @spec execute([binary()]) :: CommandPresentation.t()
-  def execute(args) when is_list(args),
+  def execute(args), do: execute(args, [])
+
+  @doc false
+  @spec execute([binary()], keyword()) :: CommandPresentation.t()
+  def execute(args, frontend_opts) when is_list(args) and is_list(frontend_opts),
     do:
       CommandRouter.execute(
         args,
         :mix,
         &MixCommandRuntime.bootstrap/1,
-        &run_one_shot/2
+        fn arguments, runtime -> run_one_shot(arguments, runtime, frontend_opts) end
       )
 
-  def execute(_args), do: execute([])
+  def execute(_args, _frontend_opts), do: execute([], [])
 
-  defp run_one_shot(%{command: :repl} = arguments, runtime),
-    do: ReplFrontend.run(arguments, runtime)
+  defp run_one_shot(%{command: :repl} = arguments, runtime, frontend_opts),
+    do: ReplFrontend.run(arguments, runtime, frontend_opts)
 
-  defp run_one_shot(%{command: :transcript} = arguments, runtime),
+  defp run_one_shot(%{command: :transcript} = arguments, runtime, _frontend_opts),
     do: TranscriptFrontend.run(arguments, runtime)
 
   @doc false
   @spec run_task([binary()]) :: CommandPresentation.t() | no_return()
-  def run_task(args) when is_list(args) do
-    presentation = execute(args)
+  def run_task(args), do: run_task(args, [])
+
+  @doc false
+  @spec run_task([binary()], keyword()) :: CommandPresentation.t() | no_return()
+  def run_task(args, frontend_opts) when is_list(args) and is_list(frontend_opts) do
+    presentation = execute(args, frontend_opts)
 
     case presentation.exit_status do
       0 ->

@@ -97,7 +97,7 @@ while IFS= read -r path || [ -n "$path" ]; do
       ;;
 
     .github/workflows/test.yml|.github/actions/setup-elixir/*|\
-      scripts/classify_changes.sh)
+      scripts/ci/classify-changes.sh)
       select_all
       ;;
 

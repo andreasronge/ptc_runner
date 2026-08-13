@@ -177,45 +177,22 @@ defmodule PtcRunner.MixProject do
     [
       ptc: &run_ptc/1,
       precommit: [
-        "format --check-formatted",
-        "compile --warnings-as-errors",
-        "xref graph --format cycles --label compile-connected --fail-above 0",
-        "credo --strict",
-        "cmd bash scripts/duplication_gate.sh check",
-        "ptc.validate_spec",
-        "ptc.gen_docs --check",
-        "ptc.conformance_report --check-inventory",
-        "test --warnings-as-errors",
-        "cmd --cd ptc_viewer mix test --color",
-        "cmd --cd ptc_runner_launcher mix precommit",
-        "cmd bash scripts/verify_core_package.sh",
-        "cmd bash scripts/verify_standalone_release.sh"
+        "cmd scripts/ci/core-quality.sh",
+        "cmd scripts/ci/core-tests.sh",
+        "cmd scripts/ci/viewer.sh",
+        "cmd scripts/ci/launcher-package.sh",
+        "cmd scripts/ci/core-release.sh"
       ],
-      # Slower checks kept out of the per-commit loop; run before pushing.
-      # PR CI runs these as individual steps. The upstream audit attests all
-      # exact Java descriptors when Java 11 or newer is available.
-      #
-      # The two staleness checks are also in `precommit`, and are repeated
-      # here on purpose. A generated artifact goes stale from an ordinary edit
-      # to the sources it projects, `AGENTS.md` tells you not to run `precommit`
-      # before an ordinary push because the hook already gates it, and the hook
-      # runs the suite and this alias rather than `precommit`. Without them a
-      # push that touches `lib/` clears every local gate and still fails CI on
-      # an artifact the author never had a chance to regenerate. They cost a few
-      # seconds inside a run that already spends minutes.
+      # Slower static and Dialyzer checks kept out of the per-commit loop.
+      # This diagnostic alias delegates to the same repository-owned scripts
+      # as the pre-push hook and GitHub Actions; it is not a second gate
+      # implementation.
       #
       # `ptc.gen_semantic_revision --check` is deliberately absent from both:
       # it is a release gate, not a per-commit one. See `.gitattributes`.
       prepush: [
-        # Credo is repeated here for the same reason as the staleness checks
-        # below: the hook runs this alias, not `precommit`, so without it a
-        # lint the CI Credo step rejects only surfaces after the push.
-        "credo --strict",
-        "ptc.gen_docs --check",
-        "ptc.conformance_report --check-inventory",
-        "ptc.audit_upstream",
-        "dialyzer",
-        "deps.unlock --check-unused"
+        "cmd scripts/ci/core-static.sh",
+        "cmd scripts/ci/core-dialyzer.sh"
       ],
       coverage: [
         "test --cover"

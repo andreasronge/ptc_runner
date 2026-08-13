@@ -1586,9 +1586,9 @@ Prefer contract-level integration tests over tests that mirror implementation:
 - tutorial/E2E tests — real user and provider flows.
 
 Run `mix precommit` before every commit. For an ordinary push, let the tracked
-pre-push hook run the full root/Viewer tests and the canonical `mix prepush`
-checks once. Invoke `mix prepush` directly only for diagnosis or when hooks are
-unavailable.
+pre-push hook invoke the same repository-owned root, Viewer, launcher, release,
+and documentation scripts as GitHub Actions. Invoke `mix prepush` directly only
+for static/Dialyzer diagnosis or when hooks are unavailable.
 
 Credential-free interoperability tests may run as focused push and
 pull-request jobs even when tagged `:e2e`. Secret-dependent and model-driven

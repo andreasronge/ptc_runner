@@ -1,7 +1,7 @@
 defmodule PtcRunner.Scripts.ClassifyChangesTest do
   use ExUnit.Case, async: true
 
-  @classifier Path.expand("../../scripts/classify_changes.sh", __DIR__)
+  @classifier Path.expand("../../scripts/ci/classify-changes.sh", __DIR__)
 
   test "routes independently testable repository areas" do
     assert classify(["docs/plans/future/note.md"]) == all_false()
