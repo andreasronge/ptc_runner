@@ -7,7 +7,6 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   alias PtcRunner.Kernel.AnalysisResources
   alias PtcRunner.Kernel.AnalysisSession
   alias PtcRunner.Kernel.AnalysisSessionBuilder
-  alias PtcRunner.Kernel.AnalysisTerminal
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSnapshot
@@ -120,21 +119,27 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
                {:directory, "/definitely/missing/private-output"}
              )
 
-    refute AnalysisTerminal.attached?()
-
     assert {:error, :interactive_terminal_required} =
              AnalysisSessionBuilder.start(
                @profile_id,
                resources,
                {:directory, "/definitely/missing/private-output"},
-               private_terminal: true
+               private_terminal: true,
+               terminal_attached: false
+             )
+
+    assert {:error, :invalid_private_run_analysis_source} =
+             AnalysisSessionBuilder.start(
+               @profile_id,
+               resources,
+               {:directory, "/definitely/missing/private-output"},
+               private_terminal: true,
+               terminal_attached: true
              )
   end
 
   test "private_unattended is a second authorized destination, mutually exclusive with the terminal" do
     {:ok, recipe} = AnalysisProfileRegistry.fetch(@profile_id)
-
-    refute AnalysisTerminal.attached?()
 
     base = %{
       output_format: :clojure,

@@ -1146,6 +1146,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       # This test exercises locale propagation, not the default startup
       # deadline. Booting an Elixir source fixture can exceed five seconds
       # while the full CI suite is under load.
+      |> put_in(["install", "workspace", "ceilings"], %{"timeout_ms" => 20_000})
       |> put_in(["install", "workspace", "transport", "start_timeout_ms"], 20_000)
       |> put_in(["install", "workspace", "transport", "inherit_environment"], true)
       |> put_in(["install", "workspace", "tools"], %{
@@ -1153,6 +1154,8 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       })
 
     host = load_host(dir, config)
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 20_000)
+    build_context = %{context(dir, :mission) | limits: limits, installed_limits: limits}
 
     assert {:ok, registry} =
              HostInstallation.catalog(host)
@@ -1161,7 +1164,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
              end)
 
     assert {:ok, %{capabilities: [capability], close: close}} =
-             ProviderRegistry.build(registry, "workspace", %{}, context(dir, :mission))
+             ProviderRegistry.build(registry, "workspace", %{}, build_context)
 
     on_exit(fn -> close.() end)
 

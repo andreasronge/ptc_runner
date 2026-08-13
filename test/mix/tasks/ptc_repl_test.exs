@@ -340,7 +340,9 @@ defmodule PtcRunner.ReplFrontendTest do
           {["--private-terminal", "--private-unattended"], ~r/conflicting_arguments/}
         ] do
       capture_io(fn ->
-        assert_raise Mix.Error, message, fn -> run_repl(missing_resources ++ suffix) end
+        assert_raise Mix.Error, message, fn ->
+          run_repl(missing_resources ++ suffix, terminal_attached: false)
+        end
       end)
     end
   end
@@ -919,7 +921,8 @@ defmodule PtcRunner.ReplFrontendTest do
     assert File.regular?(List.last(records)["trace_path"])
   end
 
-  defp run_repl(args), do: MixCommandAdapter.run_task(["repl" | args]).outcome
+  defp run_repl(args, frontend_opts \\ []),
+    do: MixCommandAdapter.run_task(["repl" | args], frontend_opts).outcome
 
   defp profile_args(source, output_directory) do
     [

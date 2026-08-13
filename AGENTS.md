@@ -62,22 +62,25 @@ how it was verified.
   staleness, root/Viewer/launcher tests, core-package and standalone release
   verification); run before every commit. Much broader than the fast,
   staged-file Git pre-commit hook; takes a few minutes in a fresh worktree.
+- `scripts/ci/core-tests.sh` — canonical core compile/test gate used by
+  `mix precommit`, pre-push, and GitHub Actions. It always sets `CI=1`, so
+  StreamData runs the same 300 cases locally and remotely, while retaining all
+  native schedulers by default. Use `scripts/ci/core-tests.sh --schedulers 4`
+  to reproduce GitHub's current CPU shape; this does not emulate Linux.
 - `MIX_ENV=dev mix docs --warnings-as-errors` — ExDoc reference and rendering
   gate; run when changing user-facing documentation. Generated-artifact
   staleness is checked separately, by both `mix precommit` and `mix prepush`.
 - `git push` — the tracked pre-push hook classifies pushed and dirty paths and
-  runs the relevant root, Viewer, launcher, or documentation gates. Root
-  changes run the root tests and `mix prepush` (credo, generated-artifact
-  staleness, upstream API audit, Dialyzer, unused-deps). Credo and the staleness
-  checks are also in `precommit`, and are repeated here because an ordinary push
-  does not run `precommit` — without them a `lib/` edit can clear every local
-  gate and still fail CI on an artifact you were never prompted to regenerate.
+  invokes the same repository-owned root, Viewer, launcher, release, and
+  documentation scripts as GitHub Actions. Root changes therefore use the
+  same compile/test flags, `CI=1` property count, static checks, Dialyzer
+  format, and release verification locally and remotely.
   When one fires, run its matching write form — `mix ptc.gen_docs` for
   generated docs and schemas, or `mix ptc.conformance_report --write-inventory`
   for `conformance_inventory.json` — then stage the result. Do not run
   `mix prepush` immediately before an ordinary push;
-  invoke it directly only for diagnosis or when hooks are unavailable. PR CI
-  runs the same checks as individual steps. The test suite uses
+  invoke it directly only for static/Dialyzer diagnosis or when hooks are
+  unavailable. PR CI runs the same scripts as individual jobs. The test suite uses
   `System.schedulers_online()` concurrent cases; do not reduce that pressure
   to make a failing push pass.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`;

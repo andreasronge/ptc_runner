@@ -80,6 +80,27 @@ cannot be merged, and only the release gate checks it — so never regenerate it
 on a feature branch and never hand-merge it. Run `mix regen` on `main` before
 tagging. `.gitattributes` explains why.
 
+## Local CI modes
+
+GitHub Actions and the tracked hooks delegate deterministic gates to the
+scripts in `scripts/ci/`. Run the core gate directly when diagnosing a test
+failure:
+
+```bash
+scripts/ci/core-tests.sh
+```
+
+That command sets `CI=1`, including StreamData's 300-run setting, but retains
+the machine's native scheduler count for higher local pressure. A complementary
+four-scheduler run reproduces GitHub's current CPU shape:
+
+```bash
+scripts/ci/core-tests.sh --schedulers 4
+```
+
+The second command still runs on the local operating system. It is CPU-shape
+parity, not an Ubuntu container; OS-level parity remains a separate concern.
+
 ## Dialyzer PLT
 
 Outside CI the core PLT lives under `~/.cache/ptc_runner/` and is shared across
