@@ -39,6 +39,19 @@ defmodule PtcRunner.TestSupport.TestHelpers do
   end
 
   @doc """
+  Returns an ExUnit skip reason when optional environment variables are absent.
+
+  Empty values count as absent. Tests still fail normally when a configured
+  prerequisite is invalid or unavailable during execution.
+  """
+  @spec environment_skip_reason([String.t()]) :: String.t() | nil
+  def environment_skip_reason(names) when is_list(names) do
+    names
+    |> Enum.filter(&(System.get_env(&1) in [nil, ""]))
+    |> missing_environment_reason()
+  end
+
+  @doc """
   Stops a process (Agent/GenServer) started in test setup, tolerating the
   teardown race. A `start_link`-ed process dies with the test process, which can
   race `on_exit`: `if Process.alive?(pid), do: GenServer.stop(pid)` is a TOCTOU —
@@ -52,6 +65,11 @@ defmodule PtcRunner.TestSupport.TestHelpers do
   end
 
   def stop_quietly(_), do: :ok
+
+  defp missing_environment_reason([]), do: nil
+
+  defp missing_environment_reason(names),
+    do: "optional E2E prerequisites are not configured: #{Enum.join(names, ", ")}"
 
   @doc """
   A PTC-Lisp entry body that genuinely occupies its worker while a test

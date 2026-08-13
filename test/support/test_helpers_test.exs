@@ -1,7 +1,41 @@
 defmodule PtcRunner.TestSupport.TestHelpersTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
-  import PtcRunner.TestSupport.TestHelpers, only: [stop_quietly: 1]
+  import PtcRunner.TestSupport.TestHelpers,
+    only: [environment_skip_reason: 1, stop_quietly: 1]
+
+  describe "environment_skip_reason/1" do
+    setup do
+      names = ["PTC_TEST_HELPER_PRESENT", "PTC_TEST_HELPER_MISSING"]
+      original = Map.new(names, &{&1, System.fetch_env(&1)})
+
+      on_exit(fn ->
+        Enum.each(original, fn
+          {name, {:ok, value}} -> System.put_env(name, value)
+          {name, :error} -> System.delete_env(name)
+        end)
+      end)
+
+      System.put_env("PTC_TEST_HELPER_PRESENT", "configured")
+      System.delete_env("PTC_TEST_HELPER_MISSING")
+      :ok
+    end
+
+    test "continues when every named variable is non-empty" do
+      refute environment_skip_reason(["PTC_TEST_HELPER_PRESENT"])
+    end
+
+    test "returns a descriptive reason for missing and empty variables" do
+      System.put_env("PTC_TEST_HELPER_PRESENT", "")
+
+      assert "optional E2E prerequisites are not configured: " <>
+               "PTC_TEST_HELPER_PRESENT, PTC_TEST_HELPER_MISSING" =
+               environment_skip_reason([
+                 "PTC_TEST_HELPER_PRESENT",
+                 "PTC_TEST_HELPER_MISSING"
+               ])
+    end
+  end
 
   describe "stop_quietly/1" do
     test "stops a live process" do

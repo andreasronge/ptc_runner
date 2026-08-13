@@ -26,6 +26,11 @@ defmodule PtcRunner.Kernel.MCPRemoteE2ETest do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.TestSupport.TestHelpers
+
+  if reason = TestHelpers.environment_skip_reason(["PTC_TEST_MCP_2026_ENDPOINT"]) do
+    @moduletag skip: reason
+  end
 
   test "a live stateless MCP server crosses the bounded Kernel capability boundary" do
     endpoint = System.fetch_env!("PTC_TEST_MCP_2026_ENDPOINT")

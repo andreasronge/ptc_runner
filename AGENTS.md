@@ -85,9 +85,10 @@ how it was verified.
   unavailable. PR CI runs the same scripts as individual jobs. The test suite uses
   `System.schedulers_online()` concurrent cases; do not reduce that pressure
   to make a failing push pass.
-- `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`;
-  the MCP tests also require the local server in the
-  [development setup guide](docs/development-setup.md)).
+- `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`).
+  Optional MCP tests skip unless their endpoint, binary, and token
+  prerequisites are configured as described in the
+  [development setup guide](docs/development-setup.md).
 - `mix nightly` — the `:nightly` tests, excluded from `mix test` by default.
   The `Nightly` workflow runs them daily; run it locally when you touch the
   `mix ptc run` downstream path or the benchmark task. Never add `--trace` (or
