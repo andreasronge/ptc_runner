@@ -3839,6 +3839,48 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "an unavailable cwd keeps the inspection destination diagnostic accurate", %{
+    tmp_dir: directory
+  } do
+    invocation = Path.join(directory, "removed-inspection-cwd")
+    application = write_application(directory, "unavailable-inspection-cwd", valid_manifest())
+    original = File.cwd!()
+    File.mkdir!(invocation)
+
+    on_exit(fn -> File.cd!(original) end)
+
+    File.cd!(invocation)
+    File.rmdir!(invocation)
+    assert {:error, :enoent} = File.cwd()
+
+    assert {:ok, preparation} =
+             CommandEngine.prepare([
+               "run",
+               application,
+               "--inspect",
+               "run.inspection.jsonl"
+             ])
+
+    assert preparation.artifact_destinations == %{}
+    assert preparation.artifact_destination_failures == [:inspect]
+    assert CommandPreparation.valid?(preparation)
+
+    assert {:error, outcome} = CommandEngine.preflight(preparation)
+    assert outcome.exit_status == 7
+
+    assert %{
+             "phase" => "destination",
+             "code" => "invalid_inspection_destination",
+             "message" => "--inspect must name a valid destination ending in .inspection.jsonl",
+             "retryable" => false,
+             "source" => nil,
+             "subject" => nil
+           } = outcome.envelope["error"]
+
+    refute Jason.encode!(outcome.envelope) =~ directory
+  end
+
+  @tag :tmp_dir
   test "entry still rejects captured envelope collisions when another destination cannot anchor",
        %{
          tmp_dir: directory

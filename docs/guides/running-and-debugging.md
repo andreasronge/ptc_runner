@@ -114,9 +114,10 @@ is too large. Workflow timeouts likewise name the effective limit
 (`workflow_timeout_ms` or the remaining `run_duration_ms`), its value, and
 whether compilation or execution exhausted it.
 
-`--inspect` is a host opt-in development feature. It writes a separate bounded
-owner-only artifact containing sensitive execution details. Do not publish it
-with normal traces. Artifact publication through `--output`,
+`--inspect` is a host opt-in development feature. Its destination filename must
+end in `.inspection.jsonl`. It writes a separate bounded owner-only artifact
+containing sensitive execution details. Do not publish it with normal traces.
+Artifact publication through `--output`,
 `--private-output`, or `--inspect` requires a Unix host and POSIX-compatible
 `mkdir` and `id` executables on `PATH`; command preflight reports the matching
 artifact destination as unavailable when that authority or mode-at-create
