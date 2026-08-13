@@ -164,6 +164,9 @@ requires both:
   Server executable used by CI.
 - `PTC_TEST_GITHUB_TOKEN` — a GitHub token that can read this repository.
 
+The filesystem MCP tests run when a `node` executable is available on `PATH`;
+otherwise they skip with the other unavailable optional integrations.
+
 With the GitHub MCP prerequisites exported, the repository harness supplies a
 temporary remote endpoint while the aggregate suite runs:
 

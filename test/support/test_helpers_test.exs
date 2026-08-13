@@ -2,7 +2,20 @@ defmodule PtcRunner.TestSupport.TestHelpersTest do
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.TestHelpers,
-    only: [environment_skip_reason: 1, stop_quietly: 1]
+    only: [environment_skip_reason: 1, executable_skip_reason: 1, stop_quietly: 1]
+
+  describe "executable_skip_reason/1" do
+    test "continues when every named executable is available" do
+      refute executable_skip_reason(["elixir"])
+    end
+
+    test "returns a descriptive reason for unavailable executables" do
+      missing = "ptc-test-executable-that-does-not-exist"
+      expected = "optional E2E executables are not available on PATH: #{missing}"
+
+      assert executable_skip_reason([missing]) == expected
+    end
+  end
 
   describe "environment_skip_reason/1" do
     setup do
