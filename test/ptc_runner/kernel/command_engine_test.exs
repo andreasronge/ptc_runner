@@ -665,6 +665,70 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "doctor reports an invalid application as a failed readiness check", %{
+    tmp_dir: directory
+  } do
+    manifest =
+      valid_manifest()
+      |> put_in(["workflow", "components", Access.at(0), "path"], "../main.clj")
+
+    application = write_application(directory, "invalid-doctor-application", manifest)
+    host_path = write_host_config(directory, "invalid-doctor-application", valid_host_config())
+
+    for {mode, suffix} <- [{:doctor, []}, {{:doctor, :connect}, ["--connect"]}] do
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandEngine.prepare(
+                 ["doctor", application, "--host-config", host_path] ++ suffix
+               )
+
+      assert outcome.command_mode == mode
+      assert outcome.exit_status == 3
+
+      assert outcome.envelope["error"] == %{
+               "phase" => "application",
+               "code" => "schema_violation",
+               "message" => "the application manifest does not satisfy its schema",
+               "source" => %{"kind" => "application", "name" => "ptc.json"},
+               "path" => "/workflow/components/0/path",
+               "span" => nil,
+               "subject" => nil,
+               "notes" => [],
+               "retryable" => false,
+               "provider_activity" => false
+             }
+
+      assert outcome.envelope["secondary_errors"] == []
+
+      assert outcome.envelope["result"] == %{
+               "checks" => [
+                 %{"name" => "runtime", "status" => "pass", "code" => "supported"},
+                 %{
+                   "name" => "application",
+                   "status" => "fail",
+                   "code" => "schema_violation"
+                 },
+                 %{"name" => "viewer", "status" => "pass", "code" => "available"},
+                 %{
+                   "name" => "provider/workspace/local",
+                   "status" => "skipped",
+                   "code" => "not_verified_due_to_failure"
+                 },
+                 %{
+                   "name" => "provider/workspace/connectivity",
+                   "status" => "skipped",
+                   "code" => "not_verified_due_to_failure"
+                 }
+               ],
+               "model_aliases" => [],
+               "provider_activity" => false,
+               "readiness" => "failed"
+             }
+
+      assert_schema_valid(outcome.envelope)
+    end
+  end
+
+  @tag :tmp_dir
   test "default doctor defers every installed alias until an application selects it", %{
     tmp_dir: directory
   } do

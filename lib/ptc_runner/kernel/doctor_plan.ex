@@ -32,6 +32,8 @@ defmodule PtcRunner.Kernel.DoctorPlan do
   @modes [:default, :connect]
 
   @failure_codes_by_operation DiagnosticCatalog.doctor_failure_codes_by_operation()
+  @application_failure_codes DiagnosticCatalog.doctor_application_rows()
+                             |> Enum.map(& &1.code)
 
   # Every code a connect plan cannot hold: the two that say default doctor
   # declined the work rather than doing it, and the two an application-less plan
@@ -109,6 +111,45 @@ defmodule PtcRunner.Kernel.DoctorPlan do
   end
 
   def new(_catalog, _prepared, _environment, _mode), do: {:error, :invalid_doctor_plan}
+
+  @doc "Derives a closed failed plan when application preparation did not complete."
+  @spec application_failure(
+          InstallationCatalog.t(),
+          CommandDiagnostic.t(),
+          environment(),
+          mode()
+        ) :: {:ok, t()} | {:error, :invalid_doctor_plan}
+  def application_failure(
+        %InstallationCatalog{} = catalog,
+        %CommandDiagnostic{phase: :application, code: code} = diagnostic,
+        environment,
+        mode
+      )
+      when code in @application_failure_codes and mode in @modes do
+    with true <- InstallationCatalog.valid?(catalog),
+         true <- CommandDiagnostic.valid?(diagnostic),
+         {:ok, rows} <- derive_plan(catalog, nil, environment, :default) do
+      binding =
+        Attestation.attest(__MODULE__, {catalog.attestation, diagnostic, environment, mode})
+
+      {:ok,
+       Enum.map(rows, fn
+         %{name: "application"} = row ->
+           %{row | outcome: {:fail, code}, plan_binding: binding}
+
+         %{operation: _operation} = row ->
+           %{row | outcome: {:skipped, :not_verified_due_to_failure}, plan_binding: binding}
+
+         row ->
+           %{row | plan_binding: binding}
+       end)}
+    else
+      _invalid -> {:error, :invalid_doctor_plan}
+    end
+  end
+
+  def application_failure(_catalog, _diagnostic, _environment, _mode),
+    do: {:error, :invalid_doctor_plan}
 
   # Every outcome the contract has a code for. Projection validates against this
   # rather than trusting its producers, so the rule that no provider row can
@@ -456,6 +497,9 @@ defmodule PtcRunner.Kernel.DoctorPlan do
 
   defp permitted?(%{operation: operation, outcome: {:fail, code}}),
     do: code in Map.get(@failure_codes_by_operation, operation, [])
+
+  defp permitted?(%{name: "application", outcome: {:fail, code}}),
+    do: code in @application_failure_codes
 
   defp permitted?(%{outcome: {:skipped, :not_verified_due_to_failure}}), do: true
   defp permitted?(%{outcome: outcome}), do: outcome in @permitted

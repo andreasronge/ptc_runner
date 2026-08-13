@@ -53,6 +53,15 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
     assert_contract(checks, false)
   end
 
+  test "an application failure plan refuses a forged catalog" do
+    catalog = catalog(%{"alpha" => []})
+    forged = %{catalog | attestation: <<>>}
+    diagnostic = CommandDiagnostic.new!(:application, :schema_violation)
+
+    assert {:error, :invalid_doctor_plan} =
+             DoctorPlan.application_failure(forged, diagnostic, @environment, :default)
+  end
+
   test "an application narrows the plan to the aliases it selected" do
     catalog = catalog(%{"chosen" => [], "ignored" => []})
     prepared = prepared(catalog, ["chosen"])
