@@ -5,9 +5,9 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   # the occurrence that produced it is still in scope.
   #
   # A prepare, preflight, or acquire callback answers `{:error, reason}` with an
-  # atom and nothing else. Every `provider_acquisition` code requires a subject
-  # bearing an occurrence, so a bare reason cannot be classified once it has left
-  # the loop that knows which occurrence produced it: it reaches the command
+  # atom and nothing else. Every acquisition diagnostic produced here requires
+  # a subject bearing an occurrence, so a bare reason cannot be classified once
+  # it has left the loop that knows which occurrence produced it: it reaches the command
   # boundary carrying no subject and fails closed as `internal_error`, reporting
   # an unreachable MCP server as an implementation defect. This module is called
   # from the three sites in `PtcRunner.Kernel.ProviderAcquisition` that still
@@ -29,8 +29,8 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   #
   # ## How a reason is placed
   #
-  # The catalog offers three acquisition codes, so the grouping follows one rule
-  # rather than a judgement per atom:
+  # The catalog offers three occurrence-attributed acquisition codes, so the
+  # grouping follows one rule rather than a judgement per atom:
   #
   #   * `:provider_unavailable` — the provider could not be reached or started.
   #     A transport that would not open, a stdio child that would not spawn, a

@@ -1,12 +1,13 @@
 defmodule PtcRunner.Kernel.CompileDiagnostic do
   @moduledoc """
-  Closed projection policy for structured component-compiler diagnostics.
+  Closed projection policy for structured bundle-derived diagnostic messages.
 
   Compiler-rendered messages never cross the command boundary. This module
   admits only exact, bounded detail shapes whose names use the PTC-Lisp symbol
   grammar, and rebuilds messages from literals after every name is found
-  verbatim in the submitted component source. Anything else retains the fixed
-  catalog message.
+  verbatim in the submitted component source. It also bounds capability names
+  already attested by a frozen bundle before they enter a missing-requirement
+  message. Anything else retains the fixed catalog message.
   """
 
   alias PtcRunner.Lisp.CoreAST
@@ -69,6 +70,23 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
   def rebuild(_reason, _details, _source), do: :error
 
   @doc false
+  @spec capability_requirement_message(term()) :: {:ok, binary()} | :error
+  def capability_requirement_message(names) do
+    case bounded_names(names, @max_names, []) do
+      {:ok, [name]} ->
+        {:ok, "Missing capability requirement: #{name}"}
+
+      {:ok, names} ->
+        if names == Enum.sort(Enum.uniq(names)),
+          do: {:ok, "Missing capability requirements: #{Enum.join(names, ", ")}"},
+          else: :error
+
+      :error ->
+        :error
+    end
+  end
+
+  @doc false
   @spec valid_message?(atom(), term()) :: boolean()
   def valid_message?(:undefined_variable, message) when is_binary(message) do
     byte_size(message) <= @max_message_bytes and valid_unbound_message?(message)
@@ -83,6 +101,10 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
       _invalid ->
         false
     end
+  end
+
+  def valid_message?(:capability_requirement_missing, message) when is_binary(message) do
+    byte_size(message) <= @max_message_bytes and valid_capability_requirement_message?(message)
   end
 
   def valid_message?(_code, _message), do: false
@@ -107,6 +129,20 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
         %{"const" => fallback},
         dynamic_message_schema(
           "^Duplicate definition: #{@unqualified_symbol_pattern}/#{@unqualified_symbol_pattern}$(?![\\s\\S])"
+        )
+      ]
+    }
+  end
+
+  def message_schema(:capability_requirement_missing, fallback) do
+    %{
+      "oneOf" => [
+        %{"const" => fallback},
+        dynamic_message_schema(
+          "^Missing capability requirement: #{@symbol_pattern}$(?![\\s\\S])"
+        ),
+        dynamic_message_schema(
+          "^Missing capability requirements: #{@symbol_pattern}(, #{@symbol_pattern}){1,7}$(?![\\s\\S])"
         )
       ]
     }
@@ -145,6 +181,22 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
   end
 
   defp valid_unbound_message?(_message), do: false
+
+  defp valid_capability_requirement_message?("Missing capability requirement: " <> name),
+    do: valid_name?(name)
+
+  defp valid_capability_requirement_message?("Missing capability requirements: " <> joined) do
+    case String.split(joined, ", ") do
+      [_one] ->
+        false
+
+      names ->
+        names == Enum.sort(Enum.uniq(names)) and
+          match?({:ok, _bounded}, bounded_names(names, @max_names, []))
+    end
+  end
+
+  defp valid_capability_requirement_message?(_message), do: false
 
   defp dynamic_message_schema(pattern) do
     %{

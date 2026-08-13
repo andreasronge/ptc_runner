@@ -369,7 +369,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         {:ok, next}
 
       {:error, reason, registry} ->
-        failure = execution_failure(initial, reason, :not_started)
+        failure = provider_free_failure(initial, reason)
 
         next =
           initial
@@ -384,7 +384,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         {:ok, next}
 
       {:error, reason} ->
-        failure = execution_failure(initial, reason, :not_started)
+        failure = provider_free_failure(initial, reason)
 
         next =
           initial
@@ -605,6 +605,13 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   defp execution_failure(state, reason, execution_state),
     do: OwnerFailure.new!(reason, provider_activity(state), execution_state)
+
+  defp provider_free_failure(state, reason) do
+    case RunBuilder.environment_failure_diagnostic(reason, state.prepared, false) do
+      {:ok, diagnostic} -> diagnostic
+      :error -> execution_failure(state, reason, :not_started)
+    end
+  end
 
   defp provider_activity(%{prepared: %{provider_activity: activity}}) do
     case ProviderActivity.value(activity) do

@@ -242,9 +242,9 @@ occurrence.
 ### Acquisition reasons
 
 A provider's prepare, preflight, or acquire callback answers `{:error, reason}`
-with an atom and nothing else. Every `provider_acquisition` code requires a
-subject bearing an occurrence, so once that reason leaves the loop that knows
-which occurrence produced it there is nothing to attribute it to, and the
+with an atom and nothing else. Every acquisition diagnostic produced from one
+of those callbacks requires a subject bearing an occurrence, so once that
+reason leaves the loop that knows which occurrence produced it there is nothing to attribute it to, and the
 command boundary fails closed as `internal_error` — reporting an unreachable MCP
 server as a defect in this program. `AcquisitionReason` therefore classifies at
 the three sites in `ProviderAcquisition` that still hold the occurrence.
@@ -271,6 +271,13 @@ their producers: a reason nothing can currently return has no branch. That rule
 is load-bearing rather than decorative — the first draft of this table carried
 six reasons the stdio and discovery paths normalize away before a builder can
 return them, and omitted one that a snapshot-identity build genuinely produces.
+
+Environment assembly has one separate, subjectless acquisition diagnostic.
+`capability_requirement_missing` reports the sorted, bundle-attested capability
+names that the assembled provider surface did not supply. It applies to both
+provider-backed and provider-free runs, records whether provider work actually
+occurred, and is not admitted to `doctor --connect`, which never assembles a run
+environment.
 
 ### Credential resolution
 

@@ -67,6 +67,17 @@ defmodule PtcRunner.Kernel.Environment do
     |> Enum.sort_by(& &1.name)
   end
 
+  @doc false
+  @spec capability_requirements(FrozenBundle.t() | nil) :: [binary()]
+  def capability_requirements(%FrozenBundle{prelude: %{exports: exports}}) do
+    exports
+    |> Enum.flat_map(&Map.get(&1, :tool_refs, []))
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  def capability_requirements(nil), do: []
+
   defp valid_bundle(nil), do: :ok
 
   defp valid_bundle(%FrozenBundle{} = bundle),
@@ -99,18 +110,17 @@ defmodule PtcRunner.Kernel.Environment do
       else: :ok
   end
 
-  defp bundle_requirements(%{prelude: %{exports: exports}}, capabilities, kind) do
+  defp bundle_requirements(%FrozenBundle{} = bundle, capabilities, kind) do
     granted_names = Map.new(Map.keys(capabilities) ++ implicit_capabilities(kind), &{&1, true})
 
     missing =
-      exports
-      |> Enum.flat_map(&Map.get(&1, :tool_refs, []))
-      |> Enum.uniq()
+      bundle
+      |> capability_requirements()
       |> Enum.reject(&Map.has_key?(granted_names, &1))
 
     if missing == [],
       do: :ok,
-      else: {:error, {:missing_capability_requirement, Enum.sort(missing)}}
+      else: {:error, {:missing_capability_requirement, missing}}
   end
 
   defp bundle_requirements(_bundle, _capabilities, _kind), do: :ok

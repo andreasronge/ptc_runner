@@ -6,9 +6,11 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   typed safe provenance.
   Contract-authorized paths must also match the sealed contract authority bound
   to their source classification. Rendering never inspects a lower-level
-  reason or rejected value. The two catalog-authorized compile message shapes
-  contain only fixed literals plus bounded PTC-Lisp symbol names and require
-  component-source provenance; every other message is the catalog literal.
+  reason or rejected value. Catalog-authorized dynamic message shapes contain
+  only fixed literals plus bounded PTC-Lisp symbol names. Compile messages
+  require component-source provenance; a missing capability message is rebuilt
+  from the frozen bundle's sorted tool requirements. Every other message is the
+  catalog literal.
 
   `notes` is reserved and always empty: the published V2 envelope schema pins
   it to `{"const": []}`, so a populated array would invalidate the envelope for
@@ -294,6 +296,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %CommandSource{kind: :component}
        )
        when code in [:undefined_variable, :duplicate_definition],
+       do: true
+
+  defp valid_message_source?(
+         _message,
+         %{phase: :provider_acquisition, code: :capability_requirement_missing},
+         nil
+       ),
        do: true
 
   defp valid_message_source?(_message, _row, _source), do: false

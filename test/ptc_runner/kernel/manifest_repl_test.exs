@@ -89,6 +89,31 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
     assert Enum.sort(Map.keys(failure)) == [:code, :provider_activity]
   end
 
+  @tag :tmp_dir
+  test "stale capability requirements have the same actionable REPL diagnostic with or without providers",
+       %{tmp_dir: directory} do
+    provider_free = write_provider_free_application(directory, :normal)
+
+    File.write!(
+      Path.join(directory, "main.clj"),
+      ~S|(ns app) (defn run [input] (tool/history.list-runs {"limit" 1}))|
+    )
+
+    {provider_backed, host} = write_stale_trace_application(directory)
+
+    for {manifest, host_path, provider_activity} <- [
+          {provider_free, nil, false},
+          {provider_backed, host, true}
+        ] do
+      assert {:error,
+              %{code: :capability_requirement_missing, provider_activity: ^provider_activity}} =
+               ManifestRepl.open(manifest, host_path,
+                 input_mode: :interactive,
+                 terminal_attached: true
+               )
+    end
+  end
+
   test "manifest opening status redacts retained state" do
     status = %{state: %{private_input: "secret"}, message: {:work, "secret"}, log: ["secret"]}
 
@@ -420,6 +445,53 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
               }
             },
             "ceilings" => %{"timeout_ms" => 20_000}
+          }
+        }
+      })
+    )
+
+    {manifest, host}
+  end
+
+  defp write_stale_trace_application(directory) do
+    trace_directory = Path.join(directory, "traces")
+    File.mkdir_p!(trace_directory)
+
+    File.write!(
+      Path.join(directory, "legacy.clj"),
+      ~S|(ns legacy) (defn inspect [input] (tool/history.list-runs {"limit" 1}))|
+    )
+
+    manifest = Path.join(directory, "stale-trace.json")
+    host = Path.join(directory, "stale-trace-host.json")
+
+    document =
+      manifest_document(:normal, %{
+        "workflow" => [],
+        "mission" => [%{"name" => "history", "config" => %{}}]
+      })
+      |> Map.put("missions", %{
+        "default" => %{
+          "components" => [%{"id" => "legacy", "path" => "legacy.clj"}],
+          "data" => %{},
+          "providers" => ["history"]
+        }
+      })
+
+    File.write!(manifest, Jason.encode!(document))
+
+    File.write!(
+      host,
+      Jason.encode!(%{
+        "install" => %{
+          "history" => %{
+            "source" => "ptc_trace_snapshot",
+            "installation_revision" => "history-v1",
+            "directory" => trace_directory,
+            "ceilings" => %{
+              "max_source_bytes" => 2_000_000,
+              "max_result_bytes" => 250_000
+            }
           }
         }
       })

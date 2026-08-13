@@ -61,7 +61,9 @@ defmodule PtcRunner.Kernel.CommandContract do
   @destination_codes Map.fetch!(@codes_by_phase, :destination)
   @local_preflight_codes Map.fetch!(@codes_by_phase, :local_preflight)
   @active_preflight_codes Map.fetch!(@codes_by_phase, :active_preflight)
-  @provider_acquisition_codes Map.fetch!(@codes_by_phase, :provider_acquisition)
+  @doctor_provider_acquisition_codes DiagnosticCatalog.doctor_attributable_rows()
+                                     |> Enum.filter(&(&1.phase == :provider_acquisition))
+                                     |> Enum.map(& &1.code)
   @result_cleanup_codes Map.fetch!(@codes_by_phase, :result_cleanup)
   @provider_cleanup_codes @result_cleanup_codes --
                             [:result_invalid, :result_contract_failed, :result_limit_exceeded]
@@ -745,7 +747,7 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: true
 
   defp diagnostic_pair_allowed?({:doctor, :connect}, :provider_acquisition, code)
-       when code in @provider_acquisition_codes,
+       when code in @doctor_provider_acquisition_codes,
        do: true
 
   defp diagnostic_pair_allowed?({:doctor, :connect}, :result_cleanup, code)
@@ -921,6 +923,9 @@ defmodule PtcRunner.Kernel.CommandContract do
       "name" => name_schema
     })
   end
+
+  defp diagnostic_message_schema(%{code: :capability_requirement_missing} = row, _source),
+    do: DiagnosticCatalog.message_schema(row)
 
   defp diagnostic_message_schema(row, %{"type" => "null"}), do: %{"const" => row.message}
   defp diagnostic_message_schema(row, _source_schema), do: DiagnosticCatalog.message_schema(row)
