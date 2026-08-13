@@ -277,6 +277,17 @@ defmodule PtcRunner.ReplFrontendTest do
     assert output =~ "42"
   end
 
+  @tag :tmp_dir
+  test "-l prints a trailing return as its value", %{tmp_dir: directory} do
+    path = Path.join(directory, "setup.clj")
+    File.write!(path, "(def loaded 41)\n(return (+ loaded 1))\n")
+
+    output = capture_io(fn -> run_repl(["-l", path, "-e", "loaded"]) end)
+
+    assert output == "42\nLoaded #{path}\n41\n"
+    refute output =~ "__ptc_return__"
+  end
+
   test "removed upstream and special log options fail closed" do
     assert_raise Mix.Error, ~r/unknown switch; accepted:/, fn ->
       run_repl(["--log-prelude", "-e", "(+ 1 2)"])

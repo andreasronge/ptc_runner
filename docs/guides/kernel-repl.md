@@ -28,6 +28,10 @@ mix ptc repl script.clj
 mix ptc repl - < script.clj
 ```
 
+A successful `return` prints its value, including when it is the final form in
+a loaded setup file. The evaluator's internal return control wrapper is never
+part of REPL output.
+
 Attach the same frozen workflow bundle, input, limits, labels, event policy,
 and workflow capabilities as `mix ptc run`:
 
