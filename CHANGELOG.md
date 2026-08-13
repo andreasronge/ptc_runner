@@ -190,6 +190,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A fresh-clone `mix ptc` invocation now performs normal dependency validation
+  and compiles fetched dependencies before compiling PtcRunner. Warm root
+  commands retain the dependency-check startup optimization after the first
+  successful application build.
 - Command envelope publication no longer suppresses the normal terminal
   rendering. Help, version, and init now use readable code-owned projections,
   while workflow result values retain deterministic JSON rendering.
