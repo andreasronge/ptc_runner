@@ -295,8 +295,19 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
         end
       end
 
+    result = classify_provider_free_failure(result, preparation.prepared_run)
+
     {:ok, settle_opening_result(state, result)}
   end
+
+  defp classify_provider_free_failure({:error, reason}, prepared) do
+    case RunBuilder.environment_failure_diagnostic(reason, prepared, false) do
+      {:ok, diagnostic} -> {:error, diagnostic}
+      :error -> {:error, reason}
+    end
+  end
+
+  defp classify_provider_free_failure(result, _prepared), do: result
 
   defp open_provider_backed(state) do
     owner = self()

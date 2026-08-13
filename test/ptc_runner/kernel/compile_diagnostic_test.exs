@@ -87,4 +87,35 @@ defmodule PtcRunner.Kernel.CompileDiagnosticTest do
              "Duplicate definition: app/#{long_name}"
            )
   end
+
+  test "rebuilds only canonical bounded capability requirement messages" do
+    assert {:ok, "Missing capability requirement: history.runs"} =
+             CompileDiagnostic.capability_requirement_message(["history.runs"])
+
+    assert {:ok, "Missing capability requirements: history.failure, history.runs"} =
+             CompileDiagnostic.capability_requirement_message([
+               "history.failure",
+               "history.runs"
+             ])
+
+    for invalid <- [
+          [],
+          ["history.runs", "history.failure"],
+          ["history.runs", "history.runs"],
+          Enum.map(1..9, &"history.operation-#{&1}"),
+          [String.duplicate("x", 129)]
+        ] do
+      assert :error = CompileDiagnostic.capability_requirement_message(invalid)
+    end
+
+    assert CompileDiagnostic.valid_message?(
+             :capability_requirement_missing,
+             "Missing capability requirements: history.failure, history.runs"
+           )
+
+    refute CompileDiagnostic.valid_message?(
+             :capability_requirement_missing,
+             "Missing capability requirements: history.runs, history.failure"
+           )
+  end
 end

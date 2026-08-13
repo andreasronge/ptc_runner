@@ -24,6 +24,16 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
     assert :connectivity_unavailable in Map.fetch!(codes, :connectivity)
     assert :provider_unavailable in Map.fetch!(codes, :connectivity)
     refute :connectivity_timeout in Map.fetch!(codes, :connectivity)
+
+    refute Enum.any?(codes, fn {_operation, values} ->
+             :capability_requirement_missing in values
+           end)
+
+    refute CommandContract.diagnostic_allowed?(
+             {:doctor, :connect},
+             :provider_acquisition,
+             :capability_requirement_missing
+           )
   end
 
   test "the installed surface reports every alias without an application" do

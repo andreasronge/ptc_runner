@@ -1137,6 +1137,101 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "a stale mission capability requirement remains actionable after acquisition", %{
+    tmp_dir: directory
+  } do
+    trace_directory = Path.join(directory, "legacy-capability-traces")
+    File.mkdir_p!(trace_directory)
+
+    host_path =
+      write_host_config(directory, "legacy-capability", %{
+        "install" => %{
+          "history" => %{
+            "source" => "ptc_trace_snapshot",
+            "installation_revision" => "history-v1",
+            "directory" => trace_directory,
+            "ceilings" => %{
+              "max_source_bytes" => 2_000_000,
+              "max_result_bytes" => 250_000
+            }
+          }
+        }
+      })
+
+    application =
+      write_application(
+        directory,
+        "legacy-capability",
+        valid_manifest(%{
+          "missions" => %{
+            "default" => %{
+              "components" => [%{"id" => "legacy", "path" => "legacy.clj"}],
+              "data" => %{},
+              "providers" => ["history"]
+            }
+          },
+          "providers" => %{
+            "workflow" => [],
+            "mission" => [%{"name" => "history", "config" => %{}}]
+          }
+        }),
+        %{
+          "legacy.clj" =>
+            "(ns legacy) (defn inspect [input] (tool/history.list-runs {\"limit\" 1}))"
+        }
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert outcome.envelope["error"]["phase"] == "provider_acquisition"
+    assert outcome.envelope["error"]["code"] == "capability_requirement_missing"
+
+    assert outcome.envelope["error"]["message"] ==
+             "Missing capability requirement: history.list-runs"
+
+    assert outcome.envelope["error"]["provider_activity"] == true
+
+    assert outcome.envelope["execution"] == %{
+             "state" => "incomplete",
+             "usage" => nil,
+             "evaluation_memory" => nil
+           }
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a provider-free capability requirement remains actionable without activity", %{
+    tmp_dir: directory
+  } do
+    application =
+      write_application(directory, "provider-free-capability", valid_manifest(), %{
+        "main.clj" => "(ns app) (defn run [input] (tool/history.list-runs {\"limit\" 1}))"
+      })
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["error"] == %{
+             "phase" => "provider_acquisition",
+             "code" => "capability_requirement_missing",
+             "message" => "Missing capability requirement: history.list-runs",
+             "provider_activity" => false,
+             "retryable" => false,
+             "source" => nil,
+             "span" => nil,
+             "subject" => nil,
+             "path" => nil,
+             "notes" => []
+           }
+
+    assert outcome.envelope["execution"] == %{"state" => "not_started"}
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
   test "a failing check under --connect reports the attributed row", %{
     tmp_dir: directory
   } do

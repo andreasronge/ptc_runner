@@ -51,7 +51,10 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.ArtifactPublisher
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.BundleCompiler
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandRunRef
+  alias PtcRunner.Kernel.CompileDiagnostic
+  alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.InspectionArtifact
@@ -79,6 +82,45 @@ defmodule PtcRunner.Kernel.RunBuilder do
     :private_output,
     :trace_path
   ]
+
+  @doc false
+  @spec environment_failure_diagnostic(term(), PreparedRun.t(), boolean()) ::
+          {:ok, CommandDiagnostic.t()} | :error
+  def environment_failure_diagnostic(
+        {:missing_capability_requirement, names},
+        %PreparedRun{} = prepared,
+        provider_activity
+      )
+      when is_list(names) and names != [] and is_boolean(provider_activity) do
+    if PreparedRun.sealed?(prepared) and capability_requirements_attested?(names, prepared) do
+      opts =
+        case CompileDiagnostic.capability_requirement_message(names) do
+          {:ok, message} -> [message: message, provider_activity: provider_activity]
+          :error -> [provider_activity: provider_activity]
+        end
+
+      {:ok,
+       CommandDiagnostic.new!(
+         :provider_acquisition,
+         :capability_requirement_missing,
+         opts
+       )}
+    else
+      :error
+    end
+  end
+
+  def environment_failure_diagnostic(_reason, _prepared, _provider_activity), do: :error
+
+  defp capability_requirements_attested?(names, prepared) do
+    admitted =
+      [prepared.workflow_bundle | Map.values(prepared.mission_bundles)]
+      |> Enum.flat_map(&Environment.capability_requirements/1)
+      |> MapSet.new()
+
+    names == Enum.sort(Enum.uniq(names)) and Enum.all?(names, &MapSet.member?(admitted, &1))
+  end
+
   @artifact_options [:trace_path, :inspect, :output, :private_output]
   @opened_sink_keys [
     :attestation,
@@ -574,9 +616,10 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   # One environment per declared mission, each assembled from its already
-  # prepared bundle and granted only the mission providers that mission named. A grant a mission did
-  # not name is simply absent from its environment, so authority is enforced by
-  # assembly rather than by anything the model is asked to respect.
+  # prepared bundle and granted only the mission providers that mission named.
+  # A grant a mission did not name is simply absent from its environment, so
+  # authority is enforced by assembly rather than by anything the model is
+  # asked to respect.
   defp mission_environments(package, mission_bundles, providers) do
     by_occurrence = Map.get(providers.mission, :by_occurrence, %{})
 
@@ -595,6 +638,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
              ) do
         {:cont, {:ok, Map.put(acc, name, environment)}}
       else
+        {:error, {:missing_capability_requirement, _names}} = error -> {:halt, error}
         _error -> {:halt, {:error, :invalid_mission_environment}}
       end
     end)

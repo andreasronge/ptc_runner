@@ -121,6 +121,13 @@ be exposed, then either commits one closer or aborts its provisional resources.
 one `RunConfig`. A configuration is one-shot. A caller that builds but does not
 execute it must use `RunBuilder.close/1`.
 
+Environment assembly has one separate, subjectless acquisition diagnostic.
+`capability_requirement_missing` reports the sorted, bundle-attested capability
+names that the assembled provider surface did not supply. It applies to both
+provider-backed and provider-free runs, records whether provider work actually
+occurred, and is not admitted to `doctor --connect`, which never assembles a run
+environment.
+
 `PtcRunner.Kernel.run/2` delegates to `Runner`, `RunState`, `Dispatcher`, and
 `Evaluation`. `RunState` is the single mutable owner of a run's deadline,
 quotas, reservations, protocol state, terminal state, and mission

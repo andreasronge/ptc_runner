@@ -130,6 +130,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the selected provider returned an invalid acquisition response"},
     {:provider_acquisition, :provider_policy_changed, 4, false,
      "the selected provider policy changed during acquisition"},
+    {:provider_acquisition, :capability_requirement_missing, 4, false,
+     "a component requires a capability that the selected providers did not supply"},
     {:execution, :workflow_failed, 5, false, "the workflow failed"},
     {:execution, :mission_failed, 5, false, "a subordinate mission failed"},
     {:execution, :runtime_limit_exceeded, 6, false, "a runtime limit was exceeded"},
@@ -217,9 +219,14 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   @spec valid_message?(phase(), atom(), term()) :: boolean()
   def valid_message?(phase, code, message) do
     case fetch(phase, code) do
-      {:ok, %{message: ^message}} -> true
-      {:ok, _row} -> CompileDiagnostic.valid_message?(code, message)
-      :error -> false
+      {:ok, %{message: ^message}} ->
+        true
+
+      {:ok, _row} ->
+        CompileDiagnostic.valid_message?(code, message)
+
+      :error ->
+        false
     end
   end
 
@@ -330,6 +337,11 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   @spec subject_policy(phase(), atom()) :: :required | :optional | :forbidden
   def subject_policy(:host, :installation_revision_missing), do: :required
+
+  # A missing bundle requirement describes the capability surface assembled
+  # from all providers granted to an environment. No single occurrence is the
+  # authoritative cause, so attributing one would be arbitrary.
+  def subject_policy(:provider_acquisition, :capability_requirement_missing), do: :forbidden
 
   # The one active-preflight outcome that belongs to the operation rather than
   # to an occurrence. A budget spent before or between occurrences cannot be
@@ -519,6 +531,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def provider_activity_policy(phase, _code)
       when phase in [:local_preflight, :active_preflight],
       do: :boolean
+
+  def provider_activity_policy(:provider_acquisition, :capability_requirement_missing),
+    do: :boolean
 
   def provider_activity_policy(:provider_acquisition, _code), do: true
 

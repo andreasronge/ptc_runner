@@ -278,7 +278,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
            )}
       end
 
-    result = classify_marked_failure(result)
+    result = classify_marked_failure(result, prepared)
 
     if operation == :repl,
       do: retain_or_close_repl(result, session, tracker),
@@ -299,9 +299,26 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # exception — `registry_result/4` forwards a reason it has no classification
   # for — and an independent review found it by reading, not by any test, which
   # is why the invariant is enforced here rather than asserted in a comment.
-  defp classify_marked_failure({:error, %CommandDiagnostic{}} = error), do: error
-  defp classify_marked_failure({:error, _reason}), do: {:error, internal_diagnostic()}
-  defp classify_marked_failure(result), do: result
+  defp classify_marked_failure({:error, %CommandDiagnostic{}} = error, _prepared), do: error
+
+  defp classify_marked_failure(
+         {:error, {:missing_capability_requirement, names}},
+         prepared
+       ) do
+    case RunBuilder.environment_failure_diagnostic(
+           {:missing_capability_requirement, names},
+           prepared,
+           true
+         ) do
+      {:ok, diagnostic} -> {:error, diagnostic}
+      :error -> {:error, internal_diagnostic()}
+    end
+  end
+
+  defp classify_marked_failure({:error, _reason}, _prepared),
+    do: {:error, internal_diagnostic()}
+
+  defp classify_marked_failure(result, _prepared), do: result
 
   defp execute_authorized(
          prepared,
