@@ -9,39 +9,41 @@ module documentation, guides, specifications, and plans in this repository.
 - **Module documentation** describes the implemented public API: purpose,
   arguments, return values, errors, ownership, lifecycle, and examples.
 - **Guides** explain implemented architecture and user or maintainer workflows.
+- **Reference pages** inventory exhaustive implemented fields, options, exports,
+  tables, or configuration. Use one when those details would interrupt a
+  guide. The [agent library reference](../agent-library-reference.md) is an
+  example.
 - **Specifications** define normative language or runtime behavior.
 - **Plans** describe unimplemented direction, tradeoffs, non-goals, triggers,
   and acceptance gates. Always label planned behavior as planned.
 
-ExDoc publishes to Hex for people *using* PtcRunner, so the `extras` list in
-`mix.exs` is user-facing documentation plus the maintainer guides that explain
-the codebase and its gates. Instructions for operating a checkout — environment
-setup, release steps — document this repository rather than PtcRunner, and
-belong in `docs/` but outside `extras`: `docs/development-setup.md` and
-`docs/RELEASING.md`. Reference them from `AGENTS.md`, and from published pages
-as plain paths rather than links, which would dangle on HexDocs.
+A reference describes the complete current surface; a specification defines
+what conforming implementations must do. A page is not normative merely
+because it is exhaustive.
 
-Keep one canonical explanation and link to it instead of copying contracts
-between files. Do not present speculative APIs as current behavior. Git history
-records removed 0.x designs, so current documentation does not need migration
-narratives or deprecated alternatives.
+`mix.exs` defines the pages published by ExDoc. It includes user guides and
+maintainer architecture/gate guides. Checkout-only instructions, including
+`docs/development-setup.md` and `docs/RELEASING.md`, stay outside `extras`.
+Published pages may name those paths as text, but must not create links that
+would dangle on HexDocs.
 
-Code documentation must not link to implementation plans or planning
-specifications, including files under `docs/plans/`. Those files are disposable
-working records and may be deleted when the implementation lands. Before a
-planned feature is complete, move its durable contract into the owning module
-documentation and an implemented guide or retained normative specification.
-Then code documentation links only to those retained documents.
+Keep one canonical explanation and link to it. Move exhaustive tables out of a
+guide and into the owning module docs or a retained reference page. Do not copy
+field tables, limits, or state machines between layers. Do not present
+speculative APIs as current behavior. Git history already records removed 0.x
+designs.
 
-This rule does not prohibit Elixir `@spec` typespecs, or links to retained
-normative references such as the PTC-Lisp language specification.
+Code documentation must not link to `docs/plans/` or other disposable planning
+records. Before implementation lands, move durable contracts into owning module
+docs, an implemented guide, or a retained specification. Elixir `@spec`
+typespecs and links to retained normative references are unaffected.
 
 ## Write Elixir API documentation
 
 - Give every public module and function a concise first paragraph. ExDoc uses
   it as the summary.
-- Place exact API documentation in `@moduledoc`, `@doc`, `@typedoc`, types, and
-  specs beside the implementation.
+- Put exact API contracts in `@moduledoc`, `@doc`, `@typedoc`, types, and specs
+  beside the implementation.
 - Reference modules by full name, such as `PtcRunner.Kernel.TraceLog`.
 - Reference functions by name and arity: `query/3` locally or
   `PtcRunner.Kernel.TraceLog.query/3` across modules. Use
@@ -50,8 +52,7 @@ normative references such as the PTC-Lisp language specification.
 - Start sections inside module and function documentation with `##`, commonly
   `## Examples`, `## Options`, and `## Errors`.
 - Put documentation before the first clause of a multi-clause function. Add a
-  separate function head when pattern matching would produce unclear argument
-  names in generated documentation.
+  function head when pattern matching would produce unclear argument names.
 - Use `@moduledoc false` or `@doc false` only for intentionally internal APIs.
   Hiding documentation does not make a function private.
 - Use code comments for implementation rationale and workarounds, not as a
@@ -59,10 +60,9 @@ normative references such as the PTC-Lisp language specification.
 
 ## Examples and doctests
 
-ExUnit supports executable tests embedded in documentation. `doctest/1`
-extracts IEx examples from `@moduledoc` and `@doc`; `doctest_file/1` extracts
-them from Markdown files. Prefer short, deterministic examples for public,
-side-effect-free APIs:
+`doctest/1` extracts IEx examples from module and function docs;
+`doctest_file/1` extracts them from Markdown. Prefer short, deterministic
+examples for public, side-effect-free APIs:
 
 ```elixir
 ## Examples
@@ -71,7 +71,7 @@ side-effect-free APIs:
     "[1, 2, ...]"
 ```
 
-Enable module documentation explicitly in an ExUnit test file:
+Enable module docs explicitly in a test file:
 
 ```elixir
 defmodule PtcRunner.Lisp.FormatTest do
@@ -80,7 +80,7 @@ defmodule PtcRunner.Lisp.FormatTest do
 end
 ```
 
-Markdown documentation uses the corresponding file macro:
+Markdown uses the file macro:
 
 ```elixir
 defmodule PtcRunner.DocumentationGuidelinesTest do
@@ -89,14 +89,12 @@ defmodule PtcRunner.DocumentationGuidelinesTest do
 end
 ```
 
-Doctests are executable API examples, not a replacement for behavior tests.
-Use ordinary ExUnit tests for processes, files, networking, time, concurrency,
-cleanup, complex setup, or nondeterministic output. The embedded doctest syntax
-is `iex>` plus expected output; ordinary `test "..."` cases remain in test
-files unless the document specifically teaches ExUnit usage.
+Doctests are API examples, not behavior-test replacements. Use ordinary ExUnit
+for processes, files, networking, time, concurrency, cleanup, complex setup,
+and nondeterministic output.
 
-When adding `iex>` examples, verify that the module is covered by `doctest/1`
-or the Markdown file by `doctest_file/1`; examples are not discovered globally.
+An `iex>` block runs only when a test names its module with `doctest/1` or its
+file with `doctest_file/1`.
 
 ## Style and tone
 
@@ -104,8 +102,8 @@ or the Markdown file by `doctest_file/1`; examples are not discovered globally.
 - Use plain language, active voice, and present tense for implemented behavior.
 - Use `must` for normative requirements, `may` for permitted choices, and
   explicit future tense for plans.
-- Keep paragraphs focused and headings descriptive. Avoid filler, sales
-  language, and restating names without adding meaning.
+- Keep paragraphs short and focused. Use lists or tables only when they make a
+  relationship easier to scan.
 - Use real current module, function, option, and error names. Verify them in the
   implementation before documenting them.
 - Keep examples domain-neutral unless the API itself is domain-specific.
@@ -114,11 +112,20 @@ or the Markdown file by `doctest_file/1`; examples are not discovered globally.
 
 ## Update and verify documentation
 
-When behavior changes, update the owning module documentation, the relevant
-guide or specification, tests, examples, and generated references together.
-Run the focused doctests or documentation tests, then `mix precommit` before
-committing. Do not claim an example or check passed without a successful final
-exit status.
+When behavior changes, update the owning module docs, relevant guide or
+specification, tests, examples, and generated references together. Generated
+`docs/function-reference.md`, `docs/java-interop.md`, and
+`docs/conformance/` pages must be changed through their `priv/*.exs` sources
+and `mix ptc.gen_docs`, not edited directly.
+
+Run focused doctests or documentation tests, then:
+
+```bash
+MIX_ENV=dev mix docs --warnings-as-errors
+mix precommit
+```
+
+Do not claim a check passed without its successful final exit status.
 
 References: the official Elixir guides for
 [writing documentation](https://hexdocs.pm/elixir/writing-documentation.html)
