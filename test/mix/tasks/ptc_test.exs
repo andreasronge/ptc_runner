@@ -107,6 +107,18 @@ defmodule Mix.Tasks.PtcTest do
   end
 
   @tag :tmp_dir
+  test "an invalid inspection destination states the required filename suffix", %{tmp_dir: dir} do
+    manifest_path = write_manifest(dir, %{"value" => 1})
+    invalid_inspection = Path.join(dir, "run.jsonl")
+
+    message = failed_message(["run", manifest_path, "--inspect", invalid_inspection])
+
+    assert message =~ "destination/invalid_inspection_destination:"
+    assert message =~ ".inspection.jsonl"
+    refute message =~ invalid_inspection
+  end
+
+  @tag :tmp_dir
   test "keeps a private value out of rendering and the envelope", %{tmp_dir: dir} do
     manifest_path = write_manifest(dir, %{"value" => 1})
     File.write!(Path.join(dir, "private.json"), Jason.encode!(%{"value" => "confidential"}))
