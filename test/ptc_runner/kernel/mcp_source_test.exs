@@ -649,22 +649,22 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       MCPSource.builder(
         transport: {
           :stdio,
-          # Booting an Elixir source fixture can exceed the five-second default
-          # while the full suite is under scheduler load.
+          # Booting an Elixir source fixture and reaching MCP discovery can
+          # exceed five seconds while the full suite is under scheduler load.
           launcher: launcher,
           executable: executable,
           executable_sha256: executable |> File.read!() |> then(&:crypto.hash(:sha256, &1)),
           cwd: @root,
-          args: [@unicode_stdio_fixture, marker, "mcp-unicode"],
+          args: ["--erl", "+S 1:1", @unicode_stdio_fixture, marker, "mcp-unicode"],
           env: inherited_environment(),
           start_timeout_ms: 20_000
         },
         tools: %{"unicode" => %{as: "remote.unicode", effect: :read}},
-        timeout_ms: 5_000
+        timeout_ms: 20_000
       )
 
     {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
-    {:ok, limits} = Limits.new()
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 20_000)
 
     assert {:ok, %{capabilities: [capability], close: close}} =
              ProviderRegistry.build(
