@@ -1,4 +1,4 @@
-# TraceLog and Log Prelude — V2 Contract
+# TraceLog and Run Analysis — V2 Contract
 
 **Status:** implemented retained product contract, including the local 0.x
 inspection increment. Complements the
@@ -18,7 +18,7 @@ TraceLog
   stores, sanitizes, loads, indexes, filters, and bounds event queries
 
 Consumers
-  ptc_viewer, CLI/debug tools, and a swappable log/ capability prelude
+  ptc_viewer, CLI/debug tools, and the shared analysis/* capability surface
 ```
 
 Kernel does not know how traces are stored or queried. TraceLog does not control
@@ -33,7 +33,8 @@ PtcRunner keeps four observability concerns separate:
 - `:telemetry` reports low-cardinality measurements for embedders and host
   monitoring. It is not an event store or an authorization boundary.
 - `Kernel.EventSink` and `Kernel.TraceLog` own the canonical bounded run event
-  journal consumed by `ptc_viewer`, CLI diagnostics, and `log/` capabilities.
+  journal consumed by `ptc_viewer`, CLI diagnostics, and `analysis/*`
+  capabilities.
 - the opt-in `Kernel.InspectionSink` owns exact sensitive development
   payloads under the separate controls below.
 
@@ -279,7 +280,7 @@ The implementation:
 - keeps private canonical event-source access separate and explicit;
 - never infers access from visible names, tags, or run IDs.
 
-The `log/` prelude contains no authority. It requires host trace-query
+The `analysis` prelude contains no authority. It requires host run-analysis
 capabilities whose source grant provides authority. Missing requirements fail
 before workflow code runs.
 
@@ -667,7 +668,7 @@ canonical-only trace, a complete private overlay, and incomplete or failed
 inspection states.
 
 The inspection artifact is absent from TraceLog file/directory discovery and
-from every `log/` query. Normal discovery explicitly rejects or omits the
+from every primitive TraceLog query. Normal discovery explicitly rejects or omits the
 `.inspection.jsonl` suffix rather than accidentally parsing it as canonical
 JSONL.
 
@@ -690,9 +691,9 @@ no caller-defined keys or string values, and cannot forge canonical events.
 
 ## Viewer and CLI sharing
 
-`ptc_viewer`, CLI debugging, and the model-facing `log/` capability share the
-same loader, metadata derivation, filtering, ordering, and pagination code where
-practical.
+`ptc_viewer`, CLI debugging, and the model-facing `analysis/*` capabilities
+share the same loader, metadata derivation, filtering, ordering, pagination,
+and question-shaped `RunAnalysis` projections where practical.
 
 The viewer may render richer presentations, but it is not a second canonical
 query implementation or authority source. An explicit loopback-only development
@@ -731,7 +732,7 @@ as workflow failure.
 
 - ambient search over all host traces;
 - arbitrary filesystem browsing;
-- write/update/delete through `log/`;
+- write/update/delete through `analysis/*`;
 - a mutable authoritative run database;
 - unbounded full-text search or arbitrary query expressions;
 - automatic access to the current run's private events or source records;

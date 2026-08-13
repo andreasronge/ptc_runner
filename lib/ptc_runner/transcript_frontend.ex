@@ -23,6 +23,11 @@ defmodule PtcRunner.TranscriptFrontend do
 
   @spec run(CommandArguments.t(), CommandRuntime.t()) ::
           :ok | {:error, atom(), binary()}
+  def run(arguments, runtime), do: run(arguments, runtime, [])
+
+  @doc false
+  @spec run(CommandArguments.t(), CommandRuntime.t(), keyword()) ::
+          :ok | {:error, atom(), binary()}
   def run(
         %CommandArguments{
           command: :transcript,
@@ -34,15 +39,20 @@ defmodule PtcRunner.TranscriptFrontend do
             private_output: output
           }
         },
-        %CommandRuntime{}
+        %CommandRuntime{},
+        capture_opts
       ) do
-    case PublicationHandle.reserve(output, :result, 0o600) do
-      {:ok, handle} ->
-        result = capture_and_publish(handle, run_id, traces, inspection)
-        finalize_handle(handle, result)
+    if valid_capture_opts?(capture_opts) do
+      case PublicationHandle.reserve(output, :result, 0o600) do
+        {:ok, handle} ->
+          result = capture_and_publish(handle, run_id, traces, inspection, capture_opts)
+          finalize_handle(handle, result)
 
-      {:error, _reason} ->
-        {:error, :destination_unavailable, "private transcript destination unavailable"}
+        {:error, _reason} ->
+          {:error, :destination_unavailable, "private transcript destination unavailable"}
+      end
+    else
+      {:error, :invalid_arguments, "invalid transcript command"}
     end
   rescue
     _exception -> {:error, :internal_error, "transcript command failed"}
@@ -50,15 +60,15 @@ defmodule PtcRunner.TranscriptFrontend do
     _kind, _reason -> {:error, :internal_error, "transcript command failed"}
   end
 
-  def run(_arguments, _runtime),
+  def run(_arguments, _runtime, _capture_opts),
     do: {:error, :invalid_arguments, "invalid transcript command"}
 
-  defp capture_and_publish(handle, run_id, traces, inspection) do
+  defp capture_and_publish(handle, run_id, traces, inspection, capture_opts) do
     resources = %{"traces" => traces, "inspection" => inspection}
 
     case validate_separation(handle, traces, inspection) do
       :ok ->
-        capture_source(handle, run_id, resources)
+        capture_source(handle, run_id, resources, capture_opts)
 
       {:error, _reason} ->
         {:error, :source_separation_failed,
@@ -66,8 +76,8 @@ defmodule PtcRunner.TranscriptFrontend do
     end
   end
 
-  defp capture_source(handle, run_id, resources) do
-    case PrivateRunAnalysisProfile.capture(resources, []) do
+  defp capture_source(handle, run_id, resources, capture_opts) do
+    case PrivateRunAnalysisProfile.capture(resources, capture_opts) do
       {:ok, captured} ->
         try do
           with {:ok, analysis} <-
@@ -123,10 +133,26 @@ defmodule PtcRunner.TranscriptFrontend do
          "inspection artifact schema version #{artifact_version} is unsupported; " <>
            "this build supports version #{supported_version}"}
 
+      {:error, :source_changed} ->
+        {:error, :source_changed, "analysis source changed during capture"}
+
       {:error, _reason} ->
         {:error, :source_unavailable, "private transcript source unavailable"}
     end
   end
+
+  defp valid_capture_opts?(opts) when is_list(opts) do
+    Keyword.keys(opts) --
+      [
+        :capture_hook,
+        :listing_hook,
+        :inspection_capture_hook,
+        :inspection_listing_hook,
+        :inspection_artifact_verification_hook
+      ] == []
+  end
+
+  defp valid_capture_opts?(_opts), do: false
 
   defp validate_separation(handle, traces, inspection) do
     with {:ok, trace} <- AnalysisDirectory.resolve(traces),

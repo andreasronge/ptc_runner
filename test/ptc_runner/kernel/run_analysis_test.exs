@@ -1,11 +1,26 @@
 defmodule PtcRunner.Kernel.RunAnalysisTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.RunAnalysis
   alias PtcRunner.Kernel.RunAnalysisCapability
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.TestSupport.PrivateInspectionFixture
+
+  @tag :tmp_dir
+  test "semantic run listing never exceeds the snapshot result ceiling", %{tmp_dir: root} do
+    File.write!(Path.join(root, "empty.jsonl"), "")
+
+    {:ok, trace} =
+      TraceSnapshot.start({:directory, root},
+        max_result_bytes: HostConfig.minimum_snapshot_result_bytes()
+      )
+
+    on_exit(fn -> TraceSnapshot.stop(trace) end)
+    assert {:ok, analysis} = RunAnalysis.new(trace)
+    assert {:error, :result_limit_exceeded} = RunAnalysis.query(analysis, :runs, %{})
+  end
 
   @tag :tmp_dir
   test "answers the six run questions without exposing record-family queries", %{tmp_dir: root} do
@@ -183,6 +198,53 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     assert {:error, :evidence_unavailable} =
              RunAnalysis.query(analysis, :conversation, %{"run_id" => trace_only})
+
+    assert {:error, :not_found} =
+             RunAnalysis.query(analysis, :conversation, %{"run_id" => "unknown"})
+
+    assert {:error, :not_found} =
+             RunAnalysis.query(analysis, :source, %{"run_id" => "unknown"})
+  end
+
+  @tag :tmp_dir
+  test "conversation completeness reconciles private exchanges with canonical evidence", %{
+    tmp_dir: root
+  } do
+    fixture = PrivateInspectionFixture.create!(root, "missing-exchange")
+    remove_capability_records!(fixture.inspection, "llm-#{fixture.run_id}")
+    {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
+    {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
+    on_exit(fn -> InspectionSnapshot.stop(inspection) end)
+    on_exit(fn -> TraceSnapshot.stop(trace) end)
+    assert {:ok, analysis} = RunAnalysis.new(trace, inspection)
+
+    assert {:ok,
+            %{
+              "canonical_complete?" => true,
+              "complete?" => false,
+              "missing_exchange_count" => 1,
+              "streams" => []
+            }} = RunAnalysis.query(analysis, :conversation, %{"run_id" => fixture.run_id})
+  end
+
+  @tag :tmp_dir
+  test "conversation completeness requires a canonical terminal event", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root, "open-run")
+    trace_path = Path.join(fixture.traces, "#{fixture.run_id}.jsonl")
+
+    trace_path
+    |> File.stream!()
+    |> Enum.reject(fn line -> line |> Jason.decode!() |> Map.fetch!("type") == "run-stopped" end)
+    |> then(&File.write!(trace_path, &1))
+
+    {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
+    {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
+    on_exit(fn -> InspectionSnapshot.stop(inspection) end)
+    on_exit(fn -> TraceSnapshot.stop(trace) end)
+    assert {:ok, analysis} = RunAnalysis.new(trace, inspection)
+
+    assert {:ok, %{"canonical_complete?" => false, "complete?" => false}} =
+             RunAnalysis.query(analysis, :conversation, %{"run_id" => fixture.run_id})
   end
 
   @tag :tmp_dir
@@ -304,5 +366,23 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
       "arguments" => %{"messages" => messages, "system" => "system"},
       "result" => %{"status" => "ok", "value" => Map.delete(assistant, "role")}
     }
+  end
+
+  defp remove_capability_records!(directory, capability_id) do
+    [path] = Path.wildcard(Path.join(directory, "*.inspection.jsonl"))
+
+    retained =
+      path
+      |> File.stream!()
+      |> Enum.map(&Jason.decode!/1)
+      |> Enum.reject(fn record ->
+        get_in(record, ["correlation", "capability_id"]) == capability_id
+      end)
+      |> Enum.with_index(1)
+      |> Enum.map_join(fn {record, sequence} ->
+        record |> Map.put("sequence", sequence) |> Jason.encode!() |> Kernel.<>("\n")
+      end)
+
+    File.write!(path, retained)
   end
 end

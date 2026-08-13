@@ -126,6 +126,7 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
     File.write!(candidate_path, candidate)
 
     write_json(descriptor_path, %{
+      "target" => %{"environment" => "workflow"},
       "component_id" => "agent.core",
       "base_source_hash" => base_hash,
       "source_hash" => candidate_hash,

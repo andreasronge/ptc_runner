@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.RunAnalysis do
   @private_operations [:conversation, :source]
   @default_limit 100
   @max_limit 1_000
+  @trace_page_limit 100
   @max_pages 1_000
 
   @enforce_keys [:traces, :max_result_bytes]
@@ -83,21 +84,24 @@ defmodule PtcRunner.Kernel.RunAnalysis do
     do: %{"streams" => [], "ambiguous" => [], "ambiguous?" => true}
 
   @doc false
-  @spec conversation_result(map(), map()) :: map()
-  def conversation_result(exchanges_page, programs_page)
-      when is_map(exchanges_page) and is_map(programs_page) do
+  @spec conversation_result(map(), map(), map()) :: map()
+  def conversation_result(trace_page, exchanges_page, programs_page)
+      when is_map(trace_page) and is_map(exchanges_page) and is_map(programs_page) do
     streams = conversation_streams(Map.get(exchanges_page, "items", []))
     programs = Map.get(programs_page, "items", [])
+    evidence = conversation_evidence(trace_page, exchanges_page)
 
     streams
     |> attach_programs(programs)
     |> Map.put(
       "complete?",
-      not streams["ambiguous?"] and page_complete?(exchanges_page) and
-        page_complete?(programs_page)
+      evidence.complete? and not streams["ambiguous?"] and page_complete?(programs_page)
     )
+    |> Map.put("canonical_complete?", evidence.canonical_complete?)
+    |> Map.put("missing_exchange_count", evidence.missing_exchange_count)
     |> Map.put("omitted_count", omitted_count([exchanges_page, programs_page]))
     |> Map.put("snapshot_hash", exchanges_page["snapshot_hash"])
+    |> Map.put("trace_snapshot_hash", trace_page["snapshot_hash"])
   end
 
   defp execute(analysis, :runs, arguments) do
@@ -108,7 +112,7 @@ defmodule PtcRunner.Kernel.RunAnalysis do
            ),
          :ok <- validate_limit(arguments),
          {:ok, page} <- TraceSnapshot.query(analysis.traces, :list_runs, arguments) do
-      {:ok, complete_page(page)}
+      bounded_result(analysis, complete_page(page))
     end
   end
 
@@ -143,11 +147,17 @@ defmodule PtcRunner.Kernel.RunAnalysis do
 
   defp execute(%__MODULE__{inspection: inspection} = analysis, :conversation, arguments) do
     with {:ok, query} <- run_page_query(arguments),
+         {:ok, _run} <-
+           TraceSnapshot.query(analysis.traces, :get_run, %{"run_id" => query["run_id"]}),
+         {:ok, trace_page} <- collect_trace_pages(analysis, :list_turns, query),
          {:ok, exchanges_page} <- collect_inspection_pages(inspection, :model_exchanges, query),
          {:ok, programs_page} <- collect_inspection_pages(inspection, :generated_sources, query) do
-      bounded_result(analysis, conversation_result(exchanges_page, programs_page))
+      bounded_result(
+        analysis,
+        conversation_result(trace_page, exchanges_page, programs_page)
+      )
     else
-      {:error, :not_found} -> {:error, :evidence_unavailable}
+      {:error, :not_found} -> classify_private_not_found(analysis, arguments)
       {:error, _reason} = error -> error
     end
   end
@@ -177,6 +187,8 @@ defmodule PtcRunner.Kernel.RunAnalysis do
 
   defp execute(%__MODULE__{inspection: inspection} = analysis, :source, arguments) do
     with {:ok, query} <- run_page_query(arguments),
+         {:ok, _run} <-
+           TraceSnapshot.query(analysis.traces, :get_run, %{"run_id" => query["run_id"]}),
          {:ok, preludes} <- collect_inspection_pages(inspection, :effective_preludes, query),
          {:ok, programs} <- collect_inspection_pages(inspection, :generated_sources, query) do
       bounded_result(analysis, %{
@@ -187,10 +199,20 @@ defmodule PtcRunner.Kernel.RunAnalysis do
         "snapshot_hash" => preludes["snapshot_hash"]
       })
     else
-      {:error, :not_found} -> {:error, :evidence_unavailable}
+      {:error, :not_found} -> classify_private_not_found(analysis, arguments)
       {:error, _reason} = error -> error
     end
   end
+
+  defp classify_private_not_found(analysis, %{"run_id" => run_id}) do
+    case TraceSnapshot.query(analysis.traces, :get_run, %{"run_id" => run_id}) do
+      {:ok, _run} -> {:error, :evidence_unavailable}
+      {:error, :not_found} -> {:error, :not_found}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp classify_private_not_found(_analysis, _arguments), do: {:error, :invalid_query}
 
   defp valid_pair?(source, _trace_info, nil)
        when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot],
@@ -310,6 +332,8 @@ defmodule PtcRunner.Kernel.RunAnalysis do
   end
 
   defp collect_trace_pages(analysis, operation, query) do
+    query = Map.update(query, "limit", @trace_page_limit, &min(&1, @trace_page_limit))
+
     collect_pages(
       &TraceSnapshot.query(analysis.traces, operation, &1),
       query,
@@ -416,6 +440,35 @@ defmodule PtcRunner.Kernel.RunAnalysis do
     if byte_size(Jason.encode!(result)) <= max_result_bytes,
       do: {:ok, result},
       else: {:error, :result_limit_exceeded}
+  end
+
+  defp conversation_evidence(trace_page, exchanges_page) do
+    events = Map.get(trace_page, "items", [])
+
+    expected =
+      events
+      |> Enum.filter(fn event ->
+        event["type"] == "capability-started" and event_data(event, "name") == "llm-request"
+      end)
+      |> MapSet.new(&event_data(&1, "capability_id"))
+
+    captured =
+      exchanges_page
+      |> Map.get("items", [])
+      |> MapSet.new(& &1["capability_id"])
+
+    missing_exchange_count = expected |> MapSet.difference(captured) |> MapSet.size()
+    terminal? = Enum.any?(events, &(&1["type"] == "run-stopped"))
+    dropped? = Enum.any?(events, &(&1["type"] == "events-dropped"))
+    canonical_complete? = page_complete?(trace_page) and terminal? and not dropped?
+
+    %{
+      canonical_complete?: canonical_complete?,
+      missing_exchange_count: missing_exchange_count,
+      complete?:
+        canonical_complete? and missing_exchange_count == 0 and
+          page_complete?(exchanges_page)
+    }
   end
 
   defp attach_programs(%{"streams" => streams} = result, programs) do

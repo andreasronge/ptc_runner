@@ -207,7 +207,7 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
       @manifest_template
       |> File.read!()
       |> Jason.decode!()
-      |> put_in(["mission", "components"], [
+      |> put_in(["missions", "default", "components"], [
         %{"library" => "cap"},
         %{"id" => "repo", "path" => "repo.clj", "dependencies" => ["cap"]}
       ])

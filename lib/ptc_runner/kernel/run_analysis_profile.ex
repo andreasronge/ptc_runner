@@ -211,7 +211,8 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
     case InspectionSnapshot.start({:directory, directory}, trace,
            owner: self(),
            capture_hook: Keyword.get(opts, :inspection_capture_hook),
-           listing_hook: Keyword.get(opts, :inspection_listing_hook)
+           listing_hook: Keyword.get(opts, :inspection_listing_hook),
+           artifact_verification_hook: Keyword.get(opts, :inspection_artifact_verification_hook)
          ) do
       {:ok, inspection} ->
         finish_private_capture(recipe, trace, inspection)

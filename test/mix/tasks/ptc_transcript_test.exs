@@ -1,8 +1,11 @@
 defmodule Mix.Tasks.PtcTranscriptTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.CommandEntry
+  alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.MixCommandAdapter
   alias PtcRunner.TestSupport.PrivateInspectionFixture
+  alias PtcRunner.TranscriptFrontend
 
   @tag :tmp_dir
   test "one command writes an exact private conversation without record-shape knowledge", %{
@@ -81,6 +84,68 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     assert presentation.stderr =~ "error: transcript/unsupported_schema:"
     assert presentation.stderr =~ "schema version 4 is unsupported"
     assert presentation.stderr =~ "supports version 5"
+    refute File.exists?(output)
+  end
+
+  @tag :tmp_dir
+  test "preserves capture-time source changes without publishing output", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root, "changed-source")
+    output_directory = Path.join(root, "transcript")
+    File.mkdir!(output_directory)
+    output = Path.join(output_directory, "transcript.private.json")
+
+    argv = [
+      "transcript",
+      fixture.run_id,
+      "--traces",
+      fixture.traces,
+      "--inspection",
+      fixture.inspection,
+      "--private-unattended",
+      "--private-output",
+      output
+    ]
+
+    assert {:ok, entry} = CommandEntry.open(argv, :standalone)
+    trace_path = Path.join(fixture.traces, "#{fixture.run_id}.jsonl")
+
+    assert {:error, :source_changed, "analysis source changed during capture"} =
+             TranscriptFrontend.run(entry.arguments, CommandRuntime.standalone(),
+               capture_hook: fn -> File.write!(trace_path, File.read!(trace_path) <> "\n") end
+             )
+
+    refute File.exists?(output)
+  end
+
+  @tag :tmp_dir
+  test "preserves inspection changes during artifact verification", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root, "changed-inspection")
+    output_directory = Path.join(root, "transcript")
+    File.mkdir!(output_directory)
+    output = Path.join(output_directory, "transcript.private.json")
+
+    argv = [
+      "transcript",
+      fixture.run_id,
+      "--traces",
+      fixture.traces,
+      "--inspection",
+      fixture.inspection,
+      "--private-unattended",
+      "--private-output",
+      output
+    ]
+
+    assert {:ok, entry} = CommandEntry.open(argv, :standalone)
+    [inspection_path] = Path.wildcard(Path.join(fixture.inspection, "*.inspection.jsonl"))
+
+    assert {:error, :source_changed, "analysis source changed during capture"} =
+             TranscriptFrontend.run(entry.arguments, CommandRuntime.standalone(),
+               inspection_artifact_verification_hook: fn ->
+                 File.write!(inspection_path, "\n", [:append])
+               end
+             )
+
     refute File.exists?(output)
   end
 

@@ -266,7 +266,13 @@ async function loadRun(runId) {
     return;
   }
 
-  const conversation = conversationResponse.ok ? await conversationResponse.json() : null;
+  const conversation = conversationResponse.ok
+    ? await conversationResponse.json()
+    : {
+        'available?': false,
+        status: conversationResponse.status,
+        reason: await safeBodyText(conversationResponse)
+      };
   renderRun(
     {
       metadata: await runResponse.json(),

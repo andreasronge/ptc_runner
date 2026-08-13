@@ -1,8 +1,91 @@
 defmodule PtcRunner.Kernel.ViewerAdapterTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.InspectionSnapshot
+  alias PtcRunner.Kernel.RunAnalysis
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.Kernel.ViewerAdapter
+  alias PtcRunner.TestSupport.PrivateInspectionFixture
+
+  @tag :tmp_dir
+  test "viewer conversation preserves the canonical analysis snapshot identity", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root)
+    {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
+    {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
+    on_exit(fn -> InspectionSnapshot.stop(inspection) end)
+    on_exit(fn -> TraceSnapshot.stop(trace) end)
+
+    assert {:ok, analysis} = RunAnalysis.new(trace, inspection)
+
+    assert {:ok, expected} =
+             RunAnalysis.query(analysis, :conversation, %{"run_id" => fixture.run_id})
+
+    inspection_path =
+      fixture.inspection
+      |> Path.join("*.inspection.jsonl")
+      |> Path.wildcard()
+      |> List.first()
+
+    assert {:ok, grant} =
+             ViewerAdapter.pin_inspection(inspection_path, {:directory, fixture.traces})
+
+    assert {:ok, actual} = ViewerAdapter.conversation(grant, fixture.run_id)
+    assert actual == expected
+  end
+
+  @tag :tmp_dir
+  test "pinning an exact trace file cannot acquire authority from a sibling", %{tmp_dir: root} do
+    inspected = PrivateInspectionFixture.create!(Path.join(root, "inspected"), "inspected-run")
+    selected = PrivateInspectionFixture.create!(Path.join(root, "selected"), "selected-run")
+    selected_trace = Path.join(selected.traces, "#{selected.run_id}.jsonl")
+    sibling_trace = Path.join(selected.traces, "#{inspected.run_id}.jsonl")
+    File.cp!(Path.join(inspected.traces, "#{inspected.run_id}.jsonl"), sibling_trace)
+
+    inspection_path =
+      inspected.inspection
+      |> Path.join("*.inspection.jsonl")
+      |> Path.wildcard()
+      |> List.first()
+
+    assert {:error, :inspection_correlation_missing} =
+             ViewerAdapter.pin_inspection(inspection_path, {:file, selected_trace})
+  end
+
+  @tag :tmp_dir
+  test "exact normal files retain TraceLog's extensionless admission", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root, "extensionless-run")
+    jsonl_path = Path.join(fixture.traces, "#{fixture.run_id}.jsonl")
+    extensionless_path = Path.join(fixture.traces, "canonical-trace")
+    File.rename!(jsonl_path, extensionless_path)
+    [inspection_path] = Path.wildcard(Path.join(fixture.inspection, "*.inspection.jsonl"))
+
+    assert {:ok, _grant} =
+             ViewerAdapter.pin_inspection(inspection_path, {:file, extensionless_path})
+  end
+
+  @tag :tmp_dir
+  test "private directory pinning cannot acquire authority from a normal sibling", %{
+    tmp_dir: root
+  } do
+    inspected = PrivateInspectionFixture.create!(Path.join(root, "inspected"), "normal-run")
+    selected = PrivateInspectionFixture.create!(Path.join(root, "selected"), "private-run")
+    selected_jsonl = Path.join(selected.traces, "#{selected.run_id}.jsonl")
+    File.rename!(selected_jsonl, Path.join(selected.traces, "#{selected.run_id}.private.jsonl"))
+
+    File.cp!(
+      Path.join(inspected.traces, "#{inspected.run_id}.jsonl"),
+      Path.join(selected.traces, "#{inspected.run_id}.jsonl")
+    )
+
+    [inspection_path] = Path.wildcard(Path.join(inspected.inspection, "*.inspection.jsonl"))
+
+    assert {:error, :inspection_correlation_missing} =
+             ViewerAdapter.pin_inspection(
+               inspection_path,
+               {:private_directory, selected.traces}
+             )
+  end
 
   @tag :tmp_dir
   test "viewer API and TraceLog return the same source-scoped projection", %{tmp_dir: directory} do
