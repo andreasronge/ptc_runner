@@ -50,8 +50,23 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     assert counts["capability_calls"] == 1
     assert counts["provider_exchanges"] == 1
+    assert counts["incomplete_model_exchanges"] == 0
+    assert counts["incomplete_capability_calls"] == 0
     assert Enum.find(collections, &(&1["name"] == "activity"))["available?"]
     assert Enum.find(collections, &(&1["name"] == "turns"))["available?"]
+
+    assert Enum.find(collections, &(&1["name"] == "model_exchanges"))[
+             "item_completeness_field"
+           ] == "complete?"
+
+    assert Enum.find(collections, &(&1["name"] == "capability_calls"))[
+             "item_completeness_field"
+           ] == "complete?"
+
+    refute Map.has_key?(
+             Enum.find(collections, &(&1["name"] == "turns")),
+             "item_completeness_field"
+           )
 
     capability_id = "tool-#{run_id}"
 

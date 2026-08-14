@@ -207,6 +207,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
               "items" => [
                 %{
                   "capability_id" => "llm-mcp-run",
+                  "complete?" => true,
                   "input_sequence" => llm_input,
                   "output_sequence" => llm_output,
                   "arguments" => %{"messages" => [%{"content" => "private-mcp-run"}]},
@@ -224,6 +225,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
               "items" => [
                 %{
                   "capability_id" => "tool-mcp-run",
+                  "complete?" => true,
                   "arguments" => %{"path" => "private-mcp-run.txt"},
                   "result" => %{"status" => "ok", "value" => %{"text" => "secret-mcp-run"}}
                 }
@@ -365,6 +367,92 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
                "run_id" => "mcp-run",
                "limit" => 1
              })
+  end
+
+  @tag :tmp_dir
+  test "interrupted capability attempts preserve the complete private prefix", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create_interrupted!(root)
+    {:ok, trace_snapshot} = TraceSnapshot.start({:directory, fixture.traces}, owner: self())
+
+    {:ok, snapshot} =
+      InspectionSnapshot.start({:directory, fixture.inspection}, trace_snapshot, owner: self())
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(snapshot)
+      TraceSnapshot.stop(trace_snapshot)
+    end)
+
+    assert {:ok,
+            %{
+              "counts" => %{
+                "model_exchanges" => 2,
+                "incomplete_model_exchanges" => 1,
+                "capability_calls" => 2,
+                "incomplete_capability_calls" => 1
+              }
+            }} = InspectionSnapshot.query(snapshot, :get_run, %{"run_id" => fixture.run_id})
+
+    assert {:ok,
+            %{
+              "items" => [
+                %{
+                  "capability_id" => "llm-complete-" <> _,
+                  "complete?" => true,
+                  "result" => %{"status" => "ok"},
+                  "output_sequence" => output_sequence,
+                  "output_timestamp" => output_timestamp
+                },
+                %{
+                  "capability_id" => "llm-interrupted-" <> _,
+                  "complete?" => false,
+                  "arguments" => %{"messages" => interrupted_messages}
+                } = interrupted_model
+              ]
+            }} =
+             InspectionSnapshot.query(snapshot, :model_exchanges, %{
+               "run_id" => fixture.run_id
+             })
+
+    assert is_integer(output_sequence)
+    assert is_binary(output_timestamp)
+    assert List.last(interrupted_messages)["content"] == fixture.interrupted_model_secret
+    refute Map.has_key?(interrupted_model, "result")
+    refute Map.has_key?(interrupted_model, "output_sequence")
+    refute Map.has_key?(interrupted_model, "output_timestamp")
+
+    assert {:ok,
+            %{
+              "items" => [
+                %{
+                  "capability_id" => "tool-complete-" <> _,
+                  "complete?" => true,
+                  "result" => %{"status" => "ok"}
+                },
+                %{
+                  "capability_id" => "tool-interrupted-" <> _,
+                  "complete?" => false,
+                  "arguments" => %{"path" => interrupted_tool_secret}
+                } = interrupted_tool
+              ]
+            }} =
+             InspectionSnapshot.query(snapshot, :capability_calls, %{
+               "run_id" => fixture.run_id
+             })
+
+    assert interrupted_tool_secret == fixture.interrupted_tool_secret
+    refute Map.has_key?(interrupted_tool, "result")
+    refute Map.has_key?(interrupted_tool, "output_sequence")
+    refute Map.has_key?(interrupted_tool, "output_timestamp")
+
+    assert {:ok,
+            %{
+              "evidence" => %{
+                "canonical_complete?" => true,
+                "complete?" => false,
+                "missing_exchange_count" => 1
+              },
+              "items" => [%{"capability_id" => "llm-complete-" <> _}]
+            }} = InspectionSnapshot.query(snapshot, :turns, %{"run_id" => fixture.run_id})
   end
 
   @tag :tmp_dir
@@ -678,9 +766,9 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "orphan, duplicate, incomplete, malformed, symlink, and replacement captures fail closed",
+  test "orphan, duplicate, malformed, symlink, and replacement captures fail closed",
        %{tmp_dir: root} do
-    for scenario <- [:orphan, :duplicate, :incomplete, :malformed, :symlink, :replacement] do
+    for scenario <- [:orphan, :duplicate, :malformed, :symlink, :replacement] do
       scenario_root = Path.join(root, Atom.to_string(scenario))
       {trace, inspection} = source_directories(scenario_root)
       write_run(trace, inspection, "valid", :basic)
@@ -698,11 +786,6 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
               Path.join(inspection, "duplicate.inspection.jsonl")
             )
 
-            InspectionSnapshot.start({:directory, inspection}, trace_snapshot)
-
-          :incomplete ->
-            File.rm!(Path.join(inspection, "valid.inspection.jsonl"))
-            write_incomplete_inspection(inspection, "valid")
             InspectionSnapshot.start({:directory, inspection}, trace_snapshot)
 
           :malformed ->
@@ -1016,28 +1099,6 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     {:ok, records} = InspectionSink.records(sink)
     path = Path.join(directory, "#{run_id}.inspection.jsonl")
     :ok = InspectionArtifact.persist(path, records, events)
-    :ok = InspectionSink.stop(sink)
-  end
-
-  defp write_incomplete_inspection(directory, run_id) do
-    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
-
-    emit!(sink, "capability-input", %{capability_id: "tool-#{run_id}"}, %{
-      environment: :mission,
-      mission_name: "default",
-      name: "workspace.read",
-      arguments: %{"path" => "private"}
-    })
-
-    {:ok, records} = InspectionSink.records(sink)
-
-    :ok =
-      InspectionArtifact.persist(
-        Path.join(directory, "#{run_id}.inspection.jsonl"),
-        records,
-        canonical_events(run_id)
-      )
-
     :ok = InspectionSink.stop(sink)
   end
 

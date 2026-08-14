@@ -1362,10 +1362,12 @@ defmodule PtcRunner.Kernel.MCPSource do
       end)
     end
 
-    case InspectionSink.emit(sink, "mcp-request", correlation, payload.(request)) do
-      :ok -> InspectionSink.emit(sink, "mcp-response", correlation, payload.(response))
-      {:error, :inspection_sink_error} = error -> error
-    end
+    InspectionSink.emit_mcp_exchange(
+      sink,
+      correlation,
+      payload.(request),
+      payload.(response)
+    )
   end
 
   defp capture_exchange(

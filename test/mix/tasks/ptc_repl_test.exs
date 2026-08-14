@@ -452,6 +452,90 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
+  test "private analysis reads the complete prefix of an interrupted run", %{
+    tmp_dir: directory
+  } do
+    fixture = PrivateInspectionFixture.create_interrupted!(directory, "interrupted-debugger")
+    normal_path = Path.join(fixture.traces, "#{fixture.run_id}.jsonl")
+    private_path = Path.join(fixture.traces, "#{fixture.run_id}.private.jsonl")
+    File.rename!(normal_path, private_path)
+
+    output =
+      capture_io(fn ->
+        run_repl([
+          "--profile",
+          "private-run-analysis-v1",
+          "--resource",
+          "traces=#{fixture.traces}",
+          "--resource",
+          "inspection=#{fixture.inspection}",
+          "--session-trace-dir",
+          fixture.output,
+          "--private-unattended",
+          "--format",
+          "jsonl",
+          "-e",
+          ~s|(analysis/open "#{fixture.run_id}")|,
+          "-e",
+          ~s|(analysis/read "#{fixture.run_id}" {"collection" "model_exchanges"})|,
+          "-e",
+          ~s|(analysis/read "#{fixture.run_id}" {"collection" "capability_calls"})|,
+          "-e",
+          ~s|(analysis/read "#{fixture.run_id}" {"collection" "turns"})|
+        ])
+      end)
+
+    records = decode_jsonl(output)
+
+    assert Enum.map(records, & &1["type"]) == [
+             "session-started",
+             "evaluation",
+             "evaluation",
+             "evaluation",
+             "evaluation",
+             "session-closed"
+           ]
+
+    [opened, model_page, capability_page, turns_page] =
+      records
+      |> Enum.filter(&(&1["type"] == "evaluation"))
+      |> Enum.map(&get_in(&1, ["result", "value"]))
+
+    assert opened["inspection"]["counts"] == %{
+             "capability_calls" => 2,
+             "effective_preludes" => 0,
+             "evaluation_analyses" => 0,
+             "execution_errors" => 0,
+             "execution_prints" => 0,
+             "generated_sources" => 0,
+             "incomplete_capability_calls" => 1,
+             "incomplete_model_exchanges" => 1,
+             "model_exchanges" => 2,
+             "provider_exchanges" => 0
+           }
+
+    assert Enum.map(model_page["items"], & &1["complete?"]) == [true, false]
+    assert Enum.map(capability_page["items"], & &1["complete?"]) == [true, false]
+
+    assert get_in(List.last(model_page["items"]), ["arguments", "messages"]) |> List.last() ==
+             %{"content" => fixture.interrupted_model_secret, "role" => "user"}
+
+    assert get_in(List.last(capability_page["items"]), ["arguments", "path"]) ==
+             fixture.interrupted_tool_secret
+
+    assert turns_page["evidence"]["missing_exchange_count"] == 1
+
+    assert Enum.map(turns_page["items"], & &1["capability_id"]) == [
+             "llm-complete-#{fixture.run_id}"
+           ]
+
+    closed = List.last(records)
+    encoded_trace = File.read!(closed["trace_path"])
+    refute encoded_trace =~ fixture.interrupted_model_secret
+    refute encoded_trace =~ fixture.interrupted_tool_secret
+  end
+
+  @tag :tmp_dir
   test "inspection profile setup explains an unsupported artifact schema", %{
     tmp_dir: directory
   } do

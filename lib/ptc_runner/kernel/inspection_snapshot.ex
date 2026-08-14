@@ -5,9 +5,12 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   A snapshot inventories one bounded directory, loads each regular
   `.inspection.jsonl` artifact exactly once through `InspectionArtifact`, and
   validates every artifact against an already captured `TraceSnapshot`.
-  Duplicate runs, orphaned identities, malformed artifacts, incomplete
-  input/output joins, replacement during capture, and aggregate or retained
-  limits fail the entire capture. No partial catalog is published.
+  Duplicate runs, orphaned identities, malformed artifacts, output-only
+  capability joins, incomplete MCP joins, replacement during capture, and
+  aggregate or retained limits fail the entire capture. Validated input-only
+  capability attempts remain available as explicitly incomplete records. MCP
+  request/response pairs are retained atomically so interruption cannot publish
+  only half of an exchange. No partial catalog is published.
 
   The owner process holds only compiled query collections and safe metadata.
   Paths and private records are redacted from process status. Its tokenized

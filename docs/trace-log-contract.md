@@ -394,6 +394,9 @@ Returns metadata for one source-visible run or a uniform not-found/denied error.
 It does not return all evidence implicitly. Its `collections` catalog names
 each collection, its authority, availability, exact filters, and stable order,
 so a caller can discover the next read without knowing the storage schema.
+The `model_exchanges` and `capability_calls` entries additionally advertise
+`item_completeness_field: "complete?"`; collections without per-item
+completion semantics omit that catalog field.
 
 ### `analysis/read`
 
@@ -408,12 +411,21 @@ also advertise `turns`, `model_exchanges`, `capability_calls`,
 `execution_prints`, and `execution_errors`. Public recipes report those private
 collections as unavailable and reject reads without changing authority.
 
+Every raw `model_exchanges` and `capability_calls` item carries `complete?`.
+Completed items retain their result, output sequence, and output timestamp.
+An interrupted input-only attempt has `complete?: false` and omits those three
+terminal fields. The run metadata counts all admitted attempts and separately
+reports `incomplete_model_exchanges` and `incomplete_capability_calls`, including
+zero on complete runs.
+
 `turns` is the only compiled convenience collection. Each item is one model
 turn with the newly added messages, response, matching generated programs, and
 stable stream/turn identity. It omits the repeated system prompt; exact raw
 model requests remain available through `model_exchanges`. Page-level
 `evidence` reports canonical completeness, missing exchanges, and ambiguity
-separately from pagination.
+separately from pagination. Interrupted model inputs remain raw evidence but
+are excluded from `turns`, so the canonical missing-exchange count records the
+gap instead of a fabricated assistant response.
 
 Generated programs carry `prelude_calls_available?` and a sorted
 `prelude_calls` list of `{ref, component_id}` entries. Exact
@@ -624,11 +636,16 @@ pinning. There may be at most one input and one output for a capability ID, one
 source and one subsequent analysis for an evaluation ID, and one source for an
 environment/component pair.
 A capability output requires an earlier matching input; an input without an
-output is valid only as an interrupted attempt. Private capability name and
-environment must match the canonical `capability-started` event carrying the
-same ID, and canonical capability-start IDs must themselves be unique. Browser
-indexing also refuses to overwrite a prior identity defensively, but server
-validation is authoritative. There may likewise be at most one
+output is valid only as an interrupted attempt. Private queries retain that
+input as `complete?: false` and do not synthesize terminal fields. MCP provider
+exchange projections still require a validated request/response pair; the
+inspection sink retains each pair atomically so interruption cannot leave a
+request without its response. Private
+capability name and environment must match the canonical `capability-started`
+event carrying the same ID, and canonical capability-start IDs must themselves
+be unique. Browser indexing also refuses to overwrite a prior identity
+defensively, but server validation is authoritative. There may likewise be at
+most one
 `execution-prints` and one `execution-error` for a given `evaluation_id`; a run
 with no `println` output and no execution-phase failure emits neither.
 

@@ -18,6 +18,19 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     fixture
   end
 
+  def create_interrupted!(root, run_id \\ "interrupted-private-run") do
+    %{traces: traces, inspection: inspection} = fixture = create_directories(root, run_id)
+    events = interrupted_events(run_id)
+
+    File.write!(Path.join(traces, "#{run_id}.jsonl"), encode_jsonl(events))
+    write_interrupted_inspection!(inspection, run_id, events)
+
+    Map.merge(fixture, %{
+      interrupted_model_secret: "INTERRUPTED_MODEL_SECRET_#{run_id}",
+      interrupted_tool_secret: "INTERRUPTED_TOOL_SECRET_#{run_id}"
+    })
+  end
+
   def create_result!(root, value, run_id \\ "private-result-run") do
     %{traces: traces, inspection: inspection} = fixture = create_directories(root, run_id)
     {:ok, result_hash} = ResultIdentity.strict_json_hash(value)
@@ -201,6 +214,115 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     :ok = InspectionSink.stop(sink)
   end
 
+  defp write_interrupted_inspection!(directory, run_id, events) do
+    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
+
+    emit!(sink, "capability-input", %{capability_id: "llm-complete-#{run_id}"}, %{
+      environment: :workflow,
+      name: "llm-request",
+      arguments: %{
+        "messages" => [%{"content" => "private-prompt-#{run_id}", "role" => "user"}],
+        "system" => "private-system-#{run_id}"
+      }
+    })
+
+    emit!(sink, "capability-output", %{capability_id: "llm-complete-#{run_id}"}, %{
+      environment: :workflow,
+      name: "llm-request",
+      result: %{
+        status: :ok,
+        value: %{"content" => "private-answer-#{run_id}"}
+      }
+    })
+
+    emit!(sink, "capability-input", %{capability_id: "tool-complete-#{run_id}"}, %{
+      environment: :mission,
+      mission_name: "default",
+      name: "workspace.read",
+      arguments: %{"path" => "private-#{run_id}.txt"}
+    })
+
+    emit!(sink, "capability-output", %{capability_id: "tool-complete-#{run_id}"}, %{
+      environment: :mission,
+      mission_name: "default",
+      name: "workspace.read",
+      result: %{status: :ok, value: %{"text" => "private-tool-result-#{run_id}"}}
+    })
+
+    emit!(sink, "capability-input", %{capability_id: "llm-interrupted-#{run_id}"}, %{
+      environment: :workflow,
+      name: "llm-request",
+      arguments: %{
+        "messages" => [
+          %{"content" => "private-prompt-#{run_id}", "role" => "user"},
+          %{"content" => "private-answer-#{run_id}", "role" => "assistant"},
+          %{"content" => "INTERRUPTED_MODEL_SECRET_#{run_id}", "role" => "user"}
+        ],
+        "system" => "private-system-#{run_id}"
+      }
+    })
+
+    emit!(sink, "capability-input", %{capability_id: "tool-interrupted-#{run_id}"}, %{
+      environment: :mission,
+      mission_name: "default",
+      name: "workspace.read",
+      arguments: %{"path" => "INTERRUPTED_TOOL_SECRET_#{run_id}"}
+    })
+
+    {:ok, records} = InspectionSink.records(sink)
+
+    :ok =
+      InspectionArtifact.persist(
+        Path.join(directory, "#{run_id}.inspection.jsonl"),
+        records,
+        events
+      )
+
+    :ok = InspectionSink.stop(sink)
+  end
+
+  defp interrupted_events(run_id) do
+    [
+      event(run_id, 1, "run-started", %{"missions" => %{"default" => %{}}}),
+      event(run_id, 2, "capability-started", %{
+        "capability_id" => "llm-complete-#{run_id}",
+        "environment" => "workflow",
+        "name" => "llm-request"
+      }),
+      event(run_id, 3, "capability-stopped", %{
+        "capability_id" => "llm-complete-#{run_id}",
+        "environment" => "workflow",
+        "name" => "llm-request",
+        "status" => "ok"
+      }),
+      event(run_id, 4, "capability-started", %{
+        "capability_id" => "tool-complete-#{run_id}",
+        "environment" => "mission",
+        "mission_name" => "default",
+        "name" => "workspace.read"
+      }),
+      event(run_id, 5, "capability-stopped", %{
+        "capability_id" => "tool-complete-#{run_id}",
+        "environment" => "mission",
+        "mission_name" => "default",
+        "name" => "workspace.read",
+        "status" => "ok"
+      }),
+      event(run_id, 6, "capability-started", %{
+        "capability_id" => "llm-interrupted-#{run_id}",
+        "environment" => "workflow",
+        "name" => "llm-request"
+      }),
+      event(run_id, 7, "capability-started", %{
+        "capability_id" => "tool-interrupted-#{run_id}",
+        "environment" => "mission",
+        "mission_name" => "default",
+        "name" => "workspace.read"
+      }),
+      event(run_id, 8, "run-stopped", %{"outcome" => "failed"})
+    ]
+  end
+
   def emit_execution_diagnostics!(sink, run_id) do
     emit!(sink, "execution-prints", %{evaluation_id: "workflow-eval-#{run_id}"}, %{
       environment: :workflow,
@@ -247,7 +369,8 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
       "run_id" => run_id,
       "trace_id" => "trace-#{run_id}",
       "sequence" => sequence,
-      "timestamp" => "2026-07-26T12:00:0#{sequence}Z",
+      "timestamp" =>
+        "2026-07-26T12:00:#{sequence |> Integer.to_string() |> String.pad_leading(2, "0")}Z",
       "type" => type,
       "data" => data
     }
