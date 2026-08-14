@@ -311,6 +311,66 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   end
 
   @tag :tmp_dir
+  test "PTC-Lisp follows typed boundary relations without collection scans", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create_boundary_failure!(root)
+    {:ok, session, _info} = start_internal_session(fixture)
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    program = ~S"""
+    (let [run-id "RUN_ID"
+          error (first (get (analysis/read run-id {"collection" "execution_errors"}) "items"))
+          error-relations (get error "relationships")
+          producer-rel (nth error-relations 2)
+          source-rel (nth error-relations 3)
+          producer (first (get (analysis/read run-id
+                                              (assoc (get producer-rel "filters")
+                                                     "collection"
+                                                     (get producer-rel "target_collection")))
+                               "items"))
+          source (first (get (analysis/read run-id
+                                            (assoc (get source-rel "filters")
+                                                   "collection"
+                                                   (get source-rel "target_collection")))
+                             "items"))
+          source-relations (get source "relationships")
+          turn-rel (nth source-relations 0)
+          prelude-rel (nth source-relations 1)
+          turn (first (get (analysis/read run-id
+                                          (assoc (get turn-rel "filters")
+                                                 "collection"
+                                                 (get turn-rel "target_collection")))
+                           "items"))
+          prelude (first (get (analysis/read run-id
+                                             (assoc (get prelude-rel "filters")
+                                                    "collection"
+                                                    (get prelude-rel "target_collection")))
+                              "items"))]
+      (return {"error_reason" (get error "reason")
+               "producer_status" (get (get producer "data") "status")
+               "source" (get source "source")
+               "turn" (get turn "turn")
+               "prelude_component" (get prelude "component_id")}))
+    """
+
+    program = String.replace(program, "RUN_ID", fixture.run_id)
+
+    assert {:ok,
+            %{
+              status: :ok,
+              value: %{
+                "error_reason" => "terminal_result_exceeded",
+                "producer_status" => "ok",
+                "source" => "(return 42)",
+                "turn" => 1,
+                "prelude_component" => "mission-component-" <> _
+              },
+              usage: %{capability_calls: capability_calls}
+            }} = AnalysisSession.evaluate(session, program)
+
+    assert capability_calls["analysis-read"].used == 5
+  end
+
+  @tag :tmp_dir
   test "PTC-Lisp reaches exact evidence while its analysis trace stays payload-free", %{
     tmp_dir: root
   } do

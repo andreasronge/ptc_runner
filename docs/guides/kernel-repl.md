@@ -182,6 +182,26 @@ children without comparing collection-local sequence numbers:
 subordinate evaluation. It does not claim that every child caused the eventual
 workflow error.
 
+When the retained evaluator ledger proves that a successful `kernel-eval`
+result reached the workflow boundary unchanged, the error also provides typed
+relations. Follow the supplied collection and filters rather than rebuilding
+the join:
+
+```clojure
+(def relations (get error "relationships"))
+(def producer (nth relations 2))
+(analysis/read run-id
+               (assoc (get producer "filters")
+                      "collection" (get producer "target_collection")))
+```
+
+Relations distinguish `causation`, validated evaluation `nesting`, and static
+or source-match `association`. Their state is `complete`, `incomplete`,
+`ambiguous`, or `unavailable`; a relation with null filters is descriptive and
+must not be followed. `analysis/open` reports the snapshot/sequence domain and
+identifier paths for every collection, so canonical `activity.sequence` is
+never compared with an inspection or reconstructed-turn sequence.
+
 Results may include exact model messages, generated programs, effective
 component source, capability payloads, prints, failure details, and terminal
 values. `turns` reconstructs cumulative model requests once when the immutable

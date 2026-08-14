@@ -394,6 +394,13 @@ Returns metadata for one source-visible run or a uniform not-found/denied error.
 It does not return all evidence implicitly. Its `collections` catalog names
 each collection, its authority, availability, exact filters, and stable order,
 so a caller can discover the next read without knowing the storage schema.
+Every descriptor also names `snapshot_domain`, `sequence_domain`, and an
+`identifier_locations` map. `canonical_trace` sequences belong only to the
+canonical run event stream. `private_inspection` sequences belong only to one
+inspection artifact. A reconstructed turn's `{stream_id, turn}` is its identity;
+its request/response sequence fields remain in the private-inspection domain.
+Identifier locations use dotted paths, with `[]` marking values nested in a
+list, such as `generated[].evaluation_id` on a turn.
 The `model_exchanges` and `capability_calls` entries additionally advertise
 `item_completeness_field: "complete?"`; collections without per-item
 completion semantics omit that catalog field.
@@ -437,6 +444,38 @@ Generated programs carry `prelude_calls_available?` and a sorted
 `turns`. The association between a turn and generated source is explicitly
 `source_match`; duplicate identical sources are marked ambiguous rather than
 given a fabricated causal identity.
+
+Private execution errors and generated programs may carry a `relationships`
+list. Each relationship has this closed shape:
+
+```json
+{
+  "rel": "direct_boundary_producer",
+  "semantics": "causation",
+  "target_collection": "activity",
+  "filters": {"evaluation_id": "mission-evaluation-id", "status": "ok"},
+  "state": "complete"
+}
+```
+
+The closed relation IDs are `boundary_failure`, `child_evaluations`,
+`direct_boundary_producer`, `generated_source`, `producing_turn`, and
+`referenced_prelude_source`.
+`target_collection` and non-null `filters` are the exact options to add to the
+same run's next `analysis/read`; callers must not follow a null filter. State is
+one of `complete`, `incomplete`, `ambiguous`, or `unavailable`. Ambiguous
+producer candidates are emitted as separately followable exact filters, each
+marked `ambiguous`, rather than as an unbounded scan.
+
+Semantics are intentionally narrower than the relation names. `causation`
+requires a workflow boundary failure or exact identity between the terminal
+workflow value and a retained successful `kernel-eval` result. `nesting` is
+reserved for the validated canonical `parent_evaluation_id` edge.
+`association` covers source identity, static prelude references, and the
+generated-source/turn source match. A source match can be ambiguous; a parent
+edge alone is never promoted to causation. Truncated producer evidence is
+`incomplete`, a complete search with no match is `unavailable`, and no relation
+compares canonical and inspection sequence values.
 
 Provider response usage omits `total_cost` when pricing is unavailable. A
 present zero is therefore a measured zero-cost response, not an unknown cost.
@@ -641,6 +680,13 @@ workflow evaluation fails with a non-empty `details` map, where `details` is
 the Kernel `Error.details` map computed for that failure. Their `environment`
 is always `"workflow"`, and their `evaluation_id` must match a canonical
 `evaluation-started` event with `environment: "workflow"` for the same run.
+When at least one `kernel-eval` ran, private details also contain bounded
+`boundary_producer` evidence: sorted unique `evaluation_ids` whose retained
+successful result is exactly the workflow boundary value, plus `complete?`
+indicating whether every inspected `kernel-eval` ledger result was intact.
+An empty complete list proves that no retained direct result matched; a false
+completion flag forbids that conclusion. The value itself is not duplicated in
+this metadata.
 
 The input record is accepted before the callback starts. A subordinate
 `evaluation-started` event is attempted before its source record is accepted,

@@ -31,10 +31,13 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   joins static prelude-call analysis to generated source by `evaluation_id`.
   Generated source and reconstructed turns copy the canonical
   `parent_evaluation_id` edge rather than inferring one from snapshot-local
-  sequence numbers.
+  sequence numbers. Execution errors and generated sources add typed,
+  state-bearing navigation relationships only from validated identities,
+  direct boundary-value provenance, and exact source/prelude associations.
   """
 
   alias PtcRunner.Kernel.ConversationProjection
+  alias PtcRunner.Kernel.RunAnalysisRelationships
 
   @default_limit 100
   @max_limit 1_000
@@ -404,12 +407,15 @@ defmodule PtcRunner.Kernel.InspectionQuery do
         {run_id, projection}
       end)
 
-    {:ok,
-     collections
-     |> Map.put(:runs_by_id, Map.new(collections.list_runs, &{&1["run_id"], &1}))
-     |> Map.put(:turns_by_run_id, turns)
-     |> Map.put(:turns, turns |> Map.values() |> Enum.flat_map(& &1.items))
-     |> Map.put(:trace_snapshot_hash, trace_analysis["trace_snapshot_hash"])}
+    collections =
+      collections
+      |> Map.put(:runs_by_id, Map.new(collections.list_runs, &{&1["run_id"], &1}))
+      |> Map.put(:turns_by_run_id, turns)
+      |> Map.put(:turns, turns |> Map.values() |> Enum.flat_map(& &1.items))
+      |> Map.put(:trace_snapshot_hash, trace_analysis["trace_snapshot_hash"])
+      |> RunAnalysisRelationships.attach(trace_facts)
+
+    {:ok, collections}
   end
 
   defp merge_artifacts(_compiled, _trace_analysis), do: {:error, :invalid_inspection_snapshot}
