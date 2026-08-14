@@ -1602,7 +1602,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
       program = {:program, Enum.map(ns_specs, &spec_to_defn_form/1)}
       scope = dep_scope_prelude(ns, exports_by_ns, dep_ctx)
 
-      with {:ok, core} <- analyze(program, scope),
+      with {:ok, core} <- analyze(program, scope, ns_specs),
            :ok <- check_prelude_vars(core, ns_specs),
            {:ok, env} <- eval_runtime(core) do
         {:cont, {:ok, Map.put(env_acc, ns, env)}}
@@ -1670,10 +1670,34 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   end
 
   # ============================================================
-  defp analyze(program, scope) do
+  defp analyze(program, scope, specs) do
     case Analyze.analyze(program, scope) do
       {:ok, core} ->
         {:ok, core}
+
+      {:error,
+       {:invalid_form, message,
+        %{
+          kind: :unknown_namespace,
+          rejected_namespace: rejected_namespace,
+          available_namespaces: available_namespaces
+        } = details}}
+      when map_size(details) == 3 ->
+        locator = unknown_namespace_locator(specs, rejected_namespace)
+
+        {:error,
+         ValidationError.new(
+           :unknown_namespace,
+           "prelude analysis failed: #{message} " <>
+             "(if this names another prelude, declare it as a dependency via requires_preludes)",
+           details: %{
+             rejected_namespace: rejected_namespace,
+             available_namespaces: available_namespaces
+           },
+           form_index: locator[:form_index],
+           ref: locator[:ref],
+           namespace: locator[:namespace]
+         )}
 
       {:error, reason} ->
         message = "prelude analysis failed: #{inspect(reason, limit: 6)}"
@@ -1688,6 +1712,36 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         {:error, ValidationError.new(:compile_error, message <> hint)}
     end
   end
+
+  defp unknown_namespace_locator(specs, rejected_namespace) do
+    specs
+    |> Enum.filter(&references_namespace?(&1, rejected_namespace))
+    |> case do
+      [%Spec{} = spec] ->
+        %{
+          form_index: spec.form_index,
+          ref: ref(spec.namespace, spec.symbol),
+          namespace: spec.namespace
+        }
+
+      _ambiguous_or_missing ->
+        %{}
+    end
+  end
+
+  defp references_namespace?(%Spec{} = spec, rejected_namespace),
+    do: references_namespace?(spec_to_defn_form(spec), rejected_namespace)
+
+  defp references_namespace?({:ns_symbol, namespace, _member}, rejected_namespace),
+    do: to_string(namespace) == rejected_namespace
+
+  defp references_namespace?(tuple, rejected_namespace) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> references_namespace?(rejected_namespace)
+
+  defp references_namespace?(items, rejected_namespace) when is_list(items),
+    do: Enum.any?(items, &references_namespace?(&1, rejected_namespace))
+
+  defp references_namespace?(_node, _rejected_namespace), do: false
 
   defp eval_runtime(core) do
     # Stateless prelude compilation: a no-op tool executor. `defn` bodies only

@@ -262,15 +262,28 @@ defmodule PtcRunner.Lisp.AnalyzeClojureCompatTest do
   describe "unknown namespace still errors" do
     test "unknown namespace in symbol position" do
       raw = {:ns_symbol, :my_ns, :foo}
-      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+
+      assert {:error,
+              {:invalid_form, msg,
+               %{
+                 kind: :unknown_namespace,
+                 rejected_namespace: "my_ns",
+                 available_namespaces: available_namespaces
+               }}} = Analyze.analyze(raw)
+
       assert msg =~ "unknown namespace"
       assert msg =~ "my_ns"
       assert msg =~ "tool/"
+      assert available_namespaces == Enum.sort(available_namespaces)
     end
 
     test "unknown namespace in call position" do
       raw = {:list, [{:ns_symbol, :custom, :func}, {:symbol, :x}]}
-      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+
+      assert {:error,
+              {:invalid_form, msg, %{kind: :unknown_namespace, rejected_namespace: "custom"}}} =
+               Analyze.analyze(raw)
+
       assert msg =~ "unknown namespace"
       assert msg =~ "custom"
     end

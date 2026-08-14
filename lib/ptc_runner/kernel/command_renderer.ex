@@ -6,7 +6,9 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   the public command envelope. Manifest schema violations with a non-root,
   schema-authorized path include its JSON Pointer. Rendering never derives
   labels from a rejected value, provider response, credential, or unvalidated
-  path.
+  path. Component compile failures with a proven byte span render the logical
+  component name and canonical half-open byte range already present in the
+  envelope; rendering does not retain or reopen component source.
   """
 
   alias PtcRunner.Kernel.CommandOutcome
@@ -86,7 +88,7 @@ defmodule PtcRunner.Kernel.CommandRenderer do
       "error: #{error["phase"]}/#{error["code"]}: " <>
         subject_prefix(error["subject"]) <>
         error["message"] <>
-        path_suffix(error) <>
+        location_suffix(error) <>
         "(run_ref: #{run_ref})"
 
     base <> diagnostic_suffix(error) <> rejection_suffix(rejection) <> "\n"
@@ -101,7 +103,7 @@ defmodule PtcRunner.Kernel.CommandRenderer do
 
   defp diagnostic_suffix(_error), do: ""
 
-  defp path_suffix(%{
+  defp location_suffix(%{
          "phase" => "application",
          "code" => "schema_violation",
          "source" => %{"kind" => "application"},
@@ -110,7 +112,15 @@ defmodule PtcRunner.Kernel.CommandRenderer do
        when is_binary(path) and path != "",
        do: " at " <> path <> " "
 
-  defp path_suffix(_error), do: " "
+  defp location_suffix(%{
+         "phase" => "bundle",
+         "source" => %{"kind" => "component", "name" => name},
+         "span" => %{"start_byte" => start_byte, "end_byte" => end_byte}
+       })
+       when is_binary(name) and is_integer(start_byte) and is_integer(end_byte),
+       do: " at #{name} bytes [#{start_byte},#{end_byte}) "
+
+  defp location_suffix(_error), do: " "
 
   defp subject_prefix(%{
          "kind" => "provider",

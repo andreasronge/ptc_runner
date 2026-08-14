@@ -22,6 +22,7 @@ defmodule PtcRunner.Lisp.Analyze do
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Formatter
   alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
+  alias PtcRunner.Lisp.NamespaceDiagnostic
 
   # Special form names that can be shadowed by local bindings.
   # These correspond to Clojure macros (not true special forms like if/def/recur/do).
@@ -65,6 +66,12 @@ defmodule PtcRunner.Lisp.Analyze do
 
   @type error_reason ::
           {:invalid_form, String.t()}
+          | {:invalid_form, String.t(),
+             %{
+               required(:kind) => :unknown_namespace,
+               required(:rejected_namespace) => String.t(),
+               required(:available_namespaces) => [String.t()]
+             }}
           | {:grant_filtered_prelude_export, String.t(), atom() | nil}
           | {:invalid_arity, atom(), String.t()}
           | {:invalid_cond_form, String.t()}
@@ -1540,36 +1547,17 @@ defmodule PtcRunner.Lisp.Analyze do
          {:invalid_form, "#{func} is not available. #{category_name} functions: #{available}"}}
 
       true ->
+        namespace = to_string(ns)
+        details = NamespaceDiagnostic.details(namespace)
+
         {:error,
-         {:invalid_form,
-          "unknown namespace #{ns}/. Available namespaces: #{available_namespaces()}. " <>
-            "For JSON parsing use json/parse-string (not cheshire.core/...)."}}
+         {:invalid_form, NamespaceDiagnostic.message(namespace),
+          Map.put(details, :kind, :unknown_namespace)}}
     end
   end
 
   defp namespace_builtin?(ns, func) do
     Env.clojure_namespace?(ns) and func in Env.builtins_by_namespace(ns)
-  end
-
-  defp available_namespaces do
-    ([
-       "data/",
-       "tool/",
-       "json/",
-       "clojure.core/",
-       "core/",
-       "clojure.string/",
-       "str/",
-       "string/",
-       "clojure.set/",
-       "set/",
-       "clojure.walk/",
-       "walk/",
-       "regex/"
-     ] ++
-       JavaSurface.available_namespace_labels() ++ ["java.util.Date."])
-    |> Enum.uniq()
-    |> Enum.join(", ")
   end
 
   # ============================================================

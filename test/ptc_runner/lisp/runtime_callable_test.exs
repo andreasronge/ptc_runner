@@ -113,7 +113,9 @@ defmodule PtcRunner.Lisp.RuntimeCallableTest do
     test "catalog namespace symbols are no longer runtime callables" do
       raw = {:list, [{:symbol, :map}, {:ns_symbol, :catalog, :"search-tools"}, {:symbol, :qs}]}
 
-      assert {:error, {:invalid_form, message}} = Analyze.analyze(raw)
+      assert {:error, {:invalid_form, message, %{kind: :unknown_namespace}}} =
+               Analyze.analyze(raw)
+
       assert message =~ "unknown namespace catalog/"
     end
   end

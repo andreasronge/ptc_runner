@@ -7,6 +7,7 @@ defmodule PtcRunner.ReplFrontendTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.Lisp.NamespaceDiagnostic
   alias PtcRunner.MixCommandAdapter
   alias PtcRunner.TestSupport.PrivateInspectionFixture
 
@@ -43,6 +44,27 @@ defmodule PtcRunner.ReplFrontendTest do
     assert output ==
              "Error (parse_error): unbalanced parentheses: 1 extra ')' " <>
                "(first at line 1, column 8)\n"
+  end
+
+  test "direct eval retains canonical unknown-namespace guidance" do
+    expected =
+      "Error (invalid_form): invalid_form: " <> NamespaceDiagnostic.message("kernel")
+
+    output =
+      capture_io(:stderr, fn ->
+        error =
+          assert_raise Mix.Error, fn ->
+            run_repl(["-e", ~S|(kernel/mission-model-context "reader")|])
+          end
+
+        assert String.starts_with?(
+                 error.message,
+                 "error: repl/command_failed: Error (invalid_form): invalid_form: " <>
+                   "unknown namespace kernel/"
+               )
+      end)
+
+    assert output == expected <> "\n"
   end
 
   test "interactive mode prints output and exits on EOF" do
