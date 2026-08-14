@@ -1,3 +1,8 @@
 /_build/
 /deps
 *.beam
+
+# ExUnit's `tmp_dir` tag writes here. Untracked output makes the Viewer gate
+# dirty its own worktree, which `scripts/worktree.sh gc` then reads as
+# unsaved work and refuses to reclaim.
+/tmp/
