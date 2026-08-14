@@ -88,15 +88,17 @@ how it was verified.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`).
   Optional MCP tests skip unless their endpoint, binary, and token
   prerequisites are configured as described in the
-  [development setup guide](docs/development-setup.md).
+  [development setup guide](docs/development-setup.md). The comparatively
+  expensive live tutorial probes use `:scheduled_e2e` instead and run only in
+  scheduled or manually dispatched Integration workflows.
 - `mix nightly` — the `:nightly` tests, excluded from `mix test` by default.
   The `Nightly` workflow runs them daily; run it locally when you touch the
   `mix ptc run` downstream path or the benchmark task. Never add `--trace` (or
   `--slowest`, which implies it) to a suite you want to finish quickly: it
   pins `--max-cases` to 1.
 - `mix soak` — the `:soak` memory-leak suite; the scheduled `Soak` workflow
-  runs it. `:soak`, `:e2e`, `:nightly`, and `:clojure` are all excluded from
-  `mix test` by default (`:clojure` needs Babashka).
+  runs it. `:soak`, `:e2e`, `:scheduled_e2e`, `:nightly`, and `:clojure` are
+  all excluded from `mix test` by default (`:clojure` needs Babashka).
 - Two tags, two meanings, and they must not be conflated. `:nightly` means
   "costs tens of seconds; excluded everywhere but the `Nightly` workflow" —
   apply it sparingly, because it removes a test from every PR gate. `:slow`

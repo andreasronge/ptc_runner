@@ -557,7 +557,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert Enum.map(requests, & &1["correlation"]) |> MapSet.new() ==
              Enum.map(responses, & &1["correlation"]) |> MapSet.new()
 
-    assert Enum.all?(records, &(&1["schema_version"] == 5))
+    assert Enum.all?(records, &(&1["schema_version"] == 6))
     assert Enum.all?(requests ++ responses, &(&1["payload"]["mission_name"] == "default"))
 
     encoded_inspection = File.read!(inspection_path)

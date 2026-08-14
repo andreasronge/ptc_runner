@@ -14,6 +14,7 @@ defmodule PtcRunner.TranscriptFrontend do
   alias PtcRunner.Kernel.AnalysisResources
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.ConversationProjection
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.PrivateRunAnalysisProfile
   alias PtcRunner.Kernel.PublicationHandle
@@ -85,11 +86,9 @@ defmodule PtcRunner.TranscriptFrontend do
                    AnalysisResources.handle(captured, :traces),
                    AnalysisResources.handle(captured, :inspection)
                  ),
-               {:ok, %{"complete?" => true} = conversation} <-
-                 RunAnalysis.query(analysis, :conversation, %{
-                   "run_id" => run_id,
-                   "limit" => @max_items
-                 }),
+               {:ok, turns} <- RunAnalysis.collect(analysis, run_id, "turns", @max_items),
+               conversation = ConversationProjection.present_page(turns),
+               true <- conversation["complete?"] and not conversation["ambiguous?"],
                {:ok, encoded} <-
                  DeterministicJSON.encode(%{
                    "schema_version" => 1,
@@ -101,11 +100,8 @@ defmodule PtcRunner.TranscriptFrontend do
                :ok <- PublicationHandle.publish(handle) do
             :ok
           else
-            {:ok, %{"ambiguous?" => true}} ->
-              {:error, :ambiguous_evidence, "transcript evidence is ambiguous"}
-
-            {:ok, %{"complete?" => false}} ->
-              {:error, :incomplete_evidence, "transcript evidence is incomplete"}
+            false ->
+              {:error, :incomplete_evidence, "transcript evidence is incomplete or ambiguous"}
 
             {:error, :not_found} ->
               {:error, :run_not_found, "analysis run not found"}

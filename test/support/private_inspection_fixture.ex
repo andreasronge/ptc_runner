@@ -117,7 +117,10 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     emit!(sink, "capability-input", %{capability_id: "llm-#{run_id}"}, %{
       environment: :workflow,
       name: "llm-request",
-      arguments: %{"messages" => [%{"content" => "private-prompt-#{run_id}"}]}
+      arguments: %{
+        "messages" => [%{"content" => "private-prompt-#{run_id}"}],
+        "system" => "private-system-#{run_id}"
+      }
     })
 
     emit!(sink, "capability-output", %{capability_id: "llm-#{run_id}"}, %{

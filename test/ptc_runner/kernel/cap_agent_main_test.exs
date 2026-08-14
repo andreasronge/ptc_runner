@@ -148,7 +148,7 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
   end
 
   describe "analysis prelude composition" do
-    test "one analysis component declares its shared dependency and six exports" do
+    test "one analysis component declares its shared dependency and three exports" do
       assert {:ok, analysis} = Library.component("analysis")
       assert analysis.dependencies == ["cap"]
 
@@ -159,11 +159,8 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
 
       for ref <- [
             "analysis/runs",
-            "analysis/overview",
-            "analysis/activity",
-            "analysis/conversation",
-            "analysis/failure",
-            "analysis/source"
+            "analysis/open",
+            "analysis/read"
           ] do
         assert {:ok, _export} = Prelude.fetch_export(bundle.prelude, ref)
       end

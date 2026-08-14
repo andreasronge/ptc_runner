@@ -97,7 +97,7 @@ Shipped components use the same dependency rules. For example:
 | Component | Purpose |
 | --- | --- |
 | `cap` | Fail-safe capability-envelope handling and bounded cursor traversal |
-| `analysis` | Six question-shaped public/private run-analysis operations |
+| `analysis` | Three bounded public/private run-evidence navigation operations |
 
 `analysis` depends on `cap`. Adding an installed dependency widens the callable
 surface, so fixed profiles pin the complete resolved component list and must

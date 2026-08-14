@@ -132,6 +132,13 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   def validate_inspection(_snapshot, _records), do: {:error, :invalid_snapshot}
 
   @doc false
+  @spec analysis_facts(t(), [binary()]) :: {:ok, map()} | {:error, atom()}
+  def analysis_facts(%__MODULE__{} = snapshot, run_ids) when is_list(run_ids),
+    do: call(snapshot, {:analysis_facts, run_ids})
+
+  def analysis_facts(_snapshot, _run_ids), do: {:error, :invalid_snapshot}
+
+  @doc false
   @spec transfer_owner(t(), pid()) :: :ok | {:error, atom()}
   def transfer_owner(%__MODULE__{} = snapshot, owner) when is_pid(owner),
     do: call(snapshot, {:transfer_owner, owner})
@@ -202,6 +209,22 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   def handle_call({token, {:query, operation, arguments}}, _from, %{token: token} = state) do
     {:reply, query_with_snapshot_hash(state, operation, arguments), state}
+  end
+
+  def handle_call({token, {:analysis_facts, run_ids}}, _from, %{token: token} = state) do
+    result =
+      if length(run_ids) <= @default_trace_files and run_ids == Enum.uniq(run_ids) and
+           Enum.all?(run_ids, &valid_run_id?/1) do
+        {:ok,
+         %{
+           "trace_snapshot_hash" => state.info.snapshot_hash,
+           "runs" => Map.take(state.analysis.facts_by_run_id, run_ids)
+         }}
+      else
+        {:error, :invalid_query}
+      end
+
+    {:reply, result, state}
   end
 
   def handle_call(
@@ -283,14 +306,15 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
              capture_hook: capture_hook,
              listing_hook: listing_hook
            ),
+         analysis = TraceLog.compile_analysis(capture.events, capture.run_sources),
          retained_bytes
          when is_integer(retained_bytes) and retained_bytes <= config.max_retained_bytes <-
-           RetainedSize.bytes({capture.events, capture.run_sources}) do
-      retained_capture = %{
+           RetainedSize.bytes({capture.events, capture.run_sources, analysis}) do
+      retained_capture =
         capture
-        | events: RetainedSize.detach_binaries(capture.events),
-          run_sources: RetainedSize.detach_binaries(capture.run_sources)
-      }
+        |> Map.put(:events, RetainedSize.detach_binaries(capture.events))
+        |> Map.put(:run_sources, RetainedSize.detach_binaries(capture.run_sources))
+        |> Map.put(:analysis, RetainedSize.detach_binaries(analysis))
 
       {:ok, retained_capture, retained_bytes}
     else
@@ -371,6 +395,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
       owner_ref: owner_ref,
       events: capture.events,
       run_sources: capture.run_sources,
+      analysis: capture.analysis,
       source_id: capture.source_id,
       max_result_bytes: max_result_bytes,
       info: %{
@@ -392,14 +417,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     query_bytes = state.max_result_bytes - metadata_bytes
 
     if query_bytes > 0 do
-      case TraceLog.query_loaded(
-             state.events,
-             state.source_id,
-             operation,
-             arguments,
-             query_bytes,
-             state.run_sources
-           ) do
+      case snapshot_query(state, operation, arguments, query_bytes) do
         {:ok, result} -> {:ok, Map.put(result, "snapshot_hash", snapshot_hash)}
         {:error, _reason} = error -> error
       end
@@ -407,6 +425,33 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
       {:error, :result_limit_exceeded}
     end
   end
+
+  defp snapshot_query(state, :get_run, %{"run_id" => run_id} = arguments, max_bytes)
+       when map_size(arguments) == 1 and is_binary(run_id) do
+    case Map.fetch(state.analysis.runs_by_id, run_id) do
+      {:ok, run} ->
+        if byte_size(Jason.encode!(run)) <= max_bytes,
+          do: {:ok, run},
+          else: {:error, :result_limit_exceeded}
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  defp snapshot_query(state, operation, arguments, max_bytes) do
+    TraceLog.query_loaded(
+      state.events,
+      state.source_id,
+      operation,
+      arguments,
+      max_bytes,
+      state.run_sources
+    )
+  end
+
+  defp valid_run_id?(run_id),
+    do: is_binary(run_id) and byte_size(run_id) in 1..4_096 and String.valid?(run_id)
 
   defp redact_status(status) do
     Map.new(status, fn

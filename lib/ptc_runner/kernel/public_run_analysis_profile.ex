@@ -1,5 +1,5 @@
 defmodule PtcRunner.Kernel.PublicRunAnalysisProfile do
-  @moduledoc "Fixed public authority recipe for question-shaped run analysis."
+  @moduledoc "Fixed public authority recipe for bounded run-evidence navigation."
 
   use PtcRunner.Kernel.RunAnalysisProfile, kind: :public
 

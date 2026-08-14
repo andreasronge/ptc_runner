@@ -5,9 +5,9 @@ const RELOAD_MARKER = 'ptc-viewer-repl-reload-attempted';
 
 const EXAMPLES = [
   ['Runs', '(analysis/runs {})'],
-  ['Run', '(analysis/overview "run-id")'],
-  ['Turns', '(analysis/activity "run-id" {})'],
-  ['Failure', '(analysis/failure "run-id" {})']
+  ['Run', '(analysis/open "run-id")'],
+  ['Turns', '(analysis/read "run-id" {"collection" "activity"})'],
+  ['Errors', '(analysis/read "run-id" {"collection" "activity" "status" "error"})']
 ];
 
 const STOPPED_RETRY_ERRORS = new Map([

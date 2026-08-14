@@ -204,7 +204,7 @@ defmodule PtcRunner.Kernel.Evaluation do
           timeout_ms,
           {memory, history, lease},
           capture,
-          {deadline_ms, projection_boundary, params, mission_name}
+          {deadline_ms, projection_boundary, params, mission_name, evaluation_id}
         )
 
       _ = maybe_emit_limit(state, capture.event_sink, result, mission_name)
@@ -275,7 +275,7 @@ defmodule PtcRunner.Kernel.Evaluation do
          timeout_ms,
          {memory, history, lease},
          capture,
-         {deadline_ms, projection_boundary, params, mission_name}
+         {deadline_ms, projection_boundary, params, mission_name, evaluation_id}
        ) do
     limits = RunState.limits(state)
 
@@ -311,7 +311,43 @@ defmodule PtcRunner.Kernel.Evaluation do
 
     mission_calls_before = mission_capability_calls(state)
 
-    case Lisp.run_native(source, options) do
+    result = Lisp.run_native(source, options)
+
+    case inspection_analysis(
+           capture.inspection_sink,
+           evaluation_id,
+           result,
+           environment,
+           mission_name
+         ) do
+      :ok ->
+        classify_evaluation_result(
+          result,
+          state,
+          environment,
+          lease,
+          history,
+          mission_calls_before,
+          projection_boundary
+        )
+
+      {:error, :inspection_sink_error} ->
+        :ok = RunState.release_evaluation(state, lease)
+        :ok = RunState.fail(state, :inspection_sink_error, :inspection_sink_error)
+        failure(:evaluation_error, :inspection_sink_error)
+    end
+  end
+
+  defp classify_evaluation_result(
+         result,
+         state,
+         environment,
+         lease,
+         history,
+         mission_calls_before,
+         projection_boundary
+       ) do
+    case result do
       {:ok, %{return: {:__ptc_fail__, value}} = step} ->
         release_explicit_failure(
           state,
@@ -771,6 +807,72 @@ defmodule PtcRunner.Kernel.Evaluation do
       }
     )
   end
+
+  defp inspection_analysis(nil, _evaluation_id, _result, _environment, _mission_name), do: :ok
+
+  defp inspection_analysis(
+         _sink,
+         _evaluation_id,
+         {_status, %{prelude_calls: nil}},
+         _environment,
+         _mission_name
+       ),
+       do: :ok
+
+  defp inspection_analysis(
+         sink,
+         evaluation_id,
+         {_status, %{prelude_calls: calls}},
+         environment,
+         mission_name
+       )
+       when is_list(calls) do
+    case prelude_call_components(calls, bundle_prelude(environment)) do
+      {:ok, calls} ->
+        InspectionSink.emit(
+          sink,
+          "evaluation-analysis",
+          %{evaluation_id: evaluation_id},
+          %{environment: :mission, mission_name: mission_name, prelude_calls: calls}
+        )
+
+      :error ->
+        {:error, :inspection_sink_error}
+    end
+  end
+
+  defp prelude_call_components([], _prelude), do: {:ok, []}
+
+  defp prelude_call_components(calls, %Lisp.Prelude{} = prelude) do
+    component_by_namespace =
+      prelude.metadata
+      |> Map.get(:components, [])
+      |> Enum.flat_map(fn component ->
+        Enum.map(component.namespaces, &{&1, component.id})
+      end)
+      |> Map.new()
+
+    Enum.reduce_while(calls, {:ok, []}, fn ref, {:ok, entries} ->
+      namespace = ref |> String.split("/", parts: 2) |> hd()
+
+      case Map.fetch(component_by_namespace, namespace) do
+        {:ok, component_id} ->
+          {:cont, {:ok, [%{ref: ref, component_id: component_id} | entries]}}
+
+        :error ->
+          {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, entries} ->
+        {:ok, entries |> Enum.reverse() |> Enum.sort_by(&{&1.ref, &1.component_id})}
+
+      :error ->
+        :error
+    end
+  end
+
+  defp prelude_call_components(_calls, _prelude), do: :error
 
   defp sha256(source),
     do: :crypto.hash(:sha256, source) |> Base.encode16(case: :lower)

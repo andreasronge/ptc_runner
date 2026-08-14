@@ -4,6 +4,32 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.TraceLog
 
+  test "analysis facts count only workflow llm-request exchanges" do
+    events = [
+      decoded_event("model-facts", 1, "run-started"),
+      decoded_event("model-facts", 2, "capability-started", %{
+        "capability_id" => "workflow-model",
+        "environment" => "workflow",
+        "name" => "llm-request"
+      }),
+      decoded_event("model-facts", 3, "capability-started", %{
+        "capability_id" => "mission-collision",
+        "environment" => "mission",
+        "mission_name" => "default",
+        "name" => "llm-request"
+      }),
+      decoded_event("model-facts", 4, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert %{
+             facts_by_run_id: %{
+               "model-facts" => %{
+                 "expected_model_exchange_ids" => ["workflow-model"]
+               }
+             }
+           } = TraceLog.compile_analysis(events, :private)
+  end
+
   @tag :tmp_dir
   test "run-result hashes are projected only from valid successful canonical completion", %{
     tmp_dir: directory

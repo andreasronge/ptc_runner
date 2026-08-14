@@ -317,11 +317,11 @@ assert.equal(templateRequests.length, 1);
 templateRequests[0].pending.resolve(response({
   ...authoritative,
   projection_revision: 2,
-  template: { source: '(analysis/overview "run-1")' }
+  template: { source: '(analysis/open "run-1")' }
 }));
 authoritative = { ...authoritative, projection_revision: 2 };
 await flush();
-assert.equal(editor.value, '(analysis/overview "run-1")');
+assert.equal(editor.value, '(analysis/open "run-1")');
 assert.equal(runsRefreshCount, 1);
 templateRequests.shift();
 
@@ -363,7 +363,7 @@ assert.equal(templateCount, templatesBeforeBusyExample + 1);
 assert.equal(controllerDocument.getElementById('repl-evaluate').disabled, true);
 templateRequests[0].pending.resolve(response({
   ...authoritative,
-  template: { source: '(analysis/overview "run-1")' }
+  template: { source: '(analysis/open "run-1")' }
 }));
 await flush();
 templateRequests.shift();
@@ -381,7 +381,7 @@ assert.equal(availability, true);
 // A lost mutation response blocks replay until polling has reconciled, then
 // replaces the failure with explicit transcript-check guidance.
 uncertainNextEvaluation = true;
-editor.value = '(analysis/failure "run-id" {})';
+editor.value = '(analysis/read "run-id" {"collection" "execution_errors"})';
 controllerDocument.getElementById('repl-evaluate').dispatch('click');
 await flush();
 assert.match(controllerDocument.getElementById('repl-status').textContent, /uncertain request/);
@@ -398,7 +398,7 @@ editor.dispatch('input');
 templateRequests[0].pending.resolve(response({
   ...authoritative,
   projection_revision: authoritative.projection_revision + 1,
-  template: { source: '(analysis/overview "run-1")' }
+  template: { source: '(analysis/open "run-1")' }
 }));
 authoritative = { ...authoritative, projection_revision: authoritative.projection_revision + 1 };
 await firstTemplate;
@@ -411,14 +411,14 @@ assert.equal(controllerDocument.getElementById('repl-template-ready').hidden, tr
 templateRequests[1].pending.resolve(response({
   ...authoritative,
   projection_revision: authoritative.projection_revision + 1,
-  template: { source: '(analysis/activity "run-1" {})' }
+  template: { source: '(analysis/read "run-1" {"collection" "activity"})' }
 }));
 authoritative = { ...authoritative, projection_revision: authoritative.projection_revision + 1 };
 await secondTemplate;
 await flush();
-assert.equal(editor.value, '(analysis/activity "run-1" {})');
+assert.equal(editor.value, '(analysis/read "run-1" {"collection" "activity"})');
 controllerDocument.getElementById('repl-template-replace').dispatch('click');
-assert.equal(editor.value, '(analysis/activity "run-1" {})');
+assert.equal(editor.value, '(analysis/read "run-1" {"collection" "activity"})');
 
 // Reset confirmation is consumed once. A later Escape-style close has an
 // empty returnValue and cannot repeat the mutation.
@@ -565,7 +565,7 @@ globalThis.fetch = async (path, options = {}) => {
     retryTemplateCount += 1;
     return response({
       ...envelope('server-retry', 1, 2),
-      template: { source: '(analysis/overview "retry-run")' }
+      template: { source: '(analysis/open "retry-run")' }
     });
   }
   throw new Error(`unexpected retry request ${method} ${path}`);
@@ -593,7 +593,7 @@ assert.equal(retryDocument.getElementById('repl-retry').hidden, false);
 retryDocument.getElementById('repl-retry').dispatch('click');
 await flush();
 assert.equal(retryTemplateCount, 1);
-assert.equal(retryDocument.getElementById('repl-editor').value, '(analysis/overview "retry-run")');
+assert.equal(retryDocument.getElementById('repl-editor').value, '(analysis/open "retry-run")');
 
 // Initial bootstrap status follows the authoritative lifecycle instead of
 // describing a closed session as ready.

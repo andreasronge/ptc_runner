@@ -83,7 +83,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     assert presentation.exit_status == 1
     assert presentation.stderr =~ "error: transcript/unsupported_schema:"
     assert presentation.stderr =~ "schema version 4 is unsupported"
-    assert presentation.stderr =~ "supports version 5"
+    assert presentation.stderr =~ "supports version 6"
     refute File.exists?(output)
   end
 

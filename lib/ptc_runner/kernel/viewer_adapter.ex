@@ -9,9 +9,9 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
   """
 
   alias PtcRunner.Kernel.{
+    ConversationProjection,
     InspectionArtifact,
     InspectionQuery,
-    RunAnalysis,
     SafeMetadata,
     TraceLog
   }
@@ -61,10 +61,17 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
       when is_binary(granted_run_id) and is_map(trace_page) and is_list(records) and
              is_binary(trace_source_id) and is_binary(run_id) do
     if granted_run_id == run_id do
-      with {:ok, compiled} <- InspectionQuery.compile([records], trace_source_id),
-           {:ok, exchanges} <- all_inspection(compiled, :model_exchanges, run_id),
-           {:ok, programs} <- all_inspection(compiled, :generated_sources, run_id),
-           result = RunAnalysis.conversation_result(trace_page, exchanges, programs),
+      trace_analysis = TraceLog.compile_analysis(trace_page["items"], :private)
+
+      analysis_facts = %{
+        "trace_snapshot_hash" => trace_page["snapshot_hash"],
+        "runs" => trace_analysis.facts_by_run_id
+      }
+
+      with {:ok, compiled} <-
+             InspectionQuery.compile([records], trace_source_id, analysis_facts),
+           {:ok, turns} <- all_inspection(compiled, :turns, run_id),
+           result = ConversationProjection.present_page(turns),
            true <- byte_size(Jason.encode!(result)) <= 1_000_000 do
         {:ok, result}
       else
@@ -79,12 +86,21 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
   def conversation(_grant, _run_id), do: {:error, :invalid_inspection_query}
 
   defp all_inspection(compiled, operation, run_id),
-    do: all_inspection(compiled, operation, run_id, nil, [], nil, 0)
+    do: all_inspection(compiled, operation, run_id, nil, [], nil, %{}, 0)
 
-  defp all_inspection(_compiled, _operation, _run_id, _cursor, _items, _hash, 1_000),
-    do: {:error, :result_limit_exceeded}
+  defp all_inspection(
+         _compiled,
+         _operation,
+         _run_id,
+         _cursor,
+         _items,
+         _hash,
+         _metadata,
+         1_000
+       ),
+       do: {:error, :result_limit_exceeded}
 
-  defp all_inspection(compiled, operation, run_id, cursor, items, hash, pages) do
+  defp all_inspection(compiled, operation, run_id, cursor, items, hash, metadata, pages) do
     arguments = %{"run_id" => run_id, "limit" => 1_000}
     arguments = if cursor, do: Map.put(arguments, "cursor", cursor), else: arguments
 
@@ -97,17 +113,21 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
              1_000_000
            ),
          next_items = items ++ page["items"],
+         next_metadata =
+           page
+           |> Map.drop(~w(items next_cursor truncated omitted_count snapshot_hash))
+           |> Map.merge(metadata),
          true <- byte_size(Jason.encode!(next_items)) <= 1_000_000 do
       case page["next_cursor"] do
         nil ->
           {:ok,
-           %{
+           Map.merge(next_metadata, %{
              "items" => next_items,
              "next_cursor" => nil,
              "omitted_count" => 0,
              "truncated" => false,
              "snapshot_hash" => hash || SafeMetadata.fingerprint(compiled.source_id)
-           }}
+           })}
 
         next ->
           all_inspection(
@@ -117,6 +137,7 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
             next,
             next_items,
             hash || SafeMetadata.fingerprint(compiled.source_id),
+            next_metadata,
             pages + 1
           )
       end

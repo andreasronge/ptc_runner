@@ -8,12 +8,15 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.Result
+  alias PtcRunner.Kernel.RunAnalysis
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.Kernel.ViewerAdapter
   alias PtcRunner.Lisp.Format.SymbolRef
   alias PtcRunner.TestSupport.RunLifecycle
@@ -58,6 +61,17 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
       mission_evaluation_source_payload()
     )
 
+    emit!(
+      sink,
+      "evaluation-analysis",
+      %{evaluation_id: "eval-1"},
+      %{
+        environment: :mission,
+        mission_name: "default",
+        prelude_calls: [%{ref: "remote/read", component_id: "tools"}]
+      }
+    )
+
     assert :ok =
              InspectionSink.emit(
                sink,
@@ -71,12 +85,25 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                }
              )
 
-    assert {:ok, [input, output, source, prelude]} = InspectionSink.records(sink)
-    assert Enum.map([input, output, source, prelude], & &1["sequence"]) == [1, 2, 3, 4]
-    assert Enum.all?([input, output, source, prelude], &(&1["schema_version"] == 5))
+    assert {:ok, [input, output, source, analysis, prelude]} = InspectionSink.records(sink)
+
+    assert Enum.map([input, output, source, analysis, prelude], & &1["sequence"]) == [
+             1,
+             2,
+             3,
+             4,
+             5
+           ]
+
+    assert Enum.all?([input, output, source, analysis, prelude], &(&1["schema_version"] == 6))
     assert input["payload"]["environment"] == "mission"
     assert output["payload"]["result"] == %{"status" => "ok", "value" => 42}
     assert source["payload"]["source"] == @source
+
+    assert analysis["payload"]["prelude_calls"] == [
+             %{"ref" => "remote/read", "component_id" => "tools"}
+           ]
+
     assert prelude["correlation"] == %{"component_id" => "tools"}
     assert prelude["payload"]["environment"] == "workflow"
     assert prelude["payload"]["source"] == @source
@@ -135,7 +162,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
 
     assert {:ok, [request_record, response_record]} = InspectionSink.records(sink)
-    assert request_record["schema_version"] == 5
+    assert request_record["schema_version"] == 6
     assert request_record["payload"]["body"] == request
     assert response_record["payload"]["body"] == response
   end
@@ -184,7 +211,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
 
     assert {:ok, [prints_record, error_record]} = InspectionSink.records(sink)
-    assert prints_record["schema_version"] == 5
+    assert prints_record["schema_version"] == 6
     assert prints_record["correlation"] == %{"evaluation_id" => "eval-1"}
 
     assert prints_record["payload"] == %{
@@ -295,7 +322,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              InspectionSink.emit(sink, "run-result", %{}, %{result_hash: hash, value: value})
 
     assert {:ok, [record]} = InspectionSink.records(sink)
-    assert record["schema_version"] == 5
+    assert record["schema_version"] == 6
     assert record["correlation"] == %{}
     assert record["payload"] == %{"result_hash" => hash, "value" => value}
 
@@ -633,13 +660,37 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                %{environment: :workflow, prints: ["partial"], truncated: false}
              )
 
+    assert :ok =
+             InspectionSink.emit(
+               evaluation_sink,
+               "evaluation-analysis",
+               %{evaluation_id: "eval-mission"},
+               %{environment: :mission, mission_name: "other", prelude_calls: []}
+             )
+
     assert {:ok, evaluation_records} = InspectionSink.records(evaluation_sink)
     evaluation_events = dropped_events(%{"evaluation-started" => 2})
 
-    assert :ok = InspectionArtifact.validate_correlations(evaluation_records, evaluation_events)
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(evaluation_records, evaluation_events)
+
+    matching_evaluation_records =
+      Enum.map(evaluation_records, fn
+        %{"record_type" => "evaluation-analysis"} = record ->
+          put_in(record, ["payload", "mission_name"], "default")
+
+        record ->
+          record
+      end)
+
+    assert :ok =
+             InspectionArtifact.validate_correlations(
+               matching_evaluation_records,
+               evaluation_events
+             )
 
     conflicting_evaluation_records =
-      Enum.map(evaluation_records, fn record ->
+      Enum.map(matching_evaluation_records, fn record ->
         put_in(record, ["correlation", "evaluation_id"], "eval-shared")
       end)
 
@@ -769,7 +820,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
       records
       |> hd()
       |> Jason.encode!()
-      |> String.replace_prefix("{", ~S|{"schema_version":5,|)
+      |> String.replace_prefix("{", ~S|{"schema_version":6,|)
 
     File.write!(duplicate, duplicate_line <> "\n")
     assert {:error, :malformed_inspection_artifact} = InspectionArtifact.load(duplicate)
@@ -801,7 +852,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     )
 
     assert {:error,
-            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 5}}} =
+            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 6}}} =
              InspectionArtifact.load(unsupported)
 
     mixed = Path.join(dir, "mixed-schema.inspection.jsonl")
@@ -811,7 +862,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(mixed)
 
     capability_input = %{
-      "schema_version" => 5,
+      "schema_version" => 6,
       "run_id" => "run-1",
       "trace_id" => "trace-1",
       "sequence" => 1,
@@ -1026,7 +1077,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     nested = Enum.reduce(1..64, true, fn _level, value -> [value] end)
 
     record = %{
-      "schema_version" => 5,
+      "schema_version" => 6,
       "run_id" => "deep",
       "trace_id" => "deep",
       "sequence" => 1,
@@ -1056,7 +1107,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
       ~S|(ns app) (defn run [input] (do (tool/kernel-eval {"mission" "default" "kind" :source "source" (get input "program")}) "done"))|
     )
 
-    program = ~S|(return (tool/native-read {"query" "inspect me"}))|
+    File.write!(
+      Path.join(dir, "mission.clj"),
+      ~S|(ns helper {:visibility :prompt}) (defn read [query] (tool/native-read {"query" query}))|
+    )
+
+    program = ~S|(return (helper/read "inspect me"))|
 
     manifest = %{
       "version" => 1,
@@ -1065,7 +1121,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
         "entry" => "app/run"
       },
       "input" => %{"value" => %{"program" => program}},
-      "missions" => %{"default" => %{"providers" => ["native"]}},
+      "missions" => %{
+        "default" => %{
+          "components" => [%{"id" => "mission-helper", "path" => "mission.clj"}],
+          "providers" => ["native"]
+        }
+      },
       "providers" => %{
         "mission" => [%{"name" => "native", "config" => %{}}]
       },
@@ -1117,13 +1178,17 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
              |> RunLifecycle.execute()
 
-    assert {:ok, [prelude, source, input, output, result]} =
+    assert {:ok, [prelude, mission_prelude, source, input, output, analysis, result]} =
              InspectionArtifact.load(inspection_path)
 
     assert prelude["record_type"] == "prelude-source"
     assert prelude["correlation"] == %{"component_id" => "app"}
     assert prelude["payload"]["environment"] == "workflow"
     assert prelude["payload"]["source"] =~ "(ns app)"
+
+    assert mission_prelude["record_type"] == "prelude-source"
+    assert mission_prelude["correlation"] == %{"component_id" => "mission-helper"}
+    assert mission_prelude["payload"]["mission_name"] == "default"
 
     assert source["record_type"] == "evaluation-source"
     assert source["payload"]["source"] == program
@@ -1141,6 +1206,56 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              "status" => "ok",
              "value" => %{"answer" => "INSPECT ME"}
            }
+
+    assert analysis["record_type"] == "evaluation-analysis"
+    assert analysis["correlation"] == source["correlation"]
+
+    assert analysis["payload"]["prelude_calls"] == [
+             %{"component_id" => "mission-helper", "ref" => "helper/read"}
+           ]
+
+    assert {:ok, trace_snapshot} =
+             TraceSnapshot.start({:private_authorized_directory, dir})
+
+    assert {:ok, inspection_snapshot} =
+             InspectionSnapshot.start({:directory, dir}, trace_snapshot)
+
+    assert {:ok, run_analysis} = RunAnalysis.new(trace_snapshot, inspection_snapshot)
+
+    assert {:ok,
+            %{
+              "items" => [
+                %{
+                  "source" => ^program,
+                  "prelude_calls_available?" => true,
+                  "prelude_calls" => [
+                    %{"component_id" => "mission-helper", "ref" => "helper/read"}
+                  ]
+                }
+              ]
+            }} =
+             RunAnalysis.query(run_analysis, :read, %{
+               "run_id" => source["run_id"],
+               "collection" => "generated_sources",
+               "prelude_call" => "helper/read"
+             })
+
+    assert {:ok, %{"items" => []}} =
+             RunAnalysis.query(run_analysis, :read, %{
+               "run_id" => source["run_id"],
+               "collection" => "generated_sources",
+               "prelude_component" => "other-component"
+             })
+
+    assert {:error, :invalid_query} =
+             RunAnalysis.query(run_analysis, :read, %{
+               "run_id" => source["run_id"],
+               "collection" => "execution_errors",
+               "prelude_call" => "helper/read"
+             })
+
+    assert :ok = InspectionSnapshot.stop(inspection_snapshot)
+    assert :ok = TraceSnapshot.stop(trace_snapshot)
 
     assert result["record_type"] == "run-result"
     assert result["payload"]["value"] == "done"

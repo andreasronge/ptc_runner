@@ -175,6 +175,42 @@ defmodule PtcRunner.Kernel.TraceLog do
   def query_loaded(_events, _source_id, _operation, _arguments, _max_result_bytes, _source_kind),
     do: {:error, :invalid_query}
 
+  @doc false
+  @spec compile_analysis([map()], :sanitized | :private | map()) :: map()
+  def compile_analysis(events, source_kind) when is_list(events) do
+    summaries = runs(events, source_kind)
+
+    facts =
+      events
+      |> Enum.group_by(& &1["run_id"])
+      |> Map.new(fn {run_id, run_events} ->
+        expected_model_exchanges =
+          run_events
+          |> Enum.filter(fn event ->
+            event["type"] == "capability-started" and
+              stringify(event_data(event, "environment")) == "workflow" and
+              event_data(event, "name") == "llm-request"
+          end)
+          |> Enum.map(&event_data(&1, "capability_id"))
+          |> Enum.filter(&is_binary/1)
+          |> Enum.uniq()
+          |> Enum.sort()
+
+        {run_id,
+         %{
+           "expected_model_exchange_ids" => expected_model_exchanges,
+           "terminal?" => Enum.any?(run_events, &(&1["type"] == "run-stopped")),
+           "events_dropped?" => Enum.any?(run_events, &(&1["type"] == "events-dropped"))
+         }}
+      end)
+
+    %{
+      runs: summaries,
+      runs_by_id: Map.new(summaries, &{&1["run_id"], &1}),
+      facts_by_run_id: facts
+    }
+  end
+
   defp valid_query_source_kind?(_events, source_kind)
        when source_kind in [:sanitized, :private],
        do: true

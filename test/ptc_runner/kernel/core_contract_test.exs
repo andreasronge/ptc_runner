@@ -126,6 +126,41 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert combined_bytes == memory_bytes + history_bytes
   end
 
+  test "inspection analysis rejection fails without committing continuation" do
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    {:ok, inspection} =
+      InspectionSink.start(run_id: "analysis-rejection", trace_id: "analysis-rejection")
+
+    assert %{
+             outcome: :evaluation_error,
+             reason: :inspection_sink_error,
+             continuation_effect: :preserved
+           } =
+             Evaluation.evaluate_source(
+               state,
+               "default",
+               mission,
+               "(def committed 42)",
+               1_000,
+               nil,
+               inspection,
+               params: %{},
+               after_started_hook: fn -> InspectionSink.stop(inspection) end
+             )
+
+    assert %{
+             defined_count: 0,
+             history_count: 0,
+             memory_bytes: 0,
+             history_bytes: 0,
+             bytes: 0
+           } = RunState.evaluation_memory_summary(state)
+
+    refute RunState.open?(state)
+  end
+
   test "source-check reservations are independently bounded and detect continuation changes" do
     {:ok, limits} = Limits.new(subordinate_source_checks: 2)
     {:ok, state} = RunState.start(limits)

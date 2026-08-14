@@ -643,7 +643,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert {:ok,
             %{
               status: :ok,
-              value: %{"complete?" => false, "items" => [first], "next_cursor" => cursor}
+              value: %{"truncated" => true, "items" => [first], "next_cursor" => cursor}
             }} =
              AnalysisSession.evaluate(
                session,

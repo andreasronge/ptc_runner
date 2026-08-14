@@ -1358,11 +1358,8 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert Enum.map(built.capabilities, & &1.name) == [
              "history.runs",
-             "history.overview",
-             "history.activity",
-             "history.conversation",
-             "history.failure",
-             "history.source"
+             "history.open",
+             "history.read"
            ]
 
     callbacks = Map.new(built.capabilities, &{&1.name, &1.callback})
