@@ -34,6 +34,10 @@ jobs:
       - uses: ./.github/actions/setup-elixir
       - run: mix precommit
       - run: mix prepush
+      - name: Check evaluator reduction baselines
+        env:
+          MIX_ENV: dev
+        run: mix bench.check --skip-heap
       # Ordinary branches do not regenerate the semantic build projection, so
       # this is the one gate that enforces it. A failure here means the tagged
       # tree ships a build identity that does not describe its own sources:

@@ -1048,12 +1048,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       end
 
     eval_ctx =
-      EvalContext.new(
-        eval_context.ctx,
+      EvalContext.new_child(
+        eval_context,
         closure_user_ns,
         new_env,
-        eval_context.tool_exec,
-        eval_context.turn_history,
         max_print_length: eval_context.max_print_length,
         pmap_timeout: eval_context.pmap_timeout,
         parallel_deadline_cap: eval_context.parallel_deadline_cap,
@@ -1078,7 +1076,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           # nested pmap/pcalls inside this closure inherits it.
           pmap_deadline: eval_context.pmap_deadline
       }
-      |> EvalContext.inherit_prelude(eval_context)
       |> maybe_push_prelude_origin(metadata, eval_context)
       |> Capture.materialize_context()
 
@@ -1387,6 +1384,18 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp maybe_push_prelude_origin(
          %EvalContext{} = context,
+         _metadata,
+         %EvalContext{
+           prelude: nil,
+           strict_transitive_calls: false,
+           private_tool_authority?: false
+         }
+       ) do
+    context
+  end
+
+  defp maybe_push_prelude_origin(
+         %EvalContext{} = context,
          %{
            prelude_ref: ref,
            prelude_ns: ns,
@@ -1477,7 +1486,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          {:closure, _closure_patterns, body, closure_env, _closure_turn_history, meta} = closure,
          binding_patterns,
          args,
-         %EvalContext{ctx: ctx, user_ns: user_ns, tool_exec: tool_exec} = caller_ctx,
+         %EvalContext{user_ns: user_ns} = caller_ctx,
          do_eval_fn
        ) do
     case bind_args(binding_patterns, args) do
@@ -1497,9 +1506,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         # isolation, mirroring the direct `(crm/export ...)` call path).
         {closure_user_ns, restore_user_ns} = prelude_run_scope(meta, user_ns, caller_ctx)
 
-        closure_ctx =
-          EvalContext.new(ctx, closure_user_ns, new_env, tool_exec, caller_ctx.turn_history)
-          |> EvalContext.inherit_prelude(caller_ctx)
+        closure_ctx = EvalContext.new_child(caller_ctx, closure_user_ns, new_env)
 
         # Carry accumulated state from caller so tool_calls/cache aren't lost across closure calls.
         # `locals` is rebuilt from the closure's lexical capture + this invocation's
