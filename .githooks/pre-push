@@ -486,24 +486,30 @@ wait_lanes() {
     label="${LANE_LABELS[$i]}"
     log="${LANE_LOGS[$i]}"
 
-    if wait "$pid"; then
-      secs="$(cat "$log.secs" 2>/dev/null || echo '?')"
-      echo ""
-      echo "📦 $label"
-      cat "$log"
+    local lane_status=0
+    wait "$pid" || lane_status=$?
+
+    # Reaped: drop the PID before replaying output, which can take long enough
+    # for the system to hand that number to an unrelated process. An interrupt
+    # arriving mid-replay must not make cleanup signal a stranger.
+    LANE_PIDS[i]=""
+
+    secs="$(cat "$log.secs" 2>/dev/null || echo '?')"
+    echo ""
+    echo "📦 $label"
+    cat "$log"
+
+    if [ "$lane_status" -eq 0 ]; then
       echo "  ✅ $label passed in ${secs}s"
       record_phase "$label" "$secs"
     else
-      secs="$(cat "$log.secs" 2>/dev/null || echo '?')"
-      echo ""
-      echo "📦 $label"
-      cat "$log"
       echo "  ❌ $label failed after ${secs}s"
       record_phase "$label (failed)" "$secs"
       failures=$((failures + 1))
     fi
 
     rm -f "$log" "$log.secs"
+    LANE_LOGS[i]=""
   done
 
   LANE_PIDS=()
@@ -519,25 +525,44 @@ wait_lanes() {
 # to report to. Descend first so nothing is orphaned on the way down.
 kill_lane_tree() {
   local pid="$1"
+  local signal="$2"
   local child
 
   for child in $(pgrep -P "$pid" 2>/dev/null); do
-    kill_lane_tree "$child"
+    kill_lane_tree "$child" "$signal"
   done
 
-  kill "$pid" 2>/dev/null || true
+  kill "-$signal" "$pid" 2>/dev/null || true
 }
 
 # A lane outlives the shell that started it, so an interrupted push must take
-# its lanes and their logs with it.
+# its lanes and their logs with it. Entries are blanked as `wait_lanes` reaps
+# them, and a blank entry is skipped: signalling a reaped PID would be
+# signalling whatever the system has since given that number to.
 cleanup_lanes() {
   local entry
+  local signalled=false
 
   for entry in ${LANE_PIDS[@]+"${LANE_PIDS[@]}"}; do
-    kill_lane_tree "$entry"
+    [ -n "$entry" ] || continue
+    kill_lane_tree "$entry" TERM
+    signalled=true
   done
 
+  if [ "$signalled" = true ]; then
+    # A gate that forks while the walk is in progress, or that is slow to
+    # honor TERM, survives the first pass. Settle once and take down what is
+    # left. This is an abort path: bounded and blunt beats thorough.
+    sleep 1
+
+    for entry in ${LANE_PIDS[@]+"${LANE_PIDS[@]}"}; do
+      [ -n "$entry" ] || continue
+      kill_lane_tree "$entry" KILL
+    done
+  fi
+
   for entry in ${LANE_LOGS[@]+"${LANE_LOGS[@]}"}; do
+    [ -n "$entry" ] || continue
     rm -f "$entry" "$entry.secs"
   done
 
