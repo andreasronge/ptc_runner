@@ -422,6 +422,9 @@ Generated programs carry `prelude_calls_available?` and a sorted
 `source_match`; duplicate identical sources are marked ambiguous rather than
 given a fabricated causal identity.
 
+Provider response usage omits `total_cost` when pricing is unavailable. A
+present zero is therefore a measured zero-cost response, not an unknown cost.
+
 For routed `llm-request` calls, `llm_usage` groups stopped events by model alias
 and installation revision. Each row reports total and successful calls, calls
 with valid usage, successful calls missing usage, and sums of the closed

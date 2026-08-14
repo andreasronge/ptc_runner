@@ -44,8 +44,11 @@ explains its fields.
 Run the live tutorial contracts manually with:
 
 ```bash
-mix test test/ptc_runner/kernel/tutorial_examples_e2e_test.exs --include e2e
+mix test test/quickstart_guide_test.exs \
+  test/ptc_runner/kernel/tutorial_examples_e2e_test.exs \
+  --include scheduled_e2e
 ```
 
-They are tagged `:e2e` and excluded from normal `mix test` and `mix precommit`
-runs.
+The live contracts are tagged `:scheduled_e2e` and excluded from normal
+`mix test` and `mix precommit` runs. The credential-free quickstart command
+still runs in the normal suite.

@@ -9,6 +9,10 @@ defmodule PtcRunner.LLM do
 
   @type message :: %{role: :system | :user | :assistant | :tool, content: String.t()}
 
+  @typedoc """
+  Provider-reported token usage. `:total_cost` is absent when pricing is
+  unavailable; a present zero is a measured zero-cost response.
+  """
   @type tokens :: %{
           optional(:input) => non_neg_integer(),
           optional(:output) => non_neg_integer(),
@@ -119,7 +123,7 @@ defmodule PtcRunner.LLM do
   Creates a normalized callback for a configured model.
 
   `model` is a full provider-qualified identifier such as
-  `"openrouter:deepseek/deepseek-v4-flash-0731"`. The optional `:adapter`
+  `"openrouter:deepseek/deepseek-v4-flash"`. The optional `:adapter`
   setting selects a transport explicitly; other options are merged into every
   request.
   """

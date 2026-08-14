@@ -157,7 +157,8 @@ workflow adds `--include scheduled_e2e` on scheduled and manual runs, but not on
 pull requests. Run those probes directly with:
 
 ```bash
-mix test test/ptc_runner/kernel/tutorial_examples_e2e_test.exs \
+mix test test/quickstart_guide_test.exs \
+  test/ptc_runner/kernel/tutorial_examples_e2e_test.exs \
   --include scheduled_e2e
 ```
 

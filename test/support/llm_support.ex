@@ -13,7 +13,7 @@ defmodule PtcRunner.TestSupport.LLMSupport do
   alias PtcRunner.Kernel.ProviderApplicationGate
   alias PtcRunner.LLM.ReqLLMAdapter
 
-  @default_model "openrouter:deepseek/deepseek-v4-flash-0731"
+  @default_model "openrouter:deepseek/deepseek-v4-flash"
   @timeout 60_000
   @req_opts [retry: :transient, max_retries: 3]
 
@@ -96,7 +96,7 @@ defmodule PtcRunner.TestSupport.LLMSupport do
   Get the current model from PTC_TEST_MODEL env var or return default.
 
   The value is a full provider-qualified identifier, such as
-  `"openrouter:deepseek/deepseek-v4-flash-0731"`.
+  `"openrouter:deepseek/deepseek-v4-flash"`.
   """
   @spec model() :: String.t()
   def model do

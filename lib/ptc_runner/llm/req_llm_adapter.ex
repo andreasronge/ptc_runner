@@ -892,9 +892,16 @@ if Code.ensure_loaded?(ReqLLM) do
         input: usage[:input_tokens] || usage["input_tokens"] || 0,
         output: usage[:output_tokens] || usage["output_tokens"] || 0,
         cache_creation: cache_creation,
-        cache_read: cache_read,
-        total_cost: usage[:total_cost] || 0.0
+        cache_read: cache_read
       }
+      |> maybe_put_total_cost(usage)
+    end
+
+    defp maybe_put_total_cost(tokens, usage) do
+      case usage[:total_cost] || usage["total_cost"] do
+        total_cost when is_number(total_cost) -> Map.put(tokens, :total_cost, total_cost)
+        _unknown -> tokens
+      end
     end
 
     defp extract_cache_write_tokens(%{} = meta) do
