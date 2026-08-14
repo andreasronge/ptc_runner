@@ -14,6 +14,10 @@ covers a machine that has neither.
 git clone https://github.com/andreasronge/ptc_runner
 cd ptc_runner
 mix deps.get
+```
+
+<!-- ptc-guide-e2e: id=quickstart-orders -->
+```console
 mix ptc run examples/kernel-tutorial/01-orders/ptc.json
 ```
 
@@ -22,8 +26,8 @@ mix ptc run examples/kernel-tutorial/01-orders/ptc.json
 ```
 
 That is a PTC-Lisp function reading JSON input. It needs no model, host
-document, or network access. On a fresh clone, the first command performs
-normal dependency validation and compilation; later root commands use the
+document, or network access. On a fresh clone, the first `mix ptc` command
+performs normal dependency validation and compilation; later commands use the
 fast startup path.
 
 ## 2. Supply a model credential
@@ -41,9 +45,10 @@ declaration forms and how to move off `.env` for a real deployment.
 
 ## 3. Let the model write the program
 
+<!-- ptc-guide-e2e: id=quickstart-live-agent requires=OPENROUTER_API_KEY -->
 ```console
 mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
-  --env-file .env \
+  --env-file "${PTC_ENV_FILE:-.env}" \
   --host-config examples/kernel-tutorial/ptc-host.json
 ```
 
@@ -53,6 +58,9 @@ mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
 
 The model was given a task, wrote PTC-Lisp, and the runtime evaluated that
 program in the confined mission environment over two turns.
+
+The `PTC_ENV_FILE` fallback above uses the `.env` you just created. Automation
+may point it at another explicitly named environment file.
 
 [`ptc-host.json`](../../examples/kernel-tutorial/ptc-host.json) is the operator
 document: it maps the `deepseek` alias to a model and binds it to the

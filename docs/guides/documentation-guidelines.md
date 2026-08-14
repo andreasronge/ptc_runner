@@ -96,6 +96,28 @@ and nondeterministic output.
 An `iex>` block runs only when a test names its module with `doctest/1` or its
 file with `doctest_file/1`.
 
+For a copy/paste CLI example whose final line is deterministic JSON, put this
+hidden annotation immediately before its `console` block and place the expected
+`json` block immediately after it:
+
+````markdown
+<!-- ptc-guide-e2e: id=unique-example-id -->
+```console
+mix ptc run examples/kernel-tutorial/01-orders/ptc.json
+```
+```json
+{"order_count":3}
+```
+````
+
+Add `requires=ENVIRONMENT_VARIABLE` when the command needs a credential. The
+helper in `test/support/guide_examples.ex` turns each annotation into an ExUnit
+test that runs the literal shell block from the repository root, requires a
+zero exit status and empty standard error, and compares the last standard-output
+line as JSON. Credentialed examples receive the `:scheduled_e2e` tag. Keep
+setup, cleanup, secrets, and nondeterministic assertions in the test harness;
+the visible block must remain useful when pasted by a reader.
+
 ## Style and tone
 
 - Write for the API user or maintainer, leading with what the component does.

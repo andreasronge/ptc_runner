@@ -342,7 +342,8 @@ Test scripted model responses before a small live-provider boundary. The
 repository's credentialed tutorial check is explicit:
 
 ```console
-mix test test/ptc_runner/kernel/tutorial_examples_e2e_test.exs \
+mix test test/quickstart_guide_test.exs \
+  test/ptc_runner/kernel/tutorial_examples_e2e_test.exs \
   --include scheduled_e2e
 ```
 

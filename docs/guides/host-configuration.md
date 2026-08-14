@@ -28,7 +28,7 @@ actions happen later during preflight and acquisition.
     "deepseek": {
       "source": "llm",
       "installation_revision": "deepseek-policy-v1",
-      "model": "openrouter:deepseek/deepseek-v4-flash-0731",
+      "model": "openrouter:deepseek/deepseek-v4-flash",
       "credential": "openrouter_key",
       "cache": false
     },
@@ -115,7 +115,7 @@ optional request parameters, and request/response ceilings:
 "deepseek": {
   "source": "llm",
   "installation_revision": "deepseek-policy-v1",
-  "model": "openrouter:deepseek/deepseek-v4-flash-0731",
+  "model": "openrouter:deepseek/deepseek-v4-flash",
   "credential": "openrouter_key",
   "cache": false,
   "params": {"temperature": 0.2, "seed": 42, "max_tokens": 4096}

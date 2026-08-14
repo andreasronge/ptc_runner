@@ -59,15 +59,6 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
     assert result.usage.capability_calls.mission["workspace.read"] >= 1
   end
 
-  test "the multi-turn tutorial commits a helper before explicit completion" do
-    assert {:ok, result} = run("04-multi-turn-agent")
-    assert result.value == %{"ok" => true, "value" => 42}
-    assert result.usage.subordinate_evaluations == 2
-    assert result.usage.capability_calls.workflow["llm-request"] == 2
-    assert result.evaluation_memory.defined_count == 1
-    assert result.evaluation_memory.history_count == 1
-  end
-
   defp run(example) do
     {:ok, host} = HostConfig.load(@host)
 

@@ -306,6 +306,8 @@ Successful responses contain `content` and may contain `tool_calls` and
 `tokens`. Normalized tool calls use `id`, `name`, and `args`. Invalid provider
 arguments may include a bounded `args_error` classification. Token usage may
 include `input`, `output`, `cache_creation`, `cache_read`, and `total_cost`.
+When provider pricing is unavailable, `total_cost` is absent; a present zero is
+a measured zero-cost response.
 
 Provider failures remain bounded capability error envelopes so workflow policy
 can decide whether to fail or recover. Credentials, endpoints, sampling,

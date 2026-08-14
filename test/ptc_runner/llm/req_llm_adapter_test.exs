@@ -245,8 +245,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
                input: 7,
                output: 3,
                cache_read: 2,
-               cache_creation: 0,
-               total_cost: 0.0
+               cache_creation: 0
              }
     end
 
@@ -258,8 +257,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
                input: 1,
                output: 0,
                cache_read: 0,
-               cache_creation: 42,
-               total_cost: 0.0
+               cache_creation: 42
              }
     end
 
@@ -268,8 +266,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
                input: 0,
                output: 0,
                cache_read: 0,
-               cache_creation: 0,
-               total_cost: 0.0
+               cache_creation: 0
              }
     end
   end

@@ -1140,7 +1140,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   # A model is a full provider-qualified identifier such as
-  # "openrouter:deepseek/deepseek-v4-flash-0731". Requiring the provider prefix
+  # "openrouter:deepseek/deepseek-v4-flash". Requiring the provider prefix
   # here keeps a mistyped host entry a bounded preflight failure instead of a
   # live provider call that fails after the run clock has started. The adapter
   # remains the authority on whether the provider and model actually exist.
