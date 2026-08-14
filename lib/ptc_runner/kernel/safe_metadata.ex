@@ -116,6 +116,16 @@ defmodule PtcRunner.Kernel.SafeMetadata do
 
   def retain_failure_taxonomy(_taxonomy), do: %{}
 
+  @doc false
+  @spec retain_failure_taxonomy_fields(term()) :: map()
+  def retain_failure_taxonomy_fields(metadata) when is_map(metadata) do
+    metadata
+    |> Map.take([:failure_kind, :failure_kind_fingerprint])
+    |> retain_failure_taxonomy()
+  end
+
+  def retain_failure_taxonomy_fields(_metadata), do: %{}
+
   @spec fingerprint(binary()) :: binary()
   @doc "Returns the canonical non-reversible fingerprint for one bounded identifier."
   def fingerprint(value) when is_binary(value) do

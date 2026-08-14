@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   """
 
   alias PtcRunner.Kernel.CompileDiagnostic
+  alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
 
   @rows [
@@ -140,6 +141,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:execution, :runtime_limit_exceeded, 6, false, "a runtime limit was exceeded"},
     {:execution, :run_timeout, 6, false, "the run duration limit was exceeded"},
     {:execution, :provider_failed, 5, false, "a provider failed during execution"},
+    {:execution, :replay_fixture_missing, 5, false,
+     "no replay fixture matches the workflow request"},
     {:execution, :event_capture_limit_exceeded, 7, false,
      "the canonical event capture limit was exceeded"},
     {:execution, :event_sink_unavailable, 7, false, "the canonical event sink is unavailable"},
@@ -238,11 +241,17 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :execution, code: :runtime_limit_exceeded, message: fallback}),
     do: RuntimeLimitDiagnostic.message_schema(fallback)
 
+  def message_schema(%{phase: :execution, code: :replay_fixture_missing, message: fallback}),
+    do: LLMReplayDiagnostic.message_schema(fallback)
+
   def message_schema(%{code: code, message: fallback}),
     do: CompileDiagnostic.message_schema(code, fallback)
 
   defp valid_dynamic_message?(:execution, :runtime_limit_exceeded, message),
     do: RuntimeLimitDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:execution, :replay_fixture_missing, message),
+    do: LLMReplayDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(_phase, code, message),
     do: CompileDiagnostic.valid_message?(code, message)

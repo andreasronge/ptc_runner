@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.ExecutionOutcome
+  alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -207,7 +208,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
          provider_activity
        )
        when result_class in [:normal, :private] do
-    diagnostics = failure_diagnostics(evidence, report, provider_activity)
+    diagnostics = failure_diagnostics(evidence, report, result_class, provider_activity)
 
     case diagnostics do
       [primary | secondary] ->
@@ -236,12 +237,12 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
        ),
        do: internal_failure(run_ref, provider_activity, :normal, artifact_state, :incomplete)
 
-  defp failure_diagnostics(evidence, report, provider_activity) do
+  defp failure_diagnostics(evidence, report, result_class, provider_activity) do
     ([publication_primary(report)] ++
        Map.get(report, :secondary_errors, []) ++
        result_failure(evidence))
     |> Enum.reject(&is_nil/1)
-    |> Enum.map(&failure_diagnostic(&1, provider_activity))
+    |> Enum.map(&failure_diagnostic(&1, provider_activity, result_class))
     |> Enum.uniq_by(&{&1.phase, &1.code, &1.subject})
     |> Enum.sort_by(&precedence/1)
     |> Enum.uniq_by(&DiagnosticCatalog.compound_category(&1.phase, &1.code))
@@ -268,6 +269,21 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
 
   defp result_failure(%{result: {:error, %Error{} = error}}), do: [error]
   defp result_failure(_evidence), do: []
+
+  defp failure_diagnostic(
+         %Error{
+           kind: :workflow_failed,
+           reason: reason,
+           details: %{replay_request_hash: _request_hash}
+         },
+         provider_activity,
+         :private
+       )
+       when reason in [:explicit_failure, :pmap_error, :pcalls_error],
+       do: diagnostic(:execution, :workflow_failed, provider_activity)
+
+  defp failure_diagnostic(failure, provider_activity, _result_class),
+    do: failure_diagnostic(failure, provider_activity)
 
   defp failure_diagnostic(%CommandDiagnostic{} = diagnostic, _provider_activity), do: diagnostic
 
@@ -318,6 +334,27 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     case RuntimeLimitDiagnostic.subordinate_evaluations_message(limit) do
       {:ok, message} ->
         diagnostic(:execution, :runtime_limit_exceeded, provider_activity,
+          message: message,
+          source: CommandSource.fixed(:runtime)
+        )
+
+      :error ->
+        diagnostic(:execution, :workflow_failed, provider_activity)
+    end
+  end
+
+  defp failure_diagnostic(
+         %Error{
+           kind: :workflow_failed,
+           reason: reason,
+           details: %{replay_request_hash: request_hash}
+         },
+         provider_activity
+       )
+       when reason in [:explicit_failure, :pmap_error, :pcalls_error] do
+    case LLMReplayDiagnostic.message(request_hash) do
+      {:ok, message} ->
+        diagnostic(:execution, :replay_fixture_missing, provider_activity,
           message: message,
           source: CommandSource.fixed(:runtime)
         )

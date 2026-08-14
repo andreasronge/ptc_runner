@@ -533,7 +533,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
       {:provider_result, ^pid, result} ->
         await_down(pid, ref)
 
-        case RunState.finish_provider(state) do
+        case RunState.finish_provider(state, replay_request_hash(result)) do
           :ok ->
             normalize_result(state, environment, capability, result)
 
@@ -687,6 +687,12 @@ defmodule PtcRunner.Kernel.Dispatcher do
     do: Map.put(result, :mutation_state, :indeterminate)
 
   defp maybe_put_mutation_state(result, nil), do: result
+
+  defp replay_request_hash({:error, %ProviderError{} = error}) do
+    if ProviderError.valid?(error), do: error.replay_request_hash, else: nil
+  end
+
+  defp replay_request_hash(_result), do: nil
 
   defp terminal_provider_failure?({:error, %ProviderError{} = error}) do
     ProviderError.valid?(error) and
