@@ -9,11 +9,17 @@ defmodule PtcRunnerLauncher.ConformanceTest do
   # The identity hash is the only interval long enough to race a rename into, so
   # the target has to be large enough that hashing it is still in progress when
   # the swap lands: 64 MiB takes roughly a third of a second, and the rename
-  # fires 40 ms in. A rename that lands too early only makes the case vacuous --
-  # the launcher then hashes the impostor and refuses on identity -- so a slow
-  # host cannot turn this red.
+  # fires 40 ms in.
+  #
+  # The two ways to miss that interval are distinguishable rather than silent. A
+  # rename landing before the launcher opens the target makes it hash the small
+  # impostor and refuse within milliseconds, which the elapsed-time floor
+  # rejects; one landing after the exec runs the authorized target, which the
+  # output assertion accepts as the rename simply losing. Neither can report a
+  # pass for the window itself.
   @race_target_mebibytes 64
   @race_rename_delay_ms 40
+  @race_minimum_hash_ms 100
 
   setup_all do
     compiler = System.find_executable("cc") || flunk("C compiler is unavailable")
@@ -527,10 +533,10 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     %{leader: leader, descendant: descendant} = tree_pids(launcher)
 
     # Nothing else reaps this group once its launcher is gone, so a regression
-    # here must not leak a `sleep` loop into the rest of the run.
-    on_exit(fn ->
-      System.cmd(kill_executable(), ["-9", "-#{leader}"], stderr_to_stdout: true)
-    end)
+    # here must not leak a `sleep` loop into the rest of the run. The leader's
+    # PID is also the group identifier and is released the moment it is reaped,
+    # so confirm this is still our fixture before aiming a group kill at it.
+    on_exit(fn -> kill_fixture_group(leader) end)
 
     assert os_process_running?(leader)
     assert os_process_running?(descendant)
@@ -584,6 +590,8 @@ defmodule PtcRunnerLauncher.ConformanceTest do
         :file.rename(impostor, authorized)
       end)
 
+    started_at = System.monotonic_time(:millisecond)
+
     result =
       MCPStdioLauncher.open(
         executable: authorized,
@@ -595,11 +603,15 @@ defmodule PtcRunnerLauncher.ConformanceTest do
         start_timeout_ms: 30_000
       )
 
+    elapsed = System.monotonic_time(:millisecond) - started_at
     assert :ok = Task.await(racer, 5_000)
 
     case result do
       {:error, reason} ->
         assert reason == :mcp_stdio_spawn_failed
+        # Only a full pass over the authorized target takes this long, so the
+        # refusal cannot have come from hashing the impostor instead.
+        assert elapsed >= @race_minimum_hash_ms
 
       {:ok, launcher} ->
         output = collect_until(launcher, &(&1.stdout =~ ~r/-EXECUTED\n/))
@@ -1004,6 +1016,17 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     state = String.trim(output)
 
     status == 0 and state != "" and not String.starts_with?(state, "Z")
+  end
+
+  defp kill_fixture_group(leader) do
+    {command, status} =
+      System.cmd(ps_executable(), ["-o", "command=", "-p", Integer.to_string(leader)],
+        stderr_to_stdout: true
+      )
+
+    if status == 0 and command =~ @fixture do
+      System.cmd(kill_executable(), ["-9", "-#{leader}"], stderr_to_stdout: true)
+    end
   end
 
   defp kill_executable do

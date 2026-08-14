@@ -16,9 +16,10 @@
 - Narrowed the macOS path-replacement window to the check-then-exec call pair
   by re-reading the canonical path immediately before `execve`, instead of
   leaving the whole identity hash — which scales with the executable — exposed.
-- Added a lifeline watchdog so a launcher destroyed without running its own
-  teardown — `SIGKILL`, or a host that tears the process down — still retires
-  the server process group instead of leaving it reparented and running.
+- Added a group-resident watchdog so a launcher destroyed without running its
+  own teardown — `SIGKILL`, or a host that tears the process down — still
+  retires the server process group instead of leaving it reparented and
+  running.
 - Added tag-only release automation that executes each artifact and assembles
   the verified companion Hex package with signed build provenance.
 - Added a protected publication path that uploads the exact verified package

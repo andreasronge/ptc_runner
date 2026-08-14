@@ -36,15 +36,16 @@ atomic no-replace directory publication. It calls
 and fails closed when the primitive is unavailable. Scaffold construction,
 staging ownership, cleanup, and command outcomes remain in the core package.
 
-The watchdog is a second child forked before any other descriptor exists. It
-leaves the launcher's session, holds one end of a private pipe the launcher
-keeps closed-on-exec, and is armed with the server's process-group identifier
-once that group exists. Supervision stands it down as part of reaping the
-leader, because releasing that PID also releases the group identifier its
-signal names; losing the pipe without a stand-down means the launcher died
-holding a live group, and the watchdog retires it. It sends one signal rather
-than escalating, so PID reuse after the launcher's death cannot redirect a
-later signal at an unrelated group.
+The watchdog runs inside the server's own process group, forked by the server
+process after it starts that group and before the identity hash. Membership is
+the point: a process group's lifetime keeps its identifier out of the reuse
+pool, so signalling the caller's own group can only ever reach the group it was
+created for. Nothing holds or transmits a PID, which is what a launcher-side
+observer could not avoid — by the time it noticed the launcher's death, the
+leader could already have been reaped and its number reissued. It keeps only
+the read end of a private pipe whose sole writer is the launcher, and the
+launcher's own escalation retires it with the same `SIGKILL` that ends the
+group.
 
 This is process containment for trusted host-installed MCP servers, not a
 hostile-code sandbox. A trusted child can deliberately leave its process group.
