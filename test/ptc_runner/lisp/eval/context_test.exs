@@ -11,6 +11,24 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
     refute Map.has_key?(Map.from_struct(ctx), :trace_context)
   end
 
+  test "child contexts reuse the run-owned atomic resources" do
+    parent =
+      Context.new(%{}, %{}, %{}, fn _, _, _ -> nil end, [],
+        prelude: nil,
+        strict_transitive_calls: true,
+        private_tool_authority?: true
+      )
+
+    child = Context.new_child(parent, %{"scope" => "child"}, %{"x" => 1})
+
+    assert child.tool_call_budget === parent.tool_call_budget
+    assert child.tool_activity === parent.tool_activity
+    assert child.strict_transitive_calls === parent.strict_transitive_calls
+    assert child.private_tool_authority? === parent.private_tool_authority?
+    assert child.user_ns == %{"scope" => "child"}
+    assert child.env == %{"x" => 1}
+  end
+
   describe "append_tool_call/2" do
     test "accumulates tool calls in reverse order" do
       ctx = Context.new(%{}, %{}, %{}, fn _, _ -> nil end, [])

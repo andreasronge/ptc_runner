@@ -837,6 +837,9 @@ defmodule PtcRunner.Lisp do
            }}
         end)
 
+      private_tool_authority? =
+        Enum.any?(normalized_tools, fn {_name, tool} -> Tool.private?(tool) end)
+
       opts =
         Map.merge(params, %{
           normalized_tools: normalized_tools,
@@ -844,7 +847,8 @@ defmodule PtcRunner.Lisp do
           parsed_signature: parsed_signature,
           signature_str: signature_str,
           tool_failure_token: tool_failure_token,
-          tools_meta: tools_meta
+          tools_meta: tools_meta,
+          private_tool_authority?: private_tool_authority?
         })
 
       execute_program(source, opts)
@@ -1183,6 +1187,7 @@ defmodule PtcRunner.Lisp do
       turn_history_mode: turn_history_mode,
       strict_data: strict_data,
       strict_transitive_calls: strict_transitive_calls,
+      private_tool_authority?: private_tool_authority?,
       direct_namespaces: direct_namespaces,
       transitive_namespace_requirers: transitive_namespace_requirers,
       prelude_export_mask: prelude_export_mask
@@ -1216,6 +1221,7 @@ defmodule PtcRunner.Lisp do
         max_tool_call_result_bytes: max_tool_call_result_bytes,
         strict_data: strict_data,
         strict_transitive_calls: strict_transitive_calls,
+        private_tool_authority?: private_tool_authority?,
         direct_namespaces: direct_namespaces,
         transitive_namespace_requirers: transitive_namespace_requirers,
         prelude_export_mask: prelude_export_mask,

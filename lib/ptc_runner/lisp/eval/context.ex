@@ -37,6 +37,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   alias PtcRunner.Lisp.Eval.Capture
   alias PtcRunner.Lisp.Eval.Effects
+  alias PtcRunner.Lisp.Eval.RunResources
   alias PtcRunner.Lisp.RetainedSize
 
   @default_print_length 2000
@@ -110,6 +111,9 @@ defmodule PtcRunner.Lisp.Eval.Context do
     # were directly attached. Prelude-internal calls remain allowed because the
     # compiler already validated their declared namespace deps.
     strict_transitive_calls: false,
+    # Whether any tool in this run is private. Raw/no-prelude runs use this
+    # once-computed flag to avoid authority bookkeeping on every closure.
+    private_tool_authority?: false,
     direct_namespaces: MapSet.new(),
     transitive_namespace_requirers: %{},
     prelude_export_mask: nil,
@@ -204,6 +208,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           tools_meta: %{String.t() => %{optional(atom()) => term()}},
           strict_data: boolean(),
           strict_transitive_calls: boolean(),
+          private_tool_authority?: boolean(),
           direct_namespaces: MapSet.t(String.t()),
           transitive_namespace_requirers: %{String.t() => [String.t()]},
           prelude_export_mask: %{String.t() => MapSet.t(String.t())} | nil,
@@ -266,7 +271,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       prelude_caller_user_ns_stack: Keyword.get(opts, :prelude_caller_user_ns_stack, []),
       turn_history: turn_history,
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
-      tool_call_budget: Keyword.get_lazy(opts, :tool_call_budget, fn -> :atomics.new(1, []) end),
+      tool_call_budget: Keyword.get_lazy(opts, :tool_call_budget, &RunResources.new_counter/0),
       max_tool_call_result_bytes:
         Keyword.get(opts, :max_tool_call_result_bytes, @default_tool_call_result_bytes),
       max_print_length: Keyword.get(opts, :max_print_length, @default_print_length),
@@ -277,11 +282,12 @@ defmodule PtcRunner.Lisp.Eval.Context do
       max_heap: Keyword.get(opts, :max_heap),
       worker_max_heap: Keyword.get(opts, :worker_max_heap, Keyword.get(opts, :max_heap)),
       parallel_budget: Keyword.get(opts, :parallel_budget),
-      tool_activity: Keyword.get_lazy(opts, :tool_activity, fn -> :atomics.new(1, []) end),
+      tool_activity: Keyword.get_lazy(opts, :tool_activity, &RunResources.new_counter/0),
       effects: Effects.empty(),
       tools_meta: Keyword.get(opts, :tools_meta, %{}),
       strict_data: Keyword.get(opts, :strict_data, false),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
+      private_tool_authority?: Keyword.get(opts, :private_tool_authority?, false),
       direct_namespaces: namespace_set(Keyword.get(opts, :direct_namespaces, [])),
       transitive_namespace_requirers:
         normalize_namespace_requirers(Keyword.get(opts, :transitive_namespace_requirers, %{})),
@@ -289,6 +295,20 @@ defmodule PtcRunner.Lisp.Eval.Context do
       prelude_exports: prelude_exports(Keyword.get(opts, :prelude)),
       prelude: prelude_artifact(Keyword.get(opts, :prelude))
     }
+  end
+
+  @doc false
+  @spec new_child(t(), map(), map(), keyword()) :: t()
+  def new_child(%__MODULE__{} = parent, user_ns, env, opts \\ []) do
+    opts =
+      [
+        tool_call_budget: parent.tool_call_budget,
+        tool_activity: parent.tool_activity
+      ] ++ opts
+
+    parent.ctx
+    |> new(user_ns, env, parent.tool_exec, parent.turn_history, opts)
+    |> inherit_prelude(parent)
   end
 
   @doc false
@@ -563,6 +583,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       | prelude_exports: source.prelude_exports,
         prelude: source.prelude,
         strict_transitive_calls: source.strict_transitive_calls,
+        private_tool_authority?: source.private_tool_authority?,
         direct_namespaces: source.direct_namespaces,
         transitive_namespace_requirers: source.transitive_namespace_requirers,
         prelude_export_mask: source.prelude_export_mask,
