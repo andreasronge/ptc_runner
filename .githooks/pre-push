@@ -84,6 +84,41 @@ GENERATED_DOC_PATTERNS = [
     re.compile(r"^docs/conformance/.*$"),
 ]
 
+REPO_ROOT = os.environ["PTC_PRE_PUSH_REPO_ROOT"]
+EXECUTABLE_GUIDES_PATH = os.path.join(
+    REPO_ROOT, "test", "support", "executable_guides.txt"
+)
+
+def read_executable_doc_paths(path):
+    paths = set()
+
+    with open(path, encoding="utf-8") as registry:
+        for raw_line in registry:
+            line = raw_line.rstrip("\n")
+            entry = line.strip()
+
+            if not entry or entry.startswith("#"):
+                continue
+
+            parts = entry.split("/")
+            if (
+                line != entry
+                or os.path.isabs(entry)
+                or os.path.normpath(entry) != entry
+                or "\\" in entry
+                or any(part in ("", ".", "..") for part in parts)
+            ):
+                raise ValueError(
+                    f"non-canonical executable guide path: {raw_line!r}"
+                )
+
+            paths.add(entry)
+
+    return paths
+
+
+EXECUTABLE_DOC_PATHS = read_executable_doc_paths(EXECUTABLE_GUIDES_PATH)
+
 
 def matches(patterns, path):
     return any(pattern.match(path) for pattern in patterns)
@@ -97,6 +132,7 @@ def is_documentation(path):
     return (
         matches(DOC_PATTERNS, path)
         and not matches(GENERATED_DOC_PATTERNS, path)
+        and path not in EXECUTABLE_DOC_PATHS
     )
 
 
@@ -274,7 +310,8 @@ PYEOF
   trap 'rm -f "$PY_TMP" "$PTC_PRE_PUSH_PATHS_FILE"' EXIT
 
   set +e
-  printf '%s' "$REFS_INPUT" | /usr/bin/env python3 "$PY_TMP"
+  printf '%s' "$REFS_INPUT" |
+    PTC_PRE_PUSH_REPO_ROOT="$HOOK_REPO_ROOT" /usr/bin/env python3 "$PY_TMP"
   SHORT_CIRCUIT_RESULT=$?
   set -e
   rm -f "$PY_TMP"

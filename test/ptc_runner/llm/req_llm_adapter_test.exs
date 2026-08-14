@@ -271,6 +271,23 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
     end
   end
 
+  describe "build_stream_done_chunk/1" do
+    test "preserves normalized cost and token usage for streamed responses" do
+      usage = %{input_tokens: 12, output_tokens: 4, total_cost: 0.125}
+
+      assert ReqLLMAdapter.build_stream_done_chunk(usage) == %{
+               done: true,
+               tokens: %{
+                 input: 12,
+                 output: 4,
+                 cache_creation: 0,
+                 cache_read: 0,
+                 total_cost: 0.125
+               }
+             }
+    end
+  end
+
   describe "normalize_tool_calls/1" do
     test "decodes well-formed JSON arguments into a map" do
       tc = ToolCall.new("call_1", "get_weather", ~s({"city":"Paris"}))

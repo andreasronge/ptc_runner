@@ -5,6 +5,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
 
   @hook Path.expand("../../.githooks/pre-push", __DIR__)
   @classifier Path.expand("../../scripts/ci/classify-changes.sh", __DIR__)
+  @executable_guides Path.expand("../support/executable_guides.txt", __DIR__)
   @git_env GitEnv.clear()
 
   test "planning-only changes skip the full gate" do
@@ -29,6 +30,81 @@ defmodule PtcRunner.GitHooks.PrePushTest do
 
     assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
              ["deps.get --check-locked", "docs --warnings-as-errors"]
+  end
+
+  @tag :slow
+  test "annotated quickstart changes run documentation and core gates" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_change("docs/guides/quickstart.md")
+
+    {output, status} = run_hook(repo, path)
+
+    assert status == 0, output
+    refute output =~ "Documentation-only push"
+    assert output =~ "core tests"
+
+    assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
+             [
+               "deps.get --check-locked",
+               "docs --warnings-as-errors",
+               "ci-gate core-tests",
+               "ci-gate core-static",
+               "ci-gate core-dialyzer",
+               "ci-gate core-release",
+               "ci-gate viewer"
+             ]
+  end
+
+  @tag :slow
+  test "removing the final annotation still runs documentation and core gates" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_guide_marker_removed("docs/guides/quickstart.md")
+
+    {output, status} = run_hook(repo, path)
+
+    assert status == 0, output
+    refute output =~ "Documentation-only push"
+    assert output =~ "core tests"
+    assert File.read!(mix_marker) =~ "ci-gate core-tests"
+  end
+
+  @tag :slow
+  test "deleting a registered guide still runs documentation and core gates" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_deleted_file("docs/guides/quickstart.md")
+
+    {output, status} = run_hook(repo, path)
+
+    assert status == 0, output
+    refute output =~ "Documentation-only push"
+    assert output =~ "core tests"
+    assert File.read!(mix_marker) =~ "ci-gate core-tests"
+  end
+
+  @tag :slow
+  test "non-canonical executable-guide entries fail safe to every gate" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_changes(
+        ["docs/guides/quickstart.md"],
+        registry: "./docs/guides/quickstart.md\n"
+      )
+
+    {output, status} = run_hook(repo, path)
+
+    assert status == 0, output
+    refute output =~ "Documentation-only push"
+
+    assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
+             [
+               "deps.get --check-locked",
+               "docs --warnings-as-errors",
+               "ci-gate core-tests",
+               "ci-gate core-static",
+               "ci-gate core-dialyzer",
+               "ci-gate core-release",
+               "ci-gate viewer",
+               "ci-gate launcher"
+             ]
   end
 
   test "launcher-only changes run the launcher gate" do
@@ -150,7 +226,27 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     git_repo_with_changes([changed_path])
   end
 
-  defp git_repo_with_changes(changed_paths) do
+  defp git_repo_with_guide_marker_removed(changed_path) do
+    git_repo_with_mutation(changed_path, fn repo ->
+      write_changed_file!(repo, changed_path, "annotation removed\n")
+    end)
+  end
+
+  defp git_repo_with_deleted_file(changed_path) do
+    git_repo_with_mutation(changed_path, fn repo ->
+      File.rm!(Path.join(repo, changed_path))
+    end)
+  end
+
+  defp git_repo_with_mutation(changed_path, mutate) do
+    fixture = git_repo_with_changes([changed_path], commit_change?: false)
+    mutate.(fixture.repo)
+    git!(fixture.repo, ["add", "-A"])
+    git!(fixture.repo, ["commit", "--quiet", "-m", "change"])
+    fixture
+  end
+
+  defp git_repo_with_changes(changed_paths, opts \\ []) do
     root =
       Path.join(
         System.tmp_dir!(),
@@ -165,7 +261,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
 
     on_exit(fn -> File.rm_rf!(root) end)
 
-    install_hook_fixture!(repo)
+    install_hook_fixture!(repo, opts)
 
     fake_mix = Path.join(bin, "mix")
 
@@ -185,12 +281,15 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     git!(repo, ["config", "user.name", "Pre-push Test"])
 
     File.write!(Path.join(repo, "mix.exs"), "{:dialyxir, \"~> 1.4\"}\n")
-    Enum.each(changed_paths, &write_changed_file!(repo, &1, "before\n"))
+    Enum.each(changed_paths, &write_changed_file!(repo, &1, fixture_contents(&1, "before")))
     git!(repo, ["add", "."])
     git!(repo, ["commit", "--quiet", "-m", "base"])
-    Enum.each(changed_paths, &write_changed_file!(repo, &1, "after\n"))
-    git!(repo, ["add", "."])
-    git!(repo, ["commit", "--quiet", "-m", "change"])
+
+    if Keyword.get(opts, :commit_change?, true) do
+      Enum.each(changed_paths, &write_changed_file!(repo, &1, fixture_contents(&1, "after")))
+      git!(repo, ["add", "."])
+      git!(repo, ["commit", "--quiet", "-m", "change"])
+    end
 
     %{repo: repo, path: bin <> ":" <> System.fetch_env!("PATH"), mix_marker: mix_marker}
   end
@@ -223,9 +322,22 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     File.write!(full_path, contents)
   end
 
-  defp install_hook_fixture!(repo) do
+  defp fixture_contents("docs/guides/quickstart.md", state),
+    do: "<!-- ptc-guide-e2e: id=fixture -->\n#{state}\n"
+
+  defp fixture_contents(_path, state), do: "#{state}\n"
+
+  defp install_hook_fixture!(repo, opts) do
     copy_executable!(@hook, Path.join(repo, ".githooks/pre-push"))
     copy_executable!(@classifier, Path.join(repo, "scripts/ci/classify-changes.sh"))
+    File.mkdir_p!(Path.join(repo, "test/support"))
+
+    registry = Path.join(repo, "test/support/executable_guides.txt")
+
+    case opts[:registry] do
+      nil -> File.cp!(@executable_guides, registry)
+      contents -> File.write!(registry, contents)
+    end
 
     write_executable!(Path.join(repo, "scripts/ci/docs.sh"), """
     #!/bin/sh

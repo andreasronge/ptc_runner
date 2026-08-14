@@ -112,11 +112,20 @@ mix ptc run examples/kernel-tutorial/01-orders/ptc.json
 
 Add `requires=ENVIRONMENT_VARIABLE` when the command needs a credential. The
 helper in `test/support/guide_examples.ex` turns each annotation into an ExUnit
-test that runs the literal shell block from the repository root, requires a
-zero exit status and empty standard error, and compares the last standard-output
-line as JSON. Credentialed examples receive the `:scheduled_e2e` tag. Keep
+test after the guide path is added to
+`test/support/executable_guides.txt`. That registry is shared by the test,
+CI classifier, and pre-push hook. The test runs the literal shell block from the
+repository root, requires a zero exit status and empty standard error, and
+compares the last standard-output line as JSON. Credentialed examples receive
+the `:scheduled_e2e` tag.
+`assert=two-turn-agent` additionally points `PTC_ENVELOPE_FILE` at the test's
+owner-only temporary directory and verifies two model calls, two subordinate
+evaluations, and the committed continuation in the command envelope. Keep
 setup, cleanup, secrets, and nondeterministic assertions in the test harness;
-the visible block must remain useful when pasted by a reader.
+the visible block must remain useful when pasted by a reader. Because routing
+comes from the registry rather than current file contents, removing the final
+annotation or deleting a registered guide still runs both documentation and
+core test gates.
 
 ## Style and tone
 

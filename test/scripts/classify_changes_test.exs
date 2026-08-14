@@ -9,6 +9,11 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
     assert classify(["docs/guides/replay.md"]) ==
              all_false() |> Map.put("docs", "true")
 
+    assert classify(["docs/guides/quickstart.md"]) ==
+             all_false()
+             |> Map.put("core", "true")
+             |> Map.put("docs", "true")
+
     assert classify(["ptc_runner_launcher/c_src/launcher.c"]) ==
              all_false() |> Map.put("launcher", "true")
 
@@ -33,7 +38,14 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
              Map.new(all_false(), fn {scope, _value} -> {scope, "true"} end)
   end
 
-  defp classify(paths) do
+  test "non-canonical executable-guide entries conservatively select every scope" do
+    for entry <- ["  docs/guides/quickstart.md  ", "./docs/guides/quickstart.md"] do
+      assert classify(["docs/guides/quickstart.md"], registry: entry <> "\n") ==
+               Map.new(all_false(), fn {scope, _value} -> {scope, "true"} end)
+    end
+  end
+
+  defp classify(paths, opts \\ []) do
     path =
       Path.join(
         System.tmp_dir!(),
@@ -43,7 +55,19 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
     File.write!(path, Enum.join(paths, "\n") <> "\n")
     on_exit(fn -> File.rm(path) end)
 
-    {output, 0} = System.cmd(@classifier, [path], stderr_to_stdout: true)
+    env =
+      case opts[:registry] do
+        nil ->
+          []
+
+        contents ->
+          registry = path <> "-registry"
+          File.write!(registry, contents)
+          on_exit(fn -> File.rm(registry) end)
+          [{"PTC_EXECUTABLE_GUIDES_FILE", registry}]
+      end
+
+    {output, 0} = System.cmd(@classifier, [path], env: env, stderr_to_stdout: true)
 
     output
     |> String.split("\n", trim: true)

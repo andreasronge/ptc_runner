@@ -315,14 +315,7 @@ if Code.ensure_loaded?(ReqLLM) do
           done_stream =
             Stream.map([nil], fn _ ->
               usage = ReqLLM.StreamResponse.usage(stream_response) || %{}
-
-              %{
-                done: true,
-                tokens: %{
-                  input: usage[:input_tokens] || 0,
-                  output: usage[:output_tokens] || 0
-                }
-              }
+              build_stream_done_chunk(usage)
             end)
 
           {:ok, Stream.concat(content_stream, done_stream)}
@@ -895,6 +888,11 @@ if Code.ensure_loaded?(ReqLLM) do
         cache_read: cache_read
       }
       |> maybe_put_total_cost(usage)
+    end
+
+    @doc false
+    def build_stream_done_chunk(usage) do
+      %{done: true, tokens: build_tokens_from_req_llm_response(usage, %{})}
     end
 
     defp maybe_put_total_cost(tokens, usage) do
