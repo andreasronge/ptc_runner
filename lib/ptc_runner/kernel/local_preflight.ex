@@ -83,16 +83,17 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   #
   #   * `:local_preflight` / `:environment_unavailable` —
   #     `invalid_compatibility_environment`, `invalid_mcp_working_directory`,
-  #     `invalid_mcp_executable`, `invalid_replay_fixtures`,
+  #     `mcp_command_not_found`, `invalid_mcp_executable`, `invalid_replay_fixtures`,
   #     `replay_fixtures_too_large`, `duplicate_replay_entry`,
   #     `replay_entry_limit_exceeded`
   #   * `:local_preflight` / `:launcher_unavailable` —
   #     `mcp_stdio_launcher_unavailable`, `unsupported_mcp_stdio_platform`
   #   * `:local_preflight` / `:adapter_unavailable` — `invalid_llm_model`
   #
-  # Doctor refines `invalid_mcp_executable` to `command_not_found` and every
-  # replay-fixture reason to `fixtures_unreadable`, so its local rows name the
-  # actionable input rather than collapsing both into environment availability.
+  # Doctor refines `mcp_command_not_found` to `command_not_found`, an existing
+  # but unusable executable to `executable_unavailable`, and every replay-fixture
+  # reason to `fixtures_unreadable`, so its local rows name the actionable input
+  # rather than collapsing all three into environment availability.
   # The declaration-class reasons differ by side of the marker:
   #
   #   * before it — `:provider_declaration` / `:placement_denied` for
@@ -132,6 +133,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   @environment_reasons [
     :invalid_compatibility_environment,
     :invalid_mcp_working_directory,
+    :mcp_command_not_found,
     :invalid_mcp_executable,
     :invalid_replay_fixtures,
     :replay_fixtures_too_large,
@@ -154,7 +156,13 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     :invalid_inspection_snapshot_selection
   ]
 
-  @max_heap_words 200_000
+  # The audited callback code is shipped, but replay probes admit up to an 8 MB
+  # fixture and parse one response up to the installed 1 MB result ceiling.
+  # Five million words matches the installed provider-work ceiling and leaves
+  # room for the raw fixture, detached decoded values, and the retained entry
+  # map to coexist without making phase 7 depend on an application-narrowable
+  # limit.
+  @max_heap_words 5_000_000
 
   @doc """
   Runs every applicable audited-local check for one prepared run.
@@ -520,8 +528,11 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     BoundedWorker.classify_callback(result)
   end
 
-  defp diagnostic(:invalid_mcp_executable, occurrence, activity, :doctor),
+  defp diagnostic(:mcp_command_not_found, occurrence, activity, :doctor),
     do: local_diagnostic(:command_not_found, occurrence, activity)
+
+  defp diagnostic(:invalid_mcp_executable, occurrence, activity, :doctor),
+    do: local_diagnostic(:executable_unavailable, occurrence, activity)
 
   defp diagnostic(reason, occurrence, activity, :doctor) when reason in @fixture_reasons,
     do: local_diagnostic(:fixtures_unreadable, occurrence, activity)

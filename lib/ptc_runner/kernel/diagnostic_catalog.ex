@@ -92,6 +92,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "a required local environment is unavailable"},
     {:local_preflight, :command_not_found, 4, false,
      "a required provider command could not be found"},
+    {:local_preflight, :executable_unavailable, 4, false,
+     "a required provider executable is unusable"},
     {:local_preflight, :fixtures_unreadable, 4, false, "provider fixtures could not be read"},
     {:local_preflight, :adapter_unavailable, 4, false,
      "a required provider adapter is unavailable"},

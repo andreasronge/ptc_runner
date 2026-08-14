@@ -220,7 +220,9 @@ through bindings rather than JSON. The child always receives
 variables. Startup, shutdown grace, stderr capture, and results are bounded.
 Plain `doctor` resolves the selected command without launching it; an absent
 executable fails `provider/<alias>/local` as `command_not_found` while the rest
-of the readiness report remains available.
+of the readiness report remains available. A path that exists but is not a
+regular executable, is unreadable, or exceeds the executable ceiling instead
+fails that row as `executable_unavailable`.
 The optional [launcher companion](../../ptc_runner_launcher/README.md) adds
 executable identity and stronger stdio containment; select it with an absolute
 `runtime.stdio_launcher` path.

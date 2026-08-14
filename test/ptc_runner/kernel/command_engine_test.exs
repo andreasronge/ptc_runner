@@ -891,6 +891,39 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "default doctor distinguishes an unusable stdio executable from a missing command", %{
+    tmp_dir: directory
+  } do
+    executable = Path.join(directory, "not-executable")
+    File.write!(executable, "#!/bin/sh\nexit 0\n")
+    File.chmod!(executable, 0o644)
+
+    host_path =
+      write_host_config(
+        directory,
+        "doctor-unusable-command",
+        stdio_host_config(executable, System.find_executable("sh"), directory)
+      )
+
+    application =
+      doctor_application(directory, "selects-unusable-command", mission: ["workspace"])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    assert outcome.envelope["error"]["phase"] == "local_preflight"
+    assert outcome.envelope["error"]["code"] == "executable_unavailable"
+
+    assert %{"status" => "fail", "code" => "executable_unavailable"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/workspace/local")
+             )
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
   test "default doctor reports unreadable replay fixtures as a failed local check", %{
     tmp_dir: directory
   } do
@@ -973,6 +1006,45 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert outcome.envelope["result"]["readiness"] == "unverified"
     assert outcome.envelope["result"]["provider_activity"] == false
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "default doctor admits a valid replay response near its configured ceiling", %{
+    tmp_dir: directory
+  } do
+    File.write!(
+      Path.join(directory, "large-replay.jsonl"),
+      Jason.encode!(%{
+        "schema_version" => 1,
+        "request_hash" => "sha256:" <> String.duplicate("1", 64),
+        "response" => %{"content" => String.duplicate("x", 900_000)}
+      }) <> "\n"
+    )
+
+    host_path =
+      write_host_config(directory, "doctor-large-replay", %{
+        "install" => %{
+          "frozen-model" => %{
+            "source" => "llm_replay",
+            "installation_revision" => "large-replay-v1",
+            "fixtures" => "large-replay.jsonl"
+          }
+        }
+      })
+
+    application =
+      doctor_application(directory, "selects-large-replay", workflow: ["frozen-model"])
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    assert %{"status" => "pass", "code" => "available"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/frozen-model/local")
+             )
+
     assert_schema_valid(outcome.envelope)
   end
 

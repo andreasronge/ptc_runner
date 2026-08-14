@@ -113,6 +113,7 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   @environment_reasons [
     :invalid_compatibility_environment,
     :invalid_mcp_working_directory,
+    :mcp_command_not_found,
     :invalid_mcp_executable,
     :invalid_trace_snapshot_directory,
     :invalid_inspection_snapshot_directory,

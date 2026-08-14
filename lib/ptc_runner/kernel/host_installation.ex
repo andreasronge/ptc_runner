@@ -1578,7 +1578,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp resolve_command(command, environment) do
     case Path.type(command) do
       :absolute ->
-        canonical_executable(command, @max_executable_bytes, :invalid_mcp_executable)
+        canonical_mcp_executable(command)
 
       :relative ->
         if Path.basename(command) == command do
@@ -1589,25 +1589,38 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp resolve_bare_command(_command, nil), do: {:error, :invalid_mcp_executable}
+  defp resolve_bare_command(_command, nil), do: {:error, :mcp_command_not_found}
 
   defp resolve_bare_command(command, path) do
     path
     |> String.split(":", trim: true)
-    |> Enum.reduce_while({:error, :invalid_mcp_executable}, fn directory, _error ->
+    |> Enum.reduce_while({:error, :mcp_command_not_found}, fn directory, previous_error ->
       if Path.type(directory) == :absolute do
-        case canonical_executable(
-               Path.join(directory, command),
-               @max_executable_bytes,
-               :invalid_mcp_executable
-             ) do
+        case canonical_mcp_executable(Path.join(directory, command)) do
           {:ok, _path, _digest} = success -> {:halt, success}
-          {:error, _reason} -> {:cont, {:error, :invalid_mcp_executable}}
+          {:error, :mcp_command_not_found} -> {:cont, previous_error}
+          {:error, :invalid_mcp_executable} = error -> {:cont, error}
         end
       else
-        {:cont, {:error, :invalid_mcp_executable}}
+        {:cont, previous_error}
       end
     end)
+  end
+
+  defp canonical_mcp_executable(path) do
+    case ConfinedFile.resolve_absolute(path) do
+      {:ok, canonical} ->
+        case validate_executable(canonical, @max_executable_bytes) do
+          {:ok, digest} -> {:ok, canonical, digest}
+          {:error, _reason} -> {:error, :invalid_mcp_executable}
+        end
+
+      {:error, :not_found} ->
+        {:error, :mcp_command_not_found}
+
+      {:error, _reason} ->
+        {:error, :invalid_mcp_executable}
+    end
   end
 
   defp resolve_launcher(nil) do
@@ -1644,13 +1657,21 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp canonical_executable(path, max_bytes, error) do
     with {:ok, canonical} <- ConfinedFile.resolve_absolute(path),
-         {:ok, stat} <- File.stat(canonical),
-         true <- stat.type == :regular and stat.size in 1..max_bytes,
-         true <- Bitwise.band(stat.mode, 0o111) != 0,
-         {:ok, digest} <- hash_file(canonical, max_bytes) do
+         {:ok, digest} <- validate_executable(canonical, max_bytes) do
       {:ok, canonical, digest}
     else
       _reason -> {:error, error}
+    end
+  end
+
+  defp validate_executable(canonical, max_bytes) do
+    with {:ok, stat} <- File.stat(canonical),
+         true <- stat.type == :regular and stat.size in 1..max_bytes,
+         true <- Bitwise.band(stat.mode, 0o111) != 0,
+         {:ok, digest} <- hash_file(canonical, max_bytes) do
+      {:ok, digest}
+    else
+      _invalid -> {:error, :invalid_executable}
     end
   end
 

@@ -92,11 +92,11 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   @doc """
   Runs the audited-local phase-7 step for one sealed preparation.
 
-  This is the only entry to that step. Applicability is derived from the sealed
-  trio rather than supplied, so no caller can narrow the work, and the result is
-  only success or one catalogued diagnostic — never a per-occurrence report a
-  caller could turn into a passing row. The coordinator anchors the single
-  deadline the whole step spends.
+  This is the fail-fast runtime entry to that step. Applicability is derived
+  from the sealed trio rather than supplied, so no caller can narrow the work,
+  and the result is only success or one catalogued diagnostic. Default doctor
+  uses `local_check_findings/3` below to retain attributable per-occurrence
+  failures for its report. Both entries anchor one deadline for the whole step.
 
   Every active command crosses it before provider activity is marked: run and
   `doctor --connect` through `ProviderExecution`. Manifest-backed REPL

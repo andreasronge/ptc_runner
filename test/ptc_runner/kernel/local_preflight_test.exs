@@ -200,6 +200,7 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     for {reason, code} <- [
           {:invalid_compatibility_environment, :environment_unavailable},
           {:invalid_mcp_working_directory, :environment_unavailable},
+          {:mcp_command_not_found, :environment_unavailable},
           {:invalid_mcp_executable, :environment_unavailable},
           {:mcp_stdio_launcher_unavailable, :launcher_unavailable},
           {:unsupported_mcp_stdio_platform, :launcher_unavailable},
