@@ -20,7 +20,9 @@ on:
   # receives without changing any Elixir source, which silently invalidates
   # deterministic replay fixtures keyed on that request (see #1328) and can
   # change live-model behavior. Neither is caught by any other PR gate, so
-  # run the full e2e suite whenever a prelude changes.
+  # run the e2e suite whenever a prelude changes. The comparatively expensive
+  # tutorial probes are tagged `scheduled_e2e`: daily and manual runs retain
+  # them, while pull requests avoid paying for those additional model calls.
   pull_request:
     paths:
       - 'priv/preludes/**'
@@ -44,6 +46,7 @@ jobs:
       # would hard-fail through no fault of the contributor. Only run the
       # live e2e suite for pull_request when it has secret access.
       RUN_E2E: ${{ github.event_name == 'schedule' || inputs.test_type == 'e2e' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
+      PR_E2E: ${{ github.event_name == 'pull_request' }}
 
     steps:
       - name: Checkout repository
@@ -89,8 +92,12 @@ jobs:
           PTC_TEST_GITHUB_TOKEN: ${{ github.token }}
         run: |
           if [ "$RUN_E2E" = "true" ]; then
+            e2e_includes=(--include e2e)
+            if [ "$PR_E2E" != "true" ]; then
+              e2e_includes+=(--include scheduled_e2e)
+            fi
             bash test/support/mcp_go_stateless/with_server.sh \
-              mix test --include e2e --trace
+              mix test "${e2e_includes[@]}" --trace
             PTC_TEST_MCP_OAUTH=1 \
               bash test/support/mcp_go_stateless/with_server.sh \
                 mix test test/ptc_runner/kernel/mcp_oauth_remote_e2e_test.exs \

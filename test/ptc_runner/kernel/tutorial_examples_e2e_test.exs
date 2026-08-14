@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
   use ExUnit.Case, async: false
 
-  @moduletag :e2e
+  @moduletag :scheduled_e2e
   @moduletag timeout: 180_000
 
   alias PtcRunner.Kernel.ApplicationPackage

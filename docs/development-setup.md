@@ -150,12 +150,21 @@ checkout's explicitly named `.env` test input.
 
 ### Aggregate E2E suite
 
-`mix test --include e2e` runs the live-model tests and every optional MCP test
-whose prerequisites are configured. Missing MCP prerequisites are reported as
-skips, so a checkout configured only with `OPENROUTER_API_KEY` remains a valid
-way to run the model-backed coverage. Once a prerequisite is configured, an
-invalid binary, unreachable endpoint, authentication error, or protocol error
-still fails its test.
+`mix test --include e2e` runs the pull-request E2E tests and every optional MCP
+test whose prerequisites are configured. The comparatively expensive live
+tutorial probes are tagged `:scheduled_e2e`; the credentialed Integration
+workflow adds `--include scheduled_e2e` on scheduled and manual runs, but not on
+pull requests. Run those probes directly with:
+
+```bash
+mix test test/ptc_runner/kernel/tutorial_examples_e2e_test.exs \
+  --include scheduled_e2e
+```
+
+Missing MCP prerequisites are reported as skips, so a checkout configured only
+with `OPENROUTER_API_KEY` remains a valid way to run model-backed coverage. Once
+a prerequisite is configured, an invalid binary, unreachable endpoint,
+authentication error, or protocol error still fails its test.
 
 The remote MCP tests require `PTC_TEST_MCP_2026_ENDPOINT`. The GitHub MCP test
 requires both:

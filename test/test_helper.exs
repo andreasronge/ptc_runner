@@ -10,6 +10,8 @@ end
 # Build exclusion list based on tags
 # - :skip tests are temporarily disabled (must reference a GH issue)
 # - :e2e tests require API keys and are excluded by default
+# - :scheduled_e2e tests require API keys and run only in scheduled or manually
+#   dispatched Integration workflows, not as pull-request gates
 # - :clojure tests require Babashka and are excluded by default, run with --include clojure
 # - :soak tests are long-running memory soak tests, excluded by default.
 #   Run with: `mix test --only soak` (see test/soak/README.md)
@@ -28,7 +30,7 @@ end
 #   14.2 s in total. That is the wrong trade, and it is why the two tags are
 #   separate: a tag that means "expensive" must not silently also mean
 #   "unverified on pull requests".
-exclusions = [:skip, :e2e, :clojure, :soak, :nightly]
+exclusions = [:skip, :e2e, :scheduled_e2e, :clojure, :soak, :nightly]
 
 # Run clojure conformance tests: mix test --include clojure
 #
