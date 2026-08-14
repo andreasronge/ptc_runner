@@ -513,6 +513,42 @@ wait_lanes() {
   return "$failures"
 }
 
+# Signalling the lane subshell is not enough: the gate it launched is a
+# grandchild, and killing only the parent reparents a release build or a
+# Dialyzer run to init, where it keeps consuming the machine with nothing left
+# to report to. Descend first so nothing is orphaned on the way down.
+kill_lane_tree() {
+  local pid="$1"
+  local child
+
+  for child in $(pgrep -P "$pid" 2>/dev/null); do
+    kill_lane_tree "$child"
+  done
+
+  kill "$pid" 2>/dev/null || true
+}
+
+# A lane outlives the shell that started it, so an interrupted push must take
+# its lanes and their logs with it.
+cleanup_lanes() {
+  local entry
+
+  for entry in ${LANE_PIDS[@]+"${LANE_PIDS[@]}"}; do
+    kill_lane_tree "$entry"
+  done
+
+  for entry in ${LANE_LOGS[@]+"${LANE_LOGS[@]}"}; do
+    rm -f "$entry" "$entry.secs"
+  done
+
+  LANE_PIDS=()
+  LANE_LOGS=()
+}
+
+trap 'cleanup_lanes; rm -f "${PTC_PRE_PUSH_PATHS_FILE:-}"' EXIT
+trap 'cleanup_lanes; exit 130' INT
+trap 'cleanup_lanes; exit 143' TERM
+
 # Both stages compile into `_build/test`, so they share Mix's build lock and
 # gain nothing from being separate lanes.
 core_static_and_dialyzer() {

@@ -181,6 +181,44 @@ defmodule PtcRunner.GitHooks.PrePushTest do
   end
 
   @tag :slow
+  test "a failing static analysis skips Dialyzer in its own lane" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_change("lib/example.ex")
+
+    {output, status} = run_hook(repo, path, [{"MIX_FAIL_GATE", "core-static"}])
+
+    refute status == 0
+    assert output =~ "core static analysis + Dialyzer failed"
+
+    invocations = mix_marker |> File.read!() |> String.split("\n", trim: true)
+
+    # Dialyzer consumes what static analysis just compiled, so the lane chains
+    # them with `&&` and a failed static stage must not spend time on Dialyzer.
+    assert "ci-gate core-static" in invocations
+    refute "ci-gate core-dialyzer" in invocations
+
+    # The sibling lanes are independent and still run to completion.
+    assert "ci-gate core-release" in invocations
+    assert "ci-gate viewer" in invocations
+  end
+
+  @tag :slow
+  test "a failing Dialyzer fails the push after static analysis passed" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_change("lib/example.ex")
+
+    {output, status} = run_hook(repo, path, [{"MIX_FAIL_GATE", "core-dialyzer"}])
+
+    refute status == 0
+    assert output =~ "core static analysis + Dialyzer failed"
+
+    invocations = mix_marker |> File.read!() |> String.split("\n", trim: true)
+
+    assert "ci-gate core-static" in invocations
+    assert "ci-gate core-dialyzer" in invocations
+  end
+
+  @tag :slow
   test "the removed concurrency environment variable cannot throttle the full gate" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_change("lib/example.ex")
