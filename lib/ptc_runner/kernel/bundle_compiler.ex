@@ -28,7 +28,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   @max_span_locator_bytes 4_096
   @max_artifact_bytes 4_000_000
   @max_diagnostic_bytes 65_536
-  @public_compile_reasons [:parse_error, :unbound_var, :duplicate_ref]
+  @public_compile_reasons [:parse_error, :unbound_var, :duplicate_ref, :unknown_namespace]
 
   @spec compile([Component.t()]) :: {:ok, FrozenBundle.t()} | {:error, map()}
   @doc "Compiles and attests a bounded closed component set."

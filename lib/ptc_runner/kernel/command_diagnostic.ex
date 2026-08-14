@@ -296,7 +296,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %{phase: :bundle, code: code},
          %CommandSource{kind: :component}
        )
-       when code in [:undefined_variable, :duplicate_definition],
+       when code in [:undefined_variable, :duplicate_definition, :unknown_namespace],
        do: true
 
   defp valid_message_source?(

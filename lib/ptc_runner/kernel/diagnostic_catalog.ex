@@ -52,6 +52,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the component source contains an undefined variable reference"},
     {:bundle, :duplicate_definition, 3, false,
      "the component bundle defines the same name more than once"},
+    {:bundle, :unknown_namespace, 3, false,
+     "the component source references an unavailable namespace"},
     {:bundle, :entry_invalid, 3, false, "the workflow entry is not a public bundle export"},
     {:provider_declaration, :provider_unknown, 3, false,
      "the selected provider is not installed"},

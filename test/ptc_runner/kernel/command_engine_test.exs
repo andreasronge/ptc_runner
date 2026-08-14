@@ -5497,6 +5497,67 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "unknown component namespaces retain safe structured analyzer guidance", %{
+    tmp_dir: directory
+  } do
+    source = """
+    (ns app)
+
+    (defn run [input]
+      (return (kernel/mission-model-context \"reader\")))
+    """
+
+    path =
+      write_application(directory, "unknown-component-namespace", valid_manifest(), %{
+        "main.clj" => source
+      })
+
+    outcome = assert_error(["validate", path], "bundle", "unknown_namespace")
+    diagnostic = outcome.envelope["error"]
+
+    assert diagnostic["message"] =~ "unknown namespace kernel/"
+    assert diagnostic["message"] =~ "Available namespaces:"
+    assert diagnostic["message"] =~ "json/"
+    assert diagnostic["message"] =~ "For JSON parsing use json/parse-string"
+
+    assert %{"start_byte" => start_byte, "end_byte" => end_byte} = diagnostic["span"]
+
+    assert binary_part(source, start_byte, end_byte - start_byte) ==
+             "(defn run [input]\n  (return (kernel/mission-model-context \"reader\")))"
+
+    assert {:stderr, rendered} = CommandRenderer.render(outcome)
+
+    assert rendered =~ "bundle/unknown_namespace: #{diagnostic["message"]} "
+    assert rendered =~ "at main.clj bytes [#{start_byte},#{end_byte})"
+  end
+
+  @tag :tmp_dir
+  test "human compile failures render their component byte spans", %{tmp_dir: directory} do
+    source = """
+    (ns app)
+
+    (defn run [input] (return input))
+
+    (defn broken)
+    """
+
+    path =
+      write_application(directory, "human-compile-span", valid_manifest(), %{
+        "main.clj" => source
+      })
+
+    outcome = assert_error(["validate", path], "bundle", "compile_failed")
+    diagnostic = outcome.envelope["error"]
+    %{"start_byte" => start_byte, "end_byte" => end_byte} = diagnostic["span"]
+
+    assert {:stderr, rendered} = CommandRenderer.render(outcome)
+
+    assert rendered =~
+             "the component bundle could not be compiled " <>
+               "at main.clj bytes [#{start_byte},#{end_byte}) "
+  end
+
+  @tag :tmp_dir
   test "application failures retain safe external-input and override provenance", %{
     tmp_dir: directory
   } do

@@ -4,14 +4,17 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
 
   Compiler-rendered messages never cross the command boundary. This module
   admits only exact, bounded detail shapes whose names use the PTC-Lisp symbol
-  grammar, and rebuilds messages from literals after every name is found
-  verbatim in the submitted component source. It also bounds capability names
-  already attested by a frozen bundle before they enter a missing-requirement
-  message. Anything else retains the fixed catalog message.
+  grammar, and rebuilds messages from literals after every submitted name is
+  found verbatim in the component source. An unknown-namespace message also
+  requires the compiler's available-namespace list to equal the runtime's
+  canonical public list. It bounds capability names already attested by a
+  frozen bundle before they enter a missing-requirement message. Anything else
+  retains the fixed catalog message.
   """
 
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Format.SymbolRef
+  alias PtcRunner.Lisp.NamespaceDiagnostic
 
   @max_names 8
   @max_name_bytes 128
@@ -43,6 +46,26 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
       else: :error
   end
 
+  def bounded_details(
+        :unknown_namespace,
+        %{
+          rejected_namespace: namespace,
+          available_namespaces: available_namespaces
+        } = details
+      )
+      when map_size(details) == 2 do
+    if valid_unqualified_name?(namespace) and
+         available_namespaces == NamespaceDiagnostic.available_namespaces() do
+      {:ok,
+       %{
+         rejected_namespace: namespace,
+         available_namespaces: available_namespaces
+       }}
+    else
+      :error
+    end
+  end
+
   def bounded_details(_reason, _details), do: :error
 
   @doc "Rebuilds one public compiler message from admitted submitted-source names."
@@ -62,6 +85,21 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
          true <- String.contains?(source, namespace),
          true <- String.contains?(source, name) do
       {:ok, "Duplicate definition: #{namespace}/#{name}"}
+    else
+      _invalid -> :error
+    end
+  end
+
+  def rebuild(:unknown_namespace, details, source) when is_binary(source) do
+    with {:ok,
+          %{
+            rejected_namespace: namespace,
+            available_namespaces: available_namespaces
+          }} <- bounded_details(:unknown_namespace, details),
+         true <- String.contains?(source, namespace <> "/"),
+         message = NamespaceDiagnostic.message(namespace, available_namespaces),
+         true <- valid_message?(:unknown_namespace, message) do
+      {:ok, message}
     else
       _invalid -> :error
     end
@@ -103,6 +141,15 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
     end
   end
 
+  def valid_message?(:unknown_namespace, message) when is_binary(message) do
+    with true <- byte_size(message) <= @max_message_bytes,
+         {:ok, namespace} <- NamespaceDiagnostic.rejected_namespace(message) do
+      valid_unqualified_name?(namespace)
+    else
+      _invalid -> false
+    end
+  end
+
   def valid_message?(:capability_requirement_missing, message) when is_binary(message) do
     byte_size(message) <= @max_message_bytes and valid_capability_requirement_message?(message)
   end
@@ -129,6 +176,24 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
         %{"const" => fallback},
         dynamic_message_schema(
           "^Duplicate definition: #{@unqualified_symbol_pattern}/#{@unqualified_symbol_pattern}$(?![\\s\\S])"
+        )
+      ]
+    }
+  end
+
+  def message_schema(:unknown_namespace, fallback) do
+    available_pattern =
+      NamespaceDiagnostic.available_namespaces()
+      |> Enum.map_join(", ", &String.replace(&1, ".", "\\."))
+
+    %{
+      "oneOf" => [
+        %{"const" => fallback},
+        dynamic_message_schema(
+          "^unknown namespace #{@unqualified_symbol_pattern}/\\. " <>
+            "Available namespaces: #{available_pattern}\\. " <>
+            "For JSON parsing use json/parse-string " <>
+            "\\(not cheshire\\.core/\\.\\.\\.\\)\\.$(?![\\s\\S])"
         )
       ]
     }

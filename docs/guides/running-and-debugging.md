@@ -163,6 +163,17 @@ arbitrary exception, rejected value, provider response, credential, or private
 payload. A provider subject appears as `provider/<alias>/<operation>` with its
 workflow or mission occurrence when known.
 
+Component compile failures with a provable location print the logical component
+name and the envelope's half-open byte range, for example `at main.clj bytes
+[45,58)`. The same canonical offsets remain available in `error.span` when
+`--envelope` is requested. An unknown namespace is a separate closed diagnostic:
+the compiler carries the rejected namespace and canonical sorted namespace list
+as structured detail, and the command boundary rebuilds the public list and JSON
+hint after validating that detail. It never forwards the compiler-rendered
+string. For a shipped namespace such as `kernel/`, select its library and add
+the component dependency as described in
+[Select a shipped prelude](components-and-preludes.md#select-a-shipped-prelude).
+
 ### Use the standalone process contract
 
 For machine integration, name an envelope file instead of parsing stdout:

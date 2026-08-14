@@ -294,13 +294,10 @@ defmodule PtcRunner.Kernel.RunCoordinator do
        do: diagnostic(:bundle, :bundle_limit_exceeded, source_opts(failure, components))
 
   defp bundle_diagnostic(%{reason: reason} = failure, components)
-       when reason in [:component_compile_error, :bundle_compile_error, :bundle_compile_failed],
-       do:
-         diagnostic(
-           :bundle,
-           compile_diagnostic_code(Map.get(failure, :compile_reason)),
-           compile_diagnostic_opts(failure, components)
-         )
+       when reason in [:component_compile_error, :bundle_compile_error, :bundle_compile_failed] do
+    {code, opts} = compile_diagnostic(failure, components)
+    diagnostic(:bundle, code, opts)
+  end
 
   defp bundle_diagnostic(failure, components),
     do: diagnostic(:bundle, :bundle_invalid, source_opts(failure, components))
@@ -314,31 +311,42 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   defp source_opts(_failure, _components), do: []
 
-  defp compile_diagnostic_opts(failure, components),
-    do: source_opts(failure, components) ++ compile_message_opts(failure, components)
+  defp compile_diagnostic(failure, components) do
+    reason = Map.get(failure, :compile_reason)
+    source = source_opts(failure, components)
 
-  defp compile_message_opts(
+    case compile_message(failure, components) do
+      {:ok, message} ->
+        {compile_diagnostic_code(reason), source ++ [message: message]}
+
+      :error when reason == :unknown_namespace ->
+        {:compile_failed, source}
+
+      :error ->
+        {compile_diagnostic_code(reason), source}
+    end
+  end
+
+  defp compile_message(
          %{id: id, compile_reason: reason, compile_details: details},
          components
        )
        when is_binary(id) do
     case Enum.find(components, &match?(%Component{id: ^id}, &1)) do
       %Component{source: source} when is_binary(source) ->
-        case CompileDiagnostic.rebuild(reason, details, source) do
-          {:ok, message} -> [message: message]
-          :error -> []
-        end
+        CompileDiagnostic.rebuild(reason, details, source)
 
       _missing ->
-        []
+        :error
     end
   end
 
-  defp compile_message_opts(_failure, _components), do: []
+  defp compile_message(_failure, _components), do: :error
 
   defp compile_diagnostic_code(:parse_error), do: :syntax_invalid
   defp compile_diagnostic_code(:unbound_var), do: :undefined_variable
   defp compile_diagnostic_code(:duplicate_ref), do: :duplicate_definition
+  defp compile_diagnostic_code(:unknown_namespace), do: :unknown_namespace
   defp compile_diagnostic_code(_reason), do: :compile_failed
 
   # Provenance is bound to the exact component bytes the compiler read, which
