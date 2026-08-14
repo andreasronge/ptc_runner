@@ -6,7 +6,12 @@ defmodule PtcViewer.Api do
   @doc "Delegates a canonical trace query to one explicitly configured host adapter."
   def kernel_query(config, operation, arguments)
       when is_list(config) and operation in @operations and is_map(arguments) do
-    source = {:directory, Keyword.fetch!(config, :trace_dir)}
+    trace_dir = Keyword.fetch!(config, :trace_dir)
+
+    source =
+      if Keyword.get(config, :private_traces, false),
+        do: {:private_directory, trace_dir},
+        else: {:directory, trace_dir}
 
     case Keyword.get(config, :kernel_trace_adapter) do
       nil -> {:error, :unavailable}

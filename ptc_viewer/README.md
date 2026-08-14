@@ -20,8 +20,10 @@ mix ptc.viewer --trace-dir traces
 
 The root task installs `PtcRunner.Kernel.ViewerAdapter` automatically, starts a
 local server on port 4123, and opens the browser. Use `--port`, `--trace-dir`,
-`--inspection-file`, or `--no-open` to override those defaults. The server
-always binds to loopback.
+`--inspection-file`, `--private-traces`, or `--no-open` to override those
+defaults. The server always binds to loopback. `--private-traces` selects
+owner-only canonical trace files for debugger runs and disables the connected
+public run-analysis REPL; it does not widen that REPL's authority.
 
 The REPL evaluates PTC-Lisp against an immutable capture of the selected trace
 directory. The server fixes the `run-analysis-v1` profile: normal bounded

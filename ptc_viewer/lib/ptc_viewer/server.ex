@@ -25,6 +25,7 @@ defmodule PtcViewer.Server do
     inspection_adapter = Keyword.get(opts, :inspection_adapter)
     repl_adapter = Keyword.get(opts, :repl_adapter)
     repl_config = Keyword.get(opts, :repl_config, %{})
+    private_traces = Keyword.get(opts, :private_traces, false) == true
 
     if is_integer(port) and port in 0..65_535 do
       params = %{
@@ -34,7 +35,8 @@ defmodule PtcViewer.Server do
         inspection_file: inspection_file,
         inspection_adapter: inspection_adapter,
         repl_adapter: repl_adapter,
-        repl_config: repl_config
+        repl_config: repl_config,
+        private_traces: private_traces
       }
 
       case start_resources(params) do
@@ -51,7 +53,11 @@ defmodule PtcViewer.Server do
   end
 
   defp start_resources(params) do
-    case pin_inspection(params.inspection_file, params.inspection_adapter, params.trace_dir) do
+    case pin_inspection(
+           params.inspection_file,
+           params.inspection_adapter,
+           trace_source(params)
+         ) do
       {:ok, inspection_store} -> start_connection(params, inspection_store)
       {:error, reason} -> {:error, reason}
     end
@@ -96,10 +102,8 @@ defmodule PtcViewer.Server do
   defp start_bandit(params, inspection_store, connection, task_supervisor, repl_store) do
     config =
       router_config(
-        params.trace_dir,
-        params.kernel_adapter,
+        params,
         inspection_store,
-        params.inspection_adapter,
         repl_store,
         self()
       )
@@ -227,36 +231,34 @@ defmodule PtcViewer.Server do
     )
   end
 
-  defp router_config(
-         trace_dir,
-         kernel_adapter,
-         inspection_store,
-         inspection_adapter,
-         repl_store,
-         server
-       ) do
+  defp router_config(params, inspection_store, repl_store, server) do
     [
-      trace_dir: trace_dir,
-      kernel_trace_adapter: kernel_adapter,
+      trace_dir: params.trace_dir,
+      private_traces: params.private_traces,
+      kernel_trace_adapter: params.kernel_adapter,
       inspection_store: inspection_store,
-      inspection_adapter: inspection_adapter,
+      inspection_adapter: params.inspection_adapter,
       repl_store: repl_store,
       repl_enabled: not is_nil(repl_store),
       viewer_server: server
     ]
   end
 
-  defp pin_inspection(nil, nil, _trace_dir), do: {:ok, nil}
+  defp trace_source(%{private_traces: true, trace_dir: trace_dir}),
+    do: {:private_directory, trace_dir}
+
+  defp trace_source(%{trace_dir: trace_dir}), do: {:directory, trace_dir}
+
+  defp pin_inspection(nil, nil, _trace_source), do: {:ok, nil}
 
   defp pin_inspection(path, nil, _trace_dir) when is_binary(path),
     do: {:error, :invalid_inspection_config}
 
-  defp pin_inspection(path, adapter, trace_dir) when is_binary(path) and is_atom(adapter) do
-    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :pin_inspection, 2) and
-         function_exported?(adapter, :conversation, 2) do
+  defp pin_inspection(path, adapter, trace_source) when is_binary(path) and is_atom(adapter) do
+    if valid_inspection_adapter?(adapter) do
       with {:ok, source} <-
              adapter
-             |> apply(:pin_inspection, [Path.expand(path), {:directory, trace_dir}])
+             |> apply(:pin_inspection, [Path.expand(path), trace_source])
              |> normalize_pin_result(),
            {:ok, store} <- InspectionStore.start(source) do
         {:ok, store}
@@ -271,6 +273,13 @@ defmodule PtcViewer.Server do
   end
 
   defp pin_inspection(_path, _adapter, _trace_dir), do: {:error, :invalid_inspection_config}
+
+  defp valid_inspection_adapter?(adapter) do
+    Code.ensure_loaded?(adapter) and
+      Enum.all?([:pin_inspection, :conversation, :preludes], fn operation ->
+        function_exported?(adapter, operation, 2)
+      end)
+  end
 
   defp normalize_pin_result({:ok, source}) when not is_nil(source), do: {:ok, source}
   defp normalize_pin_result({:error, reason}) when is_atom(reason), do: {:error, reason}

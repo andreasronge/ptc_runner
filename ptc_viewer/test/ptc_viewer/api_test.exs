@@ -30,6 +30,26 @@ defmodule PtcViewer.ApiTest do
              PtcViewer.Api.kernel_query(config, :list_runs, %{})
   end
 
+  test "kernel_query delegates the explicitly selected private directory", %{trace_dir: trace_dir} do
+    parent = self()
+
+    adapter = fn source, operation, arguments ->
+      send(parent, {:query, source, operation, arguments})
+      {:ok, %{"items" => []}}
+    end
+
+    config = [
+      trace_dir: trace_dir,
+      private_traces: true,
+      kernel_trace_adapter: adapter
+    ]
+
+    assert {:ok, %{"items" => []}} =
+             PtcViewer.Api.kernel_query(config, :list_runs, %{})
+
+    assert_receive {:query, {:private_directory, ^trace_dir}, :list_runs, %{}}
+  end
+
   test "conversation delegates only the exact configured file and run", %{trace_dir: trace_dir} do
     parent = self()
     source = {:pinned, "run.inspection.jsonl"}
