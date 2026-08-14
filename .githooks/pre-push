@@ -411,18 +411,162 @@ run_gate() {
   record_phase "$label" "$gate_secs"
 }
 
+# ----------------------------------------------------------------------
+# Lanes: the deterministic gates overlap, the test suite never does.
+#
+# The suite is the longest stage and roughly four fifths of it is
+# `async: false` -- legitimately so, because those modules call `File.cd`,
+# `Application.put_env`, and `System.put_env`, which are VM-global. It
+# therefore holds a single core for minutes while the rest of the machine
+# idles, which is what makes the gate look like a chain of half-empty
+# stages. It still runs alone: this repository's timing-sensitive tests
+# fail under unrelated background load, and a gate that flakes costs more
+# than a gate that is slow.
+#
+# What does overlap is the deterministic tail, whose stages own disjoint
+# build trees and have no shared mutable state:
+#
+#   lane A   core-static -> core-Dialyzer   _build/test  (shared: serial)
+#   lane B   core-release                   _build/prod
+#   lane C   Viewer                         ptc_viewer/_build/test
+#
+# Documentation keeps its head start above: it owns `_build/dev` and is
+# the only stage that writes the root `deps/`, so finishing it first also
+# keeps `mix deps.get` off the lanes.
+#
+# The launcher gate stays serial on purpose. Its port-teardown assertions
+# are load-sensitive (`:DOWN` can outrun `Port.info/1` releasing the port),
+# a failure mode this repository has already had to chase down on a loaded
+# CI runner.
+#
+# Lane output is buffered and replayed in lane order, so a concurrent run
+# reads like a serial one. PTC_PRE_PUSH_SERIAL=1 restores serial execution
+# for diagnosis or for a machine too small to share.
+# ----------------------------------------------------------------------
+
+LANE_PIDS=()
+LANE_LABELS=()
+LANE_LOGS=()
+
+start_lane() {
+  local label="$1"
+  shift
+  local log
+  log="$(mktemp -t pre-push-lane.XXXXXX)"
+
+  (
+    # Inherited errexit would abort the subshell on the gate's own failure,
+    # losing both the exit status and the duration this lane is reporting.
+    set +e
+    lane_start=$SECONDS
+    "$@" > "$log" 2>&1
+    lane_rc=$?
+    echo $((SECONDS - lane_start)) > "$log.secs"
+    exit $lane_rc
+  ) &
+
+  LANE_PIDS+=("$!")
+  LANE_LABELS+=("$label")
+  LANE_LOGS+=("$log")
+  echo "  ⏳ $label started"
+}
+
+# Waits for every started lane, replays each lane's output under its own
+# heading, and returns the number that failed. Every lane is awaited even
+# after one fails: they are already running, and reporting all of them
+# beats surfacing one failure per push cycle.
+wait_lanes() {
+  local failures=0
+  local i pid label log secs
+
+  [ "${#LANE_PIDS[@]}" -gt 0 ] || return 0
+
+  for i in "${!LANE_PIDS[@]}"; do
+    pid="${LANE_PIDS[$i]}"
+    label="${LANE_LABELS[$i]}"
+    log="${LANE_LOGS[$i]}"
+
+    if wait "$pid"; then
+      secs="$(cat "$log.secs" 2>/dev/null || echo '?')"
+      echo ""
+      echo "📦 $label"
+      cat "$log"
+      echo "  ✅ $label passed in ${secs}s"
+      record_phase "$label" "$secs"
+    else
+      secs="$(cat "$log.secs" 2>/dev/null || echo '?')"
+      echo ""
+      echo "📦 $label"
+      cat "$log"
+      echo "  ❌ $label failed after ${secs}s"
+      record_phase "$label (failed)" "$secs"
+      failures=$((failures + 1))
+    fi
+
+    rm -f "$log" "$log.secs"
+  done
+
+  LANE_PIDS=()
+  LANE_LABELS=()
+  LANE_LOGS=()
+
+  return "$failures"
+}
+
+# Both stages compile into `_build/test`, so they share Mix's build lock and
+# gain nothing from being separate lanes.
+core_static_and_dialyzer() {
+  "$HOOK_REPO_ROOT/scripts/ci/core-static.sh" &&
+    "$HOOK_REPO_ROOT/scripts/ci/core-dialyzer.sh"
+}
+
+run_core_gates=false
 if [ "$core" = true ] || [ "$mcp_http" = true ] ||
    [ "$mcp_filesystem" = true ] || [ "$java" = true ]; then
-  run_gate "core tests" "$HOOK_REPO_ROOT/scripts/ci/core-tests.sh"
-  run_gate "core static analysis" "$HOOK_REPO_ROOT/scripts/ci/core-static.sh"
-  run_gate "core Dialyzer" "$HOOK_REPO_ROOT/scripts/ci/core-dialyzer.sh"
-  run_gate "core release verification" "$HOOK_REPO_ROOT/scripts/ci/core-release.sh"
+  run_core_gates=true
 fi
 
 # Root trace and inspection contracts are consumed by the Viewer, so retain
 # Viewer coverage for core changes as well as Viewer-owned changes.
+run_viewer_gate=false
 if [ "$viewer" = true ] || [ "$core" = true ]; then
-  run_gate "Viewer validation" "$HOOK_REPO_ROOT/scripts/ci/viewer.sh"
+  run_viewer_gate=true
+fi
+
+if [ "$run_core_gates" = true ]; then
+  run_gate "core tests" "$HOOK_REPO_ROOT/scripts/ci/core-tests.sh"
+fi
+
+if [ -n "${PTC_PRE_PUSH_SERIAL:-}" ]; then
+  if [ "$run_core_gates" = true ]; then
+    run_gate "core static analysis" "$HOOK_REPO_ROOT/scripts/ci/core-static.sh"
+    run_gate "core Dialyzer" "$HOOK_REPO_ROOT/scripts/ci/core-dialyzer.sh"
+    run_gate "core release verification" "$HOOK_REPO_ROOT/scripts/ci/core-release.sh"
+  fi
+
+  if [ "$run_viewer_gate" = true ]; then
+    run_gate "Viewer validation" "$HOOK_REPO_ROOT/scripts/ci/viewer.sh"
+  fi
+elif [ "$run_core_gates" = true ] || [ "$run_viewer_gate" = true ]; then
+  echo ""
+  echo "📦 Deterministic gates (concurrent lanes)"
+
+  if [ "$run_core_gates" = true ]; then
+    start_lane "core static analysis + Dialyzer" core_static_and_dialyzer
+    start_lane "core release verification" \
+      "$HOOK_REPO_ROOT/scripts/ci/core-release.sh"
+  fi
+
+  if [ "$run_viewer_gate" = true ]; then
+    start_lane "Viewer validation" "$HOOK_REPO_ROOT/scripts/ci/viewer.sh"
+  fi
+
+  if ! wait_lanes; then
+    echo ""
+    echo "❌ A deterministic gate failed. Re-run it on its own, or set"
+    echo "   PTC_PRE_PUSH_SERIAL=1 to run every gate serially."
+    exit 1
+  fi
 fi
 
 if [ "$launcher" = true ]; then
