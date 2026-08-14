@@ -199,5 +199,27 @@ defmodule PtcViewer.RouterTest do
     end)
   end
 
+  test "prelude route delegates only the pinned inspection grant", %{trace_dir: trace_dir} do
+    source = {:pinned, "fixed.inspection.jsonl"}
+    {:ok, store} = PtcViewer.InspectionStore.start(source)
+    on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
+
+    response =
+      conn(:get, "/api/analysis/runs/run-1/preludes")
+      |> call_router(
+        trace_dir: trace_dir,
+        inspection_store: store,
+        inspection_adapter: PtcViewer.PinningInspectionTestAdapter
+      )
+
+    assert response.status == 200
+
+    assert Jason.decode!(response.resp_body) == %{
+             "source" => inspect(source),
+             "run_id" => "run-1",
+             "items" => []
+           }
+  end
+
   defp call_router(conn, opts), do: PtcViewer.Router.call(conn, PtcViewer.Router.init(opts))
 end

@@ -22,6 +22,12 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
     assert {:ok, page} = RunAnalysis.collect(analysis, fixture.run_id, "turns", 1_000)
     expected = ConversationProjection.present_page(page)
 
+    assert {:ok, expected_preludes} =
+             InspectionSnapshot.query(inspection, :effective_preludes, %{
+               "run_id" => fixture.run_id,
+               "limit" => 1_000
+             })
+
     inspection_path =
       fixture.inspection
       |> Path.join("*.inspection.jsonl")
@@ -33,6 +39,8 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
 
     assert {:ok, actual} = ViewerAdapter.conversation(grant, fixture.run_id)
     assert actual == expected
+    assert {:ok, ^expected_preludes} = ViewerAdapter.preludes(grant, fixture.run_id)
+    assert {:error, :inspection_run_mismatch} = ViewerAdapter.preludes(grant, "another-run")
   end
 
   @tag :tmp_dir
