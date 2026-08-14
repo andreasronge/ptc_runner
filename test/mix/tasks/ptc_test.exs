@@ -107,6 +107,84 @@ defmodule Mix.Tasks.PtcTest do
   end
 
   @tag :tmp_dir
+  test "root command names a missing manifest property", %{tmp_dir: dir} do
+    manifest_path = write_manifest(dir, %{"value" => 1})
+
+    invalid_manifest =
+      manifest_path
+      |> File.read!()
+      |> Jason.decode!()
+      |> update_in(["workflow"], &Map.delete(&1, "entry"))
+
+    File.write!(manifest_path, Jason.encode!(invalid_manifest))
+
+    message = failed_message(["validate", manifest_path])
+
+    assert message =~
+             "application/required_property_missing: " <>
+               "the application manifest is missing a required property at /workflow/entry"
+  end
+
+  @tag :tmp_dir
+  test "root command names input and result contract failure paths", %{tmp_dir: dir} do
+    manifest_path = write_manifest(dir, %{})
+    File.write!(Path.join(dir, "main.clj"), ~S|(ns main) (defn run [input] (return input))|)
+
+    schema = %{
+      "type" => "object",
+      "properties" => %{"answer" => %{"type" => "integer"}},
+      "required" => ["answer"]
+    }
+
+    File.write!(Path.join(dir, "contract.schema.json"), Jason.encode!(schema))
+    manifest = manifest_path |> File.read!() |> Jason.decode!()
+
+    for {role, value, command, code} <- [
+          {"input_schema", %{"answer" => "wrong"}, "validate", "input_contract_failed"},
+          {"result_schema", %{"answer" => "wrong", "extra" => 1}, "run",
+           "result_contract_failed"},
+          {"input_schema", %{}, "validate", "input_contract_failed"},
+          {"result_schema", %{}, "run", "result_contract_failed"}
+        ] do
+      contract_manifest =
+        manifest
+        |> Map.put("contracts", %{role => %{"path" => "contract.schema.json"}})
+        |> put_in(["input", "value"], value)
+
+      File.write!(manifest_path, Jason.encode!(contract_manifest))
+
+      message = failed_message([command, manifest_path])
+      assert message =~ "#{code}:"
+      assert message =~ " at /answer", "#{role} with #{inspect(value)} rendered: #{message}"
+    end
+
+    tagged_union = %{
+      "oneOf" => [
+        contract_branch("left", "left_value"),
+        contract_branch("right", "right_value")
+      ]
+    }
+
+    File.write!(Path.join(dir, "contract.schema.json"), Jason.encode!(tagged_union))
+
+    for {role, command, code} <- [
+          {"input_schema", "validate", "input_contract_failed"},
+          {"result_schema", "run", "result_contract_failed"}
+        ] do
+      contract_manifest =
+        manifest
+        |> Map.put("contracts", %{role => %{"path" => "contract.schema.json"}})
+        |> put_in(["input", "value"], %{})
+
+      File.write!(manifest_path, Jason.encode!(contract_manifest))
+
+      message = failed_message([command, manifest_path])
+      assert message =~ "#{code}:"
+      assert message =~ " at /kind"
+    end
+  end
+
+  @tag :tmp_dir
   test "an invalid inspection destination states the required filename suffix", %{tmp_dir: dir} do
     manifest_path = write_manifest(dir, %{"value" => 1})
     invalid_inspection = Path.join(dir, "run.jsonl")
@@ -430,6 +508,17 @@ defmodule Mix.Tasks.PtcTest do
     )
 
     path
+  end
+
+  defp contract_branch(kind, value_name) do
+    %{
+      "type" => "object",
+      "properties" => %{
+        "kind" => %{"type" => "string", "const" => kind},
+        value_name => %{"type" => "integer"}
+      },
+      "required" => ["kind", value_name]
+    }
   end
 
   defp write_provider_application(dir, missing_env) do

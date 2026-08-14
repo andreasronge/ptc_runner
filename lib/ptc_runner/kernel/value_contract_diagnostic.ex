@@ -32,7 +32,7 @@ defmodule PtcRunner.Kernel.ValueContractDiagnostic do
         %{contract_authority: authority} = classification
       ) do
     case CommandSource.with_contract(source, authority) do
-      {:ok, bound_source} -> {bound_source, first_violation_path(classification)}
+      {:ok, bound_source} -> {bound_source, first_violation_path(classification, authority)}
       {:error, :invalid_command_source} -> {source, nil}
     end
   end
@@ -55,12 +55,25 @@ defmodule PtcRunner.Kernel.ValueContractDiagnostic do
     end)
   end
 
-  defp first_violation_path(%{violations: violations}) when is_list(violations) do
-    Enum.find_value(violations, fn
-      %{path: %CommandPath{} = path} -> path
-      _invalid -> nil
-    end)
+  defp first_violation_path(%{violations: violations}, authority) when is_list(violations) do
+    paths = Enum.flat_map(violations, &violation_paths(&1, authority))
+
+    Enum.find(paths, &(&1.segments != [])) || List.first(paths)
   end
 
-  defp first_violation_path(_classification), do: nil
+  defp first_violation_path(_classification, _authority), do: nil
+
+  defp violation_paths(
+         %{path: %CommandPath{} = parent, missing_required: [name | _rest]},
+         authority
+       )
+       when is_binary(name) do
+    case CommandPath.contract(authority, parent.segments ++ [{:property, name}]) do
+      {:ok, missing_path} -> [missing_path]
+      {:error, :invalid_command_path} -> [parent]
+    end
+  end
+
+  defp violation_paths(%{path: %CommandPath{} = path}, _authority), do: [path]
+  defp violation_paths(_violation, _authority), do: []
 end

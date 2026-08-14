@@ -3,8 +3,10 @@ defmodule PtcRunner.Kernel.ValueContractTest do
 
   alias PtcRunner.Kernel.CommandContractAuthority
   alias PtcRunner.Kernel.CommandPath
+  alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ValueContract
+  alias PtcRunner.Kernel.ValueContractDiagnostic
 
   test "compiles and validates an ordinary bounded object contract" do
     schema = %{
@@ -433,6 +435,60 @@ defmodule PtcRunner.Kernel.ValueContractTest do
              CommandPath.contract(classification.contract_authority, [
                {:property, "candidate"}
              ])
+  end
+
+  test "command diagnostics prefer declared leaves and name missing properties" do
+    assert {:ok, contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "properties" => %{"answer" => %{"type" => "integer"}},
+               "required" => ["answer"]
+             })
+
+    {:ok, source} = CommandSource.new(:result_contract, "result.schema.json")
+
+    for value <- [%{"answer" => "wrong", "extra" => 1}, %{}] do
+      assert {:ok, classification} = ValueContractDiagnostic.classify(contract, value)
+
+      assert {_bound_source, %CommandPath{} = path} =
+               ValueContractDiagnostic.diagnostic_parts(source, classification)
+
+      assert CommandPath.to_pointer(path) == "/answer"
+    end
+
+    assert {:ok, missing} = ValueContractDiagnostic.classify(contract, %{})
+
+    assert Enum.any?(missing.violations, fn
+             %{missing_required: ["answer"], path: path} -> CommandPath.to_pointer(path) == ""
+             _other -> false
+           end)
+
+    assert {:ok, union_contract} = ValueContract.compile(decision_schema())
+    assert {:ok, union_classification} = ValueContractDiagnostic.classify(union_contract, %{})
+
+    assert {_bound_source, %CommandPath{} = discriminator_path} =
+             ValueContractDiagnostic.diagnostic_parts(source, union_classification)
+
+    assert CommandPath.to_pointer(discriminator_path) == "/decision"
+
+    assert {:error, :invalid_command_path} =
+             CommandPath.contract(union_classification.contract_authority, [
+               {:property, "reason"}
+             ])
+
+    assert {:ok, unmatched} =
+             ValueContractDiagnostic.classify(union_contract, %{
+               "decision" => "unknown",
+               "reason" => "still declared in one branch"
+             })
+
+    refute Enum.any?(unmatched.violations, &Map.has_key?(&1, :allowed_keys))
+    refute Enum.any?(unmatched.violations, &Map.has_key?(&1, :undeclared_key_count))
+
+    assert {_bound_source, %CommandPath{} = unmatched_path} =
+             ValueContractDiagnostic.diagnostic_parts(source, unmatched)
+
+    assert CommandPath.to_pointer(unmatched_path) == "/decision"
   end
 
   test "nested object diagnostics retain the selected branch's attested path" do

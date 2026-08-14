@@ -1,11 +1,12 @@
 defmodule PtcRunner.Kernel.CommandContractAuthority do
   @moduledoc """
-  Sealed behavior and branch identity for a classified contract failure.
+  Sealed behavior and path scope for a classified contract failure.
 
   The authority travels with bounded classification evidence, independently of
   any selected diagnostic path. A command source can therefore bind to the
   classifying contract before a path is admitted, preventing a path minted
-  from another contract or tagged-union branch from certifying itself.
+  from another contract or tagged-union branch from certifying itself. Before
+  a tagged-union branch matches, only its shared discriminator is in scope.
   """
 
   alias PtcRunner.Kernel.Attestation

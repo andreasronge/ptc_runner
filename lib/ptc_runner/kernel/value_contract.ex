@@ -727,7 +727,21 @@ defmodule PtcRunner.Kernel.ValueContract do
        when is_list(branches) and is_integer(branch_index) and branch_index >= 0,
        do: Enum.at(branches, branch_index)
 
-  defp selected_path_schema(%{"oneOf" => branches}, nil) when is_list(branches), do: nil
+  defp selected_path_schema(%{"oneOf" => [first | _rest] = branches}, nil) do
+    with {:ok, name} <- shared_discriminator(branches),
+         %{"properties" => properties} <- first,
+         {:ok, discriminator_schema} <- Map.fetch(properties, name) do
+      %{
+        "type" => "object",
+        "properties" => %{name => discriminator_schema},
+        "required" => [name],
+        "additionalProperties" => true
+      }
+    else
+      _invalid -> nil
+    end
+  end
+
   defp selected_path_schema(schema, nil) when is_map(schema), do: schema
   defp selected_path_schema(_schema, _branch_index), do: nil
 
