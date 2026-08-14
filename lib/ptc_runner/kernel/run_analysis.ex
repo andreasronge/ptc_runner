@@ -169,7 +169,7 @@ defmodule PtcRunner.Kernel.RunAnalysis do
     with :ok <-
            validate_keys(
              arguments,
-             ~w(limit cursor status run_id trace_id tags name model provider from to)
+             ~w(limit cursor status run_id trace_id tags name bundle model provider from to)
            ),
          :ok <- validate_limit(arguments) do
       TraceSnapshot.query(analysis.traces, :list_runs, arguments)

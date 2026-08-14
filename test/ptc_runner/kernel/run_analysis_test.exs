@@ -40,6 +40,12 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     assert run_id == fixture.run_id
 
+    assert {:ok, %{"items" => [%{"run_id" => ^run_id}]}} =
+             RunAnalysis.query(analysis, :runs, %{"bundle" => "prelude-hash"})
+
+    assert {:ok, %{"items" => []}} =
+             RunAnalysis.query(analysis, :runs, %{"bundle" => "different-prelude"})
+
     assert {:ok,
             %{
               "run" => %{"run_id" => ^run_id, "complete" => true},
@@ -568,7 +574,9 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
              "analysis-read"
            ]
 
+    runs = Enum.find(capabilities, &(&1.name == "analysis-runs"))
     read = Enum.find(capabilities, &(&1.name == "analysis-read"))
+    assert runs.input_schema["properties"]["bundle"]["type"] == "string"
     assert read.input_schema["properties"]["limit"]["maximum"] == 100
     assert read.input_schema["properties"]["parent_evaluation_id"]["type"] == "string"
 

@@ -106,6 +106,7 @@ function KernelTranscript({
 
 function Hero({ metadata, transcript, eventCount, truncatedPage }) {
   const status = metadata.status || (metadata.complete ? 'complete' : 'incomplete');
+  const bundle = metadata.workflow_prelude?.hash;
   // The run ID is the identity a reader recognises and can act on; the bundle
   // hash identifies the workflow, and two runs of one workflow share it. It
   // stays available as a secondary fact rather than as the heading.
@@ -118,7 +119,7 @@ function Hero({ metadata, transcript, eventCount, truncatedPage }) {
     ['Model', abbreviate(metadata.model), metadata.model],
     ['Provider', abbreviate(metadata.provider), metadata.provider],
     ['Source', metadata.source],
-    ['Bundle', abbreviate(metadata.name), metadata.name]
+    ['Bundle', abbreviate(bundle), bundle]
   ].filter(([, value]) => value !== null && value !== undefined && value !== '');
   const errorCount = metadata.error_count ?? transcript.limits.length;
 

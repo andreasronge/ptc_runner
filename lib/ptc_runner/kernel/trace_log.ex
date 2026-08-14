@@ -748,7 +748,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     with :ok <-
            validate_keys(
              arguments,
-             ~w(limit cursor status run_id trace_id tags name model provider from to)
+             ~w(limit cursor status run_id trace_id tags name bundle model provider from to)
            ),
          :ok <- validate_run_filters(arguments),
          {:ok, page} <- page_options(arguments, source_id, :list_runs) do
@@ -816,7 +816,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     with :ok <-
            validate_keys(
              arguments,
-             ~w(status run_id trace_id tags name model provider from to mission_name)
+             ~w(status run_id trace_id tags name bundle model provider from to mission_name)
            ),
          :ok <- validate_run_filters(arguments),
          :ok <- optional_strings(arguments, ["mission_name"]) do
@@ -2376,7 +2376,8 @@ defmodule PtcRunner.Kernel.TraceLog do
       ~w(mission_prelude mission_inventory_hash mission_inventory_bytes mission_model_context_hash mission_model_context_bytes)
 
     if is_map(data["missions"]) and Enum.all?(singular, &(not Map.has_key?(data, &1))) and
-         not Map.has_key?(data, "mission_name") do
+         not Map.has_key?(data, "mission_name") and
+         valid_workflow_prelude?(data["workflow_prelude"]) do
       :ok
     else
       {:error, :malformed_source}
@@ -2404,6 +2405,28 @@ defmodule PtcRunner.Kernel.TraceLog do
         if Map.has_key?(data, "mission_name"), do: {:error, :malformed_source}, else: :ok
     end
   end
+
+  defp valid_workflow_prelude?(nil), do: true
+
+  defp valid_workflow_prelude?(prelude) when is_map(prelude) do
+    component_ids = prelude["component_ids"]
+    hash = prelude["hash"]
+    dependency_indices = prelude["dependency_indices"]
+
+    is_list(component_ids) and Enum.all?(component_ids, &(valid_string(&1) == :ok)) and
+      (is_nil(hash) or valid_string(hash) == :ok) and
+      (is_nil(dependency_indices) or valid_dependency_indices?(dependency_indices))
+  end
+
+  defp valid_workflow_prelude?(_prelude), do: false
+
+  defp valid_dependency_indices?(dependency_indices) when is_list(dependency_indices) do
+    Enum.all?(dependency_indices, fn indices ->
+      is_list(indices) and Enum.all?(indices, &(is_integer(&1) and &1 >= 0))
+    end)
+  end
+
+  defp valid_dependency_indices?(_dependency_indices), do: false
 
   defp validate_run_stopped_usage("run-stopped", data) do
     case Map.fetch(data, "usage") do
@@ -2462,6 +2485,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       "name" => Map.get(labels, "name"),
       "model" => Map.get(labels, "model"),
       "provider" => Map.get(labels, "provider"),
+      "evaluations" => evaluation_count(events),
       "subordinate_evaluations" => evaluation_count(events, "mission"),
       "subordinate_source_checks" => subordinate_source_checks(stopped),
       "workflow_capability_calls" => workflow_calls,
@@ -2505,6 +2529,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     Enum.filter(items, fn item ->
       equal_filter?(item, arguments, "status") and equal_filter?(item, arguments, "run_id") and
         equal_filter?(item, arguments, "trace_id") and equal_filter?(item, arguments, "name") and
+        bundle_filter?(item, arguments["bundle"]) and
         equal_filter?(item, arguments, "model") and equal_filter?(item, arguments, "provider") and
         tags_match?(item["tags"], arguments["tags"]) and
         after_or_equal?(item["start_timestamp"], arguments["from"]) and
@@ -2514,6 +2539,11 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp equal_filter?(item, arguments, key),
     do: is_nil(arguments[key]) or item[key] == arguments[key]
+
+  defp bundle_filter?(_item, nil), do: true
+
+  defp bundle_filter?(item, bundle),
+    do: get_in(item, ["workflow_prelude", "hash"]) == bundle
 
   defp tags_match?(_tags, nil), do: true
 
@@ -2732,6 +2762,8 @@ defmodule PtcRunner.Kernel.TraceLog do
     Enum.count(events, &(&1["type"] == "capability-started" and event_data(&1, "name") == name))
   end
 
+  defp evaluation_count(events), do: Enum.count(events, &(&1["type"] == "evaluation-started"))
+
   defp evaluation_count(events, environment) do
     Enum.count(events, fn event ->
       event["type"] == "evaluation-started" and
@@ -2897,7 +2929,10 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp validate_run_filters(arguments) do
     with :ok <-
-           optional_strings(arguments, ~w(status run_id trace_id name model provider from to)),
+           optional_strings(
+             arguments,
+             ~w(status run_id trace_id name bundle model provider from to)
+           ),
          :ok <- valid_tags(arguments["tags"]),
          :ok <- valid_timestamp(arguments["from"]) do
       valid_timestamp(arguments["to"])

@@ -3,6 +3,7 @@ import { renderKernelTranscript } from './kernel-transcript.js';
 import { renderSemanticConversation } from './semantic-conversation.js';
 import { createAnalyzeButton, createReplController, nextTabName, readViewerConfig } from './repl.js';
 import { createRunCatalog } from './run-catalog.js';
+import { commitCurrentLoad } from './current-load.js';
 import { truncate } from './utils.js';
 
 function formatDate(isoString) {
@@ -21,6 +22,7 @@ const state = {
   runs: [],
   page: null,
   catalogGeneration: 0,
+  routeGeneration: 0,
   query: '',
   selectedRunId: null
 };
@@ -97,7 +99,7 @@ function renderRunPicker() {
 function matchesQuery(run, query) {
   if (!query) return true;
   const needle = query.toLowerCase();
-  return [run.run_id, run.name, run.status, run.trace_id]
+  return [run.run_id, run.name, run.status, run.trace_id, run.workflow_prelude?.hash]
     .some(field => typeof field === 'string' && field.toLowerCase().includes(needle));
 }
 
@@ -159,8 +161,10 @@ function RunRow({ run }) {
       </span>
       <span class="file-meta">
         ${run.start_timestamp && html`<span class="modified">${formatDate(run.start_timestamp)}</span>`}
-        <span class="size">${run.subordinate_evaluations || 0} evaluations</span>
-        <span class="file-picker-query" title=${run.name || ''}>${shortenHash(run.name)}</span>
+        <span class="size">${run.evaluations ?? 0} evaluations</span>
+        <span class="file-picker-query" title=${run.workflow_prelude?.hash || ''}>
+          ${shortenHash(run.workflow_prelude?.hash)}
+        </span>
       </span>
     </button>
   `;
@@ -213,17 +217,21 @@ async function applyRoute() {
 
   if (route.runId === state.selectedRunId) return;
   state.selectedRunId = route.runId;
+  state.routeGeneration += 1;
+  const routeGeneration = state.routeGeneration;
 
   if (!route.runId) {
     state.currentRun = null;
-    mount(document.getElementById('view-container'), null);
+    const container = document.getElementById('view-container');
+    renderSemanticConversation(container, null);
+    mount(container, null);
     document.getElementById('breadcrumb').replaceChildren();
     renderRunPicker();
     return;
   }
 
   renderRunPicker();
-  await loadRun(route.runId);
+  await loadRun(route.runId, routeGeneration);
 }
 
 // Bounded page budget for the eager turn fetch. Run-level canonical metrics
@@ -253,7 +261,7 @@ async function fetchAllTurns(runId) {
   return { turns: merged };
 }
 
-async function loadRun(runId) {
+async function loadRun(runId, routeGeneration) {
   const [runResponse, turnsResult, conversationResponse, preludesResponse] = await Promise.all([
     fetch(`/api/kernel/runs/${encodeURIComponent(runId)}`),
     fetchAllTurns(runId),
@@ -261,32 +269,42 @@ async function loadRun(runId) {
     fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/preludes`)
   ]);
 
-  if (!runResponse.ok || turnsResult.failed) {
-    const failed = runResponse.ok ? turnsResult.failed : runResponse;
-    showNotice(`Failed to load run ${runId} (HTTP ${failed.status}: ${await safeBodyText(failed)}).`);
-    return;
-  }
+  await commitCurrentLoad(routeGeneration, {
+    isCurrent: candidate => state.routeGeneration === candidate,
+    load: async () => {
+      if (!runResponse.ok || turnsResult.failed) {
+        const failed = runResponse.ok ? turnsResult.failed : runResponse;
+        return {
+          error: `Failed to load run ${runId} (HTTP ${failed.status}: ${await safeBodyText(failed)}).`
+        };
+      }
 
-  const conversation = conversationResponse.ok
-    ? await conversationResponse.json()
-    : {
-        'available?': false,
-        status: conversationResponse.status,
-        reason: await safeBodyText(conversationResponse)
+      const conversation = conversationResponse.ok
+        ? await conversationResponse.json()
+        : {
+            'available?': false,
+            status: conversationResponse.status,
+            reason: await safeBodyText(conversationResponse)
+          };
+      const preludes = preludesResponse.ok ? await preludesResponse.json() : null;
+
+      return {
+        data: {
+          metadata: await runResponse.json(),
+          turns: turnsResult.turns,
+          conversation,
+          preludes
+        }
       };
-  const preludes = preludesResponse.ok ? await preludesResponse.json() : null;
-  renderRun(
-    {
-      metadata: await runResponse.json(),
-      turns: turnsResult.turns,
-      conversation,
-      preludes
     },
-    { fresh: true }
-  );
+    commit: result => {
+      if (result.error) showNotice(result.error);
+      else renderRun(result.data, { fresh: true, routeGeneration });
+    }
+  });
 }
 
-function renderRun(data, { fresh = false } = {}) {
+function renderRun(data, { fresh = false, routeGeneration = state.routeGeneration } = {}) {
   state.currentRun = data;
   const { metadata, turns, conversation } = data;
   const breadcrumb = document.getElementById('breadcrumb');
@@ -316,24 +334,37 @@ function renderRun(data, { fresh = false } = {}) {
     onLoadMore: async button => {
       button.disabled = true;
       button.textContent = 'Loading…';
-      const response = await fetch(
-        `/api/kernel/runs/${encodeURIComponent(metadata.run_id)}/turns?limit=100&cursor=${encodeURIComponent(turns.next_cursor)}`
-      );
+      await commitCurrentLoad(routeGeneration, {
+        isCurrent: candidate => state.routeGeneration === candidate,
+        load: async () => {
+          const response = await fetch(
+            `/api/kernel/runs/${encodeURIComponent(metadata.run_id)}/turns?limit=100&cursor=${encodeURIComponent(turns.next_cursor)}`
+          );
 
-      if (!response.ok) {
-        button.disabled = false;
-        button.textContent = 'Load more events';
-        return;
-      }
+          if (!response.ok) return { error: true };
+          return { nextPage: await response.json() };
+        },
+        commit: result => {
+          if (result.error) {
+            if (button.isConnected) {
+              button.disabled = false;
+              button.textContent = 'Load more events';
+            }
+            return;
+          }
 
-      const nextPage = await response.json();
-      // Not `fresh`: appending a page diffs into the existing tree, so open
-      // disclosures and the reading position are kept.
-      renderRun({
-        metadata,
-        conversation,
-        preludes: data.preludes,
-        turns: { ...nextPage, items: [...(turns.items || []), ...(nextPage.items || [])] }
+          // Not `fresh`: appending a page diffs into the existing tree, so open
+          // disclosures and the reading position are kept.
+          renderRun({
+            metadata,
+            conversation,
+            preludes: data.preludes,
+            turns: {
+              ...result.nextPage,
+              items: [...(turns.items || []), ...(result.nextPage.items || [])]
+            }
+          }, { routeGeneration });
+        }
       });
     }
   });

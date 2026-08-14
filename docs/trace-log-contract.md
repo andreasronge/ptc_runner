@@ -318,7 +318,7 @@ sufficient to select a run without loading its activity:
 - the successful terminal `result_hash` when present, without the result value;
 - workflow/agent name when supplied;
 - model and provider identifiers when recorded by a provider;
-- subordinate-evaluation count;
+- total and subordinate-evaluation counts;
 - workflow and mission capability-call counts;
 - LLM-call summary derived from named `llm-request` events when applicable;
 - error count and duration summary;
@@ -382,8 +382,8 @@ narrowed event set. Workflow and lifecycle events never match a mission filter.
 ### `analysis/runs`
 
 Discovers runs in the granted source. Filters are limited to run/trace ID,
-status, bounded exact-match tags, workflow/agent name, model/provider when
-present, timestamp range, limit, and cursor.
+status, bounded exact-match tags, workflow/agent name, workflow bundle hash,
+model/provider when present, timestamp range, limit, and cursor.
 
 Default ordering is deterministic: newest start timestamp first, with run ID as
 a stable tie-breaker.

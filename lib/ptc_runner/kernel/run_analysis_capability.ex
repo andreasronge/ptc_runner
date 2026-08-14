@@ -78,6 +78,7 @@ defmodule PtcRunner.Kernel.RunAnalysisCapability do
       "trace_id" => string_schema(),
       "tags" => %{"type" => "object"},
       "name" => string_schema(),
+      "bundle" => string_schema(),
       "model" => string_schema(),
       "provider" => string_schema(),
       "from" => string_schema(),

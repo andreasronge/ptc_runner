@@ -111,6 +111,22 @@ defmodule PtcViewer.KernelTranscriptTest do
     refute rendered =~ "ambiguous-result"
   end
 
+  test "labels the workflow prelude hash as the bundle identity", %{tmp_dir: directory} do
+    rendered =
+      render(directory, %{
+        "metadata" => %{
+          "run_id" => "bundle-run",
+          "name" => "sha256:name-fingerprint",
+          "workflow_prelude" => %{"component_ids" => ["kernel"], "hash" => "bundle-hash"}
+        },
+        "turns" => %{"items" => []}
+      })
+
+    assert rendered =~ "Bundle"
+    assert rendered =~ "bundle-hash"
+    refute rendered =~ "sha256:name-fingerprint"
+  end
+
   defp private_program_data(ambiguous?) do
     program = ~S|(runs/diagnose "failed-run")|
 
