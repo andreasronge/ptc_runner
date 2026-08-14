@@ -167,13 +167,23 @@ defmodule PtcRunner.Kernel.NamedMissionsContinuationTest do
 
     assert {:ok, _result} = Kernel.run(source, config)
 
-    missions =
+    evaluation_events =
       sink
       |> EventSink.events()
       |> Enum.filter(&(&1.type == "evaluation-started"))
-      |> Enum.map(&get_in(&1.data, [:mission_name]))
+
+    missions = Enum.map(evaluation_events, &get_in(&1.data, [:mission_name]))
 
     assert "review" in missions
+
+    workflow_evaluation_id =
+      evaluation_events
+      |> Enum.find(&(&1.data.environment == :workflow))
+      |> get_in([Access.key!(:data), Access.key!(:evaluation_id)])
+
+    mission_events = Enum.filter(evaluation_events, &(&1.data.environment == :mission))
+    assert mission_events != []
+    assert Enum.all?(mission_events, &(&1.data.parent_evaluation_id == workflow_evaluation_id))
   end
 
   test "evaluation preflight limits carry the requested mission" do

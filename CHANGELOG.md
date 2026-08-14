@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added canonical parent-evaluation edges for workflow-launched mission
+  evaluations. Private generated-source and turn projections preserve the edge,
+  and `activity`, `generated_sources`, and `turns` accept exact
+  `parent_evaluation_id` filters so debuggers can navigate from a workflow error
+  to its child programs without comparing unrelated snapshot sequences.
+
 - Replaced the split log/inspection analysis vocabularies with the three-operation
   `analysis/runs`, `analysis/open`, and `analysis/read` navigation API shared by
   PTC-Lisp, the Viewer, Elixir embedders, and the one-shot `ptc transcript`

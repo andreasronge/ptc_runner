@@ -116,7 +116,8 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   @doc """
   Builds the workflow-only subordinate-evaluation callback.
 
-  `opts` accepts `admission: :block | :fail_fast` (default `:fail_fast`).
+  `opts` accepts `admission: :block | :fail_fast` (default `:fail_fast`) and an
+  optional `parent_evaluation_id` for the enclosing workflow evaluation.
   The Runner's workflow route blocks, so concurrent agent loops queue behind
   the single evaluation lease instead of failing. The REPL keeps fail-fast:
   a REPL expression evaluates under the session's own lease, so a blocking
@@ -124,7 +125,10 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   """
   def kernel_eval(state, missions, limits, event_sink, inspection_sink \\ nil, opts \\ [])
       when is_map(missions) and not is_struct(missions) do
-    admission = Keyword.get(opts, :admission, :fail_fast)
+    evaluation_opts = [
+      admission: Keyword.get(opts, :admission, :fail_fast),
+      parent_evaluation_id: Keyword.get(opts, :parent_evaluation_id)
+    ]
 
     fn arguments ->
       case take_mission(arguments, missions) do
@@ -136,7 +140,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             limits,
             event_sink,
             inspection_sink,
-            admission
+            evaluation_opts
           )
 
         :error ->
@@ -202,13 +206,21 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          limits,
          event_sink,
          inspection_sink,
-         admission
+         evaluation_opts
        ) do
     case arguments do
       %{"kind" => kind, "source" => source} = arguments
       when is_binary(source) and map_size(arguments) == 2 ->
         if keyword_name(kind) == "source" do
-          evaluate_source(state, target, source, limits, event_sink, inspection_sink, admission)
+          evaluate_source(
+            state,
+            target,
+            source,
+            limits,
+            event_sink,
+            inspection_sink,
+            evaluation_opts
+          )
         else
           invalid_kernel_eval_request(state)
         end
@@ -224,7 +236,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             limits,
             event_sink,
             inspection_sink,
-            admission
+            evaluation_opts
           )
         else
           invalid_kernel_eval_request(state)
@@ -233,7 +245,15 @@ defmodule PtcRunner.Kernel.RuntimeTools do
       %{"kind" => kind, "program" => %Program{source: source}} = arguments
       when map_size(arguments) == 2 ->
         if keyword_name(kind) == "embedded" do
-          evaluate_source(state, target, source, limits, event_sink, inspection_sink, admission)
+          evaluate_source(
+            state,
+            target,
+            source,
+            limits,
+            event_sink,
+            inspection_sink,
+            evaluation_opts
+          )
         else
           invalid_kernel_eval_request(state)
         end
@@ -249,7 +269,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             limits,
             event_sink,
             inspection_sink,
-            admission
+            evaluation_opts
           )
         else
           invalid_kernel_eval_request(state)
@@ -361,7 +381,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          limits,
          event_sink,
          inspection_sink,
-         admission
+         evaluation_opts
        ) do
     %{
       status: :ok,
@@ -374,7 +394,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
           limits.evaluation_timeout_ms,
           event_sink,
           inspection_sink,
-          admission: admission
+          evaluation_opts
         )
     }
   end
@@ -387,7 +407,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          limits,
          event_sink,
          inspection_sink,
-         admission
+         evaluation_opts
        ) do
     case normalize_params(params, limits.capability_argument_bytes) do
       {:ok, params} ->
@@ -402,8 +422,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
               limits.evaluation_timeout_ms,
               event_sink,
               inspection_sink,
-              params: params,
-              admission: admission
+              Keyword.put(evaluation_opts, :params, params)
             )
         }
 

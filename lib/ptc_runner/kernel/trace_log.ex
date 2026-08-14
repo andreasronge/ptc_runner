@@ -196,9 +196,20 @@ defmodule PtcRunner.Kernel.TraceLog do
           |> Enum.uniq()
           |> Enum.sort()
 
+        parent_evaluation_ids =
+          run_events
+          |> Enum.filter(&(&1["type"] == "evaluation-started"))
+          |> Map.new(fn event ->
+            {event_data(event, "evaluation_id"), event_data(event, "parent_evaluation_id")}
+          end)
+          |> Map.reject(fn {evaluation_id, parent_evaluation_id} ->
+            not is_binary(evaluation_id) or not is_binary(parent_evaluation_id)
+          end)
+
         {run_id,
          %{
            "expected_model_exchange_ids" => expected_model_exchanges,
+           "parent_evaluation_ids" => parent_evaluation_ids,
            "terminal?" => Enum.any?(run_events, &(&1["type"] == "run-stopped")),
            "events_dropped?" => Enum.any?(run_events, &(&1["type"] == "events-dropped"))
          }}
@@ -782,7 +793,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     with :ok <-
            validate_keys(
              arguments,
-             ~w(run_id limit cursor status evaluation_id capability mission_name)
+             ~w(run_id limit cursor status evaluation_id parent_evaluation_id capability mission_name)
            ),
          :ok <- valid_string(run_id),
          :ok <- validate_turn_filters(arguments),
@@ -2445,6 +2456,8 @@ defmodule PtcRunner.Kernel.TraceLog do
     (is_nil(arguments["status"]) or status == arguments["status"]) and
       (is_nil(arguments["evaluation_id"]) or
          event_data(event, "evaluation_id") == arguments["evaluation_id"]) and
+      (is_nil(arguments["parent_evaluation_id"]) or
+         event_data(event, "parent_evaluation_id") == arguments["parent_evaluation_id"]) and
       (is_nil(arguments["capability"]) or event_data(event, "name") == arguments["capability"]) and
       mission_matches?(event, arguments["mission_name"])
   end
@@ -2802,7 +2815,11 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp validate_turn_filters(arguments),
-    do: optional_strings(arguments, ~w(status evaluation_id capability mission_name))
+    do:
+      optional_strings(
+        arguments,
+        ~w(status evaluation_id parent_evaluation_id capability mission_name)
+      )
 
   defp evaluations_by_mission(events) do
     events

@@ -200,7 +200,7 @@ defmodule PtcRunner.Kernel.Runner do
   defp execute_workflow(entry_source, config, state, timeout_ms, deadline_ms, evaluation_id) do
     opts = [
       context: config.input,
-      tools: workflow_tools(config, state, deadline_ms),
+      tools: workflow_tools(config, state, deadline_ms, evaluation_id),
       prelude: bundle_prelude(config.workflow_environment),
       timeout: timeout_ms,
       compile_timeout: timeout_ms,
@@ -430,7 +430,7 @@ defmodule PtcRunner.Kernel.Runner do
         {name, Map.fetch!(mission.inventory, field)}
       end)
 
-  defp workflow_tools(config, state, validation_deadline_ms) do
+  defp workflow_tools(config, state, validation_deadline_ms, evaluation_id) do
     state
     |> ToolGrant.capability_callbacks(
       :workflow,
@@ -458,7 +458,8 @@ defmodule PtcRunner.Kernel.Runner do
           config.limits,
           config.event_sink,
           config.inspection_sink,
-          admission: :block
+          admission: :block,
+          parent_evaluation_id: evaluation_id
         )
       )
     )

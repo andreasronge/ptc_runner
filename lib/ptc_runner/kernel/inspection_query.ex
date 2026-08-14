@@ -29,6 +29,9 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   repeated component and capability names remain unambiguous.
   V6 adds one singular, non-paginated terminal `result` projection per run and
   joins static prelude-call analysis to generated source by `evaluation_id`.
+  Generated source and reconstructed turns copy the canonical
+  `parent_evaluation_id` edge rather than inferring one from snapshot-local
+  sequence numbers.
   """
 
   alias PtcRunner.Kernel.ConversationProjection
@@ -364,11 +367,16 @@ defmodule PtcRunner.Kernel.InspectionQuery do
 
   defp merge_artifacts(compiled, %{"runs" => trace_facts} = trace_analysis)
        when is_map(trace_facts) do
+    generated_sources =
+      compiled
+      |> merge_collection(:generated_sources)
+      |> Enum.map(&attach_parent_evaluation_id(&1, trace_facts))
+
     collections = %{
       list_runs: compiled |> Enum.map(& &1.run) |> Enum.sort_by(& &1["run_id"]),
       model_exchanges: merge_collection(compiled, :model_exchanges),
       capability_calls: merge_collection(compiled, :capability_calls),
-      generated_sources: merge_collection(compiled, :generated_sources),
+      generated_sources: generated_sources,
       effective_preludes: merge_collection(compiled, :effective_preludes),
       provider_exchanges: merge_collection(compiled, :provider_exchanges),
       execution_prints: merge_collection(compiled, :execution_prints),
@@ -405,6 +413,15 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   end
 
   defp merge_artifacts(_compiled, _trace_analysis), do: {:error, :invalid_inspection_snapshot}
+
+  defp attach_parent_evaluation_id(source, trace_facts) do
+    parent_evaluation_id =
+      get_in(trace_facts, [source["run_id"], "parent_evaluation_ids", source["evaluation_id"]])
+
+    if is_binary(parent_evaluation_id),
+      do: Map.put(source, "parent_evaluation_id", parent_evaluation_id),
+      else: source
+  end
 
   defp merge_collection(compiled, operation) do
     compiled
@@ -452,7 +469,8 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     do: {:error, :invalid_query}
 
   defp execute(collections, source_id, :turns, %{"run_id" => run_id} = arguments, max_bytes) do
-    allowed = ~w(run_id limit cursor stream_id capability_id prelude_call prelude_component)
+    allowed =
+      ~w(run_id limit cursor stream_id capability_id evaluation_id parent_evaluation_id prelude_call prelude_component)
 
     with :ok <- validate_keys(arguments, allowed),
          true <- valid_string?(run_id),
@@ -548,7 +566,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   defp collection_filters(:provider_exchanges), do: ~w(capability_id mission_name request_id)
 
   defp collection_filters(:generated_sources),
-    do: ~w(evaluation_id mission_name prelude_call prelude_component)
+    do: ~w(evaluation_id parent_evaluation_id mission_name prelude_call prelude_component)
 
   defp collection_filters(:effective_preludes),
     do: ~w(component_id environment mission_name)
@@ -572,12 +590,19 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   defp collection_match?(:turns, item, arguments) do
     equal_filter?(item, arguments, "stream_id") and
       equal_filter?(item, arguments, "capability_id") and
+      generated_equal_match?(item, arguments["evaluation_id"], "evaluation_id") and
+      generated_equal_match?(
+        item,
+        arguments["parent_evaluation_id"],
+        "parent_evaluation_id"
+      ) and
       generated_call_match?(item, arguments["prelude_call"], "ref") and
       generated_call_match?(item, arguments["prelude_component"], "component_id")
   end
 
   defp collection_match?(:generated_sources, item, arguments) do
     equal_filter?(item, arguments, "evaluation_id") and
+      equal_filter?(item, arguments, "parent_evaluation_id") and
       equal_filter?(item, arguments, "mission_name") and
       call_match?(item, arguments["prelude_call"], "ref") and
       call_match?(item, arguments["prelude_component"], "component_id")
@@ -595,6 +620,14 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     item
     |> Map.get("generated", [])
     |> Enum.any?(&call_match?(&1, expected, key))
+  end
+
+  defp generated_equal_match?(_item, nil, _key), do: true
+
+  defp generated_equal_match?(item, expected, key) do
+    item
+    |> Map.get("generated", [])
+    |> Enum.any?(&(&1[key] == expected))
   end
 
   defp call_match?(_item, nil, _key), do: true

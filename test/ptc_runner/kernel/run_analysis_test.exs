@@ -140,6 +140,84 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
              })
   end
 
+  @tag :tmp_dir
+  test "follows a workflow error to its child source and producing turn", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root, "failure-navigation")
+    {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
+    {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
+    on_exit(fn -> InspectionSnapshot.stop(inspection) end)
+    on_exit(fn -> TraceSnapshot.stop(trace) end)
+    assert {:ok, analysis} = RunAnalysis.new(trace, inspection)
+
+    assert {:ok, %{"collections" => collections}} =
+             RunAnalysis.query(analysis, :open, %{"run_id" => fixture.run_id})
+
+    assert "parent_evaluation_id" in Enum.find(collections, &(&1["name"] == "activity"))[
+             "filters"
+           ]
+
+    assert "evaluation_id" in Enum.find(collections, &(&1["name"] == "turns"))["filters"]
+
+    assert "parent_evaluation_id" in Enum.find(collections, &(&1["name"] == "turns"))["filters"]
+
+    assert {:ok, %{"items" => [%{"evaluation_id" => workflow_evaluation_id}]}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => fixture.run_id,
+               "collection" => "execution_errors"
+             })
+
+    assert {:ok, %{"items" => child_activity}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => fixture.run_id,
+               "collection" => "activity",
+               "parent_evaluation_id" => workflow_evaluation_id
+             })
+
+    child_evaluation_ids =
+      child_activity
+      |> Enum.map(&get_in(&1, ["data", "evaluation_id"]))
+      |> Enum.uniq()
+
+    assert child_evaluation_ids == ["eval-#{fixture.run_id}"]
+    [child_evaluation_id] = child_evaluation_ids
+
+    assert {:ok,
+            %{
+              "items" => [
+                %{
+                  "evaluation_id" => ^child_evaluation_id,
+                  "parent_evaluation_id" => ^workflow_evaluation_id,
+                  "source" => "(return 42)"
+                }
+              ]
+            }} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => fixture.run_id,
+               "collection" => "generated_sources",
+               "parent_evaluation_id" => workflow_evaluation_id
+             })
+
+    assert {:ok,
+            %{
+              "items" => [
+                %{
+                  "generated" => [
+                    %{
+                      "evaluation_id" => ^child_evaluation_id,
+                      "parent_evaluation_id" => ^workflow_evaluation_id
+                    }
+                  ]
+                }
+              ]
+            }} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => fixture.run_id,
+               "collection" => "turns",
+               "evaluation_id" => child_evaluation_id,
+               "parent_evaluation_id" => workflow_evaluation_id
+             })
+  end
+
   test "conversation streams choose the unique longest complete prefix" do
     user = %{"role" => "user", "content" => "start"}
     assistant_1 = %{"role" => "assistant", "content" => nil, "tool_calls" => [%{"id" => "1"}]}
@@ -492,6 +570,7 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     read = Enum.find(capabilities, &(&1.name == "analysis-read"))
     assert read.input_schema["properties"]["limit"]["maximum"] == 100
+    assert read.input_schema["properties"]["parent_evaluation_id"]["type"] == "string"
 
     assert {:ok, %{"items" => [_]}} =
              read.callback.(%{"run_id" => fixture.run_id, "collection" => "turns"})
