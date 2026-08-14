@@ -52,6 +52,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :tool_exec,
     :tool_failure_token,
     :failure_origin,
+    :return_origin,
     :origin_stack,
     :prelude_caller_user_ns_stack,
     :turn_history,
@@ -181,6 +182,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           tool_exec: (String.t(), map(), map() | nil -> term()),
           tool_failure_token: reference() | nil,
           failure_origin: :capability | nil,
+          return_origin: :direct_tool_call | nil,
           origin_stack: [map()],
           prelude_caller_user_ns_stack: [map()],
           turn_history: list(),
@@ -259,6 +261,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       tool_exec: tool_exec,
       tool_failure_token: Keyword.get(opts, :tool_failure_token),
       failure_origin: Keyword.get(opts, :failure_origin),
+      return_origin: Keyword.get(opts, :return_origin),
       origin_stack: Keyword.get(opts, :origin_stack, []),
       prelude_caller_user_ns_stack: Keyword.get(opts, :prelude_caller_user_ns_stack, []),
       turn_history: turn_history,
@@ -568,6 +571,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
         tool_activity: source.tool_activity,
         tool_failure_token: source.tool_failure_token,
         failure_origin: source.failure_origin,
+        return_origin: source.return_origin,
         origin_stack: source.origin_stack,
         prelude_caller_user_ns_stack: source.prelude_caller_user_ns_stack
     }
@@ -697,6 +701,11 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @spec mark_capability_failure(t()) :: t()
   def mark_capability_failure(%__MODULE__{} = context),
     do: %{context | failure_origin: :capability}
+
+  @doc false
+  @spec mark_direct_tool_return(t()) :: t()
+  def mark_direct_tool_return(%__MODULE__{} = context),
+    do: %{context | return_origin: :direct_tool_call}
 
   @doc """
   Increments the iteration count and checks against the limit.

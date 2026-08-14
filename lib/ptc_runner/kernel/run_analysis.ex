@@ -49,11 +49,13 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       filters:
         ~w(stream_id capability_id evaluation_id parent_evaluation_id prelude_call prelude_component),
       order: "stream_turn_asc",
-      sequence_domain: "private_inspection",
+      sequence_domain: "reconstructed_stream",
       identifier_locations: %{
         "capability_id" => "capability_id",
         "evaluation_id" => "generated[].evaluation_id",
         "parent_evaluation_id" => "generated[].parent_evaluation_id",
+        "request_sequence" => "request_sequence",
+        "response_sequence" => "response_sequence",
         "stream_id" => "stream_id",
         "turn" => "turn"
       }

@@ -359,36 +359,29 @@ defmodule PtcRunner.Kernel.Runner do
   end
 
   # A direct return of one successful `kernel-eval` result is the narrow case
-  # where the evaluator ledger proves boundary-value provenance. Retain only
-  # the child evaluation identity. Transformed values and truncated ledger
-  # entries deliberately remain unresolved; sequence proximity is not proof.
+  # where the evaluator's return-origin marker and ledger together prove
+  # boundary-value provenance. Retain only the child evaluation identity.
+  # Transformed values deliberately remain unresolved; equal BEAM terms are
+  # not by themselves dataflow evidence.
   defp boundary_producer_details(step) do
     boundary_value = LispResult.unwrap_return(Map.get(step, :return))
 
-    kernel_eval_calls =
-      step
-      |> Map.get(:tool_calls, [])
-      |> Enum.filter(&(Map.get(&1, :name) == "kernel-eval"))
-
-    {evaluation_ids, complete?} =
-      Enum.reduce(kernel_eval_calls, {[], true}, fn call, {ids, complete?} ->
-        complete? = complete? and not Map.get(call, :result_truncated, false)
-
+    with :direct_tool_call <- Map.get(step, :return_origin),
+         %{name: "kernel-eval"} = call <- List.last(Map.get(step, :tool_calls, [])) do
+      evaluation_ids =
         case direct_boundary_producer_id(call, boundary_value) do
-          nil -> {ids, complete?}
-          evaluation_id -> {[evaluation_id | ids], complete?}
+          nil -> []
+          evaluation_id -> [evaluation_id]
         end
-      end)
 
-    if kernel_eval_calls == [] do
-      %{}
-    else
       %{
         boundary_producer: %{
-          evaluation_ids: evaluation_ids |> Enum.uniq() |> Enum.sort(),
-          complete?: complete?
+          evaluation_ids: evaluation_ids,
+          complete?: not Map.get(call, :result_truncated, false)
         }
       }
+    else
+      _other -> %{}
     end
   end
 

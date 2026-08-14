@@ -397,8 +397,9 @@ so a caller can discover the next read without knowing the storage schema.
 Every descriptor also names `snapshot_domain`, `sequence_domain`, and an
 `identifier_locations` map. `canonical_trace` sequences belong only to the
 canonical run event stream. `private_inspection` sequences belong only to one
-inspection artifact. A reconstructed turn's `{stream_id, turn}` is its identity;
-its request/response sequence fields remain in the private-inspection domain.
+inspection artifact. The `turns` descriptor instead reports
+`sequence_domain: "reconstructed_stream"`: `{stream_id, turn}` is its identity,
+while its request/response sequence fields remain in the private-inspection domain.
 Identifier locations use dotted paths, with `[]` marking values nested in a
 list, such as `generated[].evaluation_id` on a turn.
 The `model_exchanges` and `capability_calls` entries additionally advertise
@@ -468,8 +469,8 @@ producer candidates are emitted as separately followable exact filters, each
 marked `ambiguous`, rather than as an unbounded scan.
 
 Semantics are intentionally narrower than the relation names. `causation`
-requires a workflow boundary failure or exact identity between the terminal
-workflow value and a retained successful `kernel-eval` result. `nesting` is
+requires a workflow boundary failure or a direct-return origin marker plus
+exact equality with the retained successful `kernel-eval` result. `nesting` is
 reserved for the validated canonical `parent_evaluation_id` edge.
 `association` covers source identity, static prelude references, and the
 generated-source/turn source match. A source match can be ambiguous; a parent
@@ -680,13 +681,14 @@ workflow evaluation fails with a non-empty `details` map, where `details` is
 the Kernel `Error.details` map computed for that failure. Their `environment`
 is always `"workflow"`, and their `evaluation_id` must match a canonical
 `evaluation-started` event with `environment: "workflow"` for the same run.
-When at least one `kernel-eval` ran, private details also contain bounded
-`boundary_producer` evidence: sorted unique `evaluation_ids` whose retained
-successful result is exactly the workflow boundary value, plus `complete?`
-indicating whether every inspected `kernel-eval` ledger result was intact.
-An empty complete list proves that no retained direct result matched; a false
-completion flag forbids that conclusion. The value itself is not duplicated in
-this metadata.
+When the workflow's `return` expression is directly a `kernel-eval`, private
+details also contain bounded `boundary_producer` evidence: the child
+`evaluation_id` when that retained successful result is exactly the workflow
+boundary value, plus `complete?` indicating whether that ledger result was
+intact. A syntactically transformed or independently recomputed equal value is
+not treated as provenance. An empty complete list means the direct result did
+not expose a valid child identity; a false completion flag forbids that
+conclusion. The value itself is not duplicated in this metadata.
 
 The input record is accepted before the callback starts. A subordinate
 `evaluation-started` event is attempted before its source record is accepted,

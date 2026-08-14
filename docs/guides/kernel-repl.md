@@ -189,7 +189,10 @@ the join:
 
 ```clojure
 (def relations (get error "relationships"))
-(def producer (nth relations 2))
+(def producer
+  (first (filter (fn [relation]
+                   (= (get relation "rel") "direct_boundary_producer"))
+                 relations)))
 (analysis/read run-id
                (assoc (get producer "filters")
                       "collection" (get producer "target_collection")))

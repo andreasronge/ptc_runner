@@ -320,8 +320,12 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
     (let [run-id "RUN_ID"
           error (first (get (analysis/read run-id {"collection" "execution_errors"}) "items"))
           error-relations (get error "relationships")
-          producer-rel (nth error-relations 2)
-          source-rel (nth error-relations 3)
+          producer-rel (first (filter (fn [relation]
+                                        (= (get relation "rel") "direct_boundary_producer"))
+                                      error-relations))
+          source-rel (first (filter (fn [relation]
+                                      (= (get relation "rel") "generated_source"))
+                                    error-relations))
           producer (first (get (analysis/read run-id
                                               (assoc (get producer-rel "filters")
                                                      "collection"
@@ -333,8 +337,12 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
                                                    (get source-rel "target_collection")))
                              "items"))
           source-relations (get source "relationships")
-          turn-rel (nth source-relations 0)
-          prelude-rel (nth source-relations 1)
+          turn-rel (first (filter (fn [relation]
+                                    (= (get relation "rel") "producing_turn"))
+                                  source-relations))
+          prelude-rel (first (filter (fn [relation]
+                                       (= (get relation "rel") "referenced_prelude_source"))
+                                     source-relations))
           turn (first (get (analysis/read run-id
                                           (assoc (get turn-rel "filters")
                                                  "collection"

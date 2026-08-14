@@ -1429,7 +1429,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       caller_ctx
       | effects: closure_ctx.effects,
         iteration_count: closure_ctx.iteration_count,
-        failure_origin: closure_ctx.failure_origin
+        failure_origin: closure_ctx.failure_origin,
+        return_origin: closure_ctx.return_origin
     }
   end
 
@@ -1444,7 +1445,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       caller_ctx
       | effects: closure_ctx.effects,
         iteration_count: caller_ctx.iteration_count + closure_ctx.iteration_count,
-        failure_origin: closure_ctx.failure_origin
+        failure_origin: closure_ctx.failure_origin,
+        return_origin: closure_ctx.return_origin
     }
   end
 
