@@ -99,8 +99,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   deadline the whole step spends.
 
   Every active command crosses it before provider activity is marked: run and
-  `doctor --connect` through `ProviderExecution`, and default doctor by calling
-  this directly because it opens no provider session. Manifest-backed REPL
+  `doctor --connect` through `ProviderExecution`. Manifest-backed REPL
   opening crosses the same step before provider activity, through
   `ProviderExecution.open_repl/6` when providers are selected and directly for
   provider-free manifests. Direct and analysis-profile REPL sessions do not
@@ -127,6 +126,31 @@ defmodule PtcRunner.Kernel.RunCoordinator do
     do: if(InstallationCatalog.valid?(catalog), do: :ok, else: internal_error())
 
   def local_checks(_prepared, _catalog, _services), do: internal_error()
+
+  @doc """
+  Collects every attributable audited-local finding for default doctor.
+
+  This uses the same sealed declarations, callbacks, and absolute phase budget
+  as `local_checks/3`, but retains ordinary failures instead of stopping at the
+  first one so doctor can settle every provider-local row.
+  """
+  @spec local_check_findings(
+          PreparedRun.t() | nil,
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t()
+        ) :: {:ok, [CommandDiagnostic.t()]} | {:error, CommandDiagnostic.t()}
+  def local_check_findings(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services
+      ) do
+    LocalPreflight.collect(prepared, catalog, services, local_deadline(prepared))
+  end
+
+  def local_check_findings(nil, %InstallationCatalog{} = catalog, %ProviderRuntimeServices{}),
+    do: if(InstallationCatalog.valid?(catalog), do: {:ok, []}, else: internal_error())
+
+  def local_check_findings(_prepared, _catalog, _services), do: internal_error()
 
   defp internal_error, do: {:error, diagnostic(:internal, :internal_error)}
 

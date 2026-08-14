@@ -412,6 +412,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp local_preflight_mode(%{source: :llm}), do: :audited_local
   defp local_preflight_mode(%{source: :mcp, transport: %{type: :stdio}}), do: :audited_local
+  defp local_preflight_mode(%{source: :llm_replay}), do: :audited_local
   defp local_preflight_mode(_installation), do: :none
 
   defp selection_rules(%{source: :mcp} = installation) do
@@ -872,6 +873,18 @@ defmodule PtcRunner.Kernel.HostInstallation do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- llm_selection(installation, selection, context),
          {:ok, _model, _adapter} <- preflight_llm(installation.model) do
+      :ok
+    end
+  end
+
+  defp local_preflight(host, %{source: :llm_replay} = installation, selection, context) do
+    with :ok <- placement(installation, context.destination),
+         {:ok, selected} <- llm_replay_selection(installation, selection, context),
+         {:ok, _summary} <-
+           LLMReplay.probe(host.directory, installation.fixtures,
+             max_entries: selected.max_entries,
+             max_result_bytes: selected.max_result_bytes
+           ) do
       :ok
     end
   end

@@ -860,12 +860,164 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "a failing audited-local check fails the command instead of the row", %{
+  test "default doctor reports a missing stdio command as a failed local check", %{
     tmp_dir: directory
   } do
-    # Default doctor has no failing-row form, so a local check that fails
-    # surfaces as the command's own diagnostic. Connect has the separate
-    # finding result exercised below.
+    host_path =
+      write_host_config(directory, "doctor-missing-command", %{
+        "install" => %{
+          "workspace" => inert_stdio_installation("missing-command-v1")
+        }
+      })
+
+    application = doctor_application(directory, "selects-missing-command", mission: ["workspace"])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    assert outcome.command_mode == :doctor
+    assert outcome.envelope["error"]["phase"] == "local_preflight"
+    assert outcome.envelope["error"]["code"] == "command_not_found"
+    assert outcome.envelope["result"]["readiness"] == "failed"
+    assert outcome.envelope["result"]["provider_activity"] == false
+
+    assert %{"status" => "fail", "code" => "command_not_found"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/workspace/local")
+             )
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "default doctor reports unreadable replay fixtures as a failed local check", %{
+    tmp_dir: directory
+  } do
+    host_path =
+      write_host_config(directory, "doctor-missing-replay", %{
+        "install" => %{
+          "frozen-model" => %{
+            "source" => "llm_replay",
+            "installation_revision" => "missing-replay-v1",
+            "fixtures" => "missing-replay.jsonl"
+          }
+        }
+      })
+
+    application =
+      doctor_application(directory, "selects-missing-replay", workflow: ["frozen-model"])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    assert outcome.command_mode == :doctor
+    assert outcome.envelope["error"]["phase"] == "local_preflight"
+    assert outcome.envelope["error"]["code"] == "fixtures_unreadable"
+    assert outcome.envelope["result"]["readiness"] == "failed"
+    assert outcome.envelope["result"]["provider_activity"] == false
+
+    assert %{"status" => "fail", "code" => "fixtures_unreadable"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/frozen-model/local")
+             )
+
+    assert_schema_valid(outcome.envelope)
+
+    assert {:error, %CommandOutcome{} = run_outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert run_outcome.envelope["error"]["phase"] == "local_preflight"
+    assert run_outcome.envelope["error"]["code"] == "environment_unavailable"
+    assert run_outcome.envelope["error"]["subject"]["name"] == "frozen-model"
+    assert run_outcome.envelope["error"]["subject"]["operation"] == "local"
+    assert_schema_valid(run_outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "default doctor parses a valid replay fixture as an available local check", %{
+    tmp_dir: directory
+  } do
+    File.write!(
+      Path.join(directory, "replay.jsonl"),
+      Jason.encode!(%{
+        "schema_version" => 1,
+        "request_hash" => "sha256:" <> String.duplicate("0", 64),
+        "response" => %{"content" => "frozen"}
+      }) <> "\n"
+    )
+
+    host_path =
+      write_host_config(directory, "doctor-valid-replay", %{
+        "install" => %{
+          "frozen-model" => %{
+            "source" => "llm_replay",
+            "installation_revision" => "valid-replay-v1",
+            "fixtures" => "replay.jsonl"
+          }
+        }
+      })
+
+    application =
+      doctor_application(directory, "selects-valid-replay", workflow: ["frozen-model"])
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    assert %{"status" => "pass", "code" => "available"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/frozen-model/local")
+             )
+
+    assert outcome.envelope["result"]["readiness"] == "unverified"
+    assert outcome.envelope["result"]["provider_activity"] == false
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "default doctor completes every local check after an ordinary failure", %{
+    tmp_dir: directory
+  } do
+    host_path =
+      write_host_config(directory, "doctor-multiple-local-failures", %{
+        "install" => %{
+          "frozen-model" => %{
+            "source" => "llm_replay",
+            "installation_revision" => "missing-replay-v1",
+            "fixtures" => "missing-replay.jsonl"
+          },
+          "workspace" => inert_stdio_installation("missing-command-v1")
+        }
+      })
+
+    application =
+      doctor_application(directory, "selects-two-broken-providers",
+        workflow: ["frozen-model"],
+        mission: ["workspace"]
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    checks = outcome.envelope["result"]["checks"]
+
+    assert %{"status" => "fail", "code" => "fixtures_unreadable"} =
+             Enum.find(checks, &(&1["name"] == "provider/frozen-model/local"))
+
+    assert %{"status" => "fail", "code" => "command_not_found"} =
+             Enum.find(checks, &(&1["name"] == "provider/workspace/local"))
+
+    assert outcome.envelope["result"]["readiness"] == "failed"
+    assert outcome.envelope["result"]["provider_activity"] == false
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a failing audited-local check fails its row without provider activity", %{
+    tmp_dir: directory
+  } do
     host_path =
       write_host_config(directory, "doctor-local-fail", %{
         "credentials" => %{"key" => %{"literal" => "not-read"}},
@@ -890,6 +1042,19 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["error"]["subject"]["name"] == "model"
     assert outcome.envelope["error"]["subject"]["operation"] == "local"
     assert outcome.envelope["error"]["provider_activity"] == false
+
+    assert %{
+             "readiness" => "failed",
+             "provider_activity" => false,
+             "checks" => checks
+           } = outcome.envelope["result"]
+
+    assert %{"status" => "fail", "code" => "adapter_unavailable"} =
+             Enum.find(checks, &(&1["name"] == "provider/model/local"))
+
+    assert %{"status" => "skipped", "code" => "requires_connect"} =
+             Enum.find(checks, &(&1["name"] == "provider/model/credentials"))
+
     assert_schema_valid(outcome.envelope)
   end
 

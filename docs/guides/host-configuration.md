@@ -142,6 +142,11 @@ one `response` or an ordered `responses` sequence. Matching is exact; changed
 messages or tools produce a different hash and fail instead of using unrelated
 evidence. See `PtcRunner.Kernel.LLMReplay` for the fixture contract.
 
+Plain `doctor` parses the selected fixture file under its installed ceilings
+without starting the replay provider. A missing, empty, malformed, duplicate,
+or oversized fixture set therefore fails `provider/<alias>/local` as
+`fixtures_unreadable` before a run reaches acquisition.
+
 `doctor --connect` performs a real minimal completion for each selected live
 model and may incur provider cost. `--show-model-selectors` adds only safe
 selectors; endpoint-bearing `openai-compat:` selectors remain hidden.
@@ -213,6 +218,9 @@ Relative `cwd` resolves against the host document. Credential values enter
 through bindings rather than JSON. The child always receives
 `LC_ALL=C.UTF-8`; credential bindings cannot shadow runtime compatibility
 variables. Startup, shutdown grace, stderr capture, and results are bounded.
+Plain `doctor` resolves the selected command without launching it; an absent
+executable fails `provider/<alias>/local` as `command_not_found` while the rest
+of the readiness report remains available.
 The optional [launcher companion](../../ptc_runner_launcher/README.md) adds
 executable identity and stronger stdio containment; select it with an absolute
 `runtime.stdio_launcher` path.

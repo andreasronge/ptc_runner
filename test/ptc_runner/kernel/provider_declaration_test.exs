@@ -1039,6 +1039,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert catalog.descriptors["live"].connectivity_mode == :probe
     assert catalog.descriptors["live"].probe_effect == :completion
     assert catalog.descriptors["replay"].connectivity_mode == :none
+    assert catalog.descriptors["replay"].local_preflight == :audited_local
     assert catalog.descriptors["trace"].provides == [:canonical_trace_snapshot]
     assert catalog.descriptors["trace"].data_class == :normal
     assert catalog.descriptors["trace"].accepts_data == [:normal, :private_inspection]

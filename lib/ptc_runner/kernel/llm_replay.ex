@@ -66,6 +66,13 @@ defmodule PtcRunner.Kernel.LLMReplay do
           | :replay_entry_limit_exceeded
           | :resource_registrar_unavailable
 
+  @type fixture_summary :: %{
+          entry_count: pos_integer(),
+          response_count: pos_integer(),
+          fixture_hash: binary(),
+          max_result_bytes: pos_integer()
+        }
+
   @doc """
   Loads one fixture file and starts the owner that tracks sequence position.
 
@@ -81,8 +88,7 @@ defmodule PtcRunner.Kernel.LLMReplay do
     owner = Keyword.get(opts, :owner, self())
     registrar = Keyword.get(opts, :resource_registrar)
 
-    with {:ok, raw} <- read_fixtures(directory, path),
-         {:ok, entries} <- parse(raw, max_entries, max_result_bytes),
+    with {:ok, raw, entries} <- load_fixtures(directory, path, max_entries, max_result_bytes),
          {:ok, pid} <- start_owner(entries, owner, registrar) do
       {:ok,
        %__MODULE__{
@@ -95,6 +101,34 @@ defmodule PtcRunner.Kernel.LLMReplay do
        }}
     end
   end
+
+  @doc """
+  Validates one fixture file without starting its response-cursor owner.
+
+  Doctor uses this bounded, process-free probe before provider activity. It
+  reads and parses the same bytes under the same ceilings as `start/3`, so a
+  passing local check cannot disagree with acquisition about fixture validity.
+  """
+  @spec probe(binary(), binary(), keyword()) :: {:ok, fixture_summary()} | {:error, error()}
+  def probe(directory, path, opts)
+      when is_binary(directory) and is_binary(path) and is_list(opts) do
+    max_entries = Keyword.fetch!(opts, :max_entries)
+    max_result_bytes = Keyword.fetch!(opts, :max_result_bytes)
+
+    with {:ok, raw, entries} <-
+           load_fixtures(directory, path, max_entries, max_result_bytes) do
+      {:ok,
+       %{
+         entry_count: map_size(entries),
+         response_count:
+           Enum.reduce(entries, 0, fn {_hash, list}, total -> total + length(list) end),
+         fixture_hash: hash(raw),
+         max_result_bytes: max_result_bytes
+       }}
+    end
+  end
+
+  def probe(_directory, _path, _opts), do: {:error, :invalid_replay_fixtures}
 
   @doc """
   Returns the requester `LLMCapability` calls, so replay and live installations
@@ -190,6 +224,13 @@ defmodule PtcRunner.Kernel.LLMReplay do
       {:ok, raw} when byte_size(raw) > 0 -> {:ok, raw}
       {:error, :too_large} -> {:error, :replay_fixtures_too_large}
       _reason -> {:error, :invalid_replay_fixtures}
+    end
+  end
+
+  defp load_fixtures(directory, path, max_entries, max_result_bytes) do
+    with {:ok, raw} <- read_fixtures(directory, path),
+         {:ok, entries} <- parse(raw, max_entries, max_result_bytes) do
+      {:ok, raw, entries}
     end
   end
 
