@@ -108,7 +108,7 @@ defmodule PtcRunner.Kernel.Evaluation do
 
     with :ok <- source_within_limit(source, RunState.limits(state).subordinate_source_bytes),
          {:ok, memory, history, lease} <-
-           RunState.reserve_evaluation(state, mission_name, admission) do
+           RunState.reserve_evaluation_with_limit_proof(state, mission_name, admission) do
       evaluate_with_lease(
         state,
         mission_environment,
@@ -134,6 +134,16 @@ defmodule PtcRunner.Kernel.Evaluation do
           :subordinate_evaluations,
           mission_name
         )
+
+      {:error, {:limit_exceeded, proof}} ->
+        state
+        |> preflight_limit(
+          capture.event_sink,
+          :limit_exceeded,
+          :subordinate_evaluations,
+          mission_name
+        )
+        |> Map.put(:limit_proof, proof)
 
       {:error, :source_exceeded} ->
         preflight_limit(

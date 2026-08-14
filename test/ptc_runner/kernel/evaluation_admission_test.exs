@@ -92,6 +92,29 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     end
   end
 
+  test "an actual limit refusal issues a caller-bound one-shot proof" do
+    state = start_state(subordinate_evaluations: 1)
+
+    assert {:ok, %{}, [], lease} =
+             RunState.reserve_evaluation_with_limit_proof(state, "default", :fail_fast)
+
+    assert :ok = RunState.release_evaluation(state, lease)
+
+    assert {:error, {:limit_exceeded, proof}} =
+             RunState.reserve_evaluation_with_limit_proof(state, "default", :fail_fast)
+
+    assert is_binary(proof)
+
+    assert {:error, :invalid_evaluation_limit_proof} =
+             Task.async(fn -> RunState.consume_evaluation_limit_proof(state, proof) end)
+             |> Task.await()
+
+    assert :ok = RunState.consume_evaluation_limit_proof(state, proof)
+
+    assert {:error, :invalid_evaluation_limit_proof} =
+             RunState.consume_evaluation_limit_proof(state, proof)
+  end
+
   defp release!(worker, lease) do
     send(worker, {:release, lease})
     assert_receive {:released, ^worker, :ok}, 1_000

@@ -202,9 +202,16 @@
                     ;; either one, so this fails the outer workflow rather than
                     ;; spending a turn and a model call on feedback the model
                     ;; cannot act on.
-                    (:busy :limit_exceeded)
+                    :busy
                     (fail (result/error :evaluation-unavailable
                                         (get evaluation :reason)))
+
+                    :limit_exceeded
+                    (if (= :subordinate_evaluations (get evaluation :reason))
+                      (tool/kernel-runtime-limit-failure
+                        {:proof (get evaluation :limit_proof)})
+                      (fail (result/error :evaluation-unavailable
+                                          (get evaluation :reason))))
 
                     (if (false? (get evaluation :retryable?))
                       ;; An unsafe failure forbids repeating the program, not

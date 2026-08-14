@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRejection
+  alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.CommandRunOutcome
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandRuntime
@@ -22,6 +23,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.FrozenBundle
@@ -437,6 +439,84 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert fallback.envelope["error"]["provider_activity"] == true
     assert_schema_valid(fallback.envelope)
+  end
+
+  test "subordinate evaluation exhaustion names the limit and configured ceiling" do
+    usage = %{
+      remaining_ms: 0,
+      capability_calls: %{workflow: %{}, mission: %{}},
+      subordinate_evaluations: 4,
+      evaluations_by_mission: %{"default" => 4},
+      protocol_errors: 0,
+      evaluation_memory_bytes: 0,
+      evaluation_history_bytes: 0,
+      evaluation_continuation_bytes: 0,
+      events_dropped: %{}
+    }
+
+    evidence = %{
+      result:
+        {:error,
+         %Error{
+           kind: :workflow_failed,
+           reason: :runtime_limit_exceeded,
+           details: %{
+             limit: :subordinate_evaluations,
+             limit_value: 4
+           },
+           usage: usage
+         }}
+    }
+
+    artifact_state = %{
+      "trace" => "not_requested",
+      "inspection" => "not_requested",
+      "result" => "not_requested"
+    }
+
+    settlement =
+      {:error,
+       %{
+         result_class: :normal,
+         artifact_state: artifact_state,
+         error: nil,
+         secondary_errors: []
+       }}
+
+    run_ref = CommandRunRef.encode(@zero_entropy)
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandRunOutcome.project(evidence, settlement, run_ref, true)
+
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+
+    assert outcome.envelope["error"]["message"] ==
+             "subordinate_evaluations limit 4 was exceeded; raise the manifest or host ceiling, or reduce total subordinate evaluations or agent turns"
+
+    assert {:stderr, rendered} = CommandRenderer.render(outcome)
+
+    assert rendered ==
+             "error: execution/runtime_limit_exceeded: subordinate_evaluations limit 4 was exceeded; raise the manifest or host ceiling, or reduce total subordinate evaluations or agent turns (run_ref: #{run_ref})\n"
+
+    assert_schema_valid(outcome.envelope)
+
+    runtime_source = CommandSource.fixed(:runtime)
+
+    for invalid_message <- [
+          "subordinate_evaluations limit 0 was exceeded; raise the manifest or host ceiling, or reduce total subordinate evaluations or agent turns",
+          "subordinate_evaluations limit 04 was exceeded; raise the manifest or host ceiling, or reduce total subordinate evaluations or agent turns",
+          "subordinate_evaluations limit 2592000001 was exceeded; raise the manifest or host ceiling, or reduce total subordinate evaluations or agent turns",
+          "subordinate_evaluations limit 4 was exceeded; expose private details"
+        ] do
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+                 message: invalid_message,
+                 source: runtime_source,
+                 provider_activity: true
+               )
+
+      assert_schema_invalid(put_in(outcome.envelope, ["error", "message"], invalid_message))
+    end
   end
 
   @tag :tmp_dir

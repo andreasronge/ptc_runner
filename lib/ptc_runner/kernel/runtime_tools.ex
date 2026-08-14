@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SafeMetadata
@@ -22,6 +23,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.Lisp.TrustedError
   alias PtcRunner.Lisp.TrustedTool
 
   @mission_contract_version 1
@@ -143,6 +145,53 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         {:error, :invalid_request} ->
           invalid_kernel_eval_request(state)
       end
+    end
+  end
+
+  @doc false
+  @spec runtime_limit_failure(RunState.t(), map()) :: (map() -> term())
+  def runtime_limit_failure(state, limits) do
+    fn arguments ->
+      with %{"proof" => proof} <- arguments,
+           true <- map_size(arguments) == 1,
+           :ok <- RunState.consume_evaluation_limit_proof(state, proof) do
+        %TrustedError{
+          reason: :runtime_limit_exceeded,
+          message: "subordinate_evaluations limit exceeded",
+          details: %{
+            limit: :subordinate_evaluations,
+            limit_value: limits.subordinate_evaluations
+          }
+        }
+      else
+        _failure ->
+          %{
+            status: :error,
+            kind: :protocol_error,
+            reason: :invalid_runtime_limit_failure
+          }
+      end
+    end
+  end
+
+  @doc false
+  @spec maybe_put_runtime_limit_failure(map(), RunState.t(), term(), map(), term()) :: map()
+  def maybe_put_runtime_limit_failure(tools, state, event_sink, limits, bundle)
+      when is_map(tools) do
+    if Library.shipped_component?(bundle, "agent.core") do
+      Map.put(
+        tools,
+        "kernel-runtime-limit-failure",
+        instrument(
+          state,
+          event_sink,
+          :workflow,
+          "kernel-runtime-limit-failure",
+          runtime_limit_failure(state, limits)
+        )
+      )
+    else
+      tools
     end
   end
 
@@ -290,6 +339,14 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          %TrustedTool{
            function: callback,
            argument_projection: :raw
+         }}
+
+      {"kernel-runtime-limit-failure" = name, callback} ->
+        {name,
+         %TrustedTool{
+           function: callback,
+           prelude_namespaces: ["agent.core"],
+           visibility: :private
          }}
 
       {name, callback} ->

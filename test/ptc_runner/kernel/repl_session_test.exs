@@ -93,13 +93,21 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
 
     {:ok, session} = ReplSession.new(config: config)
 
-    assert {:ok, step, _session} =
+    assert {:ok, step, session} =
              ReplSession.eval(
                session,
                ~S|(workflow.event/annotate "agent-action" {:turn 0 :kind "tool-call"})|
              )
 
     assert step.return[:status] == :ok or step.return["status"] == "ok"
+
+    assert {:ok, agent_step, _session} =
+             ReplSession.eval(
+               session,
+               ~S|(if false (agent.core/run-value "unused" {"max_turns" 1}) :agent-route-ready)|
+             )
+
+    assert agent_step.return == "agent-route-ready"
 
     assert Enum.any?(EventSink.events(sink), fn event ->
              event.type == "workflow-annotation" and

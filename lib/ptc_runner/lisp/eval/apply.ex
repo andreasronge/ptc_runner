@@ -1124,7 +1124,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       :timeout,
       :parallel_capacity_exceeded,
       :loop_limit_exceeded,
-      :tool_call_limit_exceeded
+      :tool_call_limit_exceeded,
+      :runtime_limit_exceeded
     ]
   end
 

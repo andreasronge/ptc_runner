@@ -319,6 +319,10 @@ overlap provider calls, then their evaluations queue in FIFO order. The wait is
 bounded by `evaluation_admission_timeout_ms` and the run deadline. Exhausted
 `subordinate_evaluations` or an expired admission wait fails the workflow
 without spending another agent turn or model call.
+When `subordinate_evaluations` is exhausted, the command error names that
+limit and its configured ceiling and recommends either raising the applicable
+manifest or host ceiling, or reducing total subordinate evaluations or agent
+turns.
 
 Set enough `parallel_timeout_ms` headroom for the complete parallel phase. The
 Kernel limit reference, not the agent configuration, defines these ceilings.
