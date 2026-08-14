@@ -229,6 +229,84 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   end
 
   @tag :tmp_dir
+  test "an input contract rejection renders its safe declared path", %{tmp_dir: dir} do
+    application = write_application(dir)
+    manifest = application |> File.read!() |> Jason.decode!()
+
+    input_schema = %{
+      "type" => "object",
+      "properties" => %{"answer" => %{"type" => "integer"}},
+      "required" => ["answer"]
+    }
+
+    invalid_manifest =
+      manifest
+      |> Map.put("contracts", %{"input_schema" => %{"path" => "input.schema.json"}})
+      |> put_in(["input", "value", "answer"], "wrong")
+
+    File.write!(application, Jason.encode!(invalid_manifest))
+    File.write!(Path.join(dir, "input.schema.json"), Jason.encode!(input_schema))
+
+    presentation =
+      CommandFrontend.execute(["validate", application], :standalone, fn _arguments ->
+        {:ok, CommandRuntime.standalone()}
+      end)
+
+    assert presentation.exit_status == 3
+    assert presentation.outcome.envelope["error"]["path"] == "/answer"
+
+    assert presentation.stderr ==
+             "error: application/input_contract_failed: " <>
+               "the selected input does not satisfy the input contract " <>
+               "at /answer (run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
+  end
+
+  @tag :tmp_dir
+  test "a result contract rejection retains and renders its safe declared path", %{tmp_dir: dir} do
+    application = write_application(dir)
+    manifest = application |> File.read!() |> Jason.decode!()
+
+    result_schema = %{
+      "type" => "object",
+      "properties" => %{"answer" => %{"type" => "integer"}},
+      "required" => ["answer"]
+    }
+
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [_] (return {"answer" "wrong"}))|
+    )
+
+    File.write!(
+      application,
+      manifest
+      |> Map.put("contracts", %{"result_schema" => %{"path" => "result.schema.json"}})
+      |> Jason.encode!()
+    )
+
+    File.write!(Path.join(dir, "result.schema.json"), Jason.encode!(result_schema))
+
+    presentation =
+      CommandFrontend.execute(["run", application], :standalone, fn _arguments ->
+        {:ok, CommandRuntime.standalone()}
+      end)
+
+    assert presentation.exit_status == 7
+
+    assert presentation.outcome.envelope["error"]["source"] == %{
+             "kind" => "result_contract",
+             "name" => "result.schema.json"
+           }
+
+    assert presentation.outcome.envelope["error"]["path"] == "/answer"
+
+    assert presentation.stderr ==
+             "error: result_cleanup/result_contract_failed: " <>
+               "the workflow result does not satisfy its contract " <>
+               "at /answer (run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
+  end
+
+  @tag :tmp_dir
   test "human failures do not render contract-authored control bytes", %{tmp_dir: dir} do
     application = write_application(dir)
     manifest = application |> File.read!() |> Jason.decode!()
@@ -259,6 +337,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     assert presentation.stderr ==
              "error: application/input_contract_failed: " <>
                "the selected input does not satisfy the input contract " <>
+               ~S|at "/line\n\e[31m" | <>
                "(run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
 
     refute presentation.stderr =~ property

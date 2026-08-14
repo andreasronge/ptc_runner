@@ -862,6 +862,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
            limits: package.limits,
            event_sink: sink,
            result_contract: package.contracts.result,
+           result_contract_source:
+             get_in(package.manifest, ["contracts", "result_schema", "path"]),
            result_projection: request.policy.result_projection,
            inspection_sink: inspection_sink,
            provider_session: providers.provider_session,
@@ -1126,6 +1128,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
           config.event_sink,
           config.inspection_sink,
           config.result_contract,
+          config.result_contract_source,
           authority
         )
       after

@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
+  alias PtcRunner.Kernel.ValueContractDiagnostic
 
   @spec settle(
           term(),
@@ -287,11 +288,11 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
 
   defp failure_diagnostic(%CommandDiagnostic{} = diagnostic, _provider_activity), do: diagnostic
 
-  defp failure_diagnostic({:error, {:result_contract_failed, _details}}, provider_activity),
-    do: diagnostic(:result_cleanup, :result_contract_failed, provider_activity)
+  defp failure_diagnostic({:error, {:result_contract_failed, details}}, provider_activity),
+    do: result_contract_diagnostic(details, provider_activity)
 
-  defp failure_diagnostic({:result_contract_failed, _details}, provider_activity),
-    do: diagnostic(:result_cleanup, :result_contract_failed, provider_activity)
+  defp failure_diagnostic({:result_contract_failed, details}, provider_activity),
+    do: result_contract_diagnostic(details, provider_activity)
 
   defp failure_diagnostic(%Error{kind: :provider_cleanup_error}, _provider_activity),
     do: diagnostic(:result_cleanup, :provider_cleanup_failed, true)
@@ -380,6 +381,28 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
 
   defp failure_diagnostic(_reason, provider_activity),
     do: diagnostic(:internal, :internal_error, provider_activity)
+
+  defp result_contract_diagnostic(details, provider_activity) when is_map(details) do
+    source = result_contract_source(details)
+    {source, path} = ValueContractDiagnostic.diagnostic_parts(source, details)
+
+    diagnostic(:result_cleanup, :result_contract_failed, provider_activity,
+      source: source,
+      path: path
+    )
+  end
+
+  defp result_contract_diagnostic(_details, provider_activity),
+    do: diagnostic(:result_cleanup, :result_contract_failed, provider_activity)
+
+  defp result_contract_source(%{contract_source: name}) when is_binary(name) do
+    case CommandSource.new(:result_contract, name) do
+      {:ok, source} -> source
+      {:error, :invalid_command_source} -> nil
+    end
+  end
+
+  defp result_contract_source(_details), do: nil
 
   defp publication_code(:trace), do: :trace_publication_failed
   defp publication_code(:inspection), do: :inspection_publication_failed

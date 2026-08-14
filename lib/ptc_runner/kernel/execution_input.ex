@@ -11,10 +11,9 @@ defmodule PtcRunner.Kernel.ExecutionInput do
   """
 
   alias PtcRunner.Kernel.Attestation
-  alias PtcRunner.Kernel.CommandContractAuthority
-  alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Kernel.ValueContract
+  alias PtcRunner.Kernel.ValueContractDiagnostic
 
   @enforce_keys [:value, :authority]
   defstruct [:value, :authority, :attestation]
@@ -63,12 +62,9 @@ defmodule PtcRunner.Kernel.ExecutionInput do
         :ok
 
       true ->
-        {classification, evidence} = ValueContract.classify_with_evidence(contract, value)
-
-        case CommandContractAuthority.new(evidence) do
-          {:ok, authority} ->
-            {:error,
-             {:input_contract_failed, authorize_violation_paths(classification, authority)}}
+        case ValueContractDiagnostic.classify(contract, value) do
+          {:ok, classification} ->
+            {:error, {:input_contract_failed, classification}}
 
           {:error, :invalid_contract_classification} ->
             {:error, :invalid_input}
@@ -77,23 +73,6 @@ defmodule PtcRunner.Kernel.ExecutionInput do
   end
 
   defp validate_contract(_contract, _value), do: {:error, :invalid_input}
-
-  defp authorize_violation_paths(classification, authority) do
-    classification
-    |> Map.put(:contract_authority, authority)
-    |> Map.update(:violations, [], fn violations ->
-      Enum.flat_map(violations, fn
-        %{segments: segments} = violation ->
-          case CommandPath.contract(authority, segments) do
-            {:ok, path} -> [violation |> Map.delete(:segments) |> Map.put(:path, path)]
-            {:error, :invalid_command_path} -> []
-          end
-
-        _invalid ->
-          []
-      end)
-    end)
-  end
 
   defp payload(input), do: {input.value, input.authority}
 end

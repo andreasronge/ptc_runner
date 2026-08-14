@@ -10,8 +10,8 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   One-shot execution consumes the prepared run inside an execution-session
   owner. That owner constructs both sinks, keeps responding to caller death
   while a subordinate worker performs provider setup and runs the Kernel, and
-  returns only sealed, path-free execution evidence. Publication remains a
-  separate caller operation.
+  returns only sealed, filesystem-path-free execution evidence. Publication
+  remains a separate caller operation.
   """
 
   alias PtcRunner.Kernel.ApplicationSource

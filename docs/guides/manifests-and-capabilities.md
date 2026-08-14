@@ -136,7 +136,11 @@ The input contract covers manifest input and command-line input overrides. It
 is checked before preflight, credentials, processes, or discovery. The result
 contract is checked after execution and evidence capture, but before stdout or
 artifact publication. A mismatch returns `input_contract_failed` or
-`result_contract_failed`; non-object input returns `input_invalid`.
+`result_contract_failed`; non-object input returns `input_invalid`. When the
+safe failure projection identifies a non-root declared path, the command
+envelope and terminal diagnostic include its JSON Pointer. Terminal rendering
+escapes unusual contract-authored property names rather than emitting their
+control bytes.
 
 The `agent.main/run` entry also gives a model-authored terminal candidate one
 ordinary correction turn when budget remains. Feedback is schema-derived and

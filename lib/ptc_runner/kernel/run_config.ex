@@ -37,8 +37,10 @@ defmodule PtcRunner.Kernel.RunConfig do
   neither field is visible to Lisp.
 
   `result_contract` is an optional sealed, compiled application contract
-  exposed only through the reserved workflow validator used by `agent.main`. Final
-  publication enforcement remains the responsibility of `RunBuilder`.
+  exposed only through the reserved workflow validator used by `agent.main`.
+  Its optional `result_contract_source` is the portable logical document name
+  used only for an attested result-contract diagnostic. Final publication
+  enforcement remains the responsibility of `RunBuilder`.
 
   `labels` is an optional closed safe-metadata map. Caller-defined identifier
   fields become SHA-256 fingerprints and tags use finite enumerated values
@@ -51,6 +53,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   environments.
   """
 
+  alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.FrozenBundle
@@ -88,6 +91,7 @@ defmodule PtcRunner.Kernel.RunConfig do
     :run_deadline,
     :claim_id,
     result_contract: nil,
+    result_contract_source: nil,
     result_projection: :native,
     inspection_sink: nil,
     inspection_sink_owner: nil,
@@ -108,6 +112,7 @@ defmodule PtcRunner.Kernel.RunConfig do
           run_deadline: Deadline.t() | nil,
           claim_id: reference(),
           result_contract: ValueContract.t() | nil,
+          result_contract_source: binary() | nil,
           result_projection: :native | :json,
           inspection_sink: InspectionSink.t() | nil,
           inspection_sink_owner: pid() | nil,
@@ -135,6 +140,7 @@ defmodule PtcRunner.Kernel.RunConfig do
                :limits,
                :event_sink,
                :result_contract,
+               :result_contract_source,
                :result_projection,
                :inspection_sink,
                :provider_session,
@@ -151,6 +157,11 @@ defmodule PtcRunner.Kernel.RunConfig do
          %EventSink{} = sink <- Keyword.get(opts, :event_sink),
          true <- valid_event_sink_contract?(sink, limits),
          true <- result_contract?(Keyword.get(opts, :result_contract)),
+         true <-
+           result_contract_source?(
+             Keyword.get(opts, :result_contract),
+             Keyword.get(opts, :result_contract_source)
+           ),
          true <- result_projection?(Keyword.get(opts, :result_projection, :native)),
          {:ok, event_sink_owner} <- EventSink.owner(sink),
          true <- inspection?(Keyword.get(opts, :inspection_sink)),
@@ -192,6 +203,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          run_deadline: run_deadline,
          claim_id: make_ref(),
          result_contract: Keyword.get(opts, :result_contract),
+         result_contract_source: Keyword.get(opts, :result_contract_source),
          result_projection: Keyword.get(opts, :result_projection, :native),
          inspection_sink: Keyword.get(opts, :inspection_sink),
          inspection_sink_owner: inspection_sink_owner,
@@ -257,6 +269,14 @@ defmodule PtcRunner.Kernel.RunConfig do
   defp result_contract?(nil), do: true
   defp result_contract?(%ValueContract{} = contract), do: ValueContract.sealed?(contract)
   defp result_contract?(_contract), do: false
+
+  defp result_contract_source?(nil, nil), do: true
+  defp result_contract_source?(%ValueContract{}, nil), do: true
+
+  defp result_contract_source?(%ValueContract{}, source),
+    do: ApplicationSource.valid_name?(source)
+
+  defp result_contract_source?(_contract, _source), do: false
 
   defp result_projection?(projection), do: projection in [:native, :json]
 
