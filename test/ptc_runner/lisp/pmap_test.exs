@@ -27,10 +27,10 @@ defmodule PtcRunner.Lisp.PmapTest do
                Analyze.analyze(raw)
     end
 
-    test "pmap requires at least one collection" do
+    test "pmap with no collection defers arity validation to runtime resolution" do
       raw = {:list, [{:symbol, :pmap}, {:symbol, :inc}]}
-      assert {:error, {:invalid_arity, :pmap, msg}} = Analyze.analyze(raw)
-      assert msg =~ "expected (pmap f coll)"
+
+      assert {:ok, {:call, {:var, :pmap}, [{:var, :inc}]}} = Analyze.analyze(raw)
     end
 
     test "pmap accepts multiple collections" do
@@ -40,8 +40,15 @@ defmodule PtcRunner.Lisp.PmapTest do
                Analyze.analyze(raw)
     end
 
-    test "pmap with no arguments fails" do
+    test "pmap with no arguments defers arity validation to runtime resolution" do
       raw = {:list, [{:symbol, :pmap}]}
+
+      assert {:ok, {:call, {:var, :pmap}, []}} = Analyze.analyze(raw)
+    end
+
+    test "qualified pmap retains strict builtin arity validation" do
+      raw = {:list, [{:ns_symbol, :"clojure.core", :pmap}, {:symbol, :inc}]}
+
       assert {:error, {:invalid_arity, :pmap, msg}} = Analyze.analyze(raw)
       assert msg =~ "expected (pmap f coll)"
     end

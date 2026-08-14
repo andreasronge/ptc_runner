@@ -17,6 +17,8 @@ defmodule PtcRunner.Lisp.Runtime.Builtins do
     [
       {:apply, {:special, :apply}},
       {:println, {:special, :println}},
+      {:pmap, {:special, :pmap}},
+      {:pcalls, {:special, :pcalls}},
       # Prelude introspection. Special because each needs the attached prelude
       # and the run's visibility filter from the evaluation context.
       {:dir, {:special, :dir}},

@@ -21,12 +21,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.HostContext
+  alias PtcRunner.Lisp.Eval.ParallelCall
   alias PtcRunner.Lisp.Eval.Patterns
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Introspection
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Condition, as: JavaCondition
   alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
+  alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Prelude.Contract
   alias PtcRunner.Lisp.PreludeClosure
@@ -34,8 +36,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.Lisp.Runtime.Predicates
   alias PtcRunner.Lisp.RuntimeCallable
+  alias PtcRunner.Lisp.SpecialBuiltin
 
   @hof_callback_error :__ptc_hof_callback_error__
+  @parallel_specials SpecialBuiltin.names(:parallel)
   alias PtcRunner.Lisp.TypeVocabulary
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2, flex_fetch: 2]
@@ -50,6 +54,98 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   def apply_fun(fun_val, args, eval_ctx, do_eval_fn) do
     do_apply_fun(fun_val, args, eval_ctx, do_eval_fn)
   end
+
+  @doc false
+  @spec accepts_arity?(term(), non_neg_integer()) :: boolean()
+  def accepts_arity?(%Builtin{} = builtin, arity),
+    do: accepts_arity?(Builtin.unwrap(builtin), arity)
+
+  def accepts_arity?(%RuntimeCallable{}, _arity), do: true
+
+  def accepts_arity?(%JavaCallable{reference_id: reference_id} = callable, arity) do
+    with true <- JavaCallable.valid?(callable),
+         {:ok, reference} <- JavaSurface.fetch_reference(reference_id) do
+      Enum.any?(reference.overload_ids, fn overload_id ->
+        {:ok, overload} = JavaSurface.fetch_overload(overload_id)
+        receiver_arity = if reference.kind == :instance, do: 1, else: 0
+        overload.arity + receiver_arity == arity
+      end)
+    else
+      _invalid -> false
+    end
+  end
+
+  def accepts_arity?(%LispKeyword{}, arity), do: arity in [1, 2]
+  def accepts_arity?(%MapSet{}, arity), do: arity == 1
+
+  def accepts_arity?(value, arity) when is_map(value) and not is_struct(value),
+    do: arity in [1, 2]
+
+  def accepts_arity?(
+        {:closure, {:variadic, leading, _rest}, _body, _env, _history, _metadata},
+        arity
+      ),
+      do: arity >= length(leading)
+
+  def accepts_arity?({:closure, patterns, _body, _env, _history, _metadata}, arity)
+      when is_list(patterns),
+      do: length(patterns) == arity
+
+  def accepts_arity?({:special, name}, arity) do
+    case SpecialBuiltin.pcalls_thunk(name) do
+      :zero -> arity == 0
+      {:arity, expected} -> arity == expected
+      {:minimum_arity, minimum} -> arity >= minimum
+      :unsupported -> false
+    end
+  end
+
+  def accepts_arity?({:normal, fun}, arity) when is_function(fun),
+    do: function_arity(fun) == arity
+
+  def accepts_arity?({:variadic, fun, _identity}, _arity) when is_function(fun, 2), do: true
+
+  def accepts_arity?({:variadic_nonempty, _name, fun}, arity) when is_function(fun, 2),
+    do: arity > 0
+
+  def accepts_arity?({:collect, fun}, _arity) when is_function(fun, 1), do: true
+
+  def accepts_arity?({:multi_arity, _name, funs}, arity) when is_tuple(funs) do
+    minimum = funs |> elem(0) |> function_arity()
+    arity >= minimum and arity < minimum + tuple_size(funs)
+  end
+
+  def accepts_arity?({:partial_fn, callable, fixed}, arity) when is_list(fixed),
+    do: accepts_arity?(callable, length(fixed) + arity)
+
+  def accepts_arity?({:fnil_fn, callable, _default}, arity),
+    do: accepts_arity?(callable, arity)
+
+  def accepts_arity?({:complement_fn, callable}, arity),
+    do: accepts_arity?(callable, arity)
+
+  def accepts_arity?({:constantly_fn, _value}, _arity), do: true
+
+  def accepts_arity?({:juxt_fn, callables}, arity) when is_list(callables),
+    do: Enum.all?(callables, &accepts_arity?(&1, arity))
+
+  def accepts_arity?({:comp_fn, []}, arity), do: arity == 1
+
+  def accepts_arity?({:comp_fn, callables}, arity) when is_list(callables) do
+    [first | rest] = Enum.reverse(callables)
+    accepts_arity?(first, arity) and Enum.all?(rest, &accepts_arity?(&1, 1))
+  end
+
+  def accepts_arity?({tag, callables}, _arity)
+      when tag in [:every_pred_fn, :some_fn] and is_list(callables),
+      do: true
+
+  def accepts_arity?(value, arity)
+      when is_atom(value) and value not in [nil, true, false],
+      do: arity in [1, 2]
+
+  def accepts_arity?(fun, arity) when is_function(fun), do: function_arity(fun) == arity
+  def accepts_arity?(_callable, _arity), do: false
 
   defp do_apply_fun(
          %Builtin{name: name, binding: {:normal, fun}} = builtin,
@@ -182,6 +278,11 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       _ ->
         {:error, {:arity_error, "apply expects at least 2 arguments, got #{length(args)}"}}
     end
+  end
+
+  defp do_apply_fun({:special, operation}, args, eval_ctx, do_eval_fn)
+       when operation in @parallel_specials do
+    ParallelCall.invoke(operation, args, eval_ctx, do_eval_fn)
   end
 
   # Special builtin: println

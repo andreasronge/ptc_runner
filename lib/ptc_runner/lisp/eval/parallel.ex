@@ -21,6 +21,7 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
   alias PtcRunner.Lisp.Eval.ParallelRunner
   alias PtcRunner.Lisp.Eval.ParallelRunner.Envelope
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.Runtime.Args
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.UntrustedRenderer
 
@@ -422,43 +423,17 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
     end
   end
 
-  defp pcalls_thunk(
-         {:closure, [], _body, _closure_env, _turn_history, _metadata} = closure,
-         %EvalContext{} = context,
-         do_eval
-       ) do
-    {:ok, fn -> apply_worker_callable(closure, [], context, do_eval) end}
-  end
+  defp pcalls_thunk(value, %EvalContext{} = context, do_eval) do
+    cond do
+      Args.valid_callable?(value) and Apply.accepts_arity?(value, 0) ->
+        {:ok, fn -> apply_worker_callable(value, [], context, do_eval) end}
 
-  defp pcalls_thunk(
-         {:closure, params, _body, _closure_env, _turn_history, _metadata},
-         %EvalContext{},
-         _do_eval
-       ) do
-    {:error, "pcalls requires zero-arity thunks, got function with arity #{length(params)}"}
-  end
+      Args.valid_callable?(value) ->
+        {:error, "pcalls requires zero-arity thunks, got: #{inspect(value)}"}
 
-  defp pcalls_thunk(fun, %EvalContext{}, _do_eval) when is_function(fun, 0), do: {:ok, fun}
-
-  # `dir` is the one introspection builtin with a zero-argument form. It stays a
-  # binding tuple rather than a BEAM function so both its arities survive, so
-  # the plain-function clauses above do not see it.
-  defp pcalls_thunk({:special, :dir} = callable, %EvalContext{} = context, do_eval) do
-    {:ok, fn -> apply_worker_callable(callable, [], context, do_eval) end}
-  end
-
-  defp pcalls_thunk({:special, op}, %EvalContext{}, _do_eval)
-       when op in [:apropos, :doc, :export_meta] do
-    {:error, "pcalls requires zero-arity thunks, got function with arity 1"}
-  end
-
-  defp pcalls_thunk(fun, %EvalContext{}, _do_eval) when is_function(fun) do
-    {:arity, arity} = Function.info(fun, :arity)
-    {:error, "pcalls requires zero-arity thunks, got function with arity #{arity}"}
-  end
-
-  defp pcalls_thunk(value, %EvalContext{}, _do_eval) do
-    {:error, "pcalls requires callable thunks, got: #{inspect(value)}"}
+      true ->
+        {:error, "pcalls requires callable thunks, got: #{inspect(value)}"}
+    end
   end
 
   defp build_pcalls_thunks(values, %EvalContext{} = context, do_eval) do

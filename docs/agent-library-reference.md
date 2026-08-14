@@ -328,3 +328,8 @@ turns.
 
 Set enough `parallel_timeout_ms` headroom for the complete parallel phase. The
 Kernel limit reference, not the agent configuration, defines these ceilings.
+
+Use `pcalls` for a fixed heterogeneous fan-out of zero-arity tasks and `pmap`
+for a runtime-sized homogeneous collection. Both resolve as callable values,
+so a workflow may store them, pass them through a helper, or invoke them with
+`apply`; direct and indirect calls consume the same worker budget and deadline.
