@@ -255,6 +255,33 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   @doc false
+  @spec reserve_evaluation_with_limit_proof(t(), binary(), :fail_fast | :block) ::
+          {:ok, map(), [term()], reference()}
+          | {:error, atom() | {:limit_exceeded, binary()}}
+  def reserve_evaluation_with_limit_proof(state, mission_name, :fail_fast)
+      when is_binary(mission_name),
+      do: call(state, {:reserve_evaluation, mission_name, :with_limit_proof})
+
+  def reserve_evaluation_with_limit_proof(state, mission_name, :block)
+      when is_binary(mission_name) do
+    requested_at = System.monotonic_time(:millisecond)
+
+    call_blocking(
+      state,
+      {:reserve_evaluation, mission_name, :block, requested_at, :with_limit_proof}
+    )
+  end
+
+  @doc false
+  @spec consume_evaluation_limit_proof(t(), binary()) ::
+          :ok | {:error, :invalid_evaluation_limit_proof}
+  def consume_evaluation_limit_proof(state, proof) when is_binary(proof),
+    do: call(state, {:consume_evaluation_limit_proof, proof})
+
+  def consume_evaluation_limit_proof(_state, _proof),
+    do: {:error, :invalid_evaluation_limit_proof}
+
+  @doc false
   @spec reserve_source_check(t(), binary()) :: {:ok, map(), non_neg_integer()} | {:error, atom()}
   def reserve_source_check(state, mission_name) when is_binary(mission_name),
     do: call(state, {:reserve_source_check, mission_name})
@@ -439,6 +466,7 @@ defmodule PtcRunner.Kernel.RunState do
        evaluation_terminal_provider_failure?: false,
        evaluation_terminal_host_failure?: false,
        admission_queue: :queue.new(),
+       evaluation_limit_proofs: %{},
        reservations: %{}
      }}
   end
@@ -562,85 +590,46 @@ defmodule PtcRunner.Kernel.RunState do
 
   def handle_call(
         {token, {:reserve_evaluation, mission}},
-        {caller, _tag},
+        from,
         %{token: token} = state
-      ) do
-    cond do
-      state.closed? ->
-        {:reply, {:error, :run_closed}, state}
+      ),
+      do: reserve_evaluation_now(state, mission, from, false)
 
-      deadline_expired?(state) ->
-        {:reply, {:error, :deadline_expired}, state}
-
-      not grantable?(state) or not :queue.is_empty(state.admission_queue) ->
-        {:reply, {:error, :busy}, state}
-
-      state.evaluations >= state.limits.subordinate_evaluations ->
-        {:reply, {:error, :limit_exceeded}, state}
-
-      true ->
-        lease = {make_ref(), caller, Process.monitor(caller)}
-
-        continuation = continuation(state, mission)
-
-        {:reply, {:ok, continuation.memory, continuation.history, elem(lease, 0)},
-         %{
-           record_evaluation(state, mission)
-           | evaluation_lease: lease,
-             evaluation_mission: mission,
-             evaluation_release_waiter: nil,
-             evaluation_terminal_provider_failure?: false,
-             evaluation_terminal_host_failure?: false
-         }}
-    end
-  end
+  def handle_call(
+        {token, {:reserve_evaluation, mission, :with_limit_proof}},
+        from,
+        %{token: token} = state
+      ),
+      do: reserve_evaluation_now(state, mission, from, true)
 
   def handle_call(
         {token, {:reserve_evaluation, mission, :block, requested_at}},
-        {caller, _tag} = from,
+        from,
         %{token: token} = state
       )
-      when is_integer(requested_at) do
-    admission_deadline = admission_deadline(state, requested_at)
+      when is_integer(requested_at),
+      do: reserve_evaluation_blocking(state, mission, requested_at, from, false)
 
-    cond do
-      state.closed? ->
-        {:reply, {:error, :run_closed}, state}
+  def handle_call(
+        {token, {:reserve_evaluation, mission, :block, requested_at, :with_limit_proof}},
+        from,
+        %{token: token} = state
+      )
+      when is_integer(requested_at),
+      do: reserve_evaluation_blocking(state, mission, requested_at, from, true)
 
-      deadline_expired?(state) ->
-        {:reply, {:error, :deadline_expired}, state}
+  def handle_call(
+        {token, {:consume_evaluation_limit_proof, proof}},
+        {caller, _tag},
+        %{token: token} = state
+      ) do
+    case state.evaluation_limit_proofs do
+      %{^caller => %{proof: ^proof, monitor_ref: monitor_ref}} ->
+        Process.demonitor(monitor_ref, [:flush])
+        {:reply, :ok, drop_evaluation_limit_proof(state, caller)}
 
-      # The bound counts from the caller's request, so a message that sat in
-      # the owner's mailbox past its whole admission window is refused even
-      # when the lease happens to be free.
-      System.monotonic_time(:millisecond) >= admission_deadline ->
-        {:reply, {:error, :admission_timeout}, state}
-
-      state.evaluations >= state.limits.subordinate_evaluations ->
-        {:reply, {:error, :limit_exceeded}, state}
-
-      grantable?(state) and :queue.is_empty(state.admission_queue) ->
-        lease = {make_ref(), caller, Process.monitor(caller)}
-
-        continuation = continuation(state, mission)
-
-        {:reply, {:ok, continuation.memory, continuation.history, elem(lease, 0)},
-         %{
-           record_evaluation(state, mission)
-           | evaluation_lease: lease,
-             evaluation_mission: mission,
-             evaluation_release_waiter: nil,
-             evaluation_terminal_provider_failure?: false
-         }}
-
-      true ->
-        # admit_from_queue self-heals the (unreachable by invariant) state of
-        # a grantable lease behind a non-empty queue: the FIFO head is
-        # admitted, which may be this caller.
-        {:noreply,
-         admit_from_queue(
-           enqueue_admission_waiter(state, from, caller, mission, admission_deadline)
-         )}
+      _other ->
+        {:reply, {:error, :invalid_evaluation_limit_proof}, state}
     end
   end
 
@@ -975,7 +964,12 @@ defmodule PtcRunner.Kernel.RunState do
             {:noreply, put_in(state.reservations[caller], reservation)}
 
           nil ->
-            {:noreply, drop_dead_admission_waiter(state, ref)}
+            state =
+              state
+              |> drop_dead_admission_waiter(ref)
+              |> drop_dead_evaluation_limit_proof(ref)
+
+            {:noreply, state}
         end
     end
   end
@@ -1240,6 +1234,93 @@ defmodule PtcRunner.Kernel.RunState do
     end)
   end
 
+  defp reserve_evaluation_now(state, mission, {caller, _tag}, with_limit_proof?) do
+    cond do
+      state.closed? ->
+        {:reply, {:error, :run_closed}, state}
+
+      deadline_expired?(state) ->
+        {:reply, {:error, :deadline_expired}, state}
+
+      not grantable?(state) or not :queue.is_empty(state.admission_queue) ->
+        {:reply, {:error, :busy}, state}
+
+      state.evaluations >= state.limits.subordinate_evaluations ->
+        evaluation_limit_reply(state, caller, with_limit_proof?)
+
+      true ->
+        lease = {make_ref(), caller, Process.monitor(caller)}
+        continuation = continuation(state, mission)
+
+        {:reply, {:ok, continuation.memory, continuation.history, elem(lease, 0)},
+         %{
+           record_evaluation(state, mission)
+           | evaluation_lease: lease,
+             evaluation_mission: mission,
+             evaluation_release_waiter: nil,
+             evaluation_terminal_provider_failure?: false,
+             evaluation_terminal_host_failure?: false
+         }}
+    end
+  end
+
+  defp reserve_evaluation_blocking(
+         state,
+         mission,
+         requested_at,
+         {caller, _tag} = from,
+         with_limit_proof?
+       ) do
+    admission_deadline = admission_deadline(state, requested_at)
+
+    cond do
+      state.closed? ->
+        {:reply, {:error, :run_closed}, state}
+
+      deadline_expired?(state) ->
+        {:reply, {:error, :deadline_expired}, state}
+
+      # The bound counts from the caller's request, so a message that sat in
+      # the owner's mailbox past its whole admission window is refused even
+      # when the lease happens to be free.
+      System.monotonic_time(:millisecond) >= admission_deadline ->
+        {:reply, {:error, :admission_timeout}, state}
+
+      state.evaluations >= state.limits.subordinate_evaluations ->
+        evaluation_limit_reply(state, caller, with_limit_proof?)
+
+      grantable?(state) and :queue.is_empty(state.admission_queue) ->
+        lease = {make_ref(), caller, Process.monitor(caller)}
+        continuation = continuation(state, mission)
+
+        {:reply, {:ok, continuation.memory, continuation.history, elem(lease, 0)},
+         %{
+           record_evaluation(state, mission)
+           | evaluation_lease: lease,
+             evaluation_mission: mission,
+             evaluation_release_waiter: nil,
+             evaluation_terminal_provider_failure?: false,
+             evaluation_terminal_host_failure?: false
+         }}
+
+      true ->
+        # admit_from_queue self-heals the (unreachable by invariant) state of
+        # a grantable lease behind a non-empty queue: the FIFO head is
+        # admitted, which may be this caller.
+        {:noreply,
+         admit_from_queue(
+           enqueue_admission_waiter(
+             state,
+             from,
+             caller,
+             mission,
+             admission_deadline,
+             with_limit_proof?
+           )
+         )}
+    end
+  end
+
   # The admission bound counts from the caller's request time and is capped
   # by the run deadline.
   defp admission_deadline(state, requested_at) do
@@ -1249,7 +1330,14 @@ defmodule PtcRunner.Kernel.RunState do
     )
   end
 
-  defp enqueue_admission_waiter(state, from, caller, mission_name, deadline_mono) do
+  defp enqueue_admission_waiter(
+         state,
+         from,
+         caller,
+         mission_name,
+         deadline_mono,
+         with_limit_proof?
+       ) do
     monitor_ref = Process.monitor(caller)
     delay = max(deadline_mono - System.monotonic_time(:millisecond), 0)
     timer_ref = Process.send_after(self(), {:admission_deadline, monitor_ref}, delay)
@@ -1263,7 +1351,8 @@ defmodule PtcRunner.Kernel.RunState do
       mission_name: mission_name,
       monitor_ref: monitor_ref,
       timer_ref: timer_ref,
-      deadline_mono: deadline_mono
+      deadline_mono: deadline_mono,
+      with_limit_proof?: with_limit_proof?
     }
 
     %{state | admission_queue: :queue.in(waiter, state.admission_queue)}
@@ -1292,8 +1381,26 @@ defmodule PtcRunner.Kernel.RunState do
             admit_from_queue(%{state | admission_queue: rest})
 
           state.evaluations >= state.limits.subordinate_evaluations ->
-            resolve_admission_waiter(waiter, {:error, :limit_exceeded})
-            admit_from_queue(%{state | admission_queue: rest})
+            state = %{state | admission_queue: rest}
+
+            state =
+              if waiter.with_limit_proof? do
+                {proof, state} =
+                  put_evaluation_limit_proof(state, waiter.caller, waiter.monitor_ref)
+
+                resolve_admission_waiter(
+                  waiter,
+                  {:error, {:limit_exceeded, proof}},
+                  demonitor?: false
+                )
+
+                state
+              else
+                resolve_admission_waiter(waiter, {:error, :limit_exceeded})
+                state
+              end
+
+            admit_from_queue(state)
 
           not grantable?(state) ->
             state
@@ -1327,10 +1434,58 @@ defmodule PtcRunner.Kernel.RunState do
     }
   end
 
-  defp resolve_admission_waiter(waiter, reply) do
+  defp resolve_admission_waiter(waiter, reply, opts \\ []) do
     Process.cancel_timer(waiter.timer_ref)
-    Process.demonitor(waiter.monitor_ref, [:flush])
+
+    if Keyword.get(opts, :demonitor?, true),
+      do: Process.demonitor(waiter.monitor_ref, [:flush])
+
     GenServer.reply(waiter.from, reply)
+  end
+
+  defp evaluation_limit_reply(state, _caller, false),
+    do: {:reply, {:error, :limit_exceeded}, state}
+
+  defp evaluation_limit_reply(state, caller, true) do
+    {proof, state} = put_evaluation_limit_proof(state, caller)
+    {:reply, {:error, {:limit_exceeded, proof}}, state}
+  end
+
+  defp put_evaluation_limit_proof(state, caller, monitor_ref \\ nil) do
+    state = drop_evaluation_limit_proof(state, caller, demonitor?: true)
+    monitor_ref = monitor_ref || Process.monitor(caller)
+    proof = Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+
+    proofs =
+      Map.put(state.evaluation_limit_proofs, caller, %{
+        proof: proof,
+        monitor_ref: monitor_ref
+      })
+
+    {proof, %{state | evaluation_limit_proofs: proofs}}
+  end
+
+  defp drop_evaluation_limit_proof(state, caller, opts \\ []) do
+    case Map.pop(state.evaluation_limit_proofs, caller) do
+      {nil, _proofs} ->
+        state
+
+      {%{monitor_ref: monitor_ref}, proofs} ->
+        if Keyword.get(opts, :demonitor?, false),
+          do: Process.demonitor(monitor_ref, [:flush])
+
+        %{state | evaluation_limit_proofs: proofs}
+    end
+  end
+
+  defp drop_dead_evaluation_limit_proof(state, monitor_ref) do
+    case Enum.find(state.evaluation_limit_proofs, fn
+           {_caller, %{monitor_ref: ^monitor_ref}} -> true
+           _entry -> false
+         end) do
+      {caller, _proof} -> drop_evaluation_limit_proof(state, caller)
+      nil -> state
+    end
   end
 
   defp take_admission_waiter(state, monitor_ref) do

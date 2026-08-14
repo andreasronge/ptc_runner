@@ -77,6 +77,7 @@ defmodule PtcRunner.Lisp do
   alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.Lisp.Signature
   alias PtcRunner.Lisp.Tool
+  alias PtcRunner.Lisp.TrustedError
   alias PtcRunner.Lisp.UntrustedRenderer
 
   @valid_callers [:direct, :kernel, :repl]
@@ -1498,6 +1499,9 @@ defmodule PtcRunner.Lisp do
   defp error_details({:pcalls_error, _index, _message, taxonomy}) when is_map(taxonomy),
     do: SafeMetadata.retain_failure_taxonomy(taxonomy)
 
+  defp error_details({:runtime_limit_exceeded, _message, details}) when is_map(details),
+    do: details
+
   defp error_details({category, _message, details})
        when category in [
               :unsupported_java_class,
@@ -2486,6 +2490,10 @@ defmodule PtcRunner.Lisp do
 
   defp execute_tool_function(%Tool{name: name, function: fun}, args, failure_token) do
     case HostContext.without_context(fn -> fun.(args) end) do
+      %TrustedError{reason: reason, message: message, details: details}
+      when is_atom(reason) and is_binary(message) and is_map(details) ->
+        tool_failure(failure_token, reason, message, details)
+
       {:ok, value} ->
         value
 
@@ -2500,16 +2508,21 @@ defmodule PtcRunner.Lisp do
   defp authorize_tool_call(%Tool{visibility: :public}, _origin, _failure_token), do: :ok
 
   defp authorize_tool_call(
-         %Tool{name: name, visibility: :private},
+         %Tool{
+           name: name,
+           visibility: :private,
+           prelude_namespaces: prelude_namespaces
+         },
          %{
            type: :prelude_export,
            ref: ref,
+           namespace: namespace,
            tool_refs: tool_refs
          },
          failure_token
        )
        when is_list(tool_refs) do
-    if name in tool_refs do
+    if name in tool_refs and authorized_prelude_namespace?(prelude_namespaces, namespace) do
       :ok
     else
       tool_failure(failure_token, :private_tool_unauthorized, name, %{
@@ -2526,6 +2539,11 @@ defmodule PtcRunner.Lisp do
        ) do
     tool_failure(failure_token, :private_tool_unauthorized, name, %{origin: nil})
   end
+
+  defp authorized_prelude_namespace?(:any, _namespace), do: true
+
+  defp authorized_prelude_namespace?(namespaces, namespace) when is_list(namespaces),
+    do: namespace in namespaces
 
   defp validate_private_tool_args(%Tool{visibility: :public}, _args, _failure_token), do: :ok
   defp validate_private_tool_args(%Tool{signature: nil}, _args, _failure_token), do: :ok

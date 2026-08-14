@@ -4,11 +4,13 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   alias PtcRunner.Kernel.ArtifactPublisher
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandOutcome
+  alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.Result
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
 
   @spec settle(
           term(),
@@ -305,6 +307,26 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
        ),
        do: diagnostic(:result_cleanup, :result_invalid, provider_activity)
 
+  defp failure_diagnostic(
+         %Error{
+           kind: :workflow_failed,
+           reason: :runtime_limit_exceeded,
+           details: %{limit: :subordinate_evaluations, limit_value: limit}
+         },
+         provider_activity
+       ) do
+    case RuntimeLimitDiagnostic.subordinate_evaluations_message(limit) do
+      {:ok, message} ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity,
+          message: message,
+          source: CommandSource.fixed(:runtime)
+        )
+
+      :error ->
+        diagnostic(:execution, :workflow_failed, provider_activity)
+    end
+  end
+
   defp failure_diagnostic(%Error{kind: :workflow_failed}, provider_activity),
     do: diagnostic(:execution, :workflow_failed, provider_activity)
 
@@ -326,8 +348,10 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   defp publication_code(:inspection), do: :inspection_publication_failed
   defp publication_code(:result), do: :result_publication_failed
 
-  defp diagnostic(phase, code, provider_activity) do
-    case CommandDiagnostic.new(phase, code, provider_activity: provider_activity) do
+  defp diagnostic(phase, code, provider_activity, opts \\ []) do
+    opts = Keyword.put(opts, :provider_activity, provider_activity)
+
+    case CommandDiagnostic.new(phase, code, opts) do
       {:ok, diagnostic} ->
         diagnostic
 

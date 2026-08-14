@@ -10,9 +10,11 @@ defmodule PtcRunner.Kernel.Environment do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.RoutedCapability
 
-  @reserved ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
+  @reserved ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract kernel-runtime-limit-failure runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
+  @workflow_implicit ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
 
   @doc "Validates common environment fields and returns normalized attributes."
   def assemble(bundle, capabilities, data, kind)
@@ -111,7 +113,8 @@ defmodule PtcRunner.Kernel.Environment do
   end
 
   defp bundle_requirements(%FrozenBundle{} = bundle, capabilities, kind) do
-    granted_names = Map.new(Map.keys(capabilities) ++ implicit_capabilities(kind), &{&1, true})
+    granted_names =
+      Map.new(Map.keys(capabilities) ++ implicit_capabilities(kind, bundle), &{&1, true})
 
     missing =
       bundle
@@ -125,9 +128,13 @@ defmodule PtcRunner.Kernel.Environment do
 
   defp bundle_requirements(_bundle, _capabilities, _kind), do: :ok
 
-  defp implicit_capabilities(:workflow), do: @reserved
+  defp implicit_capabilities(:workflow, bundle) do
+    if Library.shipped_component?(bundle, "agent.core"),
+      do: ["kernel-runtime-limit-failure" | @workflow_implicit],
+      else: @workflow_implicit
+  end
 
-  defp implicit_capabilities(:mission),
+  defp implicit_capabilities(:mission, _bundle),
     do: ~w(runtime-usage runtime-remaining cap-list cap-describe)
 
   defp capability_metadata(%Capability{} = capability), do: Capability.metadata(capability)

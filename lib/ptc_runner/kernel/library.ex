@@ -37,6 +37,7 @@ defmodule PtcRunner.Kernel.Library do
   """
 
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.FrozenBundle
 
   @kernel_path Path.expand("../../../priv/preludes/kernel/kernel.clj", __DIR__)
   @runtime_path Path.expand("../../../priv/preludes/kernel/runtime.clj", __DIR__)
@@ -113,6 +114,23 @@ defmodule PtcRunner.Kernel.Library do
   end
 
   def component(_name), do: {:error, :unknown_library}
+
+  @doc false
+  @spec shipped_component?(FrozenBundle.t() | nil, binary()) :: boolean()
+  def shipped_component?(%FrozenBundle{} = bundle, id) when is_binary(id) do
+    with true <- FrozenBundle.valid?(bundle),
+         {:ok, expected} <- component(id),
+         %{dependencies: dependencies, origin: origin, source_hash: source_hash} <-
+           Enum.find(bundle.components, &(&1.id == id)) do
+      dependencies == expected.dependencies and
+        origin == expected.origin and
+        source_hash == source_hash(expected.source)
+    else
+      _other -> false
+    end
+  end
+
+  def shipped_component?(_bundle, _id), do: false
 
   @spec components([binary()]) :: {:ok, [Component.t()]} | {:error, :unknown_library}
   @doc "Returns shipped components in the requested order."
@@ -250,4 +268,7 @@ defmodule PtcRunner.Kernel.Library do
       do: {:error, :local_library_collision},
       else: :ok
   end
+
+  defp source_hash(source),
+    do: :crypto.hash(:sha256, source) |> Base.encode16(case: :lower)
 end

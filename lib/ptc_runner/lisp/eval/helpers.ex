@@ -5,6 +5,7 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   Provides type error formatting and type description utilities.
   """
 
+  alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
@@ -322,6 +323,18 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   def sanitize_private_error({:pcalls_error, index, _message, taxonomy})
       when is_integer(index) and is_map(taxonomy),
       do: sanitize_private_parallel_failure(:pcalls_error, index, taxonomy)
+
+  def sanitize_private_error(
+        {:runtime_limit_exceeded, _message,
+         %{limit: :subordinate_evaluations, limit_value: limit}} = reason
+      ) do
+    with {:ok, row} <- LimitCatalog.fetch(:subordinate_evaluations),
+         true <- LimitCatalog.valid_value?(row, limit) do
+      reason
+    else
+      _invalid -> {:private_prelude_error, "private prelude evaluation failed"}
+    end
+  end
 
   def sanitize_private_error({:loop_limit_exceeded, limit}) when is_integer(limit),
     do: {:loop_limit_exceeded, limit}

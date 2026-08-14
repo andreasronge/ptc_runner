@@ -498,6 +498,12 @@ defmodule PtcRunner.Kernel.Runner do
         RuntimeTools.result_contract(config.result_contract)
       )
     )
+    |> RuntimeTools.maybe_put_runtime_limit_failure(
+      state,
+      config.event_sink,
+      config.limits,
+      config.workflow_environment.bundle
+    )
     |> RuntimeTools.trusted_tools(config.limits)
   end
 
@@ -686,6 +692,19 @@ defmodule PtcRunner.Kernel.Runner do
           phase: phase
         }
     end
+  end
+
+  defp workflow_error_details(
+         %{
+           reason: :runtime_limit_exceeded,
+           details: %{limit: :subordinate_evaluations, limit_value: limit}
+         },
+         _timeout_ms,
+         limits,
+         _sink
+       )
+       when limit == limits.subordinate_evaluations do
+    %{limit: :subordinate_evaluations, limit_value: limit}
   end
 
   defp workflow_error_details(fail, _timeout_ms, _limits, sink)

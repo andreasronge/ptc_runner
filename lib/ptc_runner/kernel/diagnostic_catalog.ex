@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   """
 
   alias PtcRunner.Kernel.CompileDiagnostic
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
 
   @rows [
     {:arguments, :invalid_command, 2, false, "use one of the supported commands"},
@@ -223,7 +224,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
         true
 
       {:ok, _row} ->
-        CompileDiagnostic.valid_message?(code, message)
+        valid_dynamic_message?(phase, code, message)
 
       :error ->
         false
@@ -232,8 +233,17 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   @doc false
   @spec message_schema(row()) :: map()
+  def message_schema(%{phase: :execution, code: :runtime_limit_exceeded, message: fallback}),
+    do: RuntimeLimitDiagnostic.message_schema(fallback)
+
   def message_schema(%{code: code, message: fallback}),
     do: CompileDiagnostic.message_schema(code, fallback)
+
+  defp valid_dynamic_message?(:execution, :runtime_limit_exceeded, message),
+    do: RuntimeLimitDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(_phase, code, message),
+    do: CompileDiagnostic.valid_message?(code, message)
 
   @spec rows() :: [row()]
   def rows do

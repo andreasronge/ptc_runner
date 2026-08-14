@@ -14,12 +14,13 @@ defmodule PtcRunner.Lisp.Tool do
     :native_result,
     argument_collisions: :reject,
     argument_projection: :tool,
+    prelude_namespaces: :any,
     visibility: :public,
     cache: false,
     ledger_arguments: :full
   ]
 
-  @fields ~w(name function signature description type expose native_result visibility cache ledger_arguments argument_projection)a
+  @fields ~w(name function signature description type expose native_result visibility cache ledger_arguments argument_projection prelude_namespaces)a
 
   @type t :: %__MODULE__{
           name: binary(),
@@ -32,6 +33,7 @@ defmodule PtcRunner.Lisp.Tool do
           ledger_arguments: :full | (map() -> map()),
           argument_collisions: :reject | :pass,
           argument_projection: :tool | :raw,
+          prelude_namespaces: :any | [binary()],
           visibility: :public | :private,
           cache: boolean()
         }
@@ -45,7 +47,9 @@ defmodule PtcRunner.Lisp.Tool do
         %TrustedTool{
           function: function,
           argument_projection: argument_projection,
-          ledger_arguments: ledger_arguments
+          ledger_arguments: ledger_arguments,
+          prelude_namespaces: prelude_namespaces,
+          visibility: visibility
         }
       )
       when is_binary(name) and is_function(function, 1),
@@ -55,6 +59,8 @@ defmodule PtcRunner.Lisp.Tool do
           function: function,
           argument_projection: argument_projection,
           ledger_arguments: ledger_arguments,
+          prelude_namespaces: prelude_namespaces,
+          visibility: visibility,
           type: :native,
           argument_collisions: :pass
         })
@@ -132,14 +138,20 @@ defmodule PtcRunner.Lisp.Tool do
            cache: cache,
            argument_projection: argument_projection,
            ledger_arguments: ledger_arguments,
+           prelude_namespaces: prelude_namespaces,
            argument_collisions: collisions
          } = tool
        )
        when is_function(function) and visibility in [:public, :private] and is_boolean(cache) and
               collisions in [:reject, :pass] and
               argument_projection in [:tool, :raw] and
+              (prelude_namespaces == :any or is_list(prelude_namespaces)) and
               (ledger_arguments == :full or is_function(ledger_arguments, 1)),
-       do: {:ok, tool}
+       do:
+         if(prelude_namespaces == :any or Enum.all?(prelude_namespaces, &is_binary/1),
+           do: {:ok, tool},
+           else: {:error, :invalid_tool}
+         )
 
   defp validate(_tool), do: {:error, :invalid_tool}
 end

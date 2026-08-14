@@ -257,6 +257,14 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
        when reason in [:memory_exceeded, :timeout, :parallel_capacity_exceeded],
        do: error
 
+  defp classify_runner_error(
+         {:runtime_limit_exceeded, _message, details} = error,
+         _type,
+         _index
+       )
+       when is_map(details),
+       do: error
+
   defp classify_runner_error(:parallel_capacity_exceeded, _type, _index),
     do:
       {:parallel_capacity_exceeded,
@@ -330,6 +338,14 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
   defp parallel_abort_error({reason, message, nil}, _type, _index)
        when reason in [:memory_exceeded, :timeout, :parallel_capacity_exceeded],
        do: {reason, message}
+
+  defp parallel_abort_error(
+         {:runtime_limit_exceeded, _message, details} = error,
+         _type,
+         _index
+       )
+       when is_map(details),
+       do: error
 
   defp parallel_abort_error({@hof_callback_error, message}, type, index)
        when is_binary(message),

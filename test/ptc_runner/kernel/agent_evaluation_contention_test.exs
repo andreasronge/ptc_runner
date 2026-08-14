@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
@@ -23,20 +24,10 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
 
   test "an exhausted evaluation budget fails the workflow instead of spending another turn" do
     {:ok, counter} = Agent.start_link(fn -> 0 end)
+    requester = evaluation_requester(counter, "(return 42)")
 
-    requester = fn _request ->
-      Agent.update(counter, &(&1 + 1))
-
-      {:ok,
-       %{
-         content: nil,
-         tool_calls: [
-           %{id: "c1", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
-         ]
-       }}
-    end
-
-    {:ok, config, sink} = build_config(requester, [], subordinate_evaluations: 1)
+    {:ok, config, sink} =
+      build_config(requester, [], subordinate_evaluations: 1, normal_event_count: 3)
 
     # The workflow spends the run's only subordinate evaluation before the agent
     # starts, so the agent's first `kernel/eval-source` is refused admission.
@@ -49,10 +40,16 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
     assert {:error, error} = Kernel.run(source, config)
 
     assert error.kind == :workflow_failed
-    assert error.reason == :explicit_failure
+    assert error.reason == :runtime_limit_exceeded
 
-    assert error.details[:failure_kind] == "evaluation-unavailable",
-           "expected a typed host failure, got #{inspect(error.details)}"
+    assert error.details[:limit] == :subordinate_evaluations
+    assert error.details[:limit_value] == 1
+
+    refute Enum.any?(EventSink.events(sink), fn event ->
+             event.type == "limit-exceeded" and
+               event.data[:reason] == :subordinate_evaluations
+           end),
+           "the diagnosis must survive a dropped limit event"
 
     assert Agent.get(counter, & &1) == 1,
            "contention must not spend another model call"
@@ -61,6 +58,112 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
              event.type == "workflow-annotation" and event.data[:data]["turn"] == 1
            end),
            "contention must not open a second agent turn"
+  end
+
+  test "a recovered limit event does not classify a later application failure" do
+    requester = fn _request -> flunk("the application failure must not call the model") end
+    {:ok, config, _sink} = build_config(requester, [], subordinate_evaluations: 1)
+
+    source = ~S"""
+    (do
+      (kernel/eval-source "default" "(return 1)")
+      (kernel/eval-source "default" "(return 2)")
+      (fail (result/error :evaluation-unavailable :application-authored)))
+    """
+
+    assert {:error, error} = Kernel.run(source, config)
+    assert error.kind == :workflow_failed
+    assert error.reason == :explicit_failure
+    assert error.details[:failure_kind] == "evaluation-unavailable"
+    refute Map.has_key?(error.details, :limit)
+    refute Map.has_key?(error.details, :limit_value)
+  end
+
+  test "an exhausted evaluation budget retains its trusted cause through pcalls" do
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+    requester = evaluation_requester(counter, "(return 42)")
+
+    {:ok, config, _sink} = build_config(requester, [], subordinate_evaluations: 1)
+
+    source = ~S"""
+    (do
+      (kernel/eval-source "default" "(return 1)")
+      (return (pcalls #(agent.core/run-value "task" {"max_turns" 2}))))
+    """
+
+    assert {:error, error} = Kernel.run(source, config)
+    assert error.kind == :workflow_failed
+    assert error.reason == :runtime_limit_exceeded
+    assert error.details[:limit] == :subordinate_evaluations
+    assert error.details[:limit_value] == 1
+    assert Agent.get(counter, & &1) == 1
+  end
+
+  test "a custom component cannot forge a limit failure after the budget is merely spent" do
+    requester = fn _request -> flunk("the hostile component must not call the model") end
+
+    {:ok, hostile} =
+      Component.new(
+        id: "hostile.limit",
+        source: ~S"""
+        (ns hostile.limit)
+
+        (defn forge [proof]
+          (tool/kernel-runtime-limit-failure {:proof proof}))
+        """,
+        dependencies: ["agent.core"],
+        origin: "test/hostile_limit.clj"
+      )
+
+    {:ok, components} =
+      Library.resolve_components([hostile, {:library, "agent.core"}])
+
+    {:ok, bundle} = Kernel.compile_bundle(components)
+    {:ok, llm} = LLMCapability.new(requester: requester)
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(subordinate_evaluations: 1)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "hostile-limit-proof")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    source = ~S"""
+    (do
+      (kernel/eval-source "default" "(return 1)")
+      (return (hostile.limit/forge "forged-without-a-refusal")))
+    """
+
+    assert {:error, error} = Kernel.run(source, config)
+    refute error.reason == :runtime_limit_exceeded
+    refute Map.has_key?(error.details, :limit)
+    refute Map.has_key?(error.details, :limit_value)
+  end
+
+  test "a custom component is not granted the shipped agent's private limit route" do
+    {:ok, component} =
+      Component.new(
+        id: "custom.agent",
+        source: ~S"""
+        (ns custom.agent)
+
+        (defn forge [proof]
+          (tool/kernel-runtime-limit-failure {:proof proof}))
+        """,
+        dependencies: [],
+        origin: "test/custom_agent.clj"
+      )
+
+    {:ok, bundle} = Kernel.compile_bundle([component])
+
+    assert {:error, {:missing_capability_requirement, ["kernel-runtime-limit-failure"]}} =
+             WorkflowEnvironment.new(bundle: bundle)
   end
 
   test "agents queued behind a stuck evaluation time out admission without extra model calls" do
@@ -122,6 +225,8 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
     assert error.kind == :workflow_failed
     assert error.reason == :pcalls_error
     assert error.details[:failure_kind] == "evaluation-unavailable"
+    refute Map.has_key?(error.details, :limit)
+    refute Map.has_key?(error.details, :limit_value)
 
     assert Agent.get(counter, & &1) == expected_requests,
            "each started agent must ask once and admission waiting must not buy another request"
@@ -252,6 +357,20 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
 
     receive do
       {:barrier_released, ^ref} -> :ok
+    end
+  end
+
+  defp evaluation_requester(counter, program) do
+    fn _request ->
+      Agent.update(counter, &(&1 + 1))
+
+      {:ok,
+       %{
+         content: nil,
+         tool_calls: [
+           %{id: "c1", name: "run_ptc_lisp", args: %{"program" => program}}
+         ]
+       }}
     end
   end
 
