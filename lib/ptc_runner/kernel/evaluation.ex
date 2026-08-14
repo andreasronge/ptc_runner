@@ -72,6 +72,11 @@ defmodule PtcRunner.Kernel.Evaluation do
       |> Keyword.get(:admission, :fail_fast)
       |> validate_admission!()
 
+    parent_evaluation_id =
+      opts
+      |> Keyword.get(:parent_evaluation_id)
+      |> validate_parent_evaluation_id!()
+
     result =
       evaluate_detailed(
         state,
@@ -84,7 +89,8 @@ defmodule PtcRunner.Kernel.Evaluation do
           started_ms,
           Keyword.get(opts, :after_started_hook),
           projection_boundary,
-          Keyword.fetch(opts, :params)
+          Keyword.fetch(opts, :params),
+          parent_evaluation_id
         },
         mission_name
       )
@@ -175,7 +181,14 @@ defmodule PtcRunner.Kernel.Evaluation do
          timeout_ms,
          {memory, history, lease},
          capture,
-         {evaluation_id, started_ms, after_started_hook, projection_boundary, params},
+         {
+           evaluation_id,
+           started_ms,
+           after_started_hook,
+           projection_boundary,
+           params,
+           parent_evaluation_id
+         },
          mission_name
        ) do
     limits = RunState.limits(state)
@@ -188,14 +201,22 @@ defmodule PtcRunner.Kernel.Evaluation do
     source_bytes = byte_size(source)
 
     with :ok <-
-           Events.emit(state, capture.event_sink, "evaluation-started", %{
-             evaluation_id: evaluation_id,
-             environment: :mission,
-             mission_name: mission_name,
-             program_kind: :"ptc-lisp",
-             source_hash: source_hash,
-             source_bytes: source_bytes
-           }),
+           Events.emit(
+             state,
+             capture.event_sink,
+             "evaluation-started",
+             put_parent_evaluation_id(
+               %{
+                 evaluation_id: evaluation_id,
+                 environment: :mission,
+                 mission_name: mission_name,
+                 program_kind: :"ptc-lisp",
+                 source_hash: source_hash,
+                 source_bytes: source_bytes
+               },
+               parent_evaluation_id
+             )
+           ),
          :ok <-
            inspection_source(
              capture.inspection_sink,
@@ -222,14 +243,22 @@ defmodule PtcRunner.Kernel.Evaluation do
       duration_ms = Events.duration_ms(started_ms)
 
       _ =
-        Events.emit(state, capture.event_sink, "evaluation-stopped", %{
-          evaluation_id: evaluation_id,
-          environment: :mission,
-          mission_name: mission_name,
-          status: result.outcome,
-          continuation: RunState.evaluation_memory_summary(state),
-          duration_ms: duration_ms
-        })
+        Events.emit(
+          state,
+          capture.event_sink,
+          "evaluation-stopped",
+          put_parent_evaluation_id(
+            %{
+              evaluation_id: evaluation_id,
+              environment: :mission,
+              mission_name: mission_name,
+              status: result.outcome,
+              continuation: RunState.evaluation_memory_summary(state),
+              duration_ms: duration_ms
+            },
+            parent_evaluation_id
+          )
+        )
 
       Map.put(result, :duration_ms, duration_ms)
     else
@@ -277,6 +306,26 @@ defmodule PtcRunner.Kernel.Evaluation do
     raise ArgumentError,
           "invalid admission mode #{inspect(admission)}; expected :fail_fast or :block"
   end
+
+  defp validate_parent_evaluation_id!(nil), do: nil
+
+  defp validate_parent_evaluation_id!(parent_evaluation_id)
+       when is_binary(parent_evaluation_id) and byte_size(parent_evaluation_id) in 1..256 do
+    if String.valid?(parent_evaluation_id) do
+      parent_evaluation_id
+    else
+      raise ArgumentError, "invalid parent evaluation ID"
+    end
+  end
+
+  defp validate_parent_evaluation_id!(_parent_evaluation_id) do
+    raise ArgumentError, "invalid parent evaluation ID"
+  end
+
+  defp put_parent_evaluation_id(data, nil), do: data
+
+  defp put_parent_evaluation_id(data, parent_evaluation_id),
+    do: Map.put(data, :parent_evaluation_id, parent_evaluation_id)
 
   defp execute_with_lease(
          state,

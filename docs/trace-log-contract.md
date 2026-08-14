@@ -528,6 +528,9 @@ file/directory sources and Viewer discovery reject or omit that suffix.
 
 Sanitized subordinate `evaluation-started` data adds:
 
+- `parent_evaluation_id` — the enclosing workflow evaluation ID when the
+  subordinate evaluation was launched through the workflow's `kernel-eval`
+  route; the matching `evaluation-stopped` event repeats this ID;
 - `source_hash` — lower-case SHA-256 hex over the exact UTF-8 source bytes passed
   to `Lisp.run_native/2`;
 - `source_bytes` — `byte_size(source)` over those same bytes; and
@@ -537,6 +540,19 @@ Sanitized subordinate `evaluation-started` data adds:
 It must not contain exact source. The `activity` collection returns canonical event
 data, so embedding source in a supposedly private event would collapse source
 authorization into the ordinary activity query.
+
+Private `generated_sources` copy `parent_evaluation_id` only from that
+canonical start event, and reconstructed `turns` can be filtered by either the
+child `evaluation_id` or its `parent_evaluation_id`. Thus an execution error's
+workflow evaluation ID can select its child programs and turns without
+comparing canonical and inspection sequence numbers. The edge proves nesting,
+not that a particular child caused the workflow error.
+
+Canonical loading validates the edge before exposing it: the parent must be a
+preceding, still-open workflow evaluation in the same run, only a mission
+evaluation may name it, and a matching child stop must repeat the same parent.
+Orphaned, cyclic, wrong-environment, or contradictory edges make the source
+malformed rather than becoming navigation evidence.
 
 Optional sensitive development capture uses a separate private inspection
 record stream, not a canonical event. Every `.inspection.jsonl` line is one

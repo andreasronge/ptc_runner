@@ -103,6 +103,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
       workflow_evaluation_event(run_id, 4),
       event(run_id, 5, "evaluation-started", %{
         "evaluation_id" => "eval-#{run_id}",
+        "parent_evaluation_id" => "workflow-eval-#{run_id}",
         "environment" => "mission",
         "mission_name" => "default",
         "program_kind" => "ptc-lisp",
@@ -111,6 +112,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
       }),
       event(run_id, 6, "evaluation-stopped", %{
         "evaluation_id" => "eval-#{run_id}",
+        "parent_evaluation_id" => "workflow-eval-#{run_id}",
         "environment" => "mission",
         "mission_name" => "default",
         "status" => "ok"

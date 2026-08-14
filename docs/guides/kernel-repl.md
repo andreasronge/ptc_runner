@@ -165,6 +165,23 @@ adding smart diagnosis APIs:
 (analysis/read run-id {"collection" "execution_errors"})
 ```
 
+An execution error carries the workflow `evaluation_id`. Follow its exact
+children without comparing collection-local sequence numbers:
+
+```clojure
+(def error (first (get (analysis/read run-id {"collection" "execution_errors"})
+                       "items")))
+(def workflow-evaluation-id (get error "evaluation_id"))
+(analysis/read run-id {"collection" "generated_sources"
+                       "parent_evaluation_id" workflow-evaluation-id})
+(analysis/read run-id {"collection" "turns"
+                       "parent_evaluation_id" workflow-evaluation-id})
+```
+
+`parent_evaluation_id` proves that the workflow evaluation launched the
+subordinate evaluation. It does not claim that every child caused the eventual
+workflow error.
+
 Results may include exact model messages, generated programs, effective
 component source, capability payloads, prints, failure details, and terminal
 values. `turns` reconstructs cumulative model requests once when the immutable

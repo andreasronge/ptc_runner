@@ -30,7 +30,7 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       authority: :public,
       snapshot: :traces,
       operation: :list_turns,
-      filters: ~w(status evaluation_id capability mission_name),
+      filters: ~w(status evaluation_id parent_evaluation_id capability mission_name),
       order: "sequence_asc"
     },
     %{
@@ -38,7 +38,8 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       authority: :private,
       snapshot: :inspection,
       operation: :turns,
-      filters: ~w(stream_id capability_id prelude_call prelude_component),
+      filters:
+        ~w(stream_id capability_id evaluation_id parent_evaluation_id prelude_call prelude_component),
       order: "stream_turn_asc"
     },
     %{
@@ -72,7 +73,7 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       authority: :private,
       snapshot: :inspection,
       operation: :generated_sources,
-      filters: ~w(evaluation_id mission_name prelude_call prelude_component),
+      filters: ~w(evaluation_id parent_evaluation_id mission_name prelude_call prelude_component),
       order: "sequence_asc"
     },
     %{
