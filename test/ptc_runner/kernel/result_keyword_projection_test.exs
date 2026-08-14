@@ -143,24 +143,7 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
   end
 
   test "private inspection proves an unchanged child result produced a boundary failure" do
-    {:ok, workflow} = WorkflowEnvironment.new([])
-    {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(terminal_result_bytes: 1)
-    {:ok, events} = EventSink.start(:normal, limits, run_id: "boundary-producer")
-
-    {:ok, inspection} =
-      InspectionSink.start(run_id: "boundary-producer", trace_id: "boundary-producer")
-
-    assert {:ok, config} =
-             RunConfig.new(
-               workflow_environment: workflow,
-               missions: %{"default" => mission},
-               input: %{},
-               limits: limits,
-               event_sink: events,
-               inspection_sink: inspection,
-               result_projection: :json
-             )
+    {config, inspection} = boundary_failure_config("boundary-producer")
 
     assert {:error, %{reason: :terminal_result_exceeded}} =
              Kernel.run(
@@ -179,22 +162,7 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
   end
 
   test "equal recomputed values are not labeled as boundary producers" do
-    {:ok, workflow} = WorkflowEnvironment.new([])
-    {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(terminal_result_bytes: 1)
-    {:ok, events} = EventSink.start(:normal, limits, run_id: "equal-not-proven")
-    {:ok, inspection} = InspectionSink.start(run_id: "equal-not-proven", trace_id: "equal")
-
-    assert {:ok, config} =
-             RunConfig.new(
-               workflow_environment: workflow,
-               missions: %{"default" => mission},
-               input: %{},
-               limits: limits,
-               event_sink: events,
-               inspection_sink: inspection,
-               result_projection: :json
-             )
+    {config, inspection} = boundary_failure_config("equal-not-proven")
 
     assert {:error, %{reason: :terminal_result_exceeded}} =
              Kernel.run(
@@ -204,6 +172,27 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
 
     assert {:ok, records} = InspectionSink.records(inspection)
     refute Enum.any?(records, &(&1["record_type"] == "execution-error"))
+  end
+
+  defp boundary_failure_config(run_id) do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(terminal_result_bytes: 1)
+    {:ok, events} = EventSink.start(:normal, limits, run_id: run_id)
+    {:ok, inspection} = InspectionSink.start(run_id: run_id, trace_id: run_id)
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: events,
+        inspection_sink: inspection,
+        result_projection: :json
+      )
+
+    {config, inspection}
   end
 
   defp run(source, projection, opts \\ []) do

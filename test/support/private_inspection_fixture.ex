@@ -151,29 +151,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
 
   defp write_inspection!(directory, run_id, events) do
     {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
-
-    emit!(sink, "capability-input", %{capability_id: "llm-#{run_id}"}, %{
-      environment: :workflow,
-      name: "llm-request",
-      arguments: %{
-        "messages" => [%{"content" => "private-prompt-#{run_id}"}],
-        "system" => "private-system-#{run_id}"
-      }
-    })
-
-    emit!(sink, "capability-output", %{capability_id: "llm-#{run_id}"}, %{
-      environment: :workflow,
-      name: "llm-request",
-      result: %{
-        status: :ok,
-        value: %{
-          "answer" => "private-answer-#{run_id}",
-          "tool_calls" => [
-            %{"id" => "program-#{run_id}", "args" => %{"program" => @source}}
-          ]
-        }
-      }
-    })
+    emit_model_exchange!(sink, run_id)
 
     emit!(sink, "capability-input", %{capability_id: "tool-#{run_id}"}, %{
       environment: :mission,
@@ -215,14 +193,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
       result: %{status: :ok, value: %{"text" => "private-tool-result-#{run_id}"}}
     })
 
-    emit!(sink, "evaluation-source", %{evaluation_id: "eval-#{run_id}"}, %{
-      environment: :mission,
-      mission_name: "default",
-      program_kind: :"ptc-lisp",
-      source: @source,
-      source_hash: @source_hash,
-      source_bytes: byte_size(@source)
-    })
+    emit_evaluation_source!(sink, run_id)
 
     emit!(sink, "prelude-source", %{component_id: "component-#{run_id}"}, %{
       environment: :workflow,
@@ -233,46 +204,13 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
 
     emit_execution_diagnostics!(sink, run_id)
 
-    {:ok, records} = InspectionSink.records(sink)
-    path = Path.join(directory, "#{run_id}.inspection.jsonl")
-    :ok = InspectionArtifact.persist(path, records, events)
-    :ok = InspectionSink.stop(sink)
+    persist_inspection!(sink, directory, run_id, events)
   end
 
   defp write_boundary_failure_inspection!(directory, run_id, events) do
     {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
-
-    emit!(sink, "capability-input", %{capability_id: "llm-#{run_id}"}, %{
-      environment: :workflow,
-      name: "llm-request",
-      arguments: %{
-        "messages" => [%{"content" => "private-prompt-#{run_id}"}],
-        "system" => "private-system-#{run_id}"
-      }
-    })
-
-    emit!(sink, "capability-output", %{capability_id: "llm-#{run_id}"}, %{
-      environment: :workflow,
-      name: "llm-request",
-      result: %{
-        status: :ok,
-        value: %{
-          "answer" => "private-answer-#{run_id}",
-          "tool_calls" => [
-            %{"id" => "program-#{run_id}", "args" => %{"program" => @source}}
-          ]
-        }
-      }
-    })
-
-    emit!(sink, "evaluation-source", %{evaluation_id: "eval-#{run_id}"}, %{
-      environment: :mission,
-      mission_name: "default",
-      program_kind: :"ptc-lisp",
-      source: @source,
-      source_hash: @source_hash,
-      source_bytes: byte_size(@source)
-    })
+    emit_model_exchange!(sink, run_id)
+    emit_evaluation_source!(sink, run_id)
 
     emit!(sink, "evaluation-analysis", %{evaluation_id: "eval-#{run_id}"}, %{
       environment: :mission,
@@ -302,6 +240,46 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
       }
     })
 
+    persist_inspection!(sink, directory, run_id, events)
+  end
+
+  defp emit_model_exchange!(sink, run_id) do
+    emit!(sink, "capability-input", %{capability_id: "llm-#{run_id}"}, %{
+      environment: :workflow,
+      name: "llm-request",
+      arguments: %{
+        "messages" => [%{"content" => "private-prompt-#{run_id}"}],
+        "system" => "private-system-#{run_id}"
+      }
+    })
+
+    emit!(sink, "capability-output", %{capability_id: "llm-#{run_id}"}, %{
+      environment: :workflow,
+      name: "llm-request",
+      result: %{
+        status: :ok,
+        value: %{
+          "answer" => "private-answer-#{run_id}",
+          "tool_calls" => [
+            %{"id" => "program-#{run_id}", "args" => %{"program" => @source}}
+          ]
+        }
+      }
+    })
+  end
+
+  defp emit_evaluation_source!(sink, run_id) do
+    emit!(sink, "evaluation-source", %{evaluation_id: "eval-#{run_id}"}, %{
+      environment: :mission,
+      mission_name: "default",
+      program_kind: :"ptc-lisp",
+      source: @source,
+      source_hash: @source_hash,
+      source_bytes: byte_size(@source)
+    })
+  end
+
+  defp persist_inspection!(sink, directory, run_id, events) do
     {:ok, records} = InspectionSink.records(sink)
     path = Path.join(directory, "#{run_id}.inspection.jsonl")
     :ok = InspectionArtifact.persist(path, records, events)
