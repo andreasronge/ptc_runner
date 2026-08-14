@@ -37,6 +37,9 @@ exit without activating a provider. Successful active checks report `ready`;
 an attributable active failure also reports `failed` and exits nonzero. A
 manifest or package rejected during application validation is likewise
 reported as a failed `application` check instead of an internal command error.
+Complete readiness reports, including `readiness: "failed"`, are written to
+stdout. Failed reports retain their nonzero exit status; failures that cannot
+produce a complete report are written to stderr.
 `--show-model-selectors` adds only safe selectors.
 
 ## Run a manifest

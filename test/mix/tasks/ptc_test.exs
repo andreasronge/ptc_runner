@@ -380,7 +380,7 @@ defmodule Mix.Tasks.PtcTest do
   end
 
   @tag :tmp_dir
-  test "an active doctor finding remains the Mix failure message", %{tmp_dir: dir} do
+  test "an active doctor finding remains a readiness report", %{tmp_dir: dir} do
     missing_env = "PTC_DOCTOR_MISSING_#{System.unique_integer([:positive])}"
     System.delete_env(missing_env)
     {manifest_path, host_path} = write_provider_application(dir, missing_env)
@@ -407,9 +407,6 @@ defmodule Mix.Tasks.PtcTest do
              "status" => "skipped",
              "code" => "not_verified_due_to_failure"
            } in checks
-
-    message = failed_message(args)
-    assert %{"readiness" => "failed", "checks" => ^checks} = Jason.decode!(message)
   end
 
   @tag :tmp_dir
@@ -441,9 +438,69 @@ defmodule Mix.Tasks.PtcTest do
              "status" => "fail",
              "code" => "schema_violation"
            } in checks
+  end
 
-    message = failed_message(args)
-    assert %{"readiness" => "failed", "checks" => ^checks} = Jason.decode!(message)
+  @tag :slow
+  @tag :tmp_dir
+  test "the Mix process writes complete failed doctor reports to stdout", %{tmp_dir: dir} do
+    invalid_dir = Path.join(dir, "invalid-application")
+    File.mkdir!(invalid_dir)
+    invalid_manifest = write_manifest(invalid_dir, %{"value" => 1})
+
+    invalid_application =
+      invalid_manifest
+      |> File.read!()
+      |> Jason.decode!()
+      |> put_in(["workflow", "components", Access.at(0), "path"], "../main.clj")
+
+    File.write!(invalid_manifest, Jason.encode!(invalid_application))
+
+    local_dir = Path.join(dir, "local-preflight")
+    File.mkdir!(local_dir)
+
+    {local_manifest, local_host} =
+      write_provider_application(
+        local_dir,
+        "PTC_DOCTOR_UNUSED_#{System.unique_integer([:positive])}"
+      )
+
+    unavailable_host =
+      local_host
+      |> File.read!()
+      |> Jason.decode!()
+      |> put_in(
+        ["install", "workspace", "transport", "command"],
+        "definitely-not-a-real-binary-xyz"
+      )
+
+    File.write!(local_host, Jason.encode!(unavailable_host))
+
+    cases = [
+      {3, ["doctor", invalid_manifest],
+       %{
+         "name" => "application",
+         "status" => "fail",
+         "code" => "schema_violation"
+       }},
+      {4, ["doctor", local_manifest, "--host-config", local_host],
+       %{
+         "name" => "provider/workspace/local",
+         "status" => "fail",
+         "code" => "command_not_found"
+       }}
+    ]
+
+    for {status, args, expected_check} <- cases do
+      presentation = MixCommandAdapter.execute(args)
+      result = run_mix_process(args, dir)
+
+      assert presentation.exit_status == status
+      assert presentation.stderr == ""
+      assert expected_check in Jason.decode!(presentation.stdout)["checks"]
+      assert result.status == status
+      assert result.stdout == presentation.stdout
+      assert result.stderr == ""
+    end
   end
 
   defp seed_incomplete_build(build_path) do
@@ -485,6 +542,39 @@ defmodule Mix.Tasks.PtcTest do
     error = assert_raise Mix.Error, fn -> Ptc.run(args) end
     assert error.mix > 0
     error.message
+  end
+
+  defp run_mix_process(args, directory) do
+    stdout_path = Path.join(directory, "stdout-#{System.unique_integer([:positive])}")
+    stderr_path = Path.join(directory, "stderr-#{System.unique_integer([:positive])}")
+
+    {output, status} =
+      System.cmd(
+        System.find_executable("bash") || raise("bash is required for Mix process tests"),
+        [
+          "-c",
+          ~S(exec "$@" >"$PTC_TEST_STDOUT" 2>"$PTC_TEST_STDERR"),
+          "ptc-mix-process",
+          System.find_executable("mix"),
+          "ptc" | args
+        ],
+        cd: @root,
+        env: [
+          {"MIX_DEBUG", nil},
+          {"MIX_ENV", "test"},
+          {"MIX_QUIET", "1"},
+          {"PTC_TEST_STDOUT", stdout_path},
+          {"PTC_TEST_STDERR", stderr_path}
+        ]
+      )
+
+    assert output == ""
+
+    %{
+      status: status,
+      stdout: File.read!(stdout_path),
+      stderr: File.read!(stderr_path)
+    }
   end
 
   defp write_manifest(dir, input) do
