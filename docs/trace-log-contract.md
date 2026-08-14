@@ -420,8 +420,12 @@ zero on complete runs.
 
 `turns` is the only compiled convenience collection. Each item is one model
 turn with the newly added messages, response, matching generated programs, and
-stable stream/turn identity. It omits the repeated system prompt; exact raw
-model requests remain available through `model_exchanges`. Page-level
+stable stream/turn identity. Turn numbers start at one independently within
+each reconstructed stream; `{stream_id, turn}` is the identity, while
+`request_sequence` only orders records inside the inspection snapshot. It must
+not be compared with canonical activity sequence numbers. The collection omits
+the repeated system prompt; exact raw model requests remain available through
+`model_exchanges`. Page-level
 `evidence` reports canonical completeness, missing exchanges, and ambiguity
 separately from pagination. Interrupted model inputs remain raw evidence but
 are excluded from `turns`, so the canonical missing-exchange count records the

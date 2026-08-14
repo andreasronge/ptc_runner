@@ -195,6 +195,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reconstructed model conversations now treat blank tool-call narration and
+  the agent loop's carried-forward `nil` as the same absent content. Private
+  debugger traversals therefore retain their stream-local turn numbering while
+  preserving exact raw model exchanges.
 - Failed private debugger runs now retain validated input-only model and
   capability attempts as explicitly incomplete evidence. Raw reads expose the
   complete prefix without inventing terminal data, while reconstructed turns
