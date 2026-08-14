@@ -3,8 +3,10 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   Deterministic, privacy-preserving human projection of sealed command outcomes.
 
   Provider failures include the validated provider subject already present in
-  the public command envelope. Rendering never derives labels from a rejected
-  value, provider response, credential, or path.
+  the public command envelope. Manifest schema violations with a non-root,
+  schema-authorized path include its JSON Pointer. Rendering never derives
+  labels from a rejected value, provider response, credential, or unvalidated
+  path.
   """
 
   alias PtcRunner.Kernel.CommandOutcome
@@ -83,7 +85,8 @@ defmodule PtcRunner.Kernel.CommandRenderer do
     base =
       "error: #{error["phase"]}/#{error["code"]}: " <>
         subject_prefix(error["subject"]) <>
-        "#{error["message"]} " <>
+        error["message"] <>
+        path_suffix(error) <>
         "(run_ref: #{run_ref})"
 
     base <> diagnostic_suffix(error) <> rejection_suffix(rejection) <> "\n"
@@ -97,6 +100,17 @@ defmodule PtcRunner.Kernel.CommandRenderer do
        do: "; export it, pass --env-file PATH, or use a host file credential"
 
   defp diagnostic_suffix(_error), do: ""
+
+  defp path_suffix(%{
+         "phase" => "application",
+         "code" => "schema_violation",
+         "source" => %{"kind" => "application"},
+         "path" => path
+       })
+       when is_binary(path) and path != "",
+       do: " at " <> path <> " "
+
+  defp path_suffix(_error), do: " "
 
   defp subject_prefix(%{
          "kind" => "provider",
