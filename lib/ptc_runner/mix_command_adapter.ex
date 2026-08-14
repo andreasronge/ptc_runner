@@ -39,18 +39,20 @@ defmodule PtcRunner.MixCommandAdapter do
   def run_task(args, frontend_opts) when is_list(args) and is_list(frontend_opts) do
     presentation = execute(args, frontend_opts)
 
-    case presentation.exit_status do
-      0 ->
+    case presentation do
+      %CommandPresentation{exit_status: 0} ->
         write_output(presentation.stdout, presentation.stderr)
         presentation
 
-      status ->
+      %CommandPresentation{exit_status: status, stdout: stdout, stderr: ""}
+      when stdout != "" ->
+        write_output(stdout, "")
+        exit({:shutdown, status})
+
+      %CommandPresentation{exit_status: status} ->
         Mix.raise(failure_message(presentation), exit_status: status)
     end
   end
-
-  defp failure_message(%CommandPresentation{stdout: stdout, stderr: ""}) when stdout != "",
-    do: String.trim_trailing(stdout, "\n")
 
   defp failure_message(%CommandPresentation{stderr: "", exit_status: status}),
     do: "ptc command failed with status #{status}"
