@@ -138,9 +138,23 @@ Use replay when model responses must be deterministic:
 ```
 
 The JSON Lines fixture maps the deterministic provider-neutral request hash to
-one `response` or an ordered `responses` sequence. Matching is exact; changed
-messages or tools produce a different hash and fail instead of using unrelated
-evidence. See `PtcRunner.Kernel.LLMReplay` for the fixture contract.
+one `response` or an ordered `responses` sequence. Every line requires
+`schema_version` 1 and exactly one response field:
+
+```json
+{"schema_version":1,"request_hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000","response":{"content":"frozen"}}
+```
+
+To author a fixture iteratively, start with any schema-valid placeholder hash
+and the response shape the workflow expects. A normal-data miss prints
+`no replay fixture matches this request (request_hash: sha256:...)`; copy that
+hash into the entry and rerun. For a private-data run, request an owner-only
+inspection artifact and copy the hash from its capability record instead; the
+public diagnostic intentionally omits the unsalted hash. Matching is exact, so
+changed messages or tools produce another hash and fail instead of using
+unrelated evidence. The repository's `examples/llm-replay/` directory is a
+complete network-free example. `PtcRunner.Kernel.LLMReplay` defines the entry
+bounds and sequence behavior.
 
 Plain `doctor` parses the selected fixture file under its installed ceilings
 without starting the replay provider. A missing, empty, malformed, duplicate,

@@ -106,16 +106,52 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     assert File.lstat!(Path.join(worktree, "deps")).type == :symlink
   end
 
-  test "skips seeding entirely when a lockfile differs" do
+  # Each project's artifacts are pinned by that project's own lockfile. A
+  # branch that bumps the root lock leaves `ptc_viewer/deps` identical, and
+  # skipping it too costs a cold fetch in a project the branch never touched.
+  test "a diverged lockfile skips only the artifacts that lockfile pins" do
     %{main: main, worktree: worktree} = repo_with_worktree()
 
     write!(main, "deps/jason/mix.exs", "jason\n")
+    write!(main, "ptc_viewer/deps/plug/mix.exs", "plug\n")
     write!(worktree, "mix.lock", "diverged\n")
 
     {output, 0} = seed(main, worktree)
 
-    assert output =~ "Seed skipped: mix.lock differs"
+    assert output =~ "deps — mix.lock differs from the main checkout's copy"
     refute File.exists?(Path.join(worktree, "deps"))
+    assert File.read!(Path.join(worktree, "ptc_viewer/deps/plug/mix.exs")) == "plug\n"
+  end
+
+  test "a diverged nested lockfile leaves the root's artifacts seedable" do
+    %{main: main, worktree: worktree} = repo_with_worktree()
+
+    write!(main, "deps/jason/mix.exs", "jason\n")
+    write!(main, "ptc_viewer/deps/plug/mix.exs", "plug\n")
+    write!(worktree, "ptc_viewer/mix.lock", "diverged\n")
+
+    {output, 0} = seed(main, worktree)
+
+    assert output =~ "ptc_viewer/deps — ptc_viewer/mix.lock differs from the main checkout's copy"
+    refute File.exists?(Path.join(worktree, "ptc_viewer/deps"))
+    assert File.read!(Path.join(worktree, "deps/jason/mix.exs")) == "jason\n"
+  end
+
+  # The toolchain pin is the one key every artifact shares: a different Erlang
+  # or Elixir invalidates every compiled tree at once.
+  test "a diverged toolchain pin skips every artifact" do
+    %{main: main, worktree: worktree} = repo_with_worktree()
+
+    write!(main, "deps/jason/mix.exs", "jason\n")
+    write!(main, "ptc_viewer/deps/plug/mix.exs", "plug\n")
+    write!(worktree, "mise.toml", "diverged\n")
+
+    {output, 0} = seed(main, worktree)
+
+    assert output =~ ~r/Seeded 0 artifact\(s\)/
+    assert output =~ "deps — mise.toml differs from the main checkout's copy"
+    refute File.exists?(Path.join(worktree, "deps"))
+    refute File.exists?(Path.join(worktree, "ptc_viewer/deps"))
   end
 
   test "leaves artifacts that are already present untouched" do

@@ -55,6 +55,9 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.SourceAtoms
+  alias PtcRunner.Lisp.SpecialBuiltin
+
+  @callable_specials SpecialBuiltin.callable_names()
 
   def fnil(f, default) when is_function(f), do: {:fnil_fn, {:normal, f}, default}
 
@@ -80,7 +83,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
 
   # Context-dispatched builtins are callable, so fnil must accept them too.
   def fnil({:special, name} = callable, default)
-      when name in [:dir, :apropos, :doc, :export_meta, :println] do
+      when name in @callable_specials do
     {:fnil_fn, callable, default}
   end
 
@@ -367,7 +370,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
       {tag, fns} when tag in [:comp_fn, :every_pred_fn, :some_fn] and is_list(fns) -> :function
       {:partial_fn, _f, fixed} when is_list(fixed) -> :function
       {:fnil_fn, _f, _default} -> :function
-      {:special, name} when name in [:dir, :apropos, :doc, :export_meta, :println] -> :function
+      {:special, name} -> if(SpecialBuiltin.callable?(name), do: :function, else: :unknown)
       {tag, _, _} when tag in [:variadic, :variadic_nonempty, :multi_arity, :special] -> :function
       _ -> :unknown
     end

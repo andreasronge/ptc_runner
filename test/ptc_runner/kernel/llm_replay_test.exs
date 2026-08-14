@@ -8,6 +8,12 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   """
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.CommandContract
+  alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandEngine
+  alias PtcRunner.Kernel.CommandOutcome
+  alias PtcRunner.Kernel.CommandRenderer
+  alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.Limits
@@ -83,10 +89,22 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
       {:ok, replay} = start(dir)
 
-      assert {:error, %ProviderError{kind: :not_found, retryable?: false} = error} =
-               LLMReplay.requester(replay).(%{"system" => "different", "messages" => []})
+      unmatched = %{"system" => "different", "messages" => []}
+      {:ok, unmatched_hash} = LLMReplay.request_hash(unmatched)
 
-      assert error.details =~ "no replay fixture"
+      assert {:error, %ProviderError{kind: :not_found, retryable?: false} = error} =
+               LLMReplay.requester(replay).(unmatched)
+
+      assert error.details ==
+               "no replay fixture matches this request (request_hash: #{unmatched_hash})"
+
+      assert error.replay_request_hash == unmatched_hash
+
+      assert_raise ArgumentError, fn ->
+        ProviderError.new(:not_found, error.details,
+          replay_request_hash: "sha256:" <> String.duplicate("0", 64)
+        )
+      end
     end
 
     @tag :tmp_dir
@@ -314,6 +332,200 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   end
 
   describe "installed provider" do
+    @tag :tmp_dir
+    test "a command replay miss prints the hash needed to author a working fixture", %{
+      tmp_dir: dir
+    } do
+      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
+
+      paths = write_application(dir)
+      write_agent_application(paths, ~S|(agent.core/run-value "Return 42" {"max_turns" 1})|)
+
+      assert {:error, %CommandOutcome{} = miss} =
+               CommandEngine.dispatch(["run", paths.manifest, "--host-config", paths.host])
+
+      assert miss.envelope["error"]["code"] == "replay_fixture_missing"
+      assert CommandContract.valid_envelope?(miss.envelope)
+      message = miss.envelope["error"]["message"]
+
+      assert [request_hash] =
+               Regex.run(~r/sha256:[0-9a-f]{64}/, message, capture: :first)
+
+      assert message ==
+               "no replay fixture matches this request (request_hash: #{request_hash})"
+
+      assert {:stderr, stderr} = CommandRenderer.render(miss)
+      assert stderr =~ message
+
+      for invalid_message <- [
+            message <> "\nprivate detail",
+            String.replace(message, request_hash, String.upcase(request_hash)),
+            String.replace(message, "no replay fixture", "provider says")
+          ] do
+        assert {:error, :invalid_command_diagnostic} =
+                 CommandDiagnostic.new(:execution, :replay_fixture_missing,
+                   message: invalid_message,
+                   source: CommandSource.fixed(:runtime),
+                   provider_activity: true
+                 )
+      end
+
+      write(dir, [
+        %{
+          "request_hash" => request_hash,
+          "response" => %{
+            "content" => nil,
+            "tool_calls" => [
+              %{
+                "id" => "done",
+                "name" => "run_ptc_lisp",
+                "args" => %{"program" => "(return 42)"}
+              }
+            ]
+          }
+        }
+      ])
+
+      assert {:ok, %CommandOutcome{} = replayed} =
+               CommandEngine.dispatch(["run", paths.manifest, "--host-config", paths.host])
+
+      assert replayed.envelope["result"]["value"] == 42
+    end
+
+    @tag :tmp_dir
+    test "parallel replay misses retain the authoring hash", %{tmp_dir: dir} do
+      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
+      paths = write_application(dir)
+
+      for {parallel, expression} <- [
+            {:pmap, ~S|(pmap (fn [_] (agent.core/run-value "Return 42" {"max_turns" 1})) [1])|},
+            {:pcalls, ~S|(pcalls #(agent.core/run-value "Return 42" {"max_turns" 1}))|}
+          ] do
+        write_agent_application(paths, expression)
+
+        assert {:error, %CommandOutcome{} = miss} =
+                 CommandEngine.dispatch(["run", paths.manifest, "--host-config", paths.host])
+
+        assert miss.envelope["error"]["code"] == "replay_fixture_missing",
+               "#{parallel} discarded the replay-miss hash"
+
+        assert miss.envelope["error"]["message"] =~ ~r/request_hash: sha256:[0-9a-f]{64}/
+
+        trace_path = Path.join(dir, "#{parallel}.trace.jsonl")
+        {:ok, registry} = replay_registry(paths.host)
+
+        assert {:error, %{reason: reason}} =
+                 paths.manifest
+                 |> ApplicationPackage.request_directory(
+                   installed_limits: registry.installed_limits
+                 )
+                 |> RunLifecycle.build(registry, trace_path: trace_path)
+                 |> RunLifecycle.execute()
+
+        assert reason == if(parallel == :pmap, do: :pmap_error, else: :pcalls_error)
+
+        stopped =
+          trace_path
+          |> File.stream!()
+          |> Stream.map(&Jason.decode!/1)
+          |> Enum.find(&(&1["type"] == "run-stopped"))
+
+        assert stopped["data"]["failure_kind"] == "llm-provider-error"
+      end
+    end
+
+    @tag :tmp_dir
+    test "direct replay misses retain the authoring hash", %{tmp_dir: dir} do
+      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
+      paths = write_application(dir)
+
+      request =
+        ~S|{"system" "different" "messages" [{"role" "user" "content" "missing"}]}|
+
+      for {style, expression} <- [
+            {:raw, ~s|(let [response (llm/request #{request})]
+                  (if (= :error (get response :status))
+                    (fail response)
+                    (return response)))|},
+            {:documented_wrapper, ~s|(let [response (tool/llm-request #{request})]
+                  (if (= :error (get response :status))
+                    (fail {"kind" "llm-provider-error" "provider_response" response})
+                    (return (get response :value))))|},
+            {:parallel_raw, ~s|(pmap
+                  (fn [_]
+                    (let [response (llm/request #{request})]
+                      (if (= :error (get response :status))
+                        (fail response)
+                        response)))
+                  [1])|}
+          ] do
+        File.write!(
+          Path.join(dir, "w.clj"),
+          "(ns app)\n(defn run [_input]\n  #{expression})\n"
+        )
+
+        assert {:error, %CommandOutcome{} = miss} =
+                 CommandEngine.dispatch(["run", paths.manifest, "--host-config", paths.host])
+
+        assert miss.envelope["error"]["code"] == "replay_fixture_missing",
+               "#{style} discarded the replay-miss hash"
+
+        assert miss.envelope["error"]["message"] =~ ~r/request_hash: sha256:[0-9a-f]{64}/
+      end
+    end
+
+    @tag :tmp_dir
+    test "a private replay miss keeps its request hash out of public diagnostics", %{tmp_dir: dir} do
+      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
+      paths = write_application(dir)
+      private_input = Path.join(dir, "private-input.json")
+      inspection = Path.join(dir, "private-run.inspection.jsonl")
+      secret = "PRIVATE_REPLAY_PROMPT"
+
+      File.write!(private_input, Jason.encode!(%{"secret" => secret}))
+
+      write_agent_application(
+        paths,
+        ~S|(agent.core/run-value (get input "secret") {"max_turns" 1})|
+      )
+
+      host = paths.host |> File.read!() |> Jason.decode!()
+
+      host =
+        put_in(host, ["install", "replay-llm", "accepts_data"], ["normal", "private_inspection"])
+
+      File.write!(paths.host, Jason.encode!(host))
+
+      assert {:error, %CommandOutcome{} = miss} =
+               CommandEngine.dispatch([
+                 "run",
+                 paths.manifest,
+                 "--host-config",
+                 paths.host,
+                 "--private-input",
+                 Path.basename(private_input),
+                 "--inspect",
+                 inspection
+               ])
+
+      assert miss.envelope["artifact_class"] == "private", inspect(miss.envelope)
+      assert miss.envelope["error"]["code"] == "workflow_failed"
+      refute Jason.encode!(miss.envelope) =~ ~r/sha256:[0-9a-f]{64}/
+      refute Jason.encode!(miss.envelope) =~ secret
+
+      assert {:stderr, stderr} = CommandRenderer.render(miss)
+      refute stderr =~ ~r/sha256:[0-9a-f]{64}/
+      refute stderr =~ secret
+
+      private_records = File.read!(inspection)
+      assert private_records =~ ~r/request_hash: sha256:[0-9a-f]{64}/
+      assert private_records =~ secret
+    end
+
     @tag :tmp_dir
     test "a replay-backed run reaches the same llm-request capability as a live one", %{
       tmp_dir: dir
@@ -652,5 +864,34 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     File.write!(manifest_path, Jason.encode!(manifest))
     File.write!(host_path, Jason.encode!(host))
     %{manifest: manifest_path, host: host_path}
+  end
+
+  defp write_agent_application(paths, expression) do
+    File.write!(
+      Path.join(Path.dirname(paths.manifest), "w.clj"),
+      """
+      (ns app)
+      (defn run [input]
+        (return #{expression}))
+      """
+    )
+
+    manifest = paths.manifest |> File.read!() |> Jason.decode!()
+
+    manifest =
+      put_in(manifest, ["workflow", "components"], [
+        %{"library" => "agent.core"},
+        %{"id" => "app", "path" => "w.clj", "dependencies" => ["agent.core"]}
+      ])
+      |> Map.put("missions", %{"default" => %{"components" => []}})
+
+    File.write!(paths.manifest, Jason.encode!(manifest))
+  end
+
+  defp replay_registry(host_path) do
+    with {:ok, host} <- HostConfig.load(host_path),
+         {:ok, catalog} <- HostInstallation.catalog(host) do
+      HostInstallation.runtime_registry(host, catalog)
+    end
   end
 end

@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.TestSupport.RunLifecycle
@@ -10,6 +11,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
   @examples Path.expand("../../../examples/kernel-tutorial", __DIR__)
   @host Path.join(@examples, "ptc-host.json")
   @viewer_examples Path.expand("../../../examples/viewer-demo", __DIR__)
+  @replay_example Path.expand("../../../examples/llm-replay", __DIR__)
 
   test "the deterministic tutorial manifest returns the documented value" do
     {:ok, registry} = ProviderRegistry.new()
@@ -73,6 +75,23 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
     assert result.usage.subordinate_evaluations == 2
     assert result.usage.capability_calls.workflow == %{}
     assert result.usage.capability_calls.mission == %{}
+  end
+
+  test "the replay example returns its frozen response without network access" do
+    {:ok, host} = HostConfig.load(Path.join(@replay_example, "ptc-host.json"))
+
+    {:ok, registry} =
+      HostInstallation.catalog(host)
+      |> then(fn {:ok, catalog} ->
+        HostInstallation.runtime_registry(host, catalog)
+      end)
+
+    assert {:ok, %{value: %{"content" => "Frozen answer"}}} =
+             @replay_example
+             |> Path.join("ptc.json")
+             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunLifecycle.build(registry)
+             |> RunLifecycle.execute()
   end
 
   test "the viewer journeys load against one strict host-only installation" do

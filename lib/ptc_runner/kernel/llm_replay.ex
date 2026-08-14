@@ -9,10 +9,18 @@ defmodule PtcRunner.Kernel.LLMReplay do
   the same manifest grammar selects a replay provider or a live one, and
   nothing about the application changes between them.
 
-  A fixture file is JSON Lines. Each entry names the `request_hash` it answers
-  and carries either one `response` or an ordered `responses` sequence. The
-  sequence form exists for a request that repeats *identically* — a retry, or a
-  loop that rebuilds the same prompt — where the first call gets the first
+  A fixture file is JSON Lines. Every entry requires `"schema_version": 1`, a
+  `request_hash` matching `sha256:` followed by 64 lowercase hexadecimal
+  characters, and exactly one of `response` or `responses`. `response` is one
+  JSON object. `responses` is an ordered, non-empty sequence of at most 1,024
+  JSON objects. No other entry keys are accepted.
+
+  For example, one line is:
+
+      {"schema_version":1,"request_hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000","response":{"content":"frozen"}}
+
+  The sequence form exists for a request that repeats *identically* — a retry,
+  or a loop that rebuilds the same prompt — where the first call gets the first
   element and the next call the next. An ordinary multi-turn agent loop does
   not need it: each turn carries the accumulated transcript, so each request
   hashes differently and gets its own entry.
@@ -22,7 +30,14 @@ defmodule PtcRunner.Kernel.LLMReplay do
   fixture is not tied to the vendor that recorded it. That also makes the match
   exact by construction: a run whose prompt, messages, or tools differ at all
   produces a different hash and fails rather than silently replaying a response
-  recorded for a different question.
+  recorded for a different question. A normal-data miss reports the computed
+  hash as
+  `no replay fixture matches this request (request_hash: sha256:...)` in command
+  output and private capability inspection. A private-data run keeps the hash
+  out of its public command diagnostic because the unsalted request hash could
+  reveal equality or permit guesses of low-entropy prompts; author those
+  fixtures from the owner-only inspection record instead. Copy the hash into
+  the entry, provide the response the workflow expects, and rerun.
 
   The provider is owned. Its response cursor lives in a process that monitors
   the run that acquired it, so a run failing between acquisition and cleanup
@@ -38,6 +53,7 @@ defmodule PtcRunner.Kernel.LLMReplay do
   alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.LLMReplayOwner
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.StrictJSON
@@ -158,7 +174,13 @@ defmodule PtcRunner.Kernel.LLMReplay do
     }
   end
 
-  @doc "Hashes a provider-neutral request the way fixture keys are computed."
+  @doc """
+  Hashes a provider-neutral request the way fixture keys are computed.
+
+  Manifest authors normally copy the hash from a replay-miss command error;
+  this function supports embedders that already hold the provider-neutral
+  request map.
+  """
   @spec request_hash(map()) :: {:ok, binary()} | :error
   def request_hash(request) when is_map(request) do
     case DeterministicJSON.encode(request) do
@@ -198,7 +220,8 @@ defmodule PtcRunner.Kernel.LLMReplay do
         {:error, failure("replay sequence for this request is exhausted")}
 
       {:error, :unmatched} ->
-        {:error, failure("no replay fixture matches this request")}
+        {:ok, details} = LLMReplayDiagnostic.message(key)
+        {:error, failure(details, key)}
 
       {:error, :unavailable} ->
         {:error, ProviderError.new(:unavailable, "replay provider is unavailable")}
@@ -218,6 +241,13 @@ defmodule PtcRunner.Kernel.LLMReplay do
   # Not retryable: a fixture set is frozen, so the same request will miss
   # again. Retrying would only burn the run's turn budget.
   defp failure(details), do: ProviderError.new(:not_found, details, retryable?: false)
+
+  defp failure(details, request_hash) do
+    ProviderError.new(:not_found, details,
+      retryable?: false,
+      replay_request_hash: request_hash
+    )
+  end
 
   defp read_fixtures(directory, path) do
     case ConfinedFile.read(directory, path, @max_fixture_bytes) do

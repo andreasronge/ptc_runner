@@ -10,6 +10,7 @@ defmodule PtcRunner.Lisp.Runtime.Args do
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RuntimeCallable
+  alias PtcRunner.Lisp.SpecialBuiltin
 
   @spec validate!(Builtin.t() | term(), [term()]) :: :ok
   def validate!(callable, args) do
@@ -49,13 +50,7 @@ defmodule PtcRunner.Lisp.Runtime.Args do
 
   def valid_callable?({:partial_fn, _f, fixed}) when is_list(fixed), do: true
   def valid_callable?({:fnil_fn, _f, _default}), do: true
-  # Only specials with higher-order dispatch: the introspection builtins go
-  # through `Runtime.Callable.call/2` and `println` through its
-  # `Apply.closure_to_fun/3` bridge. `apply` has neither, so classifying it
-  # callable would promise a value position it cannot be used in.
-  def valid_callable?({:special, name})
-      when name in [:dir, :apropos, :doc, :export_meta, :println],
-      do: true
+  def valid_callable?({:special, name}), do: SpecialBuiltin.callable?(name)
 
   def valid_callable?(%LispKeyword{}), do: true
   def valid_callable?(x) when is_atom(x) and x not in [nil, true, false], do: true

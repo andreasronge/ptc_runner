@@ -52,6 +52,7 @@ defmodule PtcRunner.Kernel.RunState do
   alias PtcRunner.Kernel.EventSinkState
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Lisp
@@ -212,9 +213,33 @@ defmodule PtcRunner.Kernel.RunState do
   # release_provider_slot/1 answers. Only the exit becomes :run_closed; a reply
   # the owner actually sent is passed through, so a bad token still reaches the
   # caller as the unhandled :closed it has always been.
-  @spec finish_provider(t()) :: :ok | {:error, :run_closed}
-  @doc "Releases a provider slot and accepts completion only while the run is open."
-  def finish_provider(state), do: safe_call(state, :finish_provider, {:error, :run_closed})
+  @spec finish_provider(t(), binary() | nil) ::
+          :ok | {:error, :run_closed | :invalid_request_hash}
+  @doc "Atomically releases a provider slot, accepts completion, and records replay provenance."
+  def finish_provider(state, replay_request_hash \\ nil)
+
+  def finish_provider(state, nil),
+    do: safe_call(state, {:finish_provider, nil}, {:error, :run_closed})
+
+  def finish_provider(state, replay_request_hash) when is_binary(replay_request_hash) do
+    if LLMReplayDiagnostic.valid_request_hash?(replay_request_hash),
+      do:
+        safe_call(
+          state,
+          {:finish_provider, replay_request_hash},
+          {:error, :run_closed}
+        ),
+      else: {:error, :invalid_request_hash}
+  end
+
+  def finish_provider(_state, _replay_request_hash), do: {:error, :invalid_request_hash}
+
+  @doc false
+  @spec replay_miss?(t(), binary()) :: boolean()
+  def replay_miss?(state, request_hash) when is_binary(request_hash),
+    do: safe_call(state, {:replay_miss?, request_hash}, false)
+
+  def replay_miss?(_state, _request_hash), do: false
 
   @doc false
   @spec mark_evaluation_terminal_provider_failure(t()) :: :ok | {:error, :closed}
@@ -458,6 +483,7 @@ defmodule PtcRunner.Kernel.RunState do
        evaluations_by_mission: %{},
        source_checks: 0,
        protocol_errors: 0,
+       replay_misses: MapSet.new(),
        terminal_failure: nil,
        continuations: %{},
        evaluation_lease: nil,
@@ -536,11 +562,23 @@ defmodule PtcRunner.Kernel.RunState do
     {:reply, :ok, release_reservation(state, caller)}
   end
 
-  def handle_call({token, :finish_provider}, {caller, _tag}, %{token: token} = state) do
+  def handle_call(
+        {token, {:finish_provider, replay_request_hash}},
+        {caller, _tag},
+        %{token: token} = state
+      ) do
     state = release_reservation(state, caller)
-    reply = if unavailable?(state), do: {:error, :run_closed}, else: :ok
-    {:reply, reply, state}
+
+    if unavailable?(state) do
+      {:reply, {:error, :run_closed}, state}
+    else
+      state = maybe_record_replay_miss(state, replay_request_hash)
+      {:reply, :ok, state}
+    end
   end
+
+  def handle_call({token, {:replay_miss?, request_hash}}, _from, %{token: token} = state),
+    do: {:reply, MapSet.member?(state.replay_misses, request_hash), state}
 
   def handle_call(
         {token, :mark_evaluation_terminal_provider_failure},
@@ -1539,6 +1577,11 @@ defmodule PtcRunner.Kernel.RunState do
 
   defp unavailable?(state),
     do: state.closed? or deadline_expired?(state)
+
+  defp maybe_record_replay_miss(state, nil), do: state
+
+  defp maybe_record_replay_miss(state, request_hash),
+    do: %{state | replay_misses: MapSet.put(state.replay_misses, request_hash)}
 
   defp deadline_expired?(state),
     do: System.monotonic_time(:millisecond) >= state.deadline_ms

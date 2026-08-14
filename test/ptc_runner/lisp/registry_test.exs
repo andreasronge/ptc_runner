@@ -85,6 +85,19 @@ defmodule PtcRunner.Lisp.RegistryTest do
       end
     end
 
+    test "pmap and pcalls are analyzer-optimized env callables" do
+      supported_forms = MapSet.new(Analyze.supported_forms())
+
+      for name <- [:pmap, :pcalls] do
+        entry = Registry.doc(Atom.to_string(name))
+
+        assert entry.dispatch == :env
+        assert entry.binding == :special
+        assert Map.fetch!(Env.initial(), name) == {:special, name}
+        assert MapSet.member?(supported_forms, name)
+      end
+    end
+
     test "every entry has required fields" do
       for entry <- Registry.implemented() do
         assert is_binary(entry.name), "Entry missing name"

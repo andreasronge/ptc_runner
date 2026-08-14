@@ -49,8 +49,8 @@ defmodule PtcRunner.Lisp do
     SymbolCounter
   }
 
+  alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.Program
-  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.Eval.Helpers
@@ -1494,10 +1494,10 @@ defmodule PtcRunner.Lisp do
     do: details
 
   defp error_details({:pmap_error, _message, taxonomy}) when is_map(taxonomy),
-    do: SafeMetadata.retain_failure_taxonomy(taxonomy)
+    do: retain_parallel_failure_metadata(taxonomy)
 
   defp error_details({:pcalls_error, _index, _message, taxonomy}) when is_map(taxonomy),
-    do: SafeMetadata.retain_failure_taxonomy(taxonomy)
+    do: retain_parallel_failure_metadata(taxonomy)
 
   defp error_details({:runtime_limit_exceeded, _message, details}) when is_map(details),
     do: details
@@ -1515,6 +1515,10 @@ defmodule PtcRunner.Lisp do
        do: details
 
   defp error_details(_reason), do: %{}
+
+  defp retain_parallel_failure_metadata(metadata) do
+    LLMReplayDiagnostic.retain_parallel_failure_metadata(metadata)
+  end
 
   @doc """
   Format an error tuple into a human-readable string.

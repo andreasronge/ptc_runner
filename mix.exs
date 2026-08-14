@@ -178,7 +178,13 @@ defmodule PtcRunner.MixProject do
   defp aliases do
     [
       ptc: &run_ptc/1,
+      # The nested-project fetch leads: the Viewer and launcher gates run after
+      # the root suite, so without it a worktree that never fetched them learns
+      # so several minutes in. Each gate still fetches its own project -- this
+      # only moves the discovery to the front. GitHub gets the same fetch from
+      # the setup action, per job.
       precommit: [
+        "cmd scripts/ci/preflight.sh",
         "cmd scripts/ci/core-quality.sh",
         "cmd scripts/ci/core-tests.sh",
         "cmd scripts/ci/viewer.sh",
@@ -420,7 +426,7 @@ defmodule PtcRunner.MixProject do
   defp package do
     [
       files:
-        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
+        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",
