@@ -1447,6 +1447,25 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
 .kt-call-body { padding: 7px 10px 9px 37px; border-top: 1px solid var(--border); }
 .kt-sanitized-note { margin: 2px 0 8px; color: var(--muted); font-size: 11px; }
 
+.kt-private-source { margin: 2px 0 8px; }
+.kt-private-source > summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.kt-private-source[open] > summary { margin-bottom: 4px; }
+.kt-private-badge {
+  margin-left: 6px; padding: 1px 6px; border-radius: 8px;
+  background: var(--badge-error-bg, rgba(214, 90, 90, 0.15));
+  color: var(--badge-error-fg, #d65a5a); font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.kt-prelude-calls { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.kt-prelude-calls > span:first-child { color: var(--muted); font-size: 10px; }
+.kt-prelude-call {
+  padding: 2px 7px; border: 1px solid var(--border); border-radius: 9px;
+  color: var(--accent); font: 10px 'SF Mono', Consolas, Monaco, monospace; text-decoration: none;
+}
+.kt-prelude-call:hover,
+.kt-prelude-call:focus { background: rgba(86, 156, 214, 0.16); outline: none; }
+.kt-prelude-call-unavailable { color: var(--muted); }
+
 .kt-annotation { margin: 5px 0; border-left: 2px solid var(--keyword); background: var(--bg); }
 .kt-annotation > summary { padding: 6px 9px; cursor: pointer; }
 .kt-annotation > summary span { color: var(--muted); font-size: 10px; }
@@ -1515,6 +1534,28 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   color: var(--fg);
   font-size: 9px;
 }
+.kt-component-source { min-width: 0; }
+.kt-component-source > summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  cursor: pointer;
+  list-style-position: outside;
+}
+.kt-component-source > summary:hover code { color: var(--accent); }
+.kt-component-source-label { margin-left: auto; color: var(--accent); font-size: 9px; }
+.kt-component-source-meta { margin: 6px 0 4px; color: var(--muted); font-size: 9px; }
+.kt-component-source .kt-code { max-height: 520px; }
+.kt-component-source-compact {
+  padding: 2px 7px;
+  border-radius: 8px;
+  background: rgba(197, 134, 192, 0.14);
+}
+.kt-component-source-compact > summary { color: var(--keyword); font-size: 10px; }
+.kt-component-source-compact > summary code { color: inherit; }
+.kt-component-source-compact > .kt-code { min-width: min(680px, 80vw); }
+.kt-prelude-definition-active { border-radius: 3px; background: rgba(220, 220, 170, 0.22); }
 
 /* === Private inspection joins (dialogue, program source, payloads) === */
 .kt-private-chip {
