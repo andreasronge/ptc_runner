@@ -1,6 +1,6 @@
 defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
   @moduledoc """
-  e2e: two agents, two named missions, two role prompts, one live model.
+  e2e: two agents, two named missions, one live model.
 
   This is the question the spike exists to answer — whether a real model driven
   against a named space sees only that space's API and commits only into that
@@ -55,70 +55,7 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
                  {"max_turns" 4 "mission" "research"})
           verdict (agent.core/run-value
                     (str "Does this claim contain a numeric identifier? Claim: " fact)
-                    {"max_turns" 4 "mission" "review"})]
-      (return {"fact" fact "verdict" verdict})))
-  """
-
-  @workflow_source """
-  (ns spike.team "Two agents driven against two named named missions.")
-
-  (defn- system-text [role space]
-    (str role "\\n\\n"
-         "You must answer only by calling the run_ptc_lisp tool exactly once per turn "
-         "with one PTC-Lisp program string. Never answer in prose.\\n"
-         "Call (return value) as soon as you have the answer.\\n"
-         "Only the API below exists. Do not invent other functions.\\n"
-         "Example turn: (return (some.ns/some-fn))\\n\\n"
-         (kernel/mission-model-context space)))
-
-  (defn- correlate [messages action content]
-    (conj
-      (conj messages {"role" "assistant"
-                      "content" (get action :rationale)
-                      "tool_calls" [(get action :public-tool-call)]})
-      {"role" "tool"
-       "tool_call_id" (get action :tool-call-id)
-       "content" content}))
-
-  (defn- run-role [space role task max-turns]
-    (loop [turn 0
-           messages [{"role" "user" "content" task}]]
-      (if (>= turn max-turns)
-        (fail {:kind :turn-limit})
-        (let [response (llm/request {"system" (system-text role space)
-                                     "messages" messages
-                                     "tools" [(agent.native/tool-schema)]})
-              action (agent.native/normalize response 64000)]
-          (if (not= :tool-call (get action :kind))
-            ;; agent.core corrects a protocol error rather than ending the run;
-            ;; a loop that skips this is brittle against ordinary prose replies.
-            (if (agent.retry/retry? turn max-turns)
-              (recur (inc turn)
-                     (conj messages
-                           {"role" "user"
-                            "content" (agent.feedback/protocol-error action)}))
-              (fail {:kind :protocol-error}))
-            (let [evaluation (kernel/eval-source space (get action :program))]
-              (case (get evaluation :outcome)
-                :returned (get evaluation :value)
-                :continued (recur (inc turn)
-                                  (correlate messages action
-                                             (agent.feedback/success evaluation 2048)))
-                (if (agent.retry/retry? turn max-turns)
-                  (recur (inc turn)
-                         (correlate messages action
-                                    (agent.feedback/evaluation-error evaluation)))
-                  (fail {:kind :agent-failed})))))))))
-
-  (defn run [_input]
-    (let [fact (run-role "research"
-                         "You retrieve one stored record."
-                         "Retrieve the stored record and return it as a string."
-                         4)
-          verdict (run-role "review"
-                            "You verify one claim."
-                            (str "Does this claim contain a numeric identifier? Claim: " fact)
-                            4)
+                    {"max_turns" 4 "mission" "review"})
           leaked (kernel/eval-source "review" "(return (res/record))")]
       (return
         {"fact" fact
@@ -139,71 +76,7 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
     end
   end
 
-  test "two agents run in two named missions with two role prompts" do
-    {:ok, limits} =
-      Limits.new(
-        run_duration_ms: 150_000,
-        workflow_timeout_ms: 150_000,
-        evaluation_timeout_ms: 10_000,
-        subordinate_evaluations: 12,
-        workflow_capability_calls: 64
-      )
-
-    {:ok, %{capabilities: [llm_capability], close: close}} = build_live_llm(limits)
-    if close, do: on_exit(close)
-
-    {:ok, workflow} =
-      WorkflowEnvironment.new(
-        bundle: workflow_bundle(),
-        capabilities: [llm_capability]
-      )
-
-    {:ok, default_mission} = MissionEnvironment.new([])
-    {:ok, research} = MissionEnvironment.new(bundle: mission_bundle("res", @research_source))
-    {:ok, review} = MissionEnvironment.new(bundle: mission_bundle("rev", @review_source))
-
-    {:ok, sink} = EventSink.start(:normal, limits, run_id: "named-missions-e2e")
-
-    {:ok, config} =
-      RunConfig.new(
-        workflow_environment: workflow,
-        missions: %{"default" => default_mission, "research" => research, "review" => review},
-        input: %{},
-        limits: limits,
-        event_sink: sink
-      )
-
-    assert {:ok, %{value: value}} = Kernel.run("(spike.team/run data/input)", config)
-
-    # Each mission rendered its own API into its own agent's prompt.
-    assert value["research-api"] =~ "res/record"
-    refute value["research-api"] =~ "rev/numeric?"
-    assert value["review-api"] =~ "rev/numeric?"
-    refute value["review-api"] =~ "res/record"
-
-    # The research agent reached its own space's capability.
-    assert is_binary(value["fact"])
-    assert value["fact"] =~ "4021"
-
-    # The review agent answered from its own, different API.
-    refute is_nil(value["verdict"])
-
-    # The review space cannot call the research space's component at all.
-    refute value["cross-space-call"] == :returned
-
-    spaces =
-      sink
-      |> EventSink.events()
-      |> Enum.filter(&(&1.type == "evaluation-started"))
-      |> Enum.map(fn event -> event.data[:mission_name] end)
-      |> Enum.uniq()
-      |> Enum.sort()
-
-    assert "research" in spaces
-    assert "review" in spaces
-  end
-
-  test "the shipped agent.core loop drives two spaces via its cfg" do
+  test "the shipped agent.core loop drives two isolated spaces via its cfg" do
     {:ok, limits} =
       Limits.new(
         run_duration_ms: 150_000,
@@ -246,6 +119,15 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
     assert is_binary(value["fact"])
     assert value["fact"] =~ "4021"
     refute is_nil(value["verdict"])
+
+    # Each mission rendered its own API into its own agent's prompt.
+    assert value["research-api"] =~ "res/record"
+    refute value["research-api"] =~ "rev/numeric?"
+    assert value["review-api"] =~ "rev/numeric?"
+    refute value["review-api"] =~ "res/record"
+
+    # The review space cannot call the research space's component at all.
+    refute value["cross-space-call"] == :returned
 
     spaces =
       sink
@@ -325,28 +207,6 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
              events,
              &(&1.type == "evaluation-started" and &1.data.environment == :workflow)
            ) == 1
-  end
-
-  defp workflow_bundle do
-    {:ok, team} =
-      Component.new(
-        id: "spike.team",
-        source: @workflow_source,
-        dependencies: ["agent.feedback", "agent.native", "agent.retry", "kernel", "llm"]
-      )
-
-    {:ok, components} =
-      Library.resolve_components([
-        team,
-        {:library, "kernel"},
-        {:library, "llm"},
-        {:library, "agent.native"},
-        {:library, "agent.feedback"},
-        {:library, "agent.retry"}
-      ])
-
-    {:ok, bundle} = Kernel.compile_bundle(components)
-    bundle
   end
 
   defp mission_bundle(id, source) do
