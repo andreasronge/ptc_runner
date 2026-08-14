@@ -5,5 +5,4 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/_common.sh"
 
 "$script_dir/core-quality.sh"
-mix ptc.audit_upstream
-mix deps.unlock --check-unused
+mix do ptc.audit_upstream + deps.unlock --check-unused

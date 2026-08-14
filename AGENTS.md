@@ -76,7 +76,9 @@ how it was verified.
   invokes the same repository-owned root, Viewer, launcher, release, and
   documentation scripts as GitHub Actions. Root changes therefore use the
   same compile/test flags, `CI=1` property count, static checks, Dialyzer
-  format, and release verification locally and remotely.
+  format, and release verification locally and remotely. The selected gates
+  run concurrently, so each gate's output is captured and replayed only if it
+  fails; see `.githooks/README.md`.
   When one fires, run its matching write form — `mix ptc.gen_docs` for
   generated docs and schemas, or `mix ptc.conformance_report --write-inventory`
   for `conformance_inventory.json` — then stage the result. Do not run

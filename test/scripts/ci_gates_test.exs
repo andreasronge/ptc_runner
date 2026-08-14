@@ -2,6 +2,7 @@ defmodule PtcRunner.Scripts.CIGatesTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.TestSupport.GitEnv
+  alias PtcRunner.TestSupport.MixBackstop
 
   @root Path.expand("../..", __DIR__)
   @core_tests Path.join(@root, "scripts/ci/core-tests.sh")
@@ -101,6 +102,27 @@ defmodule PtcRunner.Scripts.CIGatesTest do
              "CI=true MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= :: dialyzer --format github"
   end
 
+  test "a gate script outliving its stub cannot fall through to the real Mix" do
+    %{path: path} = fake_mix()
+    [stub | _] = String.split(path, ":")
+
+    # ExUnit runs `on_exit` as soon as a test times out, so a `System.cmd/3`
+    # child can still be running when its stub is deleted. Without a backstop
+    # the next `mix` call resolves to the developer's real one and this script
+    # starts a full `mix test` — which runs this file again, recursively.
+    File.rm_rf!(stub)
+
+    {output, status} =
+      System.cmd(@core_tests, [],
+        cd: @root,
+        env: @git_env ++ [{"PATH", path}],
+        stderr_to_stdout: true
+      )
+
+    assert status == 0
+    assert output == ""
+  end
+
   test "Actions and the pre-push hook delegate deterministic gates to repository scripts" do
     workflow = File.read!(Path.join(@root, ".github/workflows/test.yml"))
     setup_action = File.read!(Path.join(@root, ".github/actions/setup-elixir/action.yml"))
@@ -149,6 +171,6 @@ defmodule PtcRunner.Scripts.CIGatesTest do
 
     File.chmod!(mix, 0o755)
 
-    %{marker: marker, path: bin <> ":" <> System.fetch_env!("PATH")}
+    %{marker: marker, path: MixBackstop.stub_path(bin)}
   end
 end
