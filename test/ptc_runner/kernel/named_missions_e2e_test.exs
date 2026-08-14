@@ -8,7 +8,6 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
   """
   use ExUnit.Case, async: false
 
-  @moduletag :e2e
   @moduletag timeout: 180_000
 
   alias PtcRunner.Kernel
@@ -65,17 +64,26 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
          "review-api" (kernel/mission-model-context "review")})))
   """
 
-  setup_all do
-    :ok = LLMSupport.load_dotenv()
-    :ok = LLMSupport.admit_provider_application!()
+  setup context do
+    if context[:e2e] do
+      :ok = LLMSupport.load_dotenv()
+      :ok = LLMSupport.admit_provider_application!()
 
-    if System.get_env("OPENROUTER_API_KEY") do
-      :ok
+      if System.get_env("OPENROUTER_API_KEY") do
+        :ok
+      else
+        {:skip, "OPENROUTER_API_KEY is not configured"}
+      end
     else
-      {:skip, "OPENROUTER_API_KEY is not configured"}
+      :ok
     end
   end
 
+  test "the shipped named-mission workflow bundle compiles without live credentials" do
+    assert {:ok, _bundle} = shipped_loop_bundle()
+  end
+
+  @tag :e2e
   test "the shipped agent.core loop drives two isolated spaces via its cfg" do
     {:ok, limits} =
       Limits.new(
@@ -89,15 +97,7 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
     {:ok, %{capabilities: [llm_capability], close: close}} = build_live_llm(limits)
     if close, do: on_exit(close)
 
-    {:ok, shipped} =
-      Component.new(
-        id: "spike.shipped",
-        source: @shipped_loop_source,
-        dependencies: ["agent.core"]
-      )
-
-    {:ok, components} = Library.resolve_components([shipped, {:library, "agent.core"}])
-    {:ok, bundle} = Kernel.compile_bundle(components)
+    {:ok, bundle} = shipped_loop_bundle()
 
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm_capability])
     {:ok, default_mission} = MissionEnvironment.new([])
@@ -141,6 +141,7 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
     refute "default" in spaces
   end
 
+  @tag :e2e
   test "live agents under pcalls: where the parallel boundary actually is" do
     {:ok, limits} =
       Limits.new(
@@ -213,6 +214,19 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
     {:ok, component} = Component.new(id: id, source: source)
     {:ok, bundle} = Kernel.compile_bundle([component])
     bundle
+  end
+
+  defp shipped_loop_bundle do
+    with {:ok, shipped} <-
+           Component.new(
+             id: "spike.shipped",
+             source: @shipped_loop_source,
+             dependencies: ["agent.core", "kernel"]
+           ),
+         {:ok, components} <-
+           Library.resolve_components([shipped, {:library, "agent.core"}]) do
+      Kernel.compile_bundle(components)
+    end
   end
 
   # ex_dna:disable-for-next-line — mirrors the established live DeepSeek provider fixture
