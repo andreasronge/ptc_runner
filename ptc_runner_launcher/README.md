@@ -9,8 +9,11 @@ host-authorized server with:
   the launcher before spawn;
 - separate stdin, stdout, and bounded stderr streams;
 - acknowledged backpressure;
-- a new process group; and
-- bounded EOF, TERM, and KILL cleanup, including descendant reaping on Linux.
+- a new process group;
+- bounded EOF, TERM, and KILL cleanup, including descendant reaping on Linux;
+  and
+- a lifeline watchdog that retires that group with a single `SIGKILL` when the
+  launcher itself is destroyed before it can run any of that cleanup.
 
 The package restores mandatory-checksum precompiled executables on
 `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-linux-gnu`, and
@@ -32,6 +35,16 @@ atomic no-replace directory publication. It calls
 `renameat2(RENAME_NOREPLACE)` on Linux and `renamex_np(RENAME_EXCL)` on macOS,
 and fails closed when the primitive is unavailable. Scaffold construction,
 staging ownership, cleanup, and command outcomes remain in the core package.
+
+The watchdog is a second child forked before any other descriptor exists. It
+leaves the launcher's session, holds one end of a private pipe the launcher
+keeps closed-on-exec, and is armed with the server's process-group identifier
+once that group exists. Supervision stands it down as part of reaping the
+leader, because releasing that PID also releases the group identifier its
+signal names; losing the pipe without a stand-down means the launcher died
+holding a live group, and the watchdog retires it. It sends one signal rather
+than escalating, so PID reuse after the launcher's death cannot redirect a
+later signal at an unrelated group.
 
 This is process containment for trusted host-installed MCP servers, not a
 hostile-code sandbox. A trusted child can deliberately leave its process group.

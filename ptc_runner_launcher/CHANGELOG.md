@@ -13,6 +13,9 @@
 - Added mandatory-checksum precompiled artifacts for ARM64 and x86-64 macOS
   and GNU/Linux, with tested source fallback.
 - Bound protocol-v1 startup to the caller's frozen server-executable SHA-256.
+- Added a lifeline watchdog so a launcher destroyed without running its own
+  teardown — `SIGKILL`, or a host that tears the process down — still retires
+  the server process group instead of leaving it reparented and running.
 - Added tag-only release automation that executes each artifact and assembles
   the verified companion Hex package with signed build provenance.
 - Added a protected publication path that uploads the exact verified package

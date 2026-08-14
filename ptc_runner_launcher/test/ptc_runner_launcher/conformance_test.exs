@@ -512,6 +512,29 @@ defmodule PtcRunnerLauncher.ConformanceTest do
   end
 
   @tag :tmp_dir
+  test "a forcibly killed launcher still retires its server group", %{tmp_dir: dir} do
+    marker = Path.join(dir, "orphan-term-observed")
+    launcher = open_launcher(["tree", marker], grace_ms: 100)
+    %{leader: leader, descendant: descendant} = tree_pids(launcher)
+
+    # Nothing else reaps this group once its launcher is gone, so a regression
+    # here must not leak a `sleep` loop into the rest of the run.
+    on_exit(fn ->
+      System.cmd(kill_executable(), ["-9", "-#{leader}"], stderr_to_stdout: true)
+    end)
+
+    assert os_process_running?(leader)
+    assert os_process_running?(descendant)
+
+    {:os_pid, launcher_pid} = Port.info(launcher.port, :os_pid)
+    assert {_output, 0} = System.cmd(kill_executable(), ["-9", Integer.to_string(launcher_pid)])
+    assert_eventually(fn -> not os_process_running?(launcher_pid) end, 2_000)
+
+    assert_eventually(fn -> not os_process_running?(leader) end, 5_000)
+    assert_eventually(fn -> not os_process_running?(descendant) end, 5_000)
+  end
+
+  @tag :tmp_dir
   test "close terminates an npx-shaped wrapper and its nested leaf", %{tmp_dir: dir} do
     marker = Path.join(dir, "nested-term-observed")
     launcher = open_launcher(["deep-tree", marker], grace_ms: 1_000)
@@ -837,6 +860,19 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     String.to_integer(pid)
   end
 
+  defp tree_pids(launcher) do
+    output =
+      collect_until(
+        launcher,
+        &(&1.stdout =~ ~r/leader=\d+\n/ and &1.stdout =~ ~r/descendant=\d+\n/)
+      )
+
+    [leader] = Regex.run(~r/leader=(\d+)/, output.stdout, capture: :all_but_first)
+    [descendant] = Regex.run(~r/descendant=(\d+)/, output.stdout, capture: :all_but_first)
+
+    %{leader: String.to_integer(leader), descendant: String.to_integer(descendant)}
+  end
+
   defp next_finished(launcher, timeout_ms) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
     do_next_finished(launcher, deadline)
@@ -884,8 +920,26 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     status == 0
   end
 
+  # `kill -0` also succeeds for an un-reaped zombie, and nothing reaps the
+  # server group once its launcher has been destroyed, so liveness after a
+  # forced launcher kill has to be read from the process state instead.
+  defp os_process_running?(pid) do
+    {output, status} =
+      System.cmd(ps_executable(), ["-o", "state=", "-p", Integer.to_string(pid)],
+        stderr_to_stdout: true
+      )
+
+    state = String.trim(output)
+
+    status == 0 and state != "" and not String.starts_with?(state, "Z")
+  end
+
   defp kill_executable do
     System.find_executable("kill") || flunk("POSIX kill is unavailable")
+  end
+
+  defp ps_executable do
+    System.find_executable("ps") || flunk("POSIX ps is unavailable")
   end
 
   defp mailbox_messages do

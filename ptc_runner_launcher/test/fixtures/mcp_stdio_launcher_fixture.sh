@@ -102,6 +102,7 @@ case "$1" in
     ) &
 
     descendant="$!"
+    printf 'leader=%s\n' "$$"
     printf 'descendant=%s\n' "$descendant"
     trap '' TERM
 

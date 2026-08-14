@@ -901,6 +901,127 @@ static void request_child_subreaper(void) {
 #endif
 }
 
+/*
+ * Lifeline watchdog.
+ *
+ * Every launcher teardown path retires the server process group, but a
+ * launcher destroyed without running any of its own code -- SIGKILL, or a host
+ * that tears the process down -- runs none of them. Closing the server's stdin
+ * is then the only backstop, and a server that never reads stdin never
+ * observes it, so the group is reparented and survives.
+ *
+ * The watchdog is a second child forked before any other descriptor exists. It
+ * holds the read end of a private lifeline pipe whose write end only the
+ * launcher retains, and leaves the launcher's session so a signal aimed at the
+ * launcher's own group cannot take it along. Losing that write end without an
+ * explicit stand-down means the launcher died while its group was still live.
+ *
+ * It then sends exactly one round of signals. Once the launcher is gone the
+ * leader is reparented and reaped, releasing its PID, and the PID is also the
+ * group identifier -- so a TERM-then-KILL escalation could point its second
+ * signal at an unrelated group that reused the number. A single SIGKILL keeps
+ * that exposure to the interval between the launcher's death and this wake-up.
+ * The direct kill covers the window before the leader reaches `setsid`, where
+ * no group of its own exists yet; `terminate_starting_child` pairs them for
+ * the same reason.
+ */
+static int lifeline_watchdog(int lifeline_fd) {
+  struct sigaction ignored;
+  uint8_t identifier[4];
+  uint8_t stand_down;
+  pid_t process_group;
+  ssize_t count;
+
+  (void)setsid();
+  (void)close(STDIN_FILENO);
+  (void)close(STDOUT_FILENO);
+  (void)close(STDERR_FILENO);
+
+  memset(&ignored, 0, sizeof(ignored));
+  ignored.sa_handler = SIG_IGN;
+  (void)sigemptyset(&ignored.sa_mask);
+  (void)sigaction(SIGTERM, &ignored, NULL);
+  (void)sigaction(SIGINT, &ignored, NULL);
+  (void)sigaction(SIGHUP, &ignored, NULL);
+
+  if (!read_exact(lifeline_fd, identifier, sizeof(identifier))) {
+    return 0;
+  }
+
+  process_group = (pid_t)read_u32_be(identifier);
+
+  do {
+    count = read(lifeline_fd, &stand_down, sizeof(stand_down));
+  } while (count < 0 && errno == EINTR);
+
+  if (count > 0) {
+    return 0;
+  }
+
+  signal_process_group(process_group, SIGKILL);
+  (void)kill(process_group, SIGKILL);
+  return 0;
+}
+
+static bool start_lifeline_watchdog(int *lifeline_fd) {
+  int lifeline[2] = {-1, -1};
+  pid_t watchdog_pid;
+
+  if (!make_pipe(lifeline)) {
+    return false;
+  }
+
+  /*
+   * The server inherits the write end across `fork` and must not carry it past
+   * `execve`: a lifeline the server itself holds open never reports the
+   * launcher's death.
+   */
+  if (!close_on_exec(lifeline[1])) {
+    close_if_open(&lifeline[0]);
+    close_if_open(&lifeline[1]);
+    return false;
+  }
+
+  watchdog_pid = fork();
+  if (watchdog_pid < 0) {
+    close_if_open(&lifeline[0]);
+    close_if_open(&lifeline[1]);
+    return false;
+  }
+
+  if (watchdog_pid == 0) {
+    (void)close(lifeline[1]);
+    _exit(lifeline_watchdog(lifeline[0]));
+  }
+
+  (void)close(lifeline[0]);
+  *lifeline_fd = lifeline[1];
+  return true;
+}
+
+static void arm_lifeline(int lifeline_fd, pid_t process_group) {
+  uint8_t identifier[4];
+
+  write_u32_be(identifier, (uint32_t)process_group);
+  (void)write_exact(lifeline_fd, identifier, sizeof(identifier));
+}
+
+/*
+ * The watchdog's group-directed SIGKILL is only sound while the leader's PID is
+ * still pinned by an uncollected status, so standing the watchdog down belongs
+ * to releasing that PID rather than to exiting. Every caller has already
+ * SIGKILLed the group and reaps immediately afterwards.
+ */
+static void disarm_lifeline(int *lifeline_fd) {
+  static const uint8_t stand_down = 1U;
+
+  if (*lifeline_fd >= 0) {
+    (void)write_exact(*lifeline_fd, &stand_down, sizeof(stand_down));
+    (void)close(*lifeline_fd);
+    *lifeline_fd = -1;
+  }
+}
+
 static void queue_compact(struct byte_queue *queue) {
   if (queue->offset > 0 && queue->length > 0) {
     memmove(queue->bytes, queue->bytes + queue->offset, queue->length);
@@ -1191,11 +1312,12 @@ static enum startup_result await_child_start(int exec_status_fd,
   }
 }
 
-static void terminate_starting_child(pid_t child_pid) {
+static void terminate_starting_child(pid_t child_pid, int *lifeline_fd) {
   int64_t deadline = monotonic_ms() + 1000LL;
 
   signal_process_group(child_pid, SIGKILL);
   (void)kill(child_pid, SIGKILL);
+  disarm_lifeline(lifeline_fd);
 
   for (;;) {
     pid_t waited = waitpid(child_pid, NULL, WNOHANG);
@@ -1232,7 +1354,8 @@ static int finish_supervision(enum finish_reason reason, bool child_reaped,
 }
 
 static int supervise(const struct launcher_config *config, pid_t child_pid,
-                     int child_stdin, int child_stdout, int child_stderr) {
+                     int *lifeline_fd, int child_stdin, int child_stdout,
+                     int child_stderr) {
   uint8_t input[MAX_FRAME_BYTES + 4U];
   size_t input_length = 0;
   struct byte_queue pending = {
@@ -1252,12 +1375,12 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
 
   if (!nonblocking(STDIN_FILENO) || !nonblocking(child_stdin) ||
       !nonblocking(child_stdout) || !nonblocking(child_stderr)) {
-    terminate_starting_child(child_pid);
+    terminate_starting_child(child_pid, lifeline_fd);
     return 70;
   }
 
   if (!emit_frame('R', NULL, 0)) {
-    terminate_starting_child(child_pid);
+    terminate_starting_child(child_pid, lifeline_fd);
     return 70;
   }
 
@@ -1313,6 +1436,7 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
       close_if_open(&child_stdout);
       close_if_open(&child_stderr);
       if (!child_reaped) {
+        disarm_lifeline(lifeline_fd);
         child_reaped = reap_child(child_pid, &child_status);
       }
       return finish_supervision(FINISH_TERMINATION_TIMEOUT, child_reaped,
@@ -1321,10 +1445,12 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
 
     /*
      * SIGKILL above is the final process-group signal. Only now may the leader
-     * be reaped and its numeric PID released. Subsequent loops merely observe
-     * whether any same-group descendants remain.
+     * be reaped and its numeric PID released, and the lifeline watchdog stands
+     * down with it because its own signal names the same number. Subsequent
+     * loops merely observe whether any same-group descendants remain.
      */
     if (phase == PHASE_KILL_WAIT && child_exited && !child_reaped) {
+      disarm_lifeline(lifeline_fd);
       child_reaped = reap_child(child_pid, &child_status);
     }
 
@@ -1519,6 +1645,7 @@ int main(int argc, char **argv) {
   int child_stdout[2] = {-1, -1};
   int child_stderr[2] = {-1, -1};
   int exec_status[2] = {-1, -1};
+  int lifeline_fd = -1;
   pid_t child_pid;
   struct sigaction action;
   enum startup_result startup;
@@ -1541,6 +1668,16 @@ int main(int argc, char **argv) {
   (void)sigaction(SIGHUP, &action, NULL);
   (void)signal(SIGPIPE, SIG_IGN);
   request_child_subreaper();
+
+  /*
+   * Started before every other descriptor so no launcher death after this
+   * point can leave a started server without an observer, and so the watchdog
+   * inherits nothing it would have to close beyond the standard streams.
+   */
+  if (!start_lifeline_watchdog(&lifeline_fd)) {
+    (void)emit_frame('F', NULL, 0);
+    return 70;
+  }
 
   if (!load_bootstrap(&config)) {
     (void)emit_frame('F', NULL, 0);
@@ -1594,6 +1731,13 @@ int main(int argc, char **argv) {
     _exit(child_result);
   }
 
+  /*
+   * The child becomes its own group leader in `setsid`, so before that call
+   * the identifier still names the launcher's group; the watchdog kills the
+   * PID directly as well to cover the gap.
+   */
+  arm_lifeline(lifeline_fd, child_pid);
+
   close_if_open(&child_stdin[0]);
   close_if_open(&child_stdout[1]);
   close_if_open(&child_stderr[1]);
@@ -1605,7 +1749,7 @@ int main(int argc, char **argv) {
     close_if_open(&child_stdin[1]);
     close_if_open(&child_stdout[0]);
     close_if_open(&child_stderr[0]);
-    terminate_starting_child(child_pid);
+    terminate_starting_child(child_pid, &lifeline_fd);
     if (startup != STARTUP_OWNER_EOF) {
       (void)emit_frame('F', NULL, 0);
     }
@@ -1614,8 +1758,14 @@ int main(int argc, char **argv) {
   }
 
   close_if_open(&exec_status[0]);
-  result = supervise(&config, child_pid, child_stdin[1], child_stdout[0],
-                     child_stderr[0]);
+  /*
+   * Supervision stands the watchdog down as part of reaping the leader, and
+   * every path that returns from here has done so. An exit that somehow left
+   * it armed is the safe direction: the watchdog then retires a group the
+   * launcher never confirmed dead.
+   */
+  result = supervise(&config, child_pid, &lifeline_fd, child_stdin[1],
+                     child_stdout[0], child_stderr[0]);
   free_config(&config);
   return result;
 }

@@ -30,6 +30,11 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   process group. `close/1` drains but deliberately discards output emitted
   after shutdown begins; request output must be consumed before closing.
   Losing the owning BEAM process closes the Port and triggers the same cleanup.
+  A launcher that is destroyed outright instead runs none of it, so a lifeline
+  watchdog forked before the target retires the group with a single `SIGKILL`
+  once the launcher stops holding its end of a private pipe. Supervision stands
+  that watchdog down as part of reaping the leader, whose PID is also the group
+  identifier the watchdog would name.
   POSIX process groups contain descendants that remain in the launched group;
   a deliberately trusted child can escape with `setpgid` or `setsid`. A killed
   group is only observably empty once every member has been reaped, so the
