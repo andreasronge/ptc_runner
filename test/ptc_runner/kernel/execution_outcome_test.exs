@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.EventSink
@@ -26,7 +27,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
       {:ok, sink} = EventSink.start(policy, limits)
 
       assert {:ok, outcome} =
-               ExecutionOutcome.capture(result(), {:ok, []}, sink, nil, nil, authority)
+               ExecutionOutcome.capture(result(), {:ok, []}, sink, nil, nil, nil, authority)
 
       assert ExecutionOutcome.valid?(outcome)
       assert open!(outcome, authority).result_class == policy
@@ -44,6 +45,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
                error_result(),
                {:error, :event_sink_error},
                sink,
+               nil,
                nil,
                nil,
                authority
@@ -65,6 +67,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
                sink,
                nil,
                nil,
+               nil,
                authority
              )
 
@@ -81,7 +84,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
       InspectionSink.start(run_id: "outcome-inspection", trace_id: "outcome-inspection")
 
     assert {:ok, outcome} =
-             ExecutionOutcome.capture(result(), {:ok, []}, sink, inspection, nil, authority)
+             ExecutionOutcome.capture(result(), {:ok, []}, sink, inspection, nil, nil, authority)
 
     assert open!(outcome, authority).inspection == {:ok, []}
     assert :ok = InspectionSink.stop(inspection)
@@ -117,6 +120,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
                terminal_batch,
                sink,
                inspection,
+               nil,
                nil,
                authority
              )
@@ -157,6 +161,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
                sink,
                inspection,
                nil,
+               nil,
                authority
              )
 
@@ -183,6 +188,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
                sink,
                nil,
                contract,
+               "result.schema.json",
                authority
              )
 
@@ -195,13 +201,42 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
                sink,
                nil,
                contract,
+               "result.schema.json",
                authority
              )
 
     assert {:error, {:result_contract_failed, details}} =
              open!(rejected, authority).result_contract
 
-    assert is_map(details)
+    assert details.contract_source == "result.schema.json"
+    assert [%{kind: :type, path: path}] = details.violations
+    assert CommandPath.to_pointer(path) == "/answer"
+    assert :ok = EventSink.stop(sink)
+  end
+
+  test "rejects a non-portable result-contract source", %{
+    limits: limits,
+    authority: authority
+  } do
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    {:ok, contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "properties" => %{"answer" => %{"type" => "integer"}}
+      })
+
+    assert {:error, :invalid_execution_outcome} =
+             ExecutionOutcome.capture(
+               result(),
+               {:ok, []},
+               sink,
+               nil,
+               contract,
+               "../private/result.schema.json",
+               authority
+             )
+
     assert :ok = EventSink.stop(sink)
   end
 
@@ -213,6 +248,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
                result(),
                {:ok, [%{sequence: 1}]},
                sink,
+               nil,
                nil,
                nil,
                authority
@@ -242,6 +278,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
                result(),
                {:ok, [%{sequence: 1}]},
                sink,
+               nil,
                nil,
                nil,
                authority

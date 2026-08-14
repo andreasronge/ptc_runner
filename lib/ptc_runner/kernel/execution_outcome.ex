@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.ExecutionOutcome do
   @moduledoc """
-  Sealed, path-free evidence captured at the one-shot execution boundary.
+  Sealed, filesystem-path-free evidence captured at the one-shot execution
+  boundary.
 
   The outcome freezes the effective result class, result-contract decision,
   terminal canonical events, and optional private inspection records while the
@@ -12,6 +13,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcome do
   trusted code running in the same VM.
   """
 
+  alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.EventSink
@@ -20,6 +22,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcome do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.ValueContract
+  alias PtcRunner.Kernel.ValueContractDiagnostic
 
   @enforce_keys [
     :result,
@@ -63,13 +66,22 @@ defmodule PtcRunner.Kernel.ExecutionOutcome do
           EventSink.t(),
           InspectionSink.t() | nil,
           ValueContract.t() | nil,
+          binary() | nil,
           PublicationAuthority.t()
         ) :: {:ok, t()} | {:error, :invalid_execution_outcome}
-  def capture(result, terminal_batch, event_sink, inspection_sink, contract, authority) do
+  def capture(
+        result,
+        terminal_batch,
+        event_sink,
+        inspection_sink,
+        contract,
+        contract_source,
+        authority
+      ) do
     outcome = %__MODULE__{
       result: result,
       result_class: classify(event_sink),
-      result_contract: validate_result(result, contract),
+      result_contract: validate_result(result, contract, contract_source),
       terminal_batch: terminal_batch,
       inspection: capture_inspection(inspection_sink, result, terminal_batch),
       publication_binding: publication_binding(authority),
@@ -166,22 +178,61 @@ defmodule PtcRunner.Kernel.ExecutionOutcome do
 
   defp field(_value, _key), do: nil
 
-  defp validate_result(_result, nil), do: :ok
+  defp validate_result(_result, nil, nil), do: :ok
 
-  defp validate_result({:ok, %Result{value: value}}, %ValueContract{} = contract) do
+  defp validate_result(
+         {:ok, %Result{value: value}},
+         %ValueContract{} = contract,
+         contract_source
+       )
+       when is_nil(contract_source) do
+    validate_result_value(value, contract, contract_source)
+  end
+
+  defp validate_result(
+         {:ok, %Result{value: value}},
+         %ValueContract{} = contract,
+         contract_source
+       )
+       when is_binary(contract_source) do
+    if ApplicationSource.valid_name?(contract_source),
+      do: validate_result_value(value, contract, contract_source),
+      else: :invalid
+  end
+
+  defp validate_result(_result, %ValueContract{}, nil), do: :ok
+
+  defp validate_result(_result, %ValueContract{}, contract_source)
+       when is_binary(contract_source) do
+    if ApplicationSource.valid_name?(contract_source), do: :ok, else: :invalid
+  end
+
+  defp validate_result(_result, _contract, _contract_source), do: :invalid
+
+  defp validate_result_value(value, contract, contract_source) do
     case ValueContract.json_value(value) do
       {:ok, public} ->
-        if ValueContract.valid?(contract, public),
-          do: :ok,
-          else: {:error, {:result_contract_failed, ValueContract.classify(contract, public)}}
+        if ValueContract.valid?(contract, public) do
+          :ok
+        else
+          details =
+            case ValueContractDiagnostic.classify(contract, public) do
+              {:ok, classification} -> classification
+              {:error, :invalid_contract_classification} -> %{value_kind: :unknown}
+            end
+
+          {:error, {:result_contract_failed, with_contract_source(details, contract_source)}}
+        end
 
       {:error, _reason} ->
-        {:error, {:result_contract_failed, %{value_kind: :invalid_json}}}
+        {:error,
+         {:result_contract_failed,
+          with_contract_source(%{value_kind: :invalid_json}, contract_source)}}
     end
   end
 
-  defp validate_result(_result, %ValueContract{}), do: :ok
-  defp validate_result(_result, _contract), do: :invalid
+  defp with_contract_source(details, nil), do: details
+  defp with_contract_source(details, source), do: Map.put(details, :contract_source, source)
 
   defp fields_valid?(outcome) do
     Enum.sort(Map.keys(outcome)) == @field_keys and

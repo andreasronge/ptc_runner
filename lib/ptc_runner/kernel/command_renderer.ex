@@ -3,13 +3,15 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   Deterministic, privacy-preserving human projection of sealed command outcomes.
 
   Provider failures include the validated provider subject already present in
-  the public command envelope. Manifest schema violations with a non-root,
-  schema-authorized path include its JSON Pointer. Rendering never derives
-  labels from a rejected value, provider response, credential, or unvalidated
-  path. Component compile failures with a proven byte span render the logical
-  component name and canonical half-open byte range already present in the
-  envelope; rendering does not retain or reopen component source. A replay miss
-  may include only its validated opaque request hash.
+  the public command envelope. Manifest and value-contract failures with a
+  non-root, schema-authorized path include its JSON Pointer. Unusual
+  contract-authored pointers use an escaped quoted representation before they
+  enter a terminal. Rendering never derives labels from a rejected value,
+  provider response, credential, or unvalidated path. Component compile
+  failures with a proven byte span render the logical component name and
+  canonical half-open byte range already present in the envelope; rendering
+  does not retain or reopen component source. A replay miss may include only
+  its validated opaque request hash.
   """
 
   alias PtcRunner.Kernel.CommandOutcome
@@ -121,7 +123,33 @@ defmodule PtcRunner.Kernel.CommandRenderer do
        when is_binary(name) and is_integer(start_byte) and is_integer(end_byte),
        do: " at #{name} bytes [#{start_byte},#{end_byte}) "
 
+  defp location_suffix(%{
+         "phase" => "application",
+         "code" => "input_contract_failed",
+         "source" => %{"kind" => kind},
+         "path" => path
+       })
+       when kind in ["application", "external_input", "input_contract"] and
+              is_binary(path) and path != "",
+       do: " at " <> terminal_contract_path(path) <> " "
+
+  defp location_suffix(%{
+         "phase" => "result_cleanup",
+         "code" => "result_contract_failed",
+         "source" => %{"kind" => "result_contract"},
+         "path" => path
+       })
+       when is_binary(path) and path != "",
+       do: " at " <> terminal_contract_path(path) <> " "
+
   defp location_suffix(_error), do: " "
+
+  defp terminal_contract_path(path) do
+    case path =~ ~r/\A\/[A-Za-z0-9._~\/-]+\z/ do
+      true -> path
+      false -> inspect(path, binaries: :as_strings, limit: :infinity, printable_limit: :infinity)
+    end
+  end
 
   defp subject_prefix(%{
          "kind" => "provider",

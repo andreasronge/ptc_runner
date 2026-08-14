@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.SchemaPath
+  alias PtcRunner.Kernel.ValueContractDiagnostic
 
   @spec project(:validate | :run | :doctor, term()) :: CommandDiagnostic.t()
   def project(_command, reason) do
@@ -13,9 +14,10 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
     {code, path_value} = projection(source_role, reason)
 
     source = command_source(source_role, source_name)
+    {source, path_value} = contract_diagnostic_parts(source, reason, path_value)
 
     CommandDiagnostic.new!(:application, code,
-      source: bind_contract_source(source, reason),
+      source: source,
       path: command_path(source_role, path_value)
     )
   end
@@ -83,7 +85,7 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
 
   defp projection(role, {:input_contract_failed, classification})
        when role in [:application, :external_input],
-       do: {:input_contract_failed, first_violation_path(classification)}
+       do: {:input_contract_failed, classification}
 
   defp projection(_role, :invalid_contracts), do: {:contract_invalid, nil}
 
@@ -115,15 +117,6 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
 
   defp projection(_role, _reason), do: {:schema_violation, nil}
 
-  defp first_violation_path(%{violations: violations}) when is_list(violations) do
-    Enum.find_value(violations, fn
-      %{path: %CommandPath{} = path} -> path
-      _invalid -> nil
-    end)
-  end
-
-  defp first_violation_path(_classification), do: nil
-
   defp command_path(_role, nil), do: nil
   defp command_path(_role, %CommandPath{} = path), do: path
 
@@ -145,11 +138,12 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
     path
   end
 
-  defp bind_contract_source(source, {:input_contract_failed, %{contract_authority: authority}})
-       when not is_nil(source) do
-    {:ok, source} = CommandSource.with_contract(source, authority)
-    source
-  end
+  defp contract_diagnostic_parts(
+         source,
+         {:input_contract_failed, classification},
+         classification
+       ),
+       do: ValueContractDiagnostic.diagnostic_parts(source, classification)
 
-  defp bind_contract_source(source, _reason), do: source
+  defp contract_diagnostic_parts(source, _reason, path), do: {source, path}
 end
