@@ -13,8 +13,11 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   descriptor for the same file, re-reads the canonical path immediately before
   `execve`, and refuses to start unless it still resolves to the device and
   inode that were hashed. The trusted operator must not modify executable
-  contents during startup on either platform. Linux script interpreters
-  intentionally inherit the held
+  contents during startup on either platform, and a macOS operator must also
+  leave the executable path hierarchy alone: an interpreted `#!` target is
+  handed to its interpreter as a path, which opens it a second time outside any
+  launcher check. Linux script interpreters instead intentionally inherit the
+  held
   executable descriptor because the kernel uses it for the interpreter
   handoff; native executables do not.
 
@@ -52,7 +55,8 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   hierarchy during startup on either platform. Linux executes the held object
   after it is opened; macOS executes a path, so the exposed interval there is
   the identity re-check that immediately precedes `execve` rather than the
-  identity hash, whose cost scales with the executable.
+  identity hash, whose cost scales with the executable — plus, for an
+  interpreted target, the interpreter's own second lookup of that path.
 
   This module is deliberately test-only. It exercises the packet protocol
   consumed by the core transport without making that transport part of the

@@ -53,9 +53,13 @@ The trusted operator must not modify executable contents during startup.
 Linux hashes and executes the same held readable descriptor, which prevents a
 path replacement but not an in-place write. macOS cannot exec a descriptor at
 all, so it re-reads the canonical path immediately before `execve` and refuses
-to start unless that path still resolves to the device and inode it hashed.
-The replacement window there is that call pair rather than the length of the
-hash, which scales with the executable.
+to start unless that path still resolves to the device and inode it hashed. For
+a native executable that leaves the interval between the re-read and the
+kernel's own lookup, rather than the length of the hash, which scales with the
+executable. An interpreted `#!` target is weaker still: macOS gives the
+interpreter the script's path rather than a descriptor, so the interpreter opens
+it a second time and no launcher check covers that lookup. A macOS host must
+therefore keep the executable path hierarchy immutable for the whole of startup.
 
 The Elixir API is intentionally small:
 

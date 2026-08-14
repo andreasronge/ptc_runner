@@ -875,12 +875,15 @@ defmodule PtcRunnerLauncher.ConformanceTest do
 
   defp held_descriptor_exec?, do: :os.type() == {:unix, :linux}
 
-  # The launcher forks the process that opens and hashes the target only after
-  # its bootstrap arrives, so a second process still running the launcher image
-  # means the descriptor under test is already open.
+  # Three live processes running the launcher image are the launcher, the
+  # process it forked to open and hash the target, and that process's own
+  # watchdog. The watchdog fork is the last thing to happen before the target is
+  # opened, so the count clears only microseconds ahead of the descriptor under
+  # test; anything longer than that would have to be a scheduling stall, which
+  # can only cost this case coverage, never turn it red.
   defp await_launcher_fork do
     {:ok, binary} = PtcRunnerLauncher.executable_path()
-    assert_eventually(fn -> launcher_image_count(binary) >= 2 end, 10_000)
+    assert_eventually(fn -> launcher_image_count(binary) >= 3 end, 10_000)
   end
 
   defp launcher_image_count(binary) do
