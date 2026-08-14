@@ -5,10 +5,11 @@
   "install": {
     "deepseek": {
       "source": "llm",
-      "installation_revision": "tutorial-llm-v3",
+      "installation_revision": "tutorial-llm-v4",
       "model": "openrouter:deepseek/deepseek-v4-flash",
       "credential": "openrouter_key",
-      "cache": false
+      "cache": false,
+      "params": {"max_tokens": 4096}
     },
     "workspace": {
       "source": "mcp",
