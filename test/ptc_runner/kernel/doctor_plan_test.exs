@@ -211,14 +211,16 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
     # Default doctor's one pending row settles from its phase-7 step. A connect
     # plan has no equivalent and stays unprojectable until its own operation
     # returned, which is what `settle_connect/4` needs and this one does not.
-    assert {:ok, settled} = DoctorPlan.settle_pending(default)
+    assert {:ok, settled} =
+             DoctorPlan.settle_local(default, [], prepared, catalog, @environment)
+
     assert {:ok, _checks} = DoctorPlan.checks(settled)
     assert {:error, :invalid_doctor_plan} = DoctorPlan.checks(connect)
 
-    # Default doctor's settlement is a no-op on a connect plan rather than a
-    # shortcut through it: it settles the marker its own step produces, and a
-    # connect plan holds none.
-    assert {:ok, ^connect} = DoctorPlan.settle_pending(connect)
+    # Default doctor's settlement refuses a connect plan rather than using its
+    # empty finding set as a shortcut through rows derived for another mode.
+    assert {:error, :invalid_doctor_plan} =
+             DoctorPlan.settle_local(connect, [], prepared, catalog, @environment)
   end
 
   test "connect has no application-free form" do

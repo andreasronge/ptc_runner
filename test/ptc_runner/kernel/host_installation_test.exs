@@ -799,7 +799,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       missing_executable_host,
       "workspace",
       :mission,
-      {:error, :invalid_mcp_executable}
+      {:error, :mcp_command_not_found}
     )
 
     missing_launcher_host =

@@ -344,6 +344,21 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   def valid_doctor_failure_result?(_result, _primary, _secondary), do: false
 
+  @doc false
+  @spec valid_doctor_failure_result?(
+          term(),
+          term(),
+          term(),
+          :doctor | {:doctor, :connect}
+        ) :: boolean()
+  def valid_doctor_failure_result?(result, primary, secondary, command_mode)
+      when command_mode in [:doctor, {:doctor, :connect}] do
+    valid_doctor_failure_result?(result, primary, secondary) and
+      doctor_failure_mode_consistent?(result, primary, secondary, command_mode)
+  end
+
+  def valid_doctor_failure_result?(_result, _primary, _secondary, _command_mode), do: false
+
   defp valid_doctor_result_shape?(result) do
     with true <- JSONValue.value?(result),
          {:ok, root} <- JSV.build(doctor_failure_result(), atoms: false, warnings: :silent),
@@ -359,22 +374,10 @@ defmodule PtcRunner.Kernel.CommandContract do
          checks,
          _model_aliases,
          primary,
-         _secondary
+         secondary
        ) do
-    with {:ok, expected_name, expected_code} <- failure_row_identity(primary),
-         [failed] <- Enum.filter(checks, &(&1["status"] == "fail")),
-         true <-
-           failed == %{
-             "name" => expected_name,
-             "status" => "fail",
-             "code" => expected_code
-           } do
-      Enum.all?(checks, fn check ->
-        check == failed or indeterminate_provider_check?(check) or static_connect_check?(check)
-      end)
-    else
-      _invalid -> false
-    end
+    default_local_failure_checks_consistent?(checks, primary, secondary) or
+      connect_failure_checks_consistent?(checks, primary)
   end
 
   defp doctor_failure_checks_consistent?(
@@ -397,6 +400,84 @@ defmodule PtcRunner.Kernel.CommandContract do
          _secondary
        ),
        do: false
+
+  defp default_local_failure_checks_consistent?(
+         checks,
+         %{"phase" => "local_preflight"} = primary,
+         []
+       ) do
+    with {:ok, expected_name, expected_code} <- failure_row_identity(primary),
+         failed when failed != [] <- Enum.filter(checks, &(&1["status"] == "fail")),
+         true <-
+           %{
+             "name" => expected_name,
+             "status" => "fail",
+             "code" => expected_code
+           } in failed,
+         true <- Enum.all?(failed, &default_local_failure_check?/1) do
+      Enum.all?(checks, fn check ->
+        check["status"] == "fail" or default_application_provider_check?(check)
+      end)
+    else
+      _invalid -> false
+    end
+  end
+
+  defp default_local_failure_checks_consistent?(_checks, _primary, _secondary), do: false
+
+  defp connect_failure_checks_consistent?(checks, primary) do
+    with {:ok, expected_name, expected_code} <- failure_row_identity(primary),
+         [failed] <- Enum.filter(checks, &(&1["status"] == "fail")),
+         true <-
+           failed == %{
+             "name" => expected_name,
+             "status" => "fail",
+             "code" => expected_code
+           } do
+      Enum.all?(checks, fn check ->
+        check == failed or indeterminate_provider_check?(check) or static_connect_check?(check)
+      end)
+    else
+      _invalid -> false
+    end
+  end
+
+  defp default_local_failure_check?(%{
+         "name" => "provider/" <> name,
+         "status" => "fail",
+         "code" => code
+       }) do
+    String.ends_with?(name, "/local") and
+      code in Map.get(@doctor_failure_codes_by_operation, "local", [])
+  end
+
+  defp default_local_failure_check?(_check), do: false
+
+  defp doctor_failure_mode_consistent?(
+         %{"checks" => [_runtime, %{"status" => "fail"}, _viewer | _provider_checks]},
+         %{"phase" => "application"},
+         [],
+         _command_mode
+       ),
+       do: true
+
+  defp doctor_failure_mode_consistent?(
+         %{"checks" => [_runtime, %{"status" => "pass"} = _application, _viewer | checks]},
+         primary,
+         secondary,
+         :doctor
+       ),
+       do: default_local_failure_checks_consistent?(checks, primary, secondary)
+
+  defp doctor_failure_mode_consistent?(
+         %{"checks" => [_runtime, %{"status" => "pass"} = _application, _viewer | checks]},
+         primary,
+         _secondary,
+         {:doctor, :connect}
+       ),
+       do: connect_failure_checks_consistent?(checks, primary)
+
+  defp doctor_failure_mode_consistent?(_result, _primary, _secondary, _command_mode), do: false
 
   defp failure_row_identity(%{
          "code" => code,
@@ -1293,14 +1374,19 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp doctor_check_pairs(:success, _operation, pairs), do: pairs
 
   defp doctor_check_pairs(:failure, operation, _success_pairs) do
-    static =
+    settled =
       case operation do
-        "local" -> [{"pass", "available"}]
-        "selection" -> [{"pass", "declarative"}]
-        _other -> []
+        "local" ->
+          [{"pass", "available"}, {"skipped", "active_check_required"}]
+
+        "selection" ->
+          [{"pass", "declarative"}, {"skipped", "active_check_required"}]
+
+        operation when operation in ["credentials", "authorization", "connectivity"] ->
+          [{"skipped", "requires_connect"}]
       end
 
-    static ++
+    settled ++
       [{"skipped", "not_verified_due_to_failure"}] ++
       Enum.map(Map.get(@doctor_failure_codes_by_operation, operation, []), fn code ->
         {"fail", code}

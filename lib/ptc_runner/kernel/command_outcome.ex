@@ -118,7 +118,8 @@ defmodule PtcRunner.Kernel.CommandOutcome do
          CommandContract.valid_doctor_failure_result?(
            result,
            rendered_primary,
-           rendered_secondary
+           rendered_secondary,
+           command_mode
          ) do
       envelope =
         command_mode
@@ -371,7 +372,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
       doctor_failure_mode_allowed?(command_mode, primary) and
       valid_rendered_diagnostics?(command_mode, [primary | secondary]) and
       rendered_exit_status(primary) == exit_status and
-      CommandContract.valid_doctor_failure_result?(result, primary, secondary)
+      CommandContract.valid_doctor_failure_result?(result, primary, secondary, command_mode)
   end
 
   defp valid_envelope_mode?(
@@ -414,7 +415,12 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   defp valid_envelope_mode?(_command_mode, _envelope, _exit_status), do: false
 
   defp doctor_failure_mode_allowed?(:doctor, %CommandDiagnostic{phase: :application}), do: true
+
+  defp doctor_failure_mode_allowed?(:doctor, %CommandDiagnostic{phase: :local_preflight}),
+    do: true
+
   defp doctor_failure_mode_allowed?(:doctor, %{"phase" => "application"}), do: true
+  defp doctor_failure_mode_allowed?(:doctor, %{"phase" => "local_preflight"}), do: true
   defp doctor_failure_mode_allowed?({:doctor, :connect}, _diagnostic), do: true
   defp doctor_failure_mode_allowed?(_command_mode, _diagnostic), do: false
 

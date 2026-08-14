@@ -30,6 +30,25 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
   describe "fixture decoding" do
     @tag :tmp_dir
+    test "the local probe parses fixtures without starting a replay owner", %{tmp_dir: dir} do
+      {:ok, key} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => key, "responses" => [%{"n" => 1}, %{"n" => 2}]}])
+
+      assert {:ok,
+              %{
+                entry_count: 1,
+                response_count: 2,
+                fixture_hash: "sha256:" <> _digest,
+                max_result_bytes: 250_000
+              }} = LLMReplay.probe(dir, "replay.jsonl", opts([]))
+
+      File.write!(Path.join(dir, "replay.jsonl"), "not-json\n")
+
+      assert {:error, :invalid_replay_fixtures} =
+               LLMReplay.probe(dir, "replay.jsonl", opts([]))
+    end
+
+    @tag :tmp_dir
     test "a single response answers every call with the same value", %{tmp_dir: dir} do
       {:ok, key} = LLMReplay.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"content" => "only"}}])

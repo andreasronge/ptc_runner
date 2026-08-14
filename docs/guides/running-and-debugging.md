@@ -30,11 +30,13 @@ provider checks can make real requests and may incur cost:
 mix ptc doctor ptc.json --env-file .env --host-config ptc-host.json --connect
 ```
 
-Plain doctor reports `readiness: "unverified"`. Successful active checks
-report `ready`; an attributable failed check reports `failed` and exits
-nonzero. A manifest or package rejected during application validation is
-likewise reported as a failed `application` check instead of an internal
-command error.
+Plain doctor reports `readiness: "unverified"` when its local checks pass.
+Missing provider commands, unreadable replay fixtures, and other attributable
+local failures produce failed check rows, `readiness: "failed"`, and a nonzero
+exit without activating a provider. Successful active checks report `ready`;
+an attributable active failure also reports `failed` and exits nonzero. A
+manifest or package rejected during application validation is likewise
+reported as a failed `application` check instead of an internal command error.
 `--show-model-selectors` adds only safe selectors.
 
 ## Run a manifest

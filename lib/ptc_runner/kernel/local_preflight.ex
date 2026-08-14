@@ -3,13 +3,13 @@ defmodule PtcRunner.Kernel.LocalPreflight do
 
   # Local declaration checks, on both sides of the phase-8 marker.
   #
-  # `run/4` is the only place an `:audited_local` callback runs. It executes
-  # before the marker and enables no provider activity: a shipped audited-local
-  # check may inspect decoded configuration and loaded adapter or executable
-  # availability, but may not resolve a credential, start an application,
-  # process, or port, contact a provider, or perform network work. Reaching a
-  # host installation is a process-free decrypt of the sealed payload, not an
-  # activation.
+  # `run/4` and `collect/4` are the only places an `:audited_local` callback
+  # runs. Both execute before the marker and enable no provider activity: a
+  # shipped audited-local check may inspect decoded configuration and loaded
+  # adapter, executable, or fixture availability, but may not resolve a
+  # credential, start an application, process, or port, contact a provider, or
+  # perform network work. Reaching a host installation is a process-free
+  # decrypt of the sealed payload, not an activation.
   #
   # `run_unverified/5` is the only place an `:unverified` callback runs, and it
   # is past the marker where none of those limits apply. The two steps are
@@ -41,8 +41,8 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   #
   # ## The two steps
   #
-  # `run/4` is phase 7: audited-local only, before the marker, and the trust
-  # rules below bound what may declare it. `run_unverified/5` is phase 8:
+  # `run/4` and `collect/4` are phase 7: audited-local only, before the marker,
+  # and the trust rules below bound what may declare it. `run_unverified/5` is phase 8:
   # `:unverified` only, after the marker, under the operation deadline its
   # caller anchored. Nothing bounds what an unverified callback may do, which is
   # exactly why it cannot run in phase 7 and why default doctor reports
@@ -77,19 +77,24 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   #
   # ## Failure translation
   #
-  # A failure is reported through the closed diagnostic catalog, never as a
-  # doctor check row — no provider row has a failure code in any mode. This
-  # translation is the durable contract for that boundary:
+  # Runtime and active failures are reported through the closed diagnostic
+  # catalog. Default doctor retains attributable failures and projects them as
+  # check rows. This translation is the durable contract for those boundaries:
   #
   #   * `:local_preflight` / `:environment_unavailable` —
   #     `invalid_compatibility_environment`, `invalid_mcp_working_directory`,
-  #     `invalid_mcp_executable`
+  #     `mcp_command_not_found`, `invalid_mcp_executable`, `invalid_replay_fixtures`,
+  #     `replay_fixtures_too_large`, `duplicate_replay_entry`,
+  #     `replay_entry_limit_exceeded`
   #   * `:local_preflight` / `:launcher_unavailable` —
   #     `mcp_stdio_launcher_unavailable`, `unsupported_mcp_stdio_platform`
   #   * `:local_preflight` / `:adapter_unavailable` — `invalid_llm_model`
   #
-  # Those three are identical in both steps. The declaration-class reasons are
-  # not, because their phase is reachable from only one side of the marker:
+  # Doctor refines `mcp_command_not_found` to `command_not_found`, an existing
+  # but unusable executable to `executable_unavailable`, and every replay-fixture
+  # reason to `fixtures_unreadable`, so its local rows name the actionable input
+  # rather than collapsing all three into environment availability.
+  # The declaration-class reasons differ by side of the marker:
   #
   #   * before it — `:provider_declaration` / `:placement_denied` for
   #     `provider_destination_denied`, and `:provider_declaration` /
@@ -128,7 +133,18 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   @environment_reasons [
     :invalid_compatibility_environment,
     :invalid_mcp_working_directory,
-    :invalid_mcp_executable
+    :mcp_command_not_found,
+    :invalid_mcp_executable,
+    :invalid_replay_fixtures,
+    :replay_fixtures_too_large,
+    :duplicate_replay_entry,
+    :replay_entry_limit_exceeded
+  ]
+  @fixture_reasons [
+    :invalid_replay_fixtures,
+    :replay_fixtures_too_large,
+    :duplicate_replay_entry,
+    :replay_entry_limit_exceeded
   ]
   @launcher_reasons [:mcp_stdio_launcher_unavailable, :unsupported_mcp_stdio_platform]
   @adapter_reasons [:invalid_llm_model]
@@ -140,7 +156,13 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     :invalid_inspection_snapshot_selection
   ]
 
-  @max_heap_words 200_000
+  # The audited callback code is shipped, but replay probes admit up to an 8 MB
+  # fixture and parse one response up to the installed 1 MB result ceiling.
+  # Five million words matches the installed provider-work ceiling and leaves
+  # room for the raw fixture, detached decoded values, and the retained entry
+  # map to coexist without making phase 7 depend on an application-narrowable
+  # limit.
+  @max_heap_words 5_000_000
 
   @doc """
   Runs every applicable audited-local check for one prepared run.
@@ -159,7 +181,44 @@ defmodule PtcRunner.Kernel.LocalPreflight do
          true <- Deadline.valid?(deadline),
          occurrences = applicable(catalog, prepared, :audited_local),
          true <- trusted?(catalog, occurrences) do
-      check_each(occurrences, prepared, catalog, services, deadline, audited_step())
+      check_each(occurrences, prepared, catalog, services, deadline, audited_step(:runtime))
+    else
+      _invalid -> {:error, internal_diagnostic(false)}
+    end
+  rescue
+    _exception -> {:error, internal_diagnostic(false)}
+  catch
+    _kind, _reason -> {:error, internal_diagnostic(false)}
+  end
+
+  @doc """
+  Runs every applicable audited-local check and retains attributable failures.
+
+  Unlike `run/4`, this doctor-only boundary does not stop after the first
+  ordinary local failure. Every selected occurrence spends the same absolute
+  phase deadline, and the returned diagnostics remain in declaration order.
+  Invalid bindings or an unclassifiable callback result still fail closed.
+  """
+  @spec collect(
+          PreparedRun.t(),
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t(),
+          Deadline.t()
+        ) :: {:ok, [CommandDiagnostic.t()]} | {:error, CommandDiagnostic.t()}
+  def collect(prepared, catalog, services, deadline) do
+    with true <- bound?(prepared, catalog, services, :inactive),
+         true <- Deadline.valid?(deadline),
+         occurrences = applicable(catalog, prepared, :audited_local),
+         true <- trusted?(catalog, occurrences) do
+      occurrences
+      |> collect_each(
+        prepared,
+        catalog,
+        services,
+        deadline,
+        audited_step(:doctor)
+      )
+      |> classified_findings()
     else
       _invalid -> {:error, internal_diagnostic(false)}
     end
@@ -223,14 +282,21 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # limits an application can narrow. A post-marker callback is unrestricted
   # active work, so it gets the session that can own what it starts and the
   # sealed `provider_heap_words` the rest of the operation is held to.
-  defp audited_step, do: %{activity: false, session: nil, max_heap_words: @max_heap_words}
+  defp audited_step(diagnostic_mode),
+    do: %{
+      activity: false,
+      session: nil,
+      max_heap_words: @max_heap_words,
+      diagnostic_mode: diagnostic_mode
+    }
 
   defp active_step(prepared, session, provider_activity),
     do: %{
       activity: true,
       prior_activity: provider_activity,
       session: session,
-      max_heap_words: prepared.request.package.limits.provider_heap_words
+      max_heap_words: prepared.request.package.limits.provider_heap_words,
+      diagnostic_mode: :runtime
     }
 
   # One trio, one catalog. This mirrors `ProviderExecution.bound_to_prepared?/2`
@@ -303,6 +369,23 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     end
   end
 
+  defp collect_each(occurrences, prepared, catalog, services, deadline, step) do
+    Enum.reduce(occurrences, [], fn occurrence, findings ->
+      case check(occurrence, prepared, catalog, services, deadline, step, false) do
+        {:ok, false} -> findings
+        {:error, %CommandDiagnostic{} = diagnostic} -> [diagnostic | findings]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  defp classified_findings(findings) do
+    case Enum.find(findings, &(&1.phase not in [:local_preflight])) do
+      nil -> {:ok, findings}
+      diagnostic -> {:error, diagnostic}
+    end
+  end
+
   defp check(occurrence, prepared, catalog, services, deadline, step, prior_activity) do
     with {:ok, callback} <- callback(catalog, occurrence.name, prior_activity),
          {:ok, result} <-
@@ -333,7 +416,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
           {:error, local_diagnostic(:local_check_timeout, occurrence, activity)}
 
         {:attempted, activity, {:error, reason}} ->
-          {:error, diagnostic(reason, occurrence, activity)}
+          {:error, diagnostic(reason, occurrence, activity, step.diagnostic_mode)}
 
         {:timed_out, activity} ->
           {:error, local_diagnostic(:local_check_timeout, occurrence, activity)}
@@ -445,22 +528,31 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     BoundedWorker.classify_callback(result)
   end
 
-  defp diagnostic(reason, occurrence, activity) when reason in @environment_reasons,
+  defp diagnostic(:mcp_command_not_found, occurrence, activity, :doctor),
+    do: local_diagnostic(:command_not_found, occurrence, activity)
+
+  defp diagnostic(:invalid_mcp_executable, occurrence, activity, :doctor),
+    do: local_diagnostic(:executable_unavailable, occurrence, activity)
+
+  defp diagnostic(reason, occurrence, activity, :doctor) when reason in @fixture_reasons,
+    do: local_diagnostic(:fixtures_unreadable, occurrence, activity)
+
+  defp diagnostic(reason, occurrence, activity, _mode) when reason in @environment_reasons,
     do: local_diagnostic(:environment_unavailable, occurrence, activity)
 
-  defp diagnostic(reason, occurrence, activity) when reason in @launcher_reasons,
+  defp diagnostic(reason, occurrence, activity, _mode) when reason in @launcher_reasons,
     do: local_diagnostic(:launcher_unavailable, occurrence, activity)
 
-  defp diagnostic(reason, occurrence, activity) when reason in @adapter_reasons,
+  defp diagnostic(reason, occurrence, activity, _mode) when reason in @adapter_reasons,
     do: local_diagnostic(:adapter_unavailable, occurrence, activity)
 
-  defp diagnostic(:provider_destination_denied, occurrence, activity),
+  defp diagnostic(:provider_destination_denied, occurrence, activity, _mode),
     do: declaration_diagnostic(:placement_denied, occurrence, activity)
 
-  defp diagnostic(reason, occurrence, activity) when reason in @selection_reasons,
+  defp diagnostic(reason, occurrence, activity, _mode) when reason in @selection_reasons,
     do: declaration_diagnostic(:selection_invalid, occurrence, activity)
 
-  defp diagnostic(_reason, _occurrence, activity), do: internal_diagnostic(activity)
+  defp diagnostic(_reason, _occurrence, activity, _mode), do: internal_diagnostic(activity)
 
   defp local_diagnostic(code, occurrence, activity),
     do: subject_diagnostic(:local_preflight, code, :local, occurrence, activity)

@@ -64,6 +64,18 @@ defmodule PtcRunner.Kernel.CommandDoctor do
                 false
               )
 
+            {:finding, checks, %CommandDiagnostic{} = diagnostic} ->
+              doctor_failure(
+                :doctor,
+                arguments,
+                run_ref,
+                host,
+                catalog,
+                prepared,
+                checks,
+                {diagnostic, []}
+              )
+
             {:error, diagnostic} ->
               {:error, arguments_outcome(arguments, run_ref, diagnostic)}
           end
@@ -85,12 +97,18 @@ defmodule PtcRunner.Kernel.CommandDoctor do
     do: CommandAcquisition.prepare_request(arguments, catalog, run_ref)
 
   defp local_checks(host, catalog, prepared, runtime) do
-    with {:ok, rows} <- DoctorPlan.new(catalog, prepared, DoctorEnvironment.facts(), :default),
+    environment = DoctorEnvironment.facts()
+
+    with {:ok, rows} <- DoctorPlan.new(catalog, prepared, environment, :default),
          {:ok, services} <- runtime_services(host, runtime),
-         :ok <- RunCoordinator.local_checks(prepared, catalog, services),
-         {:ok, settled} <- DoctorPlan.settle_pending(rows),
+         {:ok, findings} <- RunCoordinator.local_check_findings(prepared, catalog, services),
+         {:ok, settled} <-
+           DoctorPlan.settle_local(rows, findings, prepared, catalog, environment),
          {:ok, checks} <- DoctorPlan.checks(settled) do
-      {:ok, checks}
+      case findings do
+        [] -> {:ok, checks}
+        [primary | _rest] -> {:finding, checks, primary}
+      end
     else
       {:error, %CommandDiagnostic{} = diagnostic} -> {:error, diagnostic}
       {:error, _reason} -> {:error, diagnostic(:internal, :internal_error)}
@@ -140,14 +158,14 @@ defmodule PtcRunner.Kernel.CommandDoctor do
     else
       {:finding, checks, %CommandDiagnostic{} = diagnostic, secondary} ->
         doctor_failure(
+          {:doctor, :connect},
           arguments,
           run_ref,
           host,
           catalog,
           prepared,
           checks,
-          diagnostic,
-          secondary
+          {diagnostic, secondary}
         )
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
@@ -192,14 +210,14 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   end
 
   defp doctor_failure(
+         mode,
          arguments,
          run_ref,
          host,
          catalog,
          prepared,
          checks,
-         diagnostic,
-         secondary
+         {diagnostic, secondary}
        ) do
     provider_activity =
       Enum.any?([diagnostic | secondary], & &1.provider_activity)
@@ -216,7 +234,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
 
       {:error,
        CommandOutcome.doctor_failure(
-         {:doctor, :connect},
+         mode,
          run_ref,
          result,
          diagnostic,

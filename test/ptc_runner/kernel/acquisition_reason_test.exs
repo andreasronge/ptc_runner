@@ -38,6 +38,7 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
     {:mcp_authentication_failed, :active_preflight, :authentication_rejected, :acquisition},
     {:mcp_authorization_required, :active_preflight, :authorization_required, :authorization},
     {:invalid_compatibility_environment, :local_preflight, :environment_unavailable, :local},
+    {:mcp_command_not_found, :local_preflight, :environment_unavailable, :local},
     {:invalid_mcp_executable, :local_preflight, :environment_unavailable, :local},
     {:invalid_replay_fixtures, :local_preflight, :environment_unavailable, :local},
     {:source_unavailable, :local_preflight, :environment_unavailable, :local},
