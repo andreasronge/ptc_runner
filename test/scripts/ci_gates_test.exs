@@ -8,6 +8,7 @@ defmodule PtcRunner.Scripts.CIGatesTest do
   @core_dialyzer Path.join(@root, "scripts/ci/core-dialyzer.sh")
   @preflight Path.join(@root, "scripts/ci/preflight.sh")
   @viewer Path.join(@root, "scripts/ci/viewer.sh")
+  @launcher_package Path.join(@root, "scripts/ci/launcher-package.sh")
   @git_env GitEnv.clear()
 
   test "core tests establish the CI contract without reducing native scheduler pressure" do
@@ -83,6 +84,24 @@ defmodule PtcRunner.Scripts.CIGatesTest do
              "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_viewer :: deps.get --check-locked",
              "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_viewer :: compile --warnings-as-errors",
              "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_viewer :: test --warnings-as-errors"
+           ]
+  end
+
+  # The launcher project's own `precommit` alias fetches with a bare
+  # `deps.get`, which repairs a diverged lockfile instead of rejecting it. The
+  # gate establishes the locked fetch first, so entering it directly -- from
+  # the pre-push hook, say -- answers the way CI does.
+  test "the launcher gate fetches with the locked check before the project's own alias" do
+    %{marker: marker} = fake = fake_mix()
+
+    {output, status} = run_gate(@launcher_package, fake, env: [{"CI", nil}, {"ERL_FLAGS", nil}])
+
+    assert status == 0, output
+
+    assert File.read!(marker) |> String.split("\n", trim: true) == [
+             "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_runner_launcher :: deps.get --check-locked",
+             "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_runner_launcher :: clean",
+             "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_runner_launcher :: precommit"
            ]
   end
 
