@@ -231,6 +231,49 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
   end
 
+  @tag :tmp_dir
+  test "rejects malformed reserved boundary producer evidence", %{tmp_dir: dir} do
+    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+
+    payload = %{
+      environment: :workflow,
+      kind: :limit_exceeded,
+      reason: :terminal_result_exceeded,
+      details: %{
+        boundary_producer: %{complete?: true, evaluation_ids: ["mission-eval"]}
+      }
+    }
+
+    assert :ok =
+             InspectionSink.emit(
+               sink,
+               "execution-error",
+               %{evaluation_id: "workflow-eval"},
+               payload
+             )
+
+    assert {:ok, [record]} = InspectionSink.records(sink)
+
+    malformed_payload =
+      put_in(payload, [:details, :boundary_producer, :complete?], "not-a-boolean")
+
+    assert {:error, :inspection_sink_error} =
+             InspectionSink.emit(
+               sink,
+               "execution-error",
+               %{evaluation_id: "other-workflow-eval"},
+               malformed_payload
+             )
+
+    malformed_record =
+      put_in(record, ["payload", "details", "boundary_producer", "complete?"], "not-a-boolean")
+
+    path = Path.join(dir, "malformed-boundary.inspection.jsonl")
+    File.write!(path, Jason.encode!(malformed_record) <> "\n")
+
+    assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(path)
+  end
+
   test "current records require and correlate exact mission identity" do
     {:ok, missing_name} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
 

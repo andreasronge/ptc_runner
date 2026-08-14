@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added typed, followable run-analysis relationships from workflow boundary
+  errors to directly proven child producers, generated source, producing turns,
+  and referenced prelude source. Each relation supplies an exact target
+  collection/filter pair plus causation, nesting, or association semantics and
+  an explicit complete, incomplete, ambiguous, or unavailable state; collection
+  descriptors now name their snapshot and sequence domains and identifier paths.
+
 - Added canonical parent-evaluation edges for workflow-launched mission
   evaluations. Private generated-source and turn projections preserve the edge,
   and `activity`, `generated_sources`, and `turns` accept exact

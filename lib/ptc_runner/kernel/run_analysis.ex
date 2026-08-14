@@ -12,8 +12,10 @@ defmodule PtcRunner.Kernel.RunAnalysis do
   Public captures expose only canonical `activity`. Private captures add exact
   exchanges, reconstructed turns, generated source with static prelude-call
   facts, effective prelude source, and workflow execution diagnostics. The
-  catalog identifies raw collections whose items carry an explicit
-  completeness field.
+  catalog identifies snapshot and sequence domains, identifier locations, and
+  raw collections whose items carry an explicit completeness field. Private
+  error and source items carry typed relationships that package exact follow-up
+  reads without performing them or diagnosing their evidence.
   """
 
   alias PtcRunner.Kernel.InspectionSnapshot
@@ -31,7 +33,13 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       snapshot: :traces,
       operation: :list_turns,
       filters: ~w(status evaluation_id parent_evaluation_id capability mission_name),
-      order: "sequence_asc"
+      order: "sequence_asc",
+      sequence_domain: "canonical_trace",
+      identifier_locations: %{
+        "evaluation_id" => "data.evaluation_id",
+        "parent_evaluation_id" => "data.parent_evaluation_id",
+        "sequence" => "sequence"
+      }
     },
     %{
       name: "turns",
@@ -40,7 +48,17 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       operation: :turns,
       filters:
         ~w(stream_id capability_id evaluation_id parent_evaluation_id prelude_call prelude_component),
-      order: "stream_turn_asc"
+      order: "stream_turn_asc",
+      sequence_domain: "reconstructed_stream",
+      identifier_locations: %{
+        "capability_id" => "capability_id",
+        "evaluation_id" => "generated[].evaluation_id",
+        "parent_evaluation_id" => "generated[].parent_evaluation_id",
+        "request_sequence" => "request_sequence",
+        "response_sequence" => "response_sequence",
+        "stream_id" => "stream_id",
+        "turn" => "turn"
+      }
     },
     %{
       name: "model_exchanges",
@@ -49,6 +67,12 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       operation: :model_exchanges,
       filters: ~w(capability_id input_sequence),
       order: "input_sequence_asc",
+      sequence_domain: "private_inspection",
+      identifier_locations: %{
+        "capability_id" => "capability_id",
+        "input_sequence" => "input_sequence",
+        "output_sequence" => "output_sequence"
+      },
       item_completeness_field: "complete?"
     },
     %{
@@ -58,6 +82,12 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       operation: :capability_calls,
       filters: ~w(capability_id mission_name name),
       order: "input_sequence_asc",
+      sequence_domain: "private_inspection",
+      identifier_locations: %{
+        "capability_id" => "capability_id",
+        "input_sequence" => "input_sequence",
+        "output_sequence" => "output_sequence"
+      },
       item_completeness_field: "complete?"
     },
     %{
@@ -66,7 +96,14 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       snapshot: :inspection,
       operation: :provider_exchanges,
       filters: ~w(capability_id mission_name request_id),
-      order: "request_sequence_asc"
+      order: "request_sequence_asc",
+      sequence_domain: "private_inspection",
+      identifier_locations: %{
+        "capability_id" => "capability_id",
+        "request_id" => "request_id",
+        "request_sequence" => "request_sequence",
+        "response_sequence" => "response_sequence"
+      }
     },
     %{
       name: "generated_sources",
@@ -74,7 +111,13 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       snapshot: :inspection,
       operation: :generated_sources,
       filters: ~w(evaluation_id parent_evaluation_id mission_name prelude_call prelude_component),
-      order: "sequence_asc"
+      order: "sequence_asc",
+      sequence_domain: "private_inspection",
+      identifier_locations: %{
+        "evaluation_id" => "evaluation_id",
+        "parent_evaluation_id" => "parent_evaluation_id",
+        "sequence" => "sequence"
+      }
     },
     %{
       name: "prelude_sources",
@@ -82,7 +125,9 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       snapshot: :inspection,
       operation: :effective_preludes,
       filters: ~w(component_id environment mission_name),
-      order: "sequence_asc"
+      order: "sequence_asc",
+      sequence_domain: "private_inspection",
+      identifier_locations: %{"component_id" => "component_id", "sequence" => "sequence"}
     },
     %{
       name: "execution_prints",
@@ -90,7 +135,9 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       snapshot: :inspection,
       operation: :execution_prints,
       filters: ~w(evaluation_id),
-      order: "sequence_asc"
+      order: "sequence_asc",
+      sequence_domain: "private_inspection",
+      identifier_locations: %{"evaluation_id" => "evaluation_id", "sequence" => "sequence"}
     },
     %{
       name: "execution_errors",
@@ -98,7 +145,9 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       snapshot: :inspection,
       operation: :execution_errors,
       filters: ~w(evaluation_id),
-      order: "sequence_asc"
+      order: "sequence_asc",
+      sequence_domain: "private_inspection",
+      identifier_locations: %{"evaluation_id" => "evaluation_id", "sequence" => "sequence"}
     }
   ]
 
@@ -256,7 +305,10 @@ defmodule PtcRunner.Kernel.RunAnalysis do
         "authority" => Atom.to_string(collection.authority),
         "available?" => collection.authority == :public or private_available?,
         "filters" => collection.filters,
-        "order" => collection.order
+        "order" => collection.order,
+        "snapshot_domain" => snapshot_domain(collection.snapshot),
+        "sequence_domain" => collection.sequence_domain,
+        "identifier_locations" => collection.identifier_locations
       }
       |> put_catalog_option(collection, :item_completeness_field)
     end)
@@ -268,6 +320,9 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       :error -> catalog
     end
   end
+
+  defp snapshot_domain(:traces), do: "canonical_trace"
+  defp snapshot_domain(:inspection), do: "private_inspection"
 
   defp inspection_run(nil, _run_id), do: {:ok, %{"available?" => false}}
 

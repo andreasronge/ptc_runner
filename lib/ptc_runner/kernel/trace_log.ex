@@ -206,9 +206,20 @@ defmodule PtcRunner.Kernel.TraceLog do
             not is_binary(evaluation_id) or not is_binary(parent_evaluation_id)
           end)
 
+        evaluation_statuses =
+          run_events
+          |> Enum.filter(&(&1["type"] == "evaluation-stopped"))
+          |> Map.new(fn event ->
+            {event_data(event, "evaluation_id"), stringify(event_data(event, "status"))}
+          end)
+          |> Map.reject(fn {evaluation_id, status} ->
+            not is_binary(evaluation_id) or not is_binary(status)
+          end)
+
         {run_id,
          %{
            "expected_model_exchange_ids" => expected_model_exchanges,
+           "evaluation_statuses" => evaluation_statuses,
            "parent_evaluation_ids" => parent_evaluation_ids,
            "terminal?" => Enum.any?(run_events, &(&1["type"] == "run-stopped")),
            "events_dropped?" => Enum.any?(run_events, &(&1["type"] == "events-dropped"))

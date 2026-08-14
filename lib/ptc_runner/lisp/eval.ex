@@ -636,6 +636,11 @@ defmodule PtcRunner.Lisp.Eval do
   # Control flow signals: return and fail
   defp do_eval({:return, value_ast}, %EvalContext{} = eval_ctx) do
     with {:ok, value, eval_ctx2} <- eval_child(value_ast, eval_ctx) do
+      eval_ctx2 =
+        if match?({:tool_call, _name, _arguments}, value_ast),
+          do: EvalContext.mark_direct_tool_return(eval_ctx2),
+          else: eval_ctx2
+
       Abort.control!(:return, value, eval_ctx2)
     end
   end
@@ -896,7 +901,8 @@ defmodule PtcRunner.Lisp.Eval do
       caller_ctx
       | effects: export_ctx.effects,
         iteration_count: export_ctx.iteration_count,
-        failure_origin: export_ctx.failure_origin
+        failure_origin: export_ctx.failure_origin,
+        return_origin: export_ctx.return_origin
     }
   end
 
