@@ -39,7 +39,7 @@
   },
   "labels": {
     "name": "viewer-demo-limits",
-    "model": "openrouter:deepseek/deepseek-v4-flash-0731",
+    "model": "openrouter:deepseek/deepseek-v4-flash",
     "provider": "openrouter",
     "tags": {
       "mode": "agent"

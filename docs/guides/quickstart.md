@@ -45,11 +45,15 @@ declaration forms and how to move off `.env` for a real deployment.
 
 ## 3. Let the model write the program
 
-<!-- ptc-guide-e2e: id=quickstart-live-agent requires=OPENROUTER_API_KEY -->
+<!-- ptc-guide-e2e: id=quickstart-live-agent requires=OPENROUTER_API_KEY assert=two-turn-agent -->
 ```console
+mkdir -p tmp
+envelope="${PTC_ENVELOPE_FILE:-$(mktemp -d tmp/quickstart.XXXXXX)/command-envelope.json}"
+echo "command envelope: $envelope"
 mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
   --env-file "${PTC_ENV_FILE:-.env}" \
-  --host-config examples/kernel-tutorial/ptc-host.json
+  --host-config examples/kernel-tutorial/ptc-host.json \
+  --envelope "$envelope"
 ```
 
 ```json
@@ -60,7 +64,10 @@ The model was given a task, wrote PTC-Lisp, and the runtime evaluated that
 program in the confined mission environment over two turns.
 
 The `PTC_ENV_FILE` fallback above uses the `.env` you just created. Automation
-may point it at another explicitly named environment file.
+may point it at another explicitly named environment file. Each pasted run
+reserves a fresh public command envelope under the Git-ignored `tmp/` directory
+so you can inspect its usage and continuation summary without replacing an
+earlier run.
 
 [`ptc-host.json`](../../examples/kernel-tutorial/ptc-host.json) is the operator
 document: it maps the `deepseek` alias to a model and binds it to the

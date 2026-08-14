@@ -6,6 +6,8 @@
 
 set -euo pipefail
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+executable_guides="${PTC_EXECUTABLE_GUIDES_FILE:-$repo_root/test/support/executable_guides.txt}"
 paths_file="${1:-/dev/stdin}"
 
 core=false
@@ -27,9 +29,30 @@ select_all() {
   docs=true
 }
 
+registry_valid=true
+
+if [ ! -f "$executable_guides" ] || ! awk '
+  /^[[:space:]]*$/ || /^[[:space:]]*#/ { next }
+  /^[[:space:]]/ || /[[:space:]]$/ || /^\// || /\\/ || /\/\// || /\/$/ || \
+    /(^|\/)\.(\/|$)/ || /(^|\/)\.\.(\/|$)/ { exit 1 }
+' "$executable_guides"; then
+  registry_valid=false
+fi
+
 while IFS= read -r path || [ -n "$path" ]; do
   [ -n "$path" ] || continue
   saw_path=true
+
+  if [ "$registry_valid" = false ]; then
+    select_all
+    continue
+  fi
+
+  if grep -Fxq -- "$path" "$executable_guides"; then
+    core=true
+    docs=true
+    continue
+  fi
 
   case "$path" in
     docs/plans/*|Plans/*)
