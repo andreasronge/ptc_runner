@@ -109,7 +109,11 @@ defmodule PtcViewer.Router do
   end
 
   get "/api/analysis/runs/:run_id/conversation" do
-    send_conversation(conn, run_id)
+    send_analysis(conn, PtcViewer.Api.conversation(viewer_config(conn), run_id))
+  end
+
+  get "/api/analysis/runs/:run_id/preludes" do
+    send_analysis(conn, PtcViewer.Api.preludes(viewer_config(conn), run_id))
   end
 
   match "/api/*path" do
@@ -412,8 +416,8 @@ defmodule PtcViewer.Router do
     end
   end
 
-  defp send_conversation(conn, run_id) do
-    case PtcViewer.Api.conversation(viewer_config(conn), run_id) do
+  defp send_analysis(conn, result) do
+    case result do
       {:ok, result} ->
         send_private_json(conn, result)
 

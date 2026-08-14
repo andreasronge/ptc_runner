@@ -254,10 +254,11 @@ async function fetchAllTurns(runId) {
 }
 
 async function loadRun(runId) {
-  const [runResponse, turnsResult, conversationResponse] = await Promise.all([
+  const [runResponse, turnsResult, conversationResponse, preludesResponse] = await Promise.all([
     fetch(`/api/kernel/runs/${encodeURIComponent(runId)}`),
     fetchAllTurns(runId),
-    fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/conversation`)
+    fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/conversation`),
+    fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/preludes`)
   ]);
 
   if (!runResponse.ok || turnsResult.failed) {
@@ -273,11 +274,13 @@ async function loadRun(runId) {
         status: conversationResponse.status,
         reason: await safeBodyText(conversationResponse)
       };
+  const preludes = preludesResponse.ok ? await preludesResponse.json() : null;
   renderRun(
     {
       metadata: await runResponse.json(),
       turns: turnsResult.turns,
-      conversation
+      conversation,
+      preludes
     },
     { fresh: true }
   );
@@ -329,6 +332,7 @@ function renderRun(data, { fresh = false } = {}) {
       renderRun({
         metadata,
         conversation,
+        preludes: data.preludes,
         turns: { ...nextPage, items: [...(turns.items || []), ...(nextPage.items || [])] }
       });
     }

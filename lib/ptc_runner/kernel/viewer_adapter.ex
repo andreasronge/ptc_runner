@@ -26,7 +26,7 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
          do: TraceLog.query(trace_log, operation, arguments)
   end
 
-  @opaque inspection_grant :: {:inspection_v2, binary(), map(), [map()], binary()}
+  @opaque inspection_grant :: {:inspection_v3, binary(), map()}
 
   @spec pin_inspection(binary(), inspection_trace_source()) ::
           {:ok, inspection_grant()}
@@ -39,8 +39,9 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
          {:ok, %{"trace_id" => ^trace_id}} <-
            trace_query(capture, :get_run, %{"run_id" => run_id}),
          {:ok, trace_page} <- all_turns(capture, run_id),
-         :ok <- InspectionArtifact.validate_correlations(records, trace_page["items"]) do
-      {:ok, {:inspection_v2, run_id, trace_page, records, capture.source_id}}
+         :ok <- InspectionArtifact.validate_correlations(records, trace_page["items"]),
+         {:ok, compiled} <- compile_inspection(records, trace_page, capture.source_id) do
+      {:ok, {:inspection_v3, run_id, compiled}}
     else
       {:error, reason} when reason in [:not_found, :invalid_query] ->
         {:error, :inspection_correlation_missing}
@@ -57,33 +58,43 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
 
   @spec conversation(inspection_grant(), binary()) :: {:ok, map()} | {:error, atom()}
   @doc "Builds a semantic conversation from the pinned, already validated records."
-  def conversation({:inspection_v2, granted_run_id, trace_page, records, trace_source_id}, run_id)
-      when is_binary(granted_run_id) and is_map(trace_page) and is_list(records) and
-             is_binary(trace_source_id) and is_binary(run_id) do
+  def conversation(grant, run_id) do
+    with {:ok, turns} <- inspection_collection(grant, run_id, :turns),
+         result = ConversationProjection.present_page(turns),
+         true <- byte_size(Jason.encode!(result)) <= 1_000_000 do
+      {:ok, result}
+    else
+      false -> {:error, :result_limit_exceeded}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec preludes(inspection_grant(), binary()) :: {:ok, map()} | {:error, atom()}
+  @doc "Returns the pinned run's exact effective prelude sources."
+  def preludes(grant, run_id), do: inspection_collection(grant, run_id, :effective_preludes)
+
+  defp inspection_collection({:inspection_v3, granted_run_id, compiled}, run_id, operation)
+       when is_binary(granted_run_id) and is_map(compiled) and is_binary(run_id) do
     if granted_run_id == run_id do
-      trace_analysis = TraceLog.compile_analysis(trace_page["items"], :private)
-
-      analysis_facts = %{
-        "trace_snapshot_hash" => trace_page["snapshot_hash"],
-        "runs" => trace_analysis.facts_by_run_id
-      }
-
-      with {:ok, compiled} <-
-             InspectionQuery.compile([records], trace_source_id, analysis_facts),
-           {:ok, turns} <- all_inspection(compiled, :turns, run_id),
-           result = ConversationProjection.present_page(turns),
-           true <- byte_size(Jason.encode!(result)) <= 1_000_000 do
-        {:ok, result}
-      else
-        false -> {:error, :result_limit_exceeded}
-        {:error, _reason} = error -> error
-      end
+      all_inspection(compiled, operation, run_id)
     else
       {:error, :inspection_run_mismatch}
     end
   end
 
-  def conversation(_grant, _run_id), do: {:error, :invalid_inspection_query}
+  defp inspection_collection(_grant, _run_id, _operation),
+    do: {:error, :invalid_inspection_query}
+
+  defp compile_inspection(records, trace_page, trace_source_id) do
+    trace_analysis = TraceLog.compile_analysis(trace_page["items"], :private)
+
+    analysis_facts = %{
+      "trace_snapshot_hash" => trace_page["snapshot_hash"],
+      "runs" => trace_analysis.facts_by_run_id
+    }
+
+    InspectionQuery.compile([records], trace_source_id, analysis_facts)
+  end
 
   defp all_inspection(compiled, operation, run_id),
     do: all_inspection(compiled, operation, run_id, nil, [], nil, %{}, 0)

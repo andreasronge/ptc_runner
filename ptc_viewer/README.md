@@ -20,8 +20,10 @@ mix ptc.viewer --trace-dir traces
 
 The root task installs `PtcRunner.Kernel.ViewerAdapter` automatically, starts a
 local server on port 4123, and opens the browser. Use `--port`, `--trace-dir`,
-`--inspection-file`, or `--no-open` to override those defaults. The server
-always binds to loopback.
+`--inspection-file`, `--private-traces`, or `--no-open` to override those
+defaults. The server always binds to loopback. `--private-traces` selects
+owner-only canonical trace files for debugger runs and disables the connected
+public run-analysis REPL; it does not widen that REPL's authority.
 
 The REPL evaluates PTC-Lisp against an immutable capture of the selected trace
 directory. The server fixes the `run-analysis-v1` profile: normal bounded
@@ -47,16 +49,21 @@ and canonical activity, plus one semantic `conversation` result when the Viewer
 was started with an authorized inspection artifact. The URL carries
 `#/run/<run-id>`, so a run view can be bookmarked and reloaded.
 
-The canonical transcript remains sanitized and never joins private records.
-Private model requests and responses appear only in the separate **Model
-conversation** panel produced by `RunAnalysis`; ambiguous exchanges are
-omitted from streams and reported by the semantic result rather than guessed
-into a turn. The browser cannot choose a server path or discover inspection
-files. Startup pins the operator-selected artifact, validates it against the
-captured canonical trace, and retains an immutable grant, so replacing the
-original path cannot change later responses. Symlinks, changed files,
-oversized or malformed records, correlation failures, and mismatched run IDs
-fail closed.
+The canonical transcript keeps canonical events as its execution spine. With
+an authorized inspection artifact, it also shows each evaluation's exact
+generated program from the semantic conversation projection and the feedback
+reconstructed on the following turn. Ambiguous program-to-turn associations
+are not guessed into result blocks. Private model requests and responses also
+appear in the separate **Model conversation** panel produced by `RunAnalysis`;
+ambiguous exchanges are omitted from streams and reported by the semantic
+result rather than guessed into a turn.
+
+The browser cannot choose a server path or discover inspection files. Startup
+pins the operator-selected artifact, validates it against the captured
+canonical trace, and compiles the immutable inspection projection once, so
+replacing the original path cannot change later responses. Symlinks, changed
+files, oversized or malformed records, correlation failures, and mismatched
+run IDs fail closed.
 
 The prelude cards list effective workflow and mission components in frozen
 load order (dependencies before dependants) with the bundle hash. When run
@@ -67,6 +74,13 @@ per-component dependency lists. The complete graph must validate; missing or
 malformed projections fall back to the ordered chips without partially
 rendered edges, reordered IDs, or inferred dependencies. Current canonical
 metadata records only ordered component IDs and the bundle hash.
+
+When inspection capture includes effective prelude sources, component entries
+open the exact captured source. Generated-source records carry statically
+analyzed `prelude_calls`; those facts alone produce the clickable call badges
+that navigate to the matching scoped component. Source highlighting may place
+an anchor on a matching definition, with the component source as the fallback;
+highlighted program text is never parsed to infer that a call occurred.
 
 ```bash
 mix ptc.viewer --trace-dir traces \
@@ -130,6 +144,7 @@ Runs-only UI.
 | `GET /api/kernel/runs/:run_id/turns` | `list_turns` with bounded filters and pagination |
 | `GET /api/kernel/counters` | `counters` |
 | `GET /api/analysis/runs/:run_id/conversation` | Presentation over the bounded `turns` collection |
+| `GET /api/analysis/runs/:run_id/preludes` | Bounded effective prelude sources from the pinned inspection projection |
 | `GET /api/repl` | Bootstrap or refresh the server-owned analysis session |
 | `POST /api/repl/evaluations` | Evaluate one bounded PTC-Lisp form |
 | `POST /api/repl/templates` | Format an inert `analysis/open` or `analysis/read` editor template |

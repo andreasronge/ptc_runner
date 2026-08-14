@@ -30,6 +30,26 @@ defmodule PtcViewer.ApiTest do
              PtcViewer.Api.kernel_query(config, :list_runs, %{})
   end
 
+  test "kernel_query delegates the explicitly selected private directory", %{trace_dir: trace_dir} do
+    parent = self()
+
+    adapter = fn source, operation, arguments ->
+      send(parent, {:query, source, operation, arguments})
+      {:ok, %{"items" => []}}
+    end
+
+    config = [
+      trace_dir: trace_dir,
+      private_traces: true,
+      kernel_trace_adapter: adapter
+    ]
+
+    assert {:ok, %{"items" => []}} =
+             PtcViewer.Api.kernel_query(config, :list_runs, %{})
+
+    assert_receive {:query, {:private_directory, ^trace_dir}, :list_runs, %{}}
+  end
+
   test "conversation delegates only the exact configured file and run", %{trace_dir: trace_dir} do
     parent = self()
     source = {:pinned, "run.inspection.jsonl"}
@@ -54,6 +74,23 @@ defmodule PtcViewer.ApiTest do
 
     assert_receive {:inspection, ^source, "run-1"}
     assert {:error, :unavailable} = PtcViewer.Api.conversation([], "run-1")
+  end
+
+  test "preludes delegates the pinned inspection grant", %{trace_dir: trace_dir} do
+    source = {:pinned, "run.inspection.jsonl"}
+    {:ok, store} = PtcViewer.InspectionStore.start(source)
+    on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
+
+    config = [
+      trace_dir: trace_dir,
+      inspection_store: store,
+      inspection_adapter: PtcViewer.PinningInspectionTestAdapter
+    ]
+
+    assert {:ok, %{"source" => actual_source, "run_id" => "run-1", "items" => []}} =
+             PtcViewer.Api.preludes(config, "run-1")
+
+    assert actual_source == inspect(source)
   end
 
   test "start rejects an adapter that does not implement the query contract" do

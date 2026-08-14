@@ -12,22 +12,26 @@ defmodule Mix.Tasks.Ptc.Viewer do
           port: :integer,
           trace_dir: :string,
           inspection_file: :string,
+          private_traces: :boolean,
           no_open: :boolean
         ]
       )
 
     Mix.Task.run("app.start")
 
+    private_traces = opts[:private_traces] == true
+
     viewer_opts =
       []
       |> maybe_add(:port, opts[:port])
       |> maybe_add(:trace_dir, opts[:trace_dir])
       |> maybe_add(:inspection_file, opts[:inspection_file])
+      |> maybe_add(:private_traces, private_traces)
       |> maybe_add(:open, if(opts[:no_open], do: false, else: true))
       |> maybe_add(:kernel_trace_adapter, default_kernel_adapter())
       |> maybe_add(:inspection_adapter, inspection_adapter(opts[:inspection_file]))
-      |> maybe_add(:repl_adapter, default_repl_adapter())
-      |> maybe_add(:repl_config, repl_config(opts[:trace_dir]))
+      |> maybe_add(:repl_adapter, if(private_traces, do: nil, else: default_repl_adapter()))
+      |> maybe_add(:repl_config, if(private_traces, do: nil, else: repl_config(opts[:trace_dir])))
 
     case PtcViewer.start(viewer_opts) do
       {:ok, _pid} ->

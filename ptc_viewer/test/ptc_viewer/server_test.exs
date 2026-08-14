@@ -1,7 +1,7 @@
 defmodule PtcViewer.ServerTest do
   use ExUnit.Case, async: false
 
-  alias PtcViewer.{TestInspectionAdapter, TestReplAdapter}
+  alias PtcViewer.{PinningInspectionTestAdapter, TestInspectionAdapter, TestReplAdapter}
 
   test "inspection startup preserves an unsupported schema version error" do
     assert {:error,
@@ -32,6 +32,23 @@ defmodule PtcViewer.ServerTest do
 
     assert {:error, :invalid_repl_adapter} =
              PtcViewer.start(port: 0, repl_adapter: String, repl_config: %{}, open: false)
+  end
+
+  @tag :tmp_dir
+  test "private trace mode pins inspection against the private directory", %{tmp_dir: trace_dir} do
+    {:ok, viewer} =
+      PtcViewer.start(
+        port: 0,
+        trace_dir: trace_dir,
+        private_traces: true,
+        inspection_file: "run.inspection.jsonl",
+        inspection_adapter: PinningInspectionTestAdapter,
+        open: false
+      )
+
+    store = :sys.get_state(viewer).inspection_store
+    assert {:ok, {:private_directory, ^trace_dir}} = PtcViewer.InspectionStore.fetch(store)
+    assert :ok = PtcViewer.stop(viewer)
   end
 
   test "lifecycle owner exposes the bound listener and performs orderly REPL shutdown" do

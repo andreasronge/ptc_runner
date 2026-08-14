@@ -1,8 +1,9 @@
 // Canonical Kernel TraceLog transcript view.
 //
 // This is intentionally a projection of the shared sanitized event vocabulary,
-// not the private evaluator transcript format. Private model conversation is a
-// separate semantic RunAnalysis projection; this renderer never joins records.
+// not the private evaluator transcript format. Authorized conversation and
+// prelude projections may enrich the view, but raw inspection records never
+// reach this renderer.
 //
 // Rendering is Preact. The span derivations below stay pure functions over
 // canonical events so they remain independently testable, and the view is
@@ -12,7 +13,8 @@
 // scroll position survive it, and every interpolated value is escaped by the
 // `html` tag rather than by remembering `escapeHtml` at each site.
 
-import { html, mount, toMarkup } from './preact.js';
+import { html, mount, rawHtml, toMarkup } from './preact.js';
+import { highlightLisp } from './highlight.js';
 
 const SUCCESS = new Set(['ok', 'continued', 'returned', 'completed', 'success']);
 const FAILURE = new Set([
@@ -42,17 +44,55 @@ export function renderKernelTranscriptMarkup(data) {
   return toMarkup(html`<${KernelTranscript} ...${data} />`);
 }
 
-function KernelTranscript({ metadata = {}, turns = {}, options = {} }) {
+function KernelTranscript({
+  metadata = {}, turns = {}, conversation = null, preludes = null, options = {}
+}) {
   const events = [...(turns.items || [])].sort((left, right) => left.sequence - right.sequence);
   const transcript = buildTranscript(events);
   const partial = Boolean(turns.next_cursor);
+  const preludeIndex = buildPreludeIndex(preludes);
+  const privatePrograms = new Map();
+  const privateResults = new Map();
+
+  for (const stream of conversation?.streams || []) {
+    const streamTurns = stream.turns || [];
+
+    streamTurns.forEach((turn, index) => {
+      const generated = turn.generated || [];
+      generated.forEach(program => {
+        if (program?.evaluation_id) privatePrograms.set(program.evaluation_id, program);
+      });
+
+      const feedback = streamTurns[index + 1]?.feedback || [];
+      if (!feedback.length) return;
+
+      generated.forEach(program => {
+        if (!program?.evaluation_id || program['association_ambiguous?']) return;
+
+        const callIds = new Set(
+          (turn.assistant?.tool_calls || [])
+            .filter(call => call?.args?.program === program.source && call?.id)
+            .map(call => call.id)
+        );
+        const matched = feedback.filter(message => callIds.has(message?.tool_call_id));
+        const result = matched.length ? matched : generated.length === 1 ? feedback : [];
+        if (result.length) privateResults.set(program.evaluation_id, result);
+      });
+    });
+  }
+
+  transcript.evaluations.forEach(evaluation => {
+    evaluation.privateProgram = privatePrograms.get(evaluation.id) || null;
+    evaluation.privateResult = privateResults.get(evaluation.id) || null;
+  });
 
   return html`
     <section class="kernel-transcript">
       <${Hero} metadata=${metadata} transcript=${transcript}
                eventCount=${events.length} truncatedPage=${partial} />
       <${Provenance} />
-      <${Reference} metadata=${metadata} transcript=${transcript} options=${options} />
+      <${Reference} metadata=${metadata} transcript=${transcript}
+                    preludeIndex=${preludeIndex} options=${options} />
       ${turns.next_cursor && html`
         <button class="btn kernel-load-more" type="button"
                 onClick=${event => options.onLoadMore?.(event.currentTarget)}>
@@ -120,12 +160,12 @@ function Provenance() {
 // Supporting canonical evidence stays one click away instead of expanding a
 // small run to several screens of prelude chips and raw event JSON.
 
-function Reference({ metadata, transcript, options }) {
+function Reference({ metadata, transcript, preludeIndex, options }) {
   return html`
     <section class="kt-reference" aria-label="Run reference">
       <${Disclosure} className="kt-reference-panel" summary="Environment"
                      hint="Preludes, mission inventory and connector fingerprints">
-        <${Preludes} metadata=${metadata} />
+        <${Preludes} metadata=${metadata} preludeIndex=${preludeIndex} />
         <${Fingerprints} metadata=${metadata} />
       <//>
       <${Disclosure} className="kt-reference-panel" summary="Execution transcript"
@@ -140,7 +180,7 @@ function Reference({ metadata, transcript, options }) {
                     onClick=${() => options.onExpandAll?.(false)}>Collapse all</button>
           </div>
         </div>
-        <${Execution} transcript=${transcript} />
+        <${Execution} transcript=${transcript} preludeIndex=${preludeIndex} />
         <${LooseEvents} events=${transcript.looseEvents} />
       <//>
     </section>
@@ -159,7 +199,7 @@ function Disclosure({ className, summary, hint, open = false, children }) {
   `;
 }
 
-function Preludes({ metadata }) {
+function Preludes({ metadata, preludeIndex }) {
   const entries = [
     ['Workflow prelude', 'workflow', null, metadata.workflow_prelude],
     ...missionEntries(metadata).map(([name, mission]) =>
@@ -169,22 +209,32 @@ function Preludes({ metadata }) {
   return html`
     <div class="kt-preludes">
       ${entries.map(([title, environment, mission, prelude]) => html`
-        <${PreludeCard} key=${mission || environment} title=${title} prelude=${prelude} />`)}
+        <${PreludeCard} key=${mission || environment} title=${title} prelude=${prelude}
+                        environment=${environment} mission=${mission}
+                        preludeIndex=${preludeIndex} />`)}
     </div>
   `;
 }
 
-function PreludeCard({ title, prelude }) {
+function PreludeCard({ title, prelude, environment, mission, preludeIndex }) {
   const ids = Array.isArray(prelude?.component_ids) ? prelude.component_ids : [];
   const components = dependencyGraph(prelude);
+  const hasPrivateSources = ids.some(id =>
+    preludeIndex.byComponent.has(scopeComponentKey(environment, mission, id))
+  );
 
   return html`
     <article class="kt-prelude-card">
       <div class="kt-card-label">
         ${title}
         ${ids.length > 0 && html`<span class="kt-card-count">${ids.length} component${ids.length === 1 ? '' : 's'}</span>`}
+        ${hasPrivateSources && html`<span class="kt-private-badge">private evidence</span>`}
       </div>
-      ${components ? html`<${ComponentRows} components=${components} />` : html`<${ComponentChips} ids=${ids} />`}
+      ${components
+        ? html`<${ComponentRows} components=${components} environment=${environment}
+                                mission=${mission} preludeIndex=${preludeIndex} />`
+        : html`<${ComponentChips} ids=${ids} environment=${environment}
+                                mission=${mission} preludeIndex=${preludeIndex} />`}
       ${ids.length > 1 && html`<div class="kt-prelude-order-note">Load order — dependencies before dependants.</div>`}
       <div class="kt-hash" title=${String(prelude?.hash || '')}>${shorten(prelude?.hash) || 'No bundle hash'}</div>
     </article>
@@ -220,17 +270,20 @@ function dependencyGraph(prelude) {
   return components;
 }
 
-function ComponentChips({ ids }) {
+function ComponentChips({ ids, environment, mission, preludeIndex }) {
   return html`
     <div class="kt-component-list">
       ${ids.length
-        ? ids.map((id, index) => html`<span key=${id}><em class="kt-component-order">${index + 1}</em>${String(id)}</span>`)
+        ? ids.map((id, index) => html`
+            <${ComponentSource} key=${id} component=${{ id, dependencies: [] }} position=${index}
+                                environment=${environment} mission=${mission}
+                                preludeIndex=${preludeIndex} compact=${true} />`)
         : html`<em>No components</em>`}
     </div>
   `;
 }
 
-function ComponentRows({ components }) {
+function ComponentRows({ components, environment, mission, preludeIndex }) {
   const dependants = new Map();
   for (const component of components) {
     for (const dependency of component.dependencies) {
@@ -242,15 +295,43 @@ function ComponentRows({ components }) {
     <ol class="kt-component-rows">
       ${components.map(component => html`
         <li key=${component.id}>
-          <code>${component.id}</code>
-          ${dependants.has(component.id) && html`
-            <span class="kt-component-used-by" title="Direct dependants">↳ used by ${dependants.get(component.id)}</span>`}
-          ${component.dependencies.length > 0 && html`
-            <span class="kt-component-deps">needs ${component.dependencies.map(dependency =>
-              html`<span key=${dependency}>${dependency}</span>`)}</span>`}
+          <${ComponentSource} component=${component} dependants=${dependants.get(component.id)}
+                              environment=${environment} mission=${mission}
+                              preludeIndex=${preludeIndex} />
         </li>
       `)}
     </ol>
+  `;
+}
+
+function ComponentSource({
+  component, position, dependants, environment, mission, preludeIndex, compact = false
+}) {
+  const source = preludeIndex.byComponent.get(scopeComponentKey(environment, mission, component.id));
+  const label = html`
+    ${compact && html`<em class="kt-component-order">${position + 1}</em>`}
+    <code>${component.id}</code>
+    ${dependants && html`
+      <span class="kt-component-used-by" title="Direct dependants">↳ used by ${dependants}</span>`}
+    ${component.dependencies.length > 0 && html`
+      <span class="kt-component-deps">needs ${component.dependencies.map(dependency =>
+        html`<span key=${dependency}>${dependency}</span>`)}</span>`}
+  `;
+
+  if (!source) return compact ? html`<span>${label}</span>` : label;
+
+  return html`
+    <details class=${compact ? 'kt-component-source kt-component-source-compact' : 'kt-component-source'}
+             id=${source.domId}>
+      <summary>
+        ${label}
+        <span class="kt-component-source-label">source</span>
+      </summary>
+      <div class="kt-component-source-meta">
+        ${source.source_bytes ?? '?'} bytes · ${shorten(source.source_hash) || 'no source hash'}
+      </div>
+      ${rawHtml('pre', 'kt-code kt-code-lisp', highlightPreludeSource(source))}
+    </details>
   `;
 }
 
@@ -307,7 +388,7 @@ function missionEntries(metadata) {
 
 // --- Execution transcript -------------------------------------------------
 
-function Execution({ transcript }) {
+function Execution({ transcript, preludeIndex }) {
   if (!transcript.evaluations.length) {
     return html`<div class="kt-empty">No evaluation events were recorded for this run.</div>`;
   }
@@ -315,12 +396,13 @@ function Execution({ transcript }) {
   return html`
     <div class="kt-execution">
       ${transcript.evaluations.map(evaluation => html`
-        <${Evaluation} key=${evaluation.id} evaluation=${evaluation} />`)}
+        <${Evaluation} key=${evaluation.id} evaluation=${evaluation}
+                       preludeIndex=${preludeIndex} />`)}
     </div>
   `;
 }
 
-function Evaluation({ evaluation }) {
+function Evaluation({ evaluation, preludeIndex }) {
   const environment = environmentOf(evaluation) || 'unknown';
   const missionName = missionNameOf(evaluation);
   const status = statusOf(evaluation);
@@ -342,7 +424,7 @@ function Evaluation({ evaluation }) {
         </span>
       </summary>
       <div class="kt-evaluation-body">
-        <${EvaluationSource} evaluation=${evaluation} />
+        <${EvaluationSource} evaluation=${evaluation} preludeIndex=${preludeIndex} />
         <${Capabilities} capabilities=${evaluation.capabilities} />
         <${Annotations} annotations=${evaluation.annotations} />
         <${Limits} limits=${evaluation.limits} />
@@ -355,13 +437,70 @@ function Evaluation({ evaluation }) {
   `;
 }
 
-function EvaluationSource({ evaluation }) {
+function EvaluationSource({ evaluation, preludeIndex }) {
   const canonicalHash = evaluation.start?.data?.source_hash;
-  return canonicalHash
-    ? html`<p class="kt-sanitized-note">${
-        `Program source is omitted from the canonical trace (source_hash ${shorten(canonicalHash)}, ` +
-        `${evaluation.start?.data?.source_bytes ?? '?'} bytes).`}</p>`
+  const program = evaluation.privateProgram;
+
+  const sourceBlock = program?.source != null
+    ? html`
+      <details class="kt-private-source" open=${environmentOf(evaluation) === 'workflow'}>
+        <summary>
+          Program source
+          <span class="kt-private-badge">private evidence</span>
+        </summary>
+        ${rawHtml('pre', 'kt-code kt-code-lisp', highlightLisp(program.source))}
+        <${PreludeCalls} program=${program} evaluation=${evaluation}
+                         preludeIndex=${preludeIndex} />
+      </details>
+    `
+    : canonicalHash
+      ? html`<p class="kt-sanitized-note">${
+          `Program source is omitted from the canonical trace (source_hash ${shorten(canonicalHash)}, ` +
+          `${evaluation.start?.data?.source_bytes ?? '?'} bytes).`}</p>`
+      : null;
+
+  const resultBlock = evaluation.privateResult?.length
+    ? html`
+      <details class="kt-private-source">
+        <summary>
+          Execution result
+          <span class="kt-private-badge">private evidence</span>
+        </summary>
+        ${evaluation.privateResult.map((message, index) => html`
+          <pre class="kt-code" key=${message?.tool_call_id || index}>${message?.content ?? json(message)}</pre>`)}
+      </details>
+    `
     : null;
+
+  return html`${sourceBlock}${resultBlock}`;
+}
+
+function PreludeCalls({ program, evaluation, preludeIndex }) {
+  const calls = Array.isArray(program.prelude_calls) ? program.prelude_calls : [];
+  if (!calls.length) return null;
+
+  const environment = program.environment || environmentOf(evaluation);
+  const mission = program.mission_name || missionNameOf(evaluation);
+
+  return html`
+    <div class="kt-prelude-calls" aria-label="Captured prelude calls">
+      <span>Prelude calls</span>
+      ${calls.map((call, index) => {
+        const item = preludeIndex.byComponent.get(
+          scopeComponentKey(environment, mission, call?.component_id)
+        );
+        const target = item ? preludeCallTarget(item, call?.ref) : null;
+        const label = call?.ref || call?.component_id || 'unknown';
+
+        return target
+          ? html`<a class="kt-prelude-call" key=${`${label}-${index}`} href=${`#${target}`}
+                    data-prelude-target=${target} onClick=${revealPreludeSource}
+                    title=${`Open ${label} in ${call.component_id}`}>${label}</a>`
+          : html`<span class="kt-prelude-call kt-prelude-call-unavailable"
+                       key=${`${label}-${index}`}>${label}</span>`;
+      })}
+    </div>
+  `;
 }
 
 function Capabilities({ capabilities }) {
@@ -471,6 +610,83 @@ function Tags({ tags }) {
       ${entries.map(([key, value]) => html`<span key=${key}>${key}: ${String(value)}</span>`)}
     </div>
   `;
+}
+
+// --- Private prelude source navigation -----------------------------------
+
+function buildPreludeIndex(preludes) {
+  const byComponent = new Map();
+
+  (preludes?.items || []).forEach((record, index) => {
+    if (!record || typeof record.source !== 'string') return;
+
+    const item = {
+      ...record,
+      definitions: definitionNames(record.source),
+      domId: `kt-prelude-${record.sequence ?? 'unknown'}-${index}`
+    };
+    const key = scopeComponentKey(record.environment, record.mission_name, record.component_id);
+    if (!byComponent.has(key)) byComponent.set(key, item);
+  });
+
+  return { byComponent };
+}
+
+function definitionNames(source) {
+  const names = new Set();
+  const pattern = /\(defn-?\s+([^\s()[\]{}]+)/g;
+  let match;
+  while ((match = pattern.exec(String(source))) !== null) names.add(match[1]);
+  return names;
+}
+
+function scopeComponentKey(environment, mission, component) {
+  return `${JSON.stringify([environment || '', mission || ''])}\u0000${component || ''}`;
+}
+
+function functionDomId(item, name) {
+  const encoded = Array.from(String(name), character => character.codePointAt(0).toString(16)).join('-');
+  return `${item.domId}-function-${encoded}`;
+}
+
+function preludeCallTarget(item, ref) {
+  const name = String(ref || '').split('/').at(-1);
+  return name && item.definitions.has(name) ? functionDomId(item, name) : item.domId;
+}
+
+function highlightPreludeSource(item) {
+  return highlightLisp(item.source).replace(
+    /(<span class="hljs-keyword">defn-?<\/span>\s+)<span class="hljs-title">([^<]+)<\/span>/g,
+    (markup, prefix, encodedName) => {
+      const name = decodeHighlightedText(encodedName);
+      if (!item.definitions.has(name)) return markup;
+      return `${prefix}<span class="hljs-title kt-prelude-definition" id="${functionDomId(item, name)}">${encodedName}</span>`;
+    }
+  );
+}
+
+function decodeHighlightedText(value) {
+  return String(value)
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#x27;', "'")
+    .replaceAll('&amp;', '&');
+}
+
+function revealPreludeSource(event) {
+  const targetId = event.currentTarget?.dataset?.preludeTarget;
+  const target = targetId ? document.getElementById(targetId) : null;
+  if (!target) return;
+
+  event.preventDefault();
+  for (let node = target; node; node = node.parentElement) {
+    if (node.tagName === 'DETAILS') node.open = true;
+  }
+  document.querySelectorAll('.kt-prelude-definition-active')
+    .forEach(definition => definition.classList.remove('kt-prelude-definition-active'));
+  target.classList.add('kt-prelude-definition-active');
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 
 // --- Canonical span derivation --------------------------------------------
