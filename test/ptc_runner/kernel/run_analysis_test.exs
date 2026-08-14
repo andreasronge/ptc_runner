@@ -166,6 +166,55 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     assert Enum.at(turns, 2)["feedback"] == [feedback_2]
   end
 
+  test "conversation streams equate absent tool-call narration across captures" do
+    user = %{"role" => "user", "content" => "start"}
+    call = %{"id" => "1", "name" => "run_ptc_lisp", "args" => %{"program" => "42"}}
+    carried = %{"role" => "assistant", "content" => nil, "tool_calls" => [call]}
+    feedback = %{"role" => "tool", "tool_call_id" => "1", "content" => "42"}
+
+    for content_fields <- [%{"content" => ""}, %{"content" => " \n\t"}, %{}] do
+      captured =
+        %{"role" => "assistant", "tool_calls" => [call]}
+        |> Map.merge(content_fields)
+
+      exchanges = [
+        exchange(1, [user], captured),
+        exchange(3, [user, carried, feedback], %{"role" => "assistant", "content" => "done"})
+      ]
+
+      assert %{"ambiguous?" => false, "streams" => [%{"turns" => turns}]} =
+               ConversationProjection.streams(exchanges)
+
+      assert Enum.map(turns, & &1["turn"]) == [1, 2]
+      assert hd(turns)["assistant"] == captured
+    end
+  end
+
+  test "conversation stream matching keeps other message content exact" do
+    user = %{"role" => "user", "content" => "start"}
+    call = %{"id" => "1", "name" => "run_ptc_lisp", "args" => %{"program" => "42"}}
+    feedback = %{"role" => "tool", "tool_call_id" => "1", "content" => "42"}
+
+    narrated = %{"role" => "assistant", "content" => "I will inspect.", "tool_calls" => [call]}
+    narration_dropped = %{"role" => "assistant", "content" => nil, "tool_calls" => [call]}
+
+    assert %{"streams" => [%{"turns" => [_]}, %{"turns" => [_]}]} =
+             ConversationProjection.streams([
+               exchange(1, [user], narrated),
+               exchange(3, [user, narration_dropped, feedback], narrated)
+             ])
+
+    blank_user = %{"role" => "user", "content" => ""}
+    nil_user = %{"role" => "user", "content" => nil}
+    assistant = %{"role" => "assistant", "content" => nil, "tool_calls" => [call]}
+
+    assert %{"streams" => [%{"turns" => [_]}, %{"turns" => [_]}]} =
+             ConversationProjection.streams([
+               exchange(1, [blank_user], assistant),
+               exchange(3, [nil_user, assistant, feedback], assistant)
+             ])
+  end
+
   test "conversation streams preserve equal maximal forks as ambiguous" do
     user = %{"role" => "user", "content" => "same"}
     assistant = %{"role" => "assistant", "content" => "same answer"}

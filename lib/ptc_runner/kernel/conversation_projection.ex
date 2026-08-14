@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.ConversationProjection do
   @moduledoc false
 
+  alias PtcRunner.Lisp.Runtime.String, as: RuntimeString
+
   @spec compile([map()], [map()], map()) :: map()
   def compile(exchanges, programs, trace_facts)
       when is_list(exchanges) and is_list(programs) and is_map(trace_facts) do
@@ -219,10 +221,35 @@ defmodule PtcRunner.Kernel.ConversationProjection do
 
   defp ensure_assistant_content(message, _value), do: message
 
-  defp prefix?(prefix, messages) when length(prefix) < length(messages),
-    do: Enum.take(messages, length(prefix)) == prefix
+  defp prefix?(prefix, messages) when length(prefix) < length(messages) do
+    messages
+    |> Enum.take(length(prefix))
+    |> Enum.zip(prefix)
+    |> Enum.all?(fn {message, expected} ->
+      comparable_message(message) == comparable_message(expected)
+    end)
+  end
 
   defp prefix?(_prefix, _messages), do: false
+
+  # The agent loop carries blank tool-call narration forward as nil. Compare
+  # that known provider/agent representation difference without rewriting the
+  # raw request or response retained in the projection.
+  defp comparable_message(%{"role" => "assistant", "tool_calls" => [_ | _]} = message) do
+    case Map.get(message, "content") do
+      nil -> Map.put(message, "content", nil)
+      content when is_binary(content) -> normalize_blank_content(message, content)
+      _other -> message
+    end
+  end
+
+  defp comparable_message(message), do: message
+
+  defp normalize_blank_content(message, content) do
+    if RuntimeString.blank?(content),
+      do: Map.put(message, "content", nil),
+      else: message
+  end
 
   defp add_ambiguous(exchange, reason, state) do
     entry = %{
