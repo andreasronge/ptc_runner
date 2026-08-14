@@ -119,8 +119,9 @@ example demonstrates distinct read and write grants.
 All manifest references use portable, lowercase logical names and resolve
 beneath the canonical manifest directory. Absolute paths, traversal, devices,
 non-regular files, and symlink escape are rejected. These rules cover files
-the host loads. Model-visible files require a separately installed and selected
-provider such as the
+the host loads. The manifest path itself is selected by the caller and its
+basename does not have to use the logical-name grammar. Model-visible files
+require a separately installed and selected provider such as the
 [filesystem sample](../../examples/mcp/filesystem/README.md).
 
 ## Validate inputs and results
