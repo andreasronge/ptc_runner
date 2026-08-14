@@ -35,7 +35,7 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
     diagnostic = credential_diagnostic(false)
     result = failure_result(false)
 
-    outcome = CommandOutcome.doctor_failure(@run_ref, result, diagnostic)
+    outcome = CommandOutcome.doctor_failure({:doctor, :connect}, @run_ref, result, diagnostic)
 
     assert outcome.exit_status == 4
     assert outcome.envelope["status"] == "error"
@@ -45,6 +45,40 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
 
     assert CommandRenderer.render(outcome) ==
              {:stdout, Jason.encode!(result) <> "\n"}
+  end
+
+  test "default doctor rejects an enriched provider failure" do
+    {:ok, subject} =
+      CommandSubject.provider("model", :local, %{destination: :workflow, index: 0})
+
+    diagnostic =
+      CommandDiagnostic.new!(:local_preflight, :adapter_unavailable,
+        subject: subject,
+        provider_activity: false
+      )
+
+    result =
+      failure_result(false)
+      |> put_in(["checks", Access.at(3)], %{
+        "name" => "provider/model/local",
+        "status" => "fail",
+        "code" => "adapter_unavailable"
+      })
+      |> put_in(["checks", Access.at(5)], %{
+        "name" => "provider/model/credentials",
+        "status" => "skipped",
+        "code" => "not_verified_due_to_failure"
+      })
+
+    assert CommandContract.valid_doctor_failure_result?(
+             result,
+             CommandDiagnostic.to_map(diagnostic),
+             []
+           )
+
+    assert_raise ArgumentError, fn ->
+      CommandOutcome.doctor_failure(:doctor, @run_ref, result, diagnostic)
+    end
   end
 
   test "doctor failure result semantics reject every diagnostic correlation mismatch" do
@@ -70,7 +104,7 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
       refute CommandContract.valid_doctor_failure_result?(result, primary, [])
 
       assert_raise ArgumentError, fn ->
-        CommandOutcome.doctor_failure(@run_ref, result, diagnostic)
+        CommandOutcome.doctor_failure({:doctor, :connect}, @run_ref, result, diagnostic)
       end
     end
   end
@@ -89,7 +123,14 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
 
   test "the published failure schema rejects an unattributable primary diagnostic" do
     diagnostic = credential_diagnostic(false)
-    outcome = CommandOutcome.doctor_failure(@run_ref, failure_result(false), diagnostic)
+
+    outcome =
+      CommandOutcome.doctor_failure(
+        {:doctor, :connect},
+        @run_ref,
+        failure_result(false),
+        diagnostic
+      )
 
     timeout =
       CommandDiagnostic.new!(:active_preflight, :connectivity_timeout, provider_activity: false)

@@ -424,6 +424,18 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def subject_operations(_phase, _code), do: []
 
   @doc false
+  @spec doctor_application_rows() :: [row()]
+  def doctor_application_rows do
+    Enum.filter(rows(), fn row ->
+      row.phase == :application and row.code not in [:override_invalid, :event_identity_conflict]
+    end)
+  end
+
+  @doc false
+  @spec doctor_finding_rows() :: [row()]
+  def doctor_finding_rows, do: doctor_application_rows() ++ doctor_attributable_rows()
+
+  @doc false
   @spec doctor_attributable_rows() :: [row()]
   def doctor_attributable_rows do
     operations = [:local, :selection, :credentials, :authorization, :connectivity]

@@ -72,6 +72,9 @@ defmodule PtcRunner.Kernel.CommandContract do
                                        {Atom.to_string(operation),
                                         Enum.map(codes, &Atom.to_string/1)}
                                      end)
+  @doctor_application_failure_codes DiagnosticCatalog.doctor_application_rows()
+                                    |> Enum.map(& &1.code)
+                                    |> Enum.map(&Atom.to_string/1)
   @version Mix.Project.config() |> Keyword.fetch!(:version)
   @doctor_notice "doctor --connect may perform one or more real provider requests and may incur provider cost"
   @spec schema() :: map()
@@ -312,8 +315,7 @@ defmodule PtcRunner.Kernel.CommandContract do
          } <- result,
          [
            %{"name" => "runtime"},
-           %{"name" => "application", "status" => "pass", "code" => "valid"} =
-             application_check,
+           %{"name" => "application"} = application_check,
            %{"name" => "viewer"}
            | provider_checks
          ] <- checks,
@@ -323,7 +325,14 @@ defmodule PtcRunner.Kernel.CommandContract do
          true <- keys == Enum.sort(keys) and keys == Enum.uniq(keys),
          true <- provider_groups_start_with_local?(keys),
          true <- provider_groups_match_application?(keys, application_check),
-         true <- doctor_failure_checks_consistent?(provider_checks, primary),
+         true <-
+           doctor_failure_checks_consistent?(
+             application_check,
+             provider_checks,
+             model_aliases,
+             primary,
+             secondary
+           ),
          true <- provider_activity == diagnostic_activity([primary | secondary]) do
       true
     else
@@ -345,7 +354,13 @@ defmodule PtcRunner.Kernel.CommandContract do
     end
   end
 
-  defp doctor_failure_checks_consistent?(checks, primary) do
+  defp doctor_failure_checks_consistent?(
+         %{"status" => "pass", "code" => "valid"},
+         checks,
+         _model_aliases,
+         primary,
+         _secondary
+       ) do
     with {:ok, expected_name, expected_code} <- failure_row_identity(primary),
          [failed] <- Enum.filter(checks, &(&1["status"] == "fail")),
          true <-
@@ -361,6 +376,27 @@ defmodule PtcRunner.Kernel.CommandContract do
       _invalid -> false
     end
   end
+
+  defp doctor_failure_checks_consistent?(
+         %{"status" => "fail", "code" => code},
+         checks,
+         model_aliases,
+         %{"phase" => "application", "code" => code},
+         []
+       ) do
+    code in @doctor_application_failure_codes and
+      Enum.all?(checks, &indeterminate_provider_check?/1) and
+      Enum.all?(model_aliases, &(&1["selected"] == false and is_nil(&1["default"])))
+  end
+
+  defp doctor_failure_checks_consistent?(
+         _application,
+         _checks,
+         _model_aliases,
+         _primary,
+         _secondary
+       ),
+       do: false
 
   defp failure_row_identity(%{
          "code" => code,
@@ -461,6 +497,9 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{"status" => "skipped", "code" => "not_requested"}
        ),
        do: true
+
+  defp provider_groups_match_application?(_keys, %{"status" => "fail", "code" => code}),
+    do: code in @doctor_application_failure_codes
 
   defp provider_groups_match_application?(_keys, _application_check), do: false
 
@@ -640,7 +679,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   end
 
   defp doctor_failure_envelope do
-    primary_diagnostic = diagnostic_schema(DiagnosticCatalog.doctor_attributable_rows())
+    primary_diagnostic = diagnostic_schema(DiagnosticCatalog.doctor_finding_rows())
     secondary_diagnostic = diagnostic_schema(diagnostic_rows({:doctor, :connect}))
 
     closed(
@@ -1166,9 +1205,11 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp doctor_result(mode) when mode in [:success, :failure] do
     application_pairs =
-      if mode == :success,
-        do: [{"pass", "valid"}, {"skipped", "not_requested"}],
-        else: [{"pass", "valid"}]
+      if mode == :success do
+        [{"pass", "valid"}, {"skipped", "not_requested"}]
+      else
+        [{"pass", "valid"}] ++ Enum.map(@doctor_application_failure_codes, &{"fail", &1})
+      end
 
     fixed = [
       doctor_fixed_check_schema("runtime", [{"pass", "supported"}, {"warn", "unsupported"}]),

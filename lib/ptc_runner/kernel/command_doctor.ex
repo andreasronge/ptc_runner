@@ -71,6 +71,9 @@ defmodule PtcRunner.Kernel.CommandDoctor do
           if prepared, do: PreparedRun.close(prepared)
         end
 
+      {:error, %CommandDiagnostic{phase: :application} = diagnostic} ->
+        application_failure(:doctor, arguments, run_ref, host, catalog, diagnostic)
+
       {:error, diagnostic} ->
         {:error, arguments_outcome(arguments, run_ref, diagnostic)}
     end
@@ -111,6 +114,9 @@ defmodule PtcRunner.Kernel.CommandDoctor do
         after
           PreparedRun.close(prepared)
         end
+
+      {:error, %CommandDiagnostic{phase: :application} = diagnostic} ->
+        application_failure({:doctor, :connect}, arguments, run_ref, host, catalog, diagnostic)
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
         {:error, arguments_outcome(arguments, run_ref, diagnostic)}
@@ -208,7 +214,14 @@ defmodule PtcRunner.Kernel.CommandDoctor do
         "readiness" => "failed"
       }
 
-      {:error, CommandOutcome.doctor_failure(run_ref, result, diagnostic, secondary)}
+      {:error,
+       CommandOutcome.doctor_failure(
+         {:doctor, :connect},
+         run_ref,
+         result,
+         diagnostic,
+         secondary
+       )}
     end
   rescue
     _exception ->
@@ -217,6 +230,36 @@ defmodule PtcRunner.Kernel.CommandDoctor do
     _kind, _reason ->
       connect_interrupted(arguments, run_ref, diagnostic_activity(diagnostic, secondary))
   end
+
+  defp application_failure(mode, arguments, run_ref, host, catalog, diagnostic) do
+    environment = DoctorEnvironment.facts()
+
+    with {:ok, rows} <-
+           DoctorPlan.application_failure(catalog, diagnostic, environment, plan_mode(mode)),
+         {:ok, checks} <- DoctorPlan.checks(rows),
+         {:ok, aliases} <- DoctorPlan.model_aliases(catalog, nil) do
+      result = %{
+        "checks" => checks,
+        "model_aliases" => maybe_add_model_selectors(aliases, host, arguments.options),
+        "provider_activity" => false,
+        "readiness" => "failed"
+      }
+
+      {:error, CommandOutcome.doctor_failure(mode, run_ref, result, diagnostic)}
+    else
+      {:error, _reason} ->
+        {:error, arguments_outcome(arguments, run_ref, diagnostic(:internal, :internal_error))}
+    end
+  rescue
+    _exception ->
+      {:error, arguments_outcome(arguments, run_ref, diagnostic(:internal, :internal_error))}
+  catch
+    _kind, _reason ->
+      {:error, arguments_outcome(arguments, run_ref, diagnostic(:internal, :internal_error))}
+  end
+
+  defp plan_mode(:doctor), do: :default
+  defp plan_mode({:doctor, :connect}), do: :connect
 
   defp readiness(:doctor), do: "unverified"
   defp readiness({:doctor, :connect}), do: "ready"

@@ -32,7 +32,10 @@ mix ptc doctor ptc.json --env-file .env --host-config ptc-host.json --connect
 
 Plain doctor reports `readiness: "unverified"`. Successful active checks
 report `ready`; an attributable failed check reports `failed` and exits
-nonzero. `--show-model-selectors` adds only safe selectors.
+nonzero. A manifest or package rejected during application validation is
+likewise reported as a failed `application` check instead of an internal
+command error.
+`--show-model-selectors` adds only safe selectors.
 
 ## Run a manifest
 

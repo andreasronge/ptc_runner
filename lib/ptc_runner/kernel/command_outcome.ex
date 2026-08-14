@@ -95,16 +95,25 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   end
 
   @doc false
-  @spec doctor_failure(binary(), map(), CommandDiagnostic.t(), [CommandDiagnostic.t()]) :: t()
-  def doctor_failure(run_ref, result, diagnostic, secondary \\ [])
+  @spec doctor_failure(
+          :doctor | {:doctor, :connect},
+          binary(),
+          map(),
+          CommandDiagnostic.t(),
+          [CommandDiagnostic.t()]
+        ) :: t()
+  def doctor_failure(command_mode, run_ref, result, diagnostic, secondary \\ [])
 
-  def doctor_failure(run_ref, result, %CommandDiagnostic{} = diagnostic, secondary)
-      when is_map(result) and is_list(secondary) and length(secondary) <= 6 do
+  def doctor_failure(command_mode, run_ref, result, %CommandDiagnostic{} = diagnostic, secondary)
+      when command_mode in [:doctor, {:doctor, :connect}] and is_map(result) and
+             is_list(secondary) and length(secondary) <= 6 do
     rendered_primary = CommandDiagnostic.to_map(diagnostic)
     rendered_secondary = Enum.map(secondary, &CommandDiagnostic.to_map/1)
 
     if CommandRunRef.valid?(run_ref) and
-         valid_mode_diagnostics?({:doctor, :connect}, [diagnostic | secondary]) and
+         (command_mode == {:doctor, :connect} or secondary == []) and
+         doctor_failure_mode_allowed?(command_mode, diagnostic) and
+         valid_mode_diagnostics?(command_mode, [diagnostic | secondary]) and
          valid_compound_diagnostics?(diagnostic, secondary) and
          CommandContract.valid_doctor_failure_result?(
            result,
@@ -112,17 +121,17 @@ defmodule PtcRunner.Kernel.CommandOutcome do
            rendered_secondary
          ) do
       envelope =
-        {:doctor, :connect}
+        command_mode
         |> error_envelope(run_ref, diagnostic, secondary)
         |> Map.put("result", result)
 
-      seal({:doctor, :connect}, envelope, diagnostic.exit_status)
+      seal(command_mode, envelope, diagnostic.exit_status)
     else
       raise ArgumentError, "invalid closed doctor failure outcome"
     end
   end
 
-  def doctor_failure(_run_ref, _result, _diagnostic, _secondary),
+  def doctor_failure(_command_mode, _run_ref, _result, _diagnostic, _secondary),
     do: raise(ArgumentError, "invalid closed doctor failure outcome")
 
   @spec run_error(
@@ -346,7 +355,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
        do: CommandRunRef.valid?(run_ref) and result_class in ["normal", "private"]
 
   defp valid_envelope_mode?(
-         {:doctor, :connect} = command_mode,
+         command_mode,
          %{
            "command" => "doctor",
            "status" => "error",
@@ -357,8 +366,9 @@ defmodule PtcRunner.Kernel.CommandOutcome do
          },
          exit_status
        )
-       when is_list(secondary) do
+       when command_mode in [:doctor, {:doctor, :connect}] and is_list(secondary) do
     CommandRunRef.valid?(run_ref) and
+      doctor_failure_mode_allowed?(command_mode, primary) and
       valid_rendered_diagnostics?(command_mode, [primary | secondary]) and
       rendered_exit_status(primary) == exit_status and
       CommandContract.valid_doctor_failure_result?(result, primary, secondary)
@@ -402,6 +412,11 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   end
 
   defp valid_envelope_mode?(_command_mode, _envelope, _exit_status), do: false
+
+  defp doctor_failure_mode_allowed?(:doctor, %CommandDiagnostic{phase: :application}), do: true
+  defp doctor_failure_mode_allowed?(:doctor, %{"phase" => "application"}), do: true
+  defp doctor_failure_mode_allowed?({:doctor, :connect}, _diagnostic), do: true
+  defp doctor_failure_mode_allowed?(_command_mode, _diagnostic), do: false
 
   defp valid_rendered_diagnostics?(command_mode, diagnostics) do
     Enum.all?(diagnostics, fn diagnostic ->

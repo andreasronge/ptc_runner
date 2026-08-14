@@ -334,6 +334,40 @@ defmodule Mix.Tasks.PtcTest do
     assert %{"readiness" => "failed", "checks" => ^checks} = Jason.decode!(message)
   end
 
+  @tag :tmp_dir
+  test "an invalid application remains a doctor readiness report", %{tmp_dir: dir} do
+    manifest_path = write_manifest(dir, %{"value" => 1})
+
+    invalid_manifest =
+      manifest_path
+      |> File.read!()
+      |> Jason.decode!()
+      |> put_in(["workflow", "components", Access.at(0), "path"], "../main.clj")
+
+    File.write!(manifest_path, Jason.encode!(invalid_manifest))
+    args = ["doctor", manifest_path]
+
+    presentation = MixCommandAdapter.execute(args)
+
+    assert presentation.exit_status == 3
+    assert presentation.stderr == ""
+
+    assert %{
+             "readiness" => "failed",
+             "provider_activity" => false,
+             "checks" => checks
+           } = Jason.decode!(String.trim(presentation.stdout))
+
+    assert %{
+             "name" => "application",
+             "status" => "fail",
+             "code" => "schema_violation"
+           } in checks
+
+    message = failed_message(args)
+    assert %{"readiness" => "failed", "checks" => ^checks} = Jason.decode!(message)
+  end
+
   defp seed_incomplete_build(build_path) do
     source_lib_path = Path.join(Mix.Project.build_path(), "lib")
     build_lib_path = Path.join(build_path, "lib")

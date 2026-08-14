@@ -8,14 +8,11 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   alias PtcRunner.Kernel.SchemaPath
 
   @spec project(:validate | :run | :doctor, term()) :: CommandDiagnostic.t()
-  def project(command, reason) do
+  def project(_command, reason) do
     {source_role, source_name, reason} = source_role(reason)
     {code, path_value} = projection(source_role, reason)
 
-    source =
-      if command in [:validate, :run],
-        do: command_source(source_role, source_name),
-        else: nil
+    source = command_source(source_role, source_name)
 
     CommandDiagnostic.new!(:application, code,
       source: bind_contract_source(source, reason),
