@@ -28,6 +28,7 @@
 #define MAX_CONFIG_STRING (128U * 1024U)
 #define IO_CHUNK_BYTES 8192U
 #define MIN_FINAL_KILL_WAIT_MS 1000U
+#define KILL_WAIT_POLL_MS 5
 #define SHA256_BYTES 32U
 #define SHA256_BLOCK_BYTES 64U
 
@@ -66,6 +67,8 @@ struct launcher_config {
   char *cwd;
   int executable_fd;
   int cwd_fd;
+  dev_t executable_device;
+  ino_t executable_inode;
   uint8_t executable_sha256[SHA256_BYTES];
   char **argv;
   size_t argc;
@@ -726,6 +729,8 @@ static bool resolve_config_paths(struct launcher_config *config) {
       fstat(config->cwd_fd, &cwd_stat) == 0 && S_ISDIR(cwd_stat.st_mode) &&
       sha256_fd(readable_executable_fd, executable_sha256) &&
       memcmp(executable_sha256, config->executable_sha256, SHA256_BYTES) == 0) {
+    config->executable_device = executable_stat.st_dev;
+    config->executable_inode = executable_stat.st_ino;
     valid = true;
   }
 
@@ -1087,9 +1092,141 @@ static bool emit_stderr(const uint8_t *bytes, size_t length,
   return true;
 }
 
+/*
+ * Group watchdog.
+ *
+ * Every launcher teardown path retires the target's process group, but a
+ * launcher destroyed without running any of its own code -- SIGKILL, or a host
+ * that tears the process down -- runs none of them. Closing the target's stdin
+ * is then the only backstop, and a target that never reads stdin never observes
+ * it, so the group is reparented and survives.
+ *
+ * This runs in a process the target forks off inside its own brand-new group,
+ * and that membership is the whole design. A process group's lifetime keeps its
+ * identifier -- which is also the leader's PID -- out of the reuse pool, so
+ * `kill(0, ...)` from inside the group can only ever reach the group it was
+ * created for. Nothing here holds, transmits, or trusts a PID, which is what
+ * makes a launcher-side observer unsafe: by the time such an observer noticed
+ * the death, the leader could already have been reaped and its number reissued.
+ *
+ * The launcher holds the lifeline's only writer for its whole life. Losing it
+ * means the launcher is gone. Its ordinary teardown SIGKILLs this group before
+ * it collects the leader, so the same signal retires this process and no
+ * stand-down handshake is needed.
+ */
+static int group_watchdog(int lifeline_fd, pid_t leader_pid) {
+  struct sigaction ignored;
+  uint8_t unexpected;
+  ssize_t count;
+
+  /*
+   * The launcher's graceful escalation aims SIGTERM at this group first; the
+   * watchdog has to outlive that and stay until the SIGKILL that ends it.
+   */
+  memset(&ignored, 0, sizeof(ignored));
+  ignored.sa_handler = SIG_IGN;
+  (void)sigemptyset(&ignored.sa_mask);
+  (void)sigaction(SIGTERM, &ignored, NULL);
+  (void)sigaction(SIGINT, &ignored, NULL);
+  (void)sigaction(SIGHUP, &ignored, NULL);
+
+  do {
+    count = read(lifeline_fd, &unexpected, sizeof(unexpected));
+  } while (count > 0 || (count < 0 && errno == EINTR));
+
+  /*
+   * Tripwire, not a race check: the group identifier equals the leader's PID
+   * only because this process was forked after the leader's `setsid`. Moving
+   * that fork earlier would silently aim `kill(0, ...)` at the launcher's own
+   * group -- and therefore at the BEAM -- so refuse instead.
+   */
+  if (getpgrp() == leader_pid) {
+    (void)kill(0, SIGKILL);
+  }
+
+  return 0;
+}
+
+/*
+ * Forked before the identity hash so that a launcher dying at any point from
+ * here on is observed, and before any executable descriptor exists so that
+ * there is nothing of the target's to leak. It keeps only the lifeline reader:
+ * holding the target's streams would defer their EOF, and holding the exec
+ * status pipe would stall the launcher's startup wait. The target waits for
+ * those closes rather than assuming them, so it never execs while a second
+ * writer is still open.
+ */
+static bool start_group_watchdog(const int lifeline[2],
+                                 const int child_stdin[2],
+                                 const int child_stdout[2],
+                                 const int child_stderr[2],
+                                 const int exec_status[2]) {
+  pid_t leader_pid = getpid();
+  int ready[2] = {-1, -1};
+  pid_t watchdog_pid;
+  uint8_t unexpected;
+
+  if (!make_pipe(ready)) {
+    return false;
+  }
+
+  watchdog_pid = fork();
+  if (watchdog_pid < 0) {
+    int fork_errno = errno;
+
+    (void)close(ready[0]);
+    (void)close(ready[1]);
+    errno = fork_errno;
+    return false;
+  }
+
+  if (watchdog_pid == 0) {
+    (void)close(ready[0]);
+    (void)close(STDIN_FILENO);
+    (void)close(STDOUT_FILENO);
+    (void)close(STDERR_FILENO);
+    (void)close(child_stdin[0]);
+    (void)close(child_stdout[1]);
+    (void)close(child_stderr[1]);
+    (void)close(exec_status[1]);
+    (void)close(ready[1]);
+    _exit(group_watchdog(lifeline[0], leader_pid));
+  }
+
+  (void)close(ready[1]);
+
+  while (read(ready[0], &unexpected, sizeof(unexpected)) < 0 &&
+         errno == EINTR) {
+  }
+
+  (void)close(ready[0]);
+  return true;
+}
+
+#if !defined(__linux__)
+/*
+ * Descriptor exec is unavailable on macOS -- `fexecve` is undeclared and
+ * execing `/dev/fd/N` fails with ENOTSUP for O_EXEC and EACCES for O_RDONLY --
+ * so the identity that is hashed and the identity that is executed can only be
+ * connected through the path. Re-reading the path here narrows the replacement
+ * window from "the whole hash", which a rename against a 64 MiB target wins by
+ * three hundred milliseconds, to this call pair. The hashed descriptor is
+ * still open, so the inode number it reports cannot have been recycled by a
+ * different file underneath the comparison.
+ */
+static bool executable_identity_unchanged(const struct launcher_config *config) {
+  struct stat current;
+
+  return stat(config->executable, &current) == 0 && S_ISREG(current.st_mode) &&
+         current.st_dev == config->executable_device &&
+         current.st_ino == config->executable_inode;
+}
+#endif
+
 static int child_main(struct launcher_config *config,
                       const int child_stdin[2], const int child_stdout[2],
-                      const int child_stderr[2], const int exec_status[2]) {
+                      const int child_stderr[2], const int exec_status[2],
+                      const int lifeline[2]) {
   struct sigaction default_action;
   int exec_errno;
 
@@ -1097,12 +1234,19 @@ static int child_main(struct launcher_config *config,
   (void)close(child_stdout[0]);
   (void)close(child_stderr[0]);
   (void)close(exec_status[0]);
+  /*
+   * Closed before anything that can block: a lifeline writer held here would
+   * hide the launcher's death for the whole identity hash.
+   */
+  (void)close(lifeline[1]);
 
   memset(&default_action, 0, sizeof(default_action));
   default_action.sa_handler = SIG_DFL;
   (void)sigemptyset(&default_action.sa_mask);
 
   if (sigaction(SIGPIPE, &default_action, NULL) != 0 || setsid() < 0 ||
+      !start_group_watchdog(lifeline, child_stdin, child_stdout, child_stderr,
+                            exec_status) ||
       !resolve_config_paths(config) || fchdir(config->cwd_fd) != 0 ||
       dup2(child_stdin[0], STDIN_FILENO) < 0 ||
       dup2(child_stdout[1], STDOUT_FILENO) < 0 ||
@@ -1117,6 +1261,7 @@ static int child_main(struct launcher_config *config,
   (void)close(child_stdout[1]);
   (void)close(child_stderr[1]);
   (void)close(config->cwd_fd);
+  (void)close(lifeline[0]);
 
 #if defined(__linux__)
   fexecve(config->executable_fd, config->argv, config->envp);
@@ -1139,8 +1284,12 @@ static int child_main(struct launcher_config *config,
     }
   }
 #else
-  execve(config->executable, config->argv, config->envp);
-  exec_errno = errno;
+  if (executable_identity_unchanged(config)) {
+    execve(config->executable, config->argv, config->envp);
+    exec_errno = errno;
+  } else {
+    exec_errno = EPERM;
+  }
 #endif
   (void)write_exact(exec_status[1], (const uint8_t *)&exec_errno,
                     sizeof(exec_errno));
@@ -1320,9 +1469,10 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
     }
 
     /*
-     * SIGKILL above is the final process-group signal. Only now may the leader
-     * be reaped and its numeric PID released. Subsequent loops merely observe
-     * whether any same-group descendants remain.
+     * SIGKILL above is the final process-group signal, and it also retires the
+     * group's lifeline watchdog. Only now may the leader be reaped and its
+     * numeric PID released. Subsequent loops merely observe whether any
+     * same-group descendants remain.
      */
     if (phase == PHASE_KILL_WAIT && child_exited && !child_reaped) {
       child_reaped = reap_child(child_pid, &child_status);
@@ -1348,6 +1498,16 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
         stdout_eof && stderr_eof) {
       return finish_supervision(finish_reason, child_reaped, child_status,
                                 stderr_truncated);
+    }
+
+    /*
+     * Draining is the only thing left to observe here, and every member's exit
+     * is collected out of band -- by init for descendants the launcher never
+     * parented, including the target's own watchdog. Keeping the ordinary
+     * cadence would charge a full tick of it to each shutdown.
+     */
+    if (phase == PHASE_KILL_WAIT) {
+      poll_timeout = KILL_WAIT_POLL_MS;
     }
 
     if (phase != PHASE_RUNNING && deadline > 0) {
@@ -1519,6 +1679,7 @@ int main(int argc, char **argv) {
   int child_stdout[2] = {-1, -1};
   int child_stderr[2] = {-1, -1};
   int exec_status[2] = {-1, -1};
+  int lifeline[2] = {-1, -1};
   pid_t child_pid;
   struct sigaction action;
   enum startup_result startup;
@@ -1561,7 +1722,8 @@ int main(int argc, char **argv) {
 
   if (!make_pipe(child_stdin) || !make_pipe(child_stdout) ||
       !make_pipe(child_stderr) || !make_pipe(exec_status) ||
-      !close_on_exec(exec_status[1])) {
+      !make_pipe(lifeline) || !close_on_exec(exec_status[1]) ||
+      !close_on_exec(lifeline[0]) || !close_on_exec(lifeline[1])) {
     (void)emit_frame('F', NULL, 0);
     free_config(&config);
     return 70;
@@ -1576,6 +1738,8 @@ int main(int argc, char **argv) {
     close_if_open(&child_stderr[1]);
     close_if_open(&exec_status[0]);
     close_if_open(&exec_status[1]);
+    close_if_open(&lifeline[0]);
+    close_if_open(&lifeline[1]);
     free_config(&config);
     return 69;
   }
@@ -1590,7 +1754,7 @@ int main(int argc, char **argv) {
   if (child_pid == 0) {
     int child_result =
         child_main(&config, child_stdin, child_stdout, child_stderr,
-                   exec_status);
+                   exec_status, lifeline);
     _exit(child_result);
   }
 
@@ -1598,6 +1762,12 @@ int main(int argc, char **argv) {
   close_if_open(&child_stdout[1]);
   close_if_open(&child_stderr[1]);
   close_if_open(&exec_status[1]);
+  /*
+   * The launcher keeps the only writer for its whole life: the group
+   * watchdog treats losing it as the launcher's death, and process exit
+   * closes it however the launcher ends.
+   */
+  close_if_open(&lifeline[0]);
 
   startup = await_child_start(exec_status[0], config.start_timeout_ms);
   if (startup != STARTUP_READY) {

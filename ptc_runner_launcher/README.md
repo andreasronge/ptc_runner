@@ -9,8 +9,11 @@ host-authorized server with:
   the launcher before spawn;
 - separate stdin, stdout, and bounded stderr streams;
 - acknowledged backpressure;
-- a new process group; and
-- bounded EOF, TERM, and KILL cleanup, including descendant reaping on Linux.
+- a new process group;
+- bounded EOF, TERM, and KILL cleanup, including descendant reaping on Linux;
+  and
+- a lifeline watchdog that retires that group with a single `SIGKILL` when the
+  launcher itself is destroyed before it can run any of that cleanup.
 
 The package restores mandatory-checksum precompiled executables on
 `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-linux-gnu`, and
@@ -33,12 +36,30 @@ atomic no-replace directory publication. It calls
 and fails closed when the primitive is unavailable. Scaffold construction,
 staging ownership, cleanup, and command outcomes remain in the core package.
 
+The watchdog runs inside the server's own process group, forked by the server
+process after it starts that group and before the identity hash. Membership is
+the point: a process group's lifetime keeps its identifier out of the reuse
+pool, so signalling the caller's own group can only ever reach the group it was
+created for. Nothing holds or transmits a PID, which is what a launcher-side
+observer could not avoid — by the time it noticed the launcher's death, the
+leader could already have been reaped and its number reissued. It keeps only
+the read end of a private pipe whose sole writer is the launcher, and the
+launcher's own escalation retires it with the same `SIGKILL` that ends the
+group.
+
 This is process containment for trusted host-installed MCP servers, not a
 hostile-code sandbox. A trusted child can deliberately leave its process group.
 The trusted operator must not modify executable contents during startup.
 Linux hashes and executes the same held readable descriptor, which prevents a
-path replacement but not an in-place write. macOS additionally relies on the
-canonical executable path hierarchy remaining immutable through `execve`.
+path replacement but not an in-place write. macOS cannot exec a descriptor at
+all, so it re-reads the canonical path immediately before `execve` and refuses
+to start unless that path still resolves to the device and inode it hashed. For
+a native executable that leaves the interval between the re-read and the
+kernel's own lookup, rather than the length of the hash, which scales with the
+executable. An interpreted `#!` target is weaker still: macOS gives the
+interpreter the script's path rather than a descriptor, so the interpreter opens
+it a second time and no launcher check covers that lookup. A macOS host must
+therefore keep the executable path hierarchy immutable for the whole of startup.
 
 The Elixir API is intentionally small:
 
