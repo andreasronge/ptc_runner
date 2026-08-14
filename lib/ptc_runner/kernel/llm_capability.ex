@@ -3,9 +3,10 @@ defmodule PtcRunner.Kernel.LLMCapability do
   Constructs the provider-neutral `llm-request` workflow capability.
 
   The supplied requester owns transport and credential handling. Requests and
-  normalized JSON-like responses are independently bounded. Transport errors
-  become retryable `:unavailable` provider failures; invalid or oversized
-  responses do not cross back into Lisp.
+  normalized JSON-like responses are independently bounded. Requesters may
+  return a classified `PtcRunner.Kernel.ProviderError`; unclassified failures
+  become retryable `:unavailable` errors. Invalid or oversized responses do not
+  cross back into Lisp.
 
   This adapter provides model access, not agent policy. Message construction,
   tool protocols, feedback, retries, and completion remain PTC-Lisp workflow

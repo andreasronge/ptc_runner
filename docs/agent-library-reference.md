@@ -253,9 +253,11 @@ treating extension keys as invalid. Result-contract diagnostics are capped at
 
 An outer `fail` value is not copied into the public Kernel error or canonical
 trace. Framework failure kinds remain readable; application-defined scalar
-kinds become stable fingerprints. Exact failure values, prompts, provider
-responses, generated source, and capability payloads require an authorized
-private inspection artifact.
+kinds become stable fingerprints. Exact failure values, prompts, generated
+source, and capability payloads require an authorized private inspection
+artifact. Built-in LLM adapters retain only a bounded provider status and
+human-readable reason there; request bodies, raw response bodies, headers, and
+transport causes are not retained as provider-error details.
 
 ## Retry and effect safety
 

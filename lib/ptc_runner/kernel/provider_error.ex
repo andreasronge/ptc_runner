@@ -6,6 +6,9 @@ defmodule PtcRunner.Kernel.ProviderError do
   dispatcher converts it into the uniform Lisp capability error envelope.
   `details` is truncated to 1,024 characters and must not contain credentials,
   BEAM exceptions, stack traces, or other host-private data.
+  Adapters that translate dependency errors must select bounded diagnostic
+  fields explicitly; inspecting an entire error value may retain request
+  bodies, response bodies, headers, causes, or credentials and is forbidden.
 
   `mutation_state: :indeterminate` is orthogonal to the diagnostic `kind`: it
   means a non-successful call may already have changed external state and is

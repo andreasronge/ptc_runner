@@ -1,9 +1,33 @@
 defmodule PtcRunner.LLM.ReqLLMAdapterTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
+  alias PtcRunner.Kernel.Dispatcher
+  alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.LLMCapability
+  alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.LLM.ReqLLMAdapter
+  alias PtcRunner.TestSupport.TestHelpers
   alias ReqLLM.Message
   alias ReqLLM.ToolCall
+
+  @openrouter_model "openrouter:anthropic/claude-haiku-4.5"
+
+  setup_all do
+    initially_started = Application.started_applications() |> MapSet.new(&elem(&1, 0))
+    {:ok, started} = Application.ensure_all_started(:req_llm)
+    :ok = ReqLLMAdapter.ensure_ready()
+
+    on_exit(fn ->
+      started
+      |> Enum.reverse()
+      |> Enum.reject(&MapSet.member?(initially_started, &1))
+      |> Enum.each(&Application.stop/1)
+    end)
+  end
 
   describe "generate_object/4" do
     test "returns structured_output_not_supported for ollama" do
@@ -44,6 +68,57 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
   end
 
   describe "call/2" do
+    test "classifies a permanent ReqLLM HTTP failure and retains its provider message" do
+      provider_message = "Grok 4 Fast is deprecated. xAI recommends switching to Grok 4.3"
+
+      assert {:error,
+              %ProviderError{
+                kind: :not_found,
+                details: details,
+                retryable?: false
+              }} =
+               call_http_failure(404, provider_message)
+
+      assert details =~ "HTTP 404"
+      assert details =~ provider_message
+      refute details =~ "private prompt sentinel"
+    end
+
+    test "derives retryability from the HTTP status when ReqLLM does not classify it" do
+      cases = [
+        {400, :invalid_request, false},
+        {401, :authentication_failed, false},
+        {403, :denied, false},
+        {408, :timeout, true},
+        {409, :invalid_request, true},
+        {425, :invalid_request, true},
+        {429, :unavailable, true},
+        {503, :unavailable, true}
+      ]
+
+      for {status, kind, retryable?} <- cases do
+        assert {:error,
+                %ProviderError{
+                  kind: ^kind,
+                  details: details,
+                  retryable?: ^retryable?
+                }} = call_http_failure(status, "provider failure #{status}")
+
+        assert details =~ "HTTP #{status}"
+        assert details =~ "provider failure #{status}"
+      end
+    end
+
+    test "classifies a wrapped ReqLLM transport timeout as retryable" do
+      plug = fn conn -> Req.Test.transport_error(conn, :timeout) end
+
+      assert {:error,
+              %ProviderError{
+                kind: :timeout,
+                retryable?: true
+              }} = ReqLLMAdapter.call(@openrouter_model, request(plug))
+    end
+
     test "routes schema mode to generate_object for ollama" do
       req = %{
         system: "You are helpful",
@@ -51,7 +126,12 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
         schema: %{"type" => "object", "properties" => %{"a" => %{"type" => "string"}}}
       }
 
-      assert {:error, :structured_output_not_supported} = ReqLLMAdapter.call("ollama:test", req)
+      assert {:error,
+              %ProviderError{
+                kind: :invalid_request,
+                details: "LLM provider does not support structured output",
+                retryable?: false
+              }} = ReqLLMAdapter.call("ollama:test", req)
     end
 
     test "routes text mode to generate_text" do
@@ -61,8 +141,66 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
         cache: false
       }
 
-      # Will fail with connection error for ollama, confirming routing to generate_text
-      assert {:error, _} = ReqLLMAdapter.call("ollama:test", req)
+      # A contained connection failure confirms routing to generate_text and
+      # classification at the adapter boundary.
+      assert {:error, %ProviderError{}} = ReqLLMAdapter.call("ollama:test", req)
+    end
+  end
+
+  describe "private inspection" do
+    test "records the classified provider message instead of the generic fallback" do
+      provider_message = "Grok 4 Fast is deprecated. xAI recommends switching to Grok 4.3"
+
+      plug = fn conn ->
+        conn
+        |> Plug.Conn.put_status(404)
+        |> Req.Test.json(%{"error" => %{"message" => provider_message, "code" => 404}})
+      end
+
+      requester = fn request ->
+        request
+        |> ProviderRegistry.adapter_request()
+        |> Map.merge(provider_options(plug))
+        |> then(&ReqLLMAdapter.call(@openrouter_model, &1))
+      end
+
+      {:ok, capability} = LLMCapability.new(requester: requester)
+      {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
+      {:ok, state} = RunState.start(Limits.defaults())
+
+      {:ok, inspection_sink} =
+        InspectionSink.start(run_id: "llm-provider-error", trace_id: "llm-provider-error-trace")
+
+      assert %{
+               status: :error,
+               kind: :provider_error,
+               reason: :not_found,
+               details: details,
+               retryable?: false
+             } =
+               Dispatcher.dispatch(
+                 state,
+                 :workflow,
+                 environment,
+                 capability.name,
+                 %{
+                   "messages" => [
+                     %{"role" => "user", "content" => "private prompt sentinel"}
+                   ]
+                 },
+                 TestHelpers.dispatch_context(state, :workflow, 1_000),
+                 nil,
+                 inspection_sink
+               )
+
+      assert details =~ provider_message
+      assert {:ok, records} = InspectionSink.records(inspection_sink)
+
+      assert Enum.any?(records, fn record ->
+               record["record_type"] == "capability-output" and
+                 get_in(record, ["payload", "result", "details"]) == details and
+                 get_in(record, ["payload", "result", "retryable?"]) == false
+             end)
     end
   end
 
@@ -385,5 +523,32 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
                arguments: ~s|{"program":"(return 42)"}|
              }
     end
+  end
+
+  defp call_http_failure(status, message) do
+    plug = fn conn ->
+      conn
+      |> Plug.Conn.put_status(status)
+      |> Req.Test.json(%{"error" => %{"message" => message, "code" => status}})
+    end
+
+    ReqLLMAdapter.call(@openrouter_model, request(plug))
+  end
+
+  defp request(plug) do
+    Map.put(
+      provider_options(plug),
+      :messages,
+      [%{role: :user, content: "private prompt sentinel"}]
+    )
+  end
+
+  defp provider_options(plug) do
+    %{
+      api_key: "test-openrouter-key",
+      max_retries: 0,
+      max_tokens: 10,
+      req_http_options: [plug: plug, retry: false]
+    }
   end
 end

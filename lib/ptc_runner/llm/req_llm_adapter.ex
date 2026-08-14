@@ -10,6 +10,14 @@ if Code.ensure_loaded?(ReqLLM) do
 
     Requires `{:req_llm, "~> 1.8"}` as a dependency.
 
+    ## Failure classification
+
+    The adapter boundary converts expected provider, HTTP, and transport
+    failures into bounded `PtcRunner.Kernel.ProviderError` values. HTTP status
+    and the dependency's human-readable reason may reach private inspection;
+    request bodies, response bodies, headers, causes, and arbitrary exception
+    inspection do not cross the boundary.
+
     ## Prompt Caching
 
     When `cache: true` is set in the request, prompt caching is enabled for
@@ -25,6 +33,7 @@ if Code.ensure_loaded?(ReqLLM) do
 
     @behaviour PtcRunner.LLM
 
+    alias PtcRunner.Kernel.ProviderError
     alias ReqLLM.Message
     alias ReqLLM.Message.ContentPart
 
@@ -78,31 +87,40 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     @impl true
-    @spec call(String.t(), map()) :: {:ok, map()} | {:error, term()}
+    @spec call(String.t(), map()) :: {:ok, map()} | {:error, ProviderError.t()}
     def call(model, %{schema: schema} = req) when is_map(schema) do
       messages = build_messages(req)
 
-      case generate_object(model, messages, schema, request_opts(req)) do
+      model
+      |> generate_object(messages, schema, request_opts(req))
+      |> case do
         {:ok, %{object: object, tokens: tokens}} ->
           {:ok, %{content: Jason.encode!(object), tokens: tokens}}
 
-        {:error, reason} ->
-          {:error, reason}
+        error ->
+          normalize_call_result(error)
       end
     end
 
     def call(model, %{tools: tools} = req) when is_list(tools) and tools != [] do
       messages = build_messages(req)
-      generate_with_tools(model, messages, tools, request_opts(req))
+
+      model
+      |> generate_with_tools(messages, tools, request_opts(req))
+      |> normalize_call_result()
     end
 
     def call(model, req) do
       messages = build_messages(req)
-      generate_text(model, messages, request_opts(req))
+
+      model
+      |> generate_text(messages, request_opts(req))
+      |> normalize_call_result()
     end
 
     @impl true
-    @spec stream(String.t(), map()) :: {:ok, Enumerable.t()} | {:error, term()}
+    @spec stream(String.t(), map()) ::
+            {:ok, Enumerable.t()} | {:error, :streaming_not_supported | ProviderError.t()}
     def stream(model, req) do
       case parse_provider(model) do
         {:ollama, _} ->
@@ -321,7 +339,7 @@ if Code.ensure_loaded?(ReqLLM) do
           {:ok, Stream.concat(content_stream, done_stream)}
 
         {:error, reason} ->
-          {:error, reason}
+          provider_failure(reason)
       end
     end
 
@@ -540,6 +558,140 @@ if Code.ensure_loaded?(ReqLLM) do
           {:error, reason}
       end
     end
+
+    defp normalize_call_result({:error, reason}), do: provider_failure(reason)
+    defp normalize_call_result(result), do: result
+
+    defp provider_failure(reason), do: {:error, normalize_provider_error(reason)}
+
+    defp normalize_provider_error(%ProviderError{} = error), do: error
+
+    defp normalize_provider_error(%ReqLLM.Error.API.Request{status: status} = error)
+         when is_integer(status) do
+      ProviderError.new(
+        http_error_kind(status),
+        http_error_details(status, error.reason),
+        retryable?: http_retryable?(status, error.retryable)
+      )
+    end
+
+    defp normalize_provider_error(%ReqLLM.Error.API.Request{} = error) do
+      ProviderError.new(
+        transport_error_kind(error.cause),
+        safe_error_details(error.reason, "LLM transport unavailable"),
+        retryable?: transport_retryable?(error.cause, error.retryable)
+      )
+    end
+
+    defp normalize_provider_error(%ReqLLM.Error.API.Response{status: status} = error)
+         when is_integer(status) do
+      ProviderError.new(
+        http_error_kind(status),
+        http_error_details(status, error.reason),
+        retryable?: http_retryable?(status, nil)
+      )
+    end
+
+    defp normalize_provider_error(%ReqLLM.Error.API.Response{} = error) do
+      ProviderError.new(
+        :invalid_result,
+        safe_error_details(error.reason, "LLM provider returned an invalid response")
+      )
+    end
+
+    defp normalize_provider_error(%{status: status} = error) when is_integer(status) do
+      ProviderError.new(
+        http_error_kind(status),
+        direct_http_error_details(status, Map.get(error, :body)),
+        retryable?: http_retryable?(status, nil)
+      )
+    end
+
+    defp normalize_provider_error(%Req.TransportError{reason: reason}) do
+      ProviderError.new(
+        transport_error_kind(reason),
+        transport_error_details(reason),
+        retryable?: retryable_transport_reason?(reason)
+      )
+    end
+
+    defp normalize_provider_error(:structured_output_not_supported),
+      do: ProviderError.new(:invalid_request, "LLM provider does not support structured output")
+
+    defp normalize_provider_error(:tool_calling_not_supported),
+      do: ProviderError.new(:invalid_request, "LLM provider does not support tool calling")
+
+    defp normalize_provider_error(_reason),
+      do: ProviderError.new(:unavailable, "LLM provider unavailable", retryable?: true)
+
+    defp http_error_kind(401), do: :authentication_failed
+    defp http_error_kind(403), do: :denied
+    defp http_error_kind(404), do: :not_found
+    defp http_error_kind(408), do: :timeout
+    defp http_error_kind(429), do: :unavailable
+    defp http_error_kind(status) when status in 400..499, do: :invalid_request
+    defp http_error_kind(status) when status in 500..599, do: :unavailable
+    defp http_error_kind(_status), do: :unavailable
+
+    defp http_retryable?(_status, retryable?) when is_boolean(retryable?), do: retryable?
+    defp http_retryable?(status, _retryable?) when status in [408, 409, 425, 429], do: true
+    defp http_retryable?(status, _retryable?) when status in 500..599, do: true
+    defp http_retryable?(_status, _retryable?), do: false
+
+    defp http_error_details(status, reason) when is_binary(reason),
+      do: safe_error_details("HTTP #{status}: #{reason}", "HTTP #{status}")
+
+    defp http_error_details(status, _reason), do: "HTTP #{status}"
+
+    defp direct_http_error_details(status, body) do
+      case provider_message(body) do
+        message when is_binary(message) -> http_error_details(status, message)
+        _missing -> "HTTP #{status}"
+      end
+    end
+
+    defp provider_message(%{"error" => %{"message" => message}}) when is_binary(message),
+      do: message
+
+    defp provider_message(%{"error" => message}) when is_binary(message), do: message
+    defp provider_message(%{"message" => message}) when is_binary(message), do: message
+    defp provider_message(_body), do: nil
+
+    defp safe_error_details(details, fallback) when is_binary(details) do
+      if String.valid?(details) and details != "", do: details, else: fallback
+    end
+
+    defp safe_error_details(_details, fallback), do: fallback
+
+    defp transport_error_kind(%Req.TransportError{reason: reason}),
+      do: transport_error_kind(reason)
+
+    defp transport_error_kind(%Finch.TransportError{reason: reason}),
+      do: transport_error_kind(reason)
+
+    defp transport_error_kind(%Mint.TransportError{reason: reason}),
+      do: transport_error_kind(reason)
+
+    defp transport_error_kind(:timeout), do: :timeout
+    defp transport_error_kind(_reason), do: :transport_error
+
+    defp transport_retryable?(_cause, retryable?) when is_boolean(retryable?), do: retryable?
+
+    defp transport_retryable?(cause, _retryable?),
+      do: cause |> transport_reason() |> retryable_transport_reason?()
+
+    defp transport_reason(%Req.TransportError{reason: reason}), do: reason
+    defp transport_reason(%Finch.TransportError{reason: reason}), do: reason
+    defp transport_reason(%Mint.TransportError{reason: reason}), do: reason
+    defp transport_reason(_cause), do: nil
+
+    defp retryable_transport_reason?(reason),
+      do: reason in [:closed, :timeout, :econnrefused, :pool_not_available]
+
+    defp transport_error_details(reason) when is_atom(reason),
+      do: "LLM transport error: #{reason}"
+
+    defp transport_error_details(_reason), do: "LLM transport unavailable"
 
     @doc false
     def normalize_tool_calls(raw_tool_calls) do
