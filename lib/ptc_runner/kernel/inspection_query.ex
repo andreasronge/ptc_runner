@@ -590,14 +590,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   defp collection_match?(:turns, item, arguments) do
     equal_filter?(item, arguments, "stream_id") and
       equal_filter?(item, arguments, "capability_id") and
-      generated_equal_match?(item, arguments["evaluation_id"], "evaluation_id") and
-      generated_equal_match?(
-        item,
-        arguments["parent_evaluation_id"],
-        "parent_evaluation_id"
-      ) and
-      generated_call_match?(item, arguments["prelude_call"], "ref") and
-      generated_call_match?(item, arguments["prelude_component"], "component_id")
+      generated_source_match?(item, arguments)
   end
 
   defp collection_match?(:generated_sources, item, arguments) do
@@ -614,20 +607,21 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     |> Enum.all?(fn {key, value} -> is_nil(value) or item[key] == value end)
   end
 
-  defp generated_call_match?(_item, nil, _key), do: true
+  defp generated_source_match?(item, arguments) do
+    filters = ~w(evaluation_id parent_evaluation_id prelude_call prelude_component)
 
-  defp generated_call_match?(item, expected, key) do
-    item
-    |> Map.get("generated", [])
-    |> Enum.any?(&call_match?(&1, expected, key))
-  end
-
-  defp generated_equal_match?(_item, nil, _key), do: true
-
-  defp generated_equal_match?(item, expected, key) do
-    item
-    |> Map.get("generated", [])
-    |> Enum.any?(&(&1[key] == expected))
+    if Enum.all?(filters, &is_nil(arguments[&1])) do
+      true
+    else
+      item
+      |> Map.get("generated", [])
+      |> Enum.any?(fn source ->
+        equal_filter?(source, arguments, "evaluation_id") and
+          equal_filter?(source, arguments, "parent_evaluation_id") and
+          call_match?(source, arguments["prelude_call"], "ref") and
+          call_match?(source, arguments["prelude_component"], "component_id")
+      end)
+    end
   end
 
   defp call_match?(_item, nil, _key), do: true

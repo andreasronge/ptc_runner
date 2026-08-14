@@ -155,6 +155,65 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
            ]
   end
 
+  test "turn filters must match the same generated source" do
+    run_id = "conjunctive-turn-filters"
+    trace_id = "trace-conjunctive-turn-filters"
+    first_source = "(return 1)"
+    second_source = "(return 2)"
+
+    records = [
+      inspection_record(run_id, trace_id, 1, "capability-input", %{"capability_id" => "llm"}, %{
+        "environment" => "workflow",
+        "name" => "llm-request",
+        "arguments" => %{"messages" => [%{"role" => "user", "content" => "run both"}]}
+      }),
+      inspection_record(run_id, trace_id, 2, "capability-output", %{"capability_id" => "llm"}, %{
+        "environment" => "workflow",
+        "name" => "llm-request",
+        "result" => %{
+          "status" => "ok",
+          "value" => %{
+            "tool_calls" => [
+              %{"args" => %{"program" => first_source}},
+              %{"args" => %{"program" => second_source}}
+            ]
+          }
+        }
+      }),
+      evaluation_source_record(run_id, trace_id, 3, "evaluation-1", first_source),
+      evaluation_source_record(run_id, trace_id, 4, "evaluation-2", second_source)
+    ]
+
+    assert {:ok, %{source_id: source_id, collections: collections}} =
+             InspectionQuery.compile([records], "trace-source", %{
+               "trace_snapshot_hash" => "trace-source",
+               "runs" => %{
+                 run_id => %{
+                   "terminal?" => true,
+                   "events_dropped?" => false,
+                   "expected_model_exchange_ids" => ["llm"],
+                   "parent_evaluation_ids" => %{
+                     "evaluation-1" => "workflow-1",
+                     "evaluation-2" => "workflow-2"
+                   }
+                 }
+               }
+             })
+
+    assert {:ok, %{"items" => []}} =
+             InspectionQuery.query(
+               collections,
+               source_id,
+               :turns,
+               %{
+                 "run_id" => run_id,
+                 "evaluation_id" => "evaluation-1",
+                 "parent_evaluation_id" => "workflow-2"
+               },
+               100_000
+             )
+  end
+
   @tag :tmp_dir
   test "multiple artifacts expose paired deterministic private queries", %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
@@ -1104,6 +1163,37 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
   defp emit!(sink, type, correlation, payload),
     do: :ok = InspectionSink.emit(sink, type, correlation, payload)
+
+  defp evaluation_source_record(run_id, trace_id, sequence, evaluation_id, source) do
+    inspection_record(
+      run_id,
+      trace_id,
+      sequence,
+      "evaluation-source",
+      %{"evaluation_id" => evaluation_id},
+      %{
+        "environment" => "mission",
+        "mission_name" => "default",
+        "program_kind" => "ptc-lisp",
+        "source" => source,
+        "source_hash" => Base.encode16(:crypto.hash(:sha256, source), case: :lower),
+        "source_bytes" => byte_size(source)
+      }
+    )
+  end
+
+  defp inspection_record(run_id, trace_id, sequence, record_type, correlation, payload) do
+    %{
+      "schema_version" => 6,
+      "run_id" => run_id,
+      "trace_id" => trace_id,
+      "sequence" => sequence,
+      "timestamp" => "2026-08-14T12:00:0#{sequence}Z",
+      "record_type" => record_type,
+      "correlation" => correlation,
+      "payload" => payload
+    }
+  end
 
   # ex_dna:disable-for-next-line — Keep the compared snapshot-local trace readable here.
   defp canonical_events(run_id) do
