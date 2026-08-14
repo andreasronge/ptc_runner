@@ -121,7 +121,8 @@ function Hero({ metadata, transcript, eventCount, truncatedPage }) {
     ['Source', metadata.source],
     ['Bundle', abbreviate(bundle), bundle]
   ].filter(([, value]) => value !== null && value !== undefined && value !== '');
-  const errorCount = metadata.error_count ?? transcript.limits.length;
+  const terminalError = transcript.terminal?.data?.outcome === 'error' ? 1 : 0;
+  const errorCount = metadata.error_count ?? Math.max(transcript.limits.length, terminalError);
 
   return html`
     <div class="kt-hero">
@@ -138,6 +139,7 @@ function Hero({ metadata, transcript, eventCount, truncatedPage }) {
       </div>
       <${Tags} tags=${metadata.tags || metadata.labels?.tags} />
     </div>
+    <${TerminalCause} event=${transcript.terminal} />
     <div class="kt-metrics" aria-label="Run summary">
       <${Metric} value=${transcript.evaluations.length} label="evaluations" />
       <${Metric} value=${transcript.capabilities.length} label="capability calls" />
@@ -145,6 +147,38 @@ function Hero({ metadata, transcript, eventCount, truncatedPage }) {
                  label="LLM calls" />
       <${Metric} value=${errorCount} label="errors" tone=${errorCount > 0 ? 'error' : ''} />
       <${Metric} value=${eventCount} label=${truncatedPage ? 'events loaded' : 'events'} />
+    </div>
+  `;
+}
+
+function TerminalCause({ event }) {
+  const data = event?.data;
+  if (!data || data.outcome === 'ok') return null;
+
+  if (
+    data.failure_kind === 'turn-limit' &&
+    data.limit === 'agent_turns' &&
+    Number.isInteger(data.limit_value) &&
+    data.limit_value >= 1 &&
+    data.limit_value <= 128
+  ) {
+    return html`
+      <div class="kt-terminal-cause" role="status">
+        <strong>Agent turn limit reached</strong>
+        <span>max_turns was ${data.limit_value}. Raise it for this agent.core/run call, or reduce the work per turn.</span>
+      </div>
+    `;
+  }
+
+  const failureKind = data.failure_kind;
+  if (typeof failureKind !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(failureKind)) {
+    return null;
+  }
+
+  return html`
+    <div class="kt-terminal-cause" role="status">
+      <strong>Run stopped</strong>
+      <span>${failureKind.replaceAll('-', ' ')}</span>
     </div>
   `;
 }
@@ -701,6 +735,7 @@ export function buildTranscript(events) {
 
   const annotations = events.filter(event => event.type === 'workflow-annotation');
   const limits = events.filter(event => event.type === 'limit-exceeded');
+  const terminal = [...events].reverse().find(event => event.type === 'run-stopped') || null;
 
   for (const evaluation of evaluations) {
     evaluation.capabilities = capabilities.filter(capability =>
@@ -735,7 +770,7 @@ export function buildTranscript(events) {
     !claimed.has(event.sequence) && !['run-started', 'run-stopped'].includes(event.type)
   );
 
-  return { evaluations, capabilities, annotations, limits, looseEvents };
+  return { evaluations, capabilities, annotations, limits, terminal, looseEvents };
 }
 
 function missionNameOf(span) {

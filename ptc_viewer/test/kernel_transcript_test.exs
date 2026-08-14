@@ -127,6 +127,29 @@ defmodule PtcViewer.KernelTranscriptTest do
     refute rendered =~ "sha256:name-fingerprint"
   end
 
+  test "renders the bounded terminal cause from run-stopped", %{tmp_dir: directory} do
+    rendered =
+      render(directory, %{
+        "metadata" => %{"run_id" => "turn-limit-run", "status" => "error"},
+        "turns" => %{
+          "items" => [
+            event(1, "run-started", %{}),
+            event(2, "run-stopped", %{
+              "outcome" => "error",
+              "reason" => "explicit_failure",
+              "failure_kind" => "turn-limit",
+              "limit" => "agent_turns",
+              "limit_value" => 2
+            })
+          ]
+        }
+      })
+
+    assert rendered =~ "Agent turn limit reached"
+    assert rendered =~ "max_turns was 2"
+    refute rendered =~ "explicit_failure"
+  end
+
   defp private_program_data(ambiguous?) do
     program = ~S|(runs/diagnose "failed-run")|
 

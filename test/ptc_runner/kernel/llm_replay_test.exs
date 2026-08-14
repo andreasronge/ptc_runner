@@ -394,6 +394,68 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     end
 
     @tag :tmp_dir
+    test "agent turn exhaustion names max_turns and its effective value", %{tmp_dir: dir} do
+      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
+
+      paths = write_application(dir)
+      write_agent_application(paths, ~S|(agent.core/run-value "Return 42" {"max_turns" 2})|)
+
+      assert {:error, %CommandOutcome{} = first_miss} =
+               CommandEngine.dispatch(["run", paths.manifest, "--host-config", paths.host])
+
+      first_hash = replay_request_hash(first_miss)
+
+      write(dir, [
+        %{"request_hash" => first_hash, "response" => %{"content" => "first prose reply"}}
+      ])
+
+      assert {:error, %CommandOutcome{} = second_miss} =
+               CommandEngine.dispatch(["run", paths.manifest, "--host-config", paths.host])
+
+      second_hash = replay_request_hash(second_miss)
+
+      write(dir, [
+        %{"request_hash" => first_hash, "response" => %{"content" => "first prose reply"}},
+        %{"request_hash" => second_hash, "response" => %{"content" => "second prose reply"}}
+      ])
+
+      trace_dir = Path.join(dir, "turn-limit-traces")
+      File.mkdir_p!(trace_dir)
+
+      assert {:error, %CommandOutcome{} = exhausted} =
+               CommandEngine.dispatch([
+                 "run",
+                 paths.manifest,
+                 "--host-config",
+                 paths.host,
+                 "--trace-dir",
+                 trace_dir
+               ])
+
+      assert exhausted.envelope["error"]["code"] == "runtime_limit_exceeded",
+             inspect(exhausted.envelope)
+
+      assert exhausted.envelope["error"]["message"] ==
+               "agent turn limit 2 was exceeded; raise max_turns for this agent.core/run call, or reduce the work per turn"
+
+      assert exhausted.envelope["error"]["source"] == nil
+      assert CommandContract.valid_envelope?(exhausted.envelope)
+
+      assert [trace_path] = Path.wildcard(Path.join(trace_dir, "*.jsonl"))
+
+      stopped =
+        trace_path
+        |> File.stream!()
+        |> Stream.map(&Jason.decode!/1)
+        |> Enum.find(&(&1["type"] == "run-stopped"))
+
+      assert stopped["data"]["failure_kind"] == "turn-limit"
+      assert stopped["data"]["limit"] == "agent_turns"
+      assert stopped["data"]["limit_value"] == 2
+    end
+
+    @tag :tmp_dir
     test "parallel replay misses retain the authoring hash", %{tmp_dir: dir} do
       {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
@@ -780,6 +842,17 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       Enum.map_join(entries, "\n", &Jason.encode!(Map.put_new(&1, "schema_version", 1))) <>
         "\n"
     )
+  end
+
+  defp replay_request_hash(%CommandOutcome{} = outcome) do
+    assert outcome.envelope["error"]["code"] == "replay_fixture_missing"
+
+    assert [request_hash] =
+             Regex.run(~r/sha256:[0-9a-f]{64}/, outcome.envelope["error"]["message"],
+               capture: :first
+             )
+
+    request_hash
   end
 
   defp write_application(dir, opts \\ []) do

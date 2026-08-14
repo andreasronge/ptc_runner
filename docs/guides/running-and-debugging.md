@@ -219,6 +219,8 @@ The command reports a closed phase/code pair. If a workflow deliberately calls
 canonical `run-stopped` event retain only a safe taxonomy:
 
 - a map whose `kind` is recognized retains that readable kind;
+- an authenticated `agent.core` turn-limit failure additionally retains the
+  fixed `agent_turns` name and effective integer ceiling from 1 through 128;
 - an unknown map kind retains only a one-way fingerprint;
 - a string or other non-map retains no detail.
 
@@ -229,8 +231,9 @@ Prefer a framework classification such as:
 ```
 
 The public evidence retains `assertion-failed`, not the private explanation.
-`PtcRunner.Kernel.SafeMetadata` owns the complete recognized taxonomy and
-projection.
+`PtcRunner.Kernel.SafeMetadata` owns application-authored failure taxonomy.
+The Runner adds the fixed `agent_turns` fields only after the shipped agent's
+private runtime route has authenticated the exhaustion failure.
 
 For exact authorized detail, capture inspection evidence:
 

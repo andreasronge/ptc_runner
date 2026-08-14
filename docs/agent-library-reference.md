@@ -175,6 +175,14 @@ remaining, including the next program. With one turn left, the message requires
 the next program to call `return` or `fail`. A configured consolidation
 threshold adds domain-blind synthesis guidance before the final turn.
 
+If the loop spends its effective `max_turns` without returning, `run-outcome`
+returns bounded subject-failure data. Entries and callers that propagate that
+failure through `run`, `run-value`, or `run-result-value` report
+`execution/runtime_limit_exceeded`, name the effective turn ceiling, and
+recommend raising `max_turns` for that call or reducing the work per turn. The
+canonical failed `run-stopped` event retains the bounded `agent_turns` limit
+name and value so trace consumers can present the same cause.
+
 Before dispatch, the loop JSON-encodes the complete prospective request:
 system prompt, accumulated messages, tool schema, and optional model alias. A
 request larger than `max_transcript_chars`, or one that cannot be encoded,

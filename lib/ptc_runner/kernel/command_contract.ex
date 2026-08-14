@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
 
   @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v2.schema.json"
   @non_run_schema_modes [
@@ -1046,6 +1047,18 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp diagnostic_message_schema(%{code: :capability_requirement_missing} = row, _source),
     do: DiagnosticCatalog.message_schema(row)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :runtime_limit_exceeded} = row,
+         %{"type" => "null"}
+       ),
+       do: RuntimeLimitDiagnostic.agent_turns_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :runtime_limit_exceeded} = row,
+         %{"properties" => %{"kind" => %{"const" => "runtime"}}}
+       ),
+       do: RuntimeLimitDiagnostic.subordinate_evaluations_message_schema(row.message)
 
   defp diagnostic_message_schema(row, %{"type" => "null"}), do: %{"const" => row.message}
   defp diagnostic_message_schema(row, _source_schema), do: DiagnosticCatalog.message_schema(row)

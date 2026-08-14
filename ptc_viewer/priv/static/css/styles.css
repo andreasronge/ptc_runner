@@ -1276,6 +1276,21 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   font-size: 10px;
 }
 
+.kt-terminal-cause {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 11px 14px;
+  border: 1px solid rgba(244, 135, 113, 0.38);
+  border-radius: 8px;
+  background: rgba(244, 135, 113, 0.09);
+  color: var(--fg);
+  font-size: 12px;
+}
+.kt-terminal-cause strong { color: var(--error); white-space: nowrap; }
+.kt-terminal-cause span { color: #d7c3bf; }
+
 .kt-privacy-note {
   display: flex;
   align-items: flex-start;

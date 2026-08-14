@@ -337,6 +337,12 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     end
   end
 
+  def sanitize_private_error(
+        {:runtime_limit_exceeded, _message, %{limit: :agent_turns, limit_value: limit}} = reason
+      )
+      when limit in 1..128,
+      do: reason
+
   def sanitize_private_error({:loop_limit_exceeded, limit}) when is_integer(limit),
     do: {:loop_limit_exceeded, limit}
 

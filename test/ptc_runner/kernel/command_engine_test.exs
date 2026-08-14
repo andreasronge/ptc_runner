@@ -36,6 +36,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractClassification
   alias PtcRunner.StandaloneCLI
@@ -517,6 +518,103 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
       assert_schema_invalid(put_in(outcome.envelope, ["error", "message"], invalid_message))
     end
+  end
+
+  test "application-authored turn-limit fields cannot claim an agent runtime limit" do
+    usage = %{
+      remaining_ms: 0,
+      capability_calls: %{workflow: %{}, mission: %{}},
+      subordinate_evaluations: 2,
+      evaluations_by_mission: %{},
+      protocol_errors: 2,
+      evaluation_memory_bytes: 0,
+      evaluation_history_bytes: 0,
+      evaluation_continuation_bytes: 0,
+      events_dropped: %{}
+    }
+
+    evidence = %{
+      result:
+        {:error,
+         %Error{
+           kind: :workflow_failed,
+           reason: :explicit_failure,
+           details: %{
+             failure_kind: "turn-limit",
+             limit: :agent_turns,
+             limit_value: 2
+           },
+           usage: usage
+         }}
+    }
+
+    settlement =
+      {:error,
+       %{
+         result_class: :normal,
+         artifact_state: %{
+           "trace" => "not_requested",
+           "inspection" => "not_requested",
+           "result" => "not_requested"
+         },
+         error: nil,
+         secondary_errors: []
+       }}
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandRunOutcome.project(
+               evidence,
+               settlement,
+               CommandRunRef.encode(@zero_entropy),
+               true
+             )
+
+    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["error"]["message"] == "the workflow failed"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  test "agent turn-limit diagnostics bind their bounded message to a null source" do
+    runtime_source = CommandSource.fixed(:runtime)
+
+    for limit <- [1, 128] do
+      assert {:ok, message} = RuntimeLimitDiagnostic.agent_turns_message(limit)
+
+      assert {:ok, %CommandDiagnostic{source: nil}} =
+               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+                 message: message,
+                 provider_activity: true
+               )
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+                 message: message,
+                 source: runtime_source,
+                 provider_activity: true
+               )
+    end
+
+    for invalid_message <- [
+          "agent turn limit 0 was exceeded; raise max_turns for this agent.core/run call, or reduce the work per turn",
+          "agent turn limit 02 was exceeded; raise max_turns for this agent.core/run call, or reduce the work per turn",
+          "agent turn limit 129 was exceeded; raise max_turns for this agent.core/run call, or reduce the work per turn",
+          "agent turn limit 2 was exceeded; expose private details"
+        ] do
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+                 message: invalid_message,
+                 provider_activity: true
+               )
+    end
+
+    assert {:ok, subordinate_message} =
+             RuntimeLimitDiagnostic.subordinate_evaluations_message(4)
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: subordinate_message,
+               provider_activity: true
+             )
   end
 
   @tag :tmp_dir
