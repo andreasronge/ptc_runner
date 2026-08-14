@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.ResultIdentity
@@ -222,7 +223,14 @@ defmodule PtcRunner.Kernel.Runner do
           %Error{
             kind: :workflow_failed,
             reason: :explicit_failure,
-            details: SafeMetadata.failure_taxonomy(value),
+            details:
+              value
+              |> SafeMetadata.failure_taxonomy()
+              |> Map.merge(
+                value
+                |> LLMReplayDiagnostic.failure_metadata()
+                |> authenticated_replay_metadata(state)
+              ),
             usage: RunState.usage(state)
           }
         )
@@ -304,7 +312,8 @@ defmodule PtcRunner.Kernel.Runner do
                 timeout_ms,
                 config.limits,
                 config.event_sink
-              ),
+              )
+              |> Map.merge(authenticated_replay_metadata(step.fail.details, state)),
             usage: RunState.usage(state)
           }
         )
@@ -550,8 +559,7 @@ defmodule PtcRunner.Kernel.Runner do
        when reason in [:explicit_failure, :pmap_error, :pcalls_error] do
     taxonomy =
       details
-      |> Map.take([:failure_kind, :failure_kind_fingerprint])
-      |> SafeMetadata.retain_failure_taxonomy()
+      |> SafeMetadata.retain_failure_taxonomy_fields()
 
     Map.merge(stopped_data, taxonomy)
   end
@@ -715,7 +723,7 @@ defmodule PtcRunner.Kernel.Runner do
         _private_or_unavailable -> workflow_error_details_for_class(:private, fail)
       end
 
-    Map.merge(details, SafeMetadata.retain_failure_taxonomy(fail.details))
+    Map.merge(details, SafeMetadata.retain_failure_taxonomy_fields(fail.details))
   end
 
   # Both stable parallel messages are compared by suffix because the
@@ -732,6 +740,16 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp workflow_error_details_for_class(:normal, fail),
     do: %{message: String.slice(fail.message || "workflow failed", 0, 4_096)}
+
+  defp authenticated_replay_metadata(metadata, state) do
+    case LLMReplayDiagnostic.retain_candidate_metadata(metadata) do
+      %{replay_request_hash: request_hash} = retained ->
+        if RunState.replay_miss?(state, request_hash), do: retained, else: %{}
+
+      %{} ->
+        %{}
+    end
+  end
 
   defp configuration_error(reason, usage),
     do: {:error, %Error{kind: :configuration_error, reason: reason, details: %{}, usage: usage}}

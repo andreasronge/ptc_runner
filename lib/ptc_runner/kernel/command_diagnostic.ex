@@ -7,11 +7,11 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   Contract-authorized paths must also match the sealed contract authority bound
   to their source classification. Rendering never inspects a lower-level
   reason or rejected value. Catalog-authorized dynamic message shapes contain
-  only fixed literals plus bounded PTC-Lisp symbol names or a catalog-validated
-  runtime ceiling. Compile messages require component-source provenance; a
-  missing capability message is rebuilt from the frozen bundle's sorted tool
-  requirements. A runtime-ceiling message requires fixed runtime provenance.
-  Every other message is the catalog literal.
+  only fixed literals plus bounded PTC-Lisp symbol names, a catalog-validated
+  runtime ceiling, or an opaque replay request hash. Compile messages require
+  component-source provenance; a missing capability message is rebuilt from
+  the frozen bundle's sorted tool requirements. Runtime and replay messages
+  require fixed runtime provenance. Every other message is the catalog literal.
 
   `notes` is reserved and always empty: the published V2 envelope schema pins
   it to `{"const": []}`, so a populated array would invalidate the envelope for
@@ -309,6 +309,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   defp valid_message_source?(
          _message,
          %{phase: :execution, code: :runtime_limit_exceeded},
+         %CommandSource{kind: :runtime}
+       ),
+       do: true
+
+  defp valid_message_source?(
+         _message,
+         %{phase: :execution, code: :replay_fixture_missing},
          %CommandSource{kind: :runtime}
        ),
        do: true

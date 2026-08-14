@@ -6,7 +6,7 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   """
 
   alias PtcRunner.Kernel.LimitCatalog
-  alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Env.Builtin
@@ -438,8 +438,10 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     do: "the parallel worker budget is exhausted; reduce nesting or collection size"
 
   defp sanitize_private_parallel_failure(reason, index, taxonomy) do
-    case SafeMetadata.retain_failure_taxonomy(taxonomy) do
-      retained when map_size(retained) == 1 ->
+    retained = LLMReplayDiagnostic.retain_parallel_failure_metadata(taxonomy)
+
+    case retained do
+      retained when map_size(retained) in 1..2 ->
         message = "fail called inside #{if(reason == :pmap_error, do: "pmap", else: "pcalls")}"
 
         case reason do

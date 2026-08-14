@@ -8,7 +8,8 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   labels from a rejected value, provider response, credential, or unvalidated
   path. Component compile failures with a proven byte span render the logical
   component name and canonical half-open byte range already present in the
-  envelope; rendering does not retain or reopen component source.
+  envelope; rendering does not retain or reopen component source. A replay miss
+  may include only its validated opaque request hash.
   """
 
   alias PtcRunner.Kernel.CommandOutcome

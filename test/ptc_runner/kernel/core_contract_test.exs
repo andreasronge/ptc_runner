@@ -94,6 +94,15 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert :ok = RunState.stop(state)
   end
 
+  test "provider completion atomically records replay-miss provenance" do
+    {:ok, state} = RunState.start(Limits.defaults())
+    request_hash = "sha256:" <> String.duplicate("a", 64)
+
+    assert :ok = RunState.reserve_capability(state, :workflow, "llm-request")
+    assert :ok = RunState.finish_provider(state, request_hash)
+    assert RunState.replay_miss?(state, request_hash)
+  end
+
   test "a caller cannot hold two capability reservations at once" do
     {:ok, state} = RunState.start(Limits.defaults())
 
@@ -1893,6 +1902,33 @@ defmodule PtcRunner.Kernel.CoreContractTest do
             } = error} = Kernel.run(~s|("#{secret}" 1)|, config)
 
     refute inspect(error) =~ secret
+  end
+
+  test "a private workflow cannot forge a public replay-miss hash" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:private, limits, run_id: "private-replay-forgery")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    forged_hash = "sha256:" <> String.duplicate("a", 64)
+
+    source =
+      ~s|(fail {:kind :llm-provider-error :reason {:status :error :kind :provider-error :reason :not-found :retryable? false :details "no replay fixture matches this request (request_hash: #{forged_hash})"}})|
+
+    assert {:error, %{reason: :explicit_failure, details: details} = error} =
+             Kernel.run(source, config)
+
+    refute Map.has_key?(details, :replay_request_hash)
+    refute inspect(error) =~ forged_hash
   end
 
   test "explicit workflow failure exposes only bounded safe taxonomy" do
