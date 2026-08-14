@@ -454,7 +454,7 @@ list. Each relationship has this closed shape:
   "rel": "direct_boundary_producer",
   "semantics": "causation",
   "target_collection": "activity",
-  "filters": {"evaluation_id": "mission-evaluation-id", "status": "ok"},
+  "filters": {"evaluation_id": "mission-evaluation-id", "status": "returned"},
   "state": "complete"
 }
 ```
@@ -470,8 +470,13 @@ marked `ambiguous`, rather than as an unbounded scan.
 
 Semantics are intentionally narrower than the relation names. `causation`
 requires a workflow boundary failure or a direct-return origin marker plus
-exact equality with the retained successful `kernel-eval` result. `nesting` is
-reserved for the validated canonical `parent_evaluation_id` edge.
+exact equality with the retained successful `kernel-eval` result. A direct
+producer is complete only when the canonical trace proves that the workflow
+evaluation stopped with `error` and that the named mission evaluation is
+parented by it and stopped with `returned` or `continued`; the exact activity
+filters retain those runtime statuses. A canonically successful workflow makes
+both causal relations unavailable. `nesting` is reserved for the validated canonical
+`parent_evaluation_id` edge.
 `association` covers source identity, static prelude references, and the
 generated-source/turn source match. A source match can be ambiguous; a parent
 edge alone is never promoted to causation. Truncated producer evidence is

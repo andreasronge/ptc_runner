@@ -367,7 +367,7 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
               status: :ok,
               value: %{
                 "error_reason" => "terminal_result_exceeded",
-                "producer_status" => "ok",
+                "producer_status" => "returned",
                 "source" => "(return 42)",
                 "turn" => 1,
                 "prelude_component" => "mission-component-" <> _

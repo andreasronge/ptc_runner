@@ -272,7 +272,12 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     assert children["semantics"] == "nesting"
     assert children["filters"] == %{"parent_evaluation_id" => error["evaluation_id"]}
     assert producer["rel"] == "direct_boundary_producer"
-    assert producer["filters"] == %{"evaluation_id" => "eval-#{fixture.run_id}", "status" => "ok"}
+
+    assert producer["filters"] == %{
+             "evaluation_id" => "eval-#{fixture.run_id}",
+             "status" => "returned"
+           }
+
     assert source_relation["target_collection"] == "generated_sources"
 
     assert {:ok, %{"items" => [%{"type" => "evaluation-stopped"}]}} =
@@ -304,14 +309,20 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
       "prelude_calls" => []
     }
 
-    generated = Map.put(source, "association_ambiguous?", false)
+    generated = Map.put(source, "association_ambiguous?", true)
 
     collections = %{
-      turns: [
-        %{"run_id" => "run", "generated" => [generated]},
-        %{"run_id" => "run", "generated" => [generated]}
-      ],
-      turns_by_run_id: %{"run" => %{evidence: %{"complete?" => true}}},
+      turns: [%{"run_id" => "run", "generated" => [generated]}],
+      turns_by_run_id: %{
+        "run" => %{
+          evidence: %{
+            "complete?" => false,
+            "canonical_complete?" => true,
+            "missing_exchange_count" => 0,
+            "ambiguity_count" => 1
+          }
+        }
+      },
       effective_preludes: [],
       generated_sources: [source],
       execution_errors: [
@@ -330,7 +341,19 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     attached =
       RunAnalysisRelationships.attach(collections, %{
-        "run" => %{"terminal?" => true, "events_dropped?" => false}
+        "run" => %{
+          "terminal?" => true,
+          "events_dropped?" => false,
+          "parent_evaluation_ids" => %{
+            "eval-a" => "workflow",
+            "eval-b" => "workflow"
+          },
+          "evaluation_statuses" => %{
+            "workflow" => "error",
+            "eval-a" => "returned",
+            "eval-b" => "continued"
+          }
+        }
       })
 
     assert [%{"relationships" => [%{"state" => "ambiguous"}]}] =
@@ -348,6 +371,162 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
            ]
 
     assert Enum.all?(producer_relations, &(&1["state"] == "ambiguous"))
+
+    source_relations =
+      hd(attached.execution_errors)["relationships"]
+      |> Enum.filter(&(&1["rel"] == "generated_source"))
+
+    assert Enum.all?(source_relations, &(&1["state"] == "unavailable"))
+    assert Enum.all?(source_relations, &is_nil(&1["filters"]))
+  end
+
+  test "typed causal relations reject a canonically successful workflow boundary" do
+    collections = %{
+      turns: [],
+      turns_by_run_id: %{"run" => %{evidence: %{"complete?" => true}}},
+      effective_preludes: [],
+      generated_sources: [
+        %{
+          "run_id" => "run",
+          "evaluation_id" => "mission-eval",
+          "environment" => "mission",
+          "mission_name" => "default",
+          "prelude_calls_available?" => true,
+          "prelude_calls" => []
+        }
+      ],
+      execution_errors: [
+        %{
+          "run_id" => "run",
+          "evaluation_id" => "workflow",
+          "details" => %{
+            "boundary_producer" => %{
+              "complete?" => true,
+              "evaluation_ids" => ["mission-eval"]
+            }
+          }
+        }
+      ]
+    }
+
+    attached =
+      RunAnalysisRelationships.attach(collections, %{
+        "run" => %{
+          "terminal?" => true,
+          "events_dropped?" => false,
+          "parent_evaluation_ids" => %{"mission-eval" => "workflow"},
+          "evaluation_statuses" => %{
+            "workflow" => "ok",
+            "mission-eval" => "returned"
+          }
+        }
+      })
+
+    relationships = hd(attached.execution_errors)["relationships"]
+
+    for rel <- ["boundary_failure", "direct_boundary_producer", "generated_source"] do
+      relation = Enum.find(relationships, &(&1["rel"] == rel))
+      assert relation["state"] == "unavailable"
+      assert relation["filters"] == nil
+    end
+
+    child_relation = Enum.find(relationships, &(&1["rel"] == "child_evaluations"))
+    assert child_relation["state"] == "complete"
+  end
+
+  test "typed relations preserve explicitly incomplete producer evidence" do
+    source = %{
+      "run_id" => "run",
+      "evaluation_id" => "mission-eval",
+      "environment" => "mission",
+      "mission_name" => "default",
+      "prelude_calls_available?" => true,
+      "prelude_calls" => []
+    }
+
+    collections = %{
+      turns: [],
+      turns_by_run_id: %{"run" => %{evidence: %{"complete?" => true}}},
+      effective_preludes: [],
+      generated_sources: [source],
+      execution_errors: [
+        %{
+          "run_id" => "run",
+          "evaluation_id" => "workflow",
+          "details" => %{
+            "boundary_producer" => %{
+              "complete?" => false,
+              "evaluation_ids" => ["mission-eval"]
+            }
+          }
+        }
+      ]
+    }
+
+    attached =
+      RunAnalysisRelationships.attach(collections, %{
+        "run" => %{
+          "terminal?" => true,
+          "events_dropped?" => false,
+          "parent_evaluation_ids" => %{"mission-eval" => "workflow"},
+          "evaluation_statuses" => %{
+            "workflow" => "error",
+            "mission-eval" => "returned"
+          }
+        }
+      })
+
+    relationships = hd(attached.execution_errors)["relationships"]
+    producer = Enum.find(relationships, &(&1["rel"] == "direct_boundary_producer"))
+    source_relation = Enum.find(relationships, &(&1["rel"] == "generated_source"))
+
+    assert producer["state"] == "incomplete"
+    assert producer["filters"] == %{"evaluation_id" => "mission-eval", "status" => "returned"}
+    assert source_relation["state"] == "incomplete"
+    assert source_relation["filters"] == %{"evaluation_id" => "mission-eval"}
+  end
+
+  test "typed relations do not trust an inspection producer without its canonical parent edge" do
+    collections = %{
+      turns: [],
+      turns_by_run_id: %{"run" => %{evidence: %{"complete?" => true}}},
+      effective_preludes: [],
+      generated_sources: [],
+      execution_errors: [
+        %{
+          "run_id" => "run",
+          "evaluation_id" => "workflow",
+          "details" => %{
+            "boundary_producer" => %{
+              "complete?" => true,
+              "evaluation_ids" => ["unrelated-eval"]
+            }
+          }
+        }
+      ]
+    }
+
+    attached =
+      RunAnalysisRelationships.attach(collections, %{
+        "run" => %{
+          "terminal?" => true,
+          "events_dropped?" => false,
+          "parent_evaluation_ids" => %{"unrelated-eval" => "other-workflow"},
+          "evaluation_statuses" => %{
+            "workflow" => "error",
+            "unrelated-eval" => "returned"
+          }
+        }
+      })
+
+    relation =
+      attached.execution_errors
+      |> hd()
+      |> Map.fetch!("relationships")
+      |> Enum.find(&(&1["rel"] == "direct_boundary_producer"))
+
+    assert relation["state"] == "unavailable"
+    assert relation["filters"] == nil
   end
 
   test "conversation streams choose the unique longest complete prefix" do

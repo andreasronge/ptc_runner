@@ -40,13 +40,20 @@ defmodule PtcRunner.Kernel.RunAnalysisRelationships do
     workflow_evaluation_id = error["evaluation_id"]
     canonical_state = if complete_canonical?(trace_facts), do: "complete", else: "incomplete"
 
+    {boundary_state, boundary_filters} =
+      boundary_failure_state_and_filters(
+        trace_facts,
+        workflow_evaluation_id,
+        canonical_state
+      )
+
     [
       relation(
         "boundary_failure",
         "causation",
         "activity",
-        %{"evaluation_id" => workflow_evaluation_id, "status" => "error"},
-        canonical_state
+        boundary_filters,
+        boundary_state
       ),
       relation(
         "child_evaluations",
@@ -55,7 +62,7 @@ defmodule PtcRunner.Kernel.RunAnalysisRelationships do
         %{"parent_evaluation_id" => workflow_evaluation_id},
         canonical_state
       )
-      | producer_relations(error, canonical_state, generated_sources)
+      | producer_relations(error, trace_facts, boundary_state, generated_sources)
     ]
   end
 
@@ -64,55 +71,74 @@ defmodule PtcRunner.Kernel.RunAnalysisRelationships do
       not Map.get(trace_facts, "events_dropped?", false)
   end
 
-  defp producer_relations(error, canonical_state, generated_sources) do
+  defp boundary_failure_state_and_filters(trace_facts, evaluation_id, canonical_state) do
+    case get_in(trace_facts, ["evaluation_statuses", evaluation_id]) do
+      "error" ->
+        {canonical_state, %{"evaluation_id" => evaluation_id, "status" => "error"}}
+
+      status when is_binary(status) ->
+        {"unavailable", nil}
+
+      _missing when canonical_state == "complete" ->
+        {"unavailable", nil}
+
+      _missing ->
+        {"incomplete", nil}
+    end
+  end
+
+  defp producer_relations(error, trace_facts, boundary_state, generated_sources) do
     producer = get_in(error, ["details", "boundary_producer"])
     evaluation_ids = if is_map(producer), do: producer["evaluation_ids"], else: nil
     complete? = is_map(producer) and producer["complete?"] == true
 
     case evaluation_ids do
       [evaluation_id] when is_binary(evaluation_id) ->
-        producer_state =
-          if complete? and canonical_state == "complete", do: "complete", else: "incomplete"
+        {producer_state, filters} =
+          producer_state_and_filters(
+            error,
+            trace_facts,
+            boundary_state,
+            evaluation_id,
+            complete?
+          )
+
+        {source_state, source_filters} =
+          source_state_and_filters(
+            generated_sources,
+            evaluation_id,
+            complete?,
+            producer_state,
+            filters
+          )
 
         [
           relation(
             "direct_boundary_producer",
             "causation",
             "activity",
-            %{"evaluation_id" => evaluation_id, "status" => "ok"},
+            filters,
             producer_state
           ),
           relation(
             "generated_source",
             "association",
             "generated_sources",
-            %{"evaluation_id" => evaluation_id},
-            source_state(generated_sources, evaluation_id, complete?)
+            source_filters,
+            source_state
           )
         ]
 
       evaluation_ids when is_list(evaluation_ids) and evaluation_ids != [] ->
         Enum.flat_map(evaluation_ids, fn evaluation_id ->
-          if is_binary(evaluation_id) do
-            [
-              relation(
-                "direct_boundary_producer",
-                "causation",
-                "activity",
-                %{"evaluation_id" => evaluation_id, "status" => "ok"},
-                "ambiguous"
-              ),
-              relation(
-                "generated_source",
-                "association",
-                "generated_sources",
-                %{"evaluation_id" => evaluation_id},
-                "ambiguous"
-              )
-            ]
-          else
-            []
-          end
+          producer_candidate_relations(
+            error,
+            trace_facts,
+            boundary_state,
+            generated_sources,
+            evaluation_id,
+            complete?
+          )
         end)
 
       _other ->
@@ -122,19 +148,137 @@ defmodule PtcRunner.Kernel.RunAnalysisRelationships do
             "causation",
             "activity",
             nil,
-            if(complete?, do: "unavailable", else: "incomplete")
+            if(boundary_state == "unavailable" or complete?,
+              do: "unavailable",
+              else: "incomplete"
+            )
           )
         ]
     end
   end
 
-  defp source_state(_generated_sources, _evaluation_id, false), do: "incomplete"
+  defp producer_candidate_relations(
+         error,
+         trace_facts,
+         boundary_state,
+         generated_sources,
+         evaluation_id,
+         complete?
+       )
+       when is_binary(evaluation_id) do
+    {producer_state, filters} =
+      producer_state_and_filters(
+        error,
+        trace_facts,
+        boundary_state,
+        evaluation_id,
+        complete?
+      )
 
-  defp source_state(generated_sources, evaluation_id, true) do
+    candidate_state = if producer_state == "complete", do: "ambiguous", else: producer_state
+
+    {source_state, source_filters} =
+      source_state_and_filters(
+        generated_sources,
+        evaluation_id,
+        complete?,
+        candidate_state,
+        filters
+      )
+
+    [
+      relation(
+        "direct_boundary_producer",
+        "causation",
+        "activity",
+        filters,
+        candidate_state
+      ),
+      relation(
+        "generated_source",
+        "association",
+        "generated_sources",
+        source_filters,
+        source_state
+      )
+    ]
+  end
+
+  defp producer_candidate_relations(
+         _error,
+         _trace_facts,
+         _boundary_state,
+         _generated_sources,
+         _evaluation_id,
+         _complete?
+       ),
+       do: []
+
+  defp producer_state_and_filters(
+         error,
+         trace_facts,
+         boundary_state,
+         evaluation_id,
+         complete?
+       ) do
+    status = get_in(trace_facts, ["evaluation_statuses", evaluation_id])
+
+    canonical_producer? =
+      get_in(trace_facts, ["parent_evaluation_ids", evaluation_id]) == error["evaluation_id"] and
+        status in ["returned", "continued"]
+
+    cond do
+      boundary_state == "unavailable" ->
+        {"unavailable", nil}
+
+      not complete? ->
+        {"incomplete", maybe_status_filter(evaluation_id, status)}
+
+      boundary_state == "complete" and canonical_producer? ->
+        {"complete", %{"evaluation_id" => evaluation_id, "status" => status}}
+
+      boundary_state == "complete" ->
+        {"unavailable", nil}
+
+      true ->
+        {"incomplete", maybe_status_filter(evaluation_id, status)}
+    end
+  end
+
+  defp maybe_status_filter(evaluation_id, status) when is_binary(status),
+    do: %{"evaluation_id" => evaluation_id, "status" => status}
+
+  defp maybe_status_filter(evaluation_id, _status), do: %{"evaluation_id" => evaluation_id}
+
+  defp source_state_and_filters(
+         _generated_sources,
+         _evaluation_id,
+         _complete?,
+         "unavailable",
+         _producer_filters
+       ),
+       do: {"unavailable", nil}
+
+  defp source_state_and_filters(
+         _generated_sources,
+         evaluation_id,
+         false,
+         _producer_state,
+         _producer_filters
+       ),
+       do: {"incomplete", %{"evaluation_id" => evaluation_id}}
+
+  defp source_state_and_filters(
+         generated_sources,
+         evaluation_id,
+         true,
+         producer_state,
+         _producer_filters
+       ) do
     case Enum.count(generated_sources, &(&1["evaluation_id"] == evaluation_id)) do
-      0 -> "unavailable"
-      1 -> "complete"
-      _many -> "ambiguous"
+      0 -> {"unavailable", nil}
+      1 -> {producer_state, %{"evaluation_id" => evaluation_id}}
+      _many -> {"ambiguous", %{"evaluation_id" => evaluation_id}}
     end
   end
 
@@ -153,9 +297,10 @@ defmodule PtcRunner.Kernel.RunAnalysisRelationships do
 
     state =
       cond do
-        not evidence_complete? -> "incomplete"
-        matches == [] -> "unavailable"
+        matches == [] and evidence_complete? -> "unavailable"
+        matches == [] -> "incomplete"
         ambiguous_turn_match?(matches, source["evaluation_id"]) -> "ambiguous"
+        not evidence_complete? -> "incomplete"
         true -> "complete"
       end
 

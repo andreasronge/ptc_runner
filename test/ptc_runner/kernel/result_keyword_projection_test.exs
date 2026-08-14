@@ -3,12 +3,16 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.RunAnalysis
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
 
@@ -142,7 +146,10 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
            }
   end
 
-  test "private inspection proves an unchanged child result produced a boundary failure" do
+  @tag :tmp_dir
+  test "private inspection proves an unchanged child result produced a boundary failure", %{
+    tmp_dir: root
+  } do
     {config, inspection} = boundary_failure_config("boundary-producer")
 
     assert {:error, %{reason: :terminal_result_exceeded}} =
@@ -159,6 +166,50 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
              "complete?" => true,
              "evaluation_ids" => [source["correlation"]["evaluation_id"]]
            }
+
+    events = EventSink.events(config.event_sink)
+
+    mission_stopped =
+      Enum.find(events, &(&1.type == "evaluation-stopped" and &1.data.environment == :mission))
+
+    assert mission_stopped.data.status == :returned
+
+    trace_dir = Path.join(root, "trace")
+    inspection_dir = Path.join(root, "inspection")
+    File.mkdir!(trace_dir)
+    File.mkdir!(inspection_dir)
+    File.chmod!(trace_dir, 0o700)
+    File.chmod!(inspection_dir, 0o700)
+
+    trace_path = Path.join(trace_dir, "boundary-producer.jsonl")
+    inspection_path = Path.join(inspection_dir, "boundary-producer.inspection.jsonl")
+    File.write!(trace_path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+    assert :ok = InspectionArtifact.persist(inspection_path, records, events)
+
+    assert {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, trace_dir})
+    assert {:ok, snapshot} = InspectionSnapshot.start({:directory, inspection_dir}, trace)
+    on_exit(fn -> InspectionSnapshot.stop(snapshot) end)
+    on_exit(fn -> TraceSnapshot.stop(trace) end)
+    assert {:ok, analysis} = RunAnalysis.new(trace, snapshot)
+
+    assert {:ok, %{"items" => [%{"relationships" => relationships}]}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => "boundary-producer",
+               "collection" => "execution_errors"
+             })
+
+    producer = Enum.find(relationships, &(&1["rel"] == "direct_boundary_producer"))
+    assert producer["state"] == "complete"
+
+    assert {:ok, %{"items" => [%{"data" => %{"status" => "returned"}}]}} =
+             RunAnalysis.query(
+               analysis,
+               :read,
+               Map.merge(producer["filters"], %{
+                 "run_id" => "boundary-producer",
+                 "collection" => producer["target_collection"]
+               })
+             )
   end
 
   test "equal recomputed values are not labeled as boundary producers" do

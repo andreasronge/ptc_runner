@@ -18,12 +18,24 @@ defmodule PtcRunner.Kernel.TraceLogTest do
         "mission_name" => "default",
         "name" => "llm-request"
       }),
-      decoded_event("model-facts", 4, "run-stopped", %{"outcome" => "ok"})
+      decoded_event("model-facts", 4, "evaluation-started", %{
+        "evaluation_id" => "mission-eval",
+        "parent_evaluation_id" => "workflow-eval",
+        "environment" => "mission"
+      }),
+      decoded_event("model-facts", 5, "evaluation-stopped", %{
+        "evaluation_id" => "mission-eval",
+        "parent_evaluation_id" => "workflow-eval",
+        "environment" => "mission",
+        "status" => "returned"
+      }),
+      decoded_event("model-facts", 6, "run-stopped", %{"outcome" => "ok"})
     ]
 
     assert %{
              facts_by_run_id: %{
                "model-facts" => %{
+                 "evaluation_statuses" => %{"mission-eval" => "returned"},
                  "expected_model_exchange_ids" => ["workflow-model"]
                }
              }

@@ -641,7 +641,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     exact_keys?(payload, ~w(environment kind reason details)) and
       valid_id?(id) and payload["environment"] == "workflow" and
       valid_id?(payload["kind"]) and valid_id?(payload["reason"]) and
-      is_map(payload["details"])
+      is_map(payload["details"]) and
+      InspectionRecordTypes.valid_boundary_producer_details?(payload["details"])
   end
 
   defp valid_shape?(_record, 6), do: false

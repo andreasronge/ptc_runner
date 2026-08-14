@@ -125,7 +125,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
         "parent_evaluation_id" => "workflow-eval-#{run_id}",
         "environment" => "mission",
         "mission_name" => "default",
-        "status" => "ok"
+        "status" => "returned"
       }),
       event(run_id, 7, "evaluation-stopped", %{
         "evaluation_id" => "workflow-eval-#{run_id}",

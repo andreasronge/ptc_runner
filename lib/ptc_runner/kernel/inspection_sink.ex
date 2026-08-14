@@ -402,7 +402,8 @@ defmodule PtcRunner.Kernel.InspectionSink do
       exact_payload(payload, ~w(environment kind reason details)) and valid_id?(id) and
         payload["environment"] == "workflow" and
         valid_id?(payload["kind"]) and valid_id?(payload["reason"]) and
-        is_map(payload["details"])
+        is_map(payload["details"]) and
+        InspectionRecordTypes.valid_boundary_producer_details?(payload["details"])
 
     ok_or_error(valid?)
   end
