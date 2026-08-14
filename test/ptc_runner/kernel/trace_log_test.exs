@@ -746,6 +746,71 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     end
   end
 
+  @tag :tmp_dir
+  test "current validation rejects unproven parent evaluation edges", %{tmp_dir: directory} do
+    query = fn events, name ->
+      path = Path.join(directory, "parent-edge-#{name}.jsonl")
+      File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+      {:ok, log} = TraceLog.new(source: {:file, path})
+      TraceLog.query(log, :list_runs, %{})
+    end
+
+    valid = [
+      decoded_event("parent-edge", 1, "run-started", %{"missions" => %{}}),
+      decoded_event("parent-edge", 2, "evaluation-started", %{
+        "environment" => "workflow",
+        "evaluation_id" => "workflow-eval"
+      }),
+      decoded_event("parent-edge", 3, "evaluation-started", %{
+        "environment" => "mission",
+        "mission_name" => "reader",
+        "evaluation_id" => "mission-eval",
+        "parent_evaluation_id" => "workflow-eval"
+      }),
+      decoded_event("parent-edge", 4, "evaluation-stopped", %{
+        "environment" => "mission",
+        "mission_name" => "reader",
+        "evaluation_id" => "mission-eval",
+        "parent_evaluation_id" => "workflow-eval",
+        "status" => "ok"
+      }),
+      decoded_event("parent-edge", 5, "evaluation-stopped", %{
+        "environment" => "workflow",
+        "evaluation_id" => "workflow-eval",
+        "status" => "ok"
+      }),
+      decoded_event("parent-edge", 6, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert {:ok, _result} = query.(valid, "valid")
+
+    orphaned =
+      put_in(valid, [Access.at(2), "data", "parent_evaluation_id"], "missing-eval")
+
+    wrong_parent_environment =
+      put_in(valid, [Access.at(1), "data", "environment"], "mission")
+      |> put_in([Access.at(1), "data", "mission_name"], "reader")
+
+    parent_on_workflow =
+      put_in(valid, [Access.at(1), "data", "parent_evaluation_id"], "workflow-eval")
+
+    mismatched_stop =
+      put_in(valid, [Access.at(3), "data", "parent_evaluation_id"], "other-eval")
+
+    missing_stop_parent =
+      update_in(valid, [Access.at(3), "data"], &Map.delete(&1, "parent_evaluation_id"))
+
+    for {label, events} <- [
+          orphaned: orphaned,
+          wrong_parent_environment: wrong_parent_environment,
+          parent_on_workflow: parent_on_workflow,
+          mismatched_stop: mismatched_stop,
+          missing_stop_parent: missing_stop_parent
+        ] do
+      assert {:error, :malformed_source} = query.(events, "invalid-#{label}")
+    end
+  end
+
   test "mission filters narrow counters by explicit identity" do
     events = [
       decoded_event("mission-filter", 1, "run-started", %{"missions" => %{}}),

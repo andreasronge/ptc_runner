@@ -2175,7 +2175,8 @@ defmodule PtcRunner.Kernel.TraceLog do
       sequences: %{},
       run_traces: %{},
       trace_runs: %{},
-      run_lifecycles: %{}
+      run_lifecycles: %{},
+      evaluation_lifecycles: %{}
     }
 
     Enum.reduce_while(events, {:ok, initial}, fn event, {:ok, state} ->
@@ -2187,14 +2188,17 @@ defmodule PtcRunner.Kernel.TraceLog do
            true <- sequence > previous,
            :ok <- same_identity(state, run_id, trace_id),
            {:ok, run_lifecycles} <-
-             advance_run_lifecycle(state.run_lifecycles, run_id, event["type"]) do
+             advance_run_lifecycle(state.run_lifecycles, run_id, event["type"]),
+           {:ok, evaluation_lifecycles} <-
+             advance_evaluation_lifecycle(state.evaluation_lifecycles, run_id, event) do
         {:cont,
          {:ok,
           %{
             sequences: Map.put(state.sequences, trace_id, sequence),
             run_traces: Map.put(state.run_traces, run_id, trace_id),
             trace_runs: Map.put(state.trace_runs, trace_id, run_id),
-            run_lifecycles: run_lifecycles
+            run_lifecycles: run_lifecycles,
+            evaluation_lifecycles: evaluation_lifecycles
           }}}
       else
         {:error, reason} -> {:halt, {:error, reason}}
@@ -2228,6 +2232,92 @@ defmodule PtcRunner.Kernel.TraceLog do
         {:error, :malformed_source}
     end
   end
+
+  defp advance_evaluation_lifecycle(evaluations, run_id, %{
+         "type" => "evaluation-started",
+         "data" => data
+       }) do
+    evaluation_id = data["evaluation_id"]
+    environment = stringify(data["environment"])
+    parent_evaluation_id = data["parent_evaluation_id"]
+    key = {run_id, evaluation_id}
+
+    with :ok <- valid_event_id(evaluation_id),
+         false <- Map.has_key?(evaluations, key),
+         :ok <-
+           validate_parent_evaluation(
+             evaluations,
+             run_id,
+             environment,
+             parent_evaluation_id
+           ) do
+      {:ok,
+       Map.put(evaluations, key, %{
+         environment: environment,
+         parent_evaluation_id: parent_evaluation_id,
+         lifecycle: :open
+       })}
+    else
+      _invalid -> {:error, :malformed_source}
+    end
+  end
+
+  defp advance_evaluation_lifecycle(evaluations, run_id, %{
+         "type" => "evaluation-stopped",
+         "data" => data
+       }) do
+    evaluation_id = data["evaluation_id"]
+    environment = stringify(data["environment"])
+    parent_evaluation_id = data["parent_evaluation_id"]
+    key = {run_id, evaluation_id}
+
+    with :ok <- valid_event_id(evaluation_id),
+         %{lifecycle: :open} = started <- Map.get(evaluations, key),
+         true <- started.environment == environment,
+         true <- started.parent_evaluation_id == parent_evaluation_id do
+      {:ok, put_in(evaluations, [key, :lifecycle], :stopped)}
+    else
+      nil when is_nil(parent_evaluation_id) -> {:ok, evaluations}
+      _invalid -> {:error, :malformed_source}
+    end
+  end
+
+  defp advance_evaluation_lifecycle(evaluations, _run_id, %{"data" => data}) do
+    if Map.has_key?(data, "parent_evaluation_id"),
+      do: {:error, :malformed_source},
+      else: {:ok, evaluations}
+  end
+
+  defp validate_parent_evaluation(_evaluations, _run_id, _environment, nil), do: :ok
+
+  defp validate_parent_evaluation(
+         evaluations,
+         run_id,
+         "mission",
+         parent_evaluation_id
+       ) do
+    with :ok <- valid_event_id(parent_evaluation_id),
+         %{environment: "workflow", lifecycle: :open, parent_evaluation_id: nil} <-
+           Map.get(evaluations, {run_id, parent_evaluation_id}) do
+      :ok
+    else
+      _invalid -> {:error, :malformed_source}
+    end
+  end
+
+  defp validate_parent_evaluation(
+         _evaluations,
+         _run_id,
+         _environment,
+         _parent_evaluation_id
+       ),
+       do: {:error, :malformed_source}
+
+  defp valid_event_id(value)
+       when is_binary(value) and byte_size(value) in 1..256,
+       do: if(String.valid?(value), do: :ok, else: {:error, :malformed_source})
+
+  defp valid_event_id(_value), do: {:error, :malformed_source}
 
   defp same_identity(state, run_id, trace_id) do
     with existing_trace when existing_trace in [nil, trace_id] <-

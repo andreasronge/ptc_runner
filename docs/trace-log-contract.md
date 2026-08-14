@@ -548,6 +548,12 @@ workflow evaluation ID can select its child programs and turns without
 comparing canonical and inspection sequence numbers. The edge proves nesting,
 not that a particular child caused the workflow error.
 
+Canonical loading validates the edge before exposing it: the parent must be a
+preceding, still-open workflow evaluation in the same run, only a mission
+evaluation may name it, and a matching child stop must repeat the same parent.
+Orphaned, cyclic, wrong-environment, or contradictory edges make the source
+malformed rather than becoming navigation evidence.
+
 Optional sensitive development capture uses a separate private inspection
 record stream, not a canonical event. Every `.inspection.jsonl` line is one
 JSON object with this exact envelope:
