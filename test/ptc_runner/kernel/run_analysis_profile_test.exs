@@ -515,6 +515,35 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   end
 
   @tag :tmp_dir
+  test "private analysis returns a retained-bounded model exchange page", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create_model_exchanges!(root)
+    {:ok, session, _info} = start_internal_session(fixture)
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    assert {:ok,
+            %{
+              status: :ok,
+              value: %{
+                "count" => count,
+                "cursor" => cursor,
+                "truncated" => true
+              }
+            }} =
+             AnalysisSession.evaluate(
+               session,
+               """
+               (let [page (analysis/read "#{fixture.run_id}" {"collection" "model_exchanges"})]
+                 (return {"count" (count (get page "items"))
+                          "cursor" (get page "next_cursor")
+                          "truncated" (get page "truncated")}))
+               """
+             )
+
+    assert count in 1..(fixture.model_exchange_count - 1)
+    assert is_binary(cursor)
+  end
+
+  @tag :tmp_dir
   test "PTC-Lisp returns an exact successful terminal value and its canonical hash", %{
     tmp_dir: root
   } do

@@ -806,7 +806,7 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     tmp_dir: root
   } do
     fixture = PrivateInspectionFixture.create!(root)
-    max_result_bytes = 1_500
+    max_result_bytes = 5_000
 
     {:ok, trace} =
       TraceSnapshot.start({:private_authorized_directory, fixture.traces},
@@ -827,6 +827,40 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     assert {:error, :result_limit_exceeded} =
              RunAnalysis.collect(analysis, fixture.run_id, "activity", 100)
+  end
+
+  @tag :tmp_dir
+  test "read does not require an oversized run summary", %{tmp_dir: root} do
+    run_id = "large-summary"
+
+    [started | events] = PrivateInspectionFixture.canonical_events(run_id)
+
+    started =
+      put_in(started, ["data", "missions"], %{
+        "large" => %{"private_metadata" => String.duplicate("x", 20_000)}
+      })
+
+    File.write!(
+      Path.join(root, "#{run_id}.jsonl"),
+      Enum.map_join([started | events], "", &(Jason.encode!(&1) <> "\n"))
+    )
+
+    {:ok, trace} =
+      TraceSnapshot.start({:private_authorized_directory, root}, max_result_bytes: 5_000)
+
+    on_exit(fn -> TraceSnapshot.stop(trace) end)
+    assert {:ok, analysis} = RunAnalysis.new(trace)
+
+    assert {:error, :result_limit_exceeded} =
+             TraceSnapshot.query(trace, :get_run, %{"run_id" => run_id})
+
+    assert {:ok, %{"items" => [%{"data" => %{"name" => "llm-request"}}]}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => run_id,
+               "collection" => "activity",
+               "capability" => "llm-request",
+               "limit" => 1
+             })
   end
 
   @tag :tmp_dir

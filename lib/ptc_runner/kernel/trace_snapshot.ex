@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.ResourceRegistrar
+  alias PtcRunner.Kernel.ResultLimit
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Lisp.RetainedSize
@@ -125,6 +126,13 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   def result_limit(_snapshot), do: {:error, :invalid_snapshot}
 
   @doc false
+  @spec run_exists?(t(), binary()) :: {:ok, boolean()} | {:error, atom()}
+  def run_exists?(%__MODULE__{} = snapshot, run_id) when is_binary(run_id),
+    do: call(snapshot, {:run_exists, run_id})
+
+  def run_exists?(_snapshot, _run_id), do: {:error, :invalid_query}
+
+  @doc false
   @spec validate_inspection(t(), [map()]) :: :ok | {:error, atom()}
   def validate_inspection(%__MODULE__{} = snapshot, records) when is_list(records),
     do: call(snapshot, {:validate_inspection, records})
@@ -206,6 +214,15 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   def handle_call({token, :result_limit}, _from, %{token: token} = state),
     do: {:reply, {:ok, state.max_result_bytes}, state}
+
+  def handle_call({token, {:run_exists, run_id}}, _from, %{token: token} = state) do
+    result =
+      if valid_run_id?(run_id),
+        do: {:ok, Map.has_key?(state.analysis.runs_by_id, run_id)},
+        else: {:error, :invalid_query}
+
+    {:reply, result, state}
+  end
 
   def handle_call({token, {:query, operation, arguments}}, _from, %{token: token} = state) do
     {:reply, query_with_snapshot_hash(state, operation, arguments), state}
@@ -413,40 +430,38 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   defp query_with_snapshot_hash(state, operation, arguments) do
     snapshot_hash = state.info.snapshot_hash
-    metadata_bytes = byte_size(Jason.encode!(%{"snapshot_hash" => snapshot_hash}))
-    query_bytes = state.max_result_bytes - metadata_bytes
-
-    if query_bytes > 0 do
-      case snapshot_query(state, operation, arguments, query_bytes) do
-        {:ok, result} -> {:ok, Map.put(result, "snapshot_hash", snapshot_hash)}
-        {:error, _reason} = error -> error
-      end
-    else
-      {:error, :result_limit_exceeded}
-    end
+    metadata = %{"snapshot_hash" => snapshot_hash}
+    snapshot_query(state, operation, arguments, state.max_result_bytes, metadata)
   end
 
-  defp snapshot_query(state, :get_run, %{"run_id" => run_id} = arguments, max_bytes)
+  defp snapshot_query(
+         state,
+         :get_run,
+         %{"run_id" => run_id} = arguments,
+         max_bytes,
+         metadata
+       )
        when map_size(arguments) == 1 and is_binary(run_id) do
     case Map.fetch(state.analysis.runs_by_id, run_id) do
       {:ok, run} ->
-        if byte_size(Jason.encode!(run)) <= max_bytes,
-          do: {:ok, run},
-          else: {:error, :result_limit_exceeded}
+        result = Map.merge(run, metadata)
+
+        with :ok <- ResultLimit.validate(result, max_bytes), do: {:ok, result}
 
       :error ->
         {:error, :not_found}
     end
   end
 
-  defp snapshot_query(state, operation, arguments, max_bytes) do
+  defp snapshot_query(state, operation, arguments, max_bytes, metadata) do
     TraceLog.query_loaded(
       state.events,
       state.source_id,
       operation,
       arguments,
       max_bytes,
-      state.run_sources
+      state.run_sources,
+      metadata
     )
   end
 
