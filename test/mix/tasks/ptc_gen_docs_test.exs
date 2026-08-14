@@ -3,6 +3,13 @@ defmodule Mix.Tasks.Ptc.GenDocsTest do
 
   alias Mix.Tasks.Ptc.GenDocs
 
+  test "generated function reference explains the PtcRunner extension marker" do
+    reference = File.read!("docs/function-reference.md")
+
+    assert reference =~ ~r/`[^`]+` \*/
+    assert reference =~ "`*` marks PtcRunner extensions without a `clojure.core` equivalent."
+  end
+
   @tag :tmp_dir
   test "generated schema inventory reports missing and orphaned PTC schemas", %{tmp_dir: dir} do
     schema_dir = Path.join(dir, "priv/schemas")
