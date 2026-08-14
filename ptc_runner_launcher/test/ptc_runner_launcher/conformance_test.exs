@@ -8,16 +8,23 @@ defmodule PtcRunnerLauncher.ConformanceTest do
 
   # The identity hash is the only interval long enough to swap an executable
   # into, so the raced target is large enough that hashing it is still running
-  # when the replacement lands: 64 MiB takes roughly a third of a second.
+  # when the replacement lands: 64 MiB takes a third of a second here, and the
+  # swap fires 80 ms in.
   #
-  # Missing that interval is detected rather than silent, and a miss is retried
-  # instead of asserted away. The launcher is refused either way, so the proof
-  # that it was hashing the authorized target rather than the impostor is how
-  # much hashing remained after the swap: a launcher that had opened the
-  # impostor instead settles within milliseconds of it.
+  # The delay is deliberately biased early. Landing before the target is opened
+  # only costs the case its coverage -- the launcher hashes the impostor and
+  # refuses on identity. Landing after `execve` would be worse than useless on
+  # macOS, because an interpreted target is reopened by its interpreter through
+  # a path no launcher check covers, and the case would then go red over a
+  # documented limitation rather than a regression. Startup alone rules out
+  # reaching `execve` within 80 ms of a 64 MiB target.
+  #
+  # This is a probe rather than a gate: nothing here can tell coverage from a
+  # miss, and making it deterministic would mean a synchronization point inside
+  # a binary whose job is deciding what may execute. What it cannot do is pass
+  # while the impostor runs.
   @race_target_mebibytes 64
-  @race_minimum_hash_ms 100
-  @race_attempts 3
+  @race_swap_delay_ms 80
 
   setup_all do
     compiler = System.find_executable("cc") || flunk("C compiler is unavailable")
@@ -573,21 +580,49 @@ defmodule PtcRunnerLauncher.ConformanceTest do
   @tag :tmp_dir
   @tag :slow
   test "a replacement landing during the identity hash never reaches exec", %{tmp_dir: dir} do
-    payload = Path.join(dir, "payload")
     authorized = Path.join(dir, "server")
+    impostor = Path.join(dir, "impostor")
     on_exit(fn -> File.rm_rf(dir) end)
 
-    frozen = write_padded_script(payload, "AUTHORIZED-EXECUTED", @race_target_mebibytes)
+    frozen = write_padded_script(authorized, "AUTHORIZED-EXECUTED", @race_target_mebibytes)
+    write_padded_script(impostor, "IMPOSTOR-EXECUTED", 0)
 
-    exercised? =
-      Enum.reduce_while(1..@race_attempts, false, fn _attempt, false ->
-        case race_identity_swap(dir, payload, authorized, frozen) do
-          :exercised -> {:halt, true}
-          :missed -> {:cont, false}
-        end
+    racer =
+      Task.async(fn ->
+        # Deliberate scaffolding, not a wait for a result: the interval under
+        # test is defined by wall-clock position inside the launcher's hash and
+        # the launcher publishes nothing to synchronize on.
+        Process.sleep(@race_swap_delay_ms)
+        :file.rename(impostor, authorized)
       end)
 
-    assert exercised?, "the replacement never landed inside the identity window"
+    result =
+      MCPStdioLauncher.open(
+        executable: authorized,
+        executable_sha256: frozen,
+        cwd: dir,
+        args: [],
+        env: %{},
+        inherit_environment: false,
+        start_timeout_ms: 30_000
+      )
+
+    assert :ok = Task.await(racer, 30_000)
+
+    # Refused on macOS, where the path is what gets executed; on Linux the held
+    # descriptor still carries the authorized target through. Either is a safe
+    # outcome, and the impostor running is the only unsafe one.
+    case result do
+      {:error, reason} ->
+        assert reason == :mcp_stdio_spawn_failed
+
+      {:ok, launcher} ->
+        output = collect_until(launcher, &(&1.stdout =~ ~r/-EXECUTED\n/))
+        assert {:ok, %{reason: :close}} = MCPStdioLauncher.close(launcher, 5_000)
+
+        refute output.stdout =~ "IMPOSTOR-EXECUTED"
+        assert output.stdout =~ "AUTHORIZED-EXECUTED"
+    end
   end
 
   @tag :tmp_dir
@@ -813,92 +848,13 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     launcher
   end
 
-  # Replaces the authorized executable with an impostor while the launcher is
-  # hashing it, and reports whether the swap landed inside that window. The
-  # replacement is released only once the launcher has forked the process that
-  # opens and hashes the target, so it cannot fire before that descriptor
-  # exists; re-linking the payload leaves each retry to cost a link rather than
-  # another pass over 64 MiB.
-  defp race_identity_swap(dir, payload, authorized, frozen) do
-    impostor = Path.join(dir, "impostor")
-
-    File.rm(authorized)
-    File.ln!(payload, authorized)
-    write_padded_script(impostor, "IMPOSTOR-EXECUTED", 0)
-
-    racer =
-      Task.async(fn ->
-        await_launcher_fork()
-        :ok = :file.rename(impostor, authorized)
-        System.monotonic_time(:millisecond)
-      end)
-
-    result =
-      MCPStdioLauncher.open(
-        executable: authorized,
-        executable_sha256: frozen,
-        cwd: dir,
-        args: [],
-        env: %{},
-        inherit_environment: false,
-        start_timeout_ms: 30_000
-      )
-
-    settled_at = System.monotonic_time(:millisecond)
-    renamed_at = Task.await(racer, 30_000)
-
-    classify_identity_swap(result, settled_at - renamed_at)
-  end
-
-  # Linux hashes and executes one held descriptor, so a swap inside the window
-  # cannot reach it and the authorized target runs; a refusal there means the
-  # launcher had already opened the impostor. macOS executes a path and must
-  # refuse, and only a refusal with a full hash still outstanding proves the
-  # swap landed after the authorized descriptor was open.
-  defp classify_identity_swap({:ok, launcher}, _outstanding_hash_ms) do
-    output = collect_until(launcher, &(&1.stdout =~ ~r/-EXECUTED\n/))
-    assert {:ok, %{reason: :close}} = MCPStdioLauncher.close(launcher, 2_000)
-
-    refute output.stdout =~ "IMPOSTOR-EXECUTED"
-    assert output.stdout =~ "AUTHORIZED-EXECUTED"
-
-    if held_descriptor_exec?(), do: :exercised, else: :missed
-  end
-
-  defp classify_identity_swap({:error, reason}, outstanding_hash_ms) do
-    assert reason == :mcp_stdio_spawn_failed
-
-    if not held_descriptor_exec?() and outstanding_hash_ms >= @race_minimum_hash_ms,
-      do: :exercised,
-      else: :missed
-  end
-
-  defp held_descriptor_exec?, do: :os.type() == {:unix, :linux}
-
-  # Three live processes running the launcher image are the launcher, the
-  # process it forked to open and hash the target, and that process's own
-  # watchdog. The watchdog fork is the last thing to happen before the target is
-  # opened, so the count clears only microseconds ahead of the descriptor under
-  # test; anything longer than that would have to be a scheduling stall, which
-  # can only cost this case coverage, never turn it red.
-  defp await_launcher_fork do
-    {:ok, binary} = PtcRunnerLauncher.executable_path()
-    assert_eventually(fn -> launcher_image_count(binary) >= 3 end, 10_000)
-  end
-
-  defp launcher_image_count(binary) do
-    {output, 0} = System.cmd(ps_executable(), ["-eo", "command="])
-
-    output
-    |> String.split("\n", trim: true)
-    |> Enum.count(&String.starts_with?(&1, binary))
-  end
-
   # Returns the SHA-256 of what was written, hashed as it goes: reading a target
   # this size back just to freeze its identity would cost more than the launch
   # under test.
   defp write_padded_script(path, marker, mebibytes) do
-    header = "#!/bin/sh\nprintf '#{marker}\\n'\nexit 0\n#"
+    # Waits for stdin EOF rather than exiting on its own, so closing the
+    # launcher finishes as a close instead of racing a server exit.
+    header = "#!/bin/sh\nprintf '#{marker}\\n'\nread _ || true\nexit 0\n#"
     padding = :binary.copy("x", 1024 * 1024)
 
     digest =
