@@ -59,11 +59,14 @@ how it was verified.
   path dependency (`ptc_runner_launcher/` or `ptc_viewer/`), run a normal
   `mix compile` once. Runtime manifests, host configuration, external inputs,
   and component override descriptors and sources remain live.
-- `mix precommit` — comprehensive local quality gate (format, compile, compile
-  cycles, stable-CLI callers, credo, duplication, spec, generated-artifact
-  staleness, root/Viewer/launcher tests, core-package and standalone release
-  verification); run before every commit. Much broader than the fast,
-  staged-file Git pre-commit hook; takes a few minutes in a fresh worktree.
+- `mix precommit` — comprehensive local quality gate (nested-project dependency
+  preflight, format, compile, compile cycles, stable-CLI callers, credo,
+  duplication, spec, generated-artifact staleness, root/Viewer/launcher tests,
+  core-package and standalone release verification); run before every commit.
+  Much broader than the fast, staged-file Git pre-commit hook; takes a few
+  minutes in a fresh worktree. Every gate fetches the Mix project it compiles,
+  so an unfetched `ptc_viewer/` or `ptc_runner_launcher/` repairs itself
+  instead of failing the run.
 - `scripts/ci/core-tests.sh` — canonical core compile/test gate used by
   `mix precommit`, pre-push, and GitHub Actions. It always sets `CI=1`, so
   StreamData runs the same 300 cases locally and remotely, while retaining all

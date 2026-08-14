@@ -178,7 +178,13 @@ defmodule PtcRunner.MixProject do
   defp aliases do
     [
       ptc: &run_ptc/1,
+      # The nested-project fetch leads: the Viewer and launcher gates run after
+      # the root suite, so without it a worktree that never fetched them learns
+      # so several minutes in. Each gate still fetches its own project -- this
+      # only moves the discovery to the front. GitHub gets the same fetch from
+      # the setup action, per job.
       precommit: [
+        "cmd scripts/ci/preflight.sh",
         "cmd scripts/ci/core-quality.sh",
         "cmd scripts/ci/core-tests.sh",
         "cmd scripts/ci/viewer.sh",

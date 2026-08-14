@@ -17,14 +17,28 @@ mix deps.get
 mix compile
 ```
 
+The nested projects are listed because `mix test` inside `ptc_viewer/` or
+`ptc_runner_launcher/` needs them; no gate depends on your having run them.
+`mix precommit` opens with `scripts/ci/preflight.sh`, which fetches both, and
+each gate fetches the project it compiles — running
+`mix deps.get --check-locked`, the command GitHub runs once per job.
+
 ## Worktree seeding
 
 `scripts/worktree.sh new` seeds a fresh worktree with the main checkout's
 `deps/`, `_build/`, and `priv/plts/` (root, Viewer, and launcher) so the
 commands above become incremental instead of cold. It prints one line per
 artifact saying whether it was seeded or why not — copy skipped, source not
-built, or already present — and skips seeding entirely when `mise.toml` or any
-lockfile differs from the main checkout's copy.
+built, already present, or pinned by a file that differs from the main
+checkout's copy.
+
+That last key is per artifact, not per seed: every artifact is pinned by
+`mise.toml`, and each project's artifacts additionally by that project's own
+lockfile. A branch that bumps the root `mix.lock` therefore keeps seeding
+`ptc_viewer/` and `ptc_runner_launcher/` — projects it never touched — while a
+diverged `ptc_viewer/mix.lock` skips only the Viewer's two artifacts. The root
+lockfile covers the nested projects' Hex dependencies as well, because Mix
+converges a path dependency's requirements into the parent lock.
 
 For build staleness the seed is never an authority: Mix revalidates `deps/`
 and `_build/` against `mix.lock` and source digests, and dialyxir revalidates

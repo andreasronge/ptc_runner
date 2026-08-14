@@ -157,7 +157,34 @@ issue_state() {
 # is ever shared, so concurrent gates cannot race.
 # ----------------------------------------------------------------------
 
-SEED_KEY_FILES=(mise.toml mix.lock ptc_viewer/mix.lock ptc_runner_launcher/mix.lock)
+# Each artifact is keyed by the files that actually pin it: the toolchain,
+# which every compiled tree shares, plus its own project's lockfile. Keying
+# them together instead would make any root dependency bump -- the common case
+# for a branch -- also skip `ptc_viewer/deps` and the launcher's, projects the
+# branch never touched, sending their gates to the network for a cold fetch.
+# The root's lockfile covers the nested projects' *hex* dependencies too: Mix
+# converges a path dependency's requirements into the parent lock.
+seed_key_files() {
+  case "$1" in
+    ptc_viewer/*) printf '%s\n' mise.toml ptc_viewer/mix.lock ;;
+    ptc_runner_launcher/*) printf '%s\n' mise.toml ptc_runner_launcher/mix.lock ;;
+    *) printf '%s\n' mise.toml mix.lock ;;
+  esac
+}
+
+# The first key file that differs between the two checkouts, empty if none do.
+# The trailing `return 0` is load-bearing under `set -e`: the caller assigns
+# this in a command substitution, so "no divergence" must not read as failure.
+seed_key_divergence() {
+  local src="$1" dst="$2" artifact="$3" file
+  while IFS= read -r file; do
+    if ! cmp -s "$src/$file" "$dst/$file"; then
+      printf '%s' "$file"
+      return 0
+    fi
+  done < <(seed_key_files "$artifact")
+  return 0
+}
 
 # deps/_build make `mix deps.get` and `mix compile` incremental in all three
 # Mix projects; priv/plts carries the writable project PLT so dialyxir
@@ -196,14 +223,7 @@ clone_tree() {
 }
 
 seed_worktree() {
-  local src="$1" dst="$2" file artifact staging tmp seeded=0 start=$SECONDS
-
-  for file in "${SEED_KEY_FILES[@]}"; do
-    if ! cmp -s "$src/$file" "$dst/$file"; then
-      echo "🌱 Seed skipped: $file differs from the main checkout's copy"
-      return 0
-    fi
-  done
+  local src="$1" dst="$2" diverged artifact staging tmp seeded=0 start=$SECONDS
 
   # Stage each copy and promote it with an atomic same-volume rename, so an
   # interrupted seed can never leave a partial tree that a later run skips as
@@ -215,7 +235,10 @@ seed_worktree() {
 
   for artifact in "${SEED_ARTIFACTS[@]}"; do
     tmp="$staging/${artifact//\//__}"
-    if [ -L "$src/$artifact" ]; then
+    diverged="$(seed_key_divergence "$src" "$dst" "$artifact")"
+    if [ -n "$diverged" ]; then
+      echo "   ⏭️  $artifact — $diverged differs from the main checkout's copy"
+    elif [ -L "$src/$artifact" ]; then
       echo "   ⏭️  $artifact — main checkout's copy is a symlink"
     elif [ ! -d "$src/$artifact" ]; then
       echo "   ⏭️  $artifact — not built in the main checkout"
