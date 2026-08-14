@@ -11,6 +11,18 @@ before the longer test and Dialyzer stages. Plan-only changes skip the
 expensive gate. Unknown paths select every gate, and
 `FORCE_FULL_PRE_PUSH=1` explicitly forces the complete gate.
 
+After the test suite, the deterministic gates run as concurrent lanes, because
+they own disjoint build trees: core static analysis followed by Dialyzer
+(`_build/test`), release verification (`_build/prod`), and the Viewer
+(`ptc_viewer/_build/test`). Each lane's output is buffered and replayed under
+its own heading once it finishes, so a concurrent run reads like a serial one
+and every lane is reported even when an earlier one fails.
+
+The test suite and the launcher gate deliberately do not share the machine.
+Both own load-sensitive assertions, and a gate that flakes costs more than a
+gate that is slow. Set `PTC_PRE_PUSH_SERIAL=1` to run every gate serially when
+diagnosing a failure or pushing from a machine too small to overlap them.
+
 For an ordinary push, run `git push` and let the hook execute the complete gate
 once. "Complete" excludes `:nightly` tests, which cost tens of seconds each and
 run in the `Nightly` workflow instead; everything else runs. Run `mix prepush` directly only to diagnose that portion of the gate or
