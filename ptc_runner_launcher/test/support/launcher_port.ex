@@ -10,10 +10,11 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   canonical executable, hashes it, and confirms that identity. It then starts
   a new session/process group with only the supplied environment. Linux hashes
   and executes the same held readable descriptor. macOS hashes a readable
-  descriptor for the same file and executes the canonical host-installed path.
-  The trusted operator must not modify executable contents during startup on
-  either platform; macOS additionally requires its installation hierarchy to
-  remain immutable. Linux script interpreters intentionally inherit the held
+  descriptor for the same file, re-reads the canonical path immediately before
+  `execve`, and refuses to start unless it still resolves to the device and
+  inode that were hashed. The trusted operator must not modify executable
+  contents during startup on either platform. Linux script interpreters
+  intentionally inherit the held
   executable descriptor because the kernel uses it for the interpreter
   handoff; native executables do not.
 
@@ -48,8 +49,9 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   Canonicalization and descriptor opening are separate POSIX operations.
   Operators must not mutate executable contents or the working-directory path
   hierarchy during startup on either platform. Linux executes the held object
-  after it is opened; macOS executes the canonical path and therefore also
-  requires its executable path hierarchy to stay immutable.
+  after it is opened; macOS executes a path, so the exposed interval there is
+  the identity re-check that immediately precedes `execve` rather than the
+  identity hash, whose cost scales with the executable.
 
   This module is deliberately test-only. It exercises the packet protocol
   consumed by the core transport without making that transport part of the

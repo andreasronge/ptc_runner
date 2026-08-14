@@ -50,8 +50,11 @@ This is process containment for trusted host-installed MCP servers, not a
 hostile-code sandbox. A trusted child can deliberately leave its process group.
 The trusted operator must not modify executable contents during startup.
 Linux hashes and executes the same held readable descriptor, which prevents a
-path replacement but not an in-place write. macOS additionally relies on the
-canonical executable path hierarchy remaining immutable through `execve`.
+path replacement but not an in-place write. macOS cannot exec a descriptor at
+all, so it re-reads the canonical path immediately before `execve` and refuses
+to start unless that path still resolves to the device and inode it hashed.
+The replacement window there is that call pair rather than the length of the
+hash, which scales with the executable.
 
 The Elixir API is intentionally small:
 

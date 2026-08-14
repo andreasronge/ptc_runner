@@ -66,6 +66,8 @@ struct launcher_config {
   char *cwd;
   int executable_fd;
   int cwd_fd;
+  dev_t executable_device;
+  ino_t executable_inode;
   uint8_t executable_sha256[SHA256_BYTES];
   char **argv;
   size_t argc;
@@ -726,6 +728,8 @@ static bool resolve_config_paths(struct launcher_config *config) {
       fstat(config->cwd_fd, &cwd_stat) == 0 && S_ISDIR(cwd_stat.st_mode) &&
       sha256_fd(readable_executable_fd, executable_sha256) &&
       memcmp(executable_sha256, config->executable_sha256, SHA256_BYTES) == 0) {
+    config->executable_device = executable_stat.st_dev;
+    config->executable_inode = executable_stat.st_ino;
     valid = true;
   }
 
@@ -1208,6 +1212,26 @@ static bool emit_stderr(const uint8_t *bytes, size_t length,
   return true;
 }
 
+#if !defined(__linux__)
+/*
+ * Descriptor exec is unavailable on macOS -- `fexecve` is undeclared and
+ * execing `/dev/fd/N` fails with ENOTSUP for O_EXEC and EACCES for O_RDONLY --
+ * so the identity that is hashed and the identity that is executed can only be
+ * connected through the path. Re-reading the path here narrows the replacement
+ * window from "the whole hash", which a rename against a 64 MiB target wins by
+ * three hundred milliseconds, to this call pair. The hashed descriptor is
+ * still open, so the inode number it reports cannot have been recycled by a
+ * different file underneath the comparison.
+ */
+static bool executable_identity_unchanged(const struct launcher_config *config) {
+  struct stat current;
+
+  return stat(config->executable, &current) == 0 && S_ISREG(current.st_mode) &&
+         current.st_dev == config->executable_device &&
+         current.st_ino == config->executable_inode;
+}
+#endif
+
 static int child_main(struct launcher_config *config,
                       const int child_stdin[2], const int child_stdout[2],
                       const int child_stderr[2], const int exec_status[2]) {
@@ -1260,8 +1284,12 @@ static int child_main(struct launcher_config *config,
     }
   }
 #else
-  execve(config->executable, config->argv, config->envp);
-  exec_errno = errno;
+  if (executable_identity_unchanged(config)) {
+    execve(config->executable, config->argv, config->envp);
+    exec_errno = errno;
+  } else {
+    exec_errno = EPERM;
+  }
 #endif
   (void)write_exact(exec_status[1], (const uint8_t *)&exec_errno,
                     sizeof(exec_errno));

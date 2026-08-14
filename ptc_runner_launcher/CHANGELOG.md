@@ -13,6 +13,9 @@
 - Added mandatory-checksum precompiled artifacts for ARM64 and x86-64 macOS
   and GNU/Linux, with tested source fallback.
 - Bound protocol-v1 startup to the caller's frozen server-executable SHA-256.
+- Narrowed the macOS path-replacement window to the check-then-exec call pair
+  by re-reading the canonical path immediately before `execve`, instead of
+  leaving the whole identity hash — which scales with the executable — exposed.
 - Added a lifeline watchdog so a launcher destroyed without running its own
   teardown — `SIGKILL`, or a host that tears the process down — still retires
   the server process group instead of leaving it reparented and running.

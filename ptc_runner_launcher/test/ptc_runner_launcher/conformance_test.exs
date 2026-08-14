@@ -6,6 +6,15 @@ defmodule PtcRunnerLauncher.ConformanceTest do
   @fixture Path.expand("../fixtures/mcp_stdio_launcher_fixture.sh", __DIR__)
   @native_fixture Path.expand("../fixtures/mcp_stdio_native_fixture.c", __DIR__)
 
+  # The identity hash is the only interval long enough to race a rename into, so
+  # the target has to be large enough that hashing it is still in progress when
+  # the swap lands: 64 MiB takes roughly a third of a second, and the rename
+  # fires 40 ms in. A rename that lands too early only makes the case vacuous --
+  # the launcher then hashes the impostor and refuses on identity -- so a slow
+  # host cannot turn this red.
+  @race_target_mebibytes 64
+  @race_rename_delay_ms 40
+
   setup_all do
     compiler = System.find_executable("cc") || flunk("C compiler is unavailable")
 
@@ -558,6 +567,49 @@ defmodule PtcRunnerLauncher.ConformanceTest do
   end
 
   @tag :tmp_dir
+  @tag :slow
+  test "a replacement landing during the identity hash never reaches exec", %{tmp_dir: dir} do
+    authorized = Path.join(dir, "server")
+    impostor = Path.join(dir, "impostor")
+
+    frozen = write_padded_script(authorized, "AUTHORIZED-EXECUTED", @race_target_mebibytes)
+    _impostor_digest = write_padded_script(impostor, "IMPOSTOR-EXECUTED", 0)
+    on_exit(fn -> File.rm_rf(dir) end)
+
+    racer =
+      Task.async(fn ->
+        # Deliberate scaffolding rather than a wait: the window under test is
+        # defined by wall-clock position inside the launcher's hash.
+        Process.sleep(@race_rename_delay_ms)
+        :file.rename(impostor, authorized)
+      end)
+
+    result =
+      MCPStdioLauncher.open(
+        executable: authorized,
+        executable_sha256: frozen,
+        cwd: dir,
+        args: [],
+        env: %{},
+        inherit_environment: false,
+        start_timeout_ms: 30_000
+      )
+
+    assert :ok = Task.await(racer, 5_000)
+
+    case result do
+      {:error, reason} ->
+        assert reason == :mcp_stdio_spawn_failed
+
+      {:ok, launcher} ->
+        output = collect_until(launcher, &(&1.stdout =~ ~r/-EXECUTED\n/))
+        assert output.stdout =~ "AUTHORIZED-EXECUTED"
+        refute output.stdout =~ "IMPOSTOR-EXECUTED"
+        assert {:ok, %{reason: :close}} = MCPStdioLauncher.close(launcher, 2_000)
+    end
+  end
+
+  @tag :tmp_dir
   test "matches SHA-256 padding-boundary known answers", %{tmp_dir: dir} do
     prefix = "#!/bin/sh\nread _ || true\nexit 0\n#"
 
@@ -778,6 +830,26 @@ defmodule PtcRunnerLauncher.ConformanceTest do
       )
 
     launcher
+  end
+
+  # Returns the SHA-256 of what was written, hashed as it goes: reading a target
+  # this size back just to freeze its identity would cost more than the launch
+  # under test.
+  defp write_padded_script(path, marker, mebibytes) do
+    header = "#!/bin/sh\nprintf '#{marker}\\n'\nexit 0\n#"
+    padding = :binary.copy("x", 1024 * 1024)
+
+    digest =
+      File.open!(path, [:write, :binary], fn handle ->
+        Enum.reduce([header | List.duplicate(padding, mebibytes)], :crypto.hash_init(:sha256), fn
+          chunk, context ->
+            IO.binwrite(handle, chunk)
+            :crypto.hash_update(context, chunk)
+        end)
+      end)
+
+    File.chmod!(path, 0o700)
+    :crypto.hash_final(digest)
   end
 
   defp executable_sha256(executable) do
