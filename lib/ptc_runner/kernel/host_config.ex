@@ -46,6 +46,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.SchemaPath
   alias PtcRunner.Kernel.StrictJSON
+  alias PtcRunner.Lisp.RetainedSize
 
   @max_config_bytes 1_000_000
   @max_credentials 128
@@ -59,11 +60,19 @@ defmodule PtcRunner.Kernel.HostConfig do
   @max_inspection_source_bytes 64_000_000
   @max_inspection_files 1_024
   @max_replay_entries 10_000
-  # Native snapshot queries reserve the encoded algorithm-qualified content
-  # hash before delegating to their bounded query engines. This covers that
-  # reservation plus the smallest encoded empty page, so the accepted minimum
-  # can return at least one successful result.
-  @minimum_snapshot_result_bytes 158
+  # The accepted minimum must fit the complete smallest snapshot result under
+  # both the encoded and retained-size measurements enforced at the boundary.
+  @minimum_snapshot_result %{
+    "items" => [],
+    "next_cursor" => nil,
+    "omitted_count" => 0,
+    "snapshot_hash" => "sha256:" <> String.duplicate("0", 64),
+    "truncated" => false
+  }
+  @minimum_snapshot_result_bytes max(
+                                   byte_size(Jason.encode!(@minimum_snapshot_result)),
+                                   RetainedSize.bytes(@minimum_snapshot_result)
+                                 )
   @max_timeout_ms 300_000
   @max_llm_tokens 1_000_000
   @max_llm_seed 2_147_483_647

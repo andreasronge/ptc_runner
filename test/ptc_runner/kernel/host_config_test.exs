@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Lisp.RetainedSize
 
   @tag :tmp_dir
   test "loads one closed stdio MCP installation without resolving credentials", %{tmp_dir: dir} do
@@ -494,20 +495,17 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert {:error, :invalid_host_config} = HostConfig.decode(too_small_trace, "/tmp")
     assert {:error, _details} = JSV.validate(too_small_trace, root, cast: false)
 
-    content_hash = "sha256:" <> String.duplicate("0", 64)
-    metadata_bytes = byte_size(Jason.encode!(%{"snapshot_hash" => content_hash}))
+    empty_page = %{
+      "items" => [],
+      "next_cursor" => nil,
+      "omitted_count" => 0,
+      "snapshot_hash" => "sha256:" <> String.duplicate("0", 64),
+      "truncated" => false
+    }
 
-    empty_page_bytes =
-      byte_size(
-        Jason.encode!(%{
-          "items" => [],
-          "next_cursor" => nil,
-          "omitted_count" => 0,
-          "truncated" => false
-        })
-      )
+    expected_minimum = max(byte_size(Jason.encode!(empty_page)), RetainedSize.bytes(empty_page))
 
-    assert HostConfig.minimum_snapshot_result_bytes() == metadata_bytes + empty_page_bytes
+    assert HostConfig.minimum_snapshot_result_bytes() == expected_minimum
 
     inspection = %{
       "install" => %{

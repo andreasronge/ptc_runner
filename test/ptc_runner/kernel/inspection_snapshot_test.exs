@@ -992,6 +992,42 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   end
 
   @tag :tmp_dir
+  test "model exchange pages fit encoded and retained result ceilings", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create_model_exchanges!(root)
+
+    {:ok, trace_snapshot} =
+      TraceSnapshot.start({:private_authorized_directory, fixture.traces}, owner: self())
+
+    {:ok, snapshot} =
+      InspectionSnapshot.start({:directory, fixture.inspection}, trace_snapshot, owner: self())
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(snapshot)
+      TraceSnapshot.stop(trace_snapshot)
+    end)
+
+    assert {:ok,
+            %{
+              "items" => first_items,
+              "next_cursor" => cursor,
+              "truncated" => true
+            } = first_page} =
+             InspectionSnapshot.query(snapshot, :model_exchanges, %{
+               "run_id" => fixture.run_id
+             })
+
+    assert first_items != []
+    assert length(first_items) < fixture.model_exchange_count
+    assert is_binary(cursor)
+    assert byte_size(Jason.encode!(first_page)) <= 1_000_000
+    assert RetainedSize.bytes(first_page) <= 1_000_000
+
+    exchanges = collect_model_exchanges(snapshot, fixture.run_id, first_page)
+    assert length(exchanges) == fixture.model_exchange_count
+    assert Enum.uniq_by(exchanges, & &1["capability_id"]) == exchanges
+  end
+
+  @tag :tmp_dir
   test "safe metadata and owner lifecycle retain no private paths or payloads", %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
     write_run(trace, inspection, "owned", :mcp)
@@ -1244,6 +1280,31 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   end
 
   defp encode_jsonl(events), do: Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n"))
+
+  defp collect_model_exchanges(snapshot, run_id, first_page) do
+    collect_model_exchanges(
+      snapshot,
+      run_id,
+      first_page["next_cursor"],
+      first_page["items"]
+    )
+  end
+
+  defp collect_model_exchanges(_snapshot, _run_id, nil, items), do: items
+
+  defp collect_model_exchanges(snapshot, run_id, cursor, items) do
+    assert {:ok, page} =
+             InspectionSnapshot.query(snapshot, :model_exchanges, %{
+               "run_id" => run_id,
+               "cursor" => cursor
+             })
+
+    assert page["items"] != []
+    assert byte_size(Jason.encode!(page)) <= 1_000_000
+    assert RetainedSize.bytes(page) <= 1_000_000
+
+    collect_model_exchanges(snapshot, run_id, page["next_cursor"], items ++ page["items"])
+  end
 
   defp result_hash(value) do
     {:ok, encoded} = DeterministicJSON.encode(value)

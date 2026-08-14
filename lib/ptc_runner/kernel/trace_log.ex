@@ -19,8 +19,10 @@ defmodule PtcRunner.Kernel.TraceLog do
     alias/revision and by safely published resolved model.
 
   Pagination cursors are bound to the source and operation. Every source and
-  result has an aggregate byte ceiling. Normal directory sources exclude the
-  reserved private filename suffix; private files require an explicit source.
+  result has an aggregate encoded-and-retained byte ceiling. A requested page
+  limit is an upper bound; pagination returns the largest prefix that fits both
+  measurements. Normal directory sources exclude the reserved private filename
+  suffix; private files require an explicit source.
   Internal immutable capture may use a private authority that admits both
   normal and private trace files while retaining accurate per-run provenance.
 
@@ -39,6 +41,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.ProviderSnapshot
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ResultIdentity
+  alias PtcRunner.Kernel.ResultLimit
   alias PtcRunner.Kernel.TracePublication
 
   @default_source_bytes 8_000_000
@@ -147,7 +150,8 @@ defmodule PtcRunner.Kernel.TraceLog do
              source_id,
              arguments,
              trace_log.max_result_bytes,
-             trace_log.source_kind
+             trace_log.source_kind,
+             %{}
            )
   end
 
@@ -160,20 +164,48 @@ defmodule PtcRunner.Kernel.TraceLog do
           :list_runs | :get_run | :list_turns | :counters,
           map(),
           pos_integer(),
-          :sanitized | :private | %{binary() => :sanitized | :private}
+          :sanitized | :private | %{binary() => :sanitized | :private},
+          map()
         ) :: {:ok, map()} | {:error, atom()}
-  def query_loaded(events, source_id, operation, arguments, max_result_bytes, source_kind)
+  def query_loaded(
+        events,
+        source_id,
+        operation,
+        arguments,
+        max_result_bytes,
+        source_kind,
+        metadata \\ %{}
+      )
+
+  def query_loaded(
+        events,
+        source_id,
+        operation,
+        arguments,
+        max_result_bytes,
+        source_kind,
+        metadata
+      )
       when is_list(events) and is_binary(source_id) and
              operation in [:list_runs, :get_run, :list_turns, :counters] and is_map(arguments) and
              is_integer(max_result_bytes) and max_result_bytes > 0 and
-             (source_kind in [:sanitized, :private] or is_map(source_kind)) do
+             (source_kind in [:sanitized, :private] or is_map(source_kind)) and is_map(metadata) do
     if valid_query_source_kind?(events, source_kind),
-      do: execute(operation, events, source_id, arguments, max_result_bytes, source_kind),
+      do:
+        execute(operation, events, source_id, arguments, max_result_bytes, source_kind, metadata),
       else: {:error, :invalid_query}
   end
 
-  def query_loaded(_events, _source_id, _operation, _arguments, _max_result_bytes, _source_kind),
-    do: {:error, :invalid_query}
+  def query_loaded(
+        _events,
+        _source_id,
+        _operation,
+        _arguments,
+        _max_result_bytes,
+        _source_kind,
+        _metadata
+      ),
+      do: {:error, :invalid_query}
 
   @doc false
   @spec compile_analysis([map()], :sanitized | :private | map()) :: map()
@@ -755,7 +787,15 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   def publish_jsonl(_path, _events, _opts), do: {:error, :invalid_trace_log}
 
-  defp execute(:list_runs, events, source_id, arguments, max_result_bytes, source_kind) do
+  defp execute(
+         :list_runs,
+         events,
+         source_id,
+         arguments,
+         max_result_bytes,
+         source_kind,
+         metadata
+       ) do
     with :ok <-
            validate_keys(
              arguments,
@@ -766,7 +806,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       events
       |> runs(source_kind)
       |> filter_runs(arguments)
-      |> paginate(page, source_id, max_result_bytes)
+      |> paginate(page, source_id, max_result_bytes, metadata)
     end
   end
 
@@ -776,22 +816,32 @@ defmodule PtcRunner.Kernel.TraceLog do
          _source_id,
          %{"run_id" => run_id} = arguments,
          max_result_bytes,
-         source_kind
+         source_kind,
+         result_metadata
        ) do
     with :ok <- validate_keys(arguments, ["run_id"]),
          :ok <- valid_string(run_id),
          metadata when not is_nil(metadata) <-
            Enum.find(runs(events, source_kind), &(&1["run_id"] == run_id)),
-         :ok <- within_result_limit(metadata, max_result_bytes) do
-      {:ok, metadata}
+         result = Map.merge(metadata, result_metadata),
+         :ok <- ResultLimit.validate(result, max_result_bytes) do
+      {:ok, result}
     else
       nil -> {:error, :not_found}
       {:error, _reason} = error -> error
     end
   end
 
-  defp execute(:get_run, _events, _source_id, _arguments, _max_result_bytes, _source_kind),
-    do: {:error, :invalid_query}
+  defp execute(
+         :get_run,
+         _events,
+         _source_id,
+         _arguments,
+         _max_result_bytes,
+         _source_kind,
+         _metadata
+       ),
+       do: {:error, :invalid_query}
 
   defp execute(
          :list_turns,
@@ -799,7 +849,8 @@ defmodule PtcRunner.Kernel.TraceLog do
          source_id,
          %{"run_id" => run_id} = arguments,
          max_result_bytes,
-         _source_kind
+         _source_kind,
+         metadata
        ) do
     with :ok <-
            validate_keys(
@@ -813,17 +864,33 @@ defmodule PtcRunner.Kernel.TraceLog do
       events
       |> Enum.filter(&(&1["run_id"] == run_id and turn_matches?(&1, arguments)))
       |> Enum.sort_by(& &1["sequence"])
-      |> paginate(page, source_id, max_result_bytes)
+      |> paginate(page, source_id, max_result_bytes, metadata)
     else
       false -> {:error, :not_found}
       {:error, _reason} = error -> error
     end
   end
 
-  defp execute(:list_turns, _events, _source_id, _arguments, _max_result_bytes, _source_kind),
-    do: {:error, :invalid_query}
+  defp execute(
+         :list_turns,
+         _events,
+         _source_id,
+         _arguments,
+         _max_result_bytes,
+         _source_kind,
+         _metadata
+       ),
+       do: {:error, :invalid_query}
 
-  defp execute(:counters, events, _source_id, arguments, max_result_bytes, source_kind) do
+  defp execute(
+         :counters,
+         events,
+         _source_id,
+         arguments,
+         max_result_bytes,
+         source_kind,
+         metadata
+       ) do
     with :ok <-
            validate_keys(
              arguments,
@@ -845,9 +912,9 @@ defmodule PtcRunner.Kernel.TraceLog do
           &mission_matches?(&1, arguments["mission_name"])
         )
 
-      result = counters(selected, model_lookup)
+      result = selected |> counters(model_lookup) |> Map.merge(metadata)
 
-      with :ok <- within_result_limit(result, max_result_bytes), do: {:ok, result}
+      with :ok <- ResultLimit.validate(result, max_result_bytes), do: {:ok, result}
     end
   end
 
@@ -2841,25 +2908,34 @@ defmodule PtcRunner.Kernel.TraceLog do
          items,
          %{limit: limit, offset: offset, query_id: query_id},
          source_id,
-         max_result_bytes
+         max_result_bytes,
+         metadata
        ) do
     selected = items |> Enum.drop(offset) |> Enum.take(limit)
-    fit_page(selected, items, offset, source_id, query_id, max_result_bytes)
+    fit_page(selected, items, offset, source_id, query_id, max_result_bytes, metadata)
   end
 
   # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
-  defp fit_page(selected, all_items, offset, source_id, query_id, max_result_bytes) do
-    result = page_result(selected, all_items, offset, source_id, query_id)
+  defp fit_page(
+         selected,
+         all_items,
+         offset,
+         source_id,
+         query_id,
+         max_result_bytes,
+         metadata
+       ) do
+    result = page_result(selected, all_items, offset, source_id, query_id, metadata)
 
     cond do
-      byte_size(Jason.encode!(result)) <= max_result_bytes ->
+      ResultLimit.within?(result, max_result_bytes) ->
         {:ok, result}
 
       selected == [] ->
         {:error, :result_limit_exceeded}
 
       true ->
-        context = {all_items, offset, source_id, query_id, max_result_bytes}
+        context = {all_items, offset, source_id, query_id, max_result_bytes, metadata}
 
         fit_page_prefix(
           selected,
@@ -2879,15 +2955,17 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp fit_page_prefix(
          selected,
-         {all_items, offset, source_id, query_id, max_result_bytes} = context,
+         {all_items, offset, source_id, query_id, max_result_bytes, metadata} = context,
          lower,
          upper,
          best
        ) do
     count = div(lower + upper, 2)
-    result = page_result(Enum.take(selected, count), all_items, offset, source_id, query_id)
 
-    if byte_size(Jason.encode!(result)) <= max_result_bytes do
+    result =
+      page_result(Enum.take(selected, count), all_items, offset, source_id, query_id, metadata)
+
+    if ResultLimit.within?(result, max_result_bytes) do
       fit_page_prefix(
         selected,
         context,
@@ -2907,28 +2985,22 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
-  defp page_result(selected, all_items, offset, source_id, query_id) do
+  defp page_result(selected, all_items, offset, source_id, query_id, metadata) do
     next_offset = offset + length(selected)
     more? = next_offset < length(all_items)
 
-    %{
+    Map.merge(metadata, %{
       "items" => selected,
       "next_cursor" => if(more?, do: encode_cursor(next_offset, source_id, query_id), else: nil),
       "truncated" => more?,
       "omitted_count" => max(length(all_items) - next_offset, 0)
-    }
+    })
   end
 
   defp encode_cursor(offset, source_id, query_id) do
     %{"offset" => offset, "source" => source_id, "query" => query_id}
     |> Jason.encode!()
     |> Base.url_encode64(padding: false)
-  end
-
-  defp within_result_limit(value, max_result_bytes) do
-    if byte_size(Jason.encode!(value)) <= max_result_bytes,
-      do: :ok,
-      else: {:error, :result_limit_exceeded}
   end
 
   defp digest(value) do

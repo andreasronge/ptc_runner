@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+- Analysis and trace snapshot pagination now treats the caller's item limit as
+  an upper bound and returns the largest prefix whose complete encoded and
+  retained sizes fit the configured result ceiling. Large private model
+  exchange histories therefore remain pageable instead of being rejected by
+  the capability boundary after the query layer accepted them.
+
 ### Added
 
 - Added typed, followable run-analysis relationships from workflow boundary

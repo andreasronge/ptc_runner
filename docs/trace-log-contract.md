@@ -417,7 +417,9 @@ completion semantics omit that catalog field.
 Returns one native bounded page from the named collection. Every page has
 `items`, `next_cursor`, `truncated`, `omitted_count`, and `snapshot_hash`;
 callers follow `next_cursor` explicitly. The wrapper does not aggregate pages,
-diagnose failures, or hide primitive pagination.
+diagnose failures, or hide primitive pagination. `limit` is an item-count upper
+bound, not a promise: the query may return fewer items so the complete page,
+including snapshot metadata, fits both its encoded and retained-size ceilings.
 
 `activity` is public canonical activity in ascending sequence. Private captures
 also advertise `turns`, `model_exchanges`, `capability_calls`,
@@ -529,7 +531,7 @@ Every collection query has:
 - a conservative default and hard maximum limit;
 - a deterministic opaque cursor;
 - deterministic ordering and tie-breakers;
-- a maximum encoded result size;
+- maximum encoded and retained result sizes under one result ceiling;
 - truncation and omitted-count metadata;
 - one aggregate source-read byte cap;
 - bounded filter/tag/name lengths and counts.
@@ -540,9 +542,11 @@ operation fails as an invalid query; changing the source fails as
 `source-changed`. The caller may reduce or increase the page limit within the
 hard maximum without changing the selected result set.
 
-If a page would exceed the result ceiling, return the largest valid prefix plus
-explicit truncation/next-cursor metadata, or a stable bounded error. Never build
-an unbounded result and truncate only after allocation.
+If a page would exceed either result-size measurement, return the largest valid
+prefix plus explicit truncation/next-cursor metadata, or a stable bounded error
+when even one item does not fit. Sizing covers the final page shape, including
+snapshot metadata. Never build an unbounded result and truncate only after
+allocation.
 
 Preview fields are bounded independently. Arguments/results, messages, prints,
 memory diffs, and program source follow their own projection ceilings.

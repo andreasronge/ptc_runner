@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.RunAnalysis do
   """
 
   alias PtcRunner.Kernel.InspectionSnapshot
+  alias PtcRunner.Kernel.ResultLimit
   alias PtcRunner.Kernel.TraceSnapshot
 
   @operations [:runs, :open, :read]
@@ -251,12 +252,13 @@ defmodule PtcRunner.Kernel.RunAnalysis do
     with true <- valid_string?(run_id) and is_binary(name),
          {:ok, collection} <- fetch_collection(name),
          :ok <- validate_read_arguments(arguments, collection),
-         {:ok, _run} <- TraceSnapshot.query(analysis.traces, :get_run, %{"run_id" => run_id}),
+         {:ok, true} <- TraceSnapshot.run_exists?(analysis.traces, run_id),
          :ok <- authorize_collection(analysis, collection) do
       query = Map.drop(arguments, ["collection"])
       read_collection(analysis, collection, query)
     else
       false -> {:error, :invalid_query}
+      {:ok, false} -> {:error, :not_found}
       {:error, _reason} = error -> error
     end
   end
@@ -462,8 +464,6 @@ defmodule PtcRunner.Kernel.RunAnalysis do
     do: is_binary(value) and byte_size(value) in 1..4_096 and String.valid?(value)
 
   defp bounded_result(%__MODULE__{max_result_bytes: max_result_bytes}, result) do
-    if byte_size(Jason.encode!(result)) <= max_result_bytes,
-      do: {:ok, result},
-      else: {:error, :result_limit_exceeded}
+    with :ok <- ResultLimit.validate(result, max_result_bytes), do: {:ok, result}
   end
 end

@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   alias PtcRunner.Kernel.RunAnalysisCapability
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.TraceSnapshot
+  alias PtcRunner.Lisp.RetainedSize
 
   @tag :tmp_dir
   test "the accepted minimum result ceiling can return an empty page", %{
@@ -206,6 +207,57 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
     assert {:error, :result_limit_exceeded} =
              TraceSnapshot.query(snapshot, :list_runs, %{"limit" => 1})
+  end
+
+  @tag :tmp_dir
+  test "trace pages fit encoded and retained result ceilings", %{tmp_dir: directory} do
+    events =
+      Enum.map(1..40, fn index ->
+        tags = Map.new(1..12, &{"tag-#{&1}", "value-#{index}-#{&1}"})
+
+        "run-#{index}"
+        |> event(1, "run-started")
+        |> put_in(["data", "labels"], %{"name" => "run-#{index}", "tags" => tags})
+      end)
+
+    write_events(Path.join(directory, "runs.jsonl"), events)
+    assert {:ok, trace_log} = TraceLog.new(source: {:directory, directory})
+    assert {:ok, raw_page} = TraceLog.query(trace_log, :list_runs, %{})
+
+    sized_page =
+      Map.put(raw_page, "snapshot_hash", "sha256:" <> String.duplicate("0", 64))
+
+    encoded_bytes = byte_size(Jason.encode!(sized_page))
+    retained_bytes = RetainedSize.bytes(sized_page)
+    assert retained_bytes > encoded_bytes
+
+    max_result_bytes =
+      encoded_bytes + min(10_000, div(retained_bytes - encoded_bytes, 2))
+
+    assert {:ok, snapshot} =
+             TraceSnapshot.start({:directory, directory},
+               owner: self(),
+               max_result_bytes: max_result_bytes
+             )
+
+    on_exit(fn -> TraceSnapshot.stop(snapshot) end)
+
+    assert {:ok,
+            %{
+              "items" => first_items,
+              "next_cursor" => cursor,
+              "truncated" => true
+            } = first_page} = TraceSnapshot.query(snapshot, :list_runs, %{})
+
+    assert first_items != []
+    assert length(first_items) < 40
+    assert is_binary(cursor)
+    assert byte_size(Jason.encode!(first_page)) <= max_result_bytes
+    assert RetainedSize.bytes(first_page) <= max_result_bytes
+
+    runs = collect_runs(snapshot, first_page, max_result_bytes)
+    assert length(runs) == 40
+    assert Enum.uniq_by(runs, & &1["run_id"]) == runs
   end
 
   @tag :tmp_dir
@@ -610,6 +662,21 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
   defp write_events(path, events) do
     File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+  end
+
+  defp collect_runs(snapshot, first_page, max_result_bytes) do
+    collect_runs(snapshot, first_page["next_cursor"], first_page["items"], max_result_bytes)
+  end
+
+  defp collect_runs(_snapshot, nil, items, _max_result_bytes), do: items
+
+  defp collect_runs(snapshot, cursor, items, max_result_bytes) do
+    assert {:ok, page} = TraceSnapshot.query(snapshot, :list_runs, %{"cursor" => cursor})
+    assert page["items"] != []
+    assert byte_size(Jason.encode!(page)) <= max_result_bytes
+    assert RetainedSize.bytes(page) <= max_result_bytes
+
+    collect_runs(snapshot, page["next_cursor"], items ++ page["items"], max_result_bytes)
   end
 
   defp event(run_id, sequence, type) do

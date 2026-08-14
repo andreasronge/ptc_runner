@@ -13,8 +13,10 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   Every collection uses the same bounded page shape as canonical trace
   queries. Cursors are opaque, bind the immutable source identity, operation,
   filters, ordering, and offset, and cannot be reused against another query or
-  capture. Run-scoped private collections accept `"order": "asc" | "desc"`;
-  ascending sequence order is the default.
+  capture. The requested item limit is an upper bound: a page returns the
+  largest prefix whose final encoded and retained sizes both fit the result
+  ceiling. Run-scoped private collections accept
+  `"order": "asc" | "desc"`; ascending sequence order is the default.
 
   Inspection artifacts retain their versioned bare-hex source hashes. Query
   results expose those hashes with the `sha256:` algorithm prefix required by
@@ -37,6 +39,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   """
 
   alias PtcRunner.Kernel.ConversationProjection
+  alias PtcRunner.Kernel.ResultLimit
   alias PtcRunner.Kernel.RunAnalysisRelationships
 
   @default_limit 100
@@ -86,16 +89,19 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   def compile(_artifacts, _trace_source_id, _trace_analysis),
     do: {:error, :invalid_inspection_snapshot}
 
-  @spec query(map(), binary(), operation(), map(), pos_integer()) ::
+  @spec query(map(), binary(), operation(), map(), pos_integer(), map()) ::
           {:ok, map()} | {:error, atom()}
   @doc false
-  def query(collections, source_id, operation, arguments, max_result_bytes)
+  def query(collections, source_id, operation, arguments, max_result_bytes, metadata \\ %{})
+
+  def query(collections, source_id, operation, arguments, max_result_bytes, metadata)
       when is_map(collections) and is_binary(source_id) and operation in @operations and
-             is_map(arguments) and is_integer(max_result_bytes) and max_result_bytes > 0 do
-    execute(collections, source_id, operation, arguments, max_result_bytes)
+             is_map(arguments) and is_integer(max_result_bytes) and max_result_bytes > 0 and
+             is_map(metadata) do
+    execute(collections, source_id, operation, arguments, max_result_bytes, metadata)
   end
 
-  def query(_collections, _source_id, _operation, _arguments, _max_result_bytes),
+  def query(_collections, _source_id, _operation, _arguments, _max_result_bytes, _metadata),
     do: {:error, :invalid_query}
 
   defp compile_artifacts(artifacts) do
@@ -439,19 +445,27 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   defp item_sequence(%{"request_sequence" => sequence}), do: sequence
   defp item_sequence(%{"sequence" => sequence}), do: sequence
 
-  defp execute(collections, source_id, :list_runs, arguments, max_result_bytes) do
+  defp execute(collections, source_id, :list_runs, arguments, max_result_bytes, metadata) do
     with :ok <- validate_keys(arguments, ~w(limit cursor)),
          {:ok, page} <- page_options(arguments, source_id, :list_runs) do
-      paginate(collections.list_runs, page, source_id, max_result_bytes)
+      paginate(collections.list_runs, page, source_id, max_result_bytes, metadata)
     end
   end
 
-  defp execute(collections, _source_id, :get_run, %{"run_id" => run_id} = arguments, max_bytes) do
+  defp execute(
+         collections,
+         _source_id,
+         :get_run,
+         %{"run_id" => run_id} = arguments,
+         max_bytes,
+         metadata
+       ) do
     with :ok <- validate_keys(arguments, ["run_id"]),
          true <- valid_string?(run_id),
          {:ok, run} <- Map.fetch(collections.runs_by_id, run_id),
-         :ok <- validate_result_size(run, max_bytes) do
-      {:ok, run}
+         result = Map.merge(run, metadata),
+         :ok <- ResultLimit.validate(result, max_bytes) do
+      {:ok, result}
     else
       false -> {:error, :invalid_query}
       :error -> {:error, :not_found}
@@ -459,22 +473,37 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     end
   end
 
-  defp execute(_collections, _source_id, :get_run, _arguments, _max_result_bytes),
+  defp execute(_collections, _source_id, :get_run, _arguments, _max_result_bytes, _metadata),
     do: {:error, :invalid_query}
 
-  defp execute(collections, _source_id, :result, %{"run_id" => run_id} = arguments, max_bytes) do
+  defp execute(
+         collections,
+         _source_id,
+         :result,
+         %{"run_id" => run_id} = arguments,
+         max_bytes,
+         metadata
+       ) do
     with :ok <- validate_keys(arguments, ["run_id"]),
          :ok <- validate_result_run_id(run_id, collections.list_runs),
          {:ok, result} <- fetch_result(collections.results, run_id),
-         :ok <- validate_result_size(result, max_bytes) do
+         result = Map.merge(result, metadata),
+         :ok <- ResultLimit.validate(result, max_bytes) do
       {:ok, result}
     end
   end
 
-  defp execute(_collections, _source_id, :result, _arguments, _max_result_bytes),
+  defp execute(_collections, _source_id, :result, _arguments, _max_result_bytes, _metadata),
     do: {:error, :invalid_query}
 
-  defp execute(collections, source_id, :turns, %{"run_id" => run_id} = arguments, max_bytes) do
+  defp execute(
+         collections,
+         source_id,
+         :turns,
+         %{"run_id" => run_id} = arguments,
+         max_bytes,
+         result_metadata
+       ) do
     allowed =
       ~w(run_id limit cursor stream_id capability_id evaluation_id parent_evaluation_id prelude_call prelude_component)
 
@@ -483,10 +512,11 @@ defmodule PtcRunner.Kernel.InspectionQuery do
          :ok <- validate_filter_values(arguments, allowed -- ~w(run_id limit cursor)),
          {:ok, projection} <- Map.fetch(collections.turns_by_run_id, run_id),
          {:ok, page} <- page_options(arguments, source_id, :turns) do
-      metadata = %{
-        "evidence" => projection.evidence,
-        "trace_snapshot_hash" => collections.trace_snapshot_hash
-      }
+      metadata =
+        Map.merge(result_metadata, %{
+          "evidence" => projection.evidence,
+          "trace_snapshot_hash" => collections.trace_snapshot_hash
+        })
 
       projection.items
       |> Enum.filter(&collection_match?(:turns, &1, arguments))
@@ -498,10 +528,17 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     end
   end
 
-  defp execute(_collections, _source_id, :turns, _arguments, _max_result_bytes),
+  defp execute(_collections, _source_id, :turns, _arguments, _max_result_bytes, _metadata),
     do: {:error, :invalid_query}
 
-  defp execute(collections, source_id, operation, %{"run_id" => run_id} = arguments, max_bytes)
+  defp execute(
+         collections,
+         source_id,
+         operation,
+         %{"run_id" => run_id} = arguments,
+         max_bytes,
+         metadata
+       )
        when operation in [
               :model_exchanges,
               :capability_calls,
@@ -523,14 +560,14 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       |> Map.fetch!(operation)
       |> Enum.filter(&(&1["run_id"] == run_id and collection_match?(operation, &1, arguments)))
       |> order(Map.get(arguments, "order", "asc"))
-      |> paginate(page, source_id, max_bytes)
+      |> paginate(page, source_id, max_bytes, metadata)
     else
       false -> {:error, :not_found}
       {:error, _reason} = error -> error
     end
   end
 
-  defp execute(_collections, _source_id, _operation, _arguments, _max_result_bytes),
+  defp execute(_collections, _source_id, _operation, _arguments, _max_result_bytes, _metadata),
     do: {:error, :invalid_query}
 
   defp validate_result_run_id(run_id, runs) do
@@ -546,12 +583,6 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       nil -> {:error, :result_not_found}
       result -> {:ok, result}
     end
-  end
-
-  defp validate_result_size(result, max_bytes) do
-    if byte_size(Jason.encode!(result)) <= max_bytes,
-      do: :ok,
-      else: {:error, :result_limit_exceeded}
   end
 
   defp validate_keys(arguments, allowed) do
@@ -680,7 +711,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
 
   defp cursor_offset(_cursor, _source_id, _query_id), do: {:error, :invalid_query}
 
-  defp paginate(items, page, source_id, max_result_bytes, metadata \\ %{}) do
+  defp paginate(items, page, source_id, max_result_bytes, metadata) do
     selected = items |> Enum.drop(page.offset) |> Enum.take(page.limit)
     fit_page(selected, items, page.offset, source_id, page.query_id, max_result_bytes, metadata)
   end
@@ -689,7 +720,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     result = page_result(selected, all_items, offset, source_id, query_id, metadata)
 
     cond do
-      byte_size(Jason.encode!(result)) <= max_result_bytes ->
+      ResultLimit.within?(result, max_result_bytes) ->
         {:ok, result}
 
       selected == [] ->
@@ -725,7 +756,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     result =
       page_result(Enum.take(selected, count), all_items, offset, source_id, query_id, metadata)
 
-    if byte_size(Jason.encode!(result)) <= max_result_bytes do
+    if ResultLimit.within?(result, max_result_bytes) do
       fit_page_prefix(
         selected,
         context,

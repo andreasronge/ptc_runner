@@ -69,6 +69,81 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     Map.put(fixture, :result_hash, result_hash)
   end
 
+  def create_model_exchanges!(root, count \\ 40, run_id \\ "large-model-exchanges")
+      when is_integer(count) and count > 0 do
+    %{traces: traces, inspection: inspection} = fixture = create_directories(root, run_id)
+
+    {events, _messages} =
+      Enum.reduce(1..count, {[event(run_id, 1, "run-started", %{"missions" => %{}})], []}, fn
+        turn, {events, messages} ->
+          capability_id = "llm-#{turn}-#{run_id}"
+          user = model_message("user", turn)
+          request_messages = messages ++ [user]
+          assistant = model_message("assistant", turn)
+          sequence = turn * 2
+
+          events =
+            events ++
+              [
+                event(run_id, sequence, "capability-started", %{
+                  "capability_id" => capability_id,
+                  "environment" => "workflow",
+                  "name" => "llm-request"
+                }),
+                event(run_id, sequence + 1, "capability-stopped", %{
+                  "capability_id" => capability_id,
+                  "environment" => "workflow",
+                  "name" => "llm-request",
+                  "status" => "ok"
+                })
+              ]
+
+          {events, request_messages ++ [assistant]}
+      end)
+
+    events = events ++ [event(run_id, count * 2 + 2, "run-stopped", %{"outcome" => "ok"})]
+    File.write!(Path.join(traces, "#{run_id}.jsonl"), encode_jsonl(events))
+
+    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
+
+    _messages =
+      Enum.reduce(1..count, [], fn turn, messages ->
+        capability_id = "llm-#{turn}-#{run_id}"
+        user = model_message("user", turn)
+        request_messages = messages ++ [user]
+        assistant = model_message("assistant", turn)
+
+        emit!(sink, "capability-input", %{capability_id: capability_id}, %{
+          environment: :workflow,
+          name: "llm-request",
+          arguments: %{
+            "messages" => request_messages,
+            "system" => "private-system-#{run_id}"
+          }
+        })
+
+        emit!(sink, "capability-output", %{capability_id: capability_id}, %{
+          environment: :workflow,
+          name: "llm-request",
+          result: %{status: :ok, value: %{"content" => assistant["content"]}}
+        })
+
+        request_messages ++ [assistant]
+      end)
+
+    {:ok, records} = InspectionSink.records(sink)
+
+    :ok =
+      InspectionArtifact.persist(
+        Path.join(inspection, "#{run_id}.inspection.jsonl"),
+        records,
+        events
+      )
+
+    :ok = InspectionSink.stop(sink)
+    Map.put(fixture, :model_exchange_count, count)
+  end
+
   def rewrite_schema!(directory, schema_version) when is_integer(schema_version) do
     directory
     |> Path.join("*.inspection.jsonl")
@@ -442,9 +517,16 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
       "trace_id" => "trace-#{run_id}",
       "sequence" => sequence,
       "timestamp" =>
-        "2026-07-26T12:00:#{sequence |> Integer.to_string() |> String.pad_leading(2, "0")}Z",
+        DateTime.add(~U[2026-07-26 12:00:00Z], sequence, :second) |> DateTime.to_iso8601(),
       "type" => type,
       "data" => data
+    }
+  end
+
+  defp model_message(role, turn) do
+    %{
+      "role" => role,
+      "content" => "#{role}-#{turn}-" <> String.duplicate("evidence-", 64)
     }
   end
 

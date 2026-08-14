@@ -593,45 +593,16 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
 
   defp query_with_snapshot_hash(state, operation, arguments) do
     snapshot_hash = state.info.snapshot_hash
-    metadata_bytes = byte_size(Jason.encode!(%{"snapshot_hash" => snapshot_hash}))
-    query_bytes = state.max_result_bytes - metadata_bytes
 
-    if query_bytes > 0 do
-      case InspectionQuery.query(
-             state.collections,
-             state.source_id,
-             operation,
-             arguments,
-             query_bytes
-           ) do
-        {:ok, result} ->
-          result = Map.put(result, "snapshot_hash", snapshot_hash)
-
-          if result_within_limit?(result, operation, state.max_result_bytes),
-            do: {:ok, result},
-            else: {:error, :result_limit_exceeded}
-
-        {:error, _reason} = error ->
-          error
-      end
-    else
-      {:error, :result_limit_exceeded}
-    end
-  end
-
-  defp result_within_limit?(result, operation, max_result_bytes) do
-    byte_size(Jason.encode!(result)) <= max_result_bytes and
-      retained_result_within_limit?(result, operation, max_result_bytes)
-  end
-
-  defp retained_result_within_limit?(result, :result, max_result_bytes) do
-    match?(
-      bytes when is_integer(bytes) and bytes <= max_result_bytes,
-      RetainedSize.bytes_with_cap(result, max_result_bytes)
+    InspectionQuery.query(
+      state.collections,
+      state.source_id,
+      operation,
+      arguments,
+      state.max_result_bytes,
+      %{"snapshot_hash" => snapshot_hash}
     )
   end
-
-  defp retained_result_within_limit?(_result, _operation, _max_result_bytes), do: true
 
   defp redact_status(status) do
     Map.new(status, fn
