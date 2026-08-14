@@ -9,28 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Replaced the split log/inspection analysis vocabularies with one six-operation
-  `analysis/*` read model shared by PTC-Lisp, the Viewer, Elixir embedders, and
-  the new one-shot `ptc transcript` command. Public and private authority remain
-  separate sealed recipes; private conversation reconstruction and failure
-  bundles no longer require callers to understand inspection record shapes.
+- Replaced the split log/inspection analysis vocabularies with the three-operation
+  `analysis/runs`, `analysis/open`, and `analysis/read` navigation API shared by
+  PTC-Lisp, the Viewer, Elixir embedders, and the one-shot `ptc transcript`
+  command. `open` advertises the available public and private collections; `read`
+  returns their native bounded pages without adding diagnosis policy.
 
 - Added the fixed, mission-only `ptc_private_trace_snapshot` provider source.
   It immutably captures ordinary and private canonical traces with per-run
   provenance, keeps inspection artifacts excluded, and classifies the run as
   `private_inspection`. The private run-analysis profile now accepts
-  private traces recursively while preserving V5 terminal-result hash
+  private traces recursively while preserving V6 terminal-result hash
   correlation; ordinary trace readers remain normal-only.
 
 - Added exact successful terminal-result inspection for explicitly private
-  captures. Inspection V5 binds one strictly JSON `run-result` record to the
-  canonical `run-stopped.data.result_hash`; `analysis/overview` exposes the
+  captures. Inspection V6 binds one strictly JSON `run-result` record to the
+  canonical `run-stopped.data.result_hash`; `analysis/open` exposes the
   value and hash through the bounded private analysis profile, while ordinary
-  traces retain only the hash.
+  traces retain only the hash. V6 also correlates each analyzable generated
+  program with its sorted static prelude calls and owning component IDs.
 
 - Added explicit named mission environments: manifests declare a bounded
   `missions` map with isolated data, continuations, APIs, and provider grants;
-  workflow and agent APIs select missions by name; V2 traces, V5 inspection,
+  workflow and agent APIs select missions by name; V2 traces, V6 inspection,
   Viewer projections, and stable command V2 evidence preserve mission
   attribution. The reader/writer example demonstrates two least-authority
   agents orchestrated by one workflow.

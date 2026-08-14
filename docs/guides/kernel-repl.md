@@ -89,20 +89,18 @@ files at its own level. Capture is immutable and one level deep. Empty capture
 is refused so a mispointed directory cannot look like a real empty result. A
 started session reports its admitted file and run counts.
 
-The profile installs six question-shaped functions:
+The profile installs three navigation functions:
 
 ```clojure
 (analysis/runs {"limit" 50})
-(analysis/overview "run-id")
-(analysis/activity "run-id" {"limit" 100})
-(analysis/failure "run-id" {"limit" 100})
+(analysis/open "run-id")
+(analysis/read "run-id" {"collection" "activity" "limit" 100})
 ```
 
-Those four return public evidence. `analysis/conversation` and
-`analysis/source` require private inspection authority and return
-`evidence_unavailable` here. Results are bounded and report `complete?`; false
-means narrow the query or raise its bound, not that omitted evidence did not
-exist.
+`analysis/open` advertises every collection with its filters, order, authority,
+and availability. Public sessions expose `activity`; private collections return
+`evidence_unavailable` here. Pages are bounded and report `truncated`,
+`omitted_count`, and an opaque `next_cursor` for explicit navigation.
 
 One session can build an investigation incrementally:
 
@@ -110,7 +108,9 @@ One session can build an investigation incrementally:
 (def runs (analysis/runs {"limit" 50}))
 (def items (get runs "items"))
 (def slowest (first (sort-by #(get % "duration_ms") > items)))
-(analysis/activity (get slowest "run_id") {"limit" 100})
+(def run-id (get slowest "run_id"))
+(analysis/open run-id)
+(analysis/read run-id {"collection" "activity" "limit" 100})
 ```
 
 Loaded files, repeated expressions, scripts, stdin, and interactive forms use
@@ -150,23 +150,28 @@ uncorrelated, oversized, or unsupported artifact rejects the complete private
 source. Use the PtcRunner build matching the artifact's reported schema when
 versions differ.
 
-Private authority enriches the same six operations rather than exposing raw
-record-family APIs:
+Private authority adds collections to the same three operations rather than
+adding smart diagnosis APIs:
 
 ```clojure
 (def runs (analysis/runs {"limit" 20}))
 (def run-id (get (first (get runs "items")) "run_id"))
-(analysis/overview run-id)
-(analysis/conversation run-id {"limit" 1000})
-(analysis/failure run-id {"limit" 1000})
-(analysis/source run-id {"limit" 1000})
+(analysis/open run-id)
+(analysis/read run-id {"collection" "turns" "limit" 20})
+(analysis/read run-id {"collection" "generated_sources"
+                       "prelude_call" "workspace/read"})
+(analysis/read run-id {"collection" "prelude_sources"
+                       "component_id" "workspace"})
+(analysis/read run-id {"collection" "execution_errors"})
 ```
 
 Results may include exact model messages, generated programs, effective
 component source, capability payloads, prints, failure details, and terminal
-values. `conversation` reconstructs cumulative model requests and reports
-ambiguous predecessor relationships instead of guessing. `failure` relates
-programs conservatively to diagnostics.
+values. `turns` reconstructs cumulative model requests once when the immutable
+snapshot opens. Each item exposes one individual turn and matching generated
+source; page-level evidence reports incomplete or ambiguous reconstruction
+without guessing. The repeated system prompt is omitted from turns and remains
+available in the raw `model_exchanges` collection.
 
 For one complete conversation, use the simpler one-shot command:
 
@@ -195,7 +200,7 @@ MIX_QUIET=1 mix ptc repl \
   --session-trace-dir tmp/analysis-traces \
   --private-unattended \
   --format jsonl \
-  -e '(analysis/conversation "run-id" {"limit" 1000})' \
+  -e '(analysis/read "run-id" {"collection" "turns" "limit" 100})' \
   >tmp/private-analysis.jsonl
 ```
 
@@ -223,7 +228,7 @@ mix ptc repl \
   --profile run-analysis-v1 \
   --resource traces=tmp/tutorial-traces \
   --session-trace-dir tmp/analysis-traces \
-  -e '(analysis/overview "run-id")'
+  -e '(analysis/open "run-id")'
 ```
 
 Without `--session-trace-dir`, PtcRunner creates a private temporary directory

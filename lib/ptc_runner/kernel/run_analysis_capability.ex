@@ -1,8 +1,8 @@
 defmodule PtcRunner.Kernel.RunAnalysisCapability do
   @moduledoc """
-  The single capability builder for question-shaped run analysis.
+  The single capability builder for bounded run-evidence navigation.
 
-  Profile sessions receive six stable `analysis-*` capabilities. A sealed host
+  Profile sessions receive three stable `analysis-*` capabilities. A sealed host
   recipe may expose the same operations as `<alias>.<operation>`. Both naming
   forms delegate to `PtcRunner.Kernel.RunAnalysis`; neither exposes primitive
   trace or inspection record-family operations.
@@ -12,7 +12,7 @@ defmodule PtcRunner.Kernel.RunAnalysisCapability do
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunAnalysis
 
-  @operations [:runs, :overview, :activity, :conversation, :failure, :source]
+  @operations [:runs, :open, :read]
 
   @spec from_snapshots(term(), term() | nil, binary() | nil) ::
           {:ok, [Capability.t()]} | {:error, :invalid_run_analysis_capability}
@@ -53,7 +53,7 @@ defmodule PtcRunner.Kernel.RunAnalysisCapability do
     Capability.new(
       name: name,
       description: description(operation),
-      input_schema: %{"type" => "object", "additionalProperties" => true},
+      input_schema: input_schema(operation),
       output_schema: %{"type" => "object", "additionalProperties" => true},
       effect: :read,
       callback: fn arguments -> query(analysis, operation, arguments) end,
@@ -66,11 +66,65 @@ defmodule PtcRunner.Kernel.RunAnalysisCapability do
   defp operation_name(operation), do: operation |> Atom.to_string() |> String.replace("_", "-")
 
   defp description(:runs), do: "List the runs available in this immutable analysis capture"
-  defp description(:overview), do: "Summarize what happened in one run"
-  defp description(:activity), do: "Read ordered run activity and authorized exact exchanges"
-  defp description(:conversation), do: "Reconstruct the model conversation without record joins"
-  defp description(:failure), do: "Explain a failure with conservative program relationships"
-  defp description(:source), do: "Read exact generated and effective component source"
+  defp description(:open), do: "Open one run's metadata and discover its evidence collections"
+  defp description(:read), do: "Read one bounded page from a named run evidence collection"
+
+  defp input_schema(:runs) do
+    object_schema(%{
+      "limit" => limit_schema(),
+      "cursor" => string_schema(),
+      "status" => string_schema(),
+      "run_id" => string_schema(),
+      "trace_id" => string_schema(),
+      "tags" => %{"type" => "object"},
+      "name" => string_schema(),
+      "model" => string_schema(),
+      "provider" => string_schema(),
+      "from" => string_schema(),
+      "to" => string_schema()
+    })
+  end
+
+  defp input_schema(:open),
+    do: object_schema(%{"run_id" => string_schema()}, ["run_id"])
+
+  defp input_schema(:read) do
+    collection_names = Enum.map(RunAnalysis.collections(), & &1.name)
+
+    filter_names =
+      RunAnalysis.collections()
+      |> Enum.flat_map(& &1.filters)
+      |> Enum.uniq()
+
+    filter_schemas =
+      Map.new(filter_names, fn
+        name when name in ["input_sequence", "request_id"] -> {name, positive_integer_schema()}
+        name -> {name, string_schema()}
+      end)
+
+    object_schema(
+      Map.merge(filter_schemas, %{
+        "run_id" => string_schema(),
+        "collection" => %{"type" => "string", "enum" => collection_names},
+        "limit" => limit_schema(),
+        "cursor" => string_schema()
+      }),
+      ["run_id", "collection"]
+    )
+  end
+
+  defp object_schema(properties, required \\ []) do
+    %{
+      "type" => "object",
+      "properties" => properties,
+      "required" => required,
+      "additionalProperties" => false
+    }
+  end
+
+  defp string_schema, do: %{"type" => "string", "minLength" => 1, "maxLength" => 4_096}
+  defp limit_schema, do: %{"type" => "integer", "minimum" => 1, "maximum" => 100}
+  defp positive_integer_schema, do: %{"type" => "integer", "minimum" => 1}
 
   defp validate_arguments(arguments) when is_map(arguments), do: :ok
   defp validate_arguments(_arguments), do: {:error, "map required"}

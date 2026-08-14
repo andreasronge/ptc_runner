@@ -22,7 +22,7 @@ defmodule PtcViewer.ReplStoreTest do
     assert [%{source_preview: "(+ 1 2)"}] = evaluated["transcript"]
 
     assert {:ok, templated} = ReplStore.template(store, first_session, :run, "run-1")
-    assert templated["template"]["source"] == ~s[(analysis/overview "run-1")]
+    assert templated["template"]["source"] == ~s[(analysis/open "run-1")]
 
     assert {:ok, reset} = ReplStore.reset(store, first_session)
     replacement = reset["session_id"]

@@ -35,6 +35,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   @capture_heap_words 40_000_000
   @operations [
     :list_runs,
+    :get_run,
+    :turns,
     :model_exchanges,
     :capability_calls,
     :generated_sources,
@@ -302,7 +304,10 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
          :ok <- same_inventory(before, after_capture),
          :ok <- validate_unique_runs(artifacts),
          :ok <- validate_correlations(artifacts, trace_snapshot),
-         {:ok, compiled} <- InspectionQuery.compile(artifacts, trace_info.capture_id),
+         {:ok, trace_analysis} <-
+           TraceSnapshot.analysis_facts(trace_snapshot, artifact_run_ids(artifacts)),
+         {:ok, compiled} <-
+           InspectionQuery.compile(artifacts, trace_info.capture_id, trace_analysis),
          retained_bytes
          when is_integer(retained_bytes) and retained_bytes <= max_retained_bytes <-
            RetainedSize.bytes(compiled.collections) do
@@ -442,6 +447,9 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
       do: :ok,
       else: {:error, :duplicate_inspection_run}
   end
+
+  defp artifact_run_ids(artifacts),
+    do: Enum.map(artifacts, fn [first | _rest] -> first["run_id"] end)
 
   defp validate_correlations(artifacts, trace_snapshot) do
     Enum.reduce_while(artifacts, :ok, fn records, :ok ->

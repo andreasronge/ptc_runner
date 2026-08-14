@@ -194,10 +194,11 @@ is read-only. If any mapping is a write, an explicit non-empty list is
 required. `model_visible` may narrow discovery within the authorized names;
 visibility never grants or denies call authority.
 
-Native trace and inspection aliases derive six question-shaped capabilities:
-`runs`, `overview`, `activity`, `conversation`, `failure`, and `source`.
-Public trace sources provide public evidence and return
-`evidence_unavailable` for private questions. An inspection alias composes its
+Native trace and inspection aliases derive three navigation capabilities:
+`runs`, `open`, and `read`. `open` advertises the named collections and their
+filters; `read` returns one native bounded page. Public trace sources provide
+the `activity` collection and return `evidence_unavailable` for private
+collections. An inspection alias composes its
 required canonical trace snapshot with authorized private records. Set the
 trace dependency's config to `{"expose": false}` when only the aggregate
 inspection namespace should be callable.

@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.ViewerAdapterTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.ConversationProjection
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.RunAnalysis
   alias PtcRunner.Kernel.TraceLog
@@ -18,8 +19,8 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
 
     assert {:ok, analysis} = RunAnalysis.new(trace, inspection)
 
-    assert {:ok, expected} =
-             RunAnalysis.query(analysis, :conversation, %{"run_id" => fixture.run_id})
+    assert {:ok, page} = RunAnalysis.collect(analysis, fixture.run_id, "turns", 1_000)
+    expected = ConversationProjection.present_page(page)
 
     inspection_path =
       fixture.inspection

@@ -264,8 +264,8 @@ token lifecycle rules.
 
 ### Trace and inspection snapshots
 
-Native snapshot installations expose question-shaped analysis over immutable
-captures:
+Native snapshot installations expose bounded run-evidence navigation over
+immutable captures:
 
 ```json
 "history": {

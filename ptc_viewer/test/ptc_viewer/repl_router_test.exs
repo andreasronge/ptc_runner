@@ -145,7 +145,7 @@ defmodule PtcViewer.ReplRouterTest do
       |> call_router(opts)
       |> response_body()
 
-    assert template["template"]["source"] == ~s[(analysis/activity "run-1" {})]
+    assert template["template"]["source"] == ~s[(analysis/read "run-1" {"collection" "activity"})]
 
     reset = mutation(:post, "/api/repl/reset", %{}, session_id, nonce) |> call_router(opts)
     reset_body = response_body(reset)

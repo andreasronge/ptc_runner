@@ -174,7 +174,7 @@ new canonical events from mutating the source it is paging.
 
 The server-owned `run-analysis-v1` profile is shared by the Viewer and ordinary
 terminal REPL frontends. Its mission bundle contains `cap` and `analysis`; its
-explicit authority contains the six `analysis-*` capabilities; and ordinary implicit
+explicit authority contains the three `analysis-*` capabilities; and ordinary implicit
 mission introspection remains available. Filesystem, network, LLM, agent,
 workflow, MCP, private-inspection, and nested `kernel-eval` authority are
 absent. The separate `private-run-analysis-v1` profile uses the
@@ -309,7 +309,7 @@ and missing current fields fail closed rather than being inferred or projected.
 
 ## Required run metadata
 
-`analysis/runs` and `analysis/overview` expose bounded sanitized metadata
+`analysis/runs` and `analysis/open` expose bounded sanitized metadata
 sufficient to select a run without loading its activity:
 
 - run ID and trace ID;
@@ -354,26 +354,23 @@ messages/tool results. Absent optional facts remain absent or `nil`.
 
 ## Query contract
 
-The shipped analysis prelude exposes one question-shaped namespace:
+The shipped analysis prelude exposes a small navigation namespace:
 
 ```clojure
 (analysis/runs options)
-(analysis/overview run-id)
-(analysis/activity run-id options)
-(analysis/conversation run-id options)
-(analysis/failure run-id options)
-(analysis/source run-id options)
+(analysis/open run-id)
+(analysis/read run-id options)
 ```
 
 Examples:
 
 ```clojure
 (analysis/runs {"status" "error" "tags" {"stage" "failed"} "limit" 20})
-(analysis/overview "run-id")
-(analysis/activity "run-id" {"limit" 100})
-(analysis/conversation "run-id" {"limit" 1000})
-(analysis/failure "run-id" {"limit" 1000})
-(analysis/source "run-id" {"limit" 1000})
+(analysis/open "run-id")
+(analysis/read "run-id" {"collection" "activity" "limit" 100})
+(analysis/read "run-id" {"collection" "turns" "limit" 20})
+(analysis/read "run-id" {"collection" "generated_sources"
+                         "prelude_call" "workspace/read"})
 ```
 
 The internal canonical turn and counter readers accept `mission_name`. Run filters
@@ -391,26 +388,39 @@ present, timestamp range, limit, and cursor.
 Default ordering is deterministic: newest start timestamp first, with run ID as
 a stable tie-breaker.
 
-### `analysis/overview`
+### `analysis/open`
 
 Returns metadata for one source-visible run or a uniform not-found/denied error.
-It does not return all turns implicitly.
+It does not return all evidence implicitly. Its `collections` catalog names
+each collection, its authority, availability, exact filters, and stable order,
+so a caller can discover the next read without knowing the storage schema.
 
-### `analysis/activity`
+### `analysis/read`
 
-Returns bounded canonical activity plus authorized private facets for one run.
-The public arguments are `run_id` and an optional per-read page size `limit`;
-the read model follows source-bound primitive cursors internally and either
-returns a complete aggregate or a stable result-limit error. Ordering is
-ascending canonical sequence.
+Returns one native bounded page from the named collection. Every page has
+`items`, `next_cursor`, `truncated`, `omitted_count`, and `snapshot_hash`;
+callers follow `next_cursor` explicitly. The wrapper does not aggregate pages,
+diagnose failures, or hide primitive pagination.
 
-### Private semantic operations
+`activity` is public canonical activity in ascending sequence. Private captures
+also advertise `turns`, `model_exchanges`, `capability_calls`,
+`provider_exchanges`, `generated_sources`, `prelude_sources`,
+`execution_prints`, and `execution_errors`. Public recipes report those private
+collections as unavailable and reject reads without changing authority.
 
-`analysis/conversation` reconstructs cumulative model requests as one or more
-explicit streams. `analysis/failure` returns diagnostics and program candidates
-with conservative relationship labels. `analysis/source` returns exact
-generated and effective component sources. Public recipes reject those exact
-private reads without changing authority.
+`turns` is the only compiled convenience collection. Each item is one model
+turn with the newly added messages, response, matching generated programs, and
+stable stream/turn identity. It omits the repeated system prompt; exact raw
+model requests remain available through `model_exchanges`. Page-level
+`evidence` reports canonical completeness, missing exchanges, and ambiguity
+separately from pagination.
+
+Generated programs carry `prelude_calls_available?` and a sorted
+`prelude_calls` list of `{ref, component_id}` entries. Exact
+`prelude_call`/`prelude_component` filters work on both `generated_sources` and
+`turns`. The association between a turn and generated source is explicitly
+`source_match`; duplicate identical sources are marked ambiguous rather than
+given a fabricated causal identity.
 
 For routed `llm-request` calls, `llm_usage` groups stopped events by model alias
 and installation revision. Each row reports total and successful calls, calls
@@ -469,12 +479,10 @@ memory diffs, and program source follow their own projection ceilings.
 
 ## Capabilities and swappable preludes
 
-Analysis capabilities follow the standard Kernel envelope and are named:
+Analysis capabilities follow the standard Kernel envelope and are named
+`analysis-runs`, `analysis-open`, and `analysis-read`.
 
-- `analysis-runs`, `analysis-overview`, `analysis-activity`;
-- `analysis-conversation`, `analysis-failure`, `analysis-source`.
-
-All six delegate to `PtcRunner.Kernel.RunAnalysis`. The `analysis` prelude is a
+All three delegate to `PtcRunner.Kernel.RunAnalysis`. The `analysis` prelude is a
 thin `cap/unwrap!` layer; Viewer, CLI, and embedders call the same read model.
 Capability error envelopes fail evaluation rather than flowing into projections
 as ordinary empty data.
@@ -507,7 +515,7 @@ Sanitized subordinate `evaluation-started` data adds:
 - `program_kind: "ptc-lisp"` alongside the existing
   `environment: "mission"` and `evaluation_id`.
 
-It must not contain exact source. `analysis/activity` returns canonical event
+It must not contain exact source. The `activity` collection returns canonical event
 data, so embedding source in a supposedly private event would collapse source
 authorization into the ordinary activity query.
 
@@ -517,7 +525,7 @@ JSON object with this exact envelope:
 
 ```json
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "run_id": "run-id",
   "trace_id": "trace-id",
   "sequence": 1,
@@ -529,7 +537,7 @@ JSON object with this exact envelope:
 ```
 
 Keys are exact. `sequence` is positive and strictly increasing within the
-artifact. The timestamp is UTC ISO 8601. Except for the V5 `run-result`,
+artifact. The timestamp is UTC ISO 8601. Except for the V6 `run-result`,
 `correlation` contains exactly one of `capability_id`, `evaluation_id`, or
 `component_id`. Capability and evaluation values must occur in the canonical
 trace for the same run unless that trace explicitly proves the corresponding
@@ -542,6 +550,7 @@ types and payloads are:
 | `capability-input` | `capability_id` | `environment`, `name`, `arguments` |
 | `capability-output` | `capability_id` | `environment`, `name`, `result` |
 | `evaluation-source` | `evaluation_id` | `environment`, `program_kind`, `source`, `source_hash`, `source_bytes` |
+| `evaluation-analysis` | `evaluation_id` | `environment`, `mission_name`, `prelude_calls` |
 | `prelude-source` | `component_id` | `environment`, `source`, `source_hash`, `source_bytes` |
 | `mcp-request` | `capability_id`, `request_id` | `transport`, `body` |
 | `mcp-response` | `capability_id`, `request_id` | `transport`, `body` |
@@ -549,13 +558,14 @@ types and payloads are:
 | `execution-error` | `evaluation_id` | `environment`, `kind`, `reason`, `details` |
 
 Named-mission ownership is explicit. Mission `capability-input`,
-`capability-output`, `evaluation-source`, `prelude-source`, `mcp-request`, and
-`mcp-response` payloads require `mission_name`; workflow payloads forbid it.
+`capability-output`, `evaluation-source`, `evaluation-analysis`,
+`prelude-source`, `mcp-request`, and `mcp-response` payloads require
+`mission_name`; workflow payloads forbid it.
 Prelude uniqueness is `(environment, mission_name, component_id)`, so the same
 component ID can be inspected independently in multiple missions. Every
 mission-owned query result preserves `mission_name`.
 
-V5 includes at most one successful terminal-result record:
+V6 includes at most one successful terminal-result record:
 
 | Record type | Correlation | Exact payload fields |
 | --- | --- | --- |
@@ -574,9 +584,17 @@ rejected unless the supplied value is already strict JSON. `result` is the
 bounded Dispatcher envelope returned to Lisp, so `llm-request` input/output
 records contain the provider-neutral model request and normalized response, and
 MCP records contain the public connector arguments and normalized result/error.
-`evaluation-source` is emitted only for subordinate mission evaluation in this
-increment. Its hash and byte count must equal the corresponding canonical
-`evaluation-started` fields. `prelude-source` records carry the exact
+`evaluation-source` is emitted only for subordinate mission evaluation. Its
+hash and byte count must equal the corresponding canonical
+`evaluation-started` fields. After successful static analysis of that source,
+`evaluation-analysis` records the sorted unique public prelude functions the
+resolved program calls as exact `{"ref", "component_id"}` objects. Direct
+calls and callable function references count; constants do not. Parse or
+analysis failure leaves the source without an analysis record, which projects
+as `prelude_calls_available?: false` rather than an empty successful result.
+The analysis record is accepted before continuation state commits; a sink or
+component-mapping failure fails the evaluation without committing that
+continuation. `prelude-source` records carry the exact
 effective source of every frozen workflow and mission component, one record
 per component in frozen order, emitted by the manifest-backed builder before
 execution begins. `execution-prints` is emitted for the top-level workflow
@@ -600,7 +618,8 @@ cannot retroactively undo that read.
 
 Artifact validation rejects ambiguous joins before persistence or Viewer
 pinning. There may be at most one input and one output for a capability ID, one
-source for an evaluation ID, and one source for an environment/component pair.
+source and one subsequent analysis for an evaluation ID, and one source for an
+environment/component pair.
 A capability output requires an earlier matching input; an input without an
 output is valid only as an interrupted attempt. Private capability name and
 environment must match the canonical `capability-started` event carrying the
@@ -673,8 +692,8 @@ from every primitive TraceLog query. Normal discovery explicitly rejects or omit
 JSONL.
 
 A host-installed inspection snapshot composes its correlated canonical trace
-through the six semantic operations. `analysis/overview` includes an eligible
-immutable V5 result value and canonical `result_hash`; an unknown run and a
+through the three navigation operations. `analysis/open` includes an eligible
+immutable V6 result value and canonical `result_hash`; an unknown run and a
 known run without an eligible result remain distinct internally. Both encoded
 and retained sizes must fit the snapshot result ceiling. Possessing a private
 canonical event source, local Viewer access, or the active run does not imply
@@ -693,7 +712,7 @@ no caller-defined keys or string values, and cannot forge canonical events.
 
 `ptc_viewer`, CLI debugging, and the model-facing `analysis/*` capabilities
 share the same loader, metadata derivation, filtering, ordering, pagination,
-and question-shaped `RunAnalysis` projections where practical.
+and bounded `RunAnalysis` navigation where practical.
 
 The viewer may render richer presentations, but it is not a second canonical
 query implementation or authority source. An explicit loopback-only development

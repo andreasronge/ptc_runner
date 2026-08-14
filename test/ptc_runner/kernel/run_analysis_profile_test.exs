@@ -264,7 +264,7 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   end
 
   @tag :tmp_dir
-  test "profile and manifest capabilities share E1 queries including populated V2 exchanges", %{
+  test "profile and manifest capabilities share navigation queries", %{
     tmp_dir: root
   } do
     fixture = PrivateInspectionFixture.create!(root)
@@ -284,10 +284,7 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
     arguments = [
       %{"limit" => 10},
       %{"run_id" => fixture.run_id},
-      %{"run_id" => fixture.run_id},
-      %{"run_id" => fixture.run_id},
-      %{"run_id" => fixture.run_id},
-      %{"run_id" => fixture.run_id}
+      %{"run_id" => fixture.run_id, "collection" => "provider_exchanges"}
     ]
 
     Enum.zip([all_profile_capabilities, manifest_capabilities, arguments])
@@ -295,20 +292,22 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
       assert profile.callback.(query) == manifest.callback.(query)
     end)
 
-    activity = Enum.find(all_profile_capabilities, &(&1.name == "analysis-activity"))
+    read = Enum.find(all_profile_capabilities, &(&1.name == "analysis-read"))
 
     assert {:ok,
             %{
-              "private" => %{
-                "provider_exchanges" => [
-                  %{
-                    "request_id" => 7,
-                    "request" => %{"method" => "tools/call"},
-                    "response" => %{"result" => %{"content" => [_ | _]}}
-                  }
-                ]
-              }
-            }} = activity.callback.(%{"run_id" => fixture.run_id})
+              "items" => [
+                %{
+                  "request_id" => 7,
+                  "request" => %{"method" => "tools/call"},
+                  "response" => %{"result" => %{"content" => [_ | _]}}
+                }
+              ]
+            }} =
+             read.callback.(%{
+               "run_id" => fixture.run_id,
+               "collection" => "provider_exchanges"
+             })
   end
 
   @tag :tmp_dir
@@ -351,19 +350,17 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
             %{
               status: :ok,
               value: %{
-                "streams" => [
-                  %{"turns" => [%{"messages_added" => messages, "response" => model_result}]}
-                ]
+                "items" => [%{"messages_added" => messages, "response" => model_result}]
               },
               usage: %{capability_calls: capability_calls} = usage
             }} =
              AnalysisSession.evaluate(
                session,
-               ~s|(analysis/conversation "#{fixture.run_id}" {})|
+               ~s|(analysis/read "#{fixture.run_id}" {"collection" "turns"})|
              )
 
     refute Map.has_key?(usage, :trace_calls)
-    assert capability_calls["analysis-conversation"].used == 1
+    assert capability_calls["analysis-read"].used == 1
 
     assert messages == [%{"content" => "private-prompt-#{fixture.run_id}"}]
 
@@ -377,10 +374,10 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
              }
            }
 
-    assert {:ok, %{value: %{"generated_programs" => [source]}}} =
+    assert {:ok, %{value: %{"items" => [source]}}} =
              AnalysisSession.evaluate(
                session,
-               ~s|(analysis/source "#{fixture.run_id}" {})|
+               ~s|(analysis/read "#{fixture.run_id}" {"collection" "generated_sources"})|
              )
 
     assert source["source"] == "(return 42)"
@@ -388,10 +385,10 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
     assert {:ok, %{status: :error, outcome: :failed}} =
              AnalysisSession.evaluate(session, ~S|(analysis/runs {"limit" 1001})|)
 
-    assert {:ok, %{value: %{"private" => %{"provider_exchanges" => [exchange]}}}} =
+    assert {:ok, %{value: %{"items" => [exchange]}}} =
              AnalysisSession.evaluate(
                session,
-               ~s|(analysis/activity "#{fixture.run_id}" {})|
+               ~s|(analysis/read "#{fixture.run_id}" {"collection" "provider_exchanges"})|
              )
 
     assert exchange["response"]["result"]["content"] == [
@@ -404,23 +401,31 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
     assert {:ok,
             %{
               value: %{
-                "private" => %{
-                  "execution_prints" => [
-                    %{"evaluation_id" => ^execution_id, "prints" => [^execution_print]}
-                  ],
-                  "execution_errors" => [
-                    %{
-                      "evaluation_id" => ^execution_id,
-                      "kind" => "limit_exceeded",
-                      "reason" => "timeout"
-                    }
-                  ]
-                }
+                "items" => [
+                  %{"evaluation_id" => ^execution_id, "prints" => [^execution_print]}
+                ]
               }
             }} =
              AnalysisSession.evaluate(
                session,
-               ~s|(analysis/activity "#{fixture.run_id}" {})|
+               ~s|(analysis/read "#{fixture.run_id}" {"collection" "execution_prints"})|
+             )
+
+    assert {:ok,
+            %{
+              value: %{
+                "items" => [
+                  %{
+                    "evaluation_id" => ^execution_id,
+                    "kind" => "limit_exceeded",
+                    "reason" => "timeout"
+                  }
+                ]
+              }
+            }} =
+             AnalysisSession.evaluate(
+               session,
+               ~s|(analysis/read "#{fixture.run_id}" {"collection" "execution_errors"})|
              )
 
     assert {:ok, %{lifecycle: :closed}} = AnalysisSession.close(session)
@@ -430,7 +435,7 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
     refute encoded_trace =~ "private-prompt"
     refute encoded_trace =~ "private-answer"
     refute encoded_trace =~ "private-tool-result"
-    refute encoded_trace =~ "analysis/conversation"
+    refute encoded_trace =~ "analysis/read"
     refute encoded_trace =~ "(return 42)"
 
     assert {:ok, trace} = TraceLog.new(source: {:file, trace_path})
@@ -461,7 +466,7 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
                   "snapshot_hash" => snapshot_hash
                 }
               }
-            }} = AnalysisSession.evaluate(session, ~s|(analysis/overview "#{fixture.run_id}")|)
+            }} = AnalysisSession.evaluate(session, ~s|(analysis/open "#{fixture.run_id}")|)
 
     assert run_id == fixture.run_id
     assert result_hash == fixture.result_hash

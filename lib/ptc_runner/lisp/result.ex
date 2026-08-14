@@ -30,6 +30,7 @@ defmodule PtcRunner.Lisp.Result do
     :original_prompt,
     :tools,
     :prelude_trace,
+    :prelude_calls,
     prelude_call_counts: %{}
   ]
 
@@ -53,6 +54,7 @@ defmodule PtcRunner.Lisp.Result do
           prompt: String.t() | nil,
           tools: map() | nil,
           prelude_trace: PtcRunner.Lisp.Prelude.trace_summary() | nil,
+          prelude_calls: [String.t()] | nil,
           prelude_call_counts: %{optional(String.t()) => non_neg_integer()}
         }
 

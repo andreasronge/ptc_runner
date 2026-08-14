@@ -25,13 +25,13 @@ always binds to loopback.
 
 The REPL evaluates PTC-Lisp against an immutable capture of the selected trace
 directory. The server fixes the `run-analysis-v1` profile: normal bounded
-PTC-Lisp built-ins, the six question-shaped `analysis/*` queries, their shared
-`cap` helpers, six read-only analysis capabilities, and the ordinary
+PTC-Lisp built-ins, the three `analysis/*` navigation functions, their shared
+`cap` helpers, three read-only analysis capabilities, and the ordinary
 runtime/capability introspection routes. It does not grant filesystem, network,
 LLM, MCP, workflow-event, or arbitrary prelude authority.
 
-Forms such as `(analysis/runs {})`, `(analysis/overview "run-id")`, and
-`(analysis/activity "run-id" {"limit" 100})` return bounded values,
+Forms such as `(analysis/runs {})`, `(analysis/open "run-id")`, and
+`(analysis/read "run-id" {"collection" "activity" "limit" 100})` return bounded values,
 prints, errors, continuation effects, duration, and remaining usage. The
 server-owned transcript survives a page reload. Reset first closes and persists
 the analysis run, then captures a new snapshot and starts with fresh
@@ -129,10 +129,10 @@ Runs-only UI.
 | `GET /api/kernel/runs/:run_id` | `get_run` |
 | `GET /api/kernel/runs/:run_id/turns` | `list_turns` with bounded filters and pagination |
 | `GET /api/kernel/counters` | `counters` |
-| `GET /api/analysis/runs/:run_id/conversation` | Semantic `RunAnalysis.conversation` result |
+| `GET /api/analysis/runs/:run_id/conversation` | Presentation over the bounded `turns` collection |
 | `GET /api/repl` | Bootstrap or refresh the server-owned analysis session |
 | `POST /api/repl/evaluations` | Evaluate one bounded PTC-Lisp form |
-| `POST /api/repl/templates` | Format an inert `analysis/overview` or `analysis/activity` editor template |
+| `POST /api/repl/templates` | Format an inert `analysis/open` or `analysis/read` editor template |
 | `POST /api/repl/reset` | Persist the current session and capture a replacement |
 | `DELETE /api/repl` | Close and persist the current analysis session |
 

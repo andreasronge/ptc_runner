@@ -99,6 +99,7 @@ defmodule PtcRunner.Lisp do
     original_prompt: nil,
     tools: nil,
     prelude_trace: nil,
+    prelude_calls: nil,
     prelude_call_counts: %{}
   ]
 
@@ -981,7 +982,7 @@ defmodule PtcRunner.Lisp do
           })
 
         case compile_program(source, compile_opts) do
-          {:ok, _core_ast} -> :ok
+          {:ok, _core_ast, _prelude_calls} -> :ok
           {:error, %Step{} = step} -> {:error, step}
         end
       else
@@ -1000,8 +1001,10 @@ defmodule PtcRunner.Lisp do
 
   defp execute_program(source, opts) do
     case compile_program(source, Map.put(opts, :check_tool_resolution, true)) do
-      {:ok, core_ast} ->
-        execute_eval(core_ast, apply_run_deadline(opts))
+      {:ok, core_ast, prelude_calls} ->
+        core_ast
+        |> execute_eval(apply_run_deadline(opts))
+        |> put_prelude_calls(prelude_calls)
 
       {:error, %Step{}} = compile_error ->
         prepare_pre_setup_error(compile_error, opts)
@@ -1045,7 +1048,8 @@ defmodule PtcRunner.Lisp do
             do: check_undefined_tools(core_ast, public_tool_names, tool_names, prelude),
             else: :ok
 
-        {:ok, core_ast, undefined_vars, tool_check}
+        prelude_calls = static_prelude_calls(core_ast, prelude)
+        {:ok, core_ast, undefined_vars, tool_check, prelude_calls}
       end
     end
 
@@ -1056,10 +1060,10 @@ defmodule PtcRunner.Lisp do
     ]
 
     case PtcRunner.Sandbox.run_bounded(compile_fn, compile_opts) do
-      {:ok, {:ok, core_ast, undefined_vars, tool_check}} ->
+      {:ok, {:ok, core_ast, undefined_vars, tool_check, prelude_calls}} ->
         with :ok <- check_undefined_var_candidates(undefined_vars, memory),
              :ok <- tool_check do
-          {:ok, core_ast}
+          {:ok, core_ast, prelude_calls}
         else
           {:error, _} = compile_error ->
             handle_compile_error(compile_error, memory)
@@ -1098,6 +1102,10 @@ defmodule PtcRunner.Lisp do
     remaining_ms = max(deadline_ms - System.monotonic_time(:millisecond), 1)
     %{opts | timeout: min(timeout, remaining_ms)}
   end
+
+  defp put_prelude_calls({status, %Step{} = step}, prelude_calls)
+       when status in [:ok, :error] and is_list(prelude_calls),
+       do: {status, %{step | prelude_calls: prelude_calls}}
 
   defp handle_compile_error({:error, {:parse_error, msg}}, memory) do
     {:error, Step.error(:parse_error, msg, memory, %{})}
@@ -2410,6 +2418,44 @@ defmodule PtcRunner.Lisp do
     do: Enum.reduce(Map.values(map), acc, &collect_prelude_refs/2)
 
   defp collect_prelude_refs(_other, acc), do: acc
+
+  defp static_prelude_calls(_core_ast, nil), do: []
+
+  defp static_prelude_calls(core_ast, %Prelude{} = prelude) do
+    callable_refs =
+      prelude.exports
+      |> Enum.filter(&(&1.kind == :function))
+      |> MapSet.new(& &1.ref)
+
+    core_ast
+    |> collect_static_prelude_calls(callable_refs, MapSet.new())
+    |> MapSet.to_list()
+    |> Enum.sort()
+  end
+
+  defp collect_static_prelude_calls({:prelude_call, ref, args}, callable_refs, acc) do
+    Enum.reduce(args, MapSet.put(acc, ref), &collect_static_prelude_calls(&1, callable_refs, &2))
+  end
+
+  defp collect_static_prelude_calls({:prelude_ref, ref}, callable_refs, acc) do
+    if MapSet.member?(callable_refs, ref), do: MapSet.put(acc, ref), else: acc
+  end
+
+  defp collect_static_prelude_calls(tuple, callable_refs, acc) when is_tuple(tuple),
+    do:
+      Enum.reduce(
+        Tuple.to_list(tuple),
+        acc,
+        &collect_static_prelude_calls(&1, callable_refs, &2)
+      )
+
+  defp collect_static_prelude_calls(list, callable_refs, acc) when is_list(list),
+    do: Enum.reduce(list, acc, &collect_static_prelude_calls(&1, callable_refs, &2))
+
+  defp collect_static_prelude_calls(map, callable_refs, acc) when is_map(map),
+    do: Enum.reduce(Map.values(map), acc, &collect_static_prelude_calls(&1, callable_refs, &2))
+
+  defp collect_static_prelude_calls(_other, _callable_refs, acc), do: acc
 
   defp execute_tool(normalized_tools, name, args, origin, failure_token) do
     case Map.fetch(normalized_tools, name) do

@@ -141,8 +141,12 @@ defmodule PtcViewer.TestReplAdapter do
 
   @impl true
   def template(_backend, _session, kind, run_id) when kind in [:run, :turns] do
-    {operation, suffix} = if kind == :run, do: {"overview", ")"}, else: {"activity", " {})"}
-    {:ok, %{source: "(analysis/#{operation} #{inspect(run_id)}#{suffix}"}}
+    source =
+      if kind == :run,
+        do: ~s[(analysis/open #{inspect(run_id)})],
+        else: ~s[(analysis/read #{inspect(run_id)} {"collection" "activity"})]
+
+    {:ok, %{source: source}}
   end
 
   @impl true

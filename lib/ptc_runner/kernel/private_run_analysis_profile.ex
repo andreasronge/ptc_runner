@@ -1,6 +1,6 @@
 defmodule PtcRunner.Kernel.PrivateRunAnalysisProfile do
   @moduledoc """
-  Fixed private authority recipe for correlated question-shaped run analysis.
+  Fixed private authority recipe for correlated run-evidence navigation.
 
   Its source class is sealed as `private_inspection`; private inspection
   presence never dynamically changes a public recipe's classification.

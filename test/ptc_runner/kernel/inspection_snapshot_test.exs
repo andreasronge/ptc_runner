@@ -81,7 +81,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
              InspectionSnapshot.query(snapshot, :result, %{"run_id" => "unknown"})
 
     {:ok, capabilities} = RunAnalysisCapability.from_snapshots(trace_snapshot, snapshot)
-    result_capability = Enum.find(capabilities, &(&1.name == "analysis-overview"))
+    result_capability = Enum.find(capabilities, &(&1.name == "analysis-open"))
 
     assert {:ok, %{"result" => %{"value" => ^value}}} =
              result_capability.callback.(%{"run_id" => run_id})
@@ -102,7 +102,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     {:ok, limited_capabilities} =
       RunAnalysisCapability.from_snapshots(trace_snapshot, limited_snapshot)
 
-    limited_result = Enum.find(limited_capabilities, &(&1.name == "analysis-overview"))
+    limited_result = Enum.find(limited_capabilities, &(&1.name == "analysis-open"))
 
     assert {:error,
             %ProviderError{
@@ -117,7 +117,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       |> Enum.with_index(1)
       |> Enum.map(fn {mission_name, sequence} ->
         %{
-          "schema_version" => 5,
+          "schema_version" => 6,
           "run_id" => "qualified-preludes",
           "trace_id" => "trace-qualified-preludes",
           "sequence" => sequence,
@@ -135,7 +135,10 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       end)
 
     assert {:ok, %{source_id: source_id, collections: collections}} =
-             InspectionQuery.compile([records], "trace-source")
+             InspectionQuery.compile([records], "trace-source", %{
+               "trace_snapshot_hash" => "trace-source",
+               "runs" => %{"qualified-preludes" => %{}}
+             })
 
     assert {:ok, %{"items" => items}} =
              InspectionQuery.query(
@@ -181,7 +184,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert {:ok,
             %{
-              "items" => [%{"run_id" => "mcp-run", "schema_version" => 5}],
+              "items" => [%{"run_id" => "mcp-run", "schema_version" => 6}],
               "next_cursor" => nil,
               "snapshot_hash" => ^snapshot_hash
             }} =
@@ -478,26 +481,23 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert Enum.map(profile_capabilities, & &1.name) == [
              "analysis-runs",
-             "analysis-overview",
-             "analysis-activity",
-             "analysis-conversation",
-             "analysis-failure",
-             "analysis-source"
+             "analysis-open",
+             "analysis-read"
            ]
 
     assert Enum.map(provider_capabilities, & &1.name) == [
              "private.runs",
-             "private.overview",
-             "private.activity",
-             "private.conversation",
-             "private.failure",
-             "private.source"
+             "private.open",
+             "private.read"
            ]
 
-    provider_exchange = Enum.find(provider_capabilities, &(&1.name == "private.activity"))
+    provider_exchange = Enum.find(provider_capabilities, &(&1.name == "private.read"))
 
-    assert {:ok, %{"private" => %{"provider_exchanges" => []}}} =
-             provider_exchange.callback.(%{"run_id" => "named"})
+    assert {:ok, %{"items" => []}} =
+             provider_exchange.callback.(%{
+               "run_id" => "named",
+               "collection" => "provider_exchanges"
+             })
 
     snapshot_ref = Process.monitor(snapshot.pid)
     assert :ok = TraceSnapshot.stop(trace_snapshot)
@@ -589,19 +589,21 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     capability =
       Map.fetch!(
         built.config.missions["default"].environment.capabilities,
-        "private-history.activity"
+        "private-history.read"
       )
 
     assert {:ok,
             %{
-              "private" => %{
-                "snapshot_hash" => content_snapshot_hash,
-                "provider_exchanges" => provider_exchanges
-              }
+              "snapshot_hash" => content_snapshot_hash,
+              "items" => provider_exchanges
             }} =
-             capability.callback.(%{"run_id" => "manifest-run", "limit" => 1})
+             capability.callback.(%{
+               "run_id" => "manifest-run",
+               "collection" => "provider_exchanges",
+               "limit" => 1
+             })
 
-    assert Enum.map(provider_exchanges, & &1["request_id"]) == [7, 8]
+    assert Enum.map(provider_exchanges, & &1["request_id"]) == [7]
     assert private_snapshot["content_snapshot_hash"] == content_snapshot_hash
     assert :ok = RunBuilder.close(built)
   end
@@ -746,7 +748,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     on_exit(fn -> TraceSnapshot.stop(trace_snapshot) end)
 
     assert {:error,
-            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 5}}} =
+            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 6}}} =
              InspectionSnapshot.start({:directory, inspection}, trace_snapshot, owner: self())
   end
 

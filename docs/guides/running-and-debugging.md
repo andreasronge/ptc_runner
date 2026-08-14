@@ -263,11 +263,12 @@ mix ptc repl \
   --profile run-analysis-v1 \
   --resource traces=traces \
   -e '(analysis/runs {})' \
-  -e '(analysis/overview "run-id")'
+  -e '(analysis/open "run-id")'
 ```
 
-Public analysis supports `runs`, `overview`, `activity`, and the public portion
-of `failure`. `conversation` and `source` require private inspection authority.
+Public analysis supports `runs`, `open`, and `read`; the public `activity`
+collection contains canonical events. `open` advertises the private collections
+but they require a correlated inspection snapshot and private authority.
 The [TraceLog contract](../trace-log-contract.md) defines event schemas,
 sanitization, filtering, pagination, and source classes. The
 [Kernel REPL guide](kernel-repl.md) covers longer investigations.

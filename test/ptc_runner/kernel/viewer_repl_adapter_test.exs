@@ -73,10 +73,10 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
     assert {:ok, ^result} = ViewerReplAdapter.reconcile_evaluate(backend, session, evaluation_id)
     assert :ok = ViewerReplAdapter.acknowledge_operation(backend, :evaluation, evaluation_id)
 
-    assert {:ok, %{source: ~s[(analysis/overview "seed")]}} =
+    assert {:ok, %{source: ~s[(analysis/open "seed")]}} =
              ViewerReplAdapter.template(backend, session, :run, "seed")
 
-    assert {:ok, %{source: ~s[(analysis/activity "seed" {})]}} =
+    assert {:ok, %{source: ~s[(analysis/read "seed" {"collection" "activity"})]}} =
              ViewerReplAdapter.template(backend, session, :turns, "seed")
 
     close_id = random_id()

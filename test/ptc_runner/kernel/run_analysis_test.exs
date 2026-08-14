@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.RunAnalysisTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.ConversationProjection
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.RunAnalysis
@@ -9,7 +10,7 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
   alias PtcRunner.TestSupport.PrivateInspectionFixture
 
   @tag :tmp_dir
-  test "semantic run listing never exceeds the snapshot result ceiling", %{tmp_dir: root} do
+  test "run listing delegates the bounded native page", %{tmp_dir: root} do
     File.write!(Path.join(root, "empty.jsonl"), "")
 
     {:ok, trace} =
@@ -19,11 +20,13 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     on_exit(fn -> TraceSnapshot.stop(trace) end)
     assert {:ok, analysis} = RunAnalysis.new(trace)
-    assert {:error, :result_limit_exceeded} = RunAnalysis.query(analysis, :runs, %{})
+
+    assert {:ok, %{"items" => [], "snapshot_hash" => "sha256:" <> _}} =
+             RunAnalysis.query(analysis, :runs, %{})
   end
 
   @tag :tmp_dir
-  test "answers the six run questions without exposing record-family queries", %{tmp_dir: root} do
+  test "opens a run and reads its advertised primitive collections", %{tmp_dir: root} do
     fixture = PrivateInspectionFixture.create!(root)
     {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
     {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
@@ -32,7 +35,7 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     assert {:ok, analysis} = RunAnalysis.new(trace, inspection)
 
-    assert {:ok, %{"items" => [%{"run_id" => run_id}], "complete?" => true}} =
+    assert {:ok, %{"items" => [%{"run_id" => run_id}]}} =
              RunAnalysis.query(analysis, :runs, %{})
 
     assert run_id == fixture.run_id
@@ -41,69 +44,85 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
             %{
               "run" => %{"run_id" => ^run_id, "complete" => true},
               "inspection" => %{"counts" => counts},
-              "result" => %{"available?" => false}
-            }} = RunAnalysis.query(analysis, :overview, %{"run_id" => run_id})
+              "result" => %{"available?" => false},
+              "collections" => collections
+            }} = RunAnalysis.query(analysis, :open, %{"run_id" => run_id})
 
     assert counts["capability_calls"] == 1
     assert counts["provider_exchanges"] == 1
+    assert Enum.find(collections, &(&1["name"] == "activity"))["available?"]
+    assert Enum.find(collections, &(&1["name"] == "turns"))["available?"]
 
     capability_id = "tool-#{run_id}"
 
-    assert {:ok,
-            %{
-              "trace" => %{"items" => [_ | _]},
-              "private" => %{
-                "capability_calls" => [%{"capability_id" => ^capability_id}],
-                "provider_exchanges" => [
-                  %{
-                    "capability_id" => ^capability_id,
-                    "request_id" => 7,
-                    "request" => %{"method" => "tools/call"}
-                  }
-                ],
-                "execution_errors" => [%{"kind" => "limit_exceeded"}]
-              }
-            }} = RunAnalysis.query(analysis, :activity, %{"run_id" => run_id})
+    assert {:ok, %{"items" => [_ | _]}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => run_id,
+               "collection" => "activity"
+             })
 
     assert {:ok,
             %{
-              "complete?" => true,
-              "streams" => [
+              "evidence" => %{"complete?" => true},
+              "items" => [
                 %{
-                  "turns" => [
-                    %{
-                      "generated" => [%{"source" => "(return 42)"}],
-                      "feedback" => [],
-                      "messages_added" => [%{"content" => prompt}],
-                      "response" => %{"status" => "ok"}
-                    }
-                  ]
-                }
+                  "generated" => [%{"source" => "(return 42)"}],
+                  "feedback" => [],
+                  "messages_added" => [%{"content" => prompt}],
+                  "response" => %{"status" => "ok"}
+                } = turn
               ]
-            }} = RunAnalysis.query(analysis, :conversation, %{"run_id" => run_id})
+            }} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => run_id,
+               "collection" => "turns"
+             })
 
     assert prompt == "private-prompt-#{run_id}"
-    expected_workflow_evaluation_id = "workflow-eval-#{run_id}"
+    refute Map.has_key?(turn, "system")
 
-    assert {:ok,
-            %{
-              "run" => %{"run_id" => ^run_id},
-              "diagnostics" => [%{"evaluation_id" => evaluation_id}],
-              "programs" => [
-                %{
-                  "relationship" => "same_workflow_evaluation",
-                  "workflow_evaluation_id" => ^expected_workflow_evaluation_id
-                }
-              ]
-            }} = RunAnalysis.query(analysis, :failure, %{"run_id" => run_id})
+    assert {:ok, %{"items" => [%{"arguments" => %{"system" => "private-system-" <> ^run_id}}]}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => run_id,
+               "collection" => "model_exchanges"
+             })
 
-    assert evaluation_id == "workflow-eval-#{run_id}"
+    assert {:ok, %{"items" => [%{"capability_id" => ^capability_id}]}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => run_id,
+               "collection" => "capability_calls"
+             })
 
-    assert {:ok,
-            %{
-              "effective_preludes" => [%{"source_hash" => "sha256:" <> _}],
-              "generated_programs" => [%{"source_hash" => "sha256:" <> _}]
-            }} = RunAnalysis.query(analysis, :source, %{"run_id" => run_id})
+    assert {:ok, %{"items" => [%{"request_id" => 7, "request" => %{"method" => "tools/call"}}]}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => run_id,
+               "collection" => "provider_exchanges"
+             })
+
+    assert {:ok, %{"items" => [%{"kind" => "limit_exceeded"}]}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => run_id,
+               "collection" => "execution_errors"
+             })
+
+    assert {:ok, %{"items" => [%{"source_hash" => "sha256:" <> _}]}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => run_id,
+               "collection" => "prelude_sources"
+             })
+
+    assert {:ok, %{"items" => [%{"source_hash" => "sha256:" <> _}]}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => run_id,
+               "collection" => "generated_sources"
+             })
+
+    assert {:error, :invalid_query} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => run_id,
+               "collection" => "activity",
+               "limit" => 101
+             })
   end
 
   test "conversation streams choose the unique longest complete prefix" do
@@ -123,7 +142,7 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     ]
 
     assert %{"ambiguous?" => false, "streams" => [%{"turns" => turns}]} =
-             RunAnalysis.conversation_streams(exchanges)
+             ConversationProjection.streams(exchanges)
 
     assert Enum.map(turns, & &1["turn"]) == [1, 2, 3]
     assert Enum.at(turns, 1)["messages_added"] == [feedback_1]
@@ -143,7 +162,32 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     ]
 
     assert %{"ambiguous?" => true, "ambiguous" => [%{"capability_id" => "c"}]} =
-             RunAnalysis.conversation_streams(exchanges)
+             ConversationProjection.streams(exchanges)
+  end
+
+  test "turn projection labels duplicate source matches without inventing an exact edge" do
+    assistant = %{
+      "role" => "assistant",
+      "tool_calls" => [%{"args" => %{"program" => "(return 42)"}}]
+    }
+
+    programs = [
+      %{"evaluation_id" => "evaluation-1", "source" => "(return 42)"},
+      %{"evaluation_id" => "evaluation-2", "source" => "(return 42)"}
+    ]
+
+    projection =
+      ConversationProjection.compile(
+        [exchange(1, [%{"role" => "user", "content" => "run it"}], assistant)],
+        programs,
+        %{"terminal?" => true, "events_dropped?" => false}
+      )
+
+    assert [turn] = projection.items
+    assert Enum.map(turn["generated"], & &1["association"]) == ["source_match", "source_match"]
+    assert Enum.all?(turn["generated"], & &1["association_ambiguous?"])
+    refute projection.evidence["complete?"]
+    assert projection.evidence["ambiguity_count"] == 1
   end
 
   @tag :tmp_dir
@@ -187,23 +231,33 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
             %{
               "run" => %{"run_id" => ^trace_only},
               "inspection" => %{"available?" => false},
-              "result" => %{"available?" => false}
-            }} = RunAnalysis.query(analysis, :overview, %{"run_id" => trace_only})
+              "result" => %{"available?" => false},
+              "collections" => collections
+            }} = RunAnalysis.query(analysis, :open, %{"run_id" => trace_only})
 
-    assert {:ok, %{"trace" => %{"items" => [_ | _]}, "private" => %{"available?" => false}}} =
-             RunAnalysis.query(analysis, :activity, %{"run_id" => trace_only})
+    assert Enum.find(collections, &(&1["name"] == "activity"))["available?"]
+    refute Enum.find(collections, &(&1["name"] == "turns"))["available?"]
 
-    assert {:ok, %{"run" => %{"run_id" => ^trace_only}, "private_evidence" => false}} =
-             RunAnalysis.query(analysis, :failure, %{"run_id" => trace_only})
+    assert {:ok, %{"items" => [_ | _]}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => trace_only,
+               "collection" => "activity"
+             })
 
     assert {:error, :evidence_unavailable} =
-             RunAnalysis.query(analysis, :conversation, %{"run_id" => trace_only})
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => trace_only,
+               "collection" => "turns"
+             })
 
     assert {:error, :not_found} =
-             RunAnalysis.query(analysis, :conversation, %{"run_id" => "unknown"})
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => "unknown",
+               "collection" => "turns"
+             })
 
     assert {:error, :not_found} =
-             RunAnalysis.query(analysis, :source, %{"run_id" => "unknown"})
+             RunAnalysis.query(analysis, :open, %{"run_id" => "unknown"})
   end
 
   @tag :tmp_dir
@@ -220,11 +274,17 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     assert {:ok,
             %{
-              "canonical_complete?" => true,
-              "complete?" => false,
-              "missing_exchange_count" => 1,
-              "streams" => []
-            }} = RunAnalysis.query(analysis, :conversation, %{"run_id" => fixture.run_id})
+              "evidence" => %{
+                "canonical_complete?" => true,
+                "complete?" => false,
+                "missing_exchange_count" => 1
+              },
+              "items" => []
+            }} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => fixture.run_id,
+               "collection" => "turns"
+             })
   end
 
   @tag :tmp_dir
@@ -243,12 +303,15 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     on_exit(fn -> TraceSnapshot.stop(trace) end)
     assert {:ok, analysis} = RunAnalysis.new(trace, inspection)
 
-    assert {:ok, %{"canonical_complete?" => false, "complete?" => false}} =
-             RunAnalysis.query(analysis, :conversation, %{"run_id" => fixture.run_id})
+    assert {:ok, %{"evidence" => %{"canonical_complete?" => false, "complete?" => false}}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => fixture.run_id,
+               "collection" => "turns"
+             })
   end
 
   @tag :tmp_dir
-  test "semantic reads follow primitive cursors internally", %{tmp_dir: root} do
+  test "read returns primitive cursors for the caller to follow", %{tmp_dir: root} do
     fixture = PrivateInspectionFixture.create!(root)
     {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
     {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
@@ -258,16 +321,57 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     assert {:ok,
             %{
-              "complete?" => true,
-              "trace" => %{"complete?" => true, "items" => events, "next_cursor" => nil}
+              "items" => [_event],
+              "next_cursor" => cursor,
+              "truncated" => true
             }} =
-             RunAnalysis.query(analysis, :activity, %{"run_id" => fixture.run_id, "limit" => 1})
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => fixture.run_id,
+               "collection" => "activity",
+               "limit" => 1
+             })
 
-    assert length(events) > 1
+    assert {:ok, %{"items" => [_event], "snapshot_hash" => snapshot_hash}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => fixture.run_id,
+               "collection" => "activity",
+               "limit" => 1,
+               "cursor" => cursor
+             })
+
+    assert is_binary(snapshot_hash)
   end
 
   @tag :tmp_dir
-  test "enforces the result ceiling after composing semantic collections", %{tmp_dir: root} do
+  test "internal collection rejects a multi-page aggregate above the result-byte limit", %{
+    tmp_dir: root
+  } do
+    fixture = PrivateInspectionFixture.create!(root)
+    max_result_bytes = 1_500
+
+    {:ok, trace} =
+      TraceSnapshot.start({:private_authorized_directory, fixture.traces},
+        max_result_bytes: max_result_bytes
+      )
+
+    on_exit(fn -> TraceSnapshot.stop(trace) end)
+    assert {:ok, analysis} = RunAnalysis.new(trace)
+
+    assert {:ok, %{"next_cursor" => cursor}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => fixture.run_id,
+               "collection" => "activity",
+               "limit" => 100
+             })
+
+    assert is_binary(cursor)
+
+    assert {:error, :result_limit_exceeded} =
+             RunAnalysis.collect(analysis, fixture.run_id, "activity", 100)
+  end
+
+  @tag :tmp_dir
+  test "read does not compose independently bounded private collections", %{tmp_dir: root} do
     fixture = PrivateInspectionFixture.create!(root)
     {:ok, sizing_trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
 
@@ -286,43 +390,28 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
         "limit" => 1_000
       })
 
-    ceiling = max(byte_size(Jason.encode!(exchanges)), byte_size(Jason.encode!(programs))) + 32
+    assert {:ok, analysis} = RunAnalysis.new(sizing_trace, sizing_inspection)
+
+    assert {:ok, ^exchanges} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => fixture.run_id,
+               "collection" => "model_exchanges",
+               "limit" => 100
+             })
+
+    assert {:ok, ^programs} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => fixture.run_id,
+               "collection" => "generated_sources",
+               "limit" => 100
+             })
+
     :ok = InspectionSnapshot.stop(sizing_inspection)
     :ok = TraceSnapshot.stop(sizing_trace)
-
-    {:ok, trace} =
-      TraceSnapshot.start({:private_authorized_directory, fixture.traces},
-        max_result_bytes: ceiling
-      )
-
-    {:ok, inspection} =
-      InspectionSnapshot.start({:directory, fixture.inspection}, trace, max_result_bytes: ceiling)
-
-    on_exit(fn -> InspectionSnapshot.stop(inspection) end)
-    on_exit(fn -> TraceSnapshot.stop(trace) end)
-    assert {:ok, analysis} = RunAnalysis.new(trace, inspection)
-
-    assert {:ok, _page} =
-             InspectionSnapshot.query(inspection, :model_exchanges, %{
-               "run_id" => fixture.run_id,
-               "limit" => 1_000
-             })
-
-    assert {:ok, _page} =
-             InspectionSnapshot.query(inspection, :generated_sources, %{
-               "run_id" => fixture.run_id,
-               "limit" => 1_000
-             })
-
-    assert {:error, :result_limit_exceeded} =
-             RunAnalysis.query(analysis, :conversation, %{
-               "run_id" => fixture.run_id,
-               "limit" => 1_000
-             })
   end
 
   @tag :tmp_dir
-  test "one capability builder exposes only the six semantic operations", %{tmp_dir: root} do
+  test "one capability builder exposes only runs, open, and read", %{tmp_dir: root} do
     fixture = PrivateInspectionFixture.create!(root)
     {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
     {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
@@ -333,28 +422,23 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     assert Enum.map(capabilities, & &1.name) == [
              "analysis-runs",
-             "analysis-overview",
-             "analysis-activity",
-             "analysis-conversation",
-             "analysis-failure",
-             "analysis-source"
+             "analysis-open",
+             "analysis-read"
            ]
 
-    conversation = Enum.find(capabilities, &(&1.name == "analysis-conversation"))
+    read = Enum.find(capabilities, &(&1.name == "analysis-read"))
+    assert read.input_schema["properties"]["limit"]["maximum"] == 100
 
-    assert {:ok, %{"streams" => [%{"turns" => [_]}]}} =
-             conversation.callback.(%{"run_id" => fixture.run_id})
+    assert {:ok, %{"items" => [_]}} =
+             read.callback.(%{"run_id" => fixture.run_id, "collection" => "turns"})
 
     assert {:ok, provider_capabilities} =
              RunAnalysisCapability.from_snapshots(trace, inspection, "evidence")
 
     assert Enum.map(provider_capabilities, & &1.name) == [
              "evidence.runs",
-             "evidence.overview",
-             "evidence.activity",
-             "evidence.conversation",
-             "evidence.failure",
-             "evidence.source"
+             "evidence.open",
+             "evidence.read"
            ]
   end
 

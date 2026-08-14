@@ -15,11 +15,12 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   whose bytes must match. It rejects symlinks,
   changed files, content above 16 MB, any record above 2,000,000 encoded bytes,
   excessive structural depth, malformed lines, mixed identities, non-contiguous
-  sequences, and records outside the exact V5 vocabulary. Private records use
+  sequences, and records outside the exact V6 vocabulary. Private records use
   a required `mission_name` on mission-owned source and capability
-  records while forbidding it on workflow-owned records. V5 also admits at most
-  one strictly JSON terminal result whose self-hash must match the successful
-  canonical `run-stopped` event. A missing capability or
+  records while forbidding it on workflow-owned records. V6 joins at most one
+  static prelude-call analysis to each subordinate evaluation source and also
+  admits at most one strictly JSON terminal result whose self-hash must match
+  the successful canonical `run-stopped` event. A missing capability or
   evaluation correlation is accepted only when the same canonical trace's
   `events-dropped` marker and terminal usage agree on enough dropped events of
   that exact type. The retained trace marker therefore identifies the
@@ -48,7 +49,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
 
   @max_bytes 16_000_000
   @max_record_bytes 2_000_000
-  @schema_version 5
+  @schema_version 6
   @suffix ".inspection.jsonl"
   @envelope_keys ~w(schema_version run_id trace_id sequence timestamp record_type correlation payload)
 
@@ -360,6 +361,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       mcp_requests: %{},
       mcp_responses: MapSet.new(),
       evaluations: MapSet.new(),
+      analyses: MapSet.new(),
       preludes: MapSet.new(),
       execution_prints: MapSet.new(),
       execution_errors: MapSet.new(),
@@ -450,6 +452,15 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
        do: unique_record(state, :evaluations, id)
 
   defp validate_record_join(
+         %{"record_type" => "evaluation-analysis", "correlation" => %{"evaluation_id" => id}},
+         state
+       ) do
+    if MapSet.member?(state.evaluations, id),
+      do: unique_record(state, :analyses, id),
+      else: invalid_record_join()
+  end
+
+  defp validate_record_join(
          %{
            "record_type" => "prelude-source",
            "correlation" => %{"component_id" => id},
@@ -512,7 +523,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => correlation,
            "payload" => payload
          },
-         5
+         6
        ) do
     correlation == %{} and exact_keys?(payload, ~w(result_hash value)) and
       ResultIdentity.valid_hash?(payload["result_hash"]) and
@@ -525,7 +536,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => %{"capability_id" => id},
            "payload" => payload
          },
-         5
+         6
        )
        when record_type in ["capability-input", "capability-output"] do
     value_key = if record_type == "capability-input", do: "arguments", else: "result"
@@ -544,7 +555,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => correlation,
            "payload" => payload
          },
-         5
+         6
        )
        when record_type in ["mcp-request", "mcp-response"] do
     request_id = correlation["request_id"]
@@ -564,7 +575,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => %{"component_id" => id},
            "payload" => payload
          },
-         5
+         6
        ) do
     valid_id?(id) and is_binary(payload["source"]) and
       payload["source_bytes"] == byte_size(payload["source"]) and
@@ -581,7 +592,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => %{"evaluation_id" => id},
            "payload" => payload
          },
-         5
+         6
        ) do
     exact_keys?(
       payload,
@@ -594,11 +605,24 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
 
   defp valid_shape?(
          %{
+           "record_type" => "evaluation-analysis",
+           "correlation" => %{"evaluation_id" => id},
+           "payload" => payload
+         },
+         6
+       ) do
+    exact_keys?(payload, ~w(environment mission_name prelude_calls)) and valid_id?(id) and
+      valid_id?(payload["mission_name"]) and payload["environment"] == "mission" and
+      valid_prelude_calls?(payload["prelude_calls"])
+  end
+
+  defp valid_shape?(
+         %{
            "record_type" => "execution-prints",
            "correlation" => %{"evaluation_id" => id},
            "payload" => payload
          },
-         5
+         6
        ) do
     exact_keys?(payload, ~w(environment prints truncated)) and
       valid_id?(id) and payload["environment"] == "workflow" and
@@ -612,7 +636,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => %{"evaluation_id" => id},
            "payload" => payload
          },
-         5
+         6
        ) do
     exact_keys?(payload, ~w(environment kind reason details)) and
       valid_id?(id) and payload["environment"] == "workflow" and
@@ -620,7 +644,17 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       is_map(payload["details"])
   end
 
-  defp valid_shape?(_record, 5), do: false
+  defp valid_shape?(_record, 6), do: false
+
+  defp valid_prelude_calls?(calls) when is_list(calls) do
+    Enum.all?(calls, fn call ->
+      is_map(call) and exact_keys?(call, ~w(ref component_id)) and valid_id?(call["ref"]) and
+        valid_id?(call["component_id"])
+    end) and calls == Enum.uniq(calls) and
+      calls == Enum.sort_by(calls, &{&1["ref"], &1["component_id"]})
+  end
+
+  defp valid_prelude_calls?(_calls), do: false
 
   @spec validate_correlations([map()], [map()]) :: :ok | {:error, :inspection_correlation_missing}
   @doc "Validates every record identity and correlation against one canonical event set."
@@ -815,6 +849,30 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
 
   defp validate_record_correlation(
          %{
+           "record_type" => "evaluation-analysis",
+           "correlation" => %{"evaluation_id" => id},
+           "payload" => %{"mission_name" => mission_name, "prelude_calls" => calls}
+         },
+         _capabilities,
+         evaluations,
+         prelude_components,
+         missing
+       ) do
+    component_ids = Map.get(prelude_components, {"mission", mission_name}, MapSet.new())
+
+    if Enum.all?(calls, &MapSet.member?(component_ids, &1["component_id"])),
+      do:
+        correlate_evaluation_or_mark_missing(
+          evaluations,
+          id,
+          {"mission", mission_name, :any},
+          missing
+        ),
+      else: missing_correlation()
+  end
+
+  defp validate_record_correlation(
+         %{
            "record_type" => record_type,
            "correlation" => %{"evaluation_id" => id}
          },
@@ -872,20 +930,32 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
           else: missing_correlation()
 
       :error ->
+        owner = evaluation_owner(expected)
+
         case Map.fetch(missing.evaluations, id) do
           :error ->
-            {:cont, {:ok, put_in(missing, [:evaluations, id], elem(expected, 0))}}
+            {:cont, {:ok, put_in(missing, [:evaluations, id], owner)}}
 
-          {:ok, environment} when environment == elem(expected, 0) ->
+          {:ok, ^owner} ->
             {:cont, {:ok, missing}}
 
-          {:ok, _conflicting_environment} ->
+          {:ok, _conflicting_owner} ->
             missing_correlation()
         end
     end
   end
 
+  defp evaluation_owner({environment, mission_name, _source}),
+    do: {environment, mission_name}
+
   defp evaluation_matches?({"workflow", nil, _source}, {"workflow", nil, :any}), do: true
+
+  defp evaluation_matches?(
+         {"mission", mission_name, _source},
+         {"mission", mission_name, :any}
+       ),
+       do: true
+
   defp evaluation_matches?(actual, expected), do: actual == expected
 
   defp validate_missing_correlations(missing, dropped) do
@@ -1153,7 +1223,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     do: match?({:ok, _datetime, 0}, DateTime.from_iso8601(timestamp))
 
   defp valid_timestamp?(_timestamp), do: false
-  defp record_types(5), do: InspectionRecordTypes.all()
+  defp record_types(6), do: InspectionRecordTypes.all()
   defp valid_request_id?(id), do: is_integer(id) and id > 0
   defp valid_id?(id), do: is_binary(id) and byte_size(id) in 1..256 and String.valid?(id)
   defp sha256(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)

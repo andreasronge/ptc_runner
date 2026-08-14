@@ -403,7 +403,7 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
-  test "inspection analysis recursively reads a private V5 trace and correlated result", %{
+  test "inspection analysis recursively reads a private V6 trace and correlated result", %{
     tmp_dir: directory
   } do
     value = %{"answer" => 42}
@@ -427,7 +427,7 @@ defmodule PtcRunner.ReplFrontendTest do
           "--format",
           "jsonl",
           "-e",
-          ~s|(return (analysis/overview "#{fixture.run_id}"))|
+          ~s|(return (analysis/open "#{fixture.run_id}"))|
         ])
       end)
 
@@ -459,7 +459,7 @@ defmodule PtcRunner.ReplFrontendTest do
     PrivateInspectionFixture.rewrite_schema!(fixture.inspection, 4)
 
     message =
-      ~r/ptc repl profile setup failed: an inspection artifact declares schema version 4; this build supports version 5/
+      ~r/ptc repl profile setup failed: an inspection artifact declares schema version 4; this build supports version 6/
 
     capture_io(fn ->
       assert_raise Mix.Error, message, fn ->
@@ -548,7 +548,7 @@ defmodule PtcRunner.ReplFrontendTest do
         "--output",
         output,
         "-e",
-        ~s|(analysis/overview "seed")|
+        ~s|(analysis/open "seed")|
       ])
     end)
 
@@ -577,11 +577,11 @@ defmodule PtcRunner.ReplFrontendTest do
         "--private-output",
         output,
         "-e",
-        ~s|(analysis/conversation "#{fixture.run_id}" {"limit" 100})|
+        ~s|(analysis/read "#{fixture.run_id}" {"collection" "turns" "limit" 100})|
       ])
     end)
 
-    assert %{"streams" => [%{"turns" => [_]}]} = output |> File.read!() |> Jason.decode!()
+    assert %{"items" => [_]} = output |> File.read!() |> Jason.decode!()
     assert File.stat!(output).mode |> Bitwise.band(0o777) == 0o600
   end
 
