@@ -172,6 +172,18 @@ passing its public value does not transfer ownership.
 graph into a `FrozenBundle`. Compilation records public exports and transitive
 `tool:*` requirements but grants no capability.
 
+Compiler-rendered strings do not cross the command boundary. Prelude analysis
+represents an unknown namespace as bounded structured detail: the rejected
+namespace plus the canonical sorted list owned by the Lisp namespace diagnostic
+catalog. `BundleCompiler` admits that reason;
+`CompileDiagnostic` accepts it only when the rejected namespace is present in
+the submitted component and the available list exactly matches the canonical
+runtime list, then rebuilds the catalog-authorized message from literals.
+Malformed or substituted detail remains `bundle/compile_failed`. Separately,
+`CommandRenderer` projects any already-sealed component span as a logical name
+and half-open byte range; it has neither source bytes nor authority to derive a
+different location.
+
 Authority appears only when the bundle is installed in an environment:
 
 | Environment | Purpose | Typical grants |
