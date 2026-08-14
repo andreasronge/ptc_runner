@@ -7,7 +7,8 @@ defmodule PtcRunner.Kernel.ExecutionInput do
   because it controls later provider and publication policy. A contract
   rejection carries only `ValueContract.classify/2`'s bounded structural
   classification and a sealed authority for its exact contract behavior hash
-  and selected tagged-union branch; the rejected input never enters the error.
+  and selected tagged-union branch, or only the shared discriminator before a
+  branch matches; the rejected input never enters the error.
   """
 
   alias PtcRunner.Kernel.Attestation

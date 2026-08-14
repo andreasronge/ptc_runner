@@ -3,9 +3,10 @@ defmodule PtcRunner.Kernel.ValueContractClassification do
   Internal sealed evidence for one value-contract classification.
 
   The public classification map deliberately omits branch indexes and schema
-  material. This value carries the exact contract behavior and selected path
-  schema separately so diagnostic authority can remain branch-specific without
-  widening model-facing feedback.
+  material. This value carries the exact contract behavior and path schema
+  separately so diagnostic authority can remain branch-specific after a union
+  match, or limited to the shared discriminator before a branch matches,
+  without widening model-facing feedback.
   """
 
   alias PtcRunner.Kernel.Attestation

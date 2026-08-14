@@ -3,8 +3,9 @@ defmodule PtcRunner.Kernel.CommandPath do
   Schema-authorized diagnostic path.
 
   Paths are minted only after every property or index has been walked through
-  the host/manifest schema or the exact selected branch of one compiled value
-  contract. The attestation prevents a caller-authored segment list from being
+  the host/manifest schema, the exact selected branch of one compiled value
+  contract, or the shared discriminator projection when no tagged-union branch
+  matches. The attestation prevents a caller-authored segment list from being
   substituted at the diagnostic boundary.
   """
 

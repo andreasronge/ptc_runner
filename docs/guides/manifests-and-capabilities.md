@@ -6,7 +6,9 @@ path-confined, and inert; it executes no workflow or provider callback.
 
 The checked-in `priv/schemas/ptc-application-manifest.schema.json` is the
 complete structural reference. `PtcRunner.Kernel.Manifest` remains
-authoritative for semantic checks and referenced-file handling.
+authoritative for semantic checks and referenced-file handling. Manifest
+schema diagnostics include a safe JSON Pointer when one is available; a
+missing-required diagnostic points to the absent schema-declared property.
 
 ## Start with one workflow
 
@@ -140,7 +142,8 @@ artifact publication. A mismatch returns `input_contract_failed` or
 safe failure projection identifies a non-root declared path, the command
 envelope and terminal diagnostic include its JSON Pointer. Terminal rendering
 escapes unusual contract-authored property names rather than emitting their
-control bytes.
+control bytes. Missing-required failures name the first missing schema-declared
+property, including when the absent property is at the contract root.
 
 The `agent.main/run` entry also gives a model-authored terminal candidate one
 ordinary correction turn when budget remains. Feedback is schema-derived and

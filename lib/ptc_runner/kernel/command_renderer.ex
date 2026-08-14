@@ -108,11 +108,12 @@ defmodule PtcRunner.Kernel.CommandRenderer do
 
   defp location_suffix(%{
          "phase" => "application",
-         "code" => "schema_violation",
+         "code" => code,
          "source" => %{"kind" => "application"},
          "path" => path
        })
-       when is_binary(path) and path != "",
+       when code in ["schema_violation", "required_property_missing"] and is_binary(path) and
+              path != "",
        do: " at " <> path <> " "
 
   defp location_suffix(%{
