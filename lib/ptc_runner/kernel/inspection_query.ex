@@ -3,10 +3,12 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   Pure, source-bound queries over validated private inspection records.
 
   The compiler performs the joins once, before a snapshot publishes any
-  capability. Capability inputs and outputs are paired by `capability_id`;
-  MCP request and response bodies are paired by `{capability_id, request_id}`.
-  Callers therefore never join private records by timestamp or depend on file
-  order beyond the artifact's validated sequence.
+  capability. Capability inputs and outputs are paired by `capability_id`, and
+  a validated input without an output is retained as an explicitly incomplete
+  interrupted attempt. MCP request and response bodies remain paired by
+  `{capability_id, request_id}`. Callers therefore never join private records
+  by timestamp or depend on file order beyond the artifact's validated
+  sequence.
 
   Every collection uses the same bounded page shape as canonical trace
   queries. Cursors are opaque, bind the immutable source identity, operation,
@@ -141,7 +143,9 @@ defmodule PtcRunner.Kernel.InspectionQuery do
 
       counts = %{
         "model_exchanges" => length(model_exchanges),
+        "incomplete_model_exchanges" => incomplete_count(model_exchanges),
         "capability_calls" => length(capability_calls),
+        "incomplete_capability_calls" => incomplete_count(capability_calls),
         "generated_sources" => length(generated_sources),
         "evaluation_analyses" => map_size(evaluation_analyses),
         "effective_preludes" => length(effective_preludes),
@@ -186,18 +190,14 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       |> records_of_type("capability-output")
       |> Map.new(&{&1["correlation"]["capability_id"], &1})
 
-    if Map.keys(inputs) |> MapSet.new() == Map.keys(outputs) |> MapSet.new() do
-      pairs =
-        inputs
-        |> Enum.map(fn {capability_id, input} ->
-          capability_pair(capability_id, input, Map.fetch!(outputs, capability_id))
-        end)
-        |> Enum.sort_by(& &1["input_sequence"])
+    pairs =
+      inputs
+      |> Enum.map(fn {capability_id, input} ->
+        capability_pair(capability_id, input, Map.get(outputs, capability_id))
+      end)
+      |> Enum.sort_by(& &1["input_sequence"])
 
-      {:ok, pairs}
-    else
-      {:error, :incomplete_inspection_correlation}
-    end
+    {:ok, pairs}
   end
 
   defp provider_pairs(records) do
@@ -236,9 +236,23 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     end
   end
 
+  defp capability_pair(capability_id, input, nil) do
+    capability_input(capability_id, input)
+    |> Map.put("complete?", false)
+  end
+
   defp capability_pair(capability_id, input, output) do
+    capability_input(capability_id, input)
+    |> Map.merge(%{
+      "complete?" => true,
+      "output_sequence" => output["sequence"],
+      "output_timestamp" => output["timestamp"],
+      "result" => output["payload"]["result"]
+    })
+  end
+
+  defp capability_input(capability_id, input) do
     input_payload = input["payload"]
-    output_payload = output["payload"]
 
     %{
       "run_id" => input["run_id"],
@@ -248,13 +262,12 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       "mission_name" => input_payload["mission_name"],
       "name" => input_payload["name"],
       "input_sequence" => input["sequence"],
-      "output_sequence" => output["sequence"],
       "input_timestamp" => input["timestamp"],
-      "output_timestamp" => output["timestamp"],
-      "arguments" => input_payload["arguments"],
-      "result" => output_payload["result"]
+      "arguments" => input_payload["arguments"]
     }
   end
+
+  defp incomplete_count(items), do: Enum.count(items, &(&1["complete?"] == false))
 
   defp provider_pair(capability_id, request_id, request, response) do
     request_payload = request["payload"]
@@ -369,7 +382,10 @@ defmodule PtcRunner.Kernel.InspectionQuery do
 
         projection =
           ConversationProjection.compile(
-            Enum.filter(collections.model_exchanges, &(&1["run_id"] == run_id)),
+            Enum.filter(
+              collections.model_exchanges,
+              &(&1["run_id"] == run_id and &1["complete?"])
+            ),
             Enum.filter(collections.generated_sources, &(&1["run_id"] == run_id)),
             Map.get(trace_facts, run_id, %{})
           )

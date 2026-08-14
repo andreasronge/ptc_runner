@@ -11,7 +11,9 @@ defmodule PtcRunner.Kernel.RunAnalysis do
 
   Public captures expose only canonical `activity`. Private captures add exact
   exchanges, reconstructed turns, generated source with static prelude-call
-  facts, effective prelude source, and workflow execution diagnostics.
+  facts, effective prelude source, and workflow execution diagnostics. The
+  catalog identifies raw collections whose items carry an explicit
+  completeness field.
   """
 
   alias PtcRunner.Kernel.InspectionSnapshot
@@ -45,7 +47,8 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       snapshot: :inspection,
       operation: :model_exchanges,
       filters: ~w(capability_id input_sequence),
-      order: "input_sequence_asc"
+      order: "input_sequence_asc",
+      item_completeness_field: "complete?"
     },
     %{
       name: "capability_calls",
@@ -53,7 +56,8 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       snapshot: :inspection,
       operation: :capability_calls,
       filters: ~w(capability_id mission_name name),
-      order: "input_sequence_asc"
+      order: "input_sequence_asc",
+      item_completeness_field: "complete?"
     },
     %{
       name: "provider_exchanges",
@@ -253,7 +257,15 @@ defmodule PtcRunner.Kernel.RunAnalysis do
         "filters" => collection.filters,
         "order" => collection.order
       }
+      |> put_catalog_option(collection, :item_completeness_field)
     end)
+  end
+
+  defp put_catalog_option(catalog, collection, key) do
+    case Map.fetch(collection, key) do
+      {:ok, value} -> Map.put(catalog, Atom.to_string(key), value)
+      :error -> catalog
+    end
   end
 
   defp inspection_run(nil, _run_id), do: {:ok, %{"available?" => false}}

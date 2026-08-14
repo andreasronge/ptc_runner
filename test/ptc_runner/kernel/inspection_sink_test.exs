@@ -127,7 +127,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert :ok = InspectionSink.stop(sink)
   end
 
-  test "retains paired MCP exchange records" do
+  test "retains an MCP request and response through one atomic sink operation" do
     request = %{
       "jsonrpc" => "2.0",
       "id" => 7,
@@ -146,18 +146,10 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
 
     assert :ok =
-             InspectionSink.emit(
+             InspectionSink.emit_mcp_exchange(
                sink,
-               "mcp-request",
                correlation,
-               %{transport: :stdio, body: request}
-             )
-
-    assert :ok =
-             InspectionSink.emit(
-               sink,
-               "mcp-response",
-               correlation,
+               %{transport: :stdio, body: request},
                %{transport: :stdio, body: response}
              )
 

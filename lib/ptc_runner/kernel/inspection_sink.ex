@@ -87,6 +87,22 @@ defmodule PtcRunner.Kernel.InspectionSink do
   def emit(%__MODULE__{} = sink, _record_type, _correlation, _payload),
     do: call(sink, :fail)
 
+  @doc false
+  @spec emit_mcp_exchange(t(), map(), map(), map()) ::
+          :ok | {:error, :inspection_sink_error}
+  def emit_mcp_exchange(
+        %__MODULE__{} = sink,
+        correlation,
+        request_payload,
+        response_payload
+      )
+      when is_map(correlation) and is_map(request_payload) and is_map(response_payload) do
+    call(sink, {:emit_mcp_exchange, correlation, request_payload, response_payload})
+  end
+
+  def emit_mcp_exchange(%__MODULE__{} = sink, _correlation, _request_payload, _response_payload),
+    do: call(sink, :fail)
+
   @spec records(t()) :: {:ok, [map()]} | {:error, :inspection_sink_error}
   @doc "Returns retained records in sequence order while the required sink is healthy."
   def records(%__MODULE__{} = sink), do: call(sink, :records)
@@ -196,6 +212,18 @@ defmodule PtcRunner.Kernel.InspectionSink do
     end
   end
 
+  def handle_call(
+        {token, {:emit_mcp_exchange, correlation, request_payload, response_payload}},
+        _from,
+        %{token: token} = state
+      ) do
+    if state.failed? do
+      {:reply, {:error, :inspection_sink_error}, state}
+    else
+      retain_mcp_exchange(state, correlation, request_payload, response_payload)
+    end
+  end
+
   def handle_call({token, :fail}, _from, %{token: token} = state),
     do: {:reply, {:error, :inspection_sink_error}, %{state | failed?: true}}
 
@@ -225,6 +253,22 @@ defmodule PtcRunner.Kernel.InspectionSink do
   def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
 
   defp retain(state, record_type, correlation, payload) do
+    case retain_record(state, record_type, correlation, payload) do
+      {:ok, next} -> {:reply, :ok, next}
+      :error -> {:reply, {:error, :inspection_sink_error}, %{state | failed?: true}}
+    end
+  end
+
+  defp retain_mcp_exchange(state, correlation, request_payload, response_payload) do
+    with {:ok, next} <- retain_record(state, "mcp-request", correlation, request_payload),
+         {:ok, next} <- retain_record(next, "mcp-response", correlation, response_payload) do
+      {:reply, :ok, next}
+    else
+      :error -> {:reply, {:error, :inspection_sink_error}, %{state | failed?: true}}
+    end
+  end
+
+  defp retain_record(state, record_type, correlation, payload) do
     with true <- record_type in record_types(),
          true <- record_type != "run-result" or not state.result?,
          true <- within_record_depth?(correlation, payload),
@@ -240,7 +284,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
          true <- state.encoded_bytes + bytes <= state.max_total_bytes do
       retained_record = RetainedSize.detach_binaries(record)
 
-      {:reply, :ok,
+      {:ok,
        %{
          state
          | sequence: state.sequence + 1,
@@ -249,7 +293,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
            result?: state.result? or record_type == "run-result"
        }}
     else
-      _reason -> {:reply, {:error, :inspection_sink_error}, %{state | failed?: true}}
+      _reason -> :error
     end
   end
 

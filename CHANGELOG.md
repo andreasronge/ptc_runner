@@ -195,6 +195,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Failed private debugger runs now retain validated input-only model and
+  capability attempts as explicitly incomplete evidence. Raw reads expose the
+  complete prefix without inventing terminal data, while reconstructed turns
+  continue to report the interrupted model exchange as missing.
 - A fresh-clone `mix ptc` invocation now performs normal dependency validation
   and compiles fetched dependencies before compiling PtcRunner. Warm root
   commands retain the dependency-check startup optimization after the first
