@@ -353,7 +353,13 @@ defmodule PtcRunner.GitHooks.PrePushTest do
             {"HOOK_REFS", refs},
             {"MIX_MARKER",
              Path.join(path |> String.split(":") |> hd() |> Path.dirname(), "mix-called")},
-            {"PATH", path}
+            {"PATH", path},
+            # The gate that runs these tests may itself have been invoked with
+            # PTC_PRE_PUSH_SERIAL set. Without clearing it, the ambient value
+            # decides whether the hook under test runs lanes or not, and the
+            # lane assertions quietly test serial execution instead. Cases that
+            # want a mode set it through extra_env, which wins by coming last.
+            {"PTC_PRE_PUSH_SERIAL", nil}
           ] ++ extra_env,
       stderr_to_stdout: true
     )
