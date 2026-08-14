@@ -303,8 +303,8 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `juxt` | `(juxt f1 f2 ...)` | Returns a function that applies all functions and returns a vector of results |
-| `pcalls` * | `(pcalls f1 f2 ...)` | Execute thunks in parallel |
-| `pmap` * | `(pmap f coll), (pmap f c1 c2 ...)` | Apply f to each (zipped) item in parallel — Shares map's finite seqable contract: nil -> empty, strings map over graphemes, and multiple collections zip element-wise truncating to the shortest. Runs under bounded parallel limits (per-worker heap, worker budget, shared deadline). |
+| `pcalls` * | `(pcalls f1 f2 ...)` | Execute thunks in parallel — Resolves as a callable value and can be passed to apply, higher-order functions, and function combinators. Direct calls retain the analyzer-optimized CoreAST path. |
+| `pmap` * | `(pmap f coll), (pmap f c1 c2 ...)` | Apply f to each (zipped) item in parallel — Resolves as a callable value and can be passed to apply, higher-order functions, and function combinators. Direct calls retain the analyzer-optimized CoreAST path. Shares map's finite seqable contract: nil -> empty, strings map over graphemes, and multiple collections zip element-wise truncating to the shortest. Runs under bounded parallel limits (per-worker heap, worker budget, shared deadline). |
 
 
 

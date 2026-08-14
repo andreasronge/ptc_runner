@@ -1739,7 +1739,18 @@ as a `[key value]` pair passed to the predicate. They return a **vector** of
 ;; Closures work - captures outer scope at evaluation time
 (let [factor 10]
   (pmap #(* % factor) [1 2 3]))    ; => [10 20 30]
+
+;; pmap is also a callable value
+(apply pmap [inc [1 2 3]])         ; => [2 3 4]
+((partial pmap inc) [1 2 3])       ; => [2 3 4]
+(map pmap [inc dec] [[1 2] [3 4]]) ; => [[2 3] [2 3]]
 ```
+
+`pmap` resolves in value position like an ordinary function. It may be stored,
+passed to higher-order functions, composed with `partial` or `fnil`, and
+invoked with `apply`. A direct `(pmap ...)` call retains the analyzer-optimized
+path; direct and indirect invocation share the same evaluator, limits,
+effects, and failure semantics.
 
 **pmap semantics:**
 - Order is preserved - results match input order
@@ -1773,7 +1784,17 @@ as a `[key value]` pair passed to the predicate. They return a **vector** of
 
 ;; Simple parallel computations
 (pcalls #(+ 1 1) #(* 2 3) #(- 10 5))    ; => [2 6 5]
+
+;; pcalls is also a variadic callable value
+(apply pcalls [#(+ 1 1) #(* 2 3)])       ; => [2 6]
 ```
+
+`pcalls` may likewise be stored, passed to higher-order functions, composed,
+and invoked with `apply`. It accepts zero thunks, so using `pcalls` itself as a
+`pcalls` thunk is valid; `pmap` is rejected during zero-arity preflight before
+any worker starts. Saved parallel callables resolve evaluator authority and
+limits from the evaluation that invokes them, not the evaluation that stored
+them.
 
 **pcalls semantics:**
 - Order is preserved - results match argument order

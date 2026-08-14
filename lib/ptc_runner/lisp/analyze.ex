@@ -937,8 +937,14 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp analyze_pmap(_, _tail?) do
-    {:error, {:invalid_arity, :pmap, "expected (pmap f coll) or (pmap f c1 c2 ...)"}}
+  # A persisted user definition may shadow `pmap` with a different arity. For
+  # arities that cannot use the optimized builtin node, retain an ordinary
+  # call so runtime namespace resolution gets the final say. If no shadow is
+  # present, the builtin value reports the same recoverable arity error.
+  defp analyze_pmap(args, _tail?) do
+    with {:ok, analyzed_args} <- analyze_list(args) do
+      {:ok, {:call, {:var, :pmap}, analyzed_args}}
+    end
   end
 
   # ============================================================
@@ -1188,12 +1194,22 @@ defmodule PtcRunner.Lisp.Analyze do
 
       :error ->
         case qualified_namespace_lookup(ns, key) do
-          {:ok, qualified} -> {:ok, {:var, qualified}}
-          :not_qualified -> prelude_or_clojure_namespace(ns, key, fn -> {:ok, {:var, key}} end)
-          :unknown_member -> namespaced_unknown_member_error(ns, key)
+          {:ok, qualified} ->
+            {:ok, {:var, qualified}}
+
+          :not_qualified ->
+            prelude_or_clojure_namespace(ns, key, fn -> analyze_clojure_value(key) end)
+
+          :unknown_member ->
+            namespaced_unknown_member_error(ns, key)
         end
     end
   end
+
+  defp analyze_clojure_value(key) when key in [:pmap, :pcalls],
+    do: {:ok, {:literal, {:special, key}}}
+
+  defp analyze_clojure_value(key), do: {:ok, {:var, key}}
 
   defp analyze_namespaced_call(ns, func, rest, list, tail?) do
     case PreludeScope.fetch_export(ns, func) do
@@ -1207,7 +1223,7 @@ defmodule PtcRunner.Lisp.Analyze do
 
           :not_qualified ->
             prelude_or_clojure_namespace(ns, func, fn ->
-              dispatch_list_form({:symbol, func}, rest, list, tail?)
+              analyze_clojure_call(func, rest, list, tail?)
             end)
 
           :unknown_member ->
@@ -1215,6 +1231,28 @@ defmodule PtcRunner.Lisp.Analyze do
         end
     end
   end
+
+  # A qualified Clojure builtin is already resolved and must bypass locals and
+  # user namespace definitions. Parallel calls use their callable value path;
+  # qualified pmap keeps strict builtin arity validation at analysis time.
+  defp analyze_clojure_call(:pmap, [function, collection | collections], _list, _tail?) do
+    with {:ok, arguments} <- analyze_list([function, collection | collections]) do
+      {:ok, {:call, {:literal, {:special, :pmap}}, arguments}}
+    end
+  end
+
+  defp analyze_clojure_call(:pmap, _arguments, _list, _tail?) do
+    {:error, {:invalid_arity, :pmap, "expected (pmap f coll) or (pmap f c1 c2 ...)"}}
+  end
+
+  defp analyze_clojure_call(:pcalls, functions, _list, _tail?) do
+    with {:ok, arguments} <- analyze_list(functions) do
+      {:ok, {:call, {:literal, {:special, :pcalls}}, arguments}}
+    end
+  end
+
+  defp analyze_clojure_call(func, rest, list, tail?),
+    do: dispatch_list_form({:symbol, func}, rest, list, tail?)
 
   # ============================================================
   # Helper functions

@@ -597,9 +597,17 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp do_eval({:pmap, fn_ast, coll_asts}, %EvalContext{} = eval_ctx) do
-    with {:ok, fn_val, eval_ctx1} <- eval_child(fn_ast, eval_ctx),
-         {:ok, coll_vals, eval_ctx2} <- eval_all(coll_asts, eval_ctx1) do
-      Parallel.eval_pmap(fn_val, coll_vals, eval_ctx2, &do_eval/2)
+    case resolve_user_ns(:pmap, eval_ctx.user_ns, eval_ctx) do
+      {:ok, callable, callable_ctx} ->
+        with {:ok, args, args_ctx} <- eval_all([fn_ast | coll_asts], callable_ctx) do
+          Apply.apply_fun(callable, args, args_ctx, &do_eval/2)
+        end
+
+      :error ->
+        with {:ok, fn_val, eval_ctx1} <- eval_child(fn_ast, eval_ctx),
+             {:ok, coll_vals, eval_ctx2} <- eval_all(coll_asts, eval_ctx1) do
+          Parallel.eval_pmap(fn_val, coll_vals, eval_ctx2, &do_eval/2)
+        end
     end
   end
 
@@ -608,12 +616,20 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp do_eval({:pcalls, fn_asts}, %EvalContext{} = eval_ctx) do
-    case eval_all(fn_asts, eval_ctx) do
-      {:ok, fn_vals, eval_ctx2} ->
-        Parallel.eval_pcalls(fn_vals, eval_ctx2, &do_eval/2)
+    case resolve_user_ns(:pcalls, eval_ctx.user_ns, eval_ctx) do
+      {:ok, callable, callable_ctx} ->
+        with {:ok, args, args_ctx} <- eval_all(fn_asts, callable_ctx) do
+          Apply.apply_fun(callable, args, args_ctx, &do_eval/2)
+        end
 
-      {:error, _} = err ->
-        err
+      :error ->
+        case eval_all(fn_asts, eval_ctx) do
+          {:ok, fn_vals, eval_ctx2} ->
+            Parallel.eval_pcalls(fn_vals, eval_ctx2, &do_eval/2)
+
+          {:error, _} = err ->
+            err
+        end
     end
   end
 

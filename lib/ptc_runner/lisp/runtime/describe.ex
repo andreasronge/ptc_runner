@@ -10,6 +10,7 @@ defmodule PtcRunner.Lisp.Runtime.Describe do
   alias PtcRunner.Lisp.Java.Time.LocalDate, as: JavaLocalDate
   alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.SpecialBuiltin
 
   @default_depth 1
   @max_depth 5
@@ -571,9 +572,9 @@ defmodule PtcRunner.Lisp.Runtime.Describe do
   defp type_name({:closure, _, _, _, _, _}), do: "function"
   defp type_name({tag, _}) when tag in [:normal, :collect], do: "function"
 
-  defp type_name({:special, name})
-       when name in [:dir, :apropos, :doc, :export_meta, :println],
-       do: "function"
+  defp type_name({:special, name}) do
+    if SpecialBuiltin.callable?(name), do: "function", else: "unknown"
+  end
 
   defp type_name({tag, _, _})
        when tag in [:variadic, :variadic_nonempty, :multi_arity, :special],

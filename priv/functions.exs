@@ -4569,15 +4569,17 @@
     %{
       name: "pcalls",
       description: "Execute thunks in parallel",
-      binding: nil,
+      binding: :special,
       category: :core,
-      dispatch: :analyze,
+      dispatch: :env,
       signatures: ["(pcalls f1 f2 ...)"],
       since: nil,
       section: "Functional Tools",
       ptc_extension?: true,
       examples: [],
-      notes: nil,
+      notes:
+        "Resolves as a callable value and can be passed to apply, higher-order functions, " <>
+          "and function combinators. Direct calls retain the analyzer-optimized CoreAST path.",
       see_also: [],
       clojure_var: "pcalls",
       divergences: nil
@@ -4585,16 +4587,18 @@
     %{
       name: "pmap",
       description: "Apply f to each (zipped) item in parallel",
-      binding: nil,
+      binding: :special,
       category: :core,
-      dispatch: :analyze,
+      dispatch: :env,
       signatures: ["(pmap f coll)", "(pmap f c1 c2 ...)"],
       since: nil,
       section: "Functional Tools",
       ptc_extension?: true,
       examples: [],
       notes:
-        "Shares map's finite seqable contract: nil -> empty, strings map over graphemes, " <>
+        "Resolves as a callable value and can be passed to apply, higher-order functions, " <>
+          "and function combinators. Direct calls retain the analyzer-optimized CoreAST path. " <>
+          "Shares map's finite seqable contract: nil -> empty, strings map over graphemes, " <>
           "and multiple collections zip element-wise truncating to the shortest. Runs under " <>
           "bounded parallel limits (per-worker heap, worker budget, shared deadline).",
       see_also: ["map", "pcalls"],

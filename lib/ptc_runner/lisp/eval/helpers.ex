@@ -18,6 +18,7 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   alias PtcRunner.Lisp.Java.Time.LocalDate, as: JavaLocalDate
   alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.SpecialBuiltin
 
   @stable_parallel_errors [:memory_exceeded, :timeout, :parallel_capacity_exceeded]
   @parallel_run_deadline_message "the run deadline expired during a parallel operation"
@@ -182,9 +183,9 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   # Surface them as "function" rather than the leaky "unknown".
   def describe_type({tag, _}) when tag in [:normal, :collect], do: "function"
 
-  def describe_type({:special, name})
-      when name in [:dir, :apropos, :doc, :export_meta, :println],
-      do: "function"
+  def describe_type({:special, name}) do
+    if SpecialBuiltin.callable?(name), do: "function", else: "unknown"
+  end
 
   def describe_type({:juxt_fn, fns}) when is_list(fns), do: "function"
   def describe_type({tag, _}) when tag in [:complement_fn, :constantly_fn], do: "function"
