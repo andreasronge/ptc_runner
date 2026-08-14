@@ -31,8 +31,21 @@ if Code.ensure_loaded?(ReqLLM) do
     require Logger
 
     @default_timeout 120_000
+    @default_max_tokens 4_096
+    @request_token_headroom 256
     @ollama_base_url "http://localhost:11434"
     @default_bedrock_region "eu-north-1"
+    @req_llm_generation_options [
+      :api_key,
+      :max_tokens,
+      :max_retries,
+      :provider_options,
+      :seed,
+      :temperature,
+      :tool_choice
+    ]
+    @req_llm_stream_generation_options @req_llm_generation_options -- [:tool_choice]
+    @token_limit_options [:max_tokens, :max_completion_tokens, :max_output_tokens]
 
     # --- Behaviour Callbacks ---
 
@@ -125,6 +138,8 @@ if Code.ensure_loaded?(ReqLLM) do
     - `:receive_timeout` - Request timeout in ms (default: #{@default_timeout})
     - `:ollama_base_url` - Override Ollama server URL
     - `:cache` - Enable prompt caching for supported providers (default: false)
+    - `:max_tokens` - Output budget. ReqLLM-backed models default to at most
+      #{@default_max_tokens}, bounded by cataloged output and context limits.
     """
     @spec generate_text(String.t(), [map()], keyword()) ::
             {:ok, PtcRunner.LLM.response()} | {:error, term()}
@@ -275,6 +290,7 @@ if Code.ensure_loaded?(ReqLLM) do
     defp stream_req_llm(model_id, req) do
       model_id = maybe_resolve_inference_profile(model_id)
       messages = build_messages(req)
+      req_llm_model = resolve_req_llm_model(model_id)
       cache_enabled = req[:cache] || false
 
       {messages, extra_opts} = apply_caching(model_id, messages, cache_enabled)
@@ -283,21 +299,18 @@ if Code.ensure_loaded?(ReqLLM) do
       generation_opts =
         req
         |> request_opts()
-        |> Keyword.take([
-          :api_key,
-          :max_tokens,
-          :max_retries,
-          :provider_options,
-          :seed,
-          :temperature
-        ])
+        |> req_llm_generation_opts(
+          req_llm_model,
+          messages,
+          @req_llm_stream_generation_options
+        )
 
       req_opts =
         [receive_timeout: req[:receive_timeout] || @default_timeout]
         |> Keyword.merge(generation_opts)
         |> Keyword.merge(extra_opts)
 
-      case ReqLLM.Generation.stream_text(model_id, messages, req_opts) do
+      case ReqLLM.Generation.stream_text(req_llm_model, messages, req_opts) do
         {:ok, stream_response} ->
           # Map ReqLLM.StreamChunk structs to %{delta: text} chunks
           content_stream =
@@ -422,20 +435,12 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp call_req_llm(model, messages, opts) do
       model = maybe_resolve_inference_profile(model)
+      req_llm_model = resolve_req_llm_model(model)
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
       http_opts = Keyword.get(opts, :req_http_options, [])
       cache_enabled = Keyword.get(opts, :cache, false)
 
-      generation_opts =
-        Keyword.take(opts, [
-          :api_key,
-          :max_tokens,
-          :max_retries,
-          :provider_options,
-          :seed,
-          :temperature,
-          :tool_choice
-        ])
+      generation_opts = req_llm_generation_opts(opts, req_llm_model, messages)
 
       {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
       extra_opts = apply_bedrock_region(model, extra_opts)
@@ -445,7 +450,7 @@ if Code.ensure_loaded?(ReqLLM) do
         |> Keyword.merge(generation_opts)
         |> Keyword.merge(extra_opts)
 
-      case ReqLLM.generate_text(model, messages, req_opts) do
+      case ReqLLM.generate_text(req_llm_model, messages, req_opts) do
         {:ok, response} ->
           text = ReqLLM.Response.text(response) || ""
           usage = ReqLLM.Response.usage(response) || %{}
@@ -460,20 +465,12 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp call_req_llm_object(model, messages, schema, opts) do
       model = maybe_resolve_inference_profile(model)
+      req_llm_model = resolve_req_llm_model(model)
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
       http_opts = Keyword.get(opts, :req_http_options, [])
       cache_enabled = Keyword.get(opts, :cache, false)
 
-      generation_opts =
-        Keyword.take(opts, [
-          :api_key,
-          :max_tokens,
-          :max_retries,
-          :provider_options,
-          :seed,
-          :temperature,
-          :tool_choice
-        ])
+      generation_opts = req_llm_generation_opts(opts, req_llm_model, {messages, schema})
 
       {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
       extra_opts = apply_bedrock_region(model, extra_opts)
@@ -483,7 +480,7 @@ if Code.ensure_loaded?(ReqLLM) do
         |> Keyword.merge(generation_opts)
         |> Keyword.merge(extra_opts)
 
-      case ReqLLM.generate_object(model, messages, schema, req_opts) do
+      case ReqLLM.generate_object(req_llm_model, messages, schema, req_opts) do
         {:ok, response} ->
           usage = ReqLLM.Response.usage(response) || %{}
           tokens = build_tokens_from_req_llm_response(usage, response.provider_meta)
@@ -497,20 +494,12 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp call_req_llm_with_tools(model, messages, tools, opts) do
       model = maybe_resolve_inference_profile(model)
+      req_llm_model = resolve_req_llm_model(model)
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
       http_opts = Keyword.get(opts, :req_http_options, [])
       cache_enabled = Keyword.get(opts, :cache, false)
 
-      generation_opts =
-        Keyword.take(opts, [
-          :api_key,
-          :max_tokens,
-          :max_retries,
-          :provider_options,
-          :seed,
-          :temperature,
-          :tool_choice
-        ])
+      generation_opts = req_llm_generation_opts(opts, req_llm_model, {messages, tools})
 
       {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
       extra_opts = apply_bedrock_region(model, extra_opts)
@@ -522,7 +511,7 @@ if Code.ensure_loaded?(ReqLLM) do
         |> Keyword.merge(generation_opts)
         |> Keyword.merge(extra_opts)
 
-      case ReqLLM.generate_text(model, messages, req_opts) do
+      case ReqLLM.generate_text(req_llm_model, messages, req_opts) do
         {:ok, response} ->
           text = ReqLLM.Response.text(response)
           usage = ReqLLM.Response.usage(response) || %{}
@@ -863,6 +852,113 @@ if Code.ensure_loaded?(ReqLLM) do
         :error -> options
       end
     end
+
+    defp req_llm_generation_opts(
+           opts,
+           model,
+           request_payload,
+           allowed_options \\ @req_llm_generation_options
+         ) do
+      opts
+      |> Keyword.take(allowed_options)
+      |> maybe_put_bounded_max_tokens(model, request_payload)
+    end
+
+    defp maybe_put_bounded_max_tokens(opts, model, request_payload) do
+      if token_limit_present?(opts, model) do
+        opts
+      else
+        Keyword.put(opts, :max_tokens, bounded_max_tokens(model, request_payload))
+      end
+    end
+
+    defp bounded_max_tokens(%LLMDB.Model{limits: limits}, request_payload) do
+      [
+        @default_max_tokens,
+        model_output_limit(limits),
+        remaining_context_tokens(limits, request_payload)
+      ]
+      |> Enum.filter(&(is_integer(&1) and &1 > 0))
+      |> Enum.min()
+    end
+
+    defp bounded_max_tokens(_model, _request_payload), do: @default_max_tokens
+
+    defp model_output_limit(limits) when is_map(limits),
+      do: limits[:output] || limits["output"]
+
+    defp model_output_limit(_limits), do: nil
+
+    defp remaining_context_tokens(limits, request_payload) when is_map(limits) do
+      case limits[:context] || limits["context"] do
+        context when is_integer(context) and context > 0 ->
+          max(context - conservative_input_token_bound(request_payload), 1)
+
+        _unknown ->
+          nil
+      end
+    end
+
+    defp remaining_context_tokens(_limits, _request_payload), do: nil
+
+    # A token cannot encode less than one byte of the serialized request. Treating
+    # every external-format byte as a token, plus fixed chat framing headroom,
+    # intentionally overestimates input without depending on a provider tokenizer.
+    defp conservative_input_token_bound(request_payload) do
+      :erlang.external_size(request_payload) + @request_token_headroom
+    end
+
+    defp resolve_req_llm_model(%LLMDB.Model{} = model), do: model
+
+    defp resolve_req_llm_model(model) do
+      case ReqLLM.model(model) do
+        {:ok, %LLMDB.Model{} = resolved} -> resolved
+        _error -> model
+      end
+    end
+
+    defp token_limit_present?(opts, model) do
+      Keyword.has_key?(opts, :max_tokens) or
+        provider_token_limit_present?(
+          Keyword.get(opts, :provider_options, []),
+          model_provider(model)
+        )
+    end
+
+    defp model_provider(%LLMDB.Model{provider: provider}), do: provider
+    defp model_provider(_model), do: nil
+
+    defp provider_token_limit_present?(provider_options, provider) do
+      token_limit_in?(provider_options) or
+        provider_options
+        |> provider_namespace(provider)
+        |> token_limit_in?()
+    end
+
+    defp provider_namespace(provider_options, provider)
+         when is_list(provider_options) and is_atom(provider) do
+      if Keyword.keyword?(provider_options), do: Keyword.get(provider_options, provider, [])
+    end
+
+    defp provider_namespace(provider_options, provider)
+         when is_map(provider_options) and is_atom(provider) do
+      Map.get(provider_options, provider) || Map.get(provider_options, Atom.to_string(provider))
+    end
+
+    defp provider_namespace(_provider_options, _provider), do: nil
+
+    defp token_limit_in?(options) when is_list(options) do
+      Keyword.keyword?(options) and
+        Enum.any?(@token_limit_options, &Keyword.has_key?(options, &1))
+    end
+
+    defp token_limit_in?(options) when is_map(options) do
+      Enum.any?(@token_limit_options, fn key ->
+        Map.has_key?(options, key) or Map.has_key?(options, Atom.to_string(key))
+      end)
+    end
+
+    defp token_limit_in?(_options), do: false
 
     defp add_cache_fields(tokens) do
       Map.merge(tokens, %{cache_creation: 0, cache_read: 0})

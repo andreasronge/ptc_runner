@@ -122,6 +122,14 @@ optional request parameters, and request/response ceilings:
 }
 ```
 
+Set `params.max_tokens` explicitly when the installation needs a particular
+output budget. For catalog-backed models that omit it, PtcRunner's built-in
+ReqLLM adapter caps the default at 4096 tokens, the cataloged model output
+limit, and a conservative remainder of the context window after the request.
+This avoids turning a model's full context-window ceiling into an impossible
+output request once the prompt is included. The tutorial keeps the value
+explicit so changing only its model selector retains a bounded request.
+
 The manifest selects only `deepseek`; it cannot change any field above. When
 the adapter attests that the resolved model is safe public identity, provider
 snapshots and model-grouped usage include it. Endpoint-bearing or otherwise
