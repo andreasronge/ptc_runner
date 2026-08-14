@@ -142,6 +142,42 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
            }
   end
 
+  test "private inspection proves an unchanged child result produced a boundary failure" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(terminal_result_bytes: 1)
+    {:ok, events} = EventSink.start(:normal, limits, run_id: "boundary-producer")
+
+    {:ok, inspection} =
+      InspectionSink.start(run_id: "boundary-producer", trace_id: "boundary-producer")
+
+    assert {:ok, config} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               missions: %{"default" => mission},
+               input: %{},
+               limits: limits,
+               event_sink: events,
+               inspection_sink: inspection,
+               result_projection: :json
+             )
+
+    assert {:error, %{reason: :terminal_result_exceeded}} =
+             Kernel.run(
+               ~S|(return (tool/kernel-eval {"mission" "default" "kind" :source "source" "(return 42)"}))|,
+               config
+             )
+
+    assert {:ok, records} = InspectionSink.records(inspection)
+    source = Enum.find(records, &(&1["record_type"] == "evaluation-source"))
+    error = Enum.find(records, &(&1["record_type"] == "execution-error"))
+
+    assert error["payload"]["details"]["boundary_producer"] == %{
+             "complete?" => true,
+             "evaluation_ids" => [source["correlation"]["evaluation_id"]]
+           }
+  end
+
   defp run(source, projection, opts \\ []) do
     case build_config(projection, opts) do
       {:ok, config} -> Kernel.run(source, config)

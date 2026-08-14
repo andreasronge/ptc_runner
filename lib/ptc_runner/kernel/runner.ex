@@ -339,6 +339,7 @@ defmodule PtcRunner.Kernel.Runner do
          private_details
        )
        when is_map(private_details) do
+    private_details = Map.merge(private_details, boundary_producer_details(step))
     private_error = %{public_error | details: Map.merge(public_error.details, private_details)}
 
     case emit_execution_diagnostics(
@@ -356,6 +357,53 @@ defmodule PtcRunner.Kernel.Runner do
 
     {:error, public_error}
   end
+
+  # A direct return of one successful `kernel-eval` result is the narrow case
+  # where the evaluator ledger proves boundary-value provenance. Retain only
+  # the child evaluation identity. Transformed values and truncated ledger
+  # entries deliberately remain unresolved; sequence proximity is not proof.
+  defp boundary_producer_details(step) do
+    boundary_value = LispResult.unwrap_return(Map.get(step, :return))
+
+    kernel_eval_calls =
+      step
+      |> Map.get(:tool_calls, [])
+      |> Enum.filter(&(Map.get(&1, :name) == "kernel-eval"))
+
+    {evaluation_ids, complete?} =
+      Enum.reduce(kernel_eval_calls, {[], true}, fn call, {ids, complete?} ->
+        complete? = complete? and not Map.get(call, :result_truncated, false)
+
+        case direct_boundary_producer_id(call, boundary_value) do
+          nil -> {ids, complete?}
+          evaluation_id -> {[evaluation_id | ids], complete?}
+        end
+      end)
+
+    if kernel_eval_calls == [] do
+      %{}
+    else
+      %{
+        boundary_producer: %{
+          evaluation_ids: evaluation_ids |> Enum.uniq() |> Enum.sort(),
+          complete?: complete?
+        }
+      }
+    end
+  end
+
+  defp direct_boundary_producer_id(
+         %{error: nil, result: result},
+         boundary_value
+       )
+       when result == boundary_value do
+    get_in(result, [:value, :evaluation_id]) ||
+      get_in(result, [:value, "evaluation_id"]) ||
+      get_in(result, ["value", :evaluation_id]) ||
+      get_in(result, ["value", "evaluation_id"])
+  end
+
+  defp direct_boundary_producer_id(_call, _boundary_value), do: nil
 
   # A successful workflow's `step.prints` are as diagnostically valuable as a
   # failing one's — they are the first thing anyone adds to see why a run
