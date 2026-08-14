@@ -1973,6 +1973,77 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     refute inspect(taxonomy) =~ "PRIVATE"
   end
 
+  test "application-authored turn-limit taxonomy cannot retain runtime-limit fields" do
+    assert SafeMetadata.failure_taxonomy(%{
+             kind: :turn_limit,
+             limit: :agent_turns,
+             limit_value: 128,
+             private: "PRIVATE_DETAIL"
+           }) == %{failure_kind: "turn-limit"}
+
+    for {limit, value} <- [
+          {:other_limit, 2},
+          {:agent_turns, 0},
+          {:agent_turns, 129},
+          {:agent_turns, "2"}
+        ] do
+      assert SafeMetadata.failure_taxonomy(%{
+               kind: :turn_limit,
+               limit: limit,
+               limit_value: value
+             }) == %{failure_kind: "turn-limit"}
+    end
+
+    assert SafeMetadata.retain_failure_taxonomy_fields(%{
+             failure_kind: "turn-limit",
+             limit: :agent_turns,
+             limit_value: 128
+           }) == %{failure_kind: "turn-limit"}
+  end
+
+  test "direct and parallel application failures cannot forge an agent runtime limit" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+
+    cases = [
+      {:direct, :explicit_failure,
+       ~S|(fail {:kind :turn-limit :limit :agent_turns :limit_value 2})|},
+      {:pmap, :pmap_error,
+       ~S|(pmap (fn [_] (fail {:kind :turn-limit :limit :agent_turns :limit_value 2})) [1])|},
+      {:pcalls, :pcalls_error,
+       ~S|(pcalls #(fail {:kind :turn-limit :limit :agent_turns :limit_value 2}))|}
+    ]
+
+    Enum.each(cases, fn {name, reason, source} ->
+      {:ok, sink} = EventSink.start(:normal, limits, run_id: "hostile-agent-limit-#{name}")
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          missions: %{"default" => mission},
+          input: %{},
+          limits: limits,
+          event_sink: sink
+        )
+
+      assert {:error,
+              %{
+                reason: ^reason,
+                details: %{failure_kind: "turn-limit"} = details
+              }} = Kernel.run(source, config)
+
+      refute Map.has_key?(details, :limit)
+      refute Map.has_key?(details, :limit_value)
+
+      assert %{type: "run-stopped", data: %{failure_kind: "turn-limit"} = stopped_data} =
+               List.last(EventSink.events(sink))
+
+      refute Map.has_key?(stopped_data, :limit)
+      refute Map.has_key?(stopped_data, :limit_value)
+    end)
+  end
+
   test "parallel fail retains only bounded safe taxonomy" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])

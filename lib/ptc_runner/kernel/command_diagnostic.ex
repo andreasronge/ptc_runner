@@ -8,10 +8,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   to their source classification. Rendering never inspects a lower-level
   reason or rejected value. Catalog-authorized dynamic message shapes contain
   only fixed literals plus bounded PTC-Lisp symbol names, a catalog-validated
-  runtime ceiling, or an opaque replay request hash. Compile messages require
-  component-source provenance; a missing capability message is rebuilt from
-  the frozen bundle's sorted tool requirements. Runtime and replay messages
-  require fixed runtime provenance. Every other message is the catalog literal.
+  runtime ceiling, a bounded agent turn ceiling, or an opaque replay request
+  hash. Compile messages require component-source provenance; a missing
+  capability message is rebuilt from the frozen bundle's sorted tool
+  requirements. Kernel runtime and replay messages require fixed runtime
+  provenance. An agent turn-limit message has no source because `max_turns`
+  belongs to one `agent.core` call rather than a host or manifest document.
+  Every other message is the catalog literal.
 
   `notes` is reserved and always empty: the published V2 envelope schema pins
   it to `{"const": []}`, so a populated array would invalidate the envelope for
@@ -23,6 +26,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
 
   @enforce_keys [
     :phase,
@@ -307,11 +311,18 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
        do: true
 
   defp valid_message_source?(
-         _message,
+         message,
          %{phase: :execution, code: :runtime_limit_exceeded},
          %CommandSource{kind: :runtime}
        ),
-       do: true
+       do: RuntimeLimitDiagnostic.subordinate_evaluations_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :execution, code: :runtime_limit_exceeded},
+         nil
+       ),
+       do: RuntimeLimitDiagnostic.agent_turns_message?(message)
 
   defp valid_message_source?(
          _message,

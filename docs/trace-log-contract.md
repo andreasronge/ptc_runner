@@ -259,6 +259,12 @@ canonical JSON bytes. `ResultArtifact` writes those same bytes, so a trusted
 host can bind an artifact to the run that produced it without exposing the
 result in the public trace. Failed runs omit the field.
 
+A shipped `agent.core` loop whose caller propagates exhaustion records
+`failure_kind: "turn-limit"`, `limit: "agent_turns"`, and the validated
+`limit_value` from 1 through 128 on the failed `run-stopped` event. Other
+recognized explicit failures retain only their bounded failure taxonomy; these
+fields never admit caller-supplied prose.
+
 ## Source grants and authority
 
 Trace access is authority-bearing and source scoped. A TraceLog capability is

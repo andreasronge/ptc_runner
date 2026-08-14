@@ -606,6 +606,22 @@ defmodule PtcRunner.Kernel.Runner do
     Map.merge(stopped_data, taxonomy)
   end
 
+  defp maybe_put_failure_taxonomy(
+         stopped_data,
+         {:error,
+          %Error{
+            reason: :runtime_limit_exceeded,
+            details: %{limit: :agent_turns, limit_value: limit}
+          }}
+       )
+       when limit in 1..128 do
+    Map.merge(stopped_data, %{
+      failure_kind: "turn-limit",
+      limit: :agent_turns,
+      limit_value: limit
+    })
+  end
+
   defp maybe_put_failure_taxonomy(stopped_data, _result), do: stopped_data
 
   defp put_result_usage({:ok, %Result{} = result}, usage), do: {:ok, %{result | usage: usage}}
@@ -755,6 +771,19 @@ defmodule PtcRunner.Kernel.Runner do
        )
        when limit == limits.subordinate_evaluations do
     %{limit: :subordinate_evaluations, limit_value: limit}
+  end
+
+  defp workflow_error_details(
+         %{
+           reason: :runtime_limit_exceeded,
+           details: %{limit: :agent_turns, limit_value: limit}
+         },
+         _timeout_ms,
+         _limits,
+         _sink
+       )
+       when limit in 1..128 do
+    %{limit: :agent_turns, limit_value: limit}
   end
 
   defp workflow_error_details(fail, _timeout_ms, _limits, sink)

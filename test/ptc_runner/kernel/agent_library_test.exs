@@ -1154,7 +1154,16 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, config} =
       agent_config([response], [], provider_closers: [close_counter(self(), :final_turn)])
 
-    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure, usage: usage}} =
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :runtime_limit_exceeded,
+              details: %{
+                limit: :agent_turns,
+                limit_value: 1
+              },
+              usage: usage
+            }} =
              Kernel.run(~S|(agent.core/run "Use the final turn" {"max_turns" 1})|, config)
 
     assert usage.subordinate_evaluations == 1
@@ -1168,6 +1177,24 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              event.type == "evaluation-stopped" and event.data[:environment] == :mission and
                event.data[:status] == :continued
            end)
+  end
+
+  test "agent turn-limit provenance survives pmap and pcalls" do
+    response = %{content: "prose", tool_calls: []}
+
+    for source <- [
+          ~S|(pmap (fn [_] (agent.core/run-value "task" {"max_turns" 1})) [1])|,
+          ~S|(pcalls #(agent.core/run-value "task" {"max_turns" 1}))|
+        ] do
+      {:ok, config} = agent_config([response])
+
+      assert {:error,
+              %{
+                kind: :workflow_failed,
+                reason: :runtime_limit_exceeded,
+                details: %{limit: :agent_turns, limit_value: 1}
+              }} = Kernel.run(source, config)
+    end
   end
 
   test "host quotas can stop a continued loop before max_turns" do
@@ -2232,6 +2259,24 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              Kernel.run(
                ~S|(return (agent.core/run-outcome "Fail" {"max_turns" 1}))|,
                explicit_config
+             )
+
+    {:ok, exhausted_config} = agent_config([%{content: "prose", tool_calls: []}])
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "subject-failure",
+                "kind" => "turn-limit",
+                "error" => %{
+                  "limit" => "agent_turns",
+                  "limit_value" => 1
+                }
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Exhaust" {"max_turns" 1}))|,
+               exhausted_config
              )
 
     {:ok, provider_config} = agent_config([{:error, :transport_down}])

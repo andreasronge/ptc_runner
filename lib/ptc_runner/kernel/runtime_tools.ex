@@ -156,26 +156,42 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   @spec runtime_limit_failure(RunState.t(), map()) :: (map() -> term())
   def runtime_limit_failure(state, limits) do
     fn arguments ->
-      with %{"proof" => proof} <- arguments,
-           true <- map_size(arguments) == 1,
-           :ok <- RunState.consume_evaluation_limit_proof(state, proof) do
-        %TrustedError{
-          reason: :runtime_limit_exceeded,
-          message: "subordinate_evaluations limit exceeded",
-          details: %{
-            limit: :subordinate_evaluations,
-            limit_value: limits.subordinate_evaluations
+      case arguments do
+        %{"proof" => proof} when map_size(arguments) == 1 ->
+          case RunState.consume_evaluation_limit_proof(state, proof) do
+            :ok ->
+              %TrustedError{
+                reason: :runtime_limit_exceeded,
+                message: "subordinate_evaluations limit exceeded",
+                details: %{
+                  limit: :subordinate_evaluations,
+                  limit_value: limits.subordinate_evaluations
+                }
+              }
+
+            _failure ->
+              invalid_runtime_limit_failure()
+          end
+
+        %{"agent_turns" => limit} when map_size(arguments) == 1 and limit in 1..128 ->
+          %TrustedError{
+            reason: :runtime_limit_exceeded,
+            message: "agent turn limit exceeded",
+            details: %{limit: :agent_turns, limit_value: limit}
           }
-        }
-      else
-        _failure ->
-          %{
-            status: :error,
-            kind: :protocol_error,
-            reason: :invalid_runtime_limit_failure
-          }
+
+        _invalid ->
+          invalid_runtime_limit_failure()
       end
     end
+  end
+
+  defp invalid_runtime_limit_failure do
+    %{
+      status: :error,
+      kind: :protocol_error,
+      reason: :invalid_runtime_limit_failure
+    }
   end
 
   @doc false

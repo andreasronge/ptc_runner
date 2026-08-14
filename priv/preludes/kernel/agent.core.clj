@@ -71,6 +71,19 @@
    :kind kind
    :error (result/error kind reason)})
 
+(defn- turn-limit-failure [reason max-turns]
+  {:status :subject-failure
+   :kind :turn-limit
+   :error (assoc (result/error :turn-limit reason)
+                 :limit :agent_turns
+                 :limit_value max-turns)})
+
+(defn- propagate-subject-failure [outcome]
+  (if (= :turn-limit (get outcome :kind))
+    (tool/kernel-runtime-limit-failure
+      {"agent_turns" (get (get outcome :error) :limit_value)})
+    (fail (get outcome :error))))
+
 (defn- correctable-capability-failure? [evaluation]
   (let [error (get evaluation :value)]
     (and (true? (get evaluation :capability-failure?))
@@ -120,7 +133,7 @@
              prompt-state initial-prompt-state
              closing? false]
         (if (>= turn max-turns)
-          (subject-failure :turn-limit :turn-limit-exceeded)
+          (turn-limit-failure :turn-limit-exceeded max-turns)
           (let [request (bounded-request prompt-state messages effective-cfg max-transcript-chars)
                 response (llm/request request)
                 action (agent.native/normalize response max-program-chars)]
@@ -193,7 +206,7 @@
                                (append-correlated messages action observation)
                                next-prompt-state
                                closing?))
-                      (subject-failure :turn-limit :intermediate-result))
+                      (turn-limit-failure :intermediate-result max-turns))
 
                     ;; A refused admission is a host condition, not something
                     ;; the model wrote: either another caller holds the run's
@@ -252,7 +265,7 @@
                                      consolidate-at-turns-remaining))
                                  next-prompt-state
                                  closing?))
-                        (subject-failure :turn-limit :evaluation-error)))))))
+                        (turn-limit-failure :evaluation-error max-turns)))))))
 
               :protocol-error
               (if (agent.retry/retry? turn max-turns)
@@ -269,7 +282,7 @@
                                             consolidate-at-turns-remaining)})
                          next-prompt-state
                          closing?))
-                (subject-failure :turn-limit :protocol-error))
+                (turn-limit-failure :protocol-error max-turns))
 
               :provider-error
               (fail (result/error :llm-provider-error (get action :error)))
@@ -295,7 +308,7 @@
   (let [outcome (run-outcome task cfg)]
     (if (= :returned (get outcome :status))
       (get outcome :value)
-      (fail (get outcome :error)))))
+      (propagate-subject-failure outcome))))
 
 (defn run-result-value
   "Runs the agent loop and validates model-authored completion against the
@@ -305,7 +318,7 @@
   (let [outcome (run-outcome* task cfg true)]
     (if (= :returned (get outcome :status))
       (get outcome :value)
-      (fail (get outcome :error)))))
+      (propagate-subject-failure outcome))))
 
 (defn run
   "Runs the agent loop as a terminal workflow entry.
