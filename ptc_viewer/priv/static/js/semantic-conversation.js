@@ -1,10 +1,19 @@
 import { html, mount, toMarkup } from './preact.js';
 
 export function renderSemanticConversation(container, conversation) {
-  const host = container.querySelector('.semantic-conversation-wrapper') ||
-    container.appendChild(Object.assign(document.createElement('section'), {
-      className: 'semantic-conversation-wrapper'
-    }));
+  const existingHost = container.querySelector('.semantic-conversation-wrapper');
+
+  if (!conversation) {
+    if (existingHost) {
+      mount(existingHost, null);
+      existingHost.remove();
+    }
+    return;
+  }
+
+  const host = existingHost || container.appendChild(Object.assign(document.createElement('section'), {
+    className: 'semantic-conversation-wrapper'
+  }));
   mount(host, html`<${Conversation} conversation=${conversation} />`);
 }
 

@@ -31,7 +31,7 @@ defmodule PtcViewer.RouterTest do
     router_opts = [trace_dir: trace_dir, kernel_trace_adapter: adapter]
 
     conn =
-      conn(:get, "/api/kernel/runs?limit=2&status=error")
+      conn(:get, "/api/kernel/runs?limit=2&status=error&bundle=sha256%3Abundle")
       |> call_router(router_opts)
 
     assert conn.status == 200
@@ -39,7 +39,11 @@ defmodule PtcViewer.RouterTest do
 
     assert body == %{
              "operation" => "list_runs",
-             "arguments" => %{"limit" => 2, "status" => "error"}
+             "arguments" => %{
+               "limit" => 2,
+               "status" => "error",
+               "bundle" => "sha256:bundle"
+             }
            }
   end
 

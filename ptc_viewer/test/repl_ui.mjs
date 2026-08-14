@@ -11,6 +11,7 @@ import {
   templatePayloadMatches
 } from '../priv/static/js/repl.js';
 import { createRunCatalog } from '../priv/static/js/run-catalog.js';
+import { commitCurrentLoad } from '../priv/static/js/current-load.js';
 
 class FakeElement {
   constructor(tag = 'div') {
@@ -156,6 +157,40 @@ const deferred = () => {
 const flush = async () => {
   for (let index = 0; index < 12; index += 1) await Promise.resolve();
 };
+
+let currentLoadGeneration = 1;
+const olderRunBody = deferred();
+const newerRunBody = deferred();
+const committedLoads = [];
+const olderSameRunLoad = commitCurrentLoad(1, {
+  isCurrent: generation => currentLoadGeneration === generation,
+  load: () => olderRunBody.promise,
+  commit: value => committedLoads.push(value)
+});
+currentLoadGeneration = 2;
+const newerSameRunLoad = commitCurrentLoad(2, {
+  isCurrent: generation => currentLoadGeneration === generation,
+  load: () => newerRunBody.promise,
+  commit: value => committedLoads.push(value)
+});
+newerRunBody.resolve({ run_id: 'run-a', snapshot: 'newer' });
+assert.equal(await newerSameRunLoad, true);
+olderRunBody.resolve({ run_id: 'run-a', snapshot: 'older' });
+assert.equal(await olderSameRunLoad, false);
+assert.deepEqual(committedLoads, [{ run_id: 'run-a', snapshot: 'newer' }]);
+
+let continuationGeneration = 1;
+const staleContinuationBody = deferred();
+const continuationRenders = [];
+const staleContinuation = commitCurrentLoad(1, {
+  isCurrent: generation => continuationGeneration === generation,
+  load: () => staleContinuationBody.promise,
+  commit: value => continuationRenders.push(value)
+});
+continuationGeneration = 2;
+staleContinuationBody.resolve({ run_id: 'run-a', page: 2 });
+assert.equal(await staleContinuation, false);
+assert.deepEqual(continuationRenders, []);
 
 // Fresh catalog generations own rendering. Slow older responses and stale
 // load-more controls cannot replace a newer post-persistence catalog, while a
@@ -620,7 +655,16 @@ assert.doesNotMatch(appSource, /dataset\.runId/);
 assert.match(appSource, /onClick=\$\{\(\) => selectRun\(run\.run_id\)\}/);
 assert.match(appSource, /location\.hash = runId \? `#\/run\/\$\{encodeURIComponent\(runId\)\}`/);
 assert.match(appSource, /decodeURIComponent\(match\[1\]\)/);
-assert.match(appSource, /loadRun\(route\.runId\)/);
+assert.match(appSource, /loadRun\(route\.runId, routeGeneration\)/);
 assert.match(appSource, /encodeURIComponent\(runId\)\}`\),/);
+assert.match(appSource, /run\.workflow_prelude\?\.hash/);
+assert.match(appSource, /run\.evaluations \?\? 0/);
+assert.match(appSource, /renderSemanticConversation\(container, null\)/);
+assert.match(appSource, /commitCurrentLoad\(routeGeneration,/);
+const loadMoreSource = appSource.slice(
+  appSource.indexOf('onLoadMore:'),
+  appSource.indexOf('function activateTab')
+);
+assert.match(loadMoreSource, /commitCurrentLoad\(routeGeneration,/);
 
 process.stdout.write('ok');

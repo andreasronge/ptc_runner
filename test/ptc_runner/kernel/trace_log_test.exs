@@ -108,6 +108,75 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   end
 
   @tag :tmp_dir
+  test "run summaries expose total evaluations and filter by workflow bundle", %{
+    tmp_dir: directory
+  } do
+    path = Path.join(directory, "trace.jsonl")
+
+    events = [
+      decoded_event("bundle-a-run", 1, "run-started", %{
+        "labels" => %{"name" => "sha256:same-name"},
+        "workflow_prelude" => %{"component_ids" => ["kernel"], "hash" => "bundle-a"}
+      }),
+      decoded_event("bundle-a-run", 2, "evaluation-started", %{
+        "environment" => "workflow",
+        "evaluation_id" => "workflow-evaluation"
+      }),
+      decoded_event("bundle-a-run", 3, "evaluation-stopped", %{
+        "environment" => "workflow",
+        "evaluation_id" => "workflow-evaluation",
+        "status" => "ok"
+      }),
+      decoded_event("bundle-a-run", 4, "run-stopped", %{"outcome" => "ok"}),
+      decoded_event("bundle-b-run", 1, "run-started", %{
+        "labels" => %{"name" => "sha256:same-name"},
+        "workflow_prelude" => %{"component_ids" => ["kernel"], "hash" => "bundle-b"}
+      }),
+      decoded_event("bundle-b-run", 2, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert :ok = TraceLog.append_jsonl(path, events)
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    assert {:ok,
+            %{
+              "items" => [
+                %{
+                  "run_id" => "bundle-a-run",
+                  "evaluations" => 1,
+                  "subordinate_evaluations" => 0
+                }
+              ]
+            }} = TraceLog.query(trace_log, :list_runs, %{"bundle" => "bundle-a"})
+
+    assert {:ok, %{"items" => [%{"run_id" => "bundle-b-run"}]}} =
+             TraceLog.query(trace_log, :list_runs, %{"bundle" => "bundle-b"})
+
+    assert {:ok, %{"runs" => 1, "evaluations" => 1}} =
+             TraceLog.query(trace_log, :counters, %{"bundle" => "bundle-a"})
+
+    assert {:error, :invalid_query} =
+             TraceLog.query(trace_log, :list_runs, %{"bundle_hash" => "bundle-a"})
+  end
+
+  @tag :tmp_dir
+  test "canonical validation rejects malformed workflow prelude metadata", %{tmp_dir: directory} do
+    path = Path.join(directory, "malformed-workflow-prelude.jsonl")
+
+    events = [
+      decoded_event("malformed-workflow-prelude", 1, "run-started", %{
+        "workflow_prelude" => "not-a-prelude-projection"
+      })
+    ]
+
+    File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    assert {:error, :malformed_source} =
+             TraceLog.query(trace_log, :list_runs, %{"bundle" => "bundle-a"})
+  end
+
+  @tag :tmp_dir
   test "canonical JSONL append and reload preserves event order", %{tmp_dir: directory} do
     path = Path.join(directory, "trace.jsonl")
     first = decoded_event("append", 1, "run-started")
