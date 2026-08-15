@@ -79,11 +79,15 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "--inspect must name a valid destination ending in .inspection.jsonl"},
     {:destination, :inspection_destination_unavailable, 7, false,
      "the inspection destination is unavailable"},
+    {:destination, :inspection_directory_missing, 7, false,
+     "--inspect must name a file in an existing directory"},
     {:destination, :inspection_destination_unsafe, 7, false,
      "the inspection destination is unsafe"},
     {:destination, :invalid_result_destination, 7, false, "the result destination is invalid"},
     {:destination, :result_destination_unavailable, 7, false,
      "the result destination is unavailable"},
+    {:destination, :result_directory_missing, 7, false,
+     "--output and --private-output must name a file in an existing directory"},
     {:destination, :result_destination_unsafe, 7, false, "the result destination is unsafe"},
     {:destination, :destination_exists, 7, false, "an artifact destination already exists"},
     {:destination, :private_destination_required, 7, false,
@@ -92,6 +96,12 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the private result recovery reservation failed"},
     {:local_preflight, :environment_unavailable, 4, false,
      "a required local environment is unavailable"},
+    {:local_preflight, :environment_file_unavailable, 4, false,
+     "the named environment file must be an existing readable file"},
+    {:local_preflight, :authorization_target_unknown, 4, false,
+     "--authorize-mcp must name an installed provider the application selects"},
+    {:local_preflight, :authorization_not_applicable, 4, false,
+     "--authorize-mcp applies only to an installation that declares OAuth"},
     {:local_preflight, :command_not_found, 4, false,
      "a required provider command could not be found"},
     {:local_preflight, :executable_unavailable, 4, false,
@@ -386,6 +396,10 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   # provider as unreachable when nothing had reached it yet.
   def subject_policy(:active_preflight, :connectivity_timeout), do: :forbidden
 
+  # The environment file is named by `--env-file` or by the project host block,
+  # so it belongs to the invocation rather than to any one installed provider.
+  def subject_policy(:local_preflight, :environment_file_unavailable), do: :forbidden
+
   def subject_policy(phase, code) do
     cond do
       phase in [:provider_declaration, :local_preflight, :active_preflight, :provider_acquisition] ->
@@ -639,6 +653,14 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     do: :forbidden
 
   def subject_occurrence_policy(:provider_declaration, _code, _operation), do: :required
+
+  # An authorization target comes from `--authorize-mcp`, which names an alias
+  # and not a selection slot. The unknown-target case has no occurrence to name
+  # by definition: the alias the operator typed appears in no selection at all.
+  def subject_occurrence_policy(:local_preflight, code, _operation)
+      when code in [:authorization_target_unknown, :authorization_not_applicable],
+      do: :forbidden
+
   def subject_occurrence_policy(:local_preflight, _code, _operation), do: :required
 
   def subject_occurrence_policy(:active_preflight, code, _operation)

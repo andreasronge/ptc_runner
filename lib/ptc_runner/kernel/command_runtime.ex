@@ -77,7 +77,8 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   def valid?(_runtime), do: false
 
   @doc false
-  @spec setup_environment(t()) :: :ok | {:error, :environment_setup_failed}
+  @spec setup_environment(t()) ::
+          :ok | {:error, :environment_setup_failed | :environment_file_unavailable}
   def setup_environment(%__MODULE__{environment_setup: nil} = runtime) do
     if valid?(runtime), do: :ok, else: {:error, :environment_setup_failed}
   end
@@ -86,6 +87,10 @@ defmodule PtcRunner.Kernel.CommandRuntime do
     if valid?(runtime) do
       case runtime.environment_setup.() do
         :ok -> :ok
+        # A named dotenv file that cannot be read is the operator's input, not a
+        # broken runtime, so it keeps its own reason. Any other setup failure —
+        # including an embedding host's own callback — stays undifferentiated.
+        {:error, :environment_file_invalid} -> {:error, :environment_file_unavailable}
         _failure -> {:error, :environment_setup_failed}
       end
     else

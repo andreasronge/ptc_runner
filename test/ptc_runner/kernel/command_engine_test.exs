@@ -217,7 +217,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:error, %CommandOutcome{} = outcome} =
              CommandEngine.dispatch(["run", application], runtime)
 
-    assert outcome.envelope["error"]["phase"] == "internal"
+    # An application selecting no provider selects no authorization target
+    # either, so this is the unknown-target case and names the alias asked for.
+    assert outcome.envelope["error"]["phase"] == "local_preflight"
+    assert outcome.envelope["error"]["code"] == "authorization_target_unknown"
+    assert outcome.envelope["error"]["subject"]["name"] == "workspace"
     assert outcome.envelope["error"]["provider_activity"] == false
     assert outcome.envelope["execution"] == %{"state" => "not_started"}
     assert_schema_valid(outcome.envelope)
@@ -685,6 +689,59 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["execution"] == %{"state" => "not_started"}
     assert outcome.envelope["artifact_state"]["trace"] == "not_written"
     assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a named environment file that cannot be read is classified, not internal", %{
+    tmp_dir: directory
+  } do
+    # The file the operator names by hand is the likeliest first-run mistake, so
+    # it must not answer with the code reserved for a broken runtime. An
+    # embedding host's own failing setup callback stays internal; only the named
+    # dotenv file is user input this layer can classify.
+    host_path = write_host_config(directory, "env-file-missing", env_credential_host())
+    application = doctor_application(directory, "env-file-missing", workflow: ["model"])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch([
+               "run",
+               application,
+               "--host-config",
+               host_path,
+               "--env-file",
+               Path.join(directory, "absent.env")
+             ])
+
+    assert outcome.envelope["error"]["phase"] == "local_preflight"
+    assert outcome.envelope["error"]["code"] == "environment_file_unavailable"
+    assert outcome.envelope["error"]["message"] =~ "environment file"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    assert outcome.envelope["execution"] == %{"state" => "not_started"}
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "an artifact destination under a missing directory names that cause", %{
+    tmp_dir: directory
+  } do
+    # `--trace-dir` already names this exact condition. The result and inspection
+    # destinations computed the same cause and discarded it, so a missing parent
+    # directory was indistinguishable from every other unavailable destination.
+    application = write_application(directory, "destination-parent", valid_manifest())
+    absent = Path.join(directory, "absent")
+
+    for {switch, destination, code} <- [
+          {"--output", Path.join(absent, "result.json"), "result_directory_missing"},
+          {"--private-output", Path.join(absent, "result.json"), "result_directory_missing"},
+          {"--inspect", Path.join(absent, "run.inspection.jsonl"), "inspection_directory_missing"}
+        ] do
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandEngine.dispatch(["run", application, switch, destination])
+
+      assert outcome.envelope["error"]["code"] == code
+      assert outcome.envelope["error"]["message"] =~ "existing"
+      assert_schema_valid(outcome.envelope)
+    end
   end
 
   test "malformed phase-1 forms retain their recognized command" do
@@ -6334,6 +6391,20 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       end
 
     write_application(directory, name, manifest)
+  end
+
+  defp env_credential_host do
+    %{
+      "credentials" => %{"key" => %{"env" => "PTC_TEST_ABSENT_KEY"}},
+      "install" => %{
+        "model" => %{
+          "source" => "llm",
+          "installation_revision" => "model-v1",
+          "model" => "openrouter:test/model",
+          "credential" => "key"
+        }
+      }
+    }
   end
 
   defp provider_entries(names) do

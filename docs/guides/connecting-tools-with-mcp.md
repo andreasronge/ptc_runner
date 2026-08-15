@@ -135,6 +135,13 @@ Streamable HTTP names a remote endpoint and optional static authentication:
 }
 ```
 
+The endpoint must be `https`. A host document cannot name a plain-`http`
+endpoint, including on loopback, so a local server reached this way needs TLS;
+the in-process Elixir API has a separate loopback allowance that host documents
+deliberately do not expose. A rejected endpoint fails the installation's
+connectivity check, which `mix ptc doctor --connect` reports as
+`provider_unavailable`.
+
 Supported static schemes are `bearer`, `basic`, and header-named `api_key`.
 Protocol headers such as `authorization`, `content-type`, `host`, and `mcp-*`
 cannot be supplied as API-key headers. The generated host schema contains the

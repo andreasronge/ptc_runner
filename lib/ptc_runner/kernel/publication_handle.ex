@@ -78,6 +78,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
              is_integer(mode) and mode >= 0 and is_pid(owner) do
     with :ok <- valid_path(path),
          {:ok, path} <- PrivateDirectory.anchor(path),
+         :ok <- parent_present(path),
          :ok <- PrivateDirectory.preflight(path),
          {:ok, parent, parent_identity} <- parent_identity(path),
          {:error, :enoent} <- File.lstat(path) do
@@ -1178,6 +1179,17 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     end
   end
 
+  # Decided before the private-directory preflight, which answers for a missing
+  # parent with the same reason it uses for every unusable one. `--trace-dir`
+  # already reports this condition by name; this is what lets `--output`,
+  # `--private-output`, and `--inspect` do the same.
+  defp parent_present(path) do
+    case File.stat(Path.dirname(path), time: :posix) do
+      {:error, :enoent} -> {:error, :destination_directory_missing}
+      _other -> :ok
+    end
+  end
+
   defp parent_identity(path) do
     parent = Path.dirname(path)
 
@@ -1187,6 +1199,12 @@ defmodule PtcRunner.Kernel.PublicationHandle do
           {:ok, identity} -> {:ok, parent, identity}
           :error -> {:error, :destination_unavailable}
         end
+
+      # An absent parent directory is the ordinary operator mistake here, and
+      # the only one with an obvious remedy, so it keeps its own reason rather
+      # than joining every other way a destination can be unusable.
+      {:error, :enoent} ->
+        {:error, :destination_directory_missing}
 
       _other ->
         {:error, :destination_unavailable}

@@ -383,6 +383,37 @@ defmodule Mix.Tasks.PtcTest do
   end
 
   @tag :tmp_dir
+  test "--authorize-mcp rejections name the argument rather than failing internally", %{
+    tmp_dir: dir
+  } do
+    # Both are ordinary argument mistakes: a mistyped alias, and a real alias
+    # that simply carries no OAuth policy. Neither may answer with the code
+    # reserved for a broken runtime, and they must not answer alike.
+    missing_env = "PTC_AUTHORIZE_MISSING_#{System.unique_integer([:positive])}"
+    System.delete_env(missing_env)
+    {manifest_path, host_path} = write_provider_application(dir, missing_env)
+
+    for {target, code} <- [
+          {"absent", "authorization_target_unknown"},
+          {"workspace", "authorization_not_applicable"}
+        ] do
+      presentation =
+        MixCommandAdapter.execute([
+          "run",
+          manifest_path,
+          "--host-config",
+          host_path,
+          "--authorize-mcp",
+          target
+        ])
+
+      assert presentation.stderr =~ "local_preflight/#{code}"
+      assert presentation.stderr =~ "provider/#{target}/local"
+      refute presentation.stderr =~ "internal_error"
+    end
+  end
+
+  @tag :tmp_dir
   test "an active doctor finding remains a readiness report", %{tmp_dir: dir} do
     missing_env = "PTC_DOCTOR_MISSING_#{System.unique_integer([:positive])}"
     System.delete_env(missing_env)
