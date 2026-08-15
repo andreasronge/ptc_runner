@@ -267,6 +267,14 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
        when is_map(details),
        do: error
 
+  defp classify_runner_error(
+         {:result_contract_failed, _message, details} = error,
+         _type,
+         _index
+       )
+       when is_map(details),
+       do: error
+
   defp classify_runner_error(:parallel_capacity_exceeded, _type, _index),
     do:
       {:parallel_capacity_exceeded,
@@ -347,6 +355,14 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
 
   defp parallel_abort_error(
          {:runtime_limit_exceeded, _message, details} = error,
+         _type,
+         _index
+       )
+       when is_map(details),
+       do: error
+
+  defp parallel_abort_error(
+         {:result_contract_failed, _message, details} = error,
          _type,
          _index
        )

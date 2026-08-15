@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
 
   @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v2.schema.json"
@@ -1059,6 +1060,12 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{"properties" => %{"kind" => %{"const" => "runtime"}}}
        ),
        do: RuntimeLimitDiagnostic.subordinate_evaluations_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :result_cleanup, code: :result_contract_failed} = row,
+         %{"properties" => %{"kind" => %{"const" => "result_contract"}}}
+       ),
+       do: ResultContractDiagnostic.message_schema(row.message)
 
   defp diagnostic_message_schema(row, %{"type" => "null"}), do: %{"const" => row.message}
   defp diagnostic_message_schema(row, _source_schema), do: DiagnosticCatalog.message_schema(row)

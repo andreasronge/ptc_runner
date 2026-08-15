@@ -26,6 +26,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
 
   @enforce_keys [
@@ -294,6 +295,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   defp valid_span?(_span, _source), do: false
 
   defp valid_message_source?(message, %{message: message}, _source), do: true
+
+  defp valid_message_source?(
+         message,
+         %{phase: :result_cleanup, code: :result_contract_failed},
+         %CommandSource{kind: :result_contract}
+       ),
+       do: ResultContractDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
          _message,

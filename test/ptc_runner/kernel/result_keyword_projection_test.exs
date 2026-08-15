@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.Lisp.TrustedError
 
   test "kernel JSON results project atom-backed and struct-backed keywords uniformly" do
     source =
@@ -81,6 +82,61 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
 
     assert %{status: :error, kind: :protocol_error, reason: :invalid_result_contract_request} =
              callback.(%{"value" => %{"state" => :count}, "json_value" => true})
+  end
+
+  test "result-contract failure callbacks are fail-only and retain no candidate" do
+    assert {:ok, contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "additionalProperties" => false,
+               "required" => ["sum"],
+               "properties" => %{"sum" => %{"type" => "integer", "minimum" => 100}}
+             })
+
+    callback = RuntimeTools.result_contract_failure(contract, "result.schema.json")
+
+    assert %TrustedError{
+             reason: :result_contract_failed,
+             details: %{
+               agent_turns: 4,
+               constraint: :minimum,
+               contract_source: "result.schema.json",
+               violations: [%{kind: :minimum, path: path}]
+             }
+           } =
+             failure =
+             callback.(%{
+               "value" => %{"sum" => 99, "secret" => "candidate-secret"},
+               "agent_turns" => 4
+             })
+
+    assert path.segments == [{:property, "sum"}]
+    refute inspect(failure) =~ "candidate-secret"
+
+    assert %TrustedError{
+             reason: :result_contract_failed,
+             details: %{agent_turns: 4, constraint: :json_value, violations: []}
+           } =
+             callback.(%{
+               "value" => %{:sum => 99, "sum" => 98},
+               "agent_turns" => 4
+             })
+
+    for arguments <- [
+          %{"value" => %{"sum" => 100}, "agent_turns" => 4},
+          %{"value" => %{"sum" => 99}},
+          %{"value" => %{"sum" => 99}, "agent_turns" => 0},
+          %{"value" => %{"sum" => 99}, "agent_turns" => 4, "extra" => true}
+        ] do
+      assert %TrustedError{reason: :invalid_result_contract_failure, details: %{}} =
+               callback.(arguments)
+    end
+
+    assert %TrustedError{reason: :invalid_result_contract_failure, details: %{}} =
+             RuntimeTools.result_contract_failure(nil, nil).(%{
+               "value" => %{"sum" => 99},
+               "agent_turns" => 4
+             })
   end
 
   test "kernel result validation preserves candidate keys until terminal projection" do

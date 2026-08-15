@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.Result
+  alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.ResultIdentity
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
@@ -549,6 +550,13 @@ defmodule PtcRunner.Kernel.Runner do
         RuntimeTools.result_contract(config.result_contract)
       )
     )
+    |> RuntimeTools.maybe_put_result_contract_failure(
+      state,
+      config.event_sink,
+      config.result_contract,
+      config.result_contract_source,
+      config.workflow_environment.bundle
+    )
     |> RuntimeTools.maybe_put_runtime_limit_failure(
       state,
       config.event_sink,
@@ -604,6 +612,22 @@ defmodule PtcRunner.Kernel.Runner do
       |> SafeMetadata.retain_failure_taxonomy_fields()
 
     Map.merge(stopped_data, taxonomy)
+  end
+
+  defp maybe_put_failure_taxonomy(
+         stopped_data,
+         {:error,
+          %Error{
+            reason: :result_contract_failed,
+            details: %{agent_turns: turns, constraint: constraint}
+          }}
+       )
+       when turns in 1..128 and is_atom(constraint) do
+    Map.merge(stopped_data, %{
+      failure_kind: "result-contract",
+      agent_turns: turns,
+      constraint: constraint
+    })
   end
 
   defp maybe_put_failure_taxonomy(
@@ -771,6 +795,18 @@ defmodule PtcRunner.Kernel.Runner do
        )
        when limit == limits.subordinate_evaluations do
     %{limit: :subordinate_evaluations, limit_value: limit}
+  end
+
+  defp workflow_error_details(
+         %{reason: :result_contract_failed, details: details},
+         _timeout_ms,
+         _limits,
+         _sink
+       ) do
+    case ResultContractDiagnostic.retain_details(details) do
+      {:ok, retained} -> retained
+      :error -> %{}
+    end
   end
 
   defp workflow_error_details(

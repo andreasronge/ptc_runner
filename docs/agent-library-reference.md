@@ -88,7 +88,11 @@ This prevents an evaluator from scoring a provider outage against the subject.
 Runs the same loop, validates every model-authored terminal candidate against
 the manifest result contract, and returns the contract-valid value to its
 PTC-Lisp caller. Invalid candidates receive bounded correction feedback while
-a turn remains. Subject failure calls `fail`.
+a turn remains. If correction is exhausted, the Kernel reports an authenticated
+`result_contract_failed` diagnostic with the effective turn count, the final
+schema constraint, and an attested contract path when one is available. That
+authenticated cause is retained when the call is composed through sequential
+or parallel higher-order functions such as `map`, `pmap`, and `pcalls`.
 
 This is the composable result-contract entry used by `agent.main/run`.
 
@@ -245,11 +249,20 @@ does not echo submitted values, enum or const literals, undeclared property
 names, opaque validator reasons, or provider details.
 
 When `agent.main` rejects a returned value, feedback may identify permitted
-and missing keys at retained closed-object paths and only the count of
-undeclared submitted keys. Open objects report missing required keys without
-treating extension keys as invalid. Result-contract diagnostics are capped at
-32,768 characters, then the whole request is checked against
+and missing keys at retained closed-object paths, only the count of undeclared
+submitted keys, and small schema-declared numeric, length, or item bounds.
+Open objects report missing required keys without treating extension keys as
+invalid. Candidate values, tagged-union matches, enum literals, and const
+literals are omitted from model feedback. Result-contract diagnostics are
+capped at 32,768 characters, then the whole request is checked against
 `max_transcript_chars`.
+
+The terminal exhaustion transition is fail-only and available only to the
+shipped `agent.core` prelude. It revalidates the final candidate against the
+host's frozen result contract and creates no additional candidate-bearing
+record. The candidate does not enter public errors, command envelopes,
+canonical events, or ordinary logs. Existing authorized private inspection can
+still contain the model response and generated source that produced it.
 
 An outer `fail` value is not copied into the public Kernel error or canonical
 trace. Framework failure kinds remain readable; application-defined scalar

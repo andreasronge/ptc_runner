@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.Result
+  alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.ValueContractDiagnostic
 
@@ -319,6 +320,20 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     do: diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
 
   defp failure_diagnostic(
+         %Error{
+           kind: :workflow_failed,
+           reason: :result_contract_failed,
+           details: details
+         },
+         provider_activity
+       ) do
+    case ResultContractDiagnostic.retain_details(details) do
+      {:ok, retained} -> result_contract_diagnostic(retained, provider_activity)
+      :error -> diagnostic(:execution, :workflow_failed, provider_activity)
+    end
+  end
+
+  defp failure_diagnostic(
          %Error{kind: :workflow_failed, details: %{result_projection: true}},
          provider_activity
        ),
@@ -403,10 +418,21 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     source = result_contract_source(details)
     {source, path} = ValueContractDiagnostic.diagnostic_parts(source, details)
 
-    diagnostic(:result_cleanup, :result_contract_failed, provider_activity,
-      source: source,
-      path: path
-    )
+    opts = [source: source, path: path]
+
+    opts =
+      case {details, source} do
+        {%{agent_turns: turns, constraint: constraint}, %CommandSource{}} ->
+          case ResultContractDiagnostic.message(turns, constraint) do
+            {:ok, message} -> Keyword.put(opts, :message, message)
+            :error -> opts
+          end
+
+        _ordinary_or_source_less_contract_failure ->
+          opts
+      end
+
+    diagnostic(:result_cleanup, :result_contract_failed, provider_activity, opts)
   end
 
   defp result_contract_diagnostic(_details, provider_activity),
