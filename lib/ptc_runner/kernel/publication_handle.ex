@@ -1183,8 +1183,12 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   # parent with the same reason it uses for every unusable one. `--trace-dir`
   # already reports this condition by name; this is what lets `--output`,
   # `--private-output`, and `--inspect` do the same.
+  #
+  # `lstat`, not `stat`: a dangling symlink is an entry that exists, and letting
+  # it through keeps the secure traversal's symlink and ownership judgement
+  # rather than relabelling an unsafe parent as a merely absent one.
   defp parent_present(path) do
-    case File.stat(Path.dirname(path), time: :posix) do
+    case File.lstat(Path.dirname(path), time: :posix) do
       {:error, :enoent} -> {:error, :destination_directory_missing}
       _other -> :ok
     end

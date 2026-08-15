@@ -486,6 +486,11 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   @spec doctor_finding_rows() :: [row()]
   def doctor_finding_rows, do: doctor_application_rows() ++ doctor_attributable_rows()
 
+  # Both answer for `--authorize-mcp`, which only `run` accepts, so doctor can
+  # never produce them. They are subject-bearing local-preflight rows and would
+  # otherwise be attributed to a doctor check that cannot report them.
+  @run_only_local_codes [:authorization_target_unknown, :authorization_not_applicable]
+
   @doc false
   @spec doctor_attributable_rows() :: [row()]
   def doctor_attributable_rows do
@@ -493,6 +498,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
     Enum.filter(rows(), fn row ->
       row.phase in [:local_preflight, :active_preflight, :provider_acquisition] and
+        row.code not in @run_only_local_codes and
         subject_policy(row.phase, row.code) != :forbidden and
         Enum.any?(subject_operations(row.phase, row.code), fn subject_operation ->
           doctor_report_operation(subject_operation) in operations
@@ -591,6 +597,17 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   # conditions through the same codes and differ only here, which is what the
   # flag is for — pinning the phase would force one of the two steps to borrow
   # another phase's codes and, with them, an operation name that did not fail.
+  # These three answer for the invocation rather than for a provider occurrence
+  # and are all decided before any provider runs, so unlike the rest of their
+  # phase they can assert no activity rather than admitting either value.
+  def provider_activity_policy(:local_preflight, code)
+      when code in [
+             :environment_file_unavailable,
+             :authorization_target_unknown,
+             :authorization_not_applicable
+           ],
+      do: false
+
   def provider_activity_policy(phase, _code)
       when phase in [:local_preflight, :active_preflight],
       do: :boolean

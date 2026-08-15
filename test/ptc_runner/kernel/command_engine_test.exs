@@ -744,6 +744,47 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
+  test "invocation-scoped local-preflight codes assert no provider activity" do
+    # Every other local-preflight row spans the activity marker and admits either
+    # value. These three are decided before any provider runs, so a `true` must
+    # be unconstructible rather than merely unused by their producers.
+    for code <- [
+          :environment_file_unavailable,
+          :authorization_target_unknown,
+          :authorization_not_applicable
+        ] do
+      assert DiagnosticCatalog.provider_activity_policy(:local_preflight, code) == false
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:local_preflight, code,
+                 subject: authorization_subject(code),
+                 provider_activity: true
+               )
+    end
+  end
+
+  test "run-only authorization codes are not doctor findings" do
+    # `doctor` accepts no --authorize-mcp, so it can never produce these. They
+    # are subject-bearing local-preflight rows and would otherwise be attributed
+    # to a doctor check that cannot report them.
+    doctor_codes = Enum.map(DiagnosticCatalog.doctor_attributable_rows(), & &1.code)
+    local_codes = Map.get(DiagnosticCatalog.doctor_failure_codes_by_operation(), :local, [])
+
+    for code <- [:authorization_target_unknown, :authorization_not_applicable] do
+      refute code in doctor_codes
+      refute code in local_codes
+    end
+
+    assert :environment_unavailable in local_codes
+  end
+
+  defp authorization_subject(:environment_file_unavailable), do: nil
+
+  defp authorization_subject(_code) do
+    {:ok, subject} = CommandSubject.provider("workspace", :local)
+    subject
+  end
+
   test "malformed phase-1 forms retain their recognized command" do
     cases = [
       {["version", "extra"], "version"},
