@@ -224,7 +224,9 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
     assert presentation.exit_status == 7
     assert presentation.stdout == ""
-    assert presentation.stderr =~ "destination/result_destination_unavailable"
+    # The parent directory does not exist, which is the one destination cause
+    # with an obvious remedy, so it is named without echoing the path itself.
+    assert presentation.stderr =~ "destination/result_directory_missing"
     assert presentation.envelope_path == envelope_path
     assert File.regular?(envelope_path)
     refute presentation.stderr =~ output_path

@@ -158,6 +158,12 @@ object, array, scalar, enum, const, and bound keywords, plus the asserted
 closed object branches. References, regexes, nested composition, union types,
 and general-purpose `oneOf` are rejected.
 
+Two edges are worth knowing before you write one. `enum` and `const` must carry
+a sibling `type`, so `{"enum": ["a", "b"]}` is rejected and
+`{"type": "string", "enum": ["a", "b"]}` is accepted. The accepted bounds are
+`minimum`, `maximum`, `minLength`, `maxLength`, `minItems`, and `maxItems`;
+`exclusiveMinimum` and `exclusiveMaximum` are not in the profile.
+
 The supported keyword profile above is deliberately closed. Unsupported schema
 composition is rejected during inert application loading rather than being
 partially interpreted at runtime.

@@ -463,7 +463,7 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
     trace = Path.join(dir, "run.jsonl")
     inspection = Path.join([dir, "missing", "run.inspection.jsonl"])
 
-    assert {:error, {:private_directory_parent_unavailable, :inspection}} =
+    assert {:error, {:destination_directory_missing, :inspection}} =
              PublicationAuthority.authorize(
                "reservation-target-rollback",
                [trace: trace, inspect: inspection],
@@ -511,15 +511,17 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
       {[
          "--inspect",
          Path.join([dir, "missing-inspection-parent", "run.inspection.jsonl"])
-       ], "inspection_destination_unavailable", "the inspection destination is unavailable"},
+       ], "inspection_directory_missing", "--inspect must name a file in an existing directory"},
       {[
          "--output",
          Path.join([dir, "missing-result-parent", "result.json"])
-       ], "result_destination_unavailable", "the result destination is unavailable"},
+       ], "result_directory_missing",
+       "--output and --private-output must name a file in an existing directory"},
       {[
          "--private-output",
          Path.join([dir, "missing-private-result-parent", "result.json"])
-       ], "result_destination_unavailable", "the result destination is unavailable"}
+       ], "result_directory_missing",
+       "--output and --private-output must name a file in an existing directory"}
     ]
 
     for {destination_args, code, message} <- cases do

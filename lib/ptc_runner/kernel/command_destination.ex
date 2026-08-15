@@ -170,6 +170,9 @@ defmodule PtcRunner.Kernel.CommandDestination do
     {:destination, unavailable_destination_code(destination)}
   end
 
+  defp destination_diagnostic({:destination_directory_missing, destination}),
+    do: {:destination, missing_directory_code(destination)}
+
   defp destination_diagnostic({:private_directory_parent_unsafe, destination}),
     do: {:destination, unsafe_destination_code(destination)}
 
@@ -224,6 +227,10 @@ defmodule PtcRunner.Kernel.CommandDestination do
   defp unavailable_destination_code(:trace), do: :trace_destination_unavailable
   defp unavailable_destination_code(:inspection), do: :inspection_destination_unavailable
   defp unavailable_destination_code(:result), do: :result_destination_unavailable
+
+  defp missing_directory_code(:trace), do: :trace_directory_missing
+  defp missing_directory_code(:inspection), do: :inspection_directory_missing
+  defp missing_directory_code(:result), do: :result_directory_missing
 
   defp unsafe_destination_code(:trace), do: :trace_destination_unsafe
   defp unsafe_destination_code(:inspection), do: :inspection_destination_unsafe

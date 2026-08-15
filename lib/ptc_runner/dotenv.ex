@@ -67,7 +67,12 @@ defmodule PtcRunner.Dotenv do
       when is_list(frontend_options) do
     case Keyword.fetch(frontend_options, :env_file) do
       {:ok, path} when is_binary(path) ->
-        CommandRuntime.with_environment(runtime, fn -> load_file(path) end)
+        # Classified here rather than by the runtime, which cannot tell this
+        # callback from an embedding host's own and would relabel any caller
+        # that happened to answer with a dotenv parse reason.
+        CommandRuntime.with_environment(runtime, fn ->
+          with {:error, _reason} <- load_file(path), do: {:error, :environment_file_unavailable}
+        end)
 
       :error ->
         {:ok, runtime}

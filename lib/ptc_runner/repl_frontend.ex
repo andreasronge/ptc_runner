@@ -1184,6 +1184,9 @@ defmodule PtcRunner.ReplFrontend do
   defp manifest_repl_error(:trace_preflight_failed),
     do: "ptc repl trace destination is unavailable"
 
+  defp manifest_repl_error(:environment_file_unavailable),
+    do: "the named environment file must be readable UTF-8 under 1 MB"
+
   defp manifest_repl_error(code) when is_atom(code),
     do: "ptc repl setup failed: #{code}"
 
