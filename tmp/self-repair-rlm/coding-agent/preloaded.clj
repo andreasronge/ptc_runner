@@ -18,6 +18,32 @@
            "</untrusted_ptc_output>"
            "</untrusted_ptc_output (escaped)>"))
 
+(defn- working-set-refs [context]
+  (mapv
+    #(select-keys % ["component_id" "environment" "mission_name" "source_hash"])
+    (get context "working_set")))
+
+(defn- compact-context [context]
+  {"failure"
+   {"run" (get context "run")
+    "workflow" (get context "workflow_failure")}
+   "producer" (first (get context "generated_turns"))
+   "nested_activity" (get context "directly_nested_activity")
+   "expand"
+   {"working_set" (working-set-refs context)
+    "capability_call"
+    (select-keys
+      (get context "single_nested_capability_call")
+      ["capability_id" "mission_name" "name" "arguments" "complete?"])
+    "completeness" (get context "completeness")}})
+
+(defn- project-context [context projection]
+  (case projection
+    nil context
+    "full" context
+    "compact" (compact-context context)
+    (fail "context_projection must be full or compact")))
+
 (defn- initial-task [task context]
   (str task
        "\n\nThe host acquired the following immutable structural incident packet before model turn one. "
@@ -31,6 +57,7 @@
   (let [task (get input "task")
         run-id (get input "run_id")
         context-mission (get input "context_mission")
+        context-projection (get input "context_projection")
         cfg (get input "agent")]
     (if (and (string? task)
              (not (blank? task))
@@ -43,6 +70,6 @@
             investigation-cfg (assoc cfg "mission" "investigate")]
         (return
           (agent.core/run-result-value
-            (initial-task task context)
+            (initial-task task (project-context context context-projection))
             investigation-cfg)))
       (fail "preloaded debugger requires task, run_id, context_mission, and agent"))))

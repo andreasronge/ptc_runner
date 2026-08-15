@@ -369,3 +369,48 @@ details—for example failure boundary, generated program, consuming contract,
 and working-set references. Run only the failing DeepSeek/protocol cell first.
 If it returns, packet salience was the issue; if it still explores, the runtime
 needs a stronger bounded-synthesis affordance rather than more navigation APIs.
+
+## Compact protocol-header experiment
+
+The single failing DeepSeek/protocol cell was rerun with a generic compact
+projection over the same acquired case map. It contained exactly four top-level
+sections:
+
+1. run and workflow failure;
+2. the captured producer turn, including its original task and generated source;
+3. directly nested activity; and
+4. expandable working-set hashes, capability-call metadata, and completeness.
+
+The projection removed component source bodies and capability results. It did
+not add a cause, suspect, or repair. The producer's captured task already states
+the accepted `debug.rlm/investigate` and `debug.rlm/finish` actions and that a
+`debug.nav` result must not cross the boundary, so those exact observed contract
+facts remained available without parsing or summarizing workflow source.
+
+DeepSeek run `cmd-59mscnbxpswjma3167fsrdaf0v` again exhausted four model calls
+without a report, using 11 evidence calls in total. PTC verified that its initial
+message fell from 14,609 to 5,008 characters while still containing
+`explicit_failure`, the generated `(return (debug.nav/runs ...))` source, both
+accepted action names, and no source body or truncation marker.
+
+Its trajectory was entirely valid navigation:
+
+1. `debug.nav/open` on the supplied run;
+2. `execution_errors` for the child mission evaluation;
+3. workflow `activity`; and
+4. `capability_calls` for the navigation call.
+
+There were no language, evaluation, or result-contract corrections. The fourth
+feedback explicitly marked the next program as the final turn and required
+`return` or `fail`; DeepSeek issued another `debug.nav/read` instead. Compactness
+made the traversal more targeted than the full-packet run but did not produce a
+stopping decision.
+
+This falsifies packet size as the primary explanation for this cell. More
+evidence aggregation or navigation helpers are unlikely to help. The smallest
+remaining control is the same compact initial packet with no `debug.nav` in the
+investigation mission. If DeepSeek then returns the correct protocol diagnosis,
+tool availability is inducing unbounded verification and a product path needs a
+host-enforced synthesis phase. If it still fails, the model cannot reliably
+synthesize this abstract contract mismatch from the packet under the current
+prompt and four-call budget.
