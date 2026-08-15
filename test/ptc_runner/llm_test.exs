@@ -52,6 +52,61 @@ defmodule PtcRunner.LLMTest do
     def public_model(model), do: {:ok, model}
   end
 
+  defmodule PreparingAdapter do
+    @behaviour PtcRunner.LLM
+
+    @impl true
+    def prepare_model(model) do
+      send(self(), {:prepared_model, model})
+      {:ok, {:prepared, model}, :unavailable}
+    end
+
+    @impl true
+    def call({:prepared, model}, request) do
+      send(self(), {:called_prepared_model, model, request})
+      {:ok, %{content: "prepared", tokens: %{}}}
+    end
+
+    @impl true
+    def stream({:prepared, model}, request) do
+      send(self(), {:streamed_prepared_model, model, request})
+      {:error, :streaming_not_supported}
+    end
+  end
+
+  defmodule FailingPreparationAdapter do
+    @behaviour PtcRunner.LLM
+
+    @impl true
+    def prepare_model(_model), do: {:error, :model_unavailable}
+
+    @impl true
+    def call(_model, _request), do: raise("a failed preparation must not reach call/2")
+  end
+
+  defmodule UncatalogedPublicAdapter do
+    @behaviour PtcRunner.LLM
+
+    @impl true
+    def prepare_model(model), do: {:ok, model, :uncataloged}
+
+    @impl true
+    def call(_model, _request), do: {:ok, %{content: "", tokens: %{}}}
+
+    @impl true
+    def public_model(model), do: {:ok, model}
+  end
+
+  defmodule UncatalogedPrivateAdapter do
+    @behaviour PtcRunner.LLM
+
+    @impl true
+    def prepare_model(model), do: {:ok, model, :uncataloged}
+
+    @impl true
+    def call(_model, _request), do: {:ok, %{content: "", tokens: %{}}}
+  end
+
   defmodule MismatchingPublicModelAdapter do
     @behaviour PtcRunner.LLM
 
@@ -88,20 +143,93 @@ defmodule PtcRunner.LLMTest do
   describe "callback/2 adapter warmup" do
     test "invokes the adapter's ensure_ready/0 at build time, before the request runs" do
       Process.delete({ReadyProbe, :called})
-      closure = PtcRunner.LLM.callback("ollama:test-model", adapter: ReadyProbe)
+      {:ok, closure} = PtcRunner.LLM.callback("ollama:test-model", adapter: ReadyProbe)
       assert is_function(closure, 1)
       assert Process.get({ReadyProbe, :called}) == true
     end
 
     test "is a no-op for adapters that do not implement ensure_ready/0" do
       # MockAdapter (installed by setup) defines no ensure_ready/0.
-      assert is_function(PtcRunner.LLM.callback("ollama:test-model"), 1)
+      assert {:ok, callback} = PtcRunner.LLM.callback("ollama:test-model")
+      assert is_function(callback, 1)
     end
   end
 
   describe "callback/2" do
+    test "prepares a model once when the requester is constructed" do
+      {:ok, callback} =
+        PtcRunner.LLM.callback("provider:model",
+          adapter: PreparingAdapter,
+          temperature: 0.25
+        )
+
+      assert_receive {:prepared_model, "provider:model"}
+      refute_receive {:prepared_model, _model}
+
+      assert {:ok, %{content: "prepared"}} =
+               callback.(%{system: "test", messages: []})
+
+      assert_receive {:called_prepared_model, "provider:model",
+                      %{system: "test", messages: [], temperature: 0.25}}
+
+      assert {:ok, %{content: "prepared"}} =
+               callback.(%{system: "again", messages: []})
+
+      refute_receive {:prepared_model, _model}
+      assert_receive {:called_prepared_model, "provider:model", %{system: "again"}}
+    end
+
+    test "uses the prepared target when streaming falls back to call/2" do
+      {:ok, callback} = PtcRunner.LLM.callback("provider:model", adapter: PreparingAdapter)
+
+      assert {:ok, %{content: "prepared"}} =
+               callback.(%{system: "fallback", messages: [], stream: fn _chunk -> :ok end})
+
+      assert_receive {:prepared_model, "provider:model"}
+      assert_receive {:streamed_prepared_model, "provider:model", %{system: "fallback"}}
+      assert_receive {:called_prepared_model, "provider:model", %{system: "fallback"}}
+      refute_receive {:prepared_model, _model}
+    end
+
+    test "returns preparation failures before constructing a requester" do
+      assert {:error, :model_unavailable} =
+               PtcRunner.LLM.callback("provider:model", adapter: FailingPreparationAdapter)
+    end
+
+    test "emits an uncataloged warning once without publishing unattested selectors" do
+      public_warning =
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          assert {:ok, _requester} =
+                   PtcRunner.LLM.callback("provider:public", adapter: UncatalogedPublicAdapter)
+        end)
+
+      private_warning =
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          assert {:ok, _requester} =
+                   PtcRunner.LLM.callback("provider:private", adapter: UncatalogedPrivateAdapter)
+        end)
+
+      assert public_warning =~ "model_uncataloged"
+      assert public_warning =~ "provider:public"
+      assert private_warning =~ "model_uncataloged"
+      refute private_warning =~ "provider:private"
+    end
+
+    test "escapes control characters in an attested selector" do
+      selector = "provider:public\nwarning: forged"
+
+      warning =
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          assert {:ok, _requester} =
+                   PtcRunner.LLM.callback(selector, adapter: UncatalogedPublicAdapter)
+        end)
+
+      assert warning =~ inspect(selector)
+      refute warning =~ "public\nwarning: forged"
+    end
+
     test "returns a function that calls the adapter" do
-      callback = PtcRunner.LLM.callback("ollama:test-model")
+      {:ok, callback} = PtcRunner.LLM.callback("ollama:test-model")
       assert is_function(callback, 1)
 
       {:ok, resp} = callback.(%{system: "test", messages: []})
@@ -110,7 +238,7 @@ defmodule PtcRunner.LLMTest do
     end
 
     test "merges opts into request" do
-      callback = PtcRunner.LLM.callback("ollama:test-model", cache: true)
+      {:ok, callback} = PtcRunner.LLM.callback("ollama:test-model", cache: true)
       assert is_function(callback, 1)
 
       {:ok, resp} = callback.(%{system: "with cache", messages: []})
@@ -118,7 +246,7 @@ defmodule PtcRunner.LLMTest do
     end
 
     test "streams when request has :stream key and adapter supports streaming" do
-      callback = PtcRunner.LLM.callback("ollama:test-model")
+      {:ok, callback} = PtcRunner.LLM.callback("ollama:test-model")
       chunks = :ets.new(:chunks, [:ordered_set, :public])
 
       on_chunk = fn %{delta: text} ->
@@ -144,7 +272,7 @@ defmodule PtcRunner.LLMTest do
 
       Application.put_env(:ptc_runner, :llm_adapter, NoStreamAdapter2)
 
-      callback = PtcRunner.LLM.callback("ollama:test-model")
+      {:ok, callback} = PtcRunner.LLM.callback("ollama:test-model")
       chunk_called = :atomics.new(1, [])
 
       on_chunk = fn _chunk ->
@@ -159,7 +287,7 @@ defmodule PtcRunner.LLMTest do
     end
 
     test "stream key is stripped before passing to adapter" do
-      callback = PtcRunner.LLM.callback("ollama:test-model")
+      {:ok, callback} = PtcRunner.LLM.callback("ollama:test-model")
       # Without stream key, it hits call/2 with system: "test"
       {:ok, resp} = callback.(%{system: "test", messages: [], stream: fn _ -> :ok end})
       # Stream was used, so we get the streamed content
@@ -205,6 +333,17 @@ defmodule PtcRunner.LLMTest do
     test "delegates to adapter" do
       {:ok, resp} = PtcRunner.LLM.call("ollama:test-model", %{system: "hello", messages: []})
       assert resp.content == "mock response for: hello"
+    end
+
+    test "prepares before delegating" do
+      Application.put_env(:ptc_runner, :llm_adapter, PreparingAdapter)
+
+      assert {:ok, %{content: "prepared"}} =
+               PtcRunner.LLM.call("provider:model", %{system: "hello", messages: []})
+
+      assert_receive {:prepared_model, "provider:model"}
+      assert_receive {:called_prepared_model, "provider:model", %{system: "hello"}}
+      refute_receive {:prepared_model, _model}
     end
   end
 

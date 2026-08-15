@@ -130,6 +130,13 @@ This avoids turning a model's full context-window ceiling into an impossible
 output request once the prompt is included. The tutorial keeps the value
 explicit so changing only its model selector retains a bounded request.
 
+The built-in adapter prepares the selected model once before constructing its
+requester. A selector absent from the bundled model catalog remains usable when
+ReqLLM supports its provider, but PtcRunner emits one `model_uncataloged`
+warning for that requester. Catalog metadata such as pricing, limits, token
+estimation, and capability detection may then be incomplete; the warning does
+not mean the provider request itself is known to fail.
+
 The manifest selects only `deepseek`; it cannot change any field above. When
 the adapter attests that the resolved model is safe public identity, provider
 snapshots and model-grouped usage include it. Endpoint-bearing or otherwise

@@ -82,27 +82,130 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     assert max_tokens in 1..4_094
   end
 
-  test "resolves an uncataloged model only once per request", %{test: test} do
-    expect_request(test, "vendor/new-model")
+  test "one requester prepares an uncataloged model once and owns its warning", %{test: test} do
+    stub_requests(test, "vendor/new-model")
 
     warnings =
       capture_io(:stderr, fn ->
-        assert {:ok, %{content: "ok"}} =
-                 ReqLLMAdapter.generate_text(
-                   "openrouter:vendor/new-model",
-                   [%{role: :user, content: "hi"}],
-                   api_key: "test",
-                   req_http_options: [plug: {Req.Test, test}]
+        {:ok, requester} =
+          PtcRunner.LLM.callback("openrouter:vendor/new-model",
+            adapter: ReqLLMAdapter,
+            api_key: "test",
+            req_http_options: [plug: {Req.Test, test}]
+          )
+
+        for content <- ["first", "second"] do
+          assert {:ok, %{content: "ok"}} =
+                   requester.(%{messages: [%{role: :user, content: content}]})
+        end
+      end)
+
+    assert length(Regex.scan(~r/model_uncataloged/, warnings)) == 1
+    refute warnings =~ "Using unverified model"
+    refute warnings =~ "ReqLLM.model"
+    refute warnings =~ "req_llm.ex"
+
+    assert_receive {:request_body, %{"model" => "vendor/new-model"}}
+    assert_receive {:request_body, %{"model" => "vendor/new-model"}}
+  end
+
+  test "a cataloged model does not emit a catalog warning" do
+    warnings =
+      capture_io(:stderr, fn ->
+        assert {:ok, _requester} =
+                 PtcRunner.LLM.callback("openrouter:google/gemma-2-27b-it",
+                   adapter: ReqLLMAdapter
                  )
       end)
 
-    assert length(Regex.scan(~r/Using unverified model:/, warnings)) == 1
+    refute warnings =~ "model_uncataloged"
+  end
+
+  test "direct HTTP routes report that catalog status is unavailable" do
+    for selector <- ["ollama:local-model", "openai-compat:https://example.com/v1|deployment"] do
+      assert {:ok, %{catalog_status: :unavailable, selector: ^selector, target: ^selector}} =
+               PtcRunner.LLM.prepare(selector, ReqLLMAdapter)
+    end
+  end
+
+  test "special uncataloged fallbacks preserve ReqLLM's public resolver fields" do
+    selectors = [
+      "openai_codex:future-chat-1408",
+      "github_copilot:future-chat-1408",
+      "mistral:future-chat-1408",
+      "minimax:future-chat-1408"
+    ]
+
+    for selector <- selectors do
+      assert {:ok, expected} = ReqLLM.model(selector)
+
+      assert {:ok,
+              %{
+                catalog_status: :uncataloged,
+                target: %{model: actual, selector: ^selector}
+              }} = PtcRunner.LLM.prepare(selector, ReqLLMAdapter)
+
+      fields = [:provider, :id, :model, :provider_model_id, :capabilities, :limits, :extra]
+      assert Map.take(actual, fields) == Map.take(expected, fields)
+    end
+  end
+
+  test "Bedrock preparation preserves and supplies inference-profile prefixes" do
+    set_bedrock_region("eu-west-1")
+
+    prefixed = "amazon_bedrock:eu.amazon.nova-pro-v1:0"
+
+    assert {:ok, %{catalog_status: :cataloged, target: %{model: prefixed_model}}} =
+             PtcRunner.LLM.prepare(prefixed, ReqLLMAdapter)
+
+    assert prefixed_model.provider_model_id == "eu.amazon.nova-pro-v1:0"
+
+    unprefixed = "amazon_bedrock:amazon.nova-pro-v1:0"
+
+    assert {:ok, %{catalog_status: :cataloged, target: %{model: unprefixed_model}}} =
+             PtcRunner.LLM.prepare(unprefixed, ReqLLMAdapter)
+
+    assert unprefixed_model.provider_model_id == "eu.amazon.nova-pro-v1:0"
+  end
+
+  test "an uncataloged Bedrock model emits only the PtcRunner warning" do
+    set_bedrock_region("eu-west-1")
+    selector = "amazon_bedrock:amazon.future-1408-v1:0"
+
+    warning =
+      capture_io(:stderr, fn ->
+        assert {:ok, _requester} = PtcRunner.LLM.callback(selector, adapter: ReqLLMAdapter)
+      end)
+
+    assert length(Regex.scan(~r/model_uncataloged/, warning)) == 1
+    refute warning =~ "Using unverified model"
+    refute warning =~ "ReqLLM.model"
+
+    assert {:ok, %{target: %{model: model}}} = PtcRunner.LLM.prepare(selector, ReqLLMAdapter)
+    assert model.provider_model_id == "eu.amazon.future-1408-v1:0"
+  end
+
+  test "an invalid provider fails preparation without dependency warning frames" do
+    warnings =
+      capture_io(:stderr, fn ->
+        assert {:error, :invalid_model} =
+                 PtcRunner.LLM.callback("provider1408:future-model", adapter: ReqLLMAdapter)
+      end)
+
+    refute warnings =~ "ReqLLM"
+    refute warnings =~ "req_llm.ex"
   end
 
   defp expect_request(test, response_model) do
-    test_pid = self()
+    Req.Test.expect(test, request_handler(self(), response_model))
+  end
 
-    Req.Test.expect(test, fn conn ->
+  defp stub_requests(test, response_model) do
+    Req.Test.stub(test, request_handler(self(), response_model))
+  end
+
+  defp request_handler(test_pid, response_model) do
+    fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       send(test_pid, {:request_body, Jason.decode!(body)})
 
@@ -118,6 +221,28 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
         ],
         "usage" => %{"prompt_tokens" => 1, "completion_tokens" => 1, "total_tokens" => 2}
       })
+    end
+  end
+
+  defp set_bedrock_region(region) do
+    previous_system_region = System.get_env("AWS_REGION")
+    previous_configured_region = Application.fetch_env(:ptc_runner, :bedrock_region)
+
+    on_exit(fn ->
+      if previous_system_region,
+        do: System.put_env("AWS_REGION", previous_system_region),
+        else: System.delete_env("AWS_REGION")
+
+      case previous_configured_region do
+        {:ok, configured_region} ->
+          Application.put_env(:ptc_runner, :bedrock_region, configured_region)
+
+        :error ->
+          Application.delete_env(:ptc_runner, :bedrock_region)
+      end
     end)
+
+    System.delete_env("AWS_REGION")
+    Application.put_env(:ptc_runner, :bedrock_region, region)
   end
 end

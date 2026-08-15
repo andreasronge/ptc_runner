@@ -708,7 +708,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp preflight(_host, %{source: :llm} = installation, selection, context, _oauth_runtime) do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- llm_selection(installation, selection, context),
-         {:ok, model, adapter} <- preflight_llm(installation.model) do
+         {:ok, model, adapter} <- preflight_llm(installation.model),
+         {:ok, prepared_model} <- prepare_llm_model(model, adapter) do
       public_model = PtcRunner.LLM.attested_public_model(adapter, model)
 
       {:ok,
@@ -719,6 +720,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
             selected,
             context,
             model,
+            prepared_model,
             public_model,
             adapter,
             credentials
@@ -782,6 +784,17 @@ defmodule PtcRunner.Kernel.HostInstallation do
             context
           )
         end}}
+    end
+  end
+
+  # Adapter preparation has a deliberately rich direct-embedding error
+  # vocabulary. An installed provider crosses the Kernel's closed diagnostic
+  # boundary instead, where every invalid or unsupported target is represented
+  # by the existing adapter-unavailable reason.
+  defp prepare_llm_model(model, adapter) do
+    case PtcRunner.LLM.prepare(model, adapter) do
+      {:ok, prepared_model} -> {:ok, prepared_model}
+      {:error, _reason} -> {:error, :invalid_llm_model}
     end
   end
 
@@ -897,12 +910,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- llm_selection(installation, selection, context),
          {:ok, model, adapter} <- preflight_llm(installation.model),
+         {:ok, prepared_model} <- prepare_llm_model(model, adapter),
          {:ok, credential} <-
            Map.fetch(Map.get(context, :credentials, %{}), installation.credential),
          {:ok, timeout_ms, max_heap_words} <- connectivity_probe_bounds(context) do
       {:ok,
        %{
          model: model,
+         prepared_model: prepared_model,
          adapter: adapter,
          credential: credential,
          params: installation.params,
@@ -955,24 +970,28 @@ defmodule PtcRunner.Kernel.HostInstallation do
         req_http_options: [retry: false, redirect: false, max_retries: 0]
       )
 
-    requester = PtcRunner.LLM.callback(probe.model, options)
+    case PtcRunner.LLM.callback(probe.prepared_model, options) do
+      {:ok, requester} ->
+        result =
+          BoundedWorker.run(
+            fn ->
+              requester.(%{
+                messages: [%{role: :user, content: "Health check."}],
+                cache: false
+              })
+            end,
+            timeout_ms: probe.timeout_ms,
+            max_heap_words: probe.max_heap_words,
+            cancel_with_caller: true
+          )
 
-    result =
-      BoundedWorker.run(
-        fn ->
-          requester.(%{
-            messages: [%{role: :user, content: "Health check."}],
-            cache: false
-          })
-        end,
-        timeout_ms: probe.timeout_ms,
-        max_heap_words: probe.max_heap_words,
-        cancel_with_caller: true
-      )
+        case result do
+          {:ok, {:ok, response}} when is_map(response) -> :ok
+          _failure -> {:error, :llm_connectivity_unavailable}
+        end
 
-    case result do
-      {:ok, {:ok, response}} when is_map(response) -> :ok
-      _failure -> {:error, :llm_connectivity_unavailable}
+      {:error, _reason} ->
+        {:error, :llm_connectivity_unavailable}
     end
   rescue
     _exception -> {:error, :llm_connectivity_unavailable}
@@ -1178,14 +1197,15 @@ defmodule PtcRunner.Kernel.HostInstallation do
          selected,
          context,
          model,
+         prepared_model,
          public_model,
          adapter,
          credentials
        ) do
     with {:ok, credential} <- Map.fetch(credentials, installation.credential),
-         requester =
+         {:ok, requester} <-
            PtcRunner.LLM.callback(
-             model,
+             prepared_model,
              [
                adapter: adapter,
                cache: installation.cache,

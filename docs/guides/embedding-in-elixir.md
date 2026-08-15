@@ -126,6 +126,13 @@ not a transient model failure. Hosts that configure custom ReqLLM pools also
 own their pool geometry; the CLI uses installed `live_provider_tasks`, not one
 manifest's narrower limit, for its VM-lifetime pool.
 
+An adapter may implement `c:PtcRunner.LLM.prepare_model/1` to resolve its model
+selector once before requester construction. Return an immutable request target
+and its catalog status; do not return processes, ports, credentials, or other
+resources that need cleanup. `PtcRunner.LLM.callback/2` returns
+`{:ok, requester}` only after preparation succeeds, so embedding callers must
+propagate its error tuple before dispatch.
+
 An adapter may implement `c:PtcRunner.LLM.public_model/1` to attest that its exact
 configured target is safe to publish. Missing, altered, invalid, oversized, or
 raising attestations remain private without preventing execution. Treat the
