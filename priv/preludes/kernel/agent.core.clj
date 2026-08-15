@@ -49,7 +49,10 @@
        (pos? (get phase "max_turns"))
        (<= (get phase "max_turns") 128)
        (or (nil? (get phase "instruction"))
-           (nonblank-string? (get phase "instruction")))))
+           (nonblank-string? (get phase "instruction")))
+       (or (nil? (get phase "terminal_only"))
+           (true? (get phase "terminal_only"))
+           (false? (get phase "terminal_only")))))
 
 (defn- configured-phases [cfg default-max-turns]
   (if (contains? cfg "phases")
@@ -68,8 +71,9 @@
   (< (inc phase-index) (count phases)))
 
 (defn- phase-effective-cfg [cfg phase]
-  (assoc (assoc cfg "mission" (get phase "mission"))
-         "max_turns" (get phase "max_turns")))
+  (assoc (assoc (assoc cfg "mission" (get phase "mission"))
+                "max_turns" (get phase "max_turns"))
+         "terminal_only" (true? (get phase "terminal_only"))))
 
 (defn- phase-turn-budget
   [turns-remaining consolidate-at-turns-remaining has-next-phase?]
@@ -219,6 +223,11 @@
          (or (true? (get error :retryable?))
              (false? (get error :retryable?))))))
 
+(defn- terminal-source-check [phase mission-name source]
+  (if (true? (get phase "terminal_only"))
+    (kernel/check-terminal-source mission-name source)
+    {:outcome :valid}))
+
 (defn- run-outcome*
   "Runs the agent loop and distinguishes model-authored completion from a
   bounded subject-attributable failure.
@@ -285,7 +294,10 @@
                 {:turn turn :kind (get action :kind)}))
             (case (get action :kind)
               :tool-call
-              (let [evaluation (kernel/eval-source mission-name (get action :program))]
+              (let [source-check
+                    (terminal-source-check phase mission-name (get action :program))]
+                (if (= :valid (get source-check :outcome))
+                  (let [evaluation (kernel/eval-source mission-name (get action :program))]
                 ;; Host policy and malformed/provider-initiated MCP exchanges
                 ;; are not argument mistakes the model can correct. The Kernel
                 ;; derives this provenance from the private capability ledger,
@@ -449,6 +461,27 @@
                           (turn-limit-failure
                             :evaluation-error
                             total-max-turns))))))))
+                  (if (= :invalid (get source-check :outcome))
+                    (let [next-state
+                          (continuation-state
+                            phases phase-index turn messages action
+                            (agent.feedback/terminal-source-required source-check)
+                            prompt-state effective-cfg
+                            consolidate-at-turns-remaining closing?
+                            :terminal-source-required)]
+                      (if next-state
+                        (recur (get next-state :turn)
+                               (inc agent-turn)
+                               (get next-state :phase-index)
+                               (get next-state :messages)
+                               (get next-state :prompt-state)
+                               (get next-state :closing?))
+                        (turn-limit-failure
+                          :terminal-source-required
+                          total-max-turns)))
+                    (fail (result/error :evaluation-unavailable
+                                        (or (get source-check :reason)
+                                            (get source-check :outcome)))))))
 
               :protocol-error
               (let [next-state
@@ -509,8 +542,10 @@
   boundary, the system prompt is rebuilt from the next mission's authority and
   that phase's instruction is appended as a user message. A return closes any
   non-final phase and is retained as evidence; only the final phase can complete
-  the agent with a contract-valid result."
-  {:signature "(task :string, cfg {model :string?, phases [{mission :string, max_turns :int, instruction :string?}], max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any"}
+  the agent with a contract-valid result. A terminal-only phase rejects any
+  parsed program whose single top-level form is not return or fail before
+  mission evaluation."
+  {:signature "(task :string, cfg {model :string?, phases [{mission :string, max_turns :int, instruction :string?, terminal_only :bool?}], max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
   (let [outcome (run-outcome* task cfg true)]
     (if (= :returned (get outcome :status))

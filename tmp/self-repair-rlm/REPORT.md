@@ -695,3 +695,77 @@ More importantly, the runtime has no first-class handoff joining a rejected
 candidate, its exact authoring transcript, and the host validation report into
 a later phase. A self-repair host currently has to invent this lifecycle and
 private-evidence serialization outside PtcRunner.
+
+## Parsed terminal-only correction experiment
+
+The paired follow-up added one generic phase policy to
+`agent.core/run-phased-result-value`: `terminal_only: true`. The policy is
+enforced by the host's existing source-check path before mission evaluation.
+It uses the PTC-Lisp parser, not source-text matching, and admits only a single
+top-level `return` or `fail` form. A rejected correlated tool call receives one
+bounded correction message when the phase still has a turn. An integration
+test deliberately places `(return 42)` inside a string passed to `doc`; the
+program is rejected without consuming a subordinate evaluation, while the
+following `(return 42)` is admitted.
+
+The live comparison reused the exact ambiguous DeepSeek correction packet,
+model, evidence, result contract, and two-turn budget. Only the terminal-only
+phase policy changed.
+
+The first run, `cmd-6j3ge6n3tjgf0avm7xc2z4a0jm`, did not exercise the policy.
+PTC private analysis reconstructed two complete provider exchanges in which
+the provider consumed the full 4096-token output allowance but returned empty
+assistant content and no tool call. There were no generated programs, source
+checks, or mission evaluations. Both turns therefore became protocol errors
+and the run exhausted its budget. This is provider/model variance, not evidence
+for or against terminal enforcement.
+
+One identical rerun was allowed by the stopping rule. Run
+`cmd-7tpmc98j0a9fdkpzy2xpfj6v5k` reached the new boundary: its canonical trace
+records two source checks followed by two synthesis evaluations, both returned,
+and two result-contract checks. Thus both generated programs were parsed as
+terminal forms and evaluated. Neither value satisfied the result contract, so
+the terminal contract-failure path closed the run. No candidate was available
+for G1--G4 or behavioral validation.
+
+The second run then exposed a more serious observability failure. Its private
+inspection sink failed while handling the terminal result-contract failure.
+The command wrote the private canonical trace but no inspection artifact or
+result. The generic error does not identify the rejected record or validation
+cause. PTC's public analysis profile ignores private traces, while
+`private-run-analysis-v1` requires the missing inspection file. Consequently
+PTC could not analyze the surviving canonical trace; the counters above were
+recovered with a direct read only after the required PTC attempt failed. The
+exact model programs and rejected values were lost with the inspection
+artifact.
+
+### Conclusions
+
+1. Parsed terminal enforcement closes the authority and stopping hole: when
+   the model produced programs, both were terminal and no exploratory `doc` or
+   `dir` evaluation occurred.
+2. Terminal shape is not structured correctness. DeepSeek still failed to
+   produce a contract-valid diagnosis or abstention within two turns.
+3. The semantic comparison is inconclusive because neither rerun produced a
+   candidate: one failed at the model protocol boundary and the other at the
+   result contract, followed by inspection loss. More reruns would violate the
+   narrow stopping rule and invite prompt/model lottery.
+4. Keep `terminal_only` as a generic phase primitive, not a debugger-specific
+   prelude. The next repair increment should be the host-authored cross-run
+   validation-feedback envelope already identified above, paired with this
+   primitive.
+5. Before relying on self-analysis, private canonical traces must remain
+   analyzable when inspection publication itself fails. Otherwise the failure
+   most in need of debugging removes the only supported PTC analysis path.
+
+### Terminal-correction friction
+
+An inspection assertion added while diagnosing the failure established that
+internal `kernel-check-source` calls are intentionally absent from inspection
+records, so the new `require: terminal` ledger projection was not the cause.
+The remaining failure is reported only as `inspection_sink_unavailable` plus
+`inspection_publication_failed`; neither diagnostic identifies the record that
+poisoned the sink. Because private analysis cannot fall back to the retained
+private trace, this class of publication failure currently requires an
+out-of-band trace reader and still loses the generated source and capability
+payloads needed for causal diagnosis.

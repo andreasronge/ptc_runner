@@ -4,7 +4,7 @@
   "context_mission": "case-ambiguous",
   "agent": {
     "phases": [
-      {"mission": "synthesize", "max_turns": 2, "instruction": "This is the only bounded correction phase. Return a revised evidence-backed decision now; no further investigation is available."}
+      {"mission": "synthesize", "max_turns": 2, "terminal_only": true, "instruction": "This is the only bounded correction phase. Return a revised evidence-backed decision now; no further investigation is available."}
     ],
     "max_observation_chars": 32768,
     "max_transcript_chars": 160000,

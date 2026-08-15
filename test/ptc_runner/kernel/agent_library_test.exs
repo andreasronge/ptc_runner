@@ -279,6 +279,50 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert List.last(final_request["messages"])["content"] =~ "FINAL TURN:"
   end
 
+  test "agent.core terminal-only phases reject parsed nonterminal programs before evaluation" do
+    responses = [
+      %{
+        content: "Inspect once more before deciding.",
+        tool_calls: [
+          %{
+            id: "nonterminal",
+            name: "run_ptc_lisp",
+            args: %{"program" => ~S|(doc "text containing (return 42)")|}
+          }
+        ]
+      },
+      %{
+        content: "Return the bounded decision.",
+        tool_calls: [
+          %{id: "terminal", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+        ]
+      }
+    ]
+
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, config} =
+      agent_config(responses, [], missions: %{"synthesize" => mission})
+
+    source = ~S"""
+    (agent.core/run-phased-result-value
+      "Decide from retained evidence."
+      {"phases"
+       [{"mission" "synthesize" "max_turns" 2 "terminal_only" true}]})
+    """
+
+    assert {:ok, %{value: 42, usage: usage}} = Kernel.run(source, config)
+    assert usage.subordinate_evaluations == 1
+
+    assert_receive {:agent_request, first_request}
+    assert_receive {:agent_request, second_request}
+
+    assert first_request["system"] =~ "TERMINAL-ONLY PHASE"
+
+    assert List.last(second_request["messages"])["content"] =~
+             "terminal-only phase rejected the generated program before evaluation"
+  end
+
   test "default prompt concisely advertises bounded Java interop" do
     response = %{
       content: nil,

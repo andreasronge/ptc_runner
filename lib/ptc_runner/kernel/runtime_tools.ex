@@ -300,12 +300,11 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   @doc "Builds the workflow-only mission-aware source-check callback."
   def kernel_check_source(state, missions, limits, event_sink) when is_map(missions) do
     fn arguments ->
-      with {:ok, mission_name, mission, %{"source" => source} = rest} <-
-             take_mission(arguments, missions),
-           true <- is_binary(source) and map_size(rest) == 1 do
+      with {:ok, mission_name, mission, rest} <- take_mission(arguments, missions),
+           {:ok, source, opts} <- kernel_check_source_request(rest) do
         %{
           status: :ok,
-          value: SourceCheck.check(state, mission_name, mission, source, limits, event_sink, [])
+          value: SourceCheck.check(state, mission_name, mission, source, limits, event_sink, opts)
         }
       else
         :error -> protocol_error(state, :unknown_mission)
@@ -340,6 +339,19 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   end
 
   defp take_mission(_arguments, _missions), do: {:error, :invalid_request}
+
+  defp kernel_check_source_request(%{"source" => source} = arguments)
+       when is_binary(source) and map_size(arguments) == 1,
+       do: {:ok, source, []}
+
+  defp kernel_check_source_request(%{"source" => source, "require" => require} = arguments)
+       when is_binary(source) and map_size(arguments) == 2 do
+    if keyword_name(require) == "terminal",
+      do: {:ok, source, [required_shape: :terminal]},
+      else: {:error, :invalid_request}
+  end
+
+  defp kernel_check_source_request(_arguments), do: {:error, :invalid_request}
 
   @doc false
   @spec kernel_eval_ledger_arguments(map()) :: (map() -> map())
@@ -495,11 +507,19 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   defp project_kernel_eval_arguments(_arguments, _limits), do: %{"redacted" => true}
 
   defp project_kernel_check_source_arguments(arguments, limits) when is_map(arguments) do
-    maybe_put_source_identity(%{}, arguments, limits.subordinate_source_bytes)
+    %{}
+    |> maybe_put_source_identity(arguments, limits.subordinate_source_bytes)
+    |> maybe_put_source_requirement(arguments)
   end
 
   defp project_kernel_check_source_arguments(_arguments, _limits),
     do: %{"redacted" => true}
+
+  defp maybe_put_source_requirement(projected, arguments) do
+    if keyword_name(Map.get(arguments, "require")) == "terminal",
+      do: Map.put(projected, "require", "terminal"),
+      else: projected
+  end
 
   defp maybe_put_kind(projected, arguments) do
     case keyword_name(Map.get(arguments, "kind")) do

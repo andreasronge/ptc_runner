@@ -112,6 +112,7 @@ Choose the entry that matches the caller:
 | `agent.core/run` | The agent is the terminal workflow entry. It returns `{:ok true :value ...}` by default. |
 | `agent.core/run-value` | The outer workflow must validate, compare, or score the returned value. Subject failure calls `fail`. |
 | `agent.core/run-outcome` | An evaluator must retain subject failures as data. Host and provider failures still fail the workflow. |
+| `agent.core/run-phased-result-value` | The host must switch mission authority across bounded phases while retaining the correlated transcript. |
 | `agent.main/run` | A manifest should use the generic wrapper and validate terminal values against its result contract. |
 
 All entries select the mission independently of the model. Missing or `nil`
@@ -132,6 +133,12 @@ The loop tells the model its remaining budget and requires `return` or `fail`
 on the final turn. Loop settings never increase Kernel limits. Concurrent
 agents can overlap provider calls, but their mission evaluations share the
 run's bounded admission queue.
+
+For a decision phase that must not resume exploration, set its
+`terminal_only` option to `true`. PtcRunner parses the generated source and
+rejects any program other than one top-level `return` or `fail` form before
+mission evaluation. If the phase has another turn, the rejected correlated
+call and host feedback remain in the transcript for one bounded correction.
 
 Use the [agent library reference](../agent-library-reference.md#configuration)
 for exact defaults and validation. Use

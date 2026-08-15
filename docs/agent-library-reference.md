@@ -96,6 +96,26 @@ or parallel higher-order functions such as `map`, `pmap`, and `pcalls`.
 
 This is the composable result-contract entry used by `agent.main/run`.
 
+### `agent.core/run-phased-result-value`
+
+```clojure
+(agent.core/run-phased-result-value task config)
+```
+
+Runs ordered mission phases while retaining the exact correlated assistant and
+tool transcript. Each phase requires `mission` and `max_turns`, and may provide
+an `instruction`. At a boundary, the host rebuilds the system prompt from the
+next mission's authority and appends the instruction as a user message. A
+`return` in a non-final phase becomes retained evidence; only the final phase
+can satisfy the application result contract.
+
+Set a phase's `terminal_only` to `true` when it may only make the final
+decision. PtcRunner parses each generated program and accepts only one
+top-level `return` or `fail` form. A nonterminal program is not evaluated and
+receives bounded correction feedback if another phase turn remains. Strings,
+comments, or nested forms containing the words `return` or `fail` do not pass
+this check.
+
 ### `agent.main/run`
 
 Set the manifest entry to `agent.main/run` and supply:
@@ -126,6 +146,12 @@ it does not add task-specific prompt policy.
 | `max_transcript_chars` | `262144` | integer, 1–1,000,000 | Bounds the JSON-encoded prospective provider request. |
 | `consolidate_at_turns_remaining` | omitted | integer, 1–effective `max_turns` | Adds generic consolidation guidance at and below this remaining-turn count. |
 | `result_envelope` | `true` | boolean | Changes only `agent.core/run`; `false` returns the raw value. |
+
+`run-phased-result-value` replaces `mission` and `max_turns` with a non-empty
+`phases` vector of at most eight maps. Each phase accepts `mission` (non-empty
+string), `max_turns` (1–128), optional `instruction` (non-empty string), and
+optional `terminal_only` (boolean). The sum of phase turn budgets must not
+exceed 128.
 
 For the four `max_*` options, an out-of-range integer falls back to the
 documented default. Signature validation rejects wrong value types before the

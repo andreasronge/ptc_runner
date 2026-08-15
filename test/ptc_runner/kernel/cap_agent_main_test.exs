@@ -45,7 +45,7 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
                "(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?, result_envelope :bool?}) -> :any"
 
       assert signatures["agent.core/run-phased-result-value"] ==
-               "(task :string, cfg {model :string?, phases [{mission :string, max_turns :int, instruction :string?}], max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any"
+               "(task :string, cfg {model :string?, phases [{mission :string, max_turns :int, instruction :string?, terminal_only :bool?}], max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any"
 
       assert signatures["agent.main/run"] ==
                "(input {task :string, agent {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}}) -> :any"
