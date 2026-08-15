@@ -4,8 +4,9 @@ defmodule PtcRunner.Kernel.CommandArguments do
 
   Acquisition paths remain confined to this command-boundary value and are
   consumed before `RunCoordinator`. Artifact destinations are captured against
-  the invocation working directory after parsing and move only into the sealed
-  phase-6 command continuation.
+  the invocation working directory after parsing. `run` destinations move into
+  the sealed phase-6 command continuation; one-shot `repl` and `transcript`
+  destinations remain on the arguments passed to their dedicated frontends.
   """
 
   @enforce_keys [

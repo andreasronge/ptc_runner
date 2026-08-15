@@ -33,7 +33,8 @@ defmodule PtcRunner.Kernel.CommandFrontend do
     present(entry, outcome, entry.rejection)
   end
 
-  def present_entry(%CommandEntry{arguments: %{command: :repl}} = entry, _bootstrap) do
+  def present_entry(%CommandEntry{arguments: %{command: command}} = entry, _bootstrap)
+      when command in [:repl, :transcript] do
     {:error, outcome} = CommandEngine.dispatch_entry(entry, CommandRuntime.standalone())
     present(entry, outcome, nil)
   end

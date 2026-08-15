@@ -4,7 +4,9 @@ defmodule PtcRunner.Kernel.CommandEntry do
 
   Entry generates the command reference, parses exactly once, and validates an
   envelope destination against every derivable artifact target before startup.
-  A rejected entry retains no caller-owned destination or unknown switch text.
+  One-shot result destinations are anchored into both parsed option views before
+  their frontends receive them. A rejected entry retains no caller-owned
+  destination or unknown switch text.
   """
 
   alias PtcRunner.Kernel.CommandArguments
@@ -77,9 +79,12 @@ defmodule PtcRunner.Kernel.CommandEntry do
   defp finish(arguments, run_ref, frontend) do
     destinations = CommandDestination.capture(arguments.options)
 
-    case anchor_entry_paths(arguments) do
-      {:ok, arguments} ->
-        finish(arguments, destinations, run_ref, frontend)
+    with {:ok, arguments} <- anchor_entry_paths(arguments),
+         {:ok, arguments} <- anchor_one_shot_destinations(arguments, destinations, frontend) do
+      finish(arguments, destinations, run_ref, frontend)
+    else
+      {:error, %CommandRejection{} = rejection} ->
+        {:error, rejected(run_ref, frontend, rejection)}
 
       _invalid ->
         {:error,
@@ -89,6 +94,43 @@ defmodule PtcRunner.Kernel.CommandEntry do
            CommandRejection.generic(arguments.command, :invalid_arguments)
          )}
     end
+  end
+
+  defp anchor_one_shot_destinations(
+         %CommandArguments{command: command, options: options, ordered_options: ordered} =
+           arguments,
+         {destinations, failures},
+         frontend
+       )
+       when command in [:repl, :transcript] do
+    keys = one_shot_destination_keys(command)
+
+    case Enum.find(keys, &(&1 in failures)) do
+      nil ->
+        anchored = Map.take(destinations, keys)
+
+        {:ok,
+         %{
+           arguments
+           | options: Map.merge(options, anchored),
+             ordered_options: replace_ordered_destinations(ordered, anchored)
+         }}
+
+      key ->
+        {:error, CommandRejection.invalid_destination(command, key, frontend)}
+    end
+  end
+
+  defp anchor_one_shot_destinations(%CommandArguments{} = arguments, _destinations, _frontend),
+    do: {:ok, arguments}
+
+  defp one_shot_destination_keys(:transcript), do: [:private_output]
+  defp one_shot_destination_keys(:repl), do: [:output, :private_output]
+
+  defp replace_ordered_destinations(ordered, destinations) do
+    Enum.reduce(destinations, ordered, fn {key, path}, options ->
+      Keyword.replace!(options, key, path)
+    end)
   end
 
   defp anchor_entry_paths(arguments) do

@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
   alias PtcRunner.Examples.KernelInspectionLab
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.ViewerAdapter
+  alias PtcRunner.MixCommandAdapter
 
   @tag :tmp_dir
   @tag :slow
@@ -23,6 +24,8 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
     assert wrapper.name == "wrapper"
 
     for journey <- [direct, wrapper] do
+      assert Path.basename(Path.dirname(journey.trace)) == "traces"
+      assert Path.basename(Path.dirname(journey.inspection)) == "inspection"
       assert {:ok, records} = InspectionArtifact.load(journey.inspection)
       assert File.read!(journey.trace) =~ "mcp-2026-07-28"
 
@@ -161,6 +164,32 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
       refute turns.resp_body =~ "fixture-text"
       refute turns.resp_body =~ "fixture-file"
       PtcViewer.InspectionStore.stop(inspection_store)
+
+      journey_directory = journey.trace |> Path.dirname() |> Path.dirname()
+      transcript_directory = Path.join(journey_directory, "transcript")
+      File.mkdir!(transcript_directory)
+      transcript = Path.join(transcript_directory, "conversation.private.json")
+
+      presentation =
+        MixCommandAdapter.execute([
+          "transcript",
+          journey.run_id,
+          "--traces",
+          Path.dirname(journey.trace),
+          "--inspection",
+          Path.dirname(journey.inspection),
+          "--private-unattended",
+          "--private-output",
+          transcript
+        ])
+
+      assert presentation.exit_status == 0
+
+      assert %{"run_id" => run_id, "conversation" => %{"complete?" => true}} =
+               transcript |> File.read!() |> Jason.decode!()
+
+      assert run_id == journey.run_id
+      assert File.stat!(transcript).mode |> Bitwise.band(0o777) == 0o600
     end
 
     direct_request = model_request(direct.inspection)

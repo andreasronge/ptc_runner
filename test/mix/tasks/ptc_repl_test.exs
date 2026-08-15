@@ -642,6 +642,9 @@ defmodule PtcRunner.ReplFrontendTest do
     Enum.each([source, traces, results], &File.mkdir!/1)
     seed_trace(source, "seed")
     output = Path.join(results, "overview.json")
+    relative_output = Path.relative_to(output, File.cwd!())
+
+    assert Path.type(relative_output) == :relative
 
     capture_io(fn ->
       run_repl([
@@ -652,7 +655,7 @@ defmodule PtcRunner.ReplFrontendTest do
         "--session-trace-dir",
         traces,
         "--output",
-        output,
+        relative_output,
         "-e",
         ~s|(analysis/open "seed")|
       ])

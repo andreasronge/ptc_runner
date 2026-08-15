@@ -64,7 +64,8 @@ defmodule PtcRunner.Kernel.CommandEngine do
           {:error,
            arguments_outcome(entry.arguments, entry.run_ref, :arguments, :invalid_arguments)}
 
-        {:ok, %CommandEntry{arguments: %{command: :repl}} = entry} ->
+        {:ok, %CommandEntry{arguments: %{command: command}} = entry}
+        when command in [:repl, :transcript] ->
           {:error, outcome(:unknown, entry.run_ref, :arguments, :invalid_command)}
 
         {:ok, %CommandEntry{} = entry} ->
@@ -99,11 +100,12 @@ defmodule PtcRunner.Kernel.CommandEngine do
     do: dispatch_entry_context(entry, runtime, true)
 
   defp dispatch_entry_context(
-         %CommandEntry{arguments: %CommandArguments{command: :repl}} = entry,
+         %CommandEntry{arguments: %CommandArguments{command: command}} = entry,
          _runtime,
          _presentation?
-       ),
-       do: with_rejection(one_shot_repl_failure(entry.run_ref, :invalid_command))
+       )
+       when command in [:repl, :transcript],
+       do: with_rejection(one_shot_failure(entry.run_ref, :invalid_command))
 
   defp dispatch_entry_context(
          %CommandEntry{arguments: %CommandArguments{} = arguments, rejection: nil} = entry,
@@ -144,17 +146,19 @@ defmodule PtcRunner.Kernel.CommandEngine do
   @doc false
   @spec entry_failure(CommandEntry.t()) :: {:error, CommandOutcome.t()}
   def entry_failure(
-        %CommandEntry{rejection: %CommandRejection{command: :repl} = rejection} = entry
-      ),
-      do: one_shot_repl_failure(entry.run_ref, rejection.code)
+        %CommandEntry{rejection: %CommandRejection{command: command} = rejection} = entry
+      )
+      when command in [:repl, :transcript],
+      do: one_shot_failure(entry.run_ref, rejection.code)
 
   def entry_failure(%CommandEntry{rejection: %CommandRejection{} = rejection} = entry),
     do: {:error, outcome(rejection.command, entry.run_ref, :arguments, rejection.code)}
 
   @doc false
   @spec startup_failure(CommandEntry.t()) :: {:error, CommandOutcome.t()}
-  def startup_failure(%CommandEntry{arguments: %CommandArguments{command: :repl}} = entry),
-    do: one_shot_repl_failure(entry.run_ref, :invalid_command)
+  def startup_failure(%CommandEntry{arguments: %CommandArguments{command: command}} = entry)
+      when command in [:repl, :transcript],
+      do: one_shot_failure(entry.run_ref, :invalid_command)
 
   def startup_failure(%CommandEntry{
         arguments: %CommandArguments{} = arguments,
@@ -184,8 +188,8 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   defp prepare_with_ref(argv, run_ref, runtime) do
     case CommandParser.parse(argv) do
-      {:ok, %CommandArguments{command: :repl}} ->
-        one_shot_repl_failure(run_ref, :invalid_command)
+      {:ok, %CommandArguments{command: command}} when command in [:repl, :transcript] ->
+        one_shot_failure(run_ref, :invalid_command)
 
       {:ok, %CommandArguments{frontend_options: []} = arguments} ->
         prepare_arguments_safely(
@@ -198,8 +202,9 @@ defmodule PtcRunner.Kernel.CommandEngine do
       {:ok, %CommandArguments{} = arguments} ->
         {:error, arguments_outcome(arguments, run_ref, :arguments, :invalid_arguments)}
 
-      {:error, %CommandRejection{command: :repl} = rejection} ->
-        one_shot_repl_failure(run_ref, rejection.code)
+      {:error, %CommandRejection{command: command} = rejection}
+      when command in [:repl, :transcript] ->
+        one_shot_failure(run_ref, rejection.code)
 
       {:error, %CommandRejection{} = rejection} ->
         {:error, outcome(rejection.command, run_ref, :arguments, rejection.code)}
@@ -210,10 +215,10 @@ defmodule PtcRunner.Kernel.CommandEngine do
     _kind, _reason -> {:error, outcome(:unknown, run_ref, :internal, :internal_error)}
   end
 
-  defp one_shot_repl_failure(run_ref, :invalid_command),
+  defp one_shot_failure(run_ref, :invalid_command),
     do: {:error, outcome(:unknown, run_ref, :arguments, :invalid_command)}
 
-  defp one_shot_repl_failure(run_ref, _rejection_code),
+  defp one_shot_failure(run_ref, _rejection_code),
     do: {:error, outcome(:unknown, run_ref, :arguments, :invalid_arguments)}
 
   defp prepare_arguments_safely(%CommandArguments{} = arguments, run_ref, destinations, runtime) do

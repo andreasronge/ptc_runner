@@ -30,5 +30,6 @@ end)
 IO.puts("Open one artifact with:")
 
 IO.puts(
-  "  mix ptc.viewer --trace-dir #{output}/direct --inspection-file #{output}/direct/run.inspection.jsonl"
+  "  mix ptc.viewer --trace-dir #{output}/direct/traces " <>
+    "--inspection-file #{output}/direct/inspection/run.inspection.jsonl"
 )

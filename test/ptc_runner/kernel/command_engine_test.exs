@@ -148,11 +148,23 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
-  test "the one-shot engine APIs reject accepted and malformed repl requests as sealed outcomes" do
+  test "the one-shot engine APIs reject accepted and malformed requests as sealed outcomes" do
     for {argv, code} <- [
           {["repl"], "invalid_command"},
           {["repl", "--caller-secret", "value"], "invalid_arguments"},
-          {["repl", "-e", "expr", "script.clj"], "invalid_arguments"}
+          {["repl", "-e", "expr", "script.clj"], "invalid_arguments"},
+          {[
+             "transcript",
+             "run-1",
+             "--traces",
+             "traces",
+             "--inspection",
+             "inspection",
+             "--private-unattended",
+             "--private-output",
+             "transcript.json"
+           ], "invalid_command"},
+          {["transcript", "run-1"], "invalid_arguments"}
         ],
         operation <- [&CommandEngine.prepare/1, &CommandEngine.dispatch/1] do
       assert {:error, %CommandOutcome{} = outcome} = operation.(argv)
