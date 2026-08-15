@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [{"library": "agent.main"}],
+    "entry": "agent.main/run"
+  },
+  "missions": {
+    "evidence": {
+      "components": [{"library": "debug.nav"}],
+      "providers": ["debug.nav", "failed-run-traces"]
+    }
+  },
+  "contracts": {
+    "result_schema": {"path": "report.schema.json"}
+  },
+  "input": {
+    "value": {
+      "task": "A captured run failed. Determine why it did not produce the value it was required to produce, using only evidence you actually read.\nWork in this order: list runs and select the failed one; open it; read its execution_errors collection; read its generated_sources collection to obtain the exact program the run generated; then use debug.nav/follow on the typed relationships those items carry to reach the prelude source the program called, and keep following dependency relationships until an item has none.\nFollow a relationship object exactly as you received it, and only when its state is \"complete\". Do not invent filters, and do not pass a run id where an evaluation id is expected.\nStopping rule: as soon as you have read a source with no further complete dependency relationship, make the very next program your final report. Do not gather more evidence after that point.\nThe report is an object with exactly these fields: \"decision\", \"cause\" (a string), \"evidence\" (an array of strings), and \"component_id\" only when you name one. Use decision \"diagnosed\" with the responsible component_id only when the source you read identifies one; otherwise use decision \"insufficient-evidence\" and let \"cause\" name what is missing.",
+      "agent": {"max_turns": 14, "mission": "evidence"}
+    }
+  },
+  "providers": {
+    "workflow": [{"name": "deepseek"}],
+    "mission": [
+      {"name": "debug.nav"},
+      {"name": "failed-run-traces", "config": {"expose": false}}
+    ]
+  },
+  "limits": {
+    "run_duration_ms": 600000,
+    "workflow_timeout_ms": 540000,
+    "evaluation_timeout_ms": 480000
+  },
+  "events": {"policy": "private"},
+  "labels": {
+    "name": "debug-a-failed-run-agent",
+    "tags": {"mode": "agent"}
+  }
+}

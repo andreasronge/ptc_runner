@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.Library do
 
   Available component IDs are `kernel`, `runtime`, `cap`, `workflow.event`,
   `llm`, `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`,
-  `agent.prompt`, `agent.main`, `result`, and `analysis`.
+  `agent.prompt`, `agent.main`, `result`, `analysis`, and `debug.nav`.
 
   `agent.main` is a generic entry wrapper: a manifest names `agent.main/run`
   and supplies `task` and `agent` through input, instead of every application
@@ -17,6 +17,20 @@ defmodule PtcRunner.Kernel.Library do
   `agent.core/run-value` is the composable variant: it returns the same
   model-authored value to its PTC-Lisp caller without terminating the outer
   workflow, allowing an evaluator to judge the answer before returning.
+
+  `analysis` and `debug.nav` are the two navigation surfaces over one immutable
+  run-evidence capture, and a mission installs one or the other. `analysis`
+  binds the stable `analysis-runs`/`analysis-open`/`analysis-read` capability
+  names a REPL analysis profile grants. `debug.nav` adds `follow` and binds a
+  manifest-installed snapshot provider, which names its operations
+  `<alias>.runs`/`<alias>.open`/`<alias>.read`; the mission must therefore
+  select its correlated inspection snapshot provider under the conventional
+  alias `debug.nav`. `follow` takes one typed relationship from an evidence
+  item and reads its exact target collection and filters, refusing an
+  unavailable or filterless relationship and any caller filter beyond `limit`
+  and `cursor`. It adds no host authority and no diagnosis policy: it returns
+  the original relationship beside the unchanged native page envelope, so
+  cursors, completeness, and relationship state survive the hop.
 
   `cap` is `:discoverable` rather than `:prompt`. Its envelope and pagination
   helpers compose capabilities for other libraries and stay out of the prompt
@@ -53,6 +67,7 @@ defmodule PtcRunner.Kernel.Library do
   @agent_retry_path Path.expand("../../../priv/preludes/kernel/agent.retry.clj", __DIR__)
   @result_path Path.expand("../../../priv/preludes/kernel/result.clj", __DIR__)
   @analysis_path Path.expand("../../../priv/preludes/kernel/analysis.clj", __DIR__)
+  @debug_nav_path Path.expand("../../../priv/preludes/kernel/debug.nav.clj", __DIR__)
   @external_resource @kernel_path
   @external_resource @runtime_path
   @external_resource @cap_path
@@ -66,6 +81,7 @@ defmodule PtcRunner.Kernel.Library do
   @external_resource @agent_retry_path
   @external_resource @result_path
   @external_resource @analysis_path
+  @external_resource @debug_nav_path
   @sources %{
     "kernel" => File.read!(@kernel_path),
     "runtime" => File.read!(@runtime_path),
@@ -79,10 +95,12 @@ defmodule PtcRunner.Kernel.Library do
     "agent.feedback" => File.read!(@agent_feedback_path),
     "agent.retry" => File.read!(@agent_retry_path),
     "result" => File.read!(@result_path),
-    "analysis" => File.read!(@analysis_path)
+    "analysis" => File.read!(@analysis_path),
+    "debug.nav" => File.read!(@debug_nav_path)
   }
   @dependencies %{
     "analysis" => ["cap"],
+    "debug.nav" => ["cap"],
     "agent.prompt" => ["kernel"],
     "agent.core" => [
       "agent.feedback",

@@ -486,6 +486,12 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
           }
         end)
 
+      {:ok, inspection_sink} =
+        InspectionSink.start(
+          run_id: "contract-exhaustion-#{max_turns}",
+          trace_id: "contract-exhaustion-#{max_turns}"
+        )
+
       {:ok, config} =
         agent_config(responses, [],
           agent_main: true,
@@ -496,7 +502,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
             }
           },
           result_contract: result_contract,
-          result_contract_source: "manifest.json"
+          result_contract_source: "manifest.json",
+          inspection_sink: inspection_sink
         )
 
       assert {:error,
@@ -517,6 +524,27 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                event.type == "run-stopped" and event.data[:failure_kind] == "result-contract" and
                  event.data[:agent_turns] == max_turns and event.data[:constraint] == :minimum
              end)
+
+      # The authenticated diagnostic carries `CommandContractAuthority` and
+      # `CommandPath` structs. Publishing them verbatim used to poison the
+      # inspection sink, replacing the real outcome with an
+      # `inspection_sink_error` and destroying the evidence the failed run needs.
+      assert {:ok, records} = InspectionSink.records(inspection_sink)
+      assert diagnostic = Enum.find(records, &(&1["record_type"] == "execution-error"))
+      assert diagnostic["payload"]["reason"] == "result_contract_failed"
+
+      assert Map.take(
+               diagnostic["payload"]["details"],
+               ~w(agent_turns constraint contract_source violations)
+             ) ==
+               %{
+                 "agent_turns" => max_turns,
+                 "constraint" => "minimum",
+                 "contract_source" => "manifest.json",
+                 "violations" => [%{"kind" => "minimum", "path" => "/sum"}]
+               }
+
+      refute Map.has_key?(diagnostic["payload"]["details"], "contract_authority")
     end
   end
 

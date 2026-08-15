@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "main", "path": "main.clj", "dependencies": ["kernel"]},
+      {"library": "kernel"}
+    ],
+    "entry": "main/run"
+  },
+  "missions": {
+    "evidence": {
+      "components": [
+        {"id": "evidence.walk", "path": "evidence.walk.clj", "dependencies": ["debug.nav"]},
+        {"library": "debug.nav"}
+      ],
+      "providers": ["debug.nav", "failed-run-traces"]
+    }
+  },
+  "input": {"value": {"limit": 1}},
+  "providers": {
+    "mission": [
+      {"name": "debug.nav"},
+      {"name": "failed-run-traces", "config": {"expose": false}}
+    ]
+  },
+  "labels": {
+    "name": "debug-a-failed-run-debugger",
+    "tags": {"mode": "deterministic"}
+  }
+}

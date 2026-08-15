@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Private inspection now retains an authenticated `result_contract_failed`
+  diagnostic instead of destroying it. The retained runtime details carry
+  internal contract-authority and command-path structs, which are not JSON
+  inspection values; emitting them poisoned the inspection sink and replaced
+  the real outcome with `inspection_sink_error`, so the run most in need of
+  debugging lost its own evidence. Only the inspection copy is projected — the
+  attestation is dropped and each already-authorized path is rendered as a JSON
+  Pointer — while the runtime error keeps its authenticated structs unchanged.
+
 - Replaced eager `cap/collect-pages` with resumable `cap/fold-pages`, which
   reduces pages into bounded caller state, preserves the next cursor at a page
   bound, and rejects changed snapshots or cursor cycles. The bundled filesystem
@@ -24,6 +33,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the capability boundary after the query layer accepted them.
 
 ### Added
+
+- Added the shipped `debug.nav` component: `runs`, `open`, `read`, and a safe
+  `follow` over one immutable run-evidence capture. `follow` takes a typed
+  relationship exactly as an evidence item published it, refuses an unavailable
+  or filterless one, and returns the relationship beside the unchanged native
+  page envelope so cursors, completeness, and relationship state survive the
+  hop. It adds no host authority and no diagnosis policy.
+
+- Added the [Debug a failed run](docs/guides/debugging-a-failed-run.md) guide
+  and its credential-free `examples/debug-a-failed-run` pair, in which one
+  ordinary PTC run navigates another run's captured failure from the boundary
+  error through generated source and referenced prelude source to the frozen
+  dependency closure.
+
+- Added occurrence-qualified `dependency_prelude_source` relationships to
+  effective prelude sources, so a debugger can walk a frozen dependency closure
+  instead of guessing which copy of a shared component a call reached. A
+  component ID alone is not an occurrence identity, so every edge repeats its
+  environment and, for a mission occurrence, its mission name. The edges are
+  derived only from a prelude graph
+  that satisfies the complete positional contract — indices aligned with unique
+  component IDs, each row unique, ascending, and strictly earlier than its own
+  position — and any other graph yields one honest `incomplete` relation.
+
+- Generated entries embedded in `turns` now carry the same `relationships` list
+  as the matching `generated_sources` item. A generic walker that starts from a
+  turn no longer needs an extra exact read by `evaluation_id` merely to obtain
+  followable links.
 
 - Added typed, followable run-analysis relationships from workflow boundary
   errors to directly proven child producers, generated source, producing turns,

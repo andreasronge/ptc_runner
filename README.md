@@ -207,7 +207,9 @@ Read these in order. Each one owns its topic and links onward.
    aliases, credentials, data classes, and outer policy.
 7. [Running and debugging](docs/guides/running-and-debugging.md) — the
    commands, results, traces, private inspection, and development Viewer.
-8. [Evaluate changes with replay](docs/guides/evaluating-with-replay.md) — hold
+8. [Debug a failed run](docs/guides/debugging-a-failed-run.md) — navigate one
+   immutable failed capture from another PTC run, through typed evidence links.
+9. [Evaluate changes with replay](docs/guides/evaluating-with-replay.md) — hold
    model responses fixed while testing candidate component source.
 
 ### Going further

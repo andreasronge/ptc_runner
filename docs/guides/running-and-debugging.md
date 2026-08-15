@@ -295,6 +295,10 @@ source, effective components, capability payloads, prints, diagnostics, and
 terminal values. The attached-terminal and unattended switches are accident
 guards, not access control; treat every downstream sink as private.
 
+To walk the same capture from an ordinary application rather than a session,
+[Debug a failed run](debugging-a-failed-run.md) installs it as a snapshot
+provider and follows typed evidence links with the shipped `debug.nav` prelude.
+
 ## Browse with the development Viewer
 
 From a source checkout:

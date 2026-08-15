@@ -450,9 +450,30 @@ defmodule PtcRunner.Kernel.Runner do
       sink,
       "execution-error",
       %{evaluation_id: evaluation_id},
-      %{environment: :workflow, kind: kind, reason: reason, details: details}
+      %{
+        environment: :workflow,
+        kind: kind,
+        reason: reason,
+        details: inspection_error_details(reason, details)
+      }
     )
   end
+
+  # `capture_execution_failure/6` merges the private `boundary_producer` fact
+  # into the same details map the authenticated result-contract diagnostic
+  # owns, so split them before projecting: only the contract half holds
+  # structs the sink cannot serialize.
+  defp inspection_error_details(:result_contract_failed, details) do
+    boundary = Map.take(details, [:boundary_producer])
+    contract = Map.drop(details, [:boundary_producer])
+
+    case ResultContractDiagnostic.inspection_details(contract) do
+      {:ok, projected} -> Map.merge(projected, boundary)
+      :error -> boundary
+    end
+  end
+
+  defp inspection_error_details(_reason, details), do: details
 
   defp project_result(value, :native), do: {:ok, value}
 

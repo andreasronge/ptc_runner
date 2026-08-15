@@ -454,8 +454,8 @@ Generated programs carry `prelude_calls_available?` and a sorted
 `source_match`; duplicate identical sources are marked ambiguous rather than
 given a fabricated causal identity.
 
-Private execution errors and generated programs may carry a `relationships`
-list. Each relationship has this closed shape:
+Private execution errors, generated programs, and effective prelude sources may
+carry a `relationships` list. Each relationship has this closed shape:
 
 ```json
 {
@@ -468,8 +468,8 @@ list. Each relationship has this closed shape:
 ```
 
 The closed relation IDs are `boundary_failure`, `child_evaluations`,
-`direct_boundary_producer`, `generated_source`, `producing_turn`, and
-`referenced_prelude_source`.
+`dependency_prelude_source`, `direct_boundary_producer`, `generated_source`,
+`producing_turn`, and `referenced_prelude_source`.
 `target_collection` and non-null `filters` are the exact options to add to the
 same run's next `analysis/read`; callers must not follow a null filter. State is
 one of `complete`, `incomplete`, `ambiguous`, or `unavailable`. Ambiguous
@@ -490,6 +490,24 @@ generated-source/turn source match. A source match can be ambiguous; a parent
 edge alone is never promoted to causation. Truncated producer evidence is
 `incomplete`, a complete search with no match is `unavailable`, and no relation
 compares canonical and inspection sequence values.
+
+`dependency` is reserved for the frozen prelude graph. Each effective prelude
+source carries one `dependency_prelude_source` relation per direct dependency
+recorded at run start. A component ID alone is not an occurrence identity — the
+same component can be frozen into the workflow environment and into several
+missions with different dependency edges — so every filter set repeats the
+owning `environment` and, for a mission occurrence, its `mission_name`. The
+edges are read only from a graph that satisfies the complete positional
+contract: `dependency_indices` aligned with unique `component_ids`, and each
+entry holding unique ascending indices strictly earlier than its own position.
+A graph that is absent, or that violates any part of that contract, yields one
+`incomplete` relation with null filters rather than a guessed edge. A component
+with no dependencies yields an empty list, which is a different claim from
+`incomplete`.
+
+Generated entries embedded in `turns` carry the same `relationships` list as
+the matching `generated_sources` item, so a walker that starts from a turn can
+follow evidence without an extra exact read to obtain the links.
 
 Provider response usage omits `total_cost` when pricing is unavailable. A
 present zero is therefore a measured zero-cost response, not an unknown cost.

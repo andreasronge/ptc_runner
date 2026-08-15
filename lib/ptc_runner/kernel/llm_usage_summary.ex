@@ -257,9 +257,21 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
   defp normalize_timestamp(event), do: event
 
   defp field(map, key) when is_map(map),
-    do: Map.get(map, key) || Map.get(map, String.to_existing_atom(key))
+    do: Map.get(map, key) || Map.get(map, existing_atom(key))
 
   defp field(_value, _key), do: nil
+
+  # Events arrive with either string or atom keys, so a string lookup falls
+  # back to the atom form. `String.to_existing_atom/1` raises when nothing has
+  # created that atom yet, which depends on which modules the VM happens to
+  # have loaded — so this crashed or not purely on test and load ordering. An
+  # atom that does not exist cannot be a key in the map either, so the honest
+  # answer is that the field is absent.
+  defp existing_atom(key) do
+    String.to_existing_atom(key)
+  rescue
+    ArgumentError -> nil
+  end
 
   defp field(map, outer, inner), do: map |> field(outer) |> field(inner)
 
