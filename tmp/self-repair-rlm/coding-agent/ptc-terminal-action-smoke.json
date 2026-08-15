@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "terminal-action-smoke",
+        "path": "terminal-action-smoke.clj",
+        "dependencies": ["repair.terminal"]
+      },
+      {"id": "repair.terminal", "path": "repair.terminal.clj"}
+    ],
+    "entry": "terminal-action-smoke/run"
+  },
+  "missions": {},
+  "input": {"value": {}},
+  "contracts": {"result_schema": {"path": "report-decision.schema.json"}},
+  "limits": {"run_duration_ms": 30000}
+}

@@ -940,3 +940,102 @@ diagnostic rather than an `inspection_sink_unavailable` replacement.
    directories and the `--private-output` parent. The generic physical-
    separation error did not identify the conflicting pair. After using sibling
    output and session roots, analysis succeeded without further workaround.
+
+## Typed and terminal correction-action experiment
+
+The failed scalar abstention isolated a narrow protocol question: can a final
+mission expose typed decision actions so the model does not have to construct
+the discriminator map by hand? Two matched DeepSeek cells retained the exact
+feedback envelope, incident projection, result schema, model installation, and
+two-call budget. Only the synthesis API changed.
+
+### Typed value constructors
+
+The first arm exposed `repair.action/abstain` and
+`repair.action/propose`. The functions build the discriminator and exact
+abstention fields but return ordinary values, so the generated program still
+must wrap the call in `return`. The task explicitly named those constructors.
+
+Run `cmd-48rbj0t93nxdg45dm0b5nfexta` ended in a host-owned
+`correction-abstained` state. PTC private analysis established a complete
+41-record inspection, two complete model exchanges, no execution errors, and
+one evaluated synthesis source. The trajectory was:
+
+1. DeepSeek produced a complete `repair.action/abstain` call with cause,
+   evidence, and missing evidence, but used it as the top-level form. The
+   terminal-only source gate rejected it before evaluation because it was not
+   wrapped in `return` or `fail`.
+2. It repeated the same constructor inside `return`. The constructor produced
+   the required object, the result contract accepted it, and the host loop
+   stopped before materialization.
+
+This converts the earlier result-schema failure into an ordinary, recoverable
+terminal-shape correction. It still spends a model call on the independent
+`return` convention.
+
+### Terminal actions
+
+The second arm made the actions themselves terminal. Their implementations use
+the normal PTC-Lisp `return` signal internally, while the model calls exactly
+one top-level `repair.terminal/abstain` or
+`repair.terminal/propose`. A provider-free manifest first proved that a bare
+action call completed its caller with a schema-valid result; no host coercion
+or special result reader was involved.
+
+Because the current terminal-only source checker admits only a literal
+top-level `return` or `fail`, this arm disabled `terminal_only` and relied on a
+tool-free synthesis mission whose only domain action was the terminal prelude.
+
+Live run `cmd-7hs2sw2ywy3ztfwdkf4fh999py` also ended
+`correction-abstained`. PTC correlated 41 inspection records, two complete
+model exchanges, no execution errors, and the exact terminal prelude source.
+The evaluated program was the bare action:
+
+```clojure
+(repair.terminal/abstain "cmd-22992vemqa2d3d94pfshj9sjj3" ...)
+```
+
+There were zero subordinate terminal source checks. The internal return signal
+crossed the usual evaluation boundary, the result contract accepted the map,
+and the host loop stopped. The run still consumed two model calls: DeepSeek's
+first response contained only narration and no tool call, so the normal
+assistant-protocol feedback requested one PTC-Lisp program; the second response
+called the terminal action successfully. Terminal actions remove the outer
+`return` ceremony but cannot prevent unrelated provider/model protocol errors.
+
+### Quality and product implications
+
+Both successful reports made the safe top-level decision to abstain, but both
+retained part of the rejected candidate's incorrect reasoning: they claimed
+the result contract's `const` violation proved a keyword-versus-string map-key
+defect. The validation result already demonstrates that changing the key
+representation still yields a normal JSON `total` property with the wrong
+value, 100 rather than 120. Host validation prevented that false claim from
+becoming a code change; an abstention remains operationally safe, but its
+evidence list is not fully reliable.
+
+The comparison supports four narrower conclusions:
+
+1. Typed decision functions solve discriminator/map ceremony. Both action arms
+   produced complete reports where the baseline returned only a scalar branch
+   name twice.
+2. Making the function terminal removes the separate `return` convention and
+   works through existing PTC-Lisp control flow. The one-shot host loop needs
+   no special case for it.
+3. The present `terminal_only` policy and terminal functions are incompatible:
+   one admits only literal return/fail source, while the other deliberately
+   hides return inside an allowlisted callable. A general implementation needs
+   a source-check policy that can admit declared terminal exports while still
+   rejecting introspection, definitions, and arbitrary intermediate programs.
+4. This is not yet a general generated API. The research prelude is handwritten
+   for one report schema. A product experiment should derive terminal actions
+   from the application result contract or let a manifest explicitly declare
+   terminal exports and their payload schemas. Structured-output synthesis is
+   the alternative if the provider can guarantee the same typed branch without
+   a PTC-Lisp tool-call protocol.
+
+The next experiment should not sample this ambiguous incident again. It should
+exercise one declared terminal action on a different repairable incident where
+the expected result is a proposal, then prove the action-produced candidate
+continues through G1--G4 and host validation. That tests the proposal payload
+and end-to-end repair path rather than further measuring abstention wording.

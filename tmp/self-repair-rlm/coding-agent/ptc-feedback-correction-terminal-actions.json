@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "debug.feedback-entry-terminal-actions",
+        "path": "feedback-entry-terminal-actions.clj",
+        "dependencies": ["debug.preloaded"]
+      },
+      {
+        "id": "debug.preloaded",
+        "path": "preloaded.clj",
+        "dependencies": ["agent.core", "kernel"]
+      },
+      {"library": "agent.core"},
+      {"library": "kernel"}
+    ],
+    "entry": "debug.feedback-entry-terminal-actions/run"
+  },
+  "missions": {
+    "case-ambiguous": {
+      "components": [
+        {"library": "debug.nav"},
+        {
+          "id": "debug.workspace",
+          "path": "workspace-ambiguous.clj",
+          "dependencies": ["debug.nav"]
+        },
+        {
+          "id": "debug.case",
+          "path": "case.clj",
+          "dependencies": ["debug.nav", "debug.workspace"]
+        }
+      ],
+      "providers": ["history", "debug.nav"]
+    },
+    "synthesize": {
+      "components": [
+        {"id": "repair.terminal", "path": "repair.terminal.clj"}
+      ]
+    }
+  },
+  "input": {"value": {}},
+  "providers": {
+    "workflow": [{"name": "agent_model"}],
+    "mission": [
+      {"name": "history", "config": {"expose": false}},
+      {"name": "debug.nav"}
+    ]
+  },
+  "contracts": {"result_schema": {"path": "report-decision.schema.json"}},
+  "limits": {
+    "run_duration_ms": 300000,
+    "workflow_timeout_ms": 300000,
+    "evaluation_timeout_ms": 30000,
+    "subordinate_evaluations": 4,
+    "workflow_capability_calls": 8,
+    "workflow_capability_calls_per_name": 8,
+    "mission_capability_calls": 64,
+    "mission_capability_calls_per_name": 64,
+    "normal_event_count": 4096
+  },
+  "labels": {
+    "name": "self-repair-feedback-correction-terminal-actions",
+    "tags": {"mode": "agent", "stage": "validating", "suite": "e2e"}
+  }
+}
