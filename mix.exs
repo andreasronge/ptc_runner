@@ -41,7 +41,7 @@ defmodule PtcRunner.MixProject do
       dialyzer: [
         plt_core_path: dialyzer_plt_core_path(),
         plt_file: {:no_warn, "priv/plts/project.plt"},
-        plt_add_apps: [:ex_unit, :mix, :req, :req_llm, :llm_db, :recon],
+        plt_add_apps: [:earmark_parser, :ex_unit, :mix, :req, :req_llm, :llm_db, :recon],
         ignore_warnings: ".dialyzer_ignore.exs",
         list_unused_filters: true
       ]
@@ -125,6 +125,7 @@ defmodule PtcRunner.MixProject do
       ex_dna_dep(),
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
+      {:earmark_parser, "~> 1.4.44", only: [:dev, :test], runtime: false},
       {:req_llm, "~> 1.19", optional: true, runtime: false},
       launcher_dep(),
       {:ptc_viewer, path: "ptc_viewer", only: [:test, :dev]},
@@ -396,6 +397,7 @@ defmodule PtcRunner.MixProject do
           "docs/clojure-conformance-gaps.md",
           "docs/function-reference.md",
           "docs/java-interop.md",
+          "docs/kernel-limits-reference.md",
           "docs/signature-syntax.md",
           "docs/trace-log-contract.md",
           "docs/conformance/index.md",
@@ -405,7 +407,9 @@ defmodule PtcRunner.MixProject do
           "docs/guides/host-configuration.md",
           "docs/guides/project-configuration.md",
           "docs/guides/building-agents.md",
+          "docs/guides/connecting-tools-with-mcp.md",
           "docs/guides/running-and-debugging.md",
+          "docs/guides/evaluating-with-replay.md",
           "docs/guides/kernel-repl.md",
           "docs/guides/components-and-preludes.md",
           "docs/guides/embedding-in-elixir.md",
@@ -420,7 +424,7 @@ defmodule PtcRunner.MixProject do
         Contracts: ~r/docs\/trace-log-contract\.md/,
         Guides: ~r/docs\/guides\/.+\.md/,
         Reference:
-          ~r/docs\/(agent-library|ptc-lisp|clojure|function-reference|java-|signature-).+\.md/,
+          ~r/docs\/(agent-library|ptc-lisp|clojure|function-reference|java-|kernel-limits|signature-).+\.md/,
         Conformance: ~r/docs\/conformance\/.+\.md/
       ]
     ]
@@ -429,7 +433,7 @@ defmodule PtcRunner.MixProject do
   defp package do
     [
       files:
-        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
+        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay examples/mcp/filesystem .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",

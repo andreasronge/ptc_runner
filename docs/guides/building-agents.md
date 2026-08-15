@@ -5,73 +5,8 @@ execution and explicit authority; PTC-Lisp libraries define prompts, retries,
 feedback, continuation, and completion policy.
 
 Start with [Getting started](getting-started.md). The examples below live in
-[`examples/kernel-tutorial/`](../../examples/kernel-tutorial/README.md) and use
+[`examples/kernel-tutorial/`](https://github.com/andreasronge/ptc_runner/tree/main/examples/kernel-tutorial) and use
 the repository's trusted `deepseek` host alias.
-
-## Understand the two environments
-
-Every run separates trusted orchestration from model-authored task work:
-
-| Environment | Contains | Does not inherit |
-| --- | --- | --- |
-| Workflow | Agent policy and workflow-only model access | Mission capabilities |
-| Mission | The small API granted to generated programs | Model access or ambient host state |
-
-The shipped `agent.core` loop follows this sequence:
-
-1. The host freezes the workflow and mission bundles and installs explicit
-   capabilities.
-2. The workflow asks a model for one `run_ptc_lisp` tool call.
-3. The Kernel compiles and evaluates that source in the selected mission.
-4. An ordinary value becomes an observation for another turn. `(return value)`
-   completes the agent; `(fail value)` reports a model-program failure.
-
-The model authors PTC-Lisp; the Kernel executes it. Generated code cannot call
-the model, recursively cross the evaluation boundary, or access ungranted
-filesystem, network, or process state.
-
-[Manifests and capabilities](manifests-and-capabilities.md) defines the
-authority boundary. [Host configuration](host-configuration.md) defines the
-operator-owned installation behind each provider alias.
-
-## Write bounded PTC-Lisp
-
-PTC-Lisp is an eager, bounded Clojure subset with agent-oriented additions:
-`return`, `fail`, `tool/...` calls, and the `*1`, `*2`, and `*3` continuation
-values. It excludes arbitrary JVM access, macros, `eval`, lazy or infinite
-sequences, and unsupported Clojure APIs.
-
-Use the [PTC-Lisp specification](../ptc-lisp-specification.md) and
-[function reference](../function-reference.md) for the exact language surface.
-[Clojure conformance gaps](../clojure-conformance-gaps.md) records deliberate
-differences.
-
-### Keep source separate from runtime data
-
-Pass evidence through `data/params` instead of interpolating it into source:
-
-```clojure
-(kernel/eval-with
-  "default"
-  (program
-    (return (workspace/read {"path" (get data/params "path")})))
-  {"path" selected-path})
-```
-
-Use `kernel/eval-source-with` when the source itself is generated. Parameters
-must be JSON values and remain subject to the capability argument limit. This
-keeps the code digest stable and prevents incidental data from becoming code.
-
-For advisory validation before evaluation:
-
-```clojure
-(kernel/check-source "default" generated-source)
-```
-
-The check uses the live mission bundle and committed definitions but does not
-execute code or consume an evaluation. Evaluation compiles the source again
-and can still fail. The subordinate-evaluation contract is normative in
-[the specification](../ptc-lisp-specification.md#parameterized-subordinate-evaluation).
 
 ## Use the shipped loop
 
@@ -121,6 +56,69 @@ than falling back.
 The [agent library reference](../agent-library-reference.md) defines every
 entry, option, default, outcome, and correction rule.
 
+## Understand the two environments
+
+Every run separates trusted orchestration from model-authored task work:
+
+| Environment | Contains | Does not inherit |
+| --- | --- | --- |
+| Workflow | Agent policy and workflow-only model access | Mission capabilities |
+| Mission | The small API granted to generated programs | Model access or ambient host state |
+
+The shipped loop follows this sequence:
+
+1. The host freezes the workflow and mission bundles and installs explicit
+   capabilities.
+2. The workflow asks a model for one `run_ptc_lisp` tool call.
+3. The Kernel compiles and evaluates that source in the selected mission.
+4. An ordinary value becomes an observation for another turn. `(return value)`
+   completes the agent; `(fail value)` reports a model-program failure.
+
+Generated code cannot call the model, recursively cross the evaluation
+boundary, or access ungranted filesystem, network, or process state.
+[Manifests and capabilities](manifests-and-capabilities.md) defines the
+declarative boundary; [Host configuration](host-configuration.md) defines the
+operator-owned installation behind each selected alias.
+
+## Write bounded PTC-Lisp
+
+PTC-Lisp is an eager, bounded Clojure subset with agent-oriented additions:
+`return`, `fail`, `tool/...` calls, and the `*1`, `*2`, and `*3` continuation
+values. It excludes arbitrary JVM access, macros, `eval`, lazy or infinite
+sequences, and unsupported Clojure APIs.
+
+Use the [PTC-Lisp specification](../ptc-lisp-specification.md) and
+[function reference](../function-reference.md) for the exact language surface.
+[Clojure conformance gaps](../clojure-conformance-gaps.md) records deliberate
+differences.
+
+### Keep source separate from runtime data
+
+Pass evidence through `data/params` instead of interpolating it into source:
+
+```clojure
+(kernel/eval-with
+  "default"
+  (program
+    (return (workspace/read {"path" (get data/params "path")})))
+  {"path" selected-path})
+```
+
+Use `kernel/eval-source-with` when the source itself is generated. Parameters
+must be JSON values and remain subject to the capability argument limit. This
+keeps the code digest stable and prevents incidental data from becoming code.
+
+For advisory validation before evaluation:
+
+```clojure
+(kernel/check-source "default" generated-source)
+```
+
+The check uses the live mission bundle and committed definitions but does not
+execute code or consume an evaluation. Evaluation compiles the source again
+and can still fail. The subordinate-evaluation contract is normative in
+[the specification](../ptc-lisp-specification.md#16-2-environment-structure).
+
 ### Configure the loop
 
 `agent.core` defaults to four turns and accepts bounded options for the model,
@@ -135,23 +133,8 @@ run's bounded admission queue.
 
 Use the [agent library reference](../agent-library-reference.md#configuration)
 for exact defaults and validation. Use
-[the limits reference](manifests-and-capabilities.md#narrow-installed-limits)
+[the limits reference](../kernel-limits-reference.md)
 for Kernel ceilings.
-
-### Treat the prompt as policy
-
-`agent.prompt` owns the system prompt separately from the loop. Its
-`initial-state`, `render`, and `transition` functions are the seam to replace
-when a different prompt policy is required.
-
-Prompt-visible mission functions form a facade: when any exist, they suppress
-raw `tool/...` entries. Without a facade, the prompt lists direct mission
-capabilities. Numeric limits remain enforced but are not rendered into the
-default prompt; trusted workflow code can inspect the frozen structured
-inventory through `kernel/mission-inventory`.
-
-Keep prompts domain-blind. Describe the language, mission API, current task,
-and generic correction policy, never benchmark fixtures or expected answers.
 
 ## Select model access separately
 
@@ -174,12 +157,10 @@ invent those values. Live and replayed models are workflow-only; MCP and
 snapshot sources are mission-only.
 
 Credentials never belong in PTC-Lisp, manifests, traces, or committed project
-files. For the tutorial aliases, copy `.env.example` to the Git-ignored
-`examples/kernel-tutorial/.env` and set `OPENROUTER_API_KEY`. The tutorial
-project documents name that file explicitly; PtcRunner never searches for an
-environment file implicitly. See
-[Host configuration](host-configuration.md#declare-credentials-once) for deployment-safe
-credential sources.
+files. The [Quickstart credential step](quickstart.md#2-supply-a-model-credential)
+creates the tutorial's explicitly named environment file. See
+[Host configuration](host-configuration.md#declare-credentials-once) for
+deployment-safe credential sources.
 
 ## Use a model as a capability
 
@@ -210,7 +191,7 @@ manifest selection as the default. There is no fallback for an unknown alias.
 The [provider-neutral request reference](../agent-library-reference.md#provider-neutral-requests)
 defines the request and response fields.
 
-[`02-deepseek-extract`](../../examples/kernel-tutorial/02-deepseek-extract/extract.clj)
+[`02-deepseek-extract`](https://github.com/andreasronge/ptc_runner/blob/main/examples/kernel-tutorial/02-deepseek-extract/extract.clj)
 shows this pattern end to end.
 
 ## Expose a small mission API
@@ -255,7 +236,7 @@ Successful ordinary values enter a three-item history as `*1` through `*3`.
 Terminal `return` commits definitions but does not add its value to history.
 Failed evaluations preserve the previous definitions and history.
 
-[`04-multi-turn-agent`](../../examples/kernel-tutorial/04-multi-turn-agent/ptc.json)
+[`04-multi-turn-agent`](https://github.com/andreasronge/ptc_runner/blob/main/examples/kernel-tutorial/04-multi-turn-agent/ptc.json)
 demonstrates a two-turn definition and call:
 
 ```console
@@ -314,10 +295,31 @@ Run it from the repository root:
 mix ptc run examples/kernel-tutorial/03-file-agent.ptc-project.json
 ```
 
+This example requires Node.js 22 or newer. It runs the committed MCP server
+bundle, so readers do not need `npm install` or `npm run build`.
+
 The model sees `tutorial.files/read-page`, not the host credential or an
 unrestricted filesystem. The project records a sanitized trace under
 `03-file-agent/.ptc/traces`; inspect it with the Viewer or fixed run-analysis
 profile described in [Running and debugging](running-and-debugging.md).
+
+## Replace prompt policy after the loop works
+
+`agent.prompt` owns the system prompt separately from `agent.core`. Its
+`initial-state`, `render`, and `transition` functions are the seam to replace
+when a different prompt policy is required. Keep the loop and its failure rules
+unchanged while experimenting with how the model is instructed.
+
+Prompt-visible mission functions form a facade: when any exist, they suppress
+raw `tool/...` entries. Without a facade, the prompt lists direct mission
+capabilities. Numeric limits remain enforced but are not rendered into the
+default prompt; trusted workflow code can inspect the frozen structured
+inventory through `kernel/mission-inventory`.
+
+Keep prompts domain-blind. Describe the language, mission API, current task,
+and generic correction policy, never benchmark fixtures or expected answers.
+The [Components and preludes](components-and-preludes.md) guide owns exact
+composition and dependency rules.
 
 ## Next steps
 

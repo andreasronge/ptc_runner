@@ -175,6 +175,13 @@ exit. If trace persistence or provider cleanup fails after finalization, the
 error includes the frozen terminal events so the host can preserve evidence.
 See `PtcRunner.Kernel.ReplSession` for exact return shapes and failure modes.
 
+## Start the development Viewer
+
+The project-aware `mix ptc.viewer` task is development-only. An embedding host
+can instead start the Viewer directly with `PtcViewer.start/1`, supplying its
+trace and optional inspection roots plus the same private-data decision it
+would make for the task.
+
 ## Keep policy in PTC-Lisp
 
 Embedding should not move prompts, model-turn logic, retries, delegation, or

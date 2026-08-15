@@ -20,8 +20,8 @@ switches.
 | `mix ptc.materialize ...` | Gate model-authored source as a candidate component |
 | `mix ptc.viewer PROJECT.json` | Browse a project's captured traces in a source checkout |
 
-`PtcRunner.Kernel.CommandDeclaration` is the canonical command and option
-table. Help is generated from the same declarations as the strict parser.
+Help is generated from the same declarations as the strict parser, so use
+`mix ptc help COMMAND` as the canonical command and option reference.
 
 A provider-bearing manifest needs a host configuration. A project document can
 remember that path and its environment file. Before running it, active provider
@@ -105,9 +105,7 @@ Artifact publication currently requires a Unix host with POSIX-compatible
 Private artifacts and newly created traces require trusted ancestry, safe
 ownership, and restrictive modes. Preflight refuses unsafe or unwritable
 destinations before provider acquisition, while descriptor-based publication
-checks close later filesystem races. See
-`PtcRunner.Kernel.PublicationAuthority` for the canonical ancestry and mode
-contract.
+checks close later filesystem races.
 
 `--inspect` is an explicit host development authority. It may contain prompts,
 model responses, generated source, capability arguments and results, MCP
@@ -115,63 +113,13 @@ payloads, prints, and detailed failures. Do not publish it with normal traces.
 
 ### Evaluate replacement component source
 
-`--component-override-descriptor` replaces one component already selected by
-the manifest. The descriptor is host command authority; manifests and
-model-generated programs cannot name one:
-
-```json
-{
-  "target": {"environment": "workflow"},
-  "component_id": "my.agent",
-  "base_source_hash": "sha256:<64 lowercase hex>",
-  "source_hash": "sha256:<64 lowercase hex>",
-  "path": "candidate.clj"
-}
-```
-
-For a mission, use
-`{"environment": "mission", "mission": "reader"}` as the target. The
-candidate path is confined to the descriptor directory. `source_hash`
-identifies the candidate bytes; `base_source_hash` prevents evaluating source
-against a component version it was not derived from. The source is opened once,
-and the verified bytes are the compiled bytes. Dependencies and normal bundle,
-signature, export, and capability checks still apply.
-
-The optional closed `provenance` object may contain `run_id`, `prompt_hash`,
-`authored_at`, and `accept_widened_effect`. These values are operator claims,
-not verified origin evidence. `PtcRunner.Kernel.ComponentOverride` is the exact
-descriptor and verification reference.
-
-### Gate model-authored source
-
-A runtime `defn` lasts only for that run. Materialize authored source when it
-should become a candidate for a later run:
-
-```console
-mix ptc.materialize ptc.json \
-  --workflow \
-  --component my.helper \
-  --out private/candidate \
-  --source authored.clj \
-  --origin-run-id run-2026-08-03-0001
-```
-
-Select exactly one target with `--workflow` or `--target-mission NAME`.
-Candidate source comes from `--source`, or from one string selected with
-`--from-result PATH --result-pointer POINTER`. The new output directory and
-both files are owner-only and never replace an existing path.
-
-The task re-acquires the candidate through its descriptor, verifies that it
-compiles, requires prompt-visible exports to have signatures and docstrings,
-and compares each export's reachable effects with its base. Effect widening is
-refused unless `--accept-widened-effect` records an explicit operator decision.
-The gate does not acquire providers, so actual capability grants remain a
-runtime assembly check.
-
-The task creates evidence; it never installs the candidate. A new component
-needs a selected placeholder with its allowed dependencies and every export
-its consumers already call. Run `mix help ptc.materialize` for the full option
-and report contract.
+Use `--component-override-descriptor` to evaluate one already-selected
+component without installing it. `mix ptc.materialize` creates a verified,
+owner-only candidate and descriptor from model-authored source. The
+[replay evaluation guide](evaluating-with-replay.md) owns the complete workflow
+for holding model responses fixed, gating effect changes, and comparing a
+baseline with that candidate. Run `mix help ptc.materialize` for the exact task
+options.
 
 ## Read results and failures
 
@@ -211,9 +159,8 @@ bin/ptc run ptc.json --envelope command-envelope.json
 
 The standalone streams are human presentation channels and may also contain
 output from applications or children. The envelope is an atomic, no-replace
-file with schema `priv/schemas/ptc-command-envelope-v2.schema.json`.
-`PtcRunner.Kernel.CommandContract` generates that schema, and
-`PtcRunner.Kernel.CommandOutcome` defines its sealed status relationship.
+file with schema `priv/schemas/ptc-command-envelope-v2.schema.json`. Its status
+and exit-code relationship is sealed by the same command contract.
 
 After arguments parse, an ordinary or caught command outcome publishes one
 requested envelope. Invalid arguments and VM/OS termination can produce none.
@@ -255,7 +202,6 @@ Prefer a framework classification such as:
 ```
 
 The public evidence retains `assertion-failed`, not the private explanation.
-`PtcRunner.Kernel.SafeMetadata` owns application-authored failure taxonomy.
 The Runner adds the fixed `agent_turns` fields only after the shipped agent's
 private runtime route has authenticated the exhaustion failure.
 
@@ -323,14 +269,14 @@ sanitization, filtering, pagination, and source classes. The
 
 Capture canonical and inspection artifacts in separate trusted locations. The
 credential-free
-[Kernel inspection lab](../../examples/kernel-inspection-lab/README.md)
+[Kernel inspection lab](https://github.com/andreasronge/ptc_runner/tree/main/examples/kernel-inspection-lab)
 creates a correlated pair without a live model.
 
 For one transcript, avoid a REPL:
 
 ```console
 mkdir -p tmp/transcript
-ptc transcript RUN_ID \
+mix ptc transcript RUN_ID \
   --traces tmp/traces \
   --inspection tmp/inspection \
   --private-unattended \
@@ -341,8 +287,7 @@ The command reserves an owner-only destination before capture. Trace,
 inspection, and output directories must be pairwise physically separate: no
 directory may equal, contain, or be contained by either of the others.
 Ambiguous, incomplete, changed, unsupported, or oversized evidence fails
-without a partial output. `PtcRunner.TranscriptFrontend` defines the exact
-one-shot contract.
+without a partial output.
 
 Use `private-run-analysis-v1` when you need several correlated questions or
 custom PTC-Lisp analysis. Its results can include exact messages, generated
@@ -362,9 +307,9 @@ The project document supplies the trace root and optional inspection root, plus
 the port, browser-opening preference, REPL setting, and private-data grant. The
 Viewer binds to loopback, pins the selected data, and can open a bounded
 analysis REPL over an immutable capture. It is a development path dependency,
-not part of the published Hex package. See
-[`ptc_viewer/README.md`](../../ptc_viewer/README.md) for its complete command
-and HTTP API.
+not part of the published Hex package. See the
+[Viewer documentation](https://github.com/andreasronge/ptc_runner/tree/main/ptc_viewer)
+for its complete command and HTTP API.
 
 ## Test a workflow
 
@@ -384,13 +329,8 @@ test "$actual" = \
 ```
 
 Test scripted model responses before a small live-provider boundary. The
-repository's credentialed tutorial check is explicit:
-
-```console
-mix test test/quickstart_guide_test.exs \
-  test/ptc_runner/kernel/tutorial_examples_e2e_test.exs \
-  --include scheduled_e2e
-```
+[replay evaluation guide](evaluating-with-replay.md) shows the deterministic
+path; the [Quickstart](quickstart.md) keeps one deliberately small live check.
 
 ## Next steps
 

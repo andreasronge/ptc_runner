@@ -8,3 +8,4 @@ export MIX_ENV=dev
 
 mix deps.get --check-locked
 mix docs --warnings-as-errors
+mix ptc.verify_docs

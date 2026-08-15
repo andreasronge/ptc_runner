@@ -32,7 +32,7 @@ mix run examples/kernel-inspection-lab/run.exs /tmp/ptc-inspection-lab
 
 Each journey writes canonical artifacts under `traces/` and private artifacts
 under `inspection/`. Those sibling directories can be passed directly to
-`ptc transcript`; create a third sibling directory for `--private-output`.
+`mix ptc transcript`; create a third sibling directory for `--private-output`.
 
 Inspection artifacts contain full model requests/responses, generated source,
 and capability payloads. They are not sanitized traces and should not be

@@ -44,5 +44,5 @@ jobs:
       # run `mix regen` on main, then re-tag. See `.gitattributes`.
       - name: Check the semantic build projection is current
         run: mix ptc.gen_semantic_revision --check
-      - run: MIX_ENV=dev mix deps.get && MIX_ENV=dev mix docs --warnings-as-errors
+      - run: scripts/ci/docs.sh
       - run: MIX_ENV=prod mix hex.build

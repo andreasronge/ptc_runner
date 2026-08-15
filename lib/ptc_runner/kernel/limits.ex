@@ -6,40 +6,8 @@ defmodule PtcRunner.Kernel.Limits do
   `PtcRunner.Kernel.LimitCatalog`. There is no disabled or infinite form.
   `new/1` accepts only cataloged fields and overlays them on `defaults/0`.
 
-  Time fields are milliseconds and heap fields are BEAM words:
-
-  - `run_duration_ms` bounds the complete ordinary run after optional provider
-    application admission, including active preflight and Kernel execution;
-  - `workflow_timeout_ms` and `evaluation_timeout_ms` bound individual
-    workflow and subordinate evaluations;
-  - `evaluation_admission_timeout_ms` bounds how long a blocking
-    `kernel-eval` caller may wait behind the single evaluation lease;
-  - `parallel_timeout_ms` bounds one `pmap`/`pcalls` operation, clamped by
-    the run deadline;
-  - `workflow_heap_words`, `evaluation_heap_words`, and
-    `provider_heap_words` are per-process heap ceilings;
-  - `live_provider_tasks` bounds concurrent provider callback processes and is
-    passed to Kernel-owned Lisp evaluations as their global `pmap`/`pcalls`
-    worker capacity;
-  - `workflow_capability_calls` and `mission_capability_calls` are total call
-    quotas, with matching `*_per_name` quotas;
-  - `subordinate_evaluations`, `subordinate_source_checks`, and
-    `protocol_errors` bound those operations;
-  - `entry_source_bytes` and `subordinate_source_bytes` bound code;
-  - `evaluation_memory_bytes` and `evaluation_history_bytes` independently
-    bound retained mission definitions and exact three-value turn history;
-  - `capability_argument_bytes`, `capability_result_bytes`, and
-    `terminal_result_bytes` bound values crossing runtime boundaries;
-  - `event_payload_bytes`, `normal_event_count`, and `normal_event_bytes` bound
-    canonical event collection.
-  - `provider_cleanup_timeout_ms` is sealed for bounded provider cleanup;
-  - `local_preflight_timeout_ms` is sealed for the whole audited-local phase-7
-    step, which spends one anchored deadline across every applicable
-    occurrence;
-  - `selection_validation_timeout_ms` is sealed for active selection
-    validation;
-  - `doctor_connectivity_timeout_ms` is sealed for `doctor --connect` health
-    checks.
+  The generated [Kernel limits reference](kernel-limits-reference.md) lists the
+  meaning, unit, defaults, installed ceilings, range, and scope of every row.
 
   The installed-only timeouts are cataloged and sealed in this boundary before
   the later provider-lifecycle and doctor phases begin consuming them. Merely

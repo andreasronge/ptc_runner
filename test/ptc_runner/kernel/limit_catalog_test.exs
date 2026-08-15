@@ -95,7 +95,9 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     rows = LimitCatalog.rows()
     fields = Map.keys(Map.from_struct(Limits.defaults()))
 
-    assert Map.new(rows, &{&1.name, &1}) == @expected_catalog
+    assert Map.new(rows, &{&1.name, Map.drop(&1, [:description, :unit])}) == @expected_catalog
+    assert Enum.all?(rows, &(is_binary(&1.description) and &1.description != ""))
+    assert Enum.all?(rows, &(&1.unit in [:milliseconds, :heap_words, :bytes, :count]))
     assert Enum.map(rows, & &1.name) == Enum.sort(Enum.map(rows, & &1.name))
     assert Enum.uniq_by(rows, & &1.name) == rows
     assert Enum.uniq_by(rows, & &1.field) == rows
