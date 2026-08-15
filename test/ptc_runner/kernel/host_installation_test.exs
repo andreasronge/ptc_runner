@@ -1,6 +1,27 @@
 defmodule PtcRunner.Kernel.HostInstallationTest do
   use ExUnit.Case, async: false
 
+  defmodule PreparingHostLLMAdapter do
+    @behaviour PtcRunner.LLM
+
+    @impl true
+    def prepare_model(model) do
+      send(Application.fetch_env!(:ptc_runner, :host_preparing_llm_owner), {:prepared, model})
+      {:ok, {:prepared, model}, :uncataloged}
+    end
+
+    @impl true
+    def call({:prepared, model}, request) do
+      send(Application.fetch_env!(:ptc_runner, :host_preparing_llm_owner), {
+        :prepared_request,
+        model,
+        request
+      })
+
+      {:ok, %{content: "ok", tokens: %{}}}
+    end
+  end
+
   @stdio_fixture Path.expand("../../support/mcp_stdio_fixture.exs", __DIR__)
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
@@ -23,6 +44,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   alias PtcRunner.Kernel.ProviderSnapshot
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.SelectionRules
+  alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.RunLifecycle
 
   @tag :tmp_dir
@@ -767,6 +789,33 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
+  test "normalizes an unsupported ReqLLM provider for active host diagnostics", %{tmp_dir: dir} do
+    LLMSupport.admit_provider_application!()
+
+    host =
+      load_host(dir, %{
+        "credentials" => %{"key" => %{"literal" => "not-read"}},
+        "install" => %{
+          "live" => %{
+            "source" => "llm",
+            "installation_revision" => "live-v1",
+            "model" => "logger:future-model",
+            "credential" => "key"
+          }
+        }
+      })
+
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+
+    assert {:ok, prepared} =
+             ProviderRegistry.prepare(registry, "live", %{}, context(dir, :workflow))
+
+    assert {:error, :invalid_llm_model} = ProviderRegistry.preflight(prepared)
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
   test "audited local preflight matches missing LLM adapters and stdio runtime files", %{
     tmp_dir: dir
   } do
@@ -1002,6 +1051,64 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert private_built.snapshot["acquisition"] == %{"source" => "llm"}
     refute Map.has_key?(private_built.snapshot["acquisition"], "resolved_model")
     assert :error = ProviderSnapshot.llm_identity(private_built.snapshot)
+  end
+
+  @tag :tmp_dir
+  test "a live LLM requester binds one prepared target across turns", %{tmp_dir: dir} do
+    previous_adapter = Application.get_env(:ptc_runner, :llm_adapter)
+    previous_owner = Application.get_env(:ptc_runner, :host_preparing_llm_owner)
+    Application.put_env(:ptc_runner, :llm_adapter, PreparingHostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_preparing_llm_owner, self())
+
+    on_exit(fn ->
+      restore_env(:llm_adapter, previous_adapter)
+      restore_env(:host_preparing_llm_owner, previous_owner)
+    end)
+
+    host =
+      load_host(dir, %{
+        "credentials" => %{"key" => %{"literal" => "test-secret"}},
+        "install" => %{
+          "live" => %{
+            "source" => "llm",
+            "installation_revision" => "live-v1",
+            "model" => "provider:future-model",
+            "credential" => "key"
+          }
+        }
+      })
+
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+
+    assert {:ok, prepared} =
+             ProviderRegistry.prepare(registry, "live", %{}, context(dir, :workflow))
+
+    assert {:ok, preflighted} = ProviderRegistry.preflight(prepared)
+    assert_receive {:prepared, "provider:future-model"}
+    refute_receive {:prepared, _model}
+    assert {:ok, credentials} = ProviderRegistry.resolve_credentials(registry, ["key"])
+
+    warning =
+      ExUnit.CaptureIO.capture_io(:stderr, fn ->
+        assert {:ok, built} = ProviderRegistry.acquire(preflighted, credentials)
+        assert [%{callback: requester}] = built.capabilities
+
+        for content <- ["first", "second"] do
+          assert {:ok, %{"content" => "ok"}} =
+                   requester.(%{
+                     "messages" => [%{"role" => "user", "content" => content}]
+                   })
+        end
+      end)
+
+    assert length(Regex.scan(~r/model_uncataloged/, warning)) == 1
+    refute warning =~ "provider:future-model"
+    refute warning =~ "ReqLLM"
+    refute_receive {:prepared, _model}
+    assert_receive {:prepared_request, "provider:future-model", _request}
+    assert_receive {:prepared_request, "provider:future-model", _request}
+    assert :ok = InstallationCatalog.close(catalog)
   end
 
   @tag :tmp_dir

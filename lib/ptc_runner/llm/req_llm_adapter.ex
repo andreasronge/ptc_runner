@@ -34,6 +34,7 @@ if Code.ensure_loaded?(ReqLLM) do
     @behaviour PtcRunner.LLM
 
     alias PtcRunner.Kernel.ProviderError
+    alias PtcRunner.LLM.ReqLLMPreparedModel
     alias ReqLLM.Message
     alias ReqLLM.Message.ContentPart
 
@@ -55,6 +56,11 @@ if Code.ensure_loaded?(ReqLLM) do
     ]
     @req_llm_stream_generation_options @req_llm_generation_options -- [:tool_choice]
     @token_limit_options [:max_tokens, :max_completion_tokens, :max_output_tokens]
+    # ReqLLM 1.19 gives these providers richer uncataloged fallbacks than its
+    # documented generic inline form. Keep only the dispatch list here and let
+    # ReqLLM's public string resolver construct each target. Generic providers
+    # use the documented inline form so the dependency warning never escapes.
+    @req_llm_special_fallback_providers [:github_copilot, :minimax, :mistral, :openai_codex]
 
     # --- Behaviour Callbacks ---
 
@@ -100,7 +106,21 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     @impl true
-    @spec call(String.t(), map()) :: {:ok, map()} | {:error, ProviderError.t()}
+    @spec prepare_model(String.t()) ::
+            {:ok, String.t() | ReqLLMPreparedModel.t(), PtcRunner.LLM.catalog_status()}
+            | {:error, term()}
+    def prepare_model(model) when is_binary(model) do
+      case parse_provider(model) do
+        {:req_llm, selector} -> prepare_req_llm_model(selector)
+        _direct_http -> {:ok, model, :unavailable}
+      end
+    end
+
+    def prepare_model(_model), do: {:error, :invalid_model}
+
+    @impl true
+    @spec call(String.t() | ReqLLMPreparedModel.t(), map()) ::
+            {:ok, map()} | {:error, ProviderError.t()}
     def call(model, %{schema: schema} = req) when is_map(schema) do
       messages = build_messages(req)
 
@@ -132,8 +152,10 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     @impl true
-    @spec stream(String.t(), map()) ::
+    @spec stream(String.t() | ReqLLMPreparedModel.t(), map()) ::
             {:ok, Enumerable.t()} | {:error, :streaming_not_supported | ProviderError.t()}
+    def stream(%ReqLLMPreparedModel{} = model, req), do: stream_req_llm(model, req)
+
     def stream(model, req) do
       case parse_provider(model) do
         {:ollama, _} ->
@@ -143,7 +165,8 @@ if Code.ensure_loaded?(ReqLLM) do
           {:error, :streaming_not_supported}
 
         {:req_llm, model_id} ->
-          stream_req_llm(model_id, req)
+          with {:ok, prepared, _status} <- prepare_req_llm_model(model_id),
+               do: stream_req_llm(prepared, req)
       end
     end
 
@@ -159,9 +182,14 @@ if Code.ensure_loaded?(ReqLLM) do
     - `:max_tokens` - Output budget. ReqLLM-backed models default to at most
       #{@default_max_tokens}, bounded by cataloged output and context limits.
     """
-    @spec generate_text(String.t(), [map()], keyword()) ::
+    @spec generate_text(String.t() | ReqLLMPreparedModel.t(), [map()], keyword()) ::
             {:ok, PtcRunner.LLM.response()} | {:error, term()}
-    def generate_text(model, messages, opts \\ []) do
+    def generate_text(model, messages, opts \\ [])
+
+    def generate_text(%ReqLLMPreparedModel{} = model, messages, opts),
+      do: call_req_llm(model, messages, opts)
+
+    def generate_text(model, messages, opts) do
       case parse_provider(model) do
         {:ollama, model_name} ->
           call_ollama(model_name, messages, opts)
@@ -170,7 +198,8 @@ if Code.ensure_loaded?(ReqLLM) do
           call_openai_compat(base_url, model_name, messages, opts)
 
         {:req_llm, model_id} ->
-          call_req_llm(model_id, messages, opts)
+          with {:ok, prepared, _status} <- prepare_req_llm_model(model_id),
+               do: call_req_llm(prepared, messages, opts)
       end
     end
 
@@ -191,9 +220,14 @@ if Code.ensure_loaded?(ReqLLM) do
     Only supported for ReqLLM providers. Local providers return
     `{:error, :structured_output_not_supported}`.
     """
-    @spec generate_object(String.t(), [map()], map(), keyword()) ::
+    @spec generate_object(String.t() | ReqLLMPreparedModel.t(), [map()], map(), keyword()) ::
             {:ok, map()} | {:error, term()}
-    def generate_object(model, messages, schema, opts \\ []) do
+    def generate_object(model, messages, schema, opts \\ [])
+
+    def generate_object(%ReqLLMPreparedModel{} = model, messages, schema, opts),
+      do: call_req_llm_object(model, messages, schema, opts)
+
+    def generate_object(model, messages, schema, opts) do
       case parse_provider(model) do
         {:ollama, _model_name} ->
           {:error, :structured_output_not_supported}
@@ -202,7 +236,8 @@ if Code.ensure_loaded?(ReqLLM) do
           {:error, :structured_output_not_supported}
 
         {:req_llm, model_id} ->
-          call_req_llm_object(model_id, messages, schema, opts)
+          with {:ok, prepared, _status} <- prepare_req_llm_model(model_id),
+               do: call_req_llm_object(prepared, messages, schema, opts)
       end
     end
 
@@ -223,9 +258,14 @@ if Code.ensure_loaded?(ReqLLM) do
     Passes tools to the LLM provider. If the LLM returns tool calls,
     they are included in the response as `tool_calls`.
     """
-    @spec generate_with_tools(String.t(), [map()], [map()], keyword()) ::
+    @spec generate_with_tools(String.t() | ReqLLMPreparedModel.t(), [map()], [map()], keyword()) ::
             {:ok, map()} | {:error, term()}
-    def generate_with_tools(model, messages, tools, opts \\ []) do
+    def generate_with_tools(model, messages, tools, opts \\ [])
+
+    def generate_with_tools(%ReqLLMPreparedModel{} = model, messages, tools, opts),
+      do: call_req_llm_with_tools(model, messages, tools, opts)
+
+    def generate_with_tools(model, messages, tools, opts) do
       case parse_provider(model) do
         {:ollama, _model_name} ->
           {:error, :tool_calling_not_supported}
@@ -234,7 +274,8 @@ if Code.ensure_loaded?(ReqLLM) do
           {:error, :tool_calling_not_supported}
 
         {:req_llm, model_id} ->
-          call_req_llm_with_tools(model_id, messages, tools, opts)
+          with {:ok, prepared, _status} <- prepare_req_llm_model(model_id),
+               do: call_req_llm_with_tools(prepared, messages, tools, opts)
       end
     end
 
@@ -305,10 +346,8 @@ if Code.ensure_loaded?(ReqLLM) do
 
     # --- Streaming ---
 
-    defp stream_req_llm(model_id, req) do
-      model_id = maybe_resolve_inference_profile(model_id)
+    defp stream_req_llm(%ReqLLMPreparedModel{selector: model_id, model: req_llm_model}, req) do
       messages = build_messages(req)
-      req_llm_model = resolve_req_llm_model(model_id)
       cache_enabled = req[:cache] || false
 
       {messages, extra_opts} = apply_caching(model_id, messages, cache_enabled)
@@ -451,9 +490,7 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
-    defp call_req_llm(model, messages, opts) do
-      model = maybe_resolve_inference_profile(model)
-      req_llm_model = resolve_req_llm_model(model)
+    defp call_req_llm(%ReqLLMPreparedModel{selector: model, model: req_llm_model}, messages, opts) do
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
       http_opts = Keyword.get(opts, :req_http_options, [])
       cache_enabled = Keyword.get(opts, :cache, false)
@@ -481,9 +518,12 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
-    defp call_req_llm_object(model, messages, schema, opts) do
-      model = maybe_resolve_inference_profile(model)
-      req_llm_model = resolve_req_llm_model(model)
+    defp call_req_llm_object(
+           %ReqLLMPreparedModel{selector: model, model: req_llm_model},
+           messages,
+           schema,
+           opts
+         ) do
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
       http_opts = Keyword.get(opts, :req_http_options, [])
       cache_enabled = Keyword.get(opts, :cache, false)
@@ -510,9 +550,12 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
-    defp call_req_llm_with_tools(model, messages, tools, opts) do
-      model = maybe_resolve_inference_profile(model)
-      req_llm_model = resolve_req_llm_model(model)
+    defp call_req_llm_with_tools(
+           %ReqLLMPreparedModel{selector: model, model: req_llm_model},
+           messages,
+           tools,
+           opts
+         ) do
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
       http_opts = Keyword.get(opts, :req_http_options, [])
       cache_enabled = Keyword.get(opts, :cache, false)
@@ -880,34 +923,7 @@ if Code.ensure_loaded?(ReqLLM) do
 
     # --- Inference Profiles ---
 
-    @bedrock_inference_prefixes ["us.", "eu.", "ap.", "ca.", "global."]
     @bedrock_inference_required_families ["amazon."]
-
-    @doc false
-    def maybe_resolve_inference_profile("amazon_bedrock:" <> model_id = full) do
-      cond do
-        String.starts_with?(model_id, @bedrock_inference_prefixes) ->
-          [_region, base_id] = String.split(model_id, ".", parts: 2)
-
-          case ReqLLM.model("amazon_bedrock:#{base_id}") do
-            {:ok, model} -> %{model | provider_model_id: model_id}
-            {:error, _} -> full
-          end
-
-        Enum.any?(@bedrock_inference_required_families, &String.starts_with?(model_id, &1)) ->
-          region_prefix = bedrock_region_prefix()
-
-          case ReqLLM.model("amazon_bedrock:#{model_id}") do
-            {:ok, model} -> %{model | provider_model_id: "#{region_prefix}.#{model_id}"}
-            {:error, _} -> full
-          end
-
-        true ->
-          full
-      end
-    end
-
-    def maybe_resolve_inference_profile(model), do: model
 
     defp bedrock_region_prefix do
       region =
@@ -1060,13 +1076,66 @@ if Code.ensure_loaded?(ReqLLM) do
       :erlang.external_size(request_payload) + @request_token_headroom
     end
 
-    defp resolve_req_llm_model(%LLMDB.Model{} = model), do: model
+    defp prepare_req_llm_model(selector) do
+      {effective_selector, provider_model_id} = inference_profile_resolution(selector)
+      catalog_status = catalog_status(effective_selector)
 
-    defp resolve_req_llm_model(model) do
-      case ReqLLM.model(model) do
-        {:ok, %LLMDB.Model{} = resolved} -> resolved
-        _error -> model
+      case resolve_req_llm_model(effective_selector, catalog_status) do
+        {:ok, %LLMDB.Model{} = model} ->
+          model =
+            if provider_model_id,
+              do: %{model | provider_model_id: provider_model_id},
+              else: model
+
+          {:ok, %ReqLLMPreparedModel{selector: selector, model: model}, catalog_status}
+
+        {:error, _reason} = error ->
+          error
       end
+    end
+
+    defp inference_profile_resolution("amazon_bedrock:" <> model_id = selector) do
+      if Enum.any?(@bedrock_inference_required_families, &String.starts_with?(model_id, &1)),
+        do: {selector, "#{bedrock_region_prefix()}.#{model_id}"},
+        else: {selector, nil}
+    end
+
+    defp inference_profile_resolution(selector), do: {selector, nil}
+
+    defp catalog_status(selector) do
+      case LLMDB.model(selector) do
+        {:ok, %LLMDB.Model{}} -> :cataloged
+        _missing -> :uncataloged
+      end
+    end
+
+    defp resolve_req_llm_model(selector, :cataloged), do: ReqLLM.model(selector)
+
+    defp resolve_req_llm_model(selector, :uncataloged) do
+      with {:ok, provider, model_id} <- split_req_llm_selector(selector),
+           {:ok, _provider_module} <- ReqLLM.provider(provider) do
+        if provider in @req_llm_special_fallback_providers,
+          do: ReqLLM.model(selector),
+          else: ReqLLM.model(%{provider: provider, id: model_id})
+      end
+    end
+
+    defp split_req_llm_selector(selector) do
+      case String.split(selector, ":", parts: 2) do
+        [provider_name, model_id] when model_id != "" ->
+          {:ok, provider_atom(provider_name), model_id}
+
+        _invalid ->
+          {:error, :invalid_model}
+      end
+    rescue
+      ArgumentError -> {:error, :invalid_model}
+    end
+
+    defp provider_atom(provider_name) do
+      provider_name
+      |> String.replace("-", "_")
+      |> String.to_existing_atom()
     end
 
     defp token_limit_present?(opts, model) do

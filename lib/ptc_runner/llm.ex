@@ -33,6 +33,7 @@ defmodule PtcRunner.LLM do
         }
 
   @type chunk :: %{delta: String.t()} | %{done: true, tokens: tokens()}
+  @type catalog_status :: :cataloged | :uncataloged | :unavailable
 
   @doc """
   Make an LLM call.
@@ -46,7 +47,7 @@ defmodule PtcRunner.LLM do
 
   Returns `{:ok, response}` or `{:error, reason}`.
   """
-  @callback call(model :: String.t(), request :: map()) :: {:ok, map()} | {:error, term()}
+  @callback call(model :: term(), request :: map()) :: {:ok, map()} | {:error, term()}
 
   @doc """
   Stream an LLM response.
@@ -55,8 +56,18 @@ defmodule PtcRunner.LLM do
   - `%{delta: "text"}` for content chunks
   - `%{done: true, tokens: %{...}}` for the final chunk
   """
-  @callback stream(model :: String.t(), request :: map()) ::
+  @callback stream(model :: term(), request :: map()) ::
               {:ok, Enumerable.t()} | {:error, term()}
+
+  @doc """
+  Prepares an adapter-owned request target and reports its catalog status.
+
+  Optional. Adapters without an external model catalog may omit this callback;
+  PtcRunner then passes the original selector to requests and records the status
+  as `:unavailable`.
+  """
+  @callback prepare_model(model :: String.t()) ::
+              {:ok, target :: term(), catalog_status()} | {:error, term()}
 
   @doc """
   Preload adapter-owned model metadata into a shared, process-independent store
@@ -96,7 +107,15 @@ defmodule PtcRunner.LLM do
   """
   @callback public_model(model :: String.t()) :: {:ok, String.t()} | :private
 
-  @optional_callbacks [stream: 2, ensure_ready: 0, provider_application: 1, public_model: 1]
+  @optional_callbacks [
+    stream: 2,
+    prepare_model: 1,
+    ensure_ready: 0,
+    provider_application: 1,
+    public_model: 1
+  ]
+
+  alias PtcRunner.LLM.PreparedModel
 
   @doc false
   @spec attested_public_model(module(), String.t()) :: String.t() | nil
@@ -120,38 +139,113 @@ defmodule PtcRunner.LLM do
   def attested_public_model(_adapter, _model), do: nil
 
   @doc """
-  Creates a normalized callback for a configured model.
+  Resolves a configured selector into an immutable adapter-owned request target.
 
-  `model` is a full provider-qualified identifier such as
-  `"openrouter:deepseek/deepseek-v4-flash"`. The optional `:adapter`
-  setting selects a transport explicitly; other options are merged into every
-  request.
+  Preparation runs adapter warmup and model resolution once. It returns a typed
+  error immediately when either operation cannot produce a valid prepared value.
   """
-  @spec callback(String.t(), keyword()) :: (map() -> {:ok, map()} | {:error, term()})
+  @spec prepare(String.t(), module()) :: {:ok, PreparedModel.t()} | {:error, term()}
+  def prepare(model, adapter \\ adapter!())
+
+  def prepare(model, adapter) when is_binary(model) and is_atom(adapter) do
+    if Code.ensure_loaded?(adapter) do
+      if function_exported?(adapter, :ensure_ready, 0), do: adapter.ensure_ready()
+
+      result =
+        if function_exported?(adapter, :prepare_model, 1),
+          do: adapter.prepare_model(model),
+          else: {:ok, model, :unavailable}
+
+      case result do
+        {:ok, target, status} -> PreparedModel.new(adapter, model, target, status)
+        {:error, _reason} = error -> error
+        _invalid -> {:error, :invalid_model_preparation}
+      end
+    else
+      {:error, :invalid_model_preparation}
+    end
+  rescue
+    _exception -> {:error, :invalid_model_preparation}
+  catch
+    _kind, _reason -> {:error, :invalid_model_preparation}
+  end
+
+  def prepare(_model, _adapter), do: {:error, :invalid_model_preparation}
+
+  @doc """
+  Creates a normalized requester for a configured or prepared model.
+
+  A selector is prepared once while this function constructs the requester. A
+  prepared value is bound directly. The optional `:adapter` setting selects a
+  transport explicitly; other options are merged into every request.
+
+  Returns `{:ok, requester}` or an error before any request can run. An
+  uncataloged selector emits one concise warning while the requester is built.
+  """
+  @spec callback(String.t() | PreparedModel.t(), keyword()) ::
+          {:ok, (map() -> {:ok, map()} | {:error, term()})} | {:error, term()}
   def callback(model, opts \\ []) do
     {adapter_override, opts} = Keyword.pop(opts, :adapter)
-    adapter = adapter_override || adapter!()
-    # Provider-application admission normally warms this before the run clock.
-    # Keep the idempotent call here for direct embedding paths that construct a
-    # capability without that gate.
-    if function_exported?(adapter, :ensure_ready, 0), do: adapter.ensure_ready()
-    merged_opts = Map.new(opts)
 
-    fn req ->
-      {stream_fn, clean_req} = Map.pop(req, :stream)
-      final_req = if merged_opts == %{}, do: clean_req, else: Map.merge(clean_req, merged_opts)
+    with {:ok, prepared} <- prepared_model(model, adapter_override),
+         :ok <- warn_catalog_status(prepared) do
+      merged_opts = Map.new(opts)
 
-      if stream_fn && function_exported?(adapter, :stream, 2) do
-        case adapter.stream(model, final_req) do
-          {:ok, stream} -> consume_stream(stream, stream_fn)
-          {:error, :streaming_not_supported} -> adapter.call(model, final_req)
-          error -> error
-        end
-      else
-        adapter.call(model, final_req)
-      end
+      {:ok,
+       fn req ->
+         {stream_fn, clean_req} = Map.pop(req, :stream)
+         final_req = if merged_opts == %{}, do: clean_req, else: Map.merge(clean_req, merged_opts)
+
+         if stream_fn && function_exported?(prepared.adapter, :stream, 2) do
+           case prepared.adapter.stream(prepared.target, final_req) do
+             {:ok, stream} ->
+               consume_stream(stream, stream_fn)
+
+             {:error, :streaming_not_supported} ->
+               prepared.adapter.call(prepared.target, final_req)
+
+             error ->
+               error
+           end
+         else
+           prepared.adapter.call(prepared.target, final_req)
+         end
+       end}
     end
   end
+
+  defp prepared_model(%PreparedModel{} = prepared, nil) do
+    if PreparedModel.valid?(prepared),
+      do: {:ok, prepared},
+      else: {:error, :invalid_prepared_model}
+  end
+
+  defp prepared_model(%PreparedModel{adapter: adapter} = prepared, adapter) do
+    if PreparedModel.valid?(prepared),
+      do: {:ok, prepared},
+      else: {:error, :invalid_prepared_model}
+  end
+
+  defp prepared_model(%PreparedModel{}, _different_adapter),
+    do: {:error, :invalid_prepared_model}
+
+  defp prepared_model(model, adapter_override) when is_binary(model),
+    do: prepare(model, adapter_override || adapter!())
+
+  defp prepared_model(_model, _adapter), do: {:error, :invalid_prepared_model}
+
+  defp warn_catalog_status(%PreparedModel{catalog_status: :uncataloged} = prepared) do
+    public_model = attested_public_model(prepared.adapter, prepared.selector)
+    identity = if public_model, do: " #{inspect(public_model)}", else: ""
+
+    IO.warn(
+      "model_uncataloged: configured model#{identity} is not an exact catalog entry; " <>
+        "pricing, limits, token estimation, and capability detection may be incomplete",
+      []
+    )
+  end
+
+  defp warn_catalog_status(%PreparedModel{}), do: :ok
 
   defp consume_stream(stream, on_chunk) do
     {content, tokens} =
@@ -184,7 +278,7 @@ defmodule PtcRunner.LLM do
   """
   @spec call(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def call(model, request) do
-    adapter!().call(model, request)
+    with {:ok, requester} <- callback(model), do: requester.(request)
   end
 
   @doc """

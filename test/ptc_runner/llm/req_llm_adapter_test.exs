@@ -340,23 +340,6 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
     end
   end
 
-  describe "maybe_resolve_inference_profile/1" do
-    test "passes through non-bedrock model strings unchanged" do
-      assert ReqLLMAdapter.maybe_resolve_inference_profile("openrouter:anthropic/claude") ==
-               "openrouter:anthropic/claude"
-
-      assert ReqLLMAdapter.maybe_resolve_inference_profile("anthropic:claude-3-5-sonnet") ==
-               "anthropic:claude-3-5-sonnet"
-    end
-
-    test "passes through bedrock models with no inference-prefix and no required family" do
-      # Not "us./eu./ap./ca./global." and not the "amazon." family -> the
-      # passthrough `true` branch returns the full string unchanged (no registry hit).
-      full = "amazon_bedrock:anthropic.claude-3-haiku"
-      assert ReqLLMAdapter.maybe_resolve_inference_profile(full) == full
-    end
-  end
-
   describe "build_tokens_from_req_llm_response/2" do
     test "reads atom-keyed usage including cache read/creation and cost" do
       usage = %{
