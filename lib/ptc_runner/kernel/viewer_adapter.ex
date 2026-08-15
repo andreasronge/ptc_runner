@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
   alias PtcRunner.Kernel.{
     ConversationProjection,
     InspectionArtifact,
+    InspectionPageCollector,
     InspectionQuery,
     SafeMetadata,
     TraceLog
@@ -96,66 +97,23 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
     InspectionQuery.compile([records], trace_source_id, analysis_facts)
   end
 
-  defp all_inspection(compiled, operation, run_id),
-    do: all_inspection(compiled, operation, run_id, nil, [], nil, %{}, 0)
-
-  defp all_inspection(
-         _compiled,
-         _operation,
-         _run_id,
-         _cursor,
-         _items,
-         _hash,
-         _metadata,
-         1_000
-       ),
-       do: {:error, :result_limit_exceeded}
-
-  defp all_inspection(compiled, operation, run_id, cursor, items, hash, metadata, pages) do
-    arguments = %{"run_id" => run_id, "limit" => 1_000}
-    arguments = if cursor, do: Map.put(arguments, "cursor", cursor), else: arguments
-
-    with {:ok, page} <-
-           InspectionQuery.query(
-             compiled.collections,
-             compiled.source_id,
-             operation,
-             arguments,
-             1_000_000
-           ),
-         next_items = items ++ page["items"],
-         next_metadata =
-           page
-           |> Map.drop(~w(items next_cursor truncated omitted_count snapshot_hash))
-           |> Map.merge(metadata),
-         true <- byte_size(Jason.encode!(next_items)) <= 1_000_000 do
-      case page["next_cursor"] do
-        nil ->
-          {:ok,
-           Map.merge(next_metadata, %{
-             "items" => next_items,
-             "next_cursor" => nil,
-             "omitted_count" => 0,
-             "truncated" => false,
-             "snapshot_hash" => hash || SafeMetadata.fingerprint(compiled.source_id)
-           })}
-
-        next ->
-          all_inspection(
-            compiled,
-            operation,
-            run_id,
-            next,
-            next_items,
-            hash || SafeMetadata.fingerprint(compiled.source_id),
-            next_metadata,
-            pages + 1
-          )
-      end
-    else
-      false -> {:error, :result_limit_exceeded}
-      {:error, _reason} = error -> error
+  defp all_inspection(compiled, operation, run_id) do
+    query = fn arguments ->
+      InspectionQuery.query(
+        compiled.collections,
+        compiled.source_id,
+        operation,
+        arguments,
+        1_000_000
+      )
     end
+
+    InspectionPageCollector.collect(
+      query,
+      operation,
+      run_id,
+      SafeMetadata.fingerprint(compiled.source_id)
+    )
   end
 
   defp capture_trace({:directory, directory}), do: TraceLog.capture_directory(directory)

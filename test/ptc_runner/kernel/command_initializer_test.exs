@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
   alias PtcRunner.Kernel.CommandInitializer
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRunRef
+  alias PtcRunner.Kernel.ProjectConfig
 
   @run_ref CommandRunRef.encode(<<0::128>>)
 
@@ -35,14 +36,23 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
   """
 
   @tag :tmp_dir
-  test "init publishes the exact validated two-file scaffold", %{tmp_dir: directory} do
+  test "init publishes the exact validated three-file scaffold", %{tmp_dir: directory} do
     target = Path.join(directory, "application")
 
     assert {:ok, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["init", target])
-    assert outcome.envelope["result"] == %{"created" => ["main.clj", "ptc.json"]}
+
+    assert outcome.envelope["result"] == %{
+             "created" => ["main.clj", "ptc.json", "ptc-project.json"]
+           }
+
     assert File.read!(Path.join(target, "main.clj")) == @main_clj
     assert File.read!(Path.join(target, "ptc.json")) == @manifest
-    assert Enum.sort(File.ls!(target)) == ["main.clj", "ptc.json"]
+
+    assert {:ok, project} =
+             ProjectConfig.load(Path.join(target, "ptc-project.json"))
+
+    assert project.application == Path.join(target, "ptc.json")
+    assert Enum.sort(File.ls!(target)) == ["main.clj", "ptc-project.json", "ptc.json"]
 
     assert {:ok, root} =
              JSV.build(CommandContract.schema(), atoms: false, warnings: :silent)
@@ -323,7 +333,11 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
   defp assert_exact_scaffold(target) do
     assert File.read!(Path.join(target, "main.clj")) == @main_clj
     assert File.read!(Path.join(target, "ptc.json")) == @manifest
-    assert Enum.sort(File.ls!(target)) == ["main.clj", "ptc.json"]
+
+    assert {:ok, _project} =
+             ProjectConfig.load(Path.join(target, "ptc-project.json"))
+
+    assert Enum.sort(File.ls!(target)) == ["main.clj", "ptc-project.json", "ptc.json"]
   end
 
   defp staging_entries(directory) do

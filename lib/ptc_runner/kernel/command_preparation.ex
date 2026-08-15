@@ -28,6 +28,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
     :catalog,
     :runtime_services,
     :environment_setup_required,
+    :project_artifact_root,
     :artifact_destinations,
     :artifact_destination_failures
   ]
@@ -41,6 +42,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
           catalog: InstallationCatalog.t(),
           runtime_services: ProviderRuntimeServices.t(),
           environment_setup_required: boolean(),
+          project_artifact_root: binary() | nil,
           artifact_destinations: %{optional(atom()) => binary()},
           artifact_destination_failures: [atom()],
           attestation: binary() | nil
@@ -54,8 +56,8 @@ defmodule PtcRunner.Kernel.CommandPreparation do
           InstallationCatalog.t(),
           ProviderRuntimeServices.t(),
           boolean(),
-          map(),
-          [atom()]
+          binary() | nil,
+          {map(), [atom()]}
         ) :: {:ok, t()} | {:error, :invalid_command_preparation}
   def new(
         command,
@@ -64,10 +66,11 @@ defmodule PtcRunner.Kernel.CommandPreparation do
         catalog,
         runtime_services,
         environment_setup_required,
-        artifact_destinations,
-        artifact_destination_failures
+        project_artifact_root,
+        {artifact_destinations, artifact_destination_failures}
       )
       when command in [:validate, :run] and is_boolean(environment_setup_required) and
+             (is_binary(project_artifact_root) or is_nil(project_artifact_root)) and
              is_map(artifact_destinations) and
              is_list(artifact_destination_failures) do
     preparation = %__MODULE__{
@@ -77,6 +80,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
       catalog: catalog,
       runtime_services: runtime_services,
       environment_setup_required: environment_setup_required,
+      project_artifact_root: project_artifact_root,
       artifact_destinations: artifact_destinations,
       artifact_destination_failures: artifact_destination_failures
     }
@@ -99,8 +103,8 @@ defmodule PtcRunner.Kernel.CommandPreparation do
         _catalog,
         _runtime_services,
         _environment_setup_required,
-        _artifact_destinations,
-        _artifact_destination_failures
+        _project_artifact_root,
+        _destinations
       ),
       do: {:error, :invalid_command_preparation}
 
@@ -136,6 +140,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
         preparation.catalog.runtime_binding
       ) and
       is_boolean(preparation.environment_setup_required) and
+      project_artifact_root_valid?(preparation) and
       catalog_matches_request?(preparation) and
       artifact_destinations_valid?(
         preparation.command,
@@ -150,6 +155,15 @@ defmodule PtcRunner.Kernel.CommandPreparation do
       preparation.catalog.installed_limits ==
         preparation.prepared_run.request.package.installed_limits and
         preparation.catalog.attestation == preparation.prepared_run.catalog_attestation
+
+  defp project_artifact_root_valid?(%{command: :validate, project_artifact_root: nil}), do: true
+
+  defp project_artifact_root_valid?(%{command: :run, project_artifact_root: nil}), do: true
+
+  defp project_artifact_root_valid?(%{command: :run, project_artifact_root: root}),
+    do: is_binary(root) and Path.type(root) == :absolute
+
+  defp project_artifact_root_valid?(_preparation), do: false
 
   defp artifact_destinations_valid?(:validate, destinations, failures),
     do: destinations == %{} and failures == []
@@ -197,6 +211,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
       preparation.catalog,
       preparation.runtime_services,
       preparation.environment_setup_required,
+      preparation.project_artifact_root,
       preparation.artifact_destinations,
       preparation.artifact_destination_failures
     }

@@ -3,7 +3,6 @@ defmodule PtcRunner.MixCommandRuntime do
 
   @root_project :"Elixir.PtcRunner.MixProject"
 
-  alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandRuntime
 
@@ -46,9 +45,7 @@ defmodule PtcRunner.MixCommandRuntime do
   def runtime(%CommandArguments{} = arguments) do
     targets = Keyword.get_values(arguments.frontend_options, :authorize_mcp)
 
-    options =
-      [provider_application_mode: provider_application_mode()] ++
-        Dotenv.environment_setup_option(arguments.frontend_options)
+    options = [provider_application_mode: provider_application_mode()]
 
     runtime_options =
       case targets do

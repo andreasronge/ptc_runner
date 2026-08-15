@@ -12,6 +12,11 @@ defmodule PtcRunner.Dotenv do
 
   """
 
+  alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.ConfinedFile
+
+  @max_bytes 1_000_000
+
   @doc """
   Parse `path` as a `.env` file and set the variables it declares.
 
@@ -19,28 +24,60 @@ defmodule PtcRunner.Dotenv do
   single or double quotes are stripped from the value. Existing environment
   variables are never overwritten.
   """
-  @spec load_file(String.t()) :: :ok
-  def load_file(path) do
-    path
-    |> File.read!()
-    |> String.split("\n")
-    |> Enum.each(fn line ->
-      line
-      |> String.trim()
-      |> parse_env_line()
-    end)
+  @spec load_file(String.t()) :: :ok | {:error, :environment_file_invalid}
+  def load_file(path) when is_binary(path) do
+    with {:ok, canonical} <- ConfinedFile.resolve_absolute(Path.expand(path)),
+         {:ok, %File.Stat{type: :regular}} <- File.lstat(canonical),
+         {:ok, bytes} <-
+           ConfinedFile.read(Path.dirname(canonical), Path.basename(canonical), @max_bytes) do
+      parse(bytes)
+    else
+      _failure -> {:error, :environment_file_invalid}
+    end
+  rescue
+    _exception -> {:error, :environment_file_invalid}
+  catch
+    _kind, _reason -> {:error, :environment_file_invalid}
   end
 
+  def load_file(_path), do: {:error, :environment_file_invalid}
+
   @doc false
-  @spec environment_setup_option(keyword()) :: keyword()
-  def environment_setup_option(frontend_options) when is_list(frontend_options) do
-    case Keyword.fetch(frontend_options, :env_file) do
-      {:ok, path} when is_binary(path) -> [environment_setup: fn -> load_file(path) end]
-      _missing_or_invalid -> []
+  @spec parse(binary()) :: :ok | {:error, :environment_file_invalid}
+  def parse(bytes) when is_binary(bytes) and byte_size(bytes) <= @max_bytes do
+    if String.valid?(bytes) do
+      bytes
+      |> String.split("\n")
+      |> Enum.each(fn line ->
+        line
+        |> String.trim()
+        |> parse_env_line()
+      end)
+    else
+      {:error, :environment_file_invalid}
     end
   end
 
-  def environment_setup_option(_frontend_options), do: []
+  def parse(_bytes), do: {:error, :environment_file_invalid}
+
+  @doc false
+  @spec attach_environment(CommandRuntime.t(), keyword()) ::
+          {:ok, CommandRuntime.t()} | {:error, :invalid_command_runtime}
+  def attach_environment(%CommandRuntime{} = runtime, frontend_options)
+      when is_list(frontend_options) do
+    case Keyword.fetch(frontend_options, :env_file) do
+      {:ok, path} when is_binary(path) ->
+        CommandRuntime.with_environment(runtime, fn -> load_file(path) end)
+
+      :error ->
+        {:ok, runtime}
+
+      _invalid ->
+        {:error, :invalid_command_runtime}
+    end
+  end
+
+  def attach_environment(_runtime, _frontend_options), do: {:error, :invalid_command_runtime}
 
   defp parse_env_line(""), do: :ok
   defp parse_env_line("#" <> _), do: :ok

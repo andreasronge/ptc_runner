@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.CommandDestination do
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.ProjectArtifactRoot
   alias PtcRunner.Kernel.PublicationAuthority
 
   @artifact_names ["trace", "inspection", "result"]
@@ -99,12 +100,17 @@ defmodule PtcRunner.Kernel.CommandDestination do
   defp authorize_prepared(preparation, frontend) do
     options = preparation.artifact_destinations
 
-    case PublicationAuthority.authorize(
-           preparation.run_ref,
-           Map.to_list(options),
-           preparation.prepared_run.effective_event_policy,
-           preparation.prepared_run.effective_data_class
-         ) do
+    result =
+      with :ok <- ensure_project_artifact_root(preparation) do
+        PublicationAuthority.authorize(
+          preparation.run_ref,
+          Map.to_list(options),
+          preparation.prepared_run.effective_event_policy,
+          preparation.prepared_run.effective_data_class
+        )
+      end
+
+    case result do
       {:ok, authority} ->
         {:ok, authority, nil}
 
@@ -118,6 +124,11 @@ defmodule PtcRunner.Kernel.CommandDestination do
         {:error, outcome, nil}
     end
   end
+
+  defp ensure_project_artifact_root(%{project_artifact_root: nil}), do: :ok
+
+  defp ensure_project_artifact_root(%{project_artifact_root: root}),
+    do: ProjectArtifactRoot.ensure(root)
 
   defp destination_failure(preparation, {phase, code}) do
     CommandPreparation.close(preparation)

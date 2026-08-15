@@ -11,11 +11,11 @@ defmodule PtcRunner.Kernel.CommandEntry do
 
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandDestination
-  alias PtcRunner.Kernel.CommandParser
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.DestinationIdentity
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.ProjectResolver
   alias PtcRunner.Kernel.PublicationAuthority
 
   @fallback_run_ref "cmd-00000000000000000000000000"
@@ -59,7 +59,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
   end
 
   defp open_safely(argv, frontend, run_ref) do
-    case CommandParser.parse(argv, frontend) do
+    case ProjectResolver.parse(argv, frontend, run_ref) do
       {:ok, %CommandArguments{} = arguments} ->
         finish(arguments, run_ref, frontend)
 

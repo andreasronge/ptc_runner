@@ -12,6 +12,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   5. `priv/schemas/ptc-host-config.schema.json` — host-installation JSON Schema
   6. `priv/schemas/ptc-application-manifest.schema.json` — manifest JSON Schema
   7. `priv/schemas/ptc-command-envelope-v2.schema.json` — command envelope JSON Schema
+  8. `priv/schemas/ptc-project-config.schema.json` — project launch JSON Schema
 
   ## Usage
 
@@ -28,6 +29,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.ProjectConfig
   alias PtcRunner.Lisp.Java.Surface
   alias PtcRunner.Lisp.Registry
 
@@ -36,7 +38,13 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   @host_schema_path "priv/schemas/ptc-host-config.schema.json"
   @manifest_schema_path "priv/schemas/ptc-application-manifest.schema.json"
   @command_schema_path "priv/schemas/ptc-command-envelope-v2.schema.json"
-  @generated_schema_paths [@host_schema_path, @manifest_schema_path, @command_schema_path]
+  @project_schema_path "priv/schemas/ptc-project-config.schema.json"
+  @generated_schema_paths [
+    @host_schema_path,
+    @manifest_schema_path,
+    @command_schema_path,
+    @project_schema_path
+  ]
 
   @audits [
     %{
@@ -129,6 +137,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     generate_host_schema(check?)
     generate_manifest_schema(check?)
     generate_command_schema(check?)
+    generate_project_schema(check?)
   end
 
   defp validate_limit_catalog! do
@@ -154,6 +163,12 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     {:ok, encoded} = CommandContract.schema() |> DeterministicJSON.encode()
     write_or_check!(@command_schema_path, encoded <> "\n", check?)
     report_generation(@command_schema_path, 1, "schema", check?)
+  end
+
+  defp generate_project_schema(check?) do
+    {:ok, encoded} = ProjectConfig.schema() |> DeterministicJSON.encode()
+    write_or_check!(@project_schema_path, encoded <> "\n", check?)
+    report_generation(@project_schema_path, 1, "schema", check?)
   end
 
   defp check_java_audit_path_set! do

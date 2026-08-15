@@ -93,7 +93,8 @@ defmodule PtcRunner.MixProject do
     ]
   end
 
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(:test), do: ["lib", "dev", "test/support"]
+  defp elixirc_paths(:dev), do: ["lib", "dev"]
   defp elixirc_paths(_), do: ["lib"]
 
   # Generated dependency rules in AGENTS.md. Link bulky rules rather than
@@ -336,6 +337,7 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.MissionEnvironment,
           PtcRunner.Kernel.ProviderError,
           PtcRunner.Kernel.ProviderRegistry,
+          PtcRunner.Kernel.ProjectConfig,
           PtcRunner.Kernel.ReplSession,
           PtcRunner.Kernel.Result,
           PtcRunner.Kernel.RunBuilder,
@@ -401,6 +403,7 @@ defmodule PtcRunner.MixProject do
           "docs/guides/getting-started.md",
           "docs/guides/manifests-and-capabilities.md",
           "docs/guides/host-configuration.md",
+          "docs/guides/project-configuration.md",
           "docs/guides/building-agents.md",
           "docs/guides/running-and-debugging.md",
           "docs/guides/kernel-repl.md",

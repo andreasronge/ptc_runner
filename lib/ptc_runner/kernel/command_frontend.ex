@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.CommandFrontend do
   alias PtcRunner.Kernel.CommandPresentation
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.ProjectArtifactRoot
 
   @type bootstrap ::
           (CommandArguments.t() ->
@@ -78,11 +79,15 @@ defmodule PtcRunner.Kernel.CommandFrontend do
          rejection
        )
        when is_binary(path) do
-    case CommandEnvelope.publish(outcome, path) do
+    result =
+      with :ok <- ProjectArtifactRoot.ensure_for(entry.arguments),
+           do: CommandEnvelope.publish(outcome, path)
+
+    case result do
       :ok ->
         rendered_presentation(outcome, path, rejection)
 
-      {:error, :envelope_publication_failed} ->
+      {:error, _reason} ->
         presentation(outcome, nil, "", CommandRenderer.envelope_failure(entry.run_ref), 74)
     end
   end

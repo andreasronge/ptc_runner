@@ -99,6 +99,30 @@ defmodule PtcRunner.Kernel.CommandRuntime do
 
   def setup_environment(_runtime), do: {:error, :environment_setup_failed}
 
+  @doc false
+  @spec with_environment(t(), (-> :ok | {:error, term()})) ::
+          {:ok, t()} | {:error, :invalid_command_runtime}
+  def with_environment(%__MODULE__{} = runtime, setup) when is_function(setup, 0) do
+    if valid?(runtime) do
+      existing = runtime.environment_setup
+
+      combined = fn ->
+        with :ok <- setup.(), do: invoke_existing(existing)
+      end
+
+      new(
+        provider_application_mode: runtime.provider_application_mode,
+        authorization_targets: runtime.authorization_targets,
+        authorization_notifier: runtime.authorization_notifier,
+        environment_setup: combined
+      )
+    else
+      {:error, :invalid_command_runtime}
+    end
+  end
+
+  def with_environment(_runtime, _setup), do: {:error, :invalid_command_runtime}
+
   defp fields_valid?(runtime) do
     Enum.sort(Map.keys(runtime)) == @field_keys and
       runtime.provider_application_mode in [:host_owned, :command_vm] and
@@ -118,6 +142,9 @@ defmodule PtcRunner.Kernel.CommandRuntime do
     do:
       is_binary(name) and byte_size(name) in 1..128 and String.valid?(name) and
         Regex.match?(~r/\A[a-z][a-z0-9._-]{0,127}\z/, name)
+
+  defp invoke_existing(nil), do: :ok
+  defp invoke_existing(callback), do: callback.()
 
   defp payload(runtime),
     do:

@@ -1354,7 +1354,10 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp version_result_schema, do: version_result() |> const_object()
 
   defp init_result,
-    do: closed(~w(created), %{"created" => %{"const" => ["main.clj", "ptc.json"]}})
+    do:
+      closed(~w(created), %{
+        "created" => %{"const" => ["main.clj", "ptc.json", "ptc-project.json"]}
+      })
 
   defp validate_result do
     closed(

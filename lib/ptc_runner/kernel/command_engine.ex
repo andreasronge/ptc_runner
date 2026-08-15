@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   complete directory without replacing an existing target.
   """
 
+  alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandAcquisition
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandContract
@@ -26,15 +27,17 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandDoctor
   alias PtcRunner.Kernel.CommandEntry
+  alias PtcRunner.Kernel.CommandEnvelope
   alias PtcRunner.Kernel.CommandInitializer
   alias PtcRunner.Kernel.CommandOutcome
-  alias PtcRunner.Kernel.CommandParser
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRunDispatch
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.ProjectArtifactRoot
+  alias PtcRunner.Kernel.ProjectResolver
   alias PtcRunner.Kernel.PublicationAuthority
 
   @fallback_run_ref "cmd-00000000000000000000000000"
@@ -61,8 +64,12 @@ defmodule PtcRunner.Kernel.CommandEngine do
       case CommandEntry.open(argv, :standalone) do
         {:ok, %CommandEntry{envelope_path: envelope_path} = entry}
         when is_binary(envelope_path) ->
-          {:error,
-           arguments_outcome(entry.arguments, entry.run_ref, :arguments, :invalid_arguments)}
+          if project_envelope?(entry.arguments) do
+            dispatch_with_project_envelope(entry, runtime)
+          else
+            {:error,
+             arguments_outcome(entry.arguments, entry.run_ref, :arguments, :invalid_arguments)}
+          end
 
         {:ok, %CommandEntry{arguments: %{command: command}} = entry}
         when command in [:repl, :transcript] ->
@@ -113,17 +120,23 @@ defmodule PtcRunner.Kernel.CommandEngine do
          presentation?
        ) do
     if CommandRuntime.valid?(runtime) do
-      case prepare_arguments_safely(
-             arguments,
-             entry.run_ref,
-             entry.destinations,
-             runtime
-           ) do
-        {:ok, %CommandPreparation{} = preparation} ->
-          dispatch_preparation(preparation, runtime, entry, presentation?)
+      case Dotenv.attach_environment(runtime, arguments.frontend_options) do
+        {:ok, runtime} ->
+          case prepare_arguments_safely(
+                 arguments,
+                 entry.run_ref,
+                 entry.destinations,
+                 runtime
+               ) do
+            {:ok, %CommandPreparation{} = preparation} ->
+              dispatch_preparation(preparation, runtime, entry, presentation?)
 
-        terminal ->
-          with_rejection(terminal)
+            terminal ->
+              with_rejection(terminal)
+          end
+
+        {:error, _reason} ->
+          with_rejection(startup_failure(entry))
       end
     else
       with_rejection(startup_failure(entry))
@@ -187,7 +200,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   def preflight(preparation), do: CommandDestination.preflight(preparation)
 
   defp prepare_with_ref(argv, run_ref, runtime) do
-    case CommandParser.parse(argv) do
+    case ProjectResolver.parse(argv, :standalone, run_ref) do
       {:ok, %CommandArguments{command: command}} when command in [:repl, :transcript] ->
         one_shot_failure(run_ref, :invalid_command)
 
@@ -198,6 +211,23 @@ defmodule PtcRunner.Kernel.CommandEngine do
           CommandDestination.capture(arguments.options),
           runtime
         )
+
+      {:ok, %CommandArguments{} = arguments} when not is_nil(arguments.project) ->
+        if project_envelope?(arguments) do
+          arguments = %{
+            arguments
+            | frontend_options: Keyword.delete(arguments.frontend_options, :envelope)
+          }
+
+          prepare_arguments_safely(
+            arguments,
+            run_ref,
+            CommandDestination.capture(arguments.options),
+            runtime
+          )
+        else
+          {:error, arguments_outcome(arguments, run_ref, :arguments, :invalid_arguments)}
+        end
 
       {:ok, %CommandArguments{} = arguments} ->
         {:error, arguments_outcome(arguments, run_ref, :arguments, :invalid_arguments)}
@@ -213,6 +243,27 @@ defmodule PtcRunner.Kernel.CommandEngine do
     _exception -> {:error, outcome(:unknown, run_ref, :internal, :internal_error)}
   catch
     _kind, _reason -> {:error, outcome(:unknown, run_ref, :internal, :internal_error)}
+  end
+
+  defp dispatch_with_project_envelope(
+         %CommandEntry{envelope_path: path} = entry,
+         runtime
+       ) do
+    result = dispatch_entry(%{entry | envelope_path: nil}, runtime)
+    {_status, outcome} = result
+
+    publication =
+      with :ok <- ProjectArtifactRoot.ensure_for(entry.arguments),
+           do: CommandEnvelope.publish(outcome, path)
+
+    case publication do
+      :ok ->
+        result
+
+      {:error, _reason} ->
+        {:error,
+         arguments_outcome(entry.arguments, entry.run_ref, :publication, :invalid_destination)}
+    end
   end
 
   defp one_shot_failure(run_ref, :invalid_command),
@@ -299,6 +350,11 @@ defmodule PtcRunner.Kernel.CommandEngine do
     do: {:doctor, :connect}
 
   defp command_mode(%CommandArguments{command: command}), do: command
+
+  defp project_envelope?(%CommandArguments{project: %{derived_options: derived}}),
+    do: MapSet.member?(derived, :envelope)
+
+  defp project_envelope?(_arguments), do: false
 
   defp diagnostic(phase, code), do: CommandDiagnostic.new!(phase, code)
 end

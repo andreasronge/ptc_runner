@@ -26,6 +26,8 @@ defmodule PtcViewer.Server do
     repl_adapter = Keyword.get(opts, :repl_adapter)
     repl_config = Keyword.get(opts, :repl_config, %{})
     private_traces = Keyword.get(opts, :private_traces, false) == true
+    trace_source = Keyword.get(opts, :trace_source)
+    inspection_source = Keyword.get(opts, :inspection_source)
 
     if is_integer(port) and port in 0..65_535 do
       params = %{
@@ -36,7 +38,9 @@ defmodule PtcViewer.Server do
         inspection_adapter: inspection_adapter,
         repl_adapter: repl_adapter,
         repl_config: repl_config,
-        private_traces: private_traces
+        private_traces: private_traces,
+        trace_source: trace_source,
+        inspection_source: inspection_source
       }
 
       case start_resources(params) do
@@ -53,11 +57,7 @@ defmodule PtcViewer.Server do
   end
 
   defp start_resources(params) do
-    case pin_inspection(
-           params.inspection_file,
-           params.inspection_adapter,
-           trace_source(params)
-         ) do
+    case pin_inspection_source(params) do
       {:ok, inspection_store} -> start_connection(params, inspection_store)
       {:error, reason} -> {:error, reason}
     end
@@ -235,6 +235,7 @@ defmodule PtcViewer.Server do
     [
       trace_dir: params.trace_dir,
       private_traces: params.private_traces,
+      trace_source: params.trace_source,
       kernel_trace_adapter: params.kernel_adapter,
       inspection_store: inspection_store,
       inspection_adapter: params.inspection_adapter,
@@ -248,6 +249,12 @@ defmodule PtcViewer.Server do
     do: {:private_directory, trace_dir}
 
   defp trace_source(%{trace_dir: trace_dir}), do: {:directory, trace_dir}
+
+  defp pin_inspection_source(%{inspection_source: source}) when not is_nil(source),
+    do: InspectionStore.start(source)
+
+  defp pin_inspection_source(params),
+    do: pin_inspection(params.inspection_file, params.inspection_adapter, trace_source(params))
 
   defp pin_inspection(nil, nil, _trace_source), do: {:ok, nil}
 
@@ -355,8 +362,37 @@ defmodule PtcViewer.Server do
   defp maybe_open(false, _listener_info), do: :ok
 
   defp maybe_open(true, {_address, port}) do
-    _result = System.cmd("open", ["http://localhost:#{port}"])
+    case browser_opener() do
+      nil -> :ok
+      opener -> run_opener(opener, "http://localhost:#{port}")
+    end
+  end
+
+  defp browser_opener do
+    executable =
+      case :os.type() do
+        {:unix, :darwin} -> "open"
+        {:unix, _name} -> "xdg-open"
+        _other -> nil
+      end
+
+    if executable, do: System.find_executable(executable), else: nil
+  end
+
+  defp run_opener(opener, url) do
+    task = Task.async(fn -> System.cmd(opener, [url], stderr_to_stdout: true) end)
+
+    case Task.yield(task, 2_000) do
+      {:ok, _result} -> :ok
+      {:exit, _reason} -> :ok
+      nil -> Task.shutdown(task, :brutal_kill)
+    end
+
     :ok
+  rescue
+    _exception -> :ok
+  catch
+    _kind, _reason -> :ok
   end
 
   defp start_bandit_guard(owner, bandit) do

@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
   @moduledoc """
   Bounded, no-replace publication of the stable application scaffold.
 
-  The complete two-file scaffold is rendered and prepared from memory before
+  The complete three-file scaffold is rendered and prepared from memory before
   target filesystem access. Files are assembled under one owner-only sibling
   directory. A platform no-replace rename is the commit point; failures before
   it remove only identity-verified known staging entries, while success never
@@ -15,7 +15,9 @@ defmodule PtcRunner.Kernel.CommandInitializer do
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.ProjectConfig
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.StrictJSON
 
   @main_clj """
   (ns main)
@@ -42,8 +44,36 @@ defmodule PtcRunner.Kernel.CommandInitializer do
   }
   """
 
-  @documents %{"main.clj" => @main_clj, "ptc.json" => @manifest}
-  @created ["main.clj", "ptc.json"]
+  @project """
+  {
+    "$schema": "https://ptc-runner.dev/schemas/ptc-project-config.schema.json",
+    "kind": "ptc-project",
+    "version": 1,
+    "application": {
+      "path": "ptc.json"
+    },
+    "artifacts": {
+      "root": ".ptc",
+      "trace": true,
+      "inspection": false,
+      "result": false,
+      "envelope": true
+    },
+    "viewer": {
+      "port": 4123,
+      "open": true,
+      "repl": true,
+      "private": false
+    }
+  }
+  """
+
+  @documents %{
+    "main.clj" => @main_clj,
+    "ptc.json" => @manifest,
+    "ptc-project.json" => @project
+  }
+  @created ["main.clj", "ptc.json", "ptc-project.json"]
   @staging_attempts 16
 
   @type identity ::
@@ -137,9 +167,17 @@ defmodule PtcRunner.Kernel.CommandInitializer do
   defp validate_scaffold(catalog) do
     result =
       with {:ok, request} <-
-             ApplicationPackage.request_memory("ptc.json", @documents, result_projection: :json),
-           {:ok, prepared} <- RunCoordinator.prepare(request, catalog) do
-        PreparedRun.close(prepared)
+             ApplicationPackage.request_memory(
+               "ptc.json",
+               Map.take(@documents, ["main.clj", "ptc.json"]),
+               result_projection: :json
+             ),
+           {:ok, prepared} <- RunCoordinator.prepare(request, catalog),
+           :ok <- PreparedRun.close(prepared),
+           {:ok, project} <- StrictJSON.decode(@project),
+           {:ok, root} <- JSV.build(ProjectConfig.schema(), atoms: false, warnings: :silent),
+           {:ok, _validated} <- JSV.validate(project, root, cast: false) do
+        :ok
       end
 
     InstallationCatalog.close(catalog)

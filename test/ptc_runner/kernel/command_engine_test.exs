@@ -1931,7 +1931,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert validate_help.envelope["result"] == %{
              "topic" => "validate",
-             "usage" => ["ptc validate ptc.json [--host-config HOST.json]"],
+             "usage" => [
+               "ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json]"
+             ],
              "options" => [
                %{
                  "switches" => ["--host-config HOST.json"],
@@ -4639,8 +4641,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                preparation.catalog,
                preparation.runtime_services,
                preparation.environment_setup_required,
-               %{output: "relative-result.json"},
-               []
+               nil,
+               {%{output: "relative-result.json"}, []}
              )
 
     refute CommandPreparation.valid?(Map.put(preparation, :unexpected, :retained))
@@ -4672,8 +4674,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  catalog,
                  preparation.runtime_services,
                  preparation.environment_setup_required,
-                 destinations,
-                 []
+                 nil,
+                 {destinations, []}
                )
     end
 
@@ -4690,8 +4692,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                preparation.catalog,
                preparation.runtime_services,
                preparation.environment_setup_required,
-               %{},
-               []
+               nil,
+               {%{}, []}
              )
 
     assert :ok = PreparedRun.close(native_prepared)
@@ -4753,8 +4755,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                preparation.catalog,
                preparation.runtime_services,
                preparation.environment_setup_required,
-               %{},
-               []
+               nil,
+               {%{}, []}
              )
 
     assert :ok = CommandPreparation.close(preparation)

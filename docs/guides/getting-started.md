@@ -23,7 +23,8 @@ runtime-included release through `bin/ptc`.
 mix ptc init hello-ptc
 ```
 
-Initialization creates `main.clj` and `ptc.json`:
+Initialization creates `main.clj`, the application manifest `ptc.json`, and an
+operator-owned `ptc-project.json` that remembers artifact and Viewer choices:
 
 ```clojure
 (ns main)
@@ -49,6 +50,17 @@ Initialization creates `main.clj` and `ptc.json`:
   }
 }
 ```
+
+Run the generated project without repeating paths:
+
+```console
+mix ptc run hello-ptc/ptc-project.json
+mix ptc.viewer hello-ptc/ptc-project.json
+```
+
+The first run creates an owner-only `.ptc` artifact layout. See
+[Project configuration](project-configuration.md) for host and environment
+references, overrides, and the complete schema.
 
 Initialization refuses to merge with or overwrite an existing path.
 [Running and debugging](running-and-debugging.md#choose-a-command) lists the command

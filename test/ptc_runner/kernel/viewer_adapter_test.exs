@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
 
   alias PtcRunner.Kernel.ConversationProjection
   alias PtcRunner.Kernel.InspectionSnapshot
+  alias PtcRunner.Kernel.ProjectViewerAdapter
   alias PtcRunner.Kernel.RunAnalysis
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.TraceSnapshot
@@ -41,6 +42,12 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
     assert actual == expected
     assert {:ok, ^expected_preludes} = ViewerAdapter.preludes(grant, fixture.run_id)
     assert {:error, :inspection_run_mismatch} = ViewerAdapter.preludes(grant, "another-run")
+
+    project_source = {:inspection_snapshot, inspection}
+    assert {:ok, ^expected} = ProjectViewerAdapter.conversation(project_source, fixture.run_id)
+
+    assert {:ok, ^expected_preludes} =
+             ProjectViewerAdapter.preludes(project_source, fixture.run_id)
   end
 
   @tag :tmp_dir

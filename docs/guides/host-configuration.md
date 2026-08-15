@@ -13,6 +13,15 @@ change an endpoint or executable, supply a credential, or raise a ceiling. A
 provider-bearing manifest requires `--host-config`; a provider-free manifest
 does not.
 
+For a checkout used repeatedly, store the host and optional environment-file
+references in the separate operator-owned
+[project configuration](project-configuration.md):
+
+```console
+mix ptc run ptc-project.json
+mix ptc doctor ptc-project.json --connect
+```
+
 Loading validates bounded, path-confined JSON without reading credentials,
 resolving executables, starting processes, or contacting endpoints. Those
 actions happen later during preflight and acquisition.
