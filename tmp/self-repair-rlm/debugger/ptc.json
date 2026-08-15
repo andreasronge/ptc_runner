@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "debug.rlm.workflow", "path": "workflow.clj", "dependencies": ["agent.core", "kernel"]},
+      {"library": "agent.core"}
+    ],
+    "entry": "debug.rlm.workflow/run"
+  },
+  "missions": {
+    "root": {
+      "components": [
+        {"library": "debug.nav"},
+        {"id": "debug.rlm", "path": "delegate.clj"}
+      ],
+      "providers": ["history", "debug.nav"]
+    },
+    "child": {
+      "components": [{"library": "debug.nav"}],
+      "providers": ["history", "debug.nav"]
+    }
+  },
+  "input": {
+    "value": {
+      "task": "Diagnose one failed PtcRunner run using only immutable evidence. Discover the run and determine whether evidence proves one faulty component. A code change requires externally expected behavior and evidence that distinguishes the faulty implementation from its callers, dependencies, contracts, and inputs. Do not guess across incomplete or ambiguous evidence. A final propose-change report has exactly the flat keys decision, run_id, cause, target_environment, target_mission, component_id, function_id, base_source_hash, candidate_source, invariant, evidence, validation_plan. evidence is an array of strings and validation_plan is an array of objects with string property and test. candidate_source is the complete replacement component and preserves unrelated exports. Otherwise finish with insufficient-evidence containing exactly decision, run_id, cause, and missing_evidence, where missing_evidence is an array of strings.",
+      "root_agent": {
+        "mission": "root",
+        "max_turns": 3,
+        "max_observation_chars": 32768,
+        "max_transcript_chars": 220000,
+        "consolidate_at_turns_remaining": 2
+      },
+      "child_agent": {
+        "mission": "child",
+        "max_turns": 4,
+        "max_observation_chars": 32768,
+        "max_transcript_chars": 220000,
+        "consolidate_at_turns_remaining": 2
+      },
+      "max_investigations": 3,
+      "max_finish_corrections": 2
+    }
+  },
+  "providers": {
+    "workflow": [{"name": "agent_model"}],
+    "mission": [
+      {"name": "history", "config": {"expose": false}},
+      {"name": "debug.nav"}
+    ]
+  },
+  "contracts": {"result_schema": {"path": "report.schema.json"}},
+  "limits": {
+    "run_duration_ms": 300000,
+    "workflow_timeout_ms": 300000,
+    "evaluation_timeout_ms": 30000,
+    "subordinate_evaluations": 32,
+    "workflow_capability_calls": 32,
+    "workflow_capability_calls_per_name": 32,
+    "mission_capability_calls": 128,
+    "mission_capability_calls_per_name": 128,
+    "normal_event_count": 4096
+  },
+  "labels": {
+    "name": "self-repair-rlm-depth-one",
+    "tags": {"mode": "agent", "stage": "validating", "suite": "e2e"}
+  }
+}
