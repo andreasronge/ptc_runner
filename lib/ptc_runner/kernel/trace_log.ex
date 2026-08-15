@@ -210,11 +210,14 @@ defmodule PtcRunner.Kernel.TraceLog do
   @spec compile_analysis([map()], :sanitized | :private | map()) :: map()
   def compile_analysis(events, source_kind) when is_list(events) do
     summaries = runs(events, source_kind)
+    summaries_by_id = Map.new(summaries, &{&1["run_id"], &1})
 
     facts =
       events
       |> Enum.group_by(& &1["run_id"])
       |> Map.new(fn {run_id, run_events} ->
+        summary = Map.fetch!(summaries_by_id, run_id)
+
         expected_model_exchanges =
           run_events
           |> Enum.filter(fn event ->
@@ -252,6 +255,8 @@ defmodule PtcRunner.Kernel.TraceLog do
            "expected_model_exchange_ids" => expected_model_exchanges,
            "evaluation_statuses" => evaluation_statuses,
            "parent_evaluation_ids" => parent_evaluation_ids,
+           "workflow_prelude" => summary["workflow_prelude"],
+           "missions" => summary["missions"],
            "terminal?" => Enum.any?(run_events, &(&1["type"] == "run-stopped")),
            "events_dropped?" => Enum.any?(run_events, &(&1["type"] == "events-dropped"))
          }}
@@ -259,7 +264,7 @@ defmodule PtcRunner.Kernel.TraceLog do
 
     %{
       runs: summaries,
-      runs_by_id: Map.new(summaries, &{&1["run_id"], &1}),
+      runs_by_id: summaries_by_id,
       facts_by_run_id: facts
     }
   end

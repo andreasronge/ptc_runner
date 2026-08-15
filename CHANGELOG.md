@@ -34,6 +34,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added occurrence-qualified `dependency_prelude_source` relationships to
+  effective prelude sources, so a debugger can walk a frozen dependency closure
+  instead of guessing which copy of a shared component a call reached. A
+  component ID alone is not an occurrence identity, so every edge repeats its
+  environment and mission name. The edges are derived only from a prelude graph
+  that satisfies the complete positional contract — indices aligned with unique
+  component IDs, each row unique, ascending, and strictly earlier than its own
+  position — and any other graph yields one honest `incomplete` relation.
+
+- Generated entries embedded in `turns` now carry the same `relationships` list
+  as the matching `generated_sources` item. A generic walker that starts from a
+  turn no longer needs an extra exact read by `evaluation_id` merely to obtain
+  followable links.
+
 - Added typed, followable run-analysis relationships from workflow boundary
   errors to directly proven child producers, generated source, producing turns,
   and referenced prelude source. Each relation supplies an exact target

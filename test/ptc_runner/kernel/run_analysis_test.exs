@@ -492,6 +492,151 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     assert source_relation["filters"] == %{"evaluation_id" => "mission-eval"}
   end
 
+  test "prelude dependency relations qualify the exact occurrence of a repeated component" do
+    collections =
+      prelude_collections([
+        prelude("workflow", nil, "shared"),
+        prelude("mission", "reader", "base"),
+        prelude("mission", "reader", "shared"),
+        prelude("mission", "writer", "other"),
+        prelude("mission", "writer", "shared")
+      ])
+
+    trace_facts = %{
+      "run" => %{
+        "workflow_prelude" => graph(["shared"], [[]]),
+        "missions" => %{
+          "reader" => %{"prelude" => graph(["base", "shared"], [[], [0]])},
+          "writer" => %{"prelude" => graph(["other", "shared"], [[], [0]])}
+        }
+      }
+    }
+
+    attached = RunAnalysisRelationships.attach(collections, trace_facts)
+
+    # `shared` occurs three times with three different dependency sets. A bare
+    # component ID cannot distinguish them, so each edge must carry its
+    # environment and mission name.
+    assert dependency_relations(attached, "workflow", nil, "shared") == []
+
+    assert dependency_relations(attached, "mission", "reader", "shared") == [
+             %{
+               "rel" => "dependency_prelude_source",
+               "semantics" => "dependency",
+               "target_collection" => "prelude_sources",
+               "filters" => %{
+                 "component_id" => "base",
+                 "environment" => "mission",
+                 "mission_name" => "reader"
+               },
+               "state" => "complete"
+             }
+           ]
+
+    assert [%{"filters" => %{"component_id" => "other", "mission_name" => "writer"}}] =
+             dependency_relations(attached, "mission", "writer", "shared")
+  end
+
+  test "prelude dependency relations report an unavailable occurrence rather than a bare id" do
+    collections =
+      prelude_collections([
+        prelude("mission", "reader", "shared"),
+        prelude("mission", "writer", "base")
+      ])
+
+    trace_facts = %{
+      "run" => %{
+        "missions" => %{
+          "reader" => %{"prelude" => graph(["base", "shared"], [[], [0]])},
+          "writer" => %{"prelude" => graph(["base"], [[]])}
+        }
+      }
+    }
+
+    attached = RunAnalysisRelationships.attach(collections, trace_facts)
+
+    # `base` exists in the capture, but not as the reader occurrence the edge
+    # names, so the state must not claim the writer's copy is followable here.
+    assert [%{"state" => "unavailable"} = relation] =
+             dependency_relations(attached, "mission", "reader", "shared")
+
+    assert relation["filters"]["mission_name"] == "reader"
+  end
+
+  test "prelude dependency relations refuse a graph that breaks the positional contract" do
+    malformed = [
+      {"misaligned outer list", graph(["base", "shared"], [[]])},
+      {"index out of bounds", graph(["base", "shared"], [[], [7]])},
+      {"forward reference", graph(["base", "shared"], [[1], []])},
+      {"self reference", graph(["base", "shared"], [[], [1]])},
+      {"repeated index", graph(["base", "shared"], [[], [0, 0]])},
+      {"descending indices", graph(["a", "b", "c"], [[], [0], [1, 0]])},
+      {"repeated component id", graph(["shared", "shared"], [[], [0]])},
+      {"non-integer index", graph(["base", "shared"], [[], ["0"]])},
+      {"missing dependency_indices", %{"component_ids" => ["base", "shared"]}},
+      {"absent graph", nil}
+    ]
+
+    for {label, prelude_graph} <- malformed do
+      collections = prelude_collections([prelude("mission", "reader", "shared")])
+
+      trace_facts = %{"run" => %{"missions" => %{"reader" => %{"prelude" => prelude_graph}}}}
+      attached = RunAnalysisRelationships.attach(collections, trace_facts)
+
+      assert [
+               %{
+                 "rel" => "dependency_prelude_source",
+                 "filters" => nil,
+                 "state" => "incomplete"
+               }
+             ] = dependency_relations(attached, "mission", "reader", "shared"),
+             "expected #{label} to be reported as incomplete"
+    end
+  end
+
+  test "generated entries embedded in turns carry the same relationships as generated_sources" do
+    source = %{
+      "run_id" => "run",
+      "sequence" => 4,
+      "evaluation_id" => "mission-eval",
+      "environment" => "mission",
+      "mission_name" => "default",
+      "prelude_calls_available?" => true,
+      "prelude_calls" => [%{"component_id" => "orders"}]
+    }
+
+    embedded =
+      Map.merge(source, %{"association" => "source_match", "association_ambiguous?" => false})
+
+    turn = %{"run_id" => "run", "stream_id" => "stream-1", "generated" => [embedded]}
+
+    collections = %{
+      turns: [turn],
+      turns_by_run_id: %{"run" => %{items: [turn], evidence: %{"complete?" => true}}},
+      effective_preludes: [prelude("mission", "default", "orders")],
+      generated_sources: [source],
+      execution_errors: []
+    }
+
+    attached =
+      RunAnalysisRelationships.attach(collections, %{
+        "run" => %{
+          "missions" => %{"default" => %{"prelude" => graph(["orders"], [[]])}}
+        }
+      })
+
+    expected = hd(attached.generated_sources)["relationships"]
+    assert Enum.any?(expected, &(&1["rel"] == "referenced_prelude_source"))
+
+    # A generic walker reading `turns` must be able to follow straight from the
+    # embedded entry, without an extra exact `generated_sources` read.
+    assert [%{"relationships" => ^expected} = entry] = hd(attached.turns)["generated"]
+    assert entry["association"] == "source_match"
+
+    assert [%{"relationships" => ^expected}] =
+             hd(attached.turns_by_run_id["run"].items)["generated"]
+  end
+
   test "typed relations do not trust an inspection producer without its canonical parent edge" do
     collections = %{
       turns: [],
@@ -946,6 +1091,37 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
       "arguments" => %{"messages" => messages, "system" => "system"},
       "result" => %{"status" => "ok", "value" => Map.delete(assistant, "role")}
     }
+  end
+
+  defp prelude_collections(preludes) do
+    %{
+      turns: [],
+      turns_by_run_id: %{"run" => %{items: [], evidence: %{"complete?" => true}}},
+      effective_preludes: preludes,
+      generated_sources: [],
+      execution_errors: []
+    }
+  end
+
+  defp prelude(environment, mission_name, component_id) do
+    %{
+      "run_id" => "run",
+      "environment" => environment,
+      "mission_name" => mission_name,
+      "component_id" => component_id
+    }
+  end
+
+  defp graph(component_ids, dependency_indices),
+    do: %{"component_ids" => component_ids, "dependency_indices" => dependency_indices}
+
+  defp dependency_relations(attached, environment, mission_name, component_id) do
+    attached.effective_preludes
+    |> Enum.find(
+      &(&1["environment"] == environment and &1["mission_name"] == mission_name and
+          &1["component_id"] == component_id)
+    )
+    |> Map.fetch!("relationships")
   end
 
   defp follow(analysis, run_id, relationship) do
