@@ -174,9 +174,10 @@ invent those values. Live and replayed models are workflow-only; MCP and
 snapshot sources are mission-only.
 
 Credentials never belong in PTC-Lisp, manifests, traces, or committed project
-files. For the tutorial aliases, copy `.env.example` to the Git-ignored `.env`,
-set `OPENROUTER_API_KEY`, and pass `--env-file .env`. PtcRunner never searches
-for an environment file implicitly. See
+files. For the tutorial aliases, copy `.env.example` to the Git-ignored
+`examples/kernel-tutorial/.env` and set `OPENROUTER_API_KEY`. The tutorial
+project documents name that file explicitly; PtcRunner never searches for an
+environment file implicitly. See
 [Host configuration](host-configuration.md#declare-credentials-once) for deployment-safe
 credential sources.
 
@@ -258,9 +259,7 @@ Failed evaluations preserve the previous definitions and history.
 demonstrates a two-turn definition and call:
 
 ```console
-mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
-  --env-file .env \
-  --host-config examples/kernel-tutorial/ptc-host.json
+mix ptc run examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
 ## Handle failures without repeating effects
@@ -312,15 +311,13 @@ examples/kernel-tutorial/03-file-agent/
 Run it from the repository root:
 
 ```console
-mix ptc run examples/kernel-tutorial/03-file-agent/ptc.json \
-  --env-file .env \
-  --host-config examples/kernel-tutorial/ptc-host.json
+mix ptc run examples/kernel-tutorial/03-file-agent.ptc-project.json
 ```
 
 The model sees `tutorial.files/read-page`, not the host credential or an
-unrestricted filesystem. Add `--trace-dir DIRECTORY` for a sanitized trace,
-then inspect it with the fixed run-analysis profile described in
-[Running and debugging](running-and-debugging.md).
+unrestricted filesystem. The project records a sanitized trace under
+`03-file-agent/.ptc/traces`; inspect it with the Viewer or fixed run-analysis
+profile described in [Running and debugging](running-and-debugging.md).
 
 ## Next steps
 

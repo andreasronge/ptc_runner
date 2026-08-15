@@ -16,44 +16,39 @@ cd ptc_runner
 mix deps.get
 ```
 
-<!-- ptc-guide-e2e: id=quickstart-orders -->
+<!-- ptc-guide-e2e: id=quickstart-orders project=examples/kernel-tutorial/01-orders.ptc-project.json -->
 ```console
-mix ptc run examples/kernel-tutorial/01-orders/ptc.json
+mix ptc run examples/kernel-tutorial/01-orders.ptc-project.json
 ```
 
 ```json
 {"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}
 ```
 
-That is a PTC-Lisp function reading JSON input. It needs no model, host
-document, or network access. On a fresh clone, the first `mix ptc` command
-performs normal dependency validation and compilation; later commands use the
-fast startup path.
+That project file points to a PTC-Lisp function and its JSON input, records a
+trace and command envelope under `examples/kernel-tutorial/01-orders/.ptc`,
+and remembers the Viewer settings. It needs no model, host document, or network
+access. On a fresh clone, the first `mix ptc` command performs normal dependency
+validation and compilation; later commands use the fast startup path.
 
 ## 2. Supply a model credential
 
 ```console
-cp .env.example .env
-chmod 600 .env
+cp .env.example examples/kernel-tutorial/.env
+chmod 600 examples/kernel-tutorial/.env
 ```
 
-Set `OPENROUTER_API_KEY` in `.env` to your key. The command names that exact
-file with `--env-file`; PtcRunner never searches for it implicitly. `.env` is
+Set `OPENROUTER_API_KEY` in that file to your key. The tutorial project names
+that exact file; PtcRunner never searches for it implicitly. `.env` is
 Git-ignored, and credentials never belong in a manifest, PTC-Lisp, or a trace.
 [Host configuration](host-configuration.md#declare-credentials-once) documents the three
 declaration forms and how to move off `.env` for a real deployment.
 
 ## 3. Let the model write the program
 
-<!-- ptc-guide-e2e: id=quickstart-live-agent requires=OPENROUTER_API_KEY assert=two-turn-agent -->
+<!-- ptc-guide-e2e: id=quickstart-live-agent project=examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json requires=OPENROUTER_API_KEY assert=two-turn-agent -->
 ```console
-mkdir -p tmp
-envelope="${PTC_ENVELOPE_FILE:-$(mktemp -d tmp/quickstart.XXXXXX)/command-envelope.json}"
-echo "command envelope: $envelope"
-mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
-  --env-file "${PTC_ENV_FILE:-.env}" \
-  --host-config examples/kernel-tutorial/ptc-host.json \
-  --envelope "$envelope"
+mix ptc run examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
 ```json
@@ -63,12 +58,11 @@ mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
 The model was given a task, wrote PTC-Lisp, and the runtime evaluated that
 program in the confined mission environment over two turns.
 
-The `PTC_ENV_FILE` fallback above uses the `.env` you just created. Automation
-may point it at another explicitly named environment file. Each pasted run
-reserves a fresh public command envelope under the Git-ignored `tmp/` directory
-so you can inspect its usage and continuation summary without replacing an
-earlier run. `execution.usage.llm_usage` reports calls, tokens, and provider
-cost grouped by the selected alias and revision;
+The project document remembers the application manifest, shared host
+installation, environment file, artifact root, and Viewer settings. Each run
+uses its unique run reference for the trace and public command envelope, so it
+does not replace an earlier run. `execution.usage.llm_usage` reports calls,
+tokens, and provider cost grouped by the selected alias and revision;
 `execution.usage.llm_usage_by_model` gives the safely attested model view.
 Check `llm_usage_state` before reading either array: `"unavailable"` means the
 runtime could not validate the terminal event evidence, not that the run cost
@@ -90,9 +84,7 @@ this example `OPENROUTER_API_KEY` was not visible to the command.
 Inspect the complete readiness report with active doctor:
 
 ```console
-mix ptc doctor examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
-  --env-file .env \
-  --host-config examples/kernel-tutorial/ptc-host.json --connect
+mix ptc doctor examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect
 ```
 
 With no key it exits nonzero, marks the credential check failed, and reports

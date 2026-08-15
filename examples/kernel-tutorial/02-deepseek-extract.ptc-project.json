@@ -1,0 +1,27 @@
+{
+  "$schema": "https://ptc-runner.dev/schemas/ptc-project-config.schema.json",
+  "kind": "ptc-project",
+  "version": 1,
+  "application": {
+    "path": "02-deepseek-extract/ptc.json"
+  },
+  "host": {
+    "path": "ptc-host.json",
+    "env_file": {
+      "path": ".env"
+    }
+  },
+  "artifacts": {
+    "root": "02-deepseek-extract/.ptc",
+    "trace": true,
+    "inspection": false,
+    "result": false,
+    "envelope": true
+  },
+  "viewer": {
+    "port": 4123,
+    "open": true,
+    "repl": true,
+    "private": false
+  }
+}

@@ -16,6 +16,23 @@ mix ptc.viewer ptc-project.json
 from its filename; the `"kind": "ptc-project"` discriminator identifies the
 document.
 
+The kernel tutorial ships one project document per runnable example. A
+credential-free run and its Viewer need only the same JSON path:
+
+```console
+mix ptc run examples/kernel-tutorial/01-orders.ptc-project.json
+mix ptc.viewer examples/kernel-tutorial/01-orders.ptc-project.json
+```
+
+The provider-backed examples additionally reference the shared host document
+and `examples/kernel-tutorial/.env` from their project files. After creating
+that explicitly named environment file, their run commands have the same
+single-argument shape:
+
+```console
+mix ptc run examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
+```
+
 ## Keep the three roles separate
 
 | File | Owner | Purpose |

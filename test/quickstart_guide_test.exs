@@ -32,7 +32,7 @@ defmodule PtcRunner.QuickstartGuideTest do
 
   defp require_environment(variable) do
     if System.get_env(variable) in [nil, ""] do
-      {:skip, "#{variable} is not configured"}
+      raise "#{variable} was available when guide tests were compiled but could not be loaded"
     else
       :ok
     end

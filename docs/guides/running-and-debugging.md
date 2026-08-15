@@ -23,11 +23,12 @@ switches.
 `PtcRunner.Kernel.CommandDeclaration` is the canonical command and option
 table. Help is generated from the same declarations as the strict parser.
 
-A provider-bearing manifest needs `--host-config`. Before running it, active
-provider checks can make real requests and may incur cost:
+A provider-bearing manifest needs a host configuration. A project document can
+remember that path and its environment file. Before running it, active provider
+checks can make real requests and may incur cost:
 
 ```console
-mix ptc doctor ptc.json --env-file .env --host-config ptc-host.json --connect
+mix ptc doctor ptc-project.json --connect
 ```
 
 Plain doctor reports `readiness: "unverified"` when its local checks pass.
@@ -354,14 +355,14 @@ guards, not access control; treat every downstream sink as private.
 From a source checkout:
 
 ```console
-mix ptc.viewer --trace-dir tmp/traces \
-  --inspection-file tmp/inspection/run.inspection.jsonl
+mix ptc.viewer ptc-project.json
 ```
 
-The Viewer binds to loopback, pins the selected inspection file, and can open a
-bounded analysis REPL over an immutable capture. Use `--port` to choose a port
-and `--no-open` on a remote host. It is a development path dependency, not part
-of the published Hex package. See
+The project document supplies the trace root and optional inspection root, plus
+the port, browser-opening preference, REPL setting, and private-data grant. The
+Viewer binds to loopback, pins the selected data, and can open a bounded
+analysis REPL over an immutable capture. It is a development path dependency,
+not part of the published Hex package. See
 [`ptc_viewer/README.md`](../../ptc_viewer/README.md) for its complete command
 and HTTP API.
 

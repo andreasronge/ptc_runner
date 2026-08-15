@@ -38,6 +38,9 @@ ptc_runner-*.tar
 # Environment variables file (contains secrets like API keys).
 .env
 
+# Local artifacts produced by the runnable tutorial project files.
+examples/kernel-tutorial/*/.ptc/
+
 # Temporary commit message files from tooling.
 .commit_msg.txt
 

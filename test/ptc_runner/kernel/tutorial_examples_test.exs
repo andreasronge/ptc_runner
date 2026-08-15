@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.ProjectConfig
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.TestSupport.RunLifecycle
 
@@ -39,6 +40,28 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
     for example <- ["02-deepseek-extract", "03-file-agent", "04-multi-turn-agent"] do
       assert {:ok, manifest} = Manifest.load(path(example))
       assert manifest.entry =~ "/"
+    end
+  end
+
+  test "every tutorial project strictly resolves its application and local artifact root" do
+    examples =
+      ~w(01-orders 02-deepseek-extract 03-file-agent 04-multi-turn-agent 05-signature-feedback)
+
+    for example <- examples do
+      project_path = Path.join(@examples, "#{example}.ptc-project.json")
+      assert {:ok, project} = ProjectConfig.load(project_path)
+      assert project.application == path(example)
+      assert project.artifact_root == Path.join([@examples, example, ".ptc"])
+      assert project.artifacts == %{trace: true, inspection: false, result: false, envelope: true}
+      assert project.viewer == %{port: 4123, open: true, repl: true, private: false}
+
+      if example in ~w(02-deepseek-extract 03-file-agent 04-multi-turn-agent) do
+        assert project.host == @host
+        assert project.env_file == Path.join(@examples, ".env")
+      else
+        assert project.host == nil
+        assert project.env_file == nil
+      end
     end
   end
 
