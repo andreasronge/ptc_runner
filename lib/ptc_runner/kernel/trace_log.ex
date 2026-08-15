@@ -36,9 +36,8 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.JSONValue
-  alias PtcRunner.Kernel.LLMUsage
+  alias PtcRunner.Kernel.LLMUsageSummary
   alias PtcRunner.Kernel.PrivateDirectory
-  alias PtcRunner.Kernel.ProviderSnapshot
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ResultIdentity
   alias PtcRunner.Kernel.ResultLimit
@@ -904,15 +903,13 @@ defmodule PtcRunner.Kernel.TraceLog do
       selected_run_events =
         Enum.filter(events, &MapSet.member?(selected_ids, &1["run_id"]))
 
-      model_lookup = llm_model_lookup(selected_run_events)
-
       selected =
         Enum.filter(
           selected_run_events,
           &mission_matches?(&1, arguments["mission_name"])
         )
 
-      result = selected |> counters(model_lookup) |> Map.merge(metadata)
+      result = selected |> counters(selected_run_events) |> Map.merge(metadata)
 
       with :ok <- ResultLimit.validate(result, max_result_bytes), do: {:ok, result}
     end
@@ -2673,10 +2670,7 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp event_mission_name(_event), do: nil
 
-  defp counters(events, model_lookup) do
-    {llm_usage, llm_usage_by_model, unattributed_model_calls} =
-      llm_usage_counters(events, model_lookup)
-
+  defp counters(events, attribution_events) do
     %{
       "events" => length(events),
       "runs" => events |> Enum.map(& &1["run_id"]) |> Enum.uniq() |> length(),
@@ -2684,149 +2678,9 @@ defmodule PtcRunner.Kernel.TraceLog do
       "evaluations" => Enum.count(events, &(&1["type"] == "evaluation-started")),
       "evaluations_by_mission" => evaluations_by_mission(events),
       "workflow_capability_calls" => capability_call_count(events, "workflow"),
-      "mission_capability_calls" => capability_call_count(events, "mission"),
-      "llm_usage" => llm_usage,
-      "llm_usage_by_model" => llm_usage_by_model,
-      "unattributed_model_calls" => unattributed_model_calls
+      "mission_capability_calls" => capability_call_count(events, "mission")
     }
-  end
-
-  defp llm_usage_counters(events, model_lookup) do
-    {alias_counters, model_counters, unattributed} =
-      events
-      |> Enum.filter(&llm_usage_event?/1)
-      |> Enum.reduce({%{}, %{}, 0}, fn event, {alias_counters, model_counters, unattributed} ->
-        alias_name = event_data(event, "alias")
-        revision = event_data(event, "installation_revision")
-        success? = stringify(event_data(event, "status")) == "ok"
-        usage = event_data(event, "usage")
-        alias_key = {alias_name, revision}
-
-        alias_counters =
-          update_llm_counter(
-            alias_counters,
-            alias_key,
-            Map.merge(empty_llm_usage_row(), %{
-              "alias" => alias_name,
-              "installation_revision" => revision
-            }),
-            usage,
-            success?
-          )
-
-        lookup_key = {event["run_id"], alias_name, revision}
-
-        case Map.get(model_lookup, lookup_key) do
-          {model, 1} ->
-            model_counters =
-              update_llm_counter(
-                model_counters,
-                model,
-                Map.put(empty_llm_usage_row(), "resolved_model", model),
-                usage,
-                success?
-              )
-
-            {alias_counters, model_counters, unattributed}
-
-          _missing_or_ambiguous ->
-            {alias_counters, model_counters, unattributed + 1}
-        end
-      end)
-
-    alias_rows =
-      alias_counters
-      |> Enum.sort_by(fn {{alias_name, revision}, _row} -> {alias_name, revision} end)
-      |> Enum.map(&elem(&1, 1))
-
-    model_rows =
-      model_counters
-      |> Enum.sort_by(&elem(&1, 0))
-      |> Enum.map(&elem(&1, 1))
-
-    {alias_rows, model_rows, unattributed}
-  end
-
-  defp llm_usage_event?(event) do
-    event["type"] == "capability-stopped" and
-      event_data(event, "name") == "llm-request" and
-      is_binary(event_data(event, "alias")) and
-      is_binary(event_data(event, "installation_revision"))
-  end
-
-  defp empty_llm_usage_row do
-    %{
-      "calls" => 0,
-      "successful_calls" => 0,
-      "usage_calls" => 0,
-      "missing_usage_calls" => 0,
-      "usage" => %{}
-    }
-  end
-
-  defp update_llm_counter(counters, key, initial, usage, success?) do
-    row =
-      counters
-      |> Map.get(key, initial)
-      |> Map.update!("calls", &(&1 + 1))
-      |> Map.update!("successful_calls", &(&1 + if(success?, do: 1, else: 0)))
-      |> update_usage_row(usage, success?)
-
-    Map.put(counters, key, row)
-  end
-
-  defp llm_model_lookup(events) do
-    events
-    |> Enum.filter(&(&1["type"] == "run-started"))
-    |> Enum.reduce(%{}, fn event, lookup ->
-      snapshots =
-        case event_data(event, "connector_snapshots", []) do
-          value when is_list(value) -> value
-          _invalid -> []
-        end
-
-      Enum.reduce(snapshots, lookup, &put_llm_snapshot(&2, event["run_id"], &1))
-    end)
-  end
-
-  defp put_llm_snapshot(lookup, run_id, snapshot) do
-    case ProviderSnapshot.llm_identity(snapshot) do
-      {:ok,
-       %{
-         alias: alias_name,
-         installation_revision: revision,
-         resolved_model: model
-       }} ->
-        key = {run_id, alias_name, revision}
-
-        Map.update(lookup, key, {model, 1}, fn {existing_model, count} ->
-          {existing_model, count + 1}
-        end)
-
-      :error ->
-        lookup
-    end
-  end
-
-  defp update_usage_row(row, usage, true) when is_map(usage) do
-    case LLMUsage.normalize(usage) do
-      {:ok, normalized} ->
-        row
-        |> Map.update!("usage_calls", &(&1 + 1))
-        |> Map.update!("usage", &sum_usage(&1, normalized))
-
-      {:error, :invalid_llm_usage} ->
-        Map.update!(row, "missing_usage_calls", &(&1 + 1))
-    end
-  end
-
-  defp update_usage_row(row, _usage, true),
-    do: Map.update!(row, "missing_usage_calls", &(&1 + 1))
-
-  defp update_usage_row(row, _usage, false), do: row
-
-  defp sum_usage(left, right) do
-    Map.merge(left, right, fn _key, first, second -> first + second end)
+    |> Map.merge(LLMUsageSummary.summarize(events, attribution_events))
   end
 
   defp capability_call_count(events, environment) do

@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.LLMReplayDiagnostic
+  alias PtcRunner.Kernel.LLMUsageSummary
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.ResultContractDiagnostic
@@ -173,7 +174,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     do: %{"state" => "incomplete", "usage" => nil, "evaluation_memory" => nil}
 
   defp project_success(
-         %{result: {:ok, %Result{} = result}},
+         %{result: {:ok, %Result{} = result}} = evidence,
          result_class,
          artifact_state,
          run_ref,
@@ -181,7 +182,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
        )
        when result_class in [:normal, :private] do
     with {:ok, value} <- public_value(result_class, result.value),
-         {:ok, usage} <- usage_projection(result.usage),
+         {:ok, usage} <- usage_projection(result.usage, Map.get(evidence, :terminal_batch)),
          {:ok, evaluation_memory} <- evaluation_memory_projection(result.evaluation_memory) do
       {:ok,
        CommandOutcome.run_success(
@@ -470,8 +471,8 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     end
   end
 
-  defp execution_evidence(%{result: {:ok, %Result{} = result}}) do
-    with {:ok, usage} <- usage_projection(result.usage),
+  defp execution_evidence(%{result: {:ok, %Result{} = result}} = evidence) do
+    with {:ok, usage} <- usage_projection(result.usage, Map.get(evidence, :terminal_batch)),
          {:ok, memory} <- evaluation_memory_projection(result.evaluation_memory) do
       %{
         "state" => "finished",
@@ -485,9 +486,9 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     end
   end
 
-  defp execution_evidence(%{result: {:error, %Error{usage: usage}}}) do
+  defp execution_evidence(%{result: {:error, %Error{usage: usage}}} = evidence) do
     usage =
-      case usage_projection(usage) do
+      case usage_projection(usage, Map.get(evidence, :terminal_batch)) do
         {:ok, value} -> value
         _invalid -> nil
       end
@@ -500,26 +501,45 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   defp public_value(:private, _value), do: {:ok, nil}
   defp public_value(:normal, value), do: json_value(value)
 
-  defp usage_projection(usage) when is_map(usage) do
+  defp usage_projection(usage, terminal_batch) when is_map(usage) do
     with {:ok, capability_calls} <- capability_calls(Map.get(usage, :capability_calls)),
          {:ok, evaluations_by_mission} <-
            count_map(Map.get(usage, :evaluations_by_mission, %{})),
          {:ok, events_dropped} <- count_map(Map.get(usage, :events_dropped, %{})),
-         values <- %{
-           "remaining_ms" => Map.get(usage, :remaining_ms),
-           "capability_calls" => capability_calls,
-           "subordinate_evaluations" => Map.get(usage, :subordinate_evaluations),
-           "evaluations_by_mission" => evaluations_by_mission,
-           "protocol_errors" => Map.get(usage, :protocol_errors),
-           "evaluation_memory_bytes" => Map.get(usage, :evaluation_memory_bytes),
-           "evaluation_history_bytes" => Map.get(usage, :evaluation_history_bytes),
-           "evaluation_continuation_bytes" => Map.get(usage, :evaluation_continuation_bytes),
-           "events_dropped" => events_dropped
-         },
+         values <-
+           %{
+             "remaining_ms" => Map.get(usage, :remaining_ms),
+             "capability_calls" => capability_calls,
+             "subordinate_evaluations" => Map.get(usage, :subordinate_evaluations),
+             "evaluations_by_mission" => evaluations_by_mission,
+             "protocol_errors" => Map.get(usage, :protocol_errors),
+             "evaluation_memory_bytes" => Map.get(usage, :evaluation_memory_bytes),
+             "evaluation_history_bytes" => Map.get(usage, :evaluation_history_bytes),
+             "evaluation_continuation_bytes" => Map.get(usage, :evaluation_continuation_bytes),
+             "events_dropped" => events_dropped
+           }
+           |> Map.merge(llm_usage_projection(terminal_batch)),
          true <-
            Enum.all?(values, fn
-             {_key, value} when is_map(value) -> true
-             {_key, value} -> nonnegative?(value)
+             {_key, value} when is_map(value) ->
+               true
+
+             {_key, value} when is_list(value) ->
+               true
+
+             {"llm_usage_state", value} ->
+               value in ["available", "unavailable"]
+
+             {key, nil}
+             when key in [
+                    "llm_usage",
+                    "llm_usage_by_model",
+                    "unattributed_model_calls"
+                  ] ->
+               true
+
+             {_key, value} ->
+               nonnegative?(value)
            end) do
       {:ok, values}
     else
@@ -527,7 +547,25 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     end
   end
 
-  defp usage_projection(_usage), do: {:error, :invalid_usage}
+  defp usage_projection(_usage, _terminal_batch), do: {:error, :invalid_usage}
+
+  defp llm_usage_projection({:ok, events}) do
+    case LLMUsageSummary.terminal(events) do
+      {:ok, summary} -> Map.put(summary, "llm_usage_state", "available")
+      {:error, :invalid_event_batch} -> unavailable_llm_usage()
+    end
+  end
+
+  defp llm_usage_projection(_terminal_batch), do: unavailable_llm_usage()
+
+  defp unavailable_llm_usage do
+    %{
+      "llm_usage_state" => "unavailable",
+      "llm_usage" => nil,
+      "llm_usage_by_model" => nil,
+      "unattributed_model_calls" => nil
+    }
+  end
 
   defp capability_calls(calls) when is_map(calls) do
     Enum.reduce_while(calls, {:ok, %{}}, fn

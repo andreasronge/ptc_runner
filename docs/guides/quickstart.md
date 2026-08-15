@@ -67,7 +67,12 @@ The `PTC_ENV_FILE` fallback above uses the `.env` you just created. Automation
 may point it at another explicitly named environment file. Each pasted run
 reserves a fresh public command envelope under the Git-ignored `tmp/` directory
 so you can inspect its usage and continuation summary without replacing an
-earlier run.
+earlier run. `execution.usage.llm_usage` reports calls, tokens, and provider
+cost grouped by the selected alias and revision;
+`execution.usage.llm_usage_by_model` gives the safely attested model view.
+Check `llm_usage_state` before reading either array: `"unavailable"` means the
+runtime could not validate the terminal event evidence, not that the run cost
+zero.
 
 [`ptc-host.json`](../../examples/kernel-tutorial/ptc-host.json) is the operator
 document: it maps the `deepseek` alias to a model and binds it to the

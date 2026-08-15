@@ -731,17 +731,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
     private_artifacts = %{artifacts | "result" => "written"}
 
-    usage = %{
-      "remaining_ms" => 0,
-      "capability_calls" => %{},
-      "subordinate_evaluations" => 0,
-      "evaluations_by_mission" => %{},
-      "protocol_errors" => 0,
-      "evaluation_memory_bytes" => 0,
-      "evaluation_history_bytes" => 0,
-      "evaluation_continuation_bytes" => 0,
-      "events_dropped" => %{}
-    }
+    usage = usage_fixture()
 
     memory = %{
       "defined_count" => 0,
@@ -864,17 +854,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
           "inspection" => "not_requested",
           "result" => "not_requested"
         },
-        %{
-          "remaining_ms" => 0,
-          "capability_calls" => %{},
-          "subordinate_evaluations" => 0,
-          "evaluations_by_mission" => %{},
-          "protocol_errors" => 0,
-          "evaluation_memory_bytes" => 0,
-          "evaluation_history_bytes" => 0,
-          "evaluation_continuation_bytes" => 0,
-          "events_dropped" => %{}
-        },
+        usage_fixture(),
         %{
           "defined_count" => 0,
           "history_count" => 0,
@@ -1004,5 +984,23 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     )
   rescue
     ArgumentError -> false
+  end
+
+  defp usage_fixture do
+    %{
+      "remaining_ms" => 0,
+      "capability_calls" => %{},
+      "subordinate_evaluations" => 0,
+      "evaluations_by_mission" => %{},
+      "protocol_errors" => 0,
+      "evaluation_memory_bytes" => 0,
+      "evaluation_history_bytes" => 0,
+      "evaluation_continuation_bytes" => 0,
+      "events_dropped" => %{},
+      "llm_usage_state" => "available",
+      "llm_usage" => [],
+      "llm_usage_by_model" => [],
+      "unattributed_model_calls" => 0
+    }
   end
 end

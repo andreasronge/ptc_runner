@@ -76,6 +76,18 @@ The command envelope reports the run reference and artifact class, not artifact
 paths. Output, trace, inspection, and envelope destinations must be distinct.
 All publications are no-replace and recheck their destination at commit time.
 
+For runs that produce a validated terminal event batch, `execution.usage`
+includes `llm_usage` grouped by alias and installation revision,
+`llm_usage_by_model` grouped by an attested public resolved model, and
+`unattributed_model_calls`. Rows report call counts, usage-presence counts, and
+summed token and `total_cost` values. A row includes `total_cost` only when
+every successful call has valid usage that reports cost; otherwise the
+aggregate cost remains unknown and is omitted, not reported as zero.
+`llm_usage_state: "unavailable"` pairs all three
+aggregate fields with `null` when terminal evidence cannot be validated, while
+preserving other known usage. Non-empty `events_dropped` means an available
+summary covers retained evidence and may not be complete.
+
 Artifact publication currently requires a Unix host with POSIX-compatible
 `mkdir` and `id`; trace append also needs `sh` and either `lockf` or `flock`.
 Private artifacts and newly created traces require trusted ancestry, safe

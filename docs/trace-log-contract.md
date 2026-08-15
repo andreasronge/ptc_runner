@@ -494,12 +494,15 @@ compares canonical and inspection sequence values.
 Provider response usage omits `total_cost` when pricing is unavailable. A
 present zero is therefore a measured zero-cost response, not an unknown cost.
 
-For routed `llm-request` calls, `llm_usage` groups stopped events by model alias
-and installation revision. Each row reports total and successful calls, calls
-with valid usage, successful calls missing usage, and sums of the closed
-`input`, `output`, `cache_creation`, `cache_read`, and `total_cost` fields. A
-revision change creates a separate row rather than silently combining unlike
-deployments.
+The canonical LLM usage summary is shared by trace counters and the V2 run
+envelope's `execution.usage`. For routed `llm-request` calls, `llm_usage` groups
+stopped events by model alias and installation revision. Each row reports total
+and successful calls, calls with valid usage, successful calls missing usage,
+and sums of the closed `input`, `output`, `cache_creation`, `cache_read`, and
+`total_cost` fields. A row includes aggregate `total_cost` only when every
+successful call has valid usage that reports cost; otherwise cost is unknown
+and omitted. A revision change creates a separate row rather than silently
+combining unlike deployments.
 
 `llm_usage_by_model` groups the same eligible stopped calls by the exact
 adapter-attested `resolved_model` stored in that run's LLM provider snapshot.
@@ -523,6 +526,10 @@ Snapshot lookup uses all events from the run-filter-selected runs before a
 mission filter narrows counted calls. Capability events continue to carry only
 alias/revision routing identity; they do not duplicate model identity. The
 additional rows remain subject to the existing aggregate result-byte limit.
+The command envelope additionally publishes `llm_usage_state`; unavailable or
+invalid terminal evidence produces `"unavailable"` with null aggregate fields,
+whereas a validated run with no calls produces `"available"`, empty arrays,
+and zero unattributed calls.
 
 ## Pagination, ordering, and bounds
 

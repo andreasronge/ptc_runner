@@ -490,6 +490,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              CommandRunOutcome.project(evidence, settlement, run_ref, true)
 
     assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert outcome.envelope["execution"]["usage"]["llm_usage_state"] == "unavailable"
+    assert outcome.envelope["execution"]["usage"]["llm_usage"] == nil
 
     assert outcome.envelope["error"]["message"] ==
              "subordinate_evaluations limit 4 was exceeded; raise the manifest or host ceiling, or reduce total subordinate evaluations or agent turns"
@@ -3408,6 +3410,45 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       put_in(classified, ["execution", "usage", "events_dropped"], %{"$overflow" => 1})
     )
 
+    llm_row = %{
+      "alias" => "writer",
+      "installation_revision" => "stable-v1",
+      "calls" => 1,
+      "successful_calls" => 1,
+      "usage_calls" => 1,
+      "missing_usage_calls" => 0,
+      "usage" => %{"input" => 4}
+    }
+
+    with_llm =
+      classified
+      |> put_in(["execution", "usage", "llm_usage"], [llm_row])
+      |> put_in(["execution", "usage", "unattributed_model_calls"], 1)
+
+    assert_schema_valid(with_llm)
+
+    for invalid <- [
+          put_in(with_llm, ["execution", "usage", "llm_usage", Access.at(0), "extra"], true),
+          put_in(
+            with_llm,
+            ["execution", "usage", "llm_usage", Access.at(0), "alias"],
+            "Bad Alias"
+          ),
+          put_in(
+            with_llm,
+            ["execution", "usage", "llm_usage", Access.at(0), "usage", "total_cost"],
+            "unknown"
+          ),
+          put_in(
+            with_llm,
+            ["execution", "usage", "llm_usage"],
+            List.duplicate(llm_row, 129)
+          ),
+          put_in(with_llm, ["execution", "usage", "llm_usage_state"], "unavailable")
+        ] do
+      assert_schema_invalid(invalid)
+    end
+
     assert_schema_invalid(
       put_in(classified, ["execution"], %{
         finished_ok
@@ -6123,7 +6164,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "evaluation_memory_bytes" => 0,
       "evaluation_history_bytes" => 0,
       "evaluation_continuation_bytes" => 0,
-      "events_dropped" => %{"provider-call" => 2}
+      "events_dropped" => %{"provider-call" => 2},
+      "llm_usage_state" => "available",
+      "llm_usage" => [],
+      "llm_usage_by_model" => [],
+      "unattributed_model_calls" => 0
     }
   end
 
