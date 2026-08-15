@@ -107,8 +107,15 @@ function decodeCursor(
       throw new ToolError('cursor is not valid')
     }
     const [payload, encodedSignature] = parts as [string, string]
-    const signature = Buffer.from(encodedSignature, 'base64url')
-    const expected = createHmac('sha256', cursorKey(snapshot)).update(payload, 'ascii').digest()
+    // Compare the encoded signatures, not the decoded bytes. The trailing bits
+    // of a base64url digest are not significant, so several spellings decode to
+    // the same 32 bytes; comparing decoded buffers would admit cursor strings
+    // this server never issued.
+    const signature = Buffer.from(encodedSignature, 'ascii')
+    const expected = Buffer.from(
+      createHmac('sha256', cursorKey(snapshot)).update(payload, 'ascii').digest('base64url'),
+      'ascii',
+    )
     if (signature.length !== expected.length || !timingSafeEqual(signature, expected)) {
       throw new ToolError('cursor is not valid')
     }
