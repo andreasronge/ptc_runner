@@ -12,23 +12,25 @@ defmodule PtcRunner.Kernel.RunAnalysisRelationships do
         {run_id, projection.evidence}
       end)
 
-    preludes_by_run = Enum.group_by(collections.effective_preludes, & &1["run_id"])
     sources_by_run = Enum.group_by(collections.generated_sources, & &1["run_id"])
+
+    # Both prelude relation builders answer the same question — how many
+    # captured preludes match one exact occurrence — so index it once instead
+    # of rescanning the run's preludes per edge. A large accepted capture can
+    # hold every component of a workflow and sixteen missions.
+    occurrences = Enum.frequencies_by(collections.effective_preludes, &occurrence_key/1)
+    graphs = indexed_graphs(collections.effective_preludes, trace_facts)
 
     effective_preludes =
       Enum.map(collections.effective_preludes, fn prelude ->
-        Map.put(
-          prelude,
-          "relationships",
-          dependency_relations(prelude, trace_facts, preludes_by_run)
-        )
+        Map.put(prelude, "relationships", dependency_relations(prelude, graphs, occurrences))
       end)
 
     generated_sources =
       Enum.map(collections.generated_sources, fn source ->
         relationships =
           [producing_turn_relation(source, turns_by_run, turn_evidence_by_run)] ++
-            prelude_relations(source, preludes_by_run)
+            prelude_relations(source, occurrences)
 
         Map.put(source, "relationships", relationships)
       end)
@@ -105,20 +107,19 @@ defmodule PtcRunner.Kernel.RunAnalysisRelationships do
   # its own dependency edges. Qualify every dependency edge with the
   # occurrence that owns it, and refuse to guess when the frozen positional
   # graph does not hold.
-  defp dependency_relations(prelude, trace_facts, preludes_by_run) do
-    with {:ok, graph} <- prelude_graph(prelude, trace_facts),
-         {:ok, component_ids, dependency_indices} <- validated_graph(graph),
-         index when is_integer(index) <-
-           Enum.find_index(component_ids, &(&1 == prelude["component_id"])) do
-      dependency_indices
-      |> Enum.at(index)
+  defp dependency_relations(prelude, graphs, occurrences) do
+    with {:ok, component_ids, positions, dependency_rows} <-
+           Map.get(graphs, graph_key(prelude), :error),
+         {:ok, index} <- Map.fetch(positions, prelude["component_id"]) do
+      dependency_rows
+      |> elem(index)
       |> Enum.map(fn dependency_index ->
-        filters = prelude_filters(prelude, Enum.at(component_ids, dependency_index))
+        dependency_id = elem(component_ids, dependency_index)
+        filters = prelude_filters(prelude, dependency_id)
 
         state =
-          preludes_by_run
-          |> Map.get(prelude["run_id"], [])
-          |> Enum.count(&prelude_matches?(&1, filters))
+          occurrences
+          |> Map.get(occurrence_key(prelude, dependency_id), 0)
           |> relation_state()
 
         relation("dependency_prelude_source", "dependency", "prelude_sources", filters, state)
@@ -137,17 +138,45 @@ defmodule PtcRunner.Kernel.RunAnalysisRelationships do
     end
   end
 
-  defp prelude_graph(%{"run_id" => run_id, "environment" => "workflow"}, trace_facts),
+  # One graph per environment occurrence, validated and indexed once. Tuples
+  # and a position map keep every later lookup constant-time.
+  defp indexed_graphs(preludes, trace_facts) do
+    preludes
+    |> Enum.map(&graph_key/1)
+    |> Enum.uniq()
+    |> Map.new(fn key -> {key, key |> prelude_graph(trace_facts) |> indexed_graph()} end)
+  end
+
+  defp indexed_graph({:ok, graph}) do
+    case validated_graph(graph) do
+      {:ok, component_ids, dependency_indices} ->
+        positions = component_ids |> Enum.with_index() |> Map.new()
+
+        {:ok, List.to_tuple(component_ids), positions, List.to_tuple(dependency_indices)}
+
+      :error ->
+        :error
+    end
+  end
+
+  defp indexed_graph(:error), do: :error
+
+  defp graph_key(prelude),
+    do: {prelude["run_id"], prelude["environment"], prelude["mission_name"]}
+
+  defp occurrence_key(prelude), do: occurrence_key(prelude, prelude["component_id"])
+
+  defp occurrence_key(item, component_id),
+    do: {item["run_id"], item["environment"], item["mission_name"], component_id}
+
+  defp prelude_graph({run_id, "workflow", nil}, trace_facts),
     do: fetch_graph(get_in(trace_facts, [run_id, "workflow_prelude"]))
 
-  defp prelude_graph(
-         %{"run_id" => run_id, "environment" => "mission", "mission_name" => mission_name},
-         trace_facts
-       )
+  defp prelude_graph({run_id, "mission", mission_name}, trace_facts)
        when is_binary(mission_name),
        do: fetch_graph(get_in(trace_facts, [run_id, "missions", mission_name, "prelude"]))
 
-  defp prelude_graph(_prelude, _trace_facts), do: :error
+  defp prelude_graph(_key, _trace_facts), do: :error
 
   defp fetch_graph(graph) when is_map(graph), do: {:ok, graph}
   defp fetch_graph(_graph), do: :error
@@ -185,12 +214,6 @@ defmodule PtcRunner.Kernel.RunAnalysisRelationships do
   defp prelude_filters(prelude, component_id) do
     %{"component_id" => component_id, "environment" => prelude["environment"]}
     |> maybe_put("mission_name", prelude["mission_name"])
-  end
-
-  defp prelude_matches?(prelude, filters) do
-    prelude["component_id"] == filters["component_id"] and
-      prelude["environment"] == filters["environment"] and
-      prelude["mission_name"] == filters["mission_name"]
   end
 
   defp relation_state(0), do: "unavailable"
@@ -482,41 +505,29 @@ defmodule PtcRunner.Kernel.RunAnalysisRelationships do
 
   defp ambiguous_turn_match?(_matches, _evaluation_id), do: true
 
-  defp prelude_relations(%{"prelude_calls_available?" => false}, _preludes_by_run) do
+  defp prelude_relations(%{"prelude_calls_available?" => false}, _occurrences) do
     [relation("referenced_prelude_source", "association", "prelude_sources", nil, "incomplete")]
   end
 
-  defp prelude_relations(source, preludes_by_run) do
+  defp prelude_relations(source, occurrences) do
     source
     |> Map.get("prelude_calls", [])
     |> Enum.map(& &1["component_id"])
     |> Enum.uniq()
     |> Enum.sort()
     |> Enum.map(fn component_id ->
-      filters =
-        %{
-          "component_id" => component_id,
-          "environment" => source["environment"]
-        }
-        |> maybe_put("mission_name", source["mission_name"])
-
-      matches =
-        preludes_by_run
-        |> Map.get(source["run_id"], [])
-        |> Enum.count(fn prelude ->
-          prelude["component_id"] == component_id and
-            prelude["environment"] == source["environment"] and
-            prelude["mission_name"] == source["mission_name"]
-        end)
-
       state =
-        case matches do
-          0 -> "unavailable"
-          1 -> "complete"
-          _many -> "ambiguous"
-        end
+        occurrences
+        |> Map.get(occurrence_key(source, component_id), 0)
+        |> relation_state()
 
-      relation("referenced_prelude_source", "association", "prelude_sources", filters, state)
+      relation(
+        "referenced_prelude_source",
+        "association",
+        "prelude_sources",
+        prelude_filters(source, component_id),
+        state
+      )
     end)
   end
 

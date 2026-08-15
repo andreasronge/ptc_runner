@@ -594,6 +594,54 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     end
   end
 
+  test "prelude dependency relations stay exact at the accepted capture ceiling" do
+    # A manifest may install 128 components per environment across 16 missions,
+    # so the relationship pass must index occurrences rather than rescan the
+    # run's preludes per edge. This also repeats every component ID in every
+    # mission, which is the case a bare component ID cannot distinguish.
+    missions = Enum.map(1..16, &"mission-#{&1}")
+    component_ids = Enum.map(0..127, &"component.#{&1}")
+
+    # Each component depends on its immediate predecessor: a 128-deep chain
+    # that satisfies the strictly-earlier-position rule.
+    dependency_indices = [[] | Enum.map(1..127, &[&1 - 1])]
+
+    preludes =
+      for mission <- missions, component_id <- component_ids do
+        prelude("mission", mission, component_id)
+      end
+
+    collections = prelude_collections(preludes)
+
+    trace_facts = %{
+      "run" => %{
+        "missions" =>
+          Map.new(missions, fn mission ->
+            {mission, %{"prelude" => graph(component_ids, dependency_indices)}}
+          end)
+      }
+    }
+
+    attached = RunAnalysisRelationships.attach(collections, trace_facts)
+    assert length(attached.effective_preludes) == 16 * 128
+
+    # Every edge resolves to its own mission's copy, never another mission's.
+    for mission <- ["mission-1", "mission-9", "mission-16"] do
+      assert dependency_relations(attached, "mission", mission, "component.0") == []
+
+      assert [
+               %{
+                 "filters" => %{
+                   "component_id" => "component.126",
+                   "environment" => "mission",
+                   "mission_name" => ^mission
+                 },
+                 "state" => "complete"
+               }
+             ] = dependency_relations(attached, "mission", mission, "component.127")
+    end
+  end
+
   test "generated entries embedded in turns carry the same relationships as generated_sources" do
     source = %{
       "run_id" => "run",
