@@ -6,8 +6,7 @@
     "path": "debugger-agent/ptc.json"
   },
   "host": {
-    "path": "ptc-host.json",
-    "env_file": {"path": ".env"}
+    "path": "ptc-host.json"
   },
   "artifacts": {
     "root": "debugger-agent/.ptc",

@@ -262,10 +262,11 @@ supported diagnosis. Confirming it is a separate step: edit
 
 The same mission works for an agent. `debugger-agent/` in the example replaces
 the deterministic walk with the shipped agent loop over the same authority. It
-is the one part of the example that needs a credential:
+is the one part of the example that needs a credential, named on the command
+line so no environment file has to live inside the example directory:
 
 ```console
-mix ptc run examples/debug-a-failed-run/debugger-agent.ptc-project.json
+mix ptc run examples/debug-a-failed-run/debugger-agent.ptc-project.json --env-file .env
 ```
 
 Keep `debug.nav` as the mission's only domain authority and select a model into
@@ -327,12 +328,14 @@ and returned a report missing a single required field. The bounded contract
 feedback named exactly that field; the model resumed exploring instead of
 correcting. Stating the contract's fields in the task removed the problem.
 
-**Correct evidence does not make a correct diagnosis.** The final live run
-returned a contract-valid `diagnosed` report whose five evidence lines were all
-accurate and all genuinely read — and whose conclusion was wrong. It blamed the
-component that never calls the unused decoy, rather than the rule that adds the
-wrong amount. Nothing in the substrate could have prevented that, because the
-substrate deliberately does not choose a diagnosis.
+**Correct evidence does not make a correct diagnosis.** Two live runs of the
+identical configuration reached the same complete evidence and answered
+differently: one returned `insufficient-evidence`, the other a confident
+`diagnosed` report whose five evidence lines were all accurate and genuinely
+read, and whose conclusion was wrong — it blamed the component that never calls
+the unused decoy rather than the rule that adds the wrong amount. Nothing in
+the substrate could have prevented that, because the substrate deliberately
+does not choose a diagnosis. Treat a single sample as one opinion.
 
 That last point is the reason this layer stops where it does. Where a claim is
 mechanically testable, test it: apply the proposed change and run it against

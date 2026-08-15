@@ -53,11 +53,12 @@ mix ptc run examples/debug-a-failed-run/target.ptc-project.json
 ## Optional: let a model walk it
 
 `debugger-agent/` runs the shipped agent loop over the same authority. It is
-the one part of this example that needs a credential, so create `.env` beside
-this README with `OPENROUTER_API_KEY=...` first:
+the one part of this example that needs a credential. Name the environment file
+on the command line rather than placing one in this directory, which ships
+inside the published package:
 
 ```console
-mix ptc run examples/debug-a-failed-run/debugger-agent.ptc-project.json
+mix ptc run examples/debug-a-failed-run/debugger-agent.ptc-project.json --env-file .env
 cat examples/debug-a-failed-run/debugger-agent/.ptc/results/*.private.json
 ```
 
@@ -66,11 +67,11 @@ Selecting the inspection snapshot fixes the run's class to
 `"accepts_data": ["normal", "private_inspection"]`. That is an operator
 decision to send captured private evidence to a model vendor.
 
-A verified live run reached the whole chain and returned a contract-valid
-report whose evidence lines were accurate — and whose conclusion blamed
-`orders` for not calling the unused decoy rather than the rule that adds the
-wrong amount. That is the point of the decoy, and the reason this layer reports
-evidence instead of choosing a diagnosis.
+Two live runs of this configuration reached the same complete evidence and
+answered differently: one abstained, the other confidently blamed `orders` for
+not calling the unused decoy rather than the rule that adds the wrong amount.
+That is the point of the decoy, and the reason this layer reports evidence
+instead of choosing a diagnosis.
 
 ## What each file does
 
