@@ -307,3 +307,65 @@ path relative to the shell working directory. Supplying the repository-relative
 path produced `application/reference_missing` with source `input.json`; using
 the basename succeeded. The run guide says that `--input INPUT.json` replaces
 the manifest input but does not state this resolution rule.
+
+## Host-preloaded context experiment
+
+The follow-up removed context acquisition from the model loop. An
+experiment-local workflow now evaluates the same `debug.case/context` program
+deterministically with `kernel/eval-with`, serializes its result into an
+explicitly untrusted block in the initial user message, and then starts
+`agent.core`. The model gets all four turns for reasoning and its separate
+`investigate` mission contains only `debug.nav`; it cannot call or recompute
+the case projection.
+
+The matrix reused both incidents, the same generic diagnosis request, the same
+result contract, and the four-call ceiling:
+
+| Incident | Model | Debugger run | Result | Model / evidence calls |
+| --- | --- | --- | --- | --- |
+| invalid root action | Luna | `cmd-35qgq0yrpysaxge2h0maxejege` | correct cause and correction | 1 / 7 |
+| invalid root action | DeepSeek | `cmd-4p08at6v1crhmt6b48b4hjgjms` | turn limit without report | 4 / 10 |
+| transitive pricing defect | Luna | `cmd-2b5ve76z6cm1hwgzzn0xdty4z0` | correct cause and correction | 1 / 9 |
+| transitive pricing defect | DeepSeek | `cmd-58ghmkqzm9f3jdcn1gnhe4vr9v` | correct cause and correction | 3 / 9 |
+
+PTC private analysis verified the input boundary rather than assuming the
+wrapper worked. Both protocol runs received a 14,609-character initial message
+containing the generated `(return (debug.nav/runs ...))` source, accepted
+`debug.rlm/investigate` action contract, working set, and no truncation marker.
+Both pricing runs received a 4,963-character message containing the external
+plus-20 requirement, `pricing.rule`, its `(+ subtotal 2)` source, the complete
+working set, and no truncation marker.
+
+Luna returned directly on turn one in both cases without calling `debug.nav`.
+For the protocol run it distinguished a successful navigation call from the
+workflow's rejection of its raw result and recommended crossing the boundary
+with `debug.rlm/investigate` or `debug.rlm/finish`. For the pricing run it
+followed the captured `orders -> pricing.tax -> pricing.rule` source chain,
+computed 102 versus 120, and recommended changing the rule from 2 to 20.
+
+DeepSeek also solved the unrelated pricing case without navigation. Its first
+program invented a `DATA` file and unavailable `json/decode`; normal language
+feedback listed the valid JSON functions. It then printed the diagnosis it had
+already derived from the initial packet and returned the correct report on
+turn three. This is avoidable model ceremony, but not missing incident evidence.
+
+On the protocol case DeepSeek had no language, evaluation, or result-contract
+failure. It defined an `open-run` helper, reopened the already projected run,
+then read workflow activity and execution errors. It exhausted the limit without
+synthesizing, despite the complete packet and consolidation instruction. That
+remaining failure is evidence-size or stopping behavior, not acquisition.
+
+The result clears the main confound and rejects the strongest overfitting
+concern: the same structural startup shape enabled correct one-turn Luna
+diagnoses on two unrelated failure classes and a correct DeepSeek diagnosis on
+the functional defect. It does not yet establish a model-independent product.
+The projection still uses experiment-specific working sets, and a complete
+14.6K packet was not sufficient to make DeepSeek stop on the more abstract
+protocol failure.
+
+The next useful comparison is therefore smaller, not deeper: preserve the same
+observed facts but project a compact incident header before the expandable
+details—for example failure boundary, generated program, consuming contract,
+and working-set references. Run only the failing DeepSeek/protocol cell first.
+If it returns, packet salience was the issue; if it still explores, the runtime
+needs a stronger bounded-synthesis affordance rather than more navigation APIs.

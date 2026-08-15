@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "debug.preloaded", "path": "preloaded.clj", "dependencies": ["agent.core", "kernel"]},
+      {"library": "agent.core"},
+      {"library": "kernel"}
+    ],
+    "entry": "debug.preloaded/run"
+  },
+  "missions": {
+    "case": {
+      "components": [
+        {"library": "debug.nav"},
+        {"id": "debug.workspace", "path": "workspace.clj", "dependencies": ["debug.nav"]},
+        {"id": "debug.case", "path": "case.clj", "dependencies": ["debug.nav", "debug.workspace"]}
+      ],
+      "providers": ["history", "debug.nav"]
+    },
+    "case-deep": {
+      "components": [
+        {"library": "debug.nav"},
+        {"id": "debug.workspace", "path": "workspace-deep.clj", "dependencies": ["debug.nav"]},
+        {"id": "debug.case", "path": "case.clj", "dependencies": ["debug.nav", "debug.workspace"]}
+      ],
+      "providers": ["history", "debug.nav"]
+    },
+    "investigate": {
+      "components": [{"library": "debug.nav"}],
+      "providers": ["history", "debug.nav"]
+    }
+  },
+  "input": {"path": "input-preloaded-action.json"},
+  "providers": {
+    "workflow": [{"name": "agent_model"}],
+    "mission": [
+      {"name": "history", "config": {"expose": false}},
+      {"name": "debug.nav"}
+    ]
+  },
+  "contracts": {"result_schema": {"path": "report.schema.json"}},
+  "limits": {
+    "run_duration_ms": 300000,
+    "workflow_timeout_ms": 300000,
+    "evaluation_timeout_ms": 30000,
+    "subordinate_evaluations": 8,
+    "workflow_capability_calls": 16,
+    "workflow_capability_calls_per_name": 16,
+    "mission_capability_calls": 64,
+    "mission_capability_calls_per_name": 64,
+    "normal_event_count": 4096
+  },
+  "labels": {
+    "name": "self-repair-preloaded-context",
+    "tags": {"mode": "agent", "stage": "validating", "suite": "e2e"}
+  }
+}
