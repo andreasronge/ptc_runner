@@ -25,6 +25,10 @@ mix ptc init hello-ptc
 mix ptc run hello-ptc/ptc-project.json
 ```
 
+```json
+{}
+```
+
 The generated project is provider-free: it runs immediately, records a trace,
 and remembers its Viewer settings. See
 [Project configuration](docs/guides/project-configuration.md) for the
@@ -45,11 +49,11 @@ flowchart TB
   mf["Project manifest<br/>selects installed names and narrows limits<br/>cannot grant authority"]
 
   subgraph WF["Workflow environment — trusted"]
-    wp["replaceable preludes: agent.core, agent.prompt<br/>may call the model"]
+    wp["chooses the task, model, and retry policy"]
   end
 
   subgraph MS["Mission environment — confined"]
-    mp["replaceable preludes: cap, result, your domain API<br/>task tools only — no model, no re-entry"]
+    mp["runs model-authored PTC-Lisp<br/>task tools only — no model, no re-entry"]
   end
 
   op ==>|grants| WF
@@ -63,8 +67,7 @@ flowchart TB
 Authority flows one way: the operator grants it, the project may only select
 and narrow it, and generated code runs in the environment that was given the
 least. The mission returns a bounded value to the workflow, which decides
-whether to continue. The preludes are ordinary PTC-Lisp you can replace
-without touching either boundary.
+whether to continue.
 
 - **The language has no escape hatches.** PTC-Lisp is a small, eager subset of
   Clojure. There is no `eval`, no macros, no host interop, no lazy or infinite
@@ -115,30 +118,24 @@ A project is some PTC-Lisp files plus a small JSON manifest naming the entry
 function, input, providers, and limits. The runtime owns credentials, tool
 implementations, timeouts, memory limits, and cleanup.
 
+Three JSON documents keep those responsibilities separate:
+
+| File | Owner | Purpose |
+| --- | --- | --- |
+| `ptc.json` | Application author or model | Workflow, components, input, provider selections, and narrower limits |
+| `ptc-host.json` | Operator | Installed providers, credential references, commands, endpoints, and outer limits |
+| `ptc-project.json` | Operator or project checkout | Stable paths, local artifact policy, and Viewer preferences |
+
 A failed program is useful rather than fatal: definitions from successful turns
 stay available, failed attempts roll back cleanly, and the model gets a bounded
 correction message instead of a stack trace.
 
 ## Swap the agent loop
 
-The agent loop is not fixed inside the runtime. Prompts, retries, planning,
-memory, delegation, and completion rules are ordinary PTC-Lisp libraries called
-preludes, which compile into the frozen bundle a run executes. They work at
-three levels:
-
-- **Runtime:** safe wrappers for models, tools, results, and evaluation.
-- **Agent:** prompt, feedback, retry, memory, delegation, and workflow policy.
-- **Domain:** task-specific functions that combine lower-level tools into a
-  smaller API for the model.
-
-The shipped `agent.core` loop is one such library, and `agent.prompt` is a
-separate seam beside it: its `initial-state`, `render`, and `transition`
-functions are what you replace to change how a model is instructed, without
-touching the retry and evaluation machinery. The model sees the rendered
-interface — documented, optionally signed functions — not the prelude source.
-
-So you can experiment with agent behavior by editing PTC-Lisp, while the trusted
-host application stays unchanged.
+The shipped loop is ordinary PTC-Lisp rather than fixed runtime behavior. After
+the first model run, [Building agents](docs/guides/building-agents.md) shows how
+to use it, separate workflow and mission authority, and replace prompt policy
+without changing the trusted host.
 
 ## See what happened
 
@@ -147,10 +144,11 @@ limits, and resource use. They deliberately contain no prompts, model responses,
 tool payloads, or generated source.
 
 Analyzing them is itself a bounded run. The shipped `analysis` prelude exposes
-six question-shaped reads—runs, overview, activity, conversation, failure, and
-source—over one frozen evidence capture. A public recipe has only sanitized
-trace authority; a private recipe may additionally use a correlated inspection
-snapshot. Neither recipe gains filesystem, network, or model authority.
+three navigation operations—`runs`, `open`, and `read`—over one frozen evidence
+capture. `read` pages the public `activity` collection or, with explicit private
+authority, collections such as reconstructed turns, model exchanges, generated
+source, and execution errors. Neither analysis profile gains filesystem,
+network, model, or nested-evaluation authority.
 
 When you need the exact prompt and the exact generated code, that is a separate
 opt-in artifact written with owner-only permissions, kept out of normal trace
@@ -195,19 +193,22 @@ the target machine.
 
 Read these in order. Each one owns its topic and links onward.
 
-1. [Quickstart](docs/guides/quickstart.md) — four commands from a clone to a
+1. [Quickstart](docs/guides/quickstart.md) — the shortest path from a clone to a
    live model writing and running a program.
-2. [Getting started](docs/guides/getting-started.md) — run a credential-free
-   PTC-Lisp workflow and inspect its result and trace.
-3. [Manifests and capabilities](docs/guides/manifests-and-capabilities.md) —
+2. [Getting started](docs/guides/getting-started.md) — inspect the generated
+   files, run a data workflow, and read its result, trace, and REPL state.
+3. [Building agents](docs/guides/building-agents.md) — start with the shipped
+   loop, then separate workflow and mission authority and replace prompt policy.
+4. [Connecting tools with MCP](docs/guides/connecting-tools-with-mcp.md) — map
+   external tools into narrow model-visible capabilities.
+5. [Manifests and capabilities](docs/guides/manifests-and-capabilities.md) —
    assemble components, data, providers, limits, contracts, and event policy.
-4. [Host configuration](docs/guides/host-configuration.md) — the operator
-   document: credentials, provider sources, transports, data classes, and
-   installed ceilings.
-5. [Building agents](docs/guides/building-agents.md) — put orchestration and
-   agent policy in PTC-Lisp while keeping mission authority narrow.
-6. [Running and debugging](docs/guides/running-and-debugging.md) — the
+6. [Host configuration](docs/guides/host-configuration.md) — install provider
+   aliases, credentials, data classes, and outer policy.
+7. [Running and debugging](docs/guides/running-and-debugging.md) — the
    commands, results, traces, private inspection, and development Viewer.
+8. [Evaluate changes with replay](docs/guides/evaluating-with-replay.md) — hold
+   model responses fixed while testing candidate component source.
 
 ### Going further
 
@@ -225,16 +226,17 @@ Read these in order. Each one owns its topic and links onward.
 ### Examples
 
 Runnable projects live under
-[`examples/kernel-tutorial/`](examples/kernel-tutorial/README.md),
-[`examples/kernel-inspection-lab/`](examples/kernel-inspection-lab/README.md),
+[`examples/kernel-tutorial/`](https://github.com/andreasronge/ptc_runner/tree/main/examples/kernel-tutorial),
+[`examples/kernel-inspection-lab/`](https://github.com/andreasronge/ptc_runner/tree/main/examples/kernel-inspection-lab),
 and
-[`examples/named-mission-reader-writer/`](examples/named-mission-reader-writer/README.md).
+[`examples/named-mission-reader-writer/`](https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer).
 
 ### Reference
 
 [PTC-Lisp specification](docs/ptc-lisp-specification.md),
 [function reference](docs/function-reference.md),
 [signature syntax](docs/signature-syntax.md),
+[Kernel limits](docs/kernel-limits-reference.md),
 [TraceLog contract](docs/trace-log-contract.md), and the
 [conformance report](docs/conformance/index.md).
 

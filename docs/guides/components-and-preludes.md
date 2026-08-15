@@ -60,7 +60,7 @@ Signatures cover fixed arity only. A nullable type such as `:int?` accepts
 `nil`; it does not make a positional argument optional.
 
 See [Signature syntax](../signature-syntax.md) for the complete grammar and the
-[PTC-Lisp specification](../ptc-lisp-specification.md#98-public-component-contracts)
+[PTC-Lisp specification](../ptc-lisp-specification.md#9-8-public-component-contracts)
 for normative behavior. The
 [manifest guide](manifests-and-capabilities.md#compose-components-and-libraries)
 links to a credential-free rejection and correction example.
@@ -88,9 +88,10 @@ Transitive library dependencies join local components in the same frozen
 bundle. Unknown IDs, repeated selections, and local/library ID collisions are
 rejected. Workflow and mission bundles remain separate.
 
-Manifests and `PtcRunner.Kernel.Library.resolve_components/1` expand shipped
-dependencies. `Library.component/1` intentionally returns only one component;
-direct `PtcRunner.Kernel.compile_bundle/1` callers must supply a closed graph.
+Manifests expand shipped dependencies into a closed component graph. Direct
+Elixir callers have the same responsibility; the
+[embedding guide](embedding-in-elixir.md#resolve-shipped-libraries) shows the
+corresponding API.
 
 Shipped components use the same dependency rules. For example:
 

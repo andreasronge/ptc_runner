@@ -5,8 +5,8 @@ selections, limits, events, and optional trace labels. Loading is strict,
 path-confined, and inert; it executes no workflow or provider callback.
 
 The checked-in `priv/schemas/ptc-application-manifest.schema.json` is the
-complete structural reference. `PtcRunner.Kernel.Manifest` remains
-authoritative for semantic checks and referenced-file handling. Manifest
+complete structural reference. Runtime loading additionally performs semantic
+checks and path-confined referenced-file handling. Manifest
 schema diagnostics include a safe JSON Pointer when one is available; a
 missing-required diagnostic points to the absent schema-declared property.
 
@@ -70,7 +70,7 @@ The runtime validates inputs before the body and successful outputs afterward.
 A pre-body contract failure is safe to correct; a failure after capability
 activity is not automatically retried because repeating external effects may
 be unsafe. Run the credential-free
-[`05-signature-feedback`](../../examples/kernel-tutorial/05-signature-feedback/ptc.json)
+[`05-signature-feedback`](https://github.com/andreasronge/ptc_runner/blob/main/examples/kernel-tutorial/05-signature-feedback/ptc.json)
 example to see the correction flow. [Signature syntax](../signature-syntax.md)
 defines the grammar.
 
@@ -113,7 +113,7 @@ Workflow code selects the mission explicitly with the `kernel/eval*`,
 `kernel/check-source`, or mission-introspection functions. The shipped
 `agent.core` loop uses `"default"` only when its own mission option is omitted,
 and that mission must exist. The
-[`named-mission-reader-writer`](../../examples/named-mission-reader-writer/README.md)
+[`named-mission-reader-writer`](https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer)
 example demonstrates distinct read and write grants.
 
 All manifest references use portable, lowercase logical names and resolve
@@ -122,7 +122,7 @@ non-regular files, and symlink escape are rejected. These rules cover files
 the host loads. The manifest path itself is selected by the caller and its
 basename does not have to use the logical-name grammar. Model-visible files
 require a separately installed and selected provider such as the
-[filesystem sample](../../examples/mcp/filesystem/README.md).
+[filesystem sample](connecting-tools-with-mcp.md#run-the-checked-in-file-agent).
 
 ## Validate inputs and results
 
@@ -158,9 +158,9 @@ object, array, scalar, enum, const, and bound keywords, plus the asserted
 closed object branches. References, regexes, nested composition, union types,
 and general-purpose `oneOf` are rejected.
 
-See `PtcRunner.Kernel.ValueContract` for the exact schema profile and safe
-failure projection. That module contract, rather than this guide, is the
-canonical keyword and bound reference.
+The supported keyword profile above is deliberately closed. Unsupported schema
+composition is rejected during inert application loading rather than being
+partially interpreted at runtime.
 
 `--output PATH` atomically publishes only the validated result value without
 replacing an existing file. Use `--private-output` for a private run; it
@@ -242,9 +242,9 @@ omission uses the normal runtime default capped by a lower installed ceiling.
 Limits also bound time, heaps, concurrency, retained definitions/history,
 source, capability values, and canonical events.
 
-Installed-only operational timeouts cannot appear in a manifest. Consult
-`PtcRunner.Kernel.LimitCatalog` for the complete names, defaults, ranges, and
-scopes, and `PtcRunner.Kernel.Limits` for what each one bounds.
+Installed-only operational timeouts cannot appear in a manifest. The generated
+[Kernel limits reference](../kernel-limits-reference.md) lists every name,
+meaning, unit, default, range, and scope.
 
 ## Choose event privacy and labels
 
@@ -286,5 +286,5 @@ paths, or arbitrary user text in labels.
 - [Components and preludes](components-and-preludes.md) explains bundle
   composition.
 
-Exact manifest fields and failure contracts live in
-`PtcRunner.Kernel.Manifest`.
+The generated application-manifest schema is the exact field reference; this
+guide documents the additional semantic and authority rules applied at load.

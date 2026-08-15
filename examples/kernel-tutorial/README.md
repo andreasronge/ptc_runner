@@ -26,16 +26,10 @@ mix ptc run examples/kernel-tutorial/03-file-agent.ptc-project.json
 mix ptc run examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
-They require `OPENROUTER_API_KEY` in the host environment and use the trusted
-`deepseek` model alias. From the repository root, copy `.env.example` to the
-Git-ignored `examples/kernel-tutorial/.env` and replace its placeholder before
-running a live model example. Credentials never go in project documents,
-manifests, or PTC-Lisp files.
-
-```bash
-cp .env.example examples/kernel-tutorial/.env
-chmod 600 examples/kernel-tutorial/.env
-```
+They require `OPENROUTER_API_KEY` and use the trusted `deepseek` model alias.
+Follow the [Quickstart credential step](../../docs/guides/quickstart.md#2-supply-a-model-credential)
+once before running them. Example 03 also requires Node.js 22 or newer; its
+server bundle is committed, so no `npm install` or build is needed.
 
 Direct manifest invocation with explicit `--env-file` and `--host-config`
 switches remains available as the low-level automation form.
@@ -45,14 +39,6 @@ install from;
 [`docs/guides/host-configuration.md`](../../docs/guides/host-configuration.md)
 explains its fields.
 
-Run the live tutorial contracts manually with:
-
-```bash
-mix test test/quickstart_guide_test.exs \
-  test/ptc_runner/kernel/tutorial_examples_e2e_test.exs \
-  --include scheduled_e2e
-```
-
-The live contracts are tagged `:scheduled_e2e` and excluded from normal
-`mix test` and `mix precommit` runs. The credential-free quickstart command
-still runs in the normal suite.
+The [Quickstart](../../docs/guides/quickstart.md) owns the shortest live path;
+the [MCP guide](../../docs/guides/connecting-tools-with-mcp.md) explains the
+filesystem tool connection used by Example 03.

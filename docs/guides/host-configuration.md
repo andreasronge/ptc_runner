@@ -60,8 +60,8 @@ actions happen later during preflight and acquisition.
 Only `install` is required. The other top-level keys are `$schema`,
 `credentials`, `limits`, and `runtime`; unknown and duplicate keys are
 rejected. Use `priv/schemas/ptc-host-config.schema.json` for the complete
-structural vocabulary, defaults, bounds, and editor completion. Semantic
-checks remain authoritative in `PtcRunner.Kernel.HostConfig`.
+structural vocabulary, defaults, bounds, and editor completion. Runtime
+validation remains authoritative for semantic checks.
 
 Every installation needs a public, non-secret `installation_revision`. Change
 it whenever installed behavior or authority changes, including model routing,
@@ -95,8 +95,7 @@ PTC-Lisp, canonical traces, or committed files.
 manifest-backed `repl`. When a selected LLM uses an `env` credential, the
 frontend loads that exact file before provider activity; it never searches for
 one. Every imported value persists for the process lifetime, and an existing
-process value wins. Embedded hosts load no dotenv file implicitly. See
-`PtcRunner.Dotenv` for the exact contract.
+process value wins. Embedded hosts load no dotenv file implicitly.
 
 ## Choose a provider source
 
@@ -115,7 +114,7 @@ Selecting an alias into the wrong environment fails with
 `provider_destination_denied`. This keeps model authority out of
 model-authored mission code.
 
-### Live and replay models
+### Live models
 
 A live installation fixes the full model selector, credential, cache policy,
 optional request parameters, and request/response ceilings:
@@ -151,39 +150,9 @@ the adapter attests that the resolved model is safe public identity, provider
 snapshots and model-grouped usage include it. Endpoint-bearing or otherwise
 private targets remain absent, while alias/revision usage stays attributable.
 
-Use replay when model responses must be deterministic:
-
-```json
-"frozen-model": {
-  "source": "llm_replay",
-  "installation_revision": "frozen-model-v1",
-  "fixtures": "evaluation/replay.jsonl"
-}
-```
-
-The JSON Lines fixture maps the deterministic provider-neutral request hash to
-one `response` or an ordered `responses` sequence. Every line requires
-`schema_version` 1 and exactly one response field:
-
-```json
-{"schema_version":1,"request_hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000","response":{"content":"frozen"}}
-```
-
-To author a fixture iteratively, start with any schema-valid placeholder hash
-and the response shape the workflow expects. A normal-data miss prints
-`no replay fixture matches this request (request_hash: sha256:...)`; copy that
-hash into the entry and rerun. For a private-data run, request an owner-only
-inspection artifact and copy the hash from its capability record instead; the
-public diagnostic intentionally omits the unsalted hash. Matching is exact, so
-changed messages or tools produce another hash and fail instead of using
-unrelated evidence. The repository's `examples/llm-replay/` directory is a
-complete network-free example. `PtcRunner.Kernel.LLMReplay` defines the entry
-bounds and sequence behavior.
-
-Plain `doctor` parses the selected fixture file under its installed ceilings
-without starting the replay provider. A missing, empty, malformed, duplicate,
-or oversized fixture set therefore fails `provider/<alias>/local` as
-`fixtures_unreadable` before a run reaches acquisition.
+Use `source: "llm_replay"` when responses must be deterministic. The
+[replay evaluation guide](evaluating-with-replay.md) owns fixture authoring, the
+network-free example, candidate materialization, and component overrides.
 
 `doctor --connect` performs a real minimal completion for each selected live
 model and may incur provider cost. `--show-model-selectors` adds only safe
@@ -191,124 +160,15 @@ selectors; endpoint-bearing `openai-compat:` selectors remain hidden.
 
 ### MCP servers
 
-An MCP installation fixes its transport and maps upstream tool names to public
-capability names:
+An MCP installation fixes its stdio or streamable-HTTP transport and maps
+upstream tool names to stable public capability names with operator-declared
+read/write effects. A manifest selects and narrows that mapping but cannot
+change its executable, endpoint, credentials, or effect declarations.
 
-```json
-"workspace": {
-  "source": "mcp",
-  "installation_revision": "workspace-v1",
-  "transport": {"type": "stdio", "command": "node", "args": ["server.js"]},
-  "tools": {
-    "read_text_file": {
-      "as": "workspace.read",
-      "effect": "read",
-      "description": "Read one UTF-8 file beneath the granted root.",
-      "model_visible": true,
-      "error_feedback": "closed"
-    },
-    "write_text_file": {
-      "as": "workspace.write",
-      "effect": "write",
-      "model_visible": false
-    }
-  }
-}
-```
-
-The required `effect` is the operator's `read` or `write` declaration. Server
-annotations do not change it. If any installed mapping is a write, every
-selecting manifest must provide a non-empty `allow` list, even when it selects
-only reads. This makes authority changes fail closed. A dispatched write that
-fails is not retried automatically and may report
-`mutation_state: indeterminate`; see
-[Building agents](building-agents.md#handle-failures-without-repeating-effects).
-
-`model_visible` controls discovery, not authority. `error_feedback: "bounded"`
-may expose up to 1,024 bytes of validated MCP error text as untrusted feedback;
-enable it only when the server will not return secrets, paths, or stack traces.
-Canonical events remain closed.
-
-For immutable content, `snapshot_identity` may name an installed read tool and
-a result field containing a lowercase `sha256:` digest. PtcRunner calls that
-tool once with an empty object during assembly and publishes the digest as
-`content_snapshot_hash`. PtcRunner checks the shape, not whether the server is
-truly immutable. The
-[filesystem sample](../../examples/mcp/filesystem/README.md#publishing-the-content-identity)
-shows a working installation.
-
-#### Transports
-
-Stdio launches one local process:
-
-```json
-"transport": {
-  "type": "stdio",
-  "command": "node",
-  "cwd": ".",
-  "args": ["server.js"],
-  "inherit_environment": true,
-  "env": {"VENDOR_TOKEN": {"binding": "vendor_token"}}
-}
-```
-
-Relative `cwd` resolves against the host document. Credential values enter
-through bindings rather than JSON. The child always receives
-`LC_ALL=C.UTF-8`; credential bindings cannot shadow runtime compatibility
-variables. Startup, shutdown grace, stderr capture, and results are bounded.
-Plain `doctor` resolves the selected command without launching it; an absent
-executable fails `provider/<alias>/local` as `command_not_found` while the rest
-of the readiness report remains available. A path that exists but is not a
-regular executable, is unreadable, or exceeds the executable ceiling instead
-fails that row as `executable_unavailable`.
-The optional [launcher companion](../../ptc_runner_launcher/README.md) adds
-executable identity and stronger stdio containment; select it with an absolute
-`runtime.stdio_launcher` path.
-
-Streamable HTTP names a remote endpoint and optional static authentication:
-
-```json
-"transport": {
-  "type": "streamable_http",
-  "endpoint": "https://mcp.example.com/v1",
-  "auth": [{"scheme": "bearer", "binding": "vendor_token"}]
-}
-```
-
-Supported schemes are `bearer`, `basic`, and header-named `api_key`. Protocol
-headers, including `authorization`, `content-type`, `host`, and `mcp-*`, cannot
-be supplied as API-key headers. The schema contains the complete transport
-shape and bounds.
-
-#### OAuth-protected HTTP
-
-OAuth replaces static `auth` with a host-owned `oauth` policy that pins the
-resource, issuer, client, scope ceiling, refresh policy, loopback authority,
-and permitted network origins. The manifest and server cannot widen them.
-
-First authorization is interactive and Mix-only:
-
-```console
-mix ptc run ptc.json --host-config ptc-host.json \
-  --authorize-mcp workspace
-```
-
-The command prints a URL and waits on an operating-system-selected loopback
-port; it does not open a browser. Authorization applies only to that command.
-The shipped CLI store is process-local, so a later invocation must authorize
-again. Embeddings may provide a secure principal-scoped store.
-
-Normal execution never starts an authorization interaction. Missing or
-insufficient authority fails closed. PtcRunner also never retries the original
-MCP request after a `401` or `403`, because `tools/call` may have performed a
-write. The CLI accepts public pre-registered clients using loopback
-`127.0.0.1` or `::1`; confidential clients and other redirect policies require
-an embedding. Dynamic Client Registration, DPoP, and signed authorization
-metadata are unsupported.
-
-See `PtcRunner.Kernel.MCPOAuth.Authority` for the exact host shape and
-`PtcRunner.Kernel.MCPOAuth.Authorization` for scope selection, challenge, and
-token lifecycle rules.
+[Connecting tools with MCP](connecting-tools-with-mcp.md) owns the complete
+task-shaped setup, including tool mapping, prompt-visible facades, transport
+bindings, OAuth authorization, immutable snapshot identity, and the runnable
+filesystem example.
 
 ### Trace and inspection snapshots
 
@@ -382,10 +242,10 @@ Four timeouts are host-only: `provider_cleanup_timeout_ms`,
 `local_preflight_timeout_ms`, `selection_validation_timeout_ms`, and
 `doctor_connectivity_timeout_ms`. A manifest cannot declare them.
 
-`PtcRunner.Kernel.LimitCatalog` is the complete canonical table of names,
-scopes, defaults, accepted ranges, and identity participation.
-`PtcRunner.Kernel.Limits` explains what each limit bounds. The host schema is
-generated from that catalog.
+The generated [Kernel limits reference](../kernel-limits-reference.md) is the
+complete table of names, meanings, units, scopes, defaults, accepted ranges,
+and identity participation. The host schema is generated from the same
+catalog.
 
 ## Verify selected providers
 
@@ -408,6 +268,7 @@ does not expose endpoints, commands, paths, credentials, or OAuth authority.
   capabilities.
 - [Running and debugging](running-and-debugging.md) runs and inspects the
   application.
-
-Exact host field and acquisition contracts live in
-`PtcRunner.Kernel.HostConfig` and `PtcRunner.Kernel.HostInstallation`.
+- [Connecting tools with MCP](connecting-tools-with-mcp.md) installs external
+  tools without putting transport authority in a manifest.
+- [Evaluating with replay](evaluating-with-replay.md) fixes model responses for
+  deterministic comparisons.

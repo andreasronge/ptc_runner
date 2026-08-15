@@ -4,12 +4,13 @@ defmodule PtcRunner.TestSupport.GuideExamples do
   alias __MODULE__, as: GuideExamples
   alias PtcRunner.Kernel.ProjectConfig
 
-  defstruct [:assertion, :command, :expected, :id, :line, :project, :requires]
+  defstruct [:assertion, :command, :expected, :id, :line, :project, :requires, :scratch]
 
   @annotation ~r/<!-- ptc-guide-e2e: (?<options>[^>]+) -->/
   @example ~r/<!-- ptc-guide-e2e: (?<options>[^>]+) -->\s*```console\n(?<command>.*?)\n```\s*```json\n(?<expected>.*?)\n```/s
   @id ~r/^[a-z][a-z0-9-]*$/
   @environment_variable ~r/^[A-Z][A-Z0-9_]*$/
+  @scratch_path ~r/^[a-z0-9][a-z0-9._-]{0,127}(?:\/[a-z0-9][a-z0-9._-]{0,127}){0,7}$/
   @assertions ~w(two-turn-agent)
   @temporary_directory_attempts 10
 
@@ -20,7 +21,8 @@ defmodule PtcRunner.TestSupport.GuideExamples do
           line: pos_integer(),
           project: String.t() | nil,
           requires: String.t() | nil,
-          assertion: String.t() | nil
+          assertion: String.t() | nil,
+          scratch: String.t() | nil
         }
 
   defmacro test_registered_examples(registry_path) do
@@ -164,6 +166,7 @@ defmodule PtcRunner.TestSupport.GuideExamples do
       stdout_path = Path.join(temporary, "stdout")
       stderr_path = Path.join(temporary, "stderr")
       {command, project_path} = isolate_project(example, root, temporary)
+      command = isolate_scratch(command, example, temporary)
       environment = command_environment(example, temporary, project_path)
 
       {_output, status} =
@@ -231,6 +234,7 @@ defmodule PtcRunner.TestSupport.GuideExamples do
       project: Map.get(options, "project"),
       requires: Map.get(options, "requires"),
       assertion: Map.get(options, "assert"),
+      scratch: Map.get(options, "scratch"),
       command: capture(content, command),
       expected: content |> capture(expected) |> Jason.decode!(),
       line: content |> binary_part(0, start) |> line_number()
@@ -251,11 +255,12 @@ defmodule PtcRunner.TestSupport.GuideExamples do
       end)
 
     if map_size(parsed) != length(option_list) or
-         Map.keys(parsed) -- ~w(assert id project requires) != [] or
+         Map.keys(parsed) -- ~w(assert id project requires scratch) != [] or
          not Map.has_key?(parsed, "id") or
          not Regex.match?(@id, parsed["id"]) or
          not valid_project?(parsed["project"]) or
          not valid_requirement?(parsed["requires"]) or
+         not valid_scratch?(parsed["scratch"]) or
          not valid_assertion?(parsed["assert"]) do
       raise ArgumentError, "invalid ptc-guide-e2e options in #{path}: #{options}"
     end
@@ -265,6 +270,9 @@ defmodule PtcRunner.TestSupport.GuideExamples do
 
   defp valid_requirement?(nil), do: true
   defp valid_requirement?(name), do: Regex.match?(@environment_variable, name)
+
+  defp valid_scratch?(nil), do: true
+  defp valid_scratch?(path), do: Regex.match?(@scratch_path, path)
 
   defp valid_project?(nil), do: true
 
@@ -408,6 +416,19 @@ defmodule PtcRunner.TestSupport.GuideExamples do
       _other ->
         raise ArgumentError,
               "project guide command must contain its annotated project path exactly once"
+    end
+  end
+
+  defp isolate_scratch(command, %{scratch: nil}, _temporary), do: command
+
+  defp isolate_scratch(command, %{scratch: relative_path}, temporary) do
+    case :binary.matches(command, relative_path) do
+      [] ->
+        raise ArgumentError,
+              "guide command must contain its annotated scratch path at least once"
+
+      _matches ->
+        String.replace(command, relative_path, shell_quote(Path.join(temporary, relative_path)))
     end
   end
 

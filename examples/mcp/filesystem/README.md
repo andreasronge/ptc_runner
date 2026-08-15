@@ -60,8 +60,8 @@ match before treating two runs as comparable. Install the field when a run's
 conclusions will be cited or compared against another run, and omit it
 otherwise.
 
-[Host configuration](../../../docs/guides/host-configuration.md#mcp-servers) is
-the full reference.
+[Connecting tools with MCP](../../../docs/guides/connecting-tools-with-mcp.md)
+is the task-shaped setup guide.
 
 ## Running
 

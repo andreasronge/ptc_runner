@@ -11,9 +11,8 @@ Successful definitions and exact `*1`, `*2`, and `*3` history persist for one
 command. A failed form preserves the previously committed state. Profile and
 manifest modes are mutually exclusive because they carry different authority.
 
-Run `mix ptc help repl` for the exact switch grammar. The canonical frontend
-behavior, including option combinations and JSON Lines records, lives in
-`PtcRunner.ReplFrontend`.
+Run `mix ptc help repl` for the exact switch grammar, including option
+combinations and JSON Lines records.
 
 ## Use a workflow scratchpad
 
@@ -77,8 +76,9 @@ prints may reach only that authorized terminal. Private traces use the reserved
 
 The session owner retains the continuation, event sink, and provider resources.
 Normal close, abort, caller death, worker failure, and deadline failure converge
-on bounded cleanup before final trace persistence. Embeddings should use
-`PtcRunner.Kernel.ReplSession` rather than reproducing that lifecycle.
+on bounded cleanup before final trace persistence. Elixir embedding hosts can
+use the public session API described in
+[Embedding PtcRunner in Elixir](embedding-in-elixir.md#drive-repl-sessions-from-one-process).
 
 ## Query public traces
 
@@ -223,7 +223,7 @@ For one complete conversation, use the simpler one-shot command:
 
 ```console
 mkdir -p tmp/tutorial-transcript
-ptc transcript RUN_ID \
+mix ptc transcript RUN_ID \
   --traces tmp/tutorial-traces \
   --inspection tmp/tutorial-inspection \
   --private-unattended \

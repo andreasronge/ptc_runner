@@ -51,6 +51,78 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     {:doctor_connectivity_timeout_ms, 10_000, false}
   ]
 
+  @descriptions %{
+    run_duration_ms:
+      "Complete ordinary run after optional provider application admission, including active preflight and Kernel execution.",
+    workflow_timeout_ms: "One workflow evaluation.",
+    evaluation_timeout_ms: "One subordinate mission evaluation.",
+    evaluation_admission_timeout_ms:
+      "Wait for the single subordinate-evaluation lease before execution begins.",
+    parallel_timeout_ms: "One pmap or pcalls operation, clamped by the run deadline.",
+    workflow_heap_words: "Heap of the workflow evaluator process.",
+    evaluation_heap_words: "Heap of each subordinate evaluator process.",
+    provider_heap_words: "Heap of each provider callback process.",
+    live_provider_tasks:
+      "Concurrent provider callback processes and Kernel-owned parallel Lisp workers.",
+    workflow_capability_calls: "Total workflow capability calls in one run.",
+    workflow_capability_calls_per_name:
+      "Workflow capability calls to any one public name in one run.",
+    mission_capability_calls: "Total mission capability calls in one run.",
+    mission_capability_calls_per_name:
+      "Mission capability calls to any one public name in one run.",
+    subordinate_evaluations: "Subordinate mission evaluations in one run.",
+    subordinate_source_checks: "Advisory subordinate source checks in one run.",
+    protocol_errors: "Recoverable agent protocol errors in one run.",
+    entry_source_bytes: "Workflow entry source accepted at the application boundary.",
+    subordinate_source_bytes: "Source accepted by one subordinate check or evaluation.",
+    evaluation_memory_bytes: "Retained mission definitions across successful turns.",
+    evaluation_history_bytes:
+      "Each value and the aggregate exact three-value continuation history.",
+    capability_argument_bytes: "Encoded arguments crossing a capability boundary.",
+    capability_result_bytes: "Encoded result crossing a capability boundary.",
+    event_payload_bytes: "One canonical event payload.",
+    terminal_result_bytes: "Encoded terminal workflow result.",
+    normal_event_count: "Canonical events retained under the normal policy.",
+    normal_event_bytes: "Aggregate encoded canonical events retained under the normal policy.",
+    provider_cleanup_timeout_ms: "Kernel-owned provider cleanup after execution.",
+    local_preflight_timeout_ms: "Whole audited local-preflight phase across selected providers.",
+    selection_validation_timeout_ms: "Active validation of selected provider declarations.",
+    doctor_connectivity_timeout_ms: "One doctor --connect provider health check."
+  }
+
+  @units %{
+    run_duration_ms: :milliseconds,
+    workflow_timeout_ms: :milliseconds,
+    evaluation_timeout_ms: :milliseconds,
+    evaluation_admission_timeout_ms: :milliseconds,
+    parallel_timeout_ms: :milliseconds,
+    workflow_heap_words: :heap_words,
+    evaluation_heap_words: :heap_words,
+    provider_heap_words: :heap_words,
+    live_provider_tasks: :count,
+    workflow_capability_calls: :count,
+    workflow_capability_calls_per_name: :count,
+    mission_capability_calls: :count,
+    mission_capability_calls_per_name: :count,
+    subordinate_evaluations: :count,
+    subordinate_source_checks: :count,
+    protocol_errors: :count,
+    entry_source_bytes: :bytes,
+    subordinate_source_bytes: :bytes,
+    evaluation_memory_bytes: :bytes,
+    evaluation_history_bytes: :bytes,
+    capability_argument_bytes: :bytes,
+    capability_result_bytes: :bytes,
+    event_payload_bytes: :bytes,
+    terminal_result_bytes: :bytes,
+    normal_event_count: :count,
+    normal_event_bytes: :bytes,
+    provider_cleanup_timeout_ms: :milliseconds,
+    local_preflight_timeout_ms: :milliseconds,
+    selection_validation_timeout_ms: :milliseconds,
+    doctor_connectivity_timeout_ms: :milliseconds
+  }
+
   @rows (Enum.map(@manifest_defaults, fn {field, compiled_default, installed_default} ->
            %{
              field: field,
@@ -60,7 +132,9 @@ defmodule PtcRunner.Kernel.LimitCatalog do
              installed_default: installed_default,
              minimum: 1,
              maximum: @generic_maximum,
-             identity: true
+             identity: true,
+             unit: Map.fetch!(@units, field),
+             description: Map.fetch!(@descriptions, field)
            }
          end) ++
            Enum.map(@installed_only, fn {field, default, identity} ->
@@ -72,7 +146,9 @@ defmodule PtcRunner.Kernel.LimitCatalog do
                installed_default: default,
                minimum: 100,
                maximum: 30_000,
-               identity: identity
+               identity: identity,
+               unit: Map.fetch!(@units, field),
+               description: Map.fetch!(@descriptions, field)
              }
            end))
         |> Enum.sort_by(& &1.name)
@@ -89,7 +165,9 @@ defmodule PtcRunner.Kernel.LimitCatalog do
           installed_default: pos_integer(),
           minimum: pos_integer(),
           maximum: pos_integer(),
-          identity: boolean()
+          identity: boolean(),
+          unit: :milliseconds | :heap_words | :bytes | :count,
+          description: binary()
         }
 
   @spec rows() :: [row()]

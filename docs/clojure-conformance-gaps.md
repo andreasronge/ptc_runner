@@ -297,6 +297,8 @@ No `defmacro`, `macroexpand`, `eval`, `read-string`. LLM safety boundary.
 
 No `atom`, `ref`, `agent`, `swap!`, `reset!`. Pure functional only.
 
+<a id="div-06-silent-deduplication-of-computed-duplicate-keys-in-mapset-literals"></a>
+
 ### DIV-06: Silent deduplication of computed duplicate keys in map/set literals
 
 | Field | Value |
@@ -1038,6 +1040,8 @@ model (which takes precedence over Clojure-compat where they conflict). The
 related nil-keyseq protocol-error case was fixed as a BUG under
 [GAP-S23](#gap-s23-select-keys-with-nil-keyseq-raises-instead-of-returning-an-empty-map).
 
+<a id="div-47-flexible-keywordstring-key-access-keynormalizer"></a>
+
 ### DIV-47: Flexible keyword/string key access (KeyNormalizer)
 
 | Field | Value |
@@ -1271,7 +1275,7 @@ displayable host-facing reference, but `symbol?` remains false, `name` rejects
 it, and general quoted data is unsupported. Keywords remain the ordinary
 identifier values used in data transformations; inert references exist for
 APIs that explicitly require a symbolic name. See
-[Quoted Symbol References](ptc-lisp-specification.md#311-quoted-symbol-references).
+[Quoted Symbol References](ptc-lisp-specification.md#3-11-quoted-symbol-references).
 
 **Rationale:** Simplicity. PTC-Lisp provides the narrow host-facing reference
 use case without adopting Clojure's general symbol and quotation model.
@@ -2676,6 +2680,8 @@ shape that validates the rest args as maps only once 2+ are supplied, so a
 single non-map is accepted while multi-collection non-map arguments still fail
 validation with the canonical "expected map" error (matching Clojure, which
 also raises). A single nil keeps the existing empty-map behavior (GAP-S54).
+
+<a id="gap-s147-duplicate-literal-keys-in-mapset-literals-are-silently-deduplicated"></a>
 
 ### GAP-S147: Duplicate literal keys in map/set literals are silently deduplicated
 

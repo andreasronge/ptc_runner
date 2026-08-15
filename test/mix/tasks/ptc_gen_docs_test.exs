@@ -2,12 +2,22 @@ defmodule Mix.Tasks.Ptc.GenDocsTest do
   use ExUnit.Case, async: true
 
   alias Mix.Tasks.Ptc.GenDocs
+  alias PtcRunner.Kernel.LimitCatalog
 
   test "generated function reference explains the PtcRunner extension marker" do
     reference = File.read!("docs/function-reference.md")
 
     assert reference =~ ~r/`[^`]+` \*/
     assert reference =~ "`*` marks PtcRunner extensions without a `clojure.core` equivalent."
+  end
+
+  test "generated Kernel limits reference contains every catalog row" do
+    reference = File.read!("docs/kernel-limits-reference.md")
+
+    for row <- LimitCatalog.rows() do
+      assert reference =~ "`#{row.name}`"
+      assert reference =~ row.description
+    end
   end
 
   @tag :tmp_dir

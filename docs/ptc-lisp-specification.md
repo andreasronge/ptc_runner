@@ -4555,23 +4555,11 @@ itself; persistence and redaction are host responsibilities.
 
 ### 16.8 Resource Limits for Agentic Execution
 
-Kernel hosts apply the following relevant defaults from
-`PtcRunner.Kernel.Limits`:
-
-| Limit | Default | Description |
-|-------|---------|-------------|
-| `evaluation_timeout_ms` | 1,000 | Max execution time per evaluation |
-| `evaluation_heap_words` | 1,250,000 | Evaluator heap ceiling in BEAM words |
-| `subordinate_evaluations` | 16 | Run-wide subordinate execution quota |
-| `subordinate_source_checks` | 16 | Independent run-wide mission compile-check quota |
-| `subordinate_source_bytes` | 131,072 | Source ceiling applied before check hashing or evaluation |
-| `workflow_capability_calls` / `mission_capability_calls` | 64 / 128 | Run-wide capability-call quotas |
-| `workflow_capability_calls_per_name` / `mission_capability_calls_per_name` | 16 / 32 | Per-capability quotas |
-| `capability_argument_bytes` | 262,144 | Capability argument boundary |
-| `capability_result_bytes` | 1,000,000 | Capability result boundary |
-| `terminal_result_bytes` | 1,000,000 | Terminal return boundary |
-| `evaluation_memory_bytes` | 2,000,000 | Run-wide retained definition-memory ceiling |
-| `evaluation_history_bytes` | 1,000,000 | Independent per-value and aggregate ceiling for exact `*1`/`*2`/`*3` history |
+Kernel hosts enforce positive time, heap, count, source, value, retained-memory,
+and event ceilings. The generated
+[Kernel limits reference](kernel-limits-reference.md) lists the meaning, unit,
+effective default, installed default, accepted range, and application scope of
+every limit from the canonical catalog.
 
 Direct `PtcRunner.Lisp.run/2` has its own options. Its defaults include
 `timeout: 1_000`, `max_heap: 1_250_000` words, no tool-call count limit

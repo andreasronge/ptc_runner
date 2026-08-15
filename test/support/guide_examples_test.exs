@@ -123,6 +123,26 @@ defmodule PtcRunner.TestSupport.GuideExamplesTest do
     end
   end
 
+  test "rewrites annotated scratch paths into the owned temporary directory" do
+    scratch = "guide-scratch-fixture"
+
+    example = %GuideExamples{
+      command:
+        "mkdir -p #{scratch}; printf '{\"ok\":true}\\n' > #{scratch}/result.json; cat #{scratch}/result.json",
+      expected: %{"ok" => true},
+      id: "scratch-example",
+      line: 1,
+      scratch: scratch
+    }
+
+    result = GuideExamples.run(example, File.cwd!())
+
+    assert result.status == 0
+    assert result.stderr == ""
+    assert GuideExamples.last_json!(result.stdout) == %{"ok" => true}
+    refute File.exists?(scratch)
+  end
+
   defp example(command) do
     %GuideExamples{
       assertion: "two-turn-agent",

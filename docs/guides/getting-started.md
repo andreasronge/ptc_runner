@@ -1,30 +1,44 @@
 # Getting started
 
-This guide runs a complete PtcRunner workflow and reads its main files. It
-starts credential-free and ends with a live model call.
+The [Quickstart](quickstart.md) already took the shortest useful path: create a
+provider-free hello world, then let a live model write and run a program. This
+guide slows down and explains the files, result, trace, and REPL without making
+another model request.
 
-If you would rather see that model call first and read afterwards, the
-[Quickstart](quickstart.md) gets there in four commands.
-
-PTC-Lisp is an eager, bounded Clojure subset with agent additions such as
-`return`, `fail`, `tool/...` capability calls, and `*1`/`*2`/`*3` continuation
-history. It excludes arbitrary JVM access, macros, lazy or infinite sequences,
-and unsupported Clojure APIs. The
+PTC-Lisp is an eager, bounded Clojure subset with additions such as `return`,
+`fail`, capability calls, and `*1`/`*2`/`*3` continuation history. It excludes
+arbitrary JVM access, macros, lazy or infinite sequences, and ambient file,
+network, or process access. The
 [language specification](../ptc-lisp-specification.md) is authoritative.
 
-The Kernel product runs from a source checkout through `mix ptc` and from a
-runtime-included release through `bin/ptc`.
+The checkout command is `mix ptc`; a runtime-included release uses `bin/ptc`.
 
-## Create a minimal application
+## Create the three application files
 
-`ptc init DIRECTORY` creates an empty application. From a source checkout:
+If you completed the Quickstart, `hello-ptc` already exists and you can skip
+this setup block. When starting here from a fresh clone, fetch dependencies
+before the first Mix command:
 
 ```console
+mix deps.get
 mix ptc init hello-ptc
 ```
 
 Initialization creates `main.clj`, the application manifest `ptc.json`, and an
-operator-owned `ptc-project.json` that remembers artifact and Viewer choices:
+operator-owned `ptc-project.json` that remembers paths and local artifact
+choices. It refuses to merge with or overwrite an existing path.
+
+Run the generated project:
+
+```console
+mix ptc run hello-ptc/ptc-project.json
+```
+
+```json
+{}
+```
+
+The entry function simply returns its input:
 
 ```clojure
 (ns main)
@@ -32,6 +46,9 @@ operator-owned `ptc-project.json` that remembers artifact and Viewer choices:
 (defn run [input]
   (return input))
 ```
+
+The application manifest selects that component and entry and supplies an empty
+input object:
 
 ```json
 {
@@ -51,49 +68,25 @@ operator-owned `ptc-project.json` that remembers artifact and Viewer choices:
 }
 ```
 
-Run the generated project without repeating paths:
+The project document points at the manifest and enables a private local `.ptc`
+artifact layout. [Project configuration](project-configuration.md) documents
+its host, environment, artifact, override, and Viewer fields.
 
+## Run a workflow with data
+
+The credential-free orders example uses the same file roles with a more useful
+input and result:
+
+<!-- ptc-guide-e2e: id=getting-started-orders project=examples/kernel-tutorial/01-orders.ptc-project.json -->
 ```console
-mix ptc run hello-ptc/ptc-project.json
-mix ptc.viewer hello-ptc/ptc-project.json
-```
-
-The first run creates an owner-only `.ptc` artifact layout. See
-[Project configuration](project-configuration.md) for host and environment
-references, overrides, and the complete schema.
-
-Initialization refuses to merge with or overwrite an existing path.
-[Running and debugging](running-and-debugging.md#choose-a-command) lists the command
-and failure behavior.
-
-## Run the example
-
-From the repository root:
-
-```console
-mix deps.get
 mix ptc run examples/kernel-tutorial/01-orders.ptc-project.json
 ```
 
-The command prints the compact JSON result value (expanded here for reading):
-
 ```json
-{
-  "order_count": 3,
-  "paid_count": 2,
-  "paid_total": 335.75,
-  "pending_ids": ["A-101"]
-}
+{"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}
 ```
 
-The project enables a run-reference-named command envelope and trace without
-requiring more switches. [Running and debugging](running-and-debugging.md#read-results-and-failures)
-explains results, errors, and envelopes.
-
-## Read the project
-
-The project document sits beside the tutorial directories and points to the
-three application files:
+Its project document points to three application files:
 
 ```text
 examples/kernel-tutorial/
@@ -104,8 +97,7 @@ examples/kernel-tutorial/
     └── orders.json
 ```
 
-The manifest selects a PTC-Lisp component, its public entry function, and the
-input file:
+The manifest selects the component, public entry, and input file:
 
 ```json
 {
@@ -138,23 +130,24 @@ decoded manifest input:
 ```
 
 `return` marks intentional successful completion. `fail` marks an intentional
-workflow failure. A function that finishes normally without either still
-produces a normal Lisp value, which is useful for intermediate REPL-style
-agent turns.
+workflow failure. A function that finishes normally without either produces an
+ordinary Lisp value, which is useful during intermediate agent turns and in the
+REPL.
 
-## Record a trace
+## Read the result and trace
 
-The project document enables canonical traces and remembers their directory:
+The project enables a command envelope and canonical trace named with the
+unique run reference. They appear under
+`examples/kernel-tutorial/01-orders/.ptc`; a later run does not replace an
+earlier one.
+
+Open the local Viewer:
 
 ```console
-mix ptc run examples/kernel-tutorial/01-orders.ptc-project.json
 mix ptc.viewer examples/kernel-tutorial/01-orders.ptc-project.json
 ```
 
-The JSON Lines file under `01-orders/.ptc/traces` records the run, workflow
-evaluation, outcome, usage, and limits. The Viewer reads the same project file
-for its trace directory, port, browser-opening preference, and REPL setting.
-You can also query the captured directory through the fixed run-analysis
+Or query one frozen trace-directory capture through the public analysis
 profile:
 
 ```console
@@ -164,10 +157,10 @@ mix ptc repl \
   -e '(analysis/runs {"limit" 50})'
 ```
 
-The profile queries one frozen capture and has no filesystem, network, model,
-private-inspection, or nested-evaluation authority. The
-[Kernel REPL guide](kernel-repl.md#query-public-traces) defines its
-result fields.
+The profile can discover runs and page sanitized canonical activity. It has no
+filesystem, network, model, private-inspection, or nested-evaluation authority.
+The [Kernel REPL guide](kernel-repl.md#query-public-traces) owns the complete
+analysis walkthrough.
 
 ## Try the language directly
 
@@ -181,70 +174,22 @@ mix ptc repl \
 ```
 
 Successful definitions and the three most recent values persist for one
-session, and a failed form leaves that state untouched. The
-[Kernel REPL guide](kernel-repl.md) covers the other session modes.
-
-## Call a model
-
-Everything above is deterministic. Adding a model takes one credential; the
-project document remembers the application, host, environment, artifacts, and
-Viewer settings.
-
-Copy `.env.example` to the tutorial's Git-ignored `.env` and set
-`OPENROUTER_API_KEY` to your [OpenRouter](https://openrouter.ai/keys) key. The
-tutorial project explicitly names that file; PtcRunner does not search for it
-implicitly.
-[Host configuration](host-configuration.md#declare-credentials-once) documents the three
-declaration forms and how to move off `.env` for a real deployment.
-
-```console
-cp .env.example examples/kernel-tutorial/.env
-chmod 600 examples/kernel-tutorial/.env
-```
-
-```console
-mix ptc run examples/kernel-tutorial/02-deepseek-extract.ptc-project.json
-```
-
-```json
-{"model_output":"{\"project\":\"Atlas\",\"owner\":\"Priya\",\"risk\":\"delayed vendor security approval\"}","note":"model_output is model text; validate or parse it before production use"}
-```
-
-The model's exact wording varies between runs; the result shape does not.
-
-The project document names the operator-owned host configuration that gives the
-manifest's `deepseek` alias a model and credential. The manifest may select and
-narrow the alias, but cannot name a model, endpoint, or key. The model output
-remains untrusted text until the workflow parses and validates it.
-
-Let the model write the program instead:
-
-```console
-mix ptc run examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
-```
-
-```json
-{"ok":true,"value":42}
-```
-
-The model authored PTC-Lisp across two turns and the runtime evaluated it in
-the confined mission environment.
+session. A failed form leaves that state untouched.
 
 ## Next steps
 
 Continue in this order:
 
-1. [Building agents](building-agents.md) explains the agent loop, the
-   correction protocol, and confined model-authored mission programs.
-   The [agent library reference](../agent-library-reference.md) holds its exact
-   entries, options, and retry contract.
-2. [Manifests and capabilities](manifests-and-capabilities.md) documents the
-   declarative authority boundary — components, input, contracts, providers,
-   limits, and event policy.
-3. [Host configuration](host-configuration.md) is the operator document that
-   installs providers, supplies credentials, and sets ceilings.
-4. [Running and debugging](running-and-debugging.md) covers commands, traces,
-   private inspection, and the development Viewer.
+1. [Building agents](building-agents.md) starts with the shipped working loop,
+   then explains workflow/mission separation and replaceable prompt policy.
+2. [Connecting tools with MCP](connecting-tools-with-mcp.md) gives generated
+   programs one narrow external tool.
+3. [Manifests and capabilities](manifests-and-capabilities.md) defines the
+   declarative application boundary.
+4. [Host configuration](host-configuration.md) defines the operator-owned
+   provider installation behind selected aliases.
+5. [Running and debugging](running-and-debugging.md) covers every command,
+   failure contract, private inspection, and the development Viewer.
 
-The [PTC-Lisp specification](../ptc-lisp-specification.md) and
-[function reference](../function-reference.md) define the language surface.
+The [function reference](../function-reference.md) inventories the complete
+PTC-Lisp surface.
