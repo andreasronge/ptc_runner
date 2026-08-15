@@ -626,3 +626,72 @@ before publishing a candidate, and the diagnostic should name the missing
 parent path. As implemented, an incidental output-directory problem is
 reported only after the operator sees `candidate ready`, which makes the
 acceptance boundary harder to interpret and automate.
+
+## Bounded validation-feedback correction experiment
+
+The rejected DeepSeek ambiguity candidate was used for one bounded correction
+experiment. The new run received:
+
+- the original immutable incident projection and complete frozen working-set
+  sources;
+- its previous candidate and stated cause;
+- the host-authored validation facts: G1--G4 passed, input subtotal 100,
+  expected `{"total": 120}`, actual `{"total": 100}`, and
+  `result_mismatch`; and
+- the unchanged propose-change-or-insufficient-evidence contract.
+
+The correction phase had no `debug.nav` authority and a two-turn ceiling. The
+task explicitly preserved the causal standard: a new candidate still required
+evidence distinguishing one faulty implementation, and the model must not
+guess merely to satisfy the observed case. This matters because the additional
+expected value proves that the previous key rewrite was ineffective but still
+does not distinguish `pricing.base`, `pricing.tax`, or `orders` as faulty.
+
+DeepSeek run `cmd-40bj4q76nwsj5r86frzezdfcbh` exhausted both turns without a
+decision. PTC private analysis verified two complete model exchanges and no
+missing or ambiguous reconstructed evidence:
+
+1. Although the prompt already contained the complete `pricing.base` source,
+   the model said it needed to investigate and called
+   `(doc "pricing.base/amount")`. The empty synthesis mission returned no
+   documentation.
+2. The feedback marked the next program as the final turn and required
+   `return` or `fail`. The model called `(dir)` instead, and the host ended the
+   run with `runtime_limit_exceeded`.
+
+No candidate existed, so G1--G4 and behavioral validation correctly did not
+run. Adding another turn would weaken the stated stopping rule rather than
+test repair feedback.
+
+### Conclusions
+
+1. Validation rejection is useful evidence, but merely serializing it into a
+   new task did not make this model revise or abstain. The remaining failure is
+   again phase stopping, not missing source.
+2. An empty mission is prelude-free, not terminal-only. Core introspection
+   forms such as `doc` and `dir` remain available, so a model can continue
+   exploratory ceremony even when the host says synthesis is final.
+3. There is no supported cross-run continuation path from `ptc.repair` back
+   into the exact prior agent transcript. `run-phased-result-value` preserves
+   correlation inside one run, but validation happens after that run closes.
+   This experiment therefore had to start a new run and reserialize the prior
+   decision and rejection into its initial task.
+4. A general repair lifecycle needs a host-authored validation-feedback
+   envelope and an explicit terminal-only correction phase. The latter should
+   enforce the parsed action shape, not depend on another natural-language
+   `FINAL TURN` reminder.
+5. The next experiment should be one paired control on the same packet: a
+   generic terminal-only phase that accepts only `return` or `fail`, with one
+   correction feedback turn for a rejected nonterminal program. Success would
+   establish that validation feedback can change the decision; failure would
+   show that this model cannot safely correct the ambiguous case under a
+   bounded loop.
+
+### Correction-path friction
+
+The manifest label vocabulary accepts `stage: validating` but not a distinct
+`correcting` stage, so the experiment identity can only live in the run name.
+More importantly, the runtime has no first-class handoff joining a rejected
+candidate, its exact authoring transcript, and the host validation report into
+a later phase. A self-repair host currently has to invent this lifecycle and
+private-evidence serialization outside PtcRunner.
