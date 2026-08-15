@@ -58,6 +58,25 @@ defmodule PtcRunner.Kernel.ResultContractDiagnostic do
 
   def retain_details(_details), do: :error
 
+  # The retained runtime details deliberately carry `CommandContractAuthority`
+  # and `CommandPath` structs: they are what makes the diagnostic
+  # authenticated at the error boundary. Neither is a JSON inspection value,
+  # so publishing them verbatim poisons the sink and replaces the real
+  # `result_contract_failed` outcome with `inspection_sink_error` — losing
+  # exactly the evidence a failed run needs. Project only the inspection copy:
+  # drop the internal attestation and render each already-authorized path as a
+  # JSON Pointer. The runtime error keeps its structs unchanged.
+  @doc false
+  @spec inspection_details(term()) :: {:ok, map()} | :error
+  def inspection_details(details) do
+    with {:ok, retained} <- retain_details(details) do
+      {:ok,
+       retained
+       |> Map.delete(:contract_authority)
+       |> Map.put(:violations, Enum.map(retained.violations, &inspection_violation/1))}
+    end
+  end
+
   @doc false
   @spec message(term(), term()) :: {:ok, binary()} | :error
   def message(turns, constraint) when turns in 1..128 and constraint in @constraints,
@@ -109,6 +128,14 @@ defmodule PtcRunner.Kernel.ResultContractDiagnostic do
   end
 
   defp retain_violations(_violations, _constraint, _authority), do: :error
+
+  # `retain_violations/3` already proved the path valid, so `to_pointer/1`
+  # cannot raise here.
+  defp inspection_violation(%{kind: kind, path: %CommandPath{} = path} = violation) do
+    violation
+    |> Map.take([:missing_required])
+    |> Map.merge(%{kind: kind, path: CommandPath.to_pointer(path)})
+  end
 
   defp valid_contract_source?(nil), do: true
 

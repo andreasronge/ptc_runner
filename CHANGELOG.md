@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Private inspection now retains an authenticated `result_contract_failed`
+  diagnostic instead of destroying it. The retained runtime details carry
+  internal contract-authority and command-path structs, which are not JSON
+  inspection values; emitting them poisoned the inspection sink and replaced
+  the real outcome with `inspection_sink_error`, so the run most in need of
+  debugging lost its own evidence. Only the inspection copy is projected — the
+  attestation is dropped and each already-authorized path is rendered as a JSON
+  Pointer — while the runtime error keeps its authenticated structs unchanged.
+
 - Replaced eager `cap/collect-pages` with resumable `cap/fold-pages`, which
   reduces pages into bounded caller state, preserves the next cursor at a page
   bound, and rejects changed snapshots or cursor cycles. The bundled filesystem
