@@ -51,7 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   effective prelude sources, so a debugger can walk a frozen dependency closure
   instead of guessing which copy of a shared component a call reached. A
   component ID alone is not an occurrence identity, so every edge repeats its
-  environment and mission name. The edges are derived only from a prelude graph
+  environment and, for a mission occurrence, its mission name. The edges are
+  derived only from a prelude graph
   that satisfies the complete positional contract — indices aligned with unique
   component IDs, each row unique, ascending, and strictly earlier than its own
   position — and any other graph yields one honest `incomplete` relation.

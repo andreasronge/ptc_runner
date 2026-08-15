@@ -193,7 +193,7 @@ will report confident nonsense:
 | --- | --- |
 | `complete` | the host proved this edge; the filters are exact |
 | `incomplete` | the capture cannot answer, so no claim is made |
-| `ambiguous` | more than one item matches |
+| `ambiguous` | the target is not uniquely determined; see below |
 | `unavailable` | a complete search proved there is no such target |
 
 `incomplete` is the honest catch-all for "not established": a non-terminal or
