@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "target.agent", "path": "agent.clj", "dependencies": ["agent.core"]},
+      {"library": "agent.core"}
+    ],
+    "entry": "target.agent/run"
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {"id": "delivery.label", "path": "delivery.label.clj"},
+        {
+          "id": "delivery.engine",
+          "path": "delivery.engine.clj",
+          "dependencies": ["delivery.band", "delivery.tariff"]
+        },
+        {"id": "delivery.tariff", "path": "delivery.tariff.clj"},
+        {
+          "id": "delivery",
+          "path": "delivery.clj",
+          "dependencies": ["delivery.engine"]
+        },
+        {"id": "delivery.band", "path": "delivery.band.clj"}
+      ]
+    }
+  },
+  "input": {
+    "value": {
+      "task": "Call delivery/quote exactly once with the parcel {\"grams\" 750, \"destination\" \"local\"} and return its value. For local delivery, a parcel at or below 1000 grams is standard and costs 9; a heavier parcel is oversize and costs 17. Do not replace, catch, or work around a failed call."
+    }
+  },
+  "providers": {"workflow": [{"name": "agent_model"}]},
+  "limits": {
+    "run_duration_ms": 120000,
+    "workflow_timeout_ms": 120000,
+    "evaluation_timeout_ms": 30000,
+    "subordinate_evaluations": 2,
+    "workflow_capability_calls": 8,
+    "workflow_capability_calls_per_name": 8,
+    "normal_event_count": 1024
+  },
+  "labels": {
+    "name": "unseen-delivery-routing-target",
+    "tags": {"mode": "agent", "stage": "validating", "suite": "e2e"}
+  }
+}

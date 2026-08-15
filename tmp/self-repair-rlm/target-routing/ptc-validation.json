@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "target", "path": "target.clj", "dependencies": ["kernel"]},
+      {"library": "kernel"}
+    ],
+    "entry": "target/run"
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {"id": "delivery.label", "path": "delivery.label.clj"},
+        {
+          "id": "delivery.engine",
+          "path": "delivery.engine.clj",
+          "dependencies": ["delivery.band", "delivery.tariff"]
+        },
+        {"id": "delivery.tariff", "path": "delivery.tariff.clj"},
+        {
+          "id": "delivery",
+          "path": "delivery.clj",
+          "dependencies": ["delivery.engine"]
+        },
+        {"id": "delivery.band", "path": "delivery.band.clj"}
+      ]
+    }
+  },
+  "input": {"value": {"grams": 750}},
+  "limits": {"run_duration_ms": 30000, "subordinate_evaluations": 2}
+}

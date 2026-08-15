@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "observed-standard",
+      "input": {"grams": 750},
+      "expected": {"band": "standard", "fee": 9}
+    },
+    {
+      "name": "heldout-boundary",
+      "input": {"grams": 1000},
+      "expected": {"band": "standard", "fee": 9}
+    },
+    {
+      "name": "heldout-oversize",
+      "input": {"grams": 1001},
+      "expected": {"band": "oversize", "fee": 17}
+    }
+  ]
+}

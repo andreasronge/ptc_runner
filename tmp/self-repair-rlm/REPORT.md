@@ -1121,3 +1121,110 @@ The next generalization experiment should use a genuinely unseen incident with
 a different failure shape and component topology. It should keep this exact
 host loop and terminal action fixed, so success or failure measures evidence
 selection and repair judgment rather than another orchestration change.
+
+## Derived working-set repair on an unseen routing defect
+
+This experiment removed the strongest benchmark-selection clues from the
+previous positive path. It introduced a new delivery-routing incident with an
+inverted branch rather than a wrong arithmetic constant, generated the failed
+call through a fresh Luna run, and gave the repair model no handwritten
+component list, rejected-candidate story, or validation feedback. Exact
+held-out inputs and expected results remained outside the model run.
+
+Target run `cmd-0fcak9j7j358pm33pjhndnxh9a` asked Luna to call
+`delivery/quote` exactly once for a 750-gram local parcel. PTC private analysis
+proved one complete model exchange and this generated source:
+
+```clojure
+(return (delivery/quote {"grams" 750, "destination" "local"}))
+```
+
+The call failed through the API's local-quote invariant. The frozen mission
+contained five local components, including an unrelated `delivery.label`
+component that was not in the generated call's dependency closure.
+
+### Mechanically derived evidence
+
+`debug.workspace` no longer names domain components in this cell. It starts
+from each generated source's `referenced_prelude_source` relationship, follows
+`dependency_prelude_source` relationships to a bounded depth, records
+incomplete edges, deduplicates components, and orders the final source bodies
+by content hash rather than call or manifest order. The resulting complete
+packet contained exactly:
+
+1. `delivery.engine` (`sha256:513877...97fed`)
+2. `delivery.band` (`sha256:61e915...42114`)
+3. `delivery.tariff` (`sha256:844124...e7664`)
+4. `delivery` (`sha256:9daeba...7f95f`)
+
+The unrelated label was excluded. PTC recorded ten context capability calls:
+the run/error/activity/turn reads, one exact `generated_sources` read, the
+mission capability read, and four relationship-driven prelude-source reads.
+The packet reported complete turns, no ambiguity, no truncated source pages,
+and a complete working set.
+
+The first attempt exposed an API-shape seam without spending a model call.
+Generated entries embedded in `turns` retain evaluation and prelude-call
+identity but do not carry the relationship objects attached to the same item in
+`generated_sources`. A generic walker therefore needs the additional exact
+read by `evaluation_id` before it can call `debug.nav/follow`. After adding that
+join, the unchanged selector reached the model.
+
+### Blind proposal and host verdict
+
+DeepSeek repair run `cmd-6rxn83f6w3bhkkt0c79qs6zx4n` completed in two model
+calls with no execution or result-contract errors. Its first REPL program
+constructed a local four-source table and printed that `delivery.band` was the
+only inverted implementation. Its second program proposed the complete
+`delivery.band` replacement, swapping the two branch results. It wrapped the
+self-terminalizing proposal action in an outer `return` despite being told to
+call the action bare; the nested return signals happened to produce the
+contract-valid map.
+
+The report was passed unchanged to `ptc.repair`. It passed G1--G4, then three
+host-owned cases. PTC independently opened every validation trace and proved
+the same candidate source hash `sha256:ea07bd...8ebd5`, no execution errors,
+and these results:
+
+| Visibility to repair model | Case | Run | Result |
+| --- | --- | --- | --- |
+| observed | 750 grams | `cmd-7yhc6zkjyxr37kvna2nmsxy4cg` | `{"band":"standard","fee":9}` |
+| held out | boundary 1000 grams | `cmd-19s06ahrymab10ysgzvf1d1mv8` | `{"band":"standard","fee":9}` |
+| held out | 1001 grams | `cmd-6pttgxw2zdaxamma4esj588ztr` | `{"band":"oversize","fee":17}` |
+
+The original task necessarily stated the public behavior—at or below 1000 is
+standard/9 and heavier is oversize/17—so the semantic invariant was not hidden.
+What stayed hidden was the exact validation suite and its outcomes. The source
+packet also made this an easy code-review problem: the `delivery.band`
+docstring and implementation directly contradicted one another, while the API
+repeated the correct predicate. This is materially less curated than the
+pricing experiment, but it is not a hard diagnosis benchmark.
+
+### Generality update
+
+1. The evidence-selection step is now domain-neutral for one generated call and
+   a closed dependency graph. Adapting it to a new domain no longer requires a
+   custom list of component IDs or source ordering.
+2. The target and validation oracle remain domain-owned. General self-repair
+   cannot infer whether a patch is correct without tests, executable
+   invariants, or another host-owned acceptance signal.
+3. The case projection still assumes a complete workflow failure, selects its
+   first failure and associated generated evaluations, caps the dependency walk
+   at 32 relationships, and only walks dependencies—not callers, data flow, or
+   capability side effects. Broader incidents need explicit expansion rules
+   and honest incomplete/ambiguous outcomes.
+4. The terminal source-policy gap remains. This run ignored the bare-action
+   instruction in the opposite direction from the previous run, proving again
+   that terminal syntax needs host enforcement rather than prompt convention.
+5. The model returned unqualified `function_id: "classify"`. `ptc.repair`
+   correctly gates the complete component replacement by component ID and base
+   hash, but currently treats `function_id` as optional descriptive metadata.
+   Any future function-level repair contract must validate that identity rather
+   than implying it has enforcement value.
+
+The strongest supported claim is now: for a complete single-call failure whose
+relevant implementation lies in the called component's dependency closure, a
+domain-neutral projection can select the frozen sources, and a model can author
+a host-validated complete replacement without seeing held-out cases. Discovery
+outside that closure and repair of nonlocal or weakly specified defects remain
+untested.

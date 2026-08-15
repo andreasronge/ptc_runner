@@ -4,8 +4,8 @@
 
 (defn changed
   "Return the exact captured sources that were being changed for this experiment. The caller must still establish causality from run evidence."
-  {:signature "(run-id :string) -> :map"}
-  [run-id]
+  {:signature "(run-id :string, generated-sources [:map]) -> :map"}
+  [run-id _generated-sources]
   (let [workflow
         (debug.nav/read
           run-id
@@ -21,7 +21,8 @@
            "mission_name" "root"
            "component_id" "debug.rlm"
            "limit" 10})]
-    {"files"
+    {"complete?" true
+     "files"
      (mapv
        #(select-keys % ["component_id" "environment" "mission_name"
                         "source_hash" "source"])

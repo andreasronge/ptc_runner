@@ -36,6 +36,19 @@
                "parent_evaluation_id" workflow-evaluation-id
                "limit" 100})
             projected-turns (mapv projected-turn (get turns "items"))
+            generated-evaluation-ids
+            (distinct
+              (map #(get % "evaluation_id")
+                   (mapcat #(get % "generated") projected-turns)))
+            generated-pages
+            (mapv
+              #(debug.nav/read
+                 run-id
+                 {"collection" "generated_sources"
+                  "evaluation_id" %
+                  "limit" 20})
+              generated-evaluation-ids)
+            generated-sources (mapcat #(get % "items") generated-pages)
             mission-name (get-in projected-turns [0 "generated" 0 "mission_name"])
             calls
             (if (string? mission-name)
@@ -48,7 +61,7 @@
             single-call (if (= 1 (count (get calls "items")))
                           (first (get calls "items"))
                           nil)
-            working-set (debug.workspace/changed run-id)]
+            working-set (debug.workspace/changed run-id generated-sources)]
         {"run"
          (select-keys run ["run_id" "status" "terminal_reason" "duration_ms"
                            "error_count" "evaluations" "llm_calls"])
@@ -71,4 +84,7 @@
           "nested_activity_truncated" (get nested "truncated")
           "turns_complete" (get-in turns ["evidence" "complete?"])
           "turns_ambiguity_count" (get-in turns ["evidence" "ambiguity_count"])
-          "capability_calls_truncated" (get calls "truncated")}}))))
+          "generated_sources_truncated"
+          (boolean (some #(get % "truncated") generated-pages))
+          "capability_calls_truncated" (get calls "truncated")
+          "working_set_complete" (get working-set "complete?")}}))))

@@ -13,11 +13,12 @@
 
 (defn changed
   "Return the exact captured sources in this experiment's working set. The caller must still establish causality from run evidence."
-  {:signature "(run-id :string) -> :map"}
-  [run-id]
+  {:signature "(run-id :string, generated-sources [:map]) -> :map"}
+  [run-id _generated-sources]
   (let [pages (mapv #(source run-id %)
                     ["pricing.rule" "pricing.tax" "pricing.discount" "orders"])]
-    {"files"
+    {"complete?" true
+     "files"
      (mapv
        #(select-keys % ["component_id" "environment" "mission_name"
                         "source_hash" "source"])
