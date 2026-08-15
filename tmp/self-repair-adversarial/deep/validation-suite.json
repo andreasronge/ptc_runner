@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "observed-100",
+      "input": {
+        "task": "Call orders/place exactly once with subtotal 100 and return its value. The required standard total is subtotal plus 20. Do not replace, catch, or work around a failed call.",
+        "agent": {"mission": "default", "max_turns": 2}
+      },
+      "expected": {"total": 120}
+    },
+    {
+      "name": "heldout-zero",
+      "input": {
+        "task": "Call orders/place exactly once with subtotal 0 and return its value. The required standard total is subtotal plus 20. Do not replace, catch, or work around a failed call.",
+        "agent": {"mission": "default", "max_turns": 2}
+      },
+      "expected": {"total": 20}
+    },
+    {
+      "name": "heldout-negative",
+      "input": {
+        "task": "Call orders/place exactly once with subtotal -10 and return its value. The required standard total is subtotal plus 20. Do not replace, catch, or work around a failed call.",
+        "agent": {"mission": "default", "max_turns": 2}
+      },
+      "expected": {"total": 10}
+    }
+  ]
+}

@@ -492,6 +492,66 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     assert source_relation["filters"] == %{"evaluation_id" => "mission-eval"}
   end
 
+  test "typed prelude dependency relations preserve the exact qualified occurrence" do
+    collections = %{
+      turns: [],
+      turns_by_run_id: %{"run" => %{evidence: %{"complete?" => true}}},
+      generated_sources: [],
+      execution_errors: [],
+      effective_preludes: [
+        prelude("workflow", nil, "shared", "workflow shared"),
+        prelude("mission", "reader", "base", "reader base"),
+        prelude("mission", "reader", "shared", "reader shared"),
+        prelude("mission", "writer", "other", "writer other"),
+        prelude("mission", "writer", "shared", "writer shared")
+      ]
+    }
+
+    trace_facts = %{
+      "run" => %{
+        "workflow_prelude" => %{
+          "component_ids" => ["shared"],
+          "dependency_indices" => [[]]
+        },
+        "missions" => %{
+          "reader" => %{
+            "prelude" => %{
+              "component_ids" => ["base", "shared"],
+              "dependency_indices" => [[], [0]]
+            }
+          },
+          "writer" => %{
+            "prelude" => %{
+              "component_ids" => ["other", "shared"],
+              "dependency_indices" => [[], [0]]
+            }
+          }
+        }
+      }
+    }
+
+    attached = RunAnalysisRelationships.attach(collections, trace_facts)
+
+    reader_shared =
+      Enum.find(attached.effective_preludes, fn prelude ->
+        prelude["mission_name"] == "reader" and prelude["component_id"] == "shared"
+      end)
+
+    assert [relationship] = reader_shared["relationships"]
+
+    assert relationship == %{
+             "filters" => %{
+               "component_id" => "base",
+               "environment" => "mission",
+               "mission_name" => "reader"
+             },
+             "rel" => "dependency_prelude_source",
+             "semantics" => "dependency",
+             "state" => "complete",
+             "target_collection" => "prelude_sources"
+           }
+  end
+
   test "typed relations do not trust an inspection producer without its canonical parent edge" do
     collections = %{
       turns: [],
@@ -945,6 +1005,16 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
       "output_sequence" => sequence + 1,
       "arguments" => %{"messages" => messages, "system" => "system"},
       "result" => %{"status" => "ok", "value" => Map.delete(assistant, "role")}
+    }
+  end
+
+  defp prelude(environment, mission_name, component_id, source) do
+    %{
+      "run_id" => "run",
+      "environment" => environment,
+      "mission_name" => mission_name,
+      "component_id" => component_id,
+      "source" => source
     }
   end
 

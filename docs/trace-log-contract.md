@@ -454,8 +454,9 @@ Generated programs carry `prelude_calls_available?` and a sorted
 `source_match`; duplicate identical sources are marked ambiguous rather than
 given a fabricated causal identity.
 
-Private execution errors and generated programs may carry a `relationships`
-list. Each relationship has this closed shape:
+Private execution errors, generated programs, and effective prelude source
+occurrences may carry a `relationships` list. Each relationship has this closed
+shape:
 
 ```json
 {
@@ -469,7 +470,8 @@ list. Each relationship has this closed shape:
 
 The closed relation IDs are `boundary_failure`, `child_evaluations`,
 `direct_boundary_producer`, `generated_source`, `producing_turn`, and
-`referenced_prelude_source`.
+`referenced_prelude_source`, plus `dependency_prelude_source` on effective
+prelude source occurrences.
 `target_collection` and non-null `filters` are the exact options to add to the
 same run's next `analysis/read`; callers must not follow a null filter. State is
 one of `complete`, `incomplete`, `ambiguous`, or `unavailable`. Ambiguous
@@ -486,8 +488,11 @@ filters retain those runtime statuses. A canonically successful workflow makes
 both causal relations unavailable. `nesting` is reserved for the validated canonical
 `parent_evaluation_id` edge.
 `association` covers source identity, static prelude references, and the
-generated-source/turn source match. A source match can be ambiguous; a parent
-edge alone is never promoted to causation. Truncated producer evidence is
+generated-source/turn source match. `dependency` is reserved for an exact edge
+in the frozen effective workflow or named-mission component graph; its filters
+include environment and mission identity so repeated component IDs do not
+collide. A source match can be ambiguous; a parent edge alone is never promoted
+to causation. Truncated producer evidence is
 `incomplete`, a complete search with no match is `unavailable`, and no relation
 compares canonical and inspection sequence values.
 

@@ -1,0 +1,10 @@
+{
+  "limits": {"run_duration_ms": 300000, "workflow_timeout_ms": 300000, "subordinate_evaluations": 32, "workflow_capability_calls": 32, "workflow_capability_calls_per_name": 32, "mission_capability_calls": 128, "mission_capability_calls_per_name": 128, "normal_event_count": 4096},
+  "credentials": {"openrouter_key": {"env": "OPENROUTER_API_KEY"}},
+  "install": {
+    "agent_model": {"source": "llm", "installation_revision": "adversarial-deep-debugger-deepseek-v1", "model": "openrouter:deepseek/deepseek-v4-flash", "credential": "openrouter_key", "cache": false, "accepts_data": ["normal", "private_inspection"]},
+    "history": {"source": "ptc_trace_snapshot", "installation_revision": "adversarial-deep-history-v2", "directory": "/private/tmp/ptc-self-repair-adversarial-20260815-b/deep-target-traces"},
+    "debug.nav": {"source": "ptc_inspection_snapshot", "installation_revision": "adversarial-deep-nav-v2", "directory": "/private/tmp/ptc-self-repair-adversarial-20260815-b/deep-target-inspection"},
+    "private-history": {"source": "ptc_inspection_snapshot", "installation_revision": "adversarial-deep-raw-v2", "directory": "/private/tmp/ptc-self-repair-adversarial-20260815-b/deep-target-inspection"}
+  }
+}

@@ -18,67 +18,98 @@ defmodule PtcRunner.Kernel.DebugNavTest do
       debug.nav/runs
       debug.nav/open
       debug.nav/read
-      debug.nav/component-source
-      debug.nav/evaluation
-      debug.nav/latest-failure
+      debug.nav/follow
     ) do
       assert {:ok, _export} = Prelude.fetch_export(bundle.prelude, ref)
     end
   end
 
-  test "latest-failure includes called components and their immediate dependency sources" do
-    result = run(~S|(debug.nav/latest-failure {})|)
+  test "follow preserves a typed relationship and its complete native page" do
+    result =
+      run(~S|(debug.nav/follow
+        "run-1"
+        {"rel" "generated_source"
+         "semantics" "association"
+         "target_collection" "generated_sources"
+         "filters" {"evaluation_id" "mission-evaluation-9"}
+         "state" "complete"}
+        {"limit" 7})|)
 
-    assert result["run"]["run_id"] == "run-1"
-    assert result["called_components"] == ["orders"]
-    assert result["dependency_components"] == ["pricing.tax"]
+    assert result["relationship"]["rel"] == "generated_source"
 
-    assert Enum.map(result["prelude_sources"], & &1["component_id"]) == [
-             "orders",
-             "pricing.tax"
-           ]
-
-    assert Enum.any?(result["links"], fn link ->
-             link["rel"] == "component-source" and
-               link["component_id"] == "pricing.tax" and
-               link["call"] == ~S|(debug.nav/component-source "run-1" "pricing.tax")|
-           end)
-  end
-
-  test "evaluation follows direct advertised filters instead of inventing a filter envelope" do
-    result = run(~S|(debug.nav/evaluation "run-1" "mission-evaluation-9")|)
-
-    assert result == %{
-             "activity" => [%{"evaluation_id" => "mission-evaluation-9", "status" => "failed"}],
-             "execution_errors" => [],
-             "generated_sources" => [
+    assert result["page"] == %{
+             "items" => [
                %{"evaluation_id" => "mission-evaluation-9", "source" => "(orders/place 100)"}
              ],
-             "run_id" => "run-1",
-             "turns" => []
+             "next_cursor" => "next-page",
+             "omitted_count" => 1,
+             "snapshot_hash" => "sha256:snapshot",
+             "truncated" => true
            }
+
+    assert_receive {:read_arguments,
+                    %{
+                      "collection" => "generated_sources",
+                      "evaluation_id" => "mission-evaluation-9",
+                      "limit" => 7,
+                      "run_id" => "run-1"
+                    }}
+  end
+
+  test "follow refuses unavailable relationships and caller filter overrides" do
+    unavailable = ~S|(debug.nav/follow
+      "run-1"
+      {"rel" "generated_source"
+       "semantics" "association"
+       "target_collection" "generated_sources"
+       "filters" nil
+       "state" "unavailable"}
+      {})|
+
+    assert {:ok, %{return: {:__ptc_fail__, reason}}} = run_result(unavailable)
+    assert reason =~ "cannot follow"
+
+    override = ~S|(debug.nav/follow
+      "run-1"
+      {"rel" "generated_source"
+       "semantics" "association"
+       "target_collection" "generated_sources"
+       "filters" {"evaluation_id" "mission-evaluation-9"}
+       "state" "complete"}
+      {"evaluation_id" "different"})|
+
+    assert {:ok, %{return: {:__ptc_fail__, override_reason}}} = run_result(override)
+    assert override_reason =~ "limit and cursor"
   end
 
   defp run(source) do
-    {:ok, components} = Library.resolve_components([{:library, "debug.nav"}])
-    {:ok, bundle} = Kernel.compile_bundle(components)
-
-    {:ok, result} =
-      Lisp.run_native(source,
-        prelude: bundle.prelude,
-        tools: tools(),
-        filter_context: false,
-        caller: :kernel
-      )
-
+    {:ok, result} = run_result(source)
     result.return
   end
 
+  defp run_result(source) do
+    {:ok, components} = Library.resolve_components([{:library, "debug.nav"}])
+    {:ok, bundle} = Kernel.compile_bundle(components)
+
+    Lisp.run_native(source,
+      prelude: bundle.prelude,
+      tools: tools(),
+      filter_context: false,
+      caller: :kernel
+    )
+  end
+
   defp tools do
+    owner = self()
+
     %{
       "debug.nav.runs" => tool(fn _arguments -> %{"items" => [failed_run()]} end),
       "debug.nav.open" => tool(fn _arguments -> %{"collections" => []} end),
-      "debug.nav.read" => tool(&read/1),
+      "debug.nav.read" =>
+        tool(fn arguments ->
+          send(owner, {:read_arguments, arguments})
+          read(arguments)
+        end),
       "cap-list" => tool(fn _arguments -> [] end),
       "cap-describe" => tool(fn _arguments -> %{} end)
     }
@@ -101,7 +132,10 @@ defmodule PtcRunner.Kernel.DebugNavTest do
   defp read(%{"collection" => "generated_sources", "evaluation_id" => evaluation_id}) do
     %{
       "items" => [%{"evaluation_id" => evaluation_id, "source" => "(orders/place 100)"}],
-      "next_cursor" => nil
+      "next_cursor" => "next-page",
+      "omitted_count" => 1,
+      "snapshot_hash" => "sha256:snapshot",
+      "truncated" => true
     }
   end
 

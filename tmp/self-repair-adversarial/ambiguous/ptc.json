@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [{"library": "agent.main"}],
+    "entry": "agent.main/run"
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {"id": "pricing.base", "path": "base.clj"},
+        {"id": "pricing.tax", "path": "tax.clj"},
+        {"id": "orders", "path": "orders.clj", "dependencies": ["pricing.base", "pricing.tax"]}
+      ]
+    }
+  },
+  "input": {
+    "value": {
+      "task": "Call orders/place exactly once with subtotal 100 and return its value. Do not replace, catch, or work around the result.",
+      "agent": {"mission": "default", "max_turns": 2}
+    }
+  },
+  "providers": {
+    "workflow": [{"name": "agent_model"}],
+    "mission": []
+  },
+  "contracts": {"result_schema": {"path": "result.schema.json"}},
+  "limits": {
+    "run_duration_ms": 120000,
+    "workflow_timeout_ms": 90000,
+    "evaluation_timeout_ms": 30000,
+    "subordinate_evaluations": 4,
+    "workflow_capability_calls": 4,
+    "workflow_capability_calls_per_name": 4,
+    "normal_event_count": 256
+  },
+  "labels": {
+    "name": "self-repair-ambiguous-causes",
+    "tags": {"mode": "agent", "stage": "executing", "suite": "e2e"}
+  }
+}

@@ -337,9 +337,10 @@ stable capability boundary. Install that provider under the exact name
 ```
 
 Select both providers in the mission and set the trace provider's manifest
-config to `{"expose": false}`. `debug.nav` then wraps the inspection provider's
-existing `runs`, `open`, and `read` operations; it installs no callback and
-grants no additional authority.
+config to `{"expose": false}`. `debug.nav` wraps the inspection provider's
+existing `runs`, `open`, and `read` operations and follows only relationships
+that already contain an exact target collection and non-null filters. It
+installs no callback and grants no additional authority.
 
 Directories resolve against the host document and are captured once.
 `ptc_trace_snapshot` reads ordinary traces.

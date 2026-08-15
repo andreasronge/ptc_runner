@@ -18,7 +18,7 @@ switches.
 | `ptc transcript RUN_ID ...` | Publish one correlated private model transcript |
 | `ptc repl` | Open a direct, manifest-backed, or analysis session |
 | `mix ptc.materialize ...` | Gate model-authored source as a candidate component |
-| `mix ptc.repair ...` | Materialize a structured generated repair and validate it in a fresh run |
+| `mix ptc.repair ...` | Materialize a structured generated repair and optionally run a host-owned trial suite |
 | `mix ptc.viewer ...` | Browse traces in a source checkout |
 
 `PtcRunner.Kernel.CommandDeclaration` is the canonical command and option
@@ -166,8 +166,19 @@ and report contract.
 
 A debugger can return a flat `propose-change` result containing the diagnosed
 run id, target environment and mission, component id, captured base hash, and
-complete candidate source. The host can bind that report to the current
-application and run the static and behavioral gates in one command:
+complete candidate source. The host first binds that report to the current
+application and runs the static gate:
+
+```console
+mix ptc.repair ptc.json \
+  --report private/repair.json \
+  --out private/candidate \
+  --origin-run-id debugger-run-id
+```
+
+Materialization executes nothing. To run a bounded behavioral trial, the host
+must separately supply exact cases and acknowledge that installed providers may
+have effects:
 
 ```console
 mix ptc.repair ptc.json \
@@ -176,25 +187,30 @@ mix ptc.repair ptc.json \
   --origin-run-id debugger-run-id \
   --host-config ptc-host.json \
   --env-file .env \
-  --trace-dir private/validation-traces \
-  --inspect private/validation.inspection.jsonl \
-  --private-output private/validation-result.json \
-  --envelope private/validation-envelope.json
+  --validation-suite private/repair-suite.json \
+  --validation-out private/repair-trial \
+  --allow-live-validation
 ```
 
 The task accepts only `decision: "propose-change"`, derives the materializer
 target and component from the report, refuses a stale captured base hash or a
-no-op source, passes no effect-widening acceptance, and executes a fresh
-`ptc run` with the verified descriptor. Paths, credentials, inputs, artifact
-destinations, authoring provenance, and host configuration remain host
-arguments rather than model output. The report's `run_id` identifies the
-diagnosed run; `--origin-run-id` separately records the debugger run that
-authored the candidate. A static pass followed by a failed run retains the
-private candidate for diagnosis and exits nonzero.
+no-op source, and passes no effect-widening acceptance. Paths, credentials,
+inputs, expected results, artifact destinations, authoring provenance, and host
+configuration remain host arguments rather than model output. The report's
+`run_id` identifies the diagnosed run; `--origin-run-id` separately records the
+debugger run that authored the candidate.
+
+The suite has version 1 and one to 32 uniquely named cases. Each case contains
+an exact `expected` JSON value and exactly one `input` or `private_input`.
+Non-secret `input` cases preserve the application's normal data class while all
+results and evidence remain private. `private_input` cases require every
+selected provider to admit private data. All cases run even after a failure;
+the private aggregate report records case status, input class, artifact names,
+candidate hash, diagnosed run, authoring run, and base application digest.
 
 Success does not install the component. Promotion remains a separate operator
-decision. The fresh run proves only its selected input and providers; use
-host-owned held-out inputs when semantic generalization matters.
+decision. Passing cases prove only those host-selected inputs and installed
+providers; include held-out cases when semantic generalization matters.
 
 ## Read results and failures
 
@@ -375,13 +391,15 @@ guards, not access control; treat every downstream sink as private.
 
 For an LLM-driven second run, select `{"library": "debug.nav"}` in a mission
 with the hidden canonical trace provider and the correlated inspection provider
-named `debug.nav`. Start with `(debug.nav/latest-failure {})`. It returns one
-bounded incident containing errors, reconstructed programs and feedback,
-sources for called components and their immediate dependencies, collection
-completeness, and typed links. Follow a returned
-`debug.nav/evaluation` or `debug.nav/component-source` call only when the
-incident lacks a material fact. Raw `debug.nav/read` remains available and its
-documentation shows the exact top-level filter shape.
+named `debug.nav`. Use `debug.nav/runs` to discover a run and `debug.nav/open`
+to discover its available collections and filters. `debug.nav/read` returns one
+native bounded page. Evidence items can advertise typed relationships such as
+`producing_turn`, `referenced_prelude_source`, and
+`dependency_prelude_source`; pass the relationship unchanged to
+`debug.nav/follow`. The helper refuses unavailable or filterless relationships,
+does not accept filter overrides, and returns both the original relationship
+and complete native page envelope. Callers must still reason about completeness
+and ambiguity; the prelude does not select a cause or repair.
 
 ## Browse with the development Viewer
 

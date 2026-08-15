@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [{"library": "agent.main"}],
+    "entry": "agent.main/run"
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {"library": "cap"},
+        {"id": "debug.evidence", "path": "evidence.clj", "dependencies": ["cap"]}
+      ],
+      "providers": ["history", "private-history"]
+    }
+  },
+  "input": {
+    "value": {
+      "task": "Diagnose one failed PtcRunner run using only immutable evidence. Discover the failed run with debug.evidence/runs and inspect its advertised collections with debug.evidence/open. Traverse complete typed relationships by reading each target_collection with its exact non-null filters, especially producing_turn, referenced_prelude_source, and dependency_prelude_source; do not invent filters. A code change requires evidence of externally expected behavior, not only an internal assertion, and evidence that distinguishes the faulty implementation from its callers, dependencies, contracts, and inputs. Do not guess across incomplete, unavailable, or ambiguous evidence. If evidence proves one faulty prelude, return propose-change with exactly these flat keys: decision, run_id, cause, target_environment, target_mission, component_id, function_id, base_source_hash, candidate_source, invariant, evidence, validation_plan. evidence must be an array of strings. validation_plan must be an array of objects, each with string keys property and test. candidate_source must be the complete replacement component and preserve unrelated exports; copy base_source_hash exactly from evidence. Otherwise return insufficient-evidence with exactly decision, run_id, cause, and missing_evidence, where missing_evidence is an array of strings. Use return only for the final report.",
+      "agent": {
+        "max_turns": 14,
+        "max_observation_chars": 32768,
+        "max_transcript_chars": 300000,
+        "consolidate_at_turns_remaining": 4
+      }
+    }
+  },
+  "providers": {
+    "workflow": [{"name": "agent_model"}],
+    "mission": [
+      {"name": "history", "config": {"expose": false}},
+      {"name": "private-history"}
+    ]
+  },
+  "contracts": {"result_schema": {"path": "report.schema.json"}},
+  "limits": {
+    "run_duration_ms": 300000,
+    "workflow_timeout_ms": 300000,
+    "evaluation_timeout_ms": 30000,
+    "subordinate_evaluations": 24,
+    "workflow_capability_calls": 24,
+    "workflow_capability_calls_per_name": 24,
+    "mission_capability_calls": 96,
+    "mission_capability_calls_per_name": 96,
+    "normal_event_count": 4096
+  },
+  "labels": {
+    "name": "self-repair-adversarial-raw",
+    "tags": {"mode": "agent", "stage": "validating", "suite": "e2e"}
+  }
+}

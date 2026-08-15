@@ -98,12 +98,14 @@ Shipped components use the same dependency rules. For example:
 | --- | --- |
 | `cap` | Fail-safe capability-envelope handling and bounded cursor traversal |
 | `analysis` | Three bounded public/private run-evidence navigation operations |
-| `debug.nav` | Coarse private incidents and typed follow-up views over snapshot-provider `runs/open/read` operations |
+| `debug.nav` | Typed private run navigation over snapshot-provider `runs/open/read` operations |
 
 `analysis` and `debug.nav` depend on `cap`. `analysis` belongs to the fixed
 analysis profiles. `debug.nav` belongs in an ordinary debugger mission and
 expects the correlated inspection snapshot provider to use the conventional
-alias `debug.nav`; it adds navigation policy without adding host authority.
+alias `debug.nav`. Its `runs`, `open`, and `read` functions return native pages;
+`follow` accepts one advertised relationship and preserves its exact filters,
+state, semantics, and page envelope. It adds no host authority.
 Adding an installed dependency widens the callable surface, so fixed profiles
 pin the complete resolved component list and must version public surface
 changes.

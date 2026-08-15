@@ -1,0 +1,9 @@
+{
+  "limits": {"run_duration_ms": 300000, "workflow_timeout_ms": 300000, "subordinate_evaluations": 32, "workflow_capability_calls": 32, "workflow_capability_calls_per_name": 32, "mission_capability_calls": 128, "mission_capability_calls_per_name": 128, "normal_event_count": 4096},
+  "credentials": {"openrouter_key": {"env": "OPENROUTER_API_KEY"}},
+  "install": {
+    "agent_model": {"source": "llm", "installation_revision": "adversarial-ambiguous-debugger-luna-v1", "model": "openrouter:openai/gpt-5.6-luna", "credential": "openrouter_key", "cache": false, "accepts_data": ["normal", "private_inspection"]},
+    "history": {"source": "ptc_trace_snapshot", "installation_revision": "adversarial-ambiguous-history-v2", "directory": "/private/tmp/ptc-self-repair-adversarial-20260815-b/ambiguous-target-traces"},
+    "debug.nav": {"source": "ptc_inspection_snapshot", "installation_revision": "adversarial-ambiguous-nav-v2", "directory": "/private/tmp/ptc-self-repair-adversarial-20260815-b/ambiguous-target-inspection"}
+  }
+}

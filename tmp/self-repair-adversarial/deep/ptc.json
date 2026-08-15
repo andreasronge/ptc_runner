@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [{"library": "agent.main"}],
+    "entry": "agent.main/run"
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {"id": "pricing.rule", "path": "rule.clj"},
+        {"id": "pricing.tax", "path": "tax.clj", "dependencies": ["pricing.rule"]},
+        {"id": "pricing.discount", "path": "discount.clj"},
+        {"id": "orders", "path": "orders.clj", "dependencies": ["pricing.discount", "pricing.tax"]}
+      ]
+    }
+  },
+  "input": {
+    "value": {
+      "task": "Call orders/place exactly once with subtotal 100 and return its value. The required standard total is subtotal plus 20. Do not replace, catch, or work around a failed call.",
+      "agent": {"mission": "default", "max_turns": 2}
+    }
+  },
+  "providers": {
+    "workflow": [{"name": "agent_model"}],
+    "mission": []
+  },
+  "contracts": {"result_schema": {"path": "result.schema.json"}},
+  "limits": {
+    "run_duration_ms": 120000,
+    "workflow_timeout_ms": 90000,
+    "evaluation_timeout_ms": 30000,
+    "subordinate_evaluations": 4,
+    "workflow_capability_calls": 4,
+    "workflow_capability_calls_per_name": 4,
+    "normal_event_count": 256
+  },
+  "labels": {
+    "name": "self-repair-deep-decoy",
+    "tags": {"mode": "agent", "stage": "executing", "suite": "e2e"}
+  }
+}

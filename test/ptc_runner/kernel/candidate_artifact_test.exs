@@ -64,6 +64,18 @@ defmodule PtcRunner.Kernel.CandidateArtifactTest do
   end
 
   @tag :tmp_dir
+  test "cleanup reports a material filesystem failure", context do
+    out = Path.join(context.tmp_dir, "candidate")
+
+    assert {:ok, published} = CandidateArtifact.publish(out, @source, descriptor())
+    File.rm!(published.candidate)
+    File.mkdir!(published.candidate)
+
+    assert {:error, :candidate_cleanup_failed} = CandidateArtifact.discard(published)
+    assert File.dir?(published.candidate)
+  end
+
+  @tag :tmp_dir
   test "an oversized candidate is refused before anything is created", context do
     out = Path.join(context.tmp_dir, "candidate")
 

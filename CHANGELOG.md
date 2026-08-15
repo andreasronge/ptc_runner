@@ -27,15 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added the shipped `debug.nav` PTC-Lisp library for ordinary debugger
   missions. It composes the existing snapshot-provider `runs`, `open`, and
-  `read` authority into a bounded latest-failure incident, immediate prelude
-  dependency sources, grouped evaluation evidence, and copyable follow-up
-  links without adding a privileged host operation.
+  `read` authority into direct run discovery, collection reads, and a typed
+  `follow` helper that preserves the source relationship and native page
+  envelope without adding a privileged host operation.
 
 - Added `mix ptc.repair` to consume one structured generated repair, bind it to
-  the current component base hash, pass the existing G1-G4 materialization
-  gate, and execute a fresh validation run. Generated reports never control
-  paths, credentials, inputs, host configuration, effect-widening acceptance,
-  or promotion.
+  the current component base hash, and pass the existing G1-G4 materialization
+  gate. Optional live trials require an explicit effects acknowledgement and a
+  host-owned suite of exact normal or private inputs and expected results;
+  reports never control paths, credentials, inputs, host configuration,
+  effect-widening acceptance, or promotion.
 
 - Added typed, followable run-analysis relationships from workflow boundary
   errors to directly proven child producers, generated source, producing turns,
@@ -43,6 +44,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collection/filter pair plus causation, nesting, or association semantics and
   an explicit complete, incomplete, ambiguous, or unavailable state; collection
   descriptors now name their snapshot and sequence domains and identifier paths.
+
+- Added occurrence-qualified dependency relationships to effective prelude
+  sources. Workflow and mission component occurrences now link to their exact
+  dependency occurrences without conflating repeated component IDs.
+
+### Changed
+
+- Candidate gating now refuses every removed installed export, including an
+  export absent from the observed live validation path. Refused-candidate
+  cleanup reports material residue instead of claiming successful removal.
 
 - Added canonical parent-evaluation edges for workflow-launched mission
   evaluations. Private generated-source and turn projections preserve the edge,

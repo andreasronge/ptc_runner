@@ -278,7 +278,7 @@ defmodule PtcRunner.Kernel.DispatcherArgumentViolationTest do
              JSONSchema.validate(
                validator,
                normalized,
-               %{"rows" => List.duplicate(0, 10_000)},
+               %{"rows" => List.duplicate(0, 100_000)},
                1,
                100_000_000
              )

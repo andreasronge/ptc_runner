@@ -15,6 +15,12 @@ defmodule PtcRunner.Kernel.RunAnalysisRelationships do
     preludes_by_run = Enum.group_by(collections.effective_preludes, & &1["run_id"])
     sources_by_run = Enum.group_by(collections.generated_sources, & &1["run_id"])
 
+    effective_preludes =
+      Enum.map(collections.effective_preludes, fn prelude ->
+        relationships = dependency_relations(prelude, trace_facts, preludes_by_run)
+        Map.put(prelude, "relationships", relationships)
+      end)
+
     generated_sources =
       Enum.map(collections.generated_sources, fn source ->
         relationships =
@@ -33,8 +39,86 @@ defmodule PtcRunner.Kernel.RunAnalysisRelationships do
         Map.put(error, "relationships", error_relations(error, facts, sources))
       end)
 
-    %{collections | generated_sources: generated_sources, execution_errors: execution_errors}
+    %{
+      collections
+      | effective_preludes: effective_preludes,
+        generated_sources: generated_sources,
+        execution_errors: execution_errors
+    }
   end
+
+  defp dependency_relations(prelude, trace_facts, preludes_by_run) do
+    with {:ok, graph} <- prelude_graph(prelude, trace_facts),
+         component_ids when is_list(component_ids) <- graph["component_ids"],
+         dependency_indices when is_list(dependency_indices) <- graph["dependency_indices"],
+         index when is_integer(index) <-
+           Enum.find_index(component_ids, &(&1 == prelude["component_id"])),
+         dependencies when is_list(dependencies) <- Enum.at(dependency_indices, index) do
+      Enum.map(dependencies, fn dependency_index ->
+        dependency_id = Enum.at(component_ids, dependency_index)
+        filters = prelude_filters(prelude, dependency_id)
+
+        state =
+          preludes_by_run
+          |> Map.get(prelude["run_id"], [])
+          |> Enum.count(&prelude_matches?(&1, filters))
+          |> relation_state()
+
+        relation(
+          "dependency_prelude_source",
+          "dependency",
+          "prelude_sources",
+          filters,
+          state
+        )
+      end)
+    else
+      _missing ->
+        [
+          relation(
+            "dependency_prelude_source",
+            "dependency",
+            "prelude_sources",
+            nil,
+            "incomplete"
+          )
+        ]
+    end
+  end
+
+  defp prelude_graph(%{"run_id" => run_id, "environment" => "workflow"}, trace_facts) do
+    fetch_graph(get_in(trace_facts, [run_id, "workflow_prelude"]))
+  end
+
+  defp prelude_graph(
+         %{"run_id" => run_id, "environment" => "mission", "mission_name" => mission_name},
+         trace_facts
+       ) do
+    fetch_graph(get_in(trace_facts, [run_id, "missions", mission_name, "prelude"]))
+  end
+
+  defp prelude_graph(_prelude, _trace_facts), do: :error
+
+  defp fetch_graph(graph) when is_map(graph), do: {:ok, graph}
+  defp fetch_graph(_graph), do: :error
+
+  defp prelude_filters(prelude, component_id) do
+    %{
+      "component_id" => component_id,
+      "environment" => prelude["environment"]
+    }
+    |> maybe_put("mission_name", prelude["mission_name"])
+  end
+
+  defp prelude_matches?(prelude, filters) do
+    prelude["component_id"] == filters["component_id"] and
+      prelude["environment"] == filters["environment"] and
+      prelude["mission_name"] == filters["mission_name"]
+  end
+
+  defp relation_state(0), do: "unavailable"
+  defp relation_state(1), do: "complete"
+  defp relation_state(_many), do: "ambiguous"
 
   defp error_relations(error, trace_facts, generated_sources) do
     workflow_evaluation_id = error["evaluation_id"]

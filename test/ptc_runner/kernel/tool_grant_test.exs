@@ -168,7 +168,7 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
              status: :error,
              kind: :capability_unavailable,
              reason: :input_validation_unavailable
-           } = grant["checked"].(%{"rows" => List.duplicate(0, 10_000)})
+           } = grant["checked"].(%{"rows" => List.duplicate(0, 12_000)})
 
     assert {:ok, %{terminal_host_failure?: true}} =
              RunState.release_evaluation_status(state, lease)
