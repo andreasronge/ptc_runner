@@ -15,15 +15,15 @@ validation, run derivation, filtering, and pagination remain owned by
 From the PtcRunner root:
 
 ```bash
-mix ptc.viewer --trace-dir traces
+mix ptc.viewer ptc-project.json
 ```
 
-The root task installs `PtcRunner.Kernel.ViewerAdapter` automatically, starts a
-local server on port 4123, and opens the browser. Use `--port`, `--trace-dir`,
-`--inspection-file`, `--private-traces`, or `--no-open` to override those
-defaults. The server always binds to loopback. `--private-traces` selects
-owner-only canonical trace files for debugger runs and disables the connected
-public run-analysis REPL; it does not widen that REPL's authority.
+The root development task reads the explicitly named operator-owned project
+configuration, captures its trace and authorized inspection directories,
+starts a loopback server, and optionally opens the browser. Port, opening,
+REPL, and private-data choices live in the project file. The old independent
+Viewer path-switch grammar has been removed; see the root
+[project configuration guide](../docs/guides/project-configuration.md).
 
 The REPL evaluates PTC-Lisp against an immutable capture of the selected trace
 directory. The server fixes the `run-analysis-v1` profile: normal bounded
@@ -82,13 +82,8 @@ that navigate to the matching scoped component. Source highlighting may place
 an anchor on a matching definition, with the component source as the fallback;
 highlighted program text is never parsed to infer that a call occurred.
 
-```bash
-mix ptc.viewer --trace-dir traces \
-  --inspection-file traces/run.inspection.jsonl
-```
-
-Authenticated remote access, multiple private artifacts, and prelude editing
-remain outside this local development mode.
+Authenticated remote access and prelude editing remain outside this local
+development mode.
 
 ## Frontend
 

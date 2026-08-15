@@ -10,24 +10,25 @@ switches.
 | Command | Purpose |
 | --- | --- |
 | `ptc init DIRECTORY` | Publish a validated minimal application without replacing an existing target |
-| `ptc validate MANIFEST` | Load and compile without executing the workflow |
-| `ptc run MANIFEST` | Execute the manifest entry |
+| `ptc validate MANIFEST or PROJECT` | Load and compile without executing the workflow |
+| `ptc run MANIFEST or PROJECT` | Execute the application entry |
 | `ptc run MANIFEST --env-file FILE` | Load environment-backed credentials from this exact file |
-| `ptc doctor [MANIFEST]` | Report application and provider readiness |
-| `ptc models --host-config HOST.json` | List public installed model-alias declarations |
+| `ptc doctor [MANIFEST or PROJECT]` | Report application and provider readiness |
+| `ptc models PROJECT.json` or `--host-config HOST.json` | List public installed model-alias declarations |
 | `ptc transcript RUN_ID ...` | Publish one correlated private model transcript |
 | `ptc repl` | Open a direct, manifest-backed, or analysis session |
 | `mix ptc.materialize ...` | Gate model-authored source as a candidate component |
-| `mix ptc.viewer ...` | Browse traces in a source checkout |
+| `mix ptc.viewer PROJECT.json` | Browse a project's captured traces in a source checkout |
 
 `PtcRunner.Kernel.CommandDeclaration` is the canonical command and option
 table. Help is generated from the same declarations as the strict parser.
 
-A provider-bearing manifest needs `--host-config`. Before running it, active
-provider checks can make real requests and may incur cost:
+A provider-bearing manifest needs a host configuration. A project document can
+remember that path and its environment file. Before running it, active provider
+checks can make real requests and may incur cost:
 
 ```console
-mix ptc doctor ptc.json --env-file .env --host-config ptc-host.json --connect
+mix ptc doctor ptc-project.json --connect
 ```
 
 Plain doctor reports `readiness: "unverified"` when its local checks pass.
@@ -43,6 +44,17 @@ produce a complete report are written to stderr.
 `--show-model-selectors` adds only safe selectors.
 
 ## Run a manifest
+
+For normal local use, keep stable paths in a project document:
+
+```console
+mix ptc run ptc-project.json
+mix ptc.viewer ptc-project.json
+```
+
+The project form creates its fixed owner-only artifact layout as needed. See
+[Project configuration](project-configuration.md). Direct manifest invocation
+remains the explicit low-level form below.
 
 The trace directory must already exist:
 
@@ -343,14 +355,14 @@ guards, not access control; treat every downstream sink as private.
 From a source checkout:
 
 ```console
-mix ptc.viewer --trace-dir tmp/traces \
-  --inspection-file tmp/inspection/run.inspection.jsonl
+mix ptc.viewer ptc-project.json
 ```
 
-The Viewer binds to loopback, pins the selected inspection file, and can open a
-bounded analysis REPL over an immutable capture. Use `--port` to choose a port
-and `--no-open` on a remote host. It is a development path dependency, not part
-of the published Hex package. See
+The project document supplies the trace root and optional inspection root, plus
+the port, browser-opening preference, REPL setting, and private-data grant. The
+Viewer binds to loopback, pins the selected data, and can open a bounded
+analysis REPL over an immutable capture. It is a development path dependency,
+not part of the published Hex package. See
 [`ptc_viewer/README.md`](../../ptc_viewer/README.md) for its complete command
 and HTTP API.
 

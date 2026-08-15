@@ -39,7 +39,13 @@ and workflow capabilities as `mix ptc run`:
 mix ptc repl --manifest ptc.json
 mix ptc repl --manifest ptc.json --host-config ptc-host.json
 mix ptc repl --manifest ptc.json -e '(workflow/helper data/input)'
+mix ptc repl --project ptc-project.json -e '(workflow/helper data/input)'
 ```
+
+`--project` supplies the project's application, host, and lazy environment
+defaults while preserving the manifest REPL input grammar. It conflicts with
+`--manifest`, `--profile`, and `--describe-profile`; an explicit
+`--host-config` or `--env-file` overrides the matching project reference.
 
 A provider-bearing manifest requires `--host-config`. The session performs the
 same audited-local checks, acquires one provider session, and reuses it for

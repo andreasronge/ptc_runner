@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.ManifestReplPreparation
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProjectContext
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
@@ -185,6 +186,8 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
         result
 
       :run ->
+        destinations = project_result_destinations(arguments, prepared, destinations)
+
         case CommandPreparation.new(
                :run,
                run_ref,
@@ -192,8 +195,8 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
                catalog,
                runtime_services,
                environment_setup_required,
-               elem(destinations, 0),
-               elem(destinations, 1)
+               project_artifact_root(arguments),
+               destinations
              ) do
           {:ok, preparation} -> {:ok, preparation}
           {:error, _reason} -> invalid_preparation(arguments, run_ref, prepared)
@@ -209,6 +212,52 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
       PreparedRun.close(prepared)
       InstallationCatalog.close(catalog)
       :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  defp project_result_destinations(
+         %CommandArguments{project: %ProjectContext{derived_options: derived}},
+         %{effective_event_policy: :private},
+         {destinations, failures}
+       ) do
+    if MapSet.member?(derived, :result) do
+      destinations =
+        case Map.pop(destinations, :output) do
+          {nil, remaining} -> remaining
+          {path, remaining} -> Map.put(remaining, :private_output, private_result_path(path))
+        end
+
+      failures =
+        Enum.map(failures, fn
+          :output -> :private_output
+          key -> key
+        end)
+
+      {destinations, failures}
+    else
+      {destinations, failures}
+    end
+  end
+
+  defp project_result_destinations(_arguments, _prepared, destinations), do: destinations
+
+  defp project_artifact_root(%CommandArguments{
+         project: %ProjectContext{
+           config: %{artifact_root: root},
+           derived_options: derived
+         }
+       })
+       when is_binary(root) do
+    if MapSet.disjoint?(derived, MapSet.new([:trace_dir, :inspect, :result, :envelope])),
+      do: nil,
+      else: root
+  end
+
+  defp project_artifact_root(_arguments), do: nil
+
+  defp private_result_path(path) do
+    if String.ends_with?(path, ".json"),
+      do: String.replace_suffix(path, ".json", ".private.json"),
+      else: path <> ".private.json"
   end
 
   defp command_runtime_services(nil, runtime),

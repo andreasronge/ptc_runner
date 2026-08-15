@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ptc-runner.dev/schemas/ptc-project-config.schema.json",
+  "kind": "ptc-project",
+  "version": 1,
+  "application": {
+    "path": "05-signature-feedback/ptc.json"
+  },
+  "artifacts": {
+    "root": "05-signature-feedback/.ptc",
+    "trace": true,
+    "inspection": false,
+    "result": false,
+    "envelope": true
+  },
+  "viewer": {
+    "port": 4123,
+    "open": true,
+    "repl": true,
+    "private": false
+  }
+}

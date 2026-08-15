@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   @default_directory_entries 4_096
   @default_trace_files 1_024
   @capture_heap_words 10_000_000
+  @capture_timeout_ms 15_000
   @operations [:list_runs, :get_run, :list_turns, :counters]
 
   @enforce_keys [:pid, :token]
@@ -56,6 +57,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
       :max_directory_entries,
       :max_trace_files,
       :capture_heap_words,
+      :capture_deadline_ms,
       :capture_hook,
       :listing_hook
     ]
@@ -77,6 +79,12 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
            Keyword.get(opts, :max_trace_files, @default_trace_files),
          capture_heap_words when capture_heap_words in 233..@capture_heap_words <-
            Keyword.get(opts, :capture_heap_words, @capture_heap_words),
+         capture_deadline_ms when is_integer(capture_deadline_ms) <-
+           Keyword.get(
+             opts,
+             :capture_deadline_ms,
+             System.monotonic_time(:millisecond) + @capture_timeout_ms
+           ),
          capture_hook when is_nil(capture_hook) or is_function(capture_hook, 0) <-
            Keyword.get(opts, :capture_hook),
          listing_hook when is_nil(listing_hook) or is_function(listing_hook, 0) <-
@@ -87,7 +95,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
              __MODULE__,
              {directory, source, source_kind, owner, registrar, token, max_source_bytes,
               max_retained_bytes, max_result_bytes, max_directory_entries, max_trace_files,
-              capture_heap_words, capture_hook, listing_hook}
+              capture_heap_words, capture_deadline_ms, capture_hook, listing_hook}
            ) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
         {:error, {:source_retained_limit_exceeded, _details} = reason} -> {:error, reason}
@@ -179,7 +187,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   def init(
         {directory, source, source_kind, owner, registrar, token, max_source_bytes,
          max_retained_bytes, max_result_bytes, max_directory_entries, max_trace_files,
-         capture_heap_words, capture_hook, listing_hook}
+         capture_heap_words, capture_deadline_ms, capture_hook, listing_hook}
       ) do
     owner_ref = Process.monitor(owner)
 
@@ -198,7 +206,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
     with :ok <- ResourceRegistrar.register_root(registrar),
          {:ok, capture, retained_bytes} <-
-           capture_for_owner(capture, owner, owner_ref, capture_heap_words) do
+           capture_for_owner(capture, owner, owner_ref, capture_heap_words, capture_deadline_ms) do
       {:ok, snapshot_state(capture, source, retained_bytes, token, owner_ref, max_result_bytes)}
     else
       {:error, reason} -> {:stop, reason}
@@ -355,7 +363,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     end
   end
 
-  defp capture_for_owner(capture, owner, owner_ref, capture_heap_words) do
+  defp capture_for_owner(capture, owner, owner_ref, capture_heap_words, capture_deadline_ms) do
     reply_alias = Process.alias()
     reply_ref = make_ref()
 
@@ -373,6 +381,8 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
           :monitor
         ]
       )
+
+    timeout = max(capture_deadline_ms - System.monotonic_time(:millisecond), 0)
 
     receive do
       {^reply_ref, result} ->
@@ -393,6 +403,10 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
       {:DOWN, ^worker_ref, :process, ^worker, _reason} ->
         Process.unalias(reply_alias)
+        {:error, :source_unavailable}
+    after
+      timeout ->
+        terminate_capture(worker, worker_ref, reply_alias)
         {:error, :source_unavailable}
     end
   end

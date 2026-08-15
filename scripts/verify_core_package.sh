@@ -41,6 +41,9 @@ test -z "$(find "$package_tmp_dir/source" -type f \( -name '*.c' -o -name '*.so'
 test -x "$package_tmp_dir/source/rel/overlays/bin/ptc"
 test -f "$package_tmp_dir/source/priv/schemas/ptc-host-config.schema.json"
 test -f "$package_tmp_dir/source/priv/schemas/ptc-application-manifest.schema.json"
+test -f "$package_tmp_dir/source/priv/schemas/ptc-project-config.schema.json"
+test ! -e "$package_tmp_dir/source/dev"
+test ! -e "$package_tmp_dir/source/lib/mix/tasks/ptc.viewer.ex"
 
 for mix_env in dev test; do
   (

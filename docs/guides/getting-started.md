@@ -23,7 +23,8 @@ runtime-included release through `bin/ptc`.
 mix ptc init hello-ptc
 ```
 
-Initialization creates `main.clj` and `ptc.json`:
+Initialization creates `main.clj`, the application manifest `ptc.json`, and an
+operator-owned `ptc-project.json` that remembers artifact and Viewer choices:
 
 ```clojure
 (ns main)
@@ -50,6 +51,17 @@ Initialization creates `main.clj` and `ptc.json`:
 }
 ```
 
+Run the generated project without repeating paths:
+
+```console
+mix ptc run hello-ptc/ptc-project.json
+mix ptc.viewer hello-ptc/ptc-project.json
+```
+
+The first run creates an owner-only `.ptc` artifact layout. See
+[Project configuration](project-configuration.md) for host and environment
+references, overrides, and the complete schema.
+
 Initialization refuses to merge with or overwrite an existing path.
 [Running and debugging](running-and-debugging.md#choose-a-command) lists the command
 and failure behavior.
@@ -60,7 +72,7 @@ From the repository root:
 
 ```console
 mix deps.get
-mix ptc run examples/kernel-tutorial/01-orders/ptc.json
+mix ptc run examples/kernel-tutorial/01-orders.ptc-project.json
 ```
 
 The command prints the compact JSON result value (expanded here for reading):
@@ -74,19 +86,22 @@ The command prints the compact JSON result value (expanded here for reading):
 }
 ```
 
-Use `--envelope FILE` when a caller also needs stable command metadata and
-runtime usage. [Running and debugging](running-and-debugging.md#read-results-and-failures)
+The project enables a run-reference-named command envelope and trace without
+requiring more switches. [Running and debugging](running-and-debugging.md#read-results-and-failures)
 explains results, errors, and envelopes.
 
 ## Read the project
 
-The example has three files:
+The project document sits beside the tutorial directories and points to the
+three application files:
 
 ```text
-examples/kernel-tutorial/01-orders/
-├── ptc.json
-├── orders.clj
-└── orders.json
+examples/kernel-tutorial/
+├── 01-orders.ptc-project.json
+└── 01-orders/
+    ├── ptc.json
+    ├── orders.clj
+    └── orders.json
 ```
 
 The manifest selects a PTC-Lisp component, its public entry function, and the
@@ -129,22 +144,23 @@ agent turns.
 
 ## Record a trace
 
-Canonical traces contain bounded operational facts, not prompts, capability
-payloads, or generated source:
+The project document enables canonical traces and remembers their directory:
 
 ```console
-mkdir -p tmp/tutorial-traces
-mix ptc run examples/kernel-tutorial/01-orders/ptc.json \
-  --trace-dir tmp/tutorial-traces
+mix ptc run examples/kernel-tutorial/01-orders.ptc-project.json
+mix ptc.viewer examples/kernel-tutorial/01-orders.ptc-project.json
 ```
 
-The JSON Lines file records the run, workflow evaluation, outcome, usage, and
-limits. Query the captured directory through the fixed run-analysis profile:
+The JSON Lines file under `01-orders/.ptc/traces` records the run, workflow
+evaluation, outcome, usage, and limits. The Viewer reads the same project file
+for its trace directory, port, browser-opening preference, and REPL setting.
+You can also query the captured directory through the fixed run-analysis
+profile:
 
 ```console
 mix ptc repl \
   --profile run-analysis-v1 \
-  --resource traces=tmp/tutorial-traces \
+  --resource traces=examples/kernel-tutorial/01-orders/.ptc/traces \
   -e '(analysis/runs {"limit" 50})'
 ```
 
@@ -170,19 +186,24 @@ session, and a failed form leaves that state untouched. The
 
 ## Call a model
 
-Everything above is deterministic. Adding a model takes one credential and one
-extra flag.
+Everything above is deterministic. Adding a model takes one credential; the
+project document remembers the application, host, environment, artifacts, and
+Viewer settings.
 
-Copy `.env.example` to the Git-ignored `.env` and set `OPENROUTER_API_KEY` to
-your [OpenRouter](https://openrouter.ai/keys) key. Pass `--env-file .env` to
-load that exact file; PtcRunner does not search for it implicitly.
+Copy `.env.example` to the tutorial's Git-ignored `.env` and set
+`OPENROUTER_API_KEY` to your [OpenRouter](https://openrouter.ai/keys) key. The
+tutorial project explicitly names that file; PtcRunner does not search for it
+implicitly.
 [Host configuration](host-configuration.md#declare-credentials-once) documents the three
 declaration forms and how to move off `.env` for a real deployment.
 
 ```console
-mix ptc run examples/kernel-tutorial/02-deepseek-extract/ptc.json \
-  --env-file .env \
-  --host-config examples/kernel-tutorial/ptc-host.json
+cp .env.example examples/kernel-tutorial/.env
+chmod 600 examples/kernel-tutorial/.env
+```
+
+```console
+mix ptc run examples/kernel-tutorial/02-deepseek-extract.ptc-project.json
 ```
 
 ```json
@@ -191,17 +212,15 @@ mix ptc run examples/kernel-tutorial/02-deepseek-extract/ptc.json \
 
 The model's exact wording varies between runs; the result shape does not.
 
-`--host-config` names the operator document that gives the manifest's
-`deepseek` alias a model and credential. The manifest may select and narrow the
-alias, but cannot name a model, endpoint, or key. The model output remains
-untrusted text until the workflow parses and validates it.
+The project document names the operator-owned host configuration that gives the
+manifest's `deepseek` alias a model and credential. The manifest may select and
+narrow the alias, but cannot name a model, endpoint, or key. The model output
+remains untrusted text until the workflow parses and validates it.
 
 Let the model write the program instead:
 
 ```console
-mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
-  --env-file .env \
-  --host-config examples/kernel-tutorial/ptc-host.json
+mix ptc run examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
 ```json

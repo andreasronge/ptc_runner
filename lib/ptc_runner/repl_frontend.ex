@@ -68,6 +68,7 @@ defmodule PtcRunner.ReplFrontend do
   a closed frontend error; this shared module never halts the VM.
   """
 
+  alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.AnalysisDirectory
   alias PtcRunner.Kernel.AnalysisProfileRegistry
   alias PtcRunner.Kernel.AnalysisSession
@@ -94,7 +95,8 @@ defmodule PtcRunner.ReplFrontend do
         %CommandRuntime{} = runtime,
         frontend_opts
       ) do
-    if valid_frontend_opts?(frontend_opts) do
+    if valid_frontend_opts?(frontend_opts) and CommandRuntime.valid?(runtime) do
+      {:ok, runtime} = Dotenv.attach_environment(runtime, opts)
       arguments = if is_binary(script), do: [script], else: []
       terminal_attached? = terminal_attached?(frontend_opts)
 

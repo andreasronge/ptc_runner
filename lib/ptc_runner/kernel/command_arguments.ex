@@ -18,7 +18,7 @@ defmodule PtcRunner.Kernel.CommandArguments do
     :frontend,
     :frontend_options
   ]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [project: nil]
 
   @type command ::
           :help | :version | :init | :validate | :run | :doctor | :models | :transcript | :repl
@@ -29,6 +29,7 @@ defmodule PtcRunner.Kernel.CommandArguments do
           options: map(),
           ordered_options: keyword(),
           frontend: :standalone | :mix,
-          frontend_options: keyword()
+          frontend_options: keyword(),
+          project: term()
         }
 end

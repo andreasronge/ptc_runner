@@ -13,6 +13,15 @@ change an endpoint or executable, supply a credential, or raise a ceiling. A
 provider-bearing manifest requires `--host-config`; a provider-free manifest
 does not.
 
+For a checkout used repeatedly, store the host and optional environment-file
+references in the separate operator-owned
+[project configuration](project-configuration.md):
+
+```console
+mix ptc run ptc-project.json
+mix ptc doctor ptc-project.json --connect
+```
+
 Loading validates bounded, path-confined JSON without reading credentials,
 resolving executables, starting processes, or contacting endpoints. Those
 actions happen later during preflight and acquisition.
@@ -384,9 +393,7 @@ Run active local, credential, authorization, and connectivity checks without
 invoking the workflow:
 
 ```console
-mix ptc doctor examples/kernel-tutorial/02-deepseek-extract/ptc.json \
-  --host-config examples/kernel-tutorial/ptc-host.json \
-  --connect
+mix ptc doctor examples/kernel-tutorial/02-deepseek-extract.ptc-project.json --connect
 ```
 
 `readiness` is `ready` only after successful active checks. Plain doctor is

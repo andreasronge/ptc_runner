@@ -101,9 +101,9 @@ hidden annotation immediately before its `console` block and place the expected
 `json` block immediately after it:
 
 ````markdown
-<!-- ptc-guide-e2e: id=unique-example-id -->
+<!-- ptc-guide-e2e: id=unique-example-id project=examples/kernel-tutorial/01-orders.ptc-project.json -->
 ```console
-mix ptc run examples/kernel-tutorial/01-orders/ptc.json
+mix ptc run examples/kernel-tutorial/01-orders.ptc-project.json
 ```
 ```json
 {"order_count":3}
@@ -126,6 +126,15 @@ the visible block must remain useful when pasted by a reader. Because routing
 comes from the registry rather than current file contents, removing the final
 annotation or deleting a registered guide still runs both documentation and
 core test gates.
+
+Add `project=path/to/ptc-project.json` when the visible command runs a shipped
+project configuration. The helper copies the project directory into its
+owner-only temporary directory, substitutes only that exact command argument,
+removes copied artifacts, writes a required credential to the copied project's
+declared environment file, and reads asserted envelopes from the copied
+artifact root. The checked-out example therefore remains unchanged while the
+test exercises the same project document, relative paths, and command form a
+reader uses.
 
 ## Style and tone
 

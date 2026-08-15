@@ -21,13 +21,15 @@ From the repository root:
 
 ```console
 mix deps.get
-mix ptc run examples/kernel-tutorial/01-orders/ptc.json
+mix ptc init hello-ptc
+mix ptc run hello-ptc/ptc-project.json
 ```
 
-The example loads JSON input, runs a PTC-Lisp function, and returns a JSON
-result. It needs no model credentials and no host code. Two more commands add
-an API key and get a model to write the program instead:
-[Quickstart](docs/guides/quickstart.md).
+The generated project is provider-free: it runs immediately, records a trace,
+and remembers its Viewer settings. See
+[Project configuration](docs/guides/project-configuration.md) for the
+single-file workflow, or [Quickstart](docs/guides/quickstart.md) to get a model
+writing the program.
 
 ## Why it is safe
 

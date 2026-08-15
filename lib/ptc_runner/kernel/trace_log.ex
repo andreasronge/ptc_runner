@@ -2055,7 +2055,7 @@ defmodule PtcRunner.Kernel.TraceLog do
                                                   {:ok, event_groups, run_sources} ->
       case decode_jsonl(source) do
         {:ok, events} ->
-          case put_run_sources(run_sources, events, filename_source_kind(name)) do
+          case put_run_sources(run_sources, events, filename_source_kind(name), name) do
             {:ok, run_sources} -> {:cont, {:ok, [events | event_groups], run_sources}}
             {:error, _reason} = error -> {:halt, error}
           end
@@ -2066,19 +2066,20 @@ defmodule PtcRunner.Kernel.TraceLog do
     end)
     |> case do
       {:ok, event_groups, run_sources} ->
-        {:ok, event_groups |> Enum.reverse() |> List.flatten(), run_sources}
+        source_kinds = Map.new(run_sources, fn {run_id, {kind, _name}} -> {run_id, kind} end)
+        {:ok, event_groups |> Enum.reverse() |> List.flatten(), source_kinds}
 
       {:error, _reason} = error ->
         error
     end
   end
 
-  defp put_run_sources(run_sources, events, source_kind) do
+  defp put_run_sources(run_sources, events, source_kind, source_name) do
     Enum.reduce_while(events, {:ok, run_sources}, fn
       %{"run_id" => run_id}, {:ok, sources} ->
         case Map.get(sources, run_id) do
-          nil -> {:cont, {:ok, Map.put(sources, run_id, source_kind)}}
-          ^source_kind -> {:cont, {:ok, sources}}
+          nil -> {:cont, {:ok, Map.put(sources, run_id, {source_kind, source_name})}}
+          {^source_kind, ^source_name} -> {:cont, {:ok, sources}}
           _conflicting -> {:halt, {:error, :malformed_source}}
         end
 

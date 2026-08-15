@@ -5,6 +5,7 @@ defmodule Mix.Tasks.Ptc do
 
       mix ptc help
       mix ptc init DIRECTORY
+      mix ptc run DIRECTORY/ptc-project.json
       mix ptc validate ptc.json
       mix ptc run ptc.json --input alternate-input.json
       mix ptc doctor ptc.json --host-config ptc-host.json --connect

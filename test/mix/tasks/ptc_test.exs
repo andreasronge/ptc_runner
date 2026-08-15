@@ -360,7 +360,9 @@ defmodule Mix.Tasks.PtcTest do
   end
 
   @tag :tmp_dir
-  test "command runtimes load only an explicitly named environment file", %{tmp_dir: dir} do
+  test "command runtime bootstrappers leave explicit environment loading to command execution", %{
+    tmp_dir: dir
+  } do
     for {frontend, variable, bootstrap} <- [
           {:mix, "PTC_RUN_EXPLICIT_MIX_CREDENTIAL", &MixCommandRuntime.bootstrap/1},
           {:standalone, "PTC_RUN_EXPLICIT_STANDALONE_CREDENTIAL",
@@ -375,7 +377,8 @@ defmodule Mix.Tasks.PtcTest do
 
       assert {:ok, runtime} = bootstrap.(entry.arguments)
       assert CommandRuntime.setup_environment(runtime) == :ok
-      assert System.get_env(variable) == "loaded"
+      assert runtime.environment_setup == nil
+      assert System.get_env(variable) == nil
     end
   end
 

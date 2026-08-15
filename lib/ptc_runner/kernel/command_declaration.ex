@@ -25,10 +25,10 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
   @declarations %{
     root: %{
       usage: [
-        "ptc validate ptc.json [--host-config HOST.json]",
-        "ptc run ptc.json [OPTIONS]",
-        "ptc doctor [ptc.json] [--host-config HOST.json] [--connect]",
-        "ptc models --host-config HOST.json",
+        "ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json]",
+        "ptc run MANIFEST.json|PROJECT.json [OPTIONS]",
+        "ptc doctor [MANIFEST.json|PROJECT.json] [--host-config HOST.json] [--connect]",
+        "ptc models PROJECT.json | --host-config HOST.json",
         "ptc init DIRECTORY",
         "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE",
         "ptc repl [OPTIONS] [SCRIPT|-]",
@@ -57,7 +57,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
       ]
     },
     validate: %{
-      usage: ["ptc validate ptc.json [--host-config HOST.json]"],
+      usage: ["ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json]"],
       options: [
         %{
           key: :host_config,
@@ -75,7 +75,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
       ]
     },
     run: %{
-      usage: ["ptc run ptc.json [OPTIONS]"],
+      usage: ["ptc run MANIFEST.json|PROJECT.json [OPTIONS]"],
       options: [
         %{
           key: :host_config,
@@ -146,7 +146,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
     },
     doctor: %{
       usage: [
-        "ptc doctor [ptc.json] [--host-config HOST.json] [--connect] [--show-model-selectors]"
+        "ptc doctor [MANIFEST.json|PROJECT.json] [--host-config HOST.json] [--connect] [--show-model-selectors]"
       ],
       options: [
         %{
@@ -178,7 +178,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
       ]
     },
     models: %{
-      usage: ["ptc models --host-config HOST.json"],
+      usage: ["ptc models PROJECT.json | --host-config HOST.json"],
       options: [
         %{
           key: :host_config,
@@ -230,6 +230,12 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
     repl: %{
       usage: ["ptc repl [OPTIONS] [SCRIPT|-]"],
       options: [
+        %{
+          key: :project,
+          type: :string,
+          syntax: ["--project PROJECT.json"],
+          description: "reuse application, host, and environment project defaults"
+        },
         %{
           key: :eval,
           type: [:string, :keep],

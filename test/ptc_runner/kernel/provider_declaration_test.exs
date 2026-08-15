@@ -1423,8 +1423,8 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                other_catalog,
                runtime_services,
                false,
-               %{},
-               []
+               nil,
+               {%{}, []}
              )
 
     assert :ok = PreparedRun.close(prepared)

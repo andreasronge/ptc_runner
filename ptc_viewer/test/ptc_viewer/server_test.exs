@@ -34,6 +34,22 @@ defmodule PtcViewer.ServerTest do
              PtcViewer.start(port: 0, repl_adapter: String, repl_config: %{}, open: false)
   end
 
+  test "a pre-pinned inspection source is retained without invoking path pinning" do
+    source = {:inspection_snapshot, make_ref()}
+
+    {:ok, viewer} =
+      PtcViewer.start(
+        port: 0,
+        inspection_source: source,
+        inspection_adapter: PinningInspectionTestAdapter,
+        open: false
+      )
+
+    store = :sys.get_state(viewer).inspection_store
+    assert {:ok, ^source} = PtcViewer.InspectionStore.fetch(store)
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
   @tag :tmp_dir
   test "private trace mode pins inspection against the private directory", %{tmp_dir: trace_dir} do
     {:ok, viewer} =

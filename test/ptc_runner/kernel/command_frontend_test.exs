@@ -806,7 +806,10 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
       "doctor_default" => CommandOutcome.success(:doctor, @run_ref, doctor_default),
       "doctor_connect" => CommandOutcome.success({:doctor, :connect}, @run_ref, doctor_connect),
       "models" => CommandOutcome.success(:models, @run_ref, %{"installations" => []}),
-      "init" => CommandOutcome.success(:init, @run_ref, %{"created" => ["main.clj", "ptc.json"]}),
+      "init" =>
+        CommandOutcome.success(:init, @run_ref, %{
+          "created" => ["main.clj", "ptc.json", "ptc-project.json"]
+        }),
       "help_root" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:root)),
       "help_run" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:run)),
       "version" => CommandOutcome.success(:version, @run_ref, CommandContract.version_result())

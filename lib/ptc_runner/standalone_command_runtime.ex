@@ -1,7 +1,6 @@
 defmodule PtcRunner.StandaloneCommandRuntime do
   @moduledoc false
 
-  alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandRuntime
 
@@ -21,12 +20,8 @@ defmodule PtcRunner.StandaloneCommandRuntime do
 
   def bootstrap(_arguments), do: {:error, :command_bootstrap_failed}
 
-  defp runtime(arguments) do
-    options =
-      [provider_application_mode: :command_vm] ++
-        Dotenv.environment_setup_option(arguments.frontend_options)
-
-    case CommandRuntime.new(options) do
+  defp runtime(_arguments) do
+    case CommandRuntime.new(provider_application_mode: :command_vm) do
       {:ok, runtime} -> {:ok, runtime}
       {:error, :invalid_command_runtime} -> {:error, :command_bootstrap_failed}
     end
