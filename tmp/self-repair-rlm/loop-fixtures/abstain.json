@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "loop-fixture.abstain", "path": "abstain.clj", "dependencies": ["kernel"]},
+      {"library": "kernel"}
+    ],
+    "entry": "loop-fixture.abstain/run"
+  },
+  "missions": {},
+  "input": {"value": {}},
+  "limits": {"run_duration_ms": 30000, "subordinate_evaluations": 1}
+}

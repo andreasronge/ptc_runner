@@ -851,3 +851,92 @@ their own evidence, but it cannot recover the two already-lost model values.
 5. PTC analysis fallback for a missing inspection artifact remains necessary
    even with the producer fixed. Older runs and unrelated publication failures
    can still leave a private canonical trace as the only surviving evidence.
+
+## One-shot host repair loop experiment
+
+The next increment tested the lifecycle rather than adding another model
+prompt. `repair-loop.exs` accepts a strict configuration containing an existing
+owner-only `feedback.json`, an explicit correction manifest, the target
+manifest, and a bounded validation suite. It creates one owner-only output
+root, runs exactly one correction, and owns the terminal state:
+
+- `correction-failed` for a failed run or malformed decision;
+- `correction-abstained` for a structurally valid insufficient-evidence report;
+- `candidate-rejected` when `ptc.repair` materializes but host validation
+  fails;
+- `candidate-validated` only after G1--G4 and every named host case passes; or
+- `repair-failed` for an operational/static-gate failure after proposal.
+
+The model cannot write any of those states. A `propose-change` value is stored
+as owner-only untrusted input and passed to the existing `ptc.repair`; an
+abstention stops before materialization. The loop records correction traces,
+inspection, result, envelope, candidate, validation evidence, and a compact
+host-authored lifecycle report beneath the output root. It does not promote,
+modify the target checkout, rerun automatically, or guess after failure.
+
+Provider-free controls established both sides of the branch. The abstention
+fixture ended `correction-abstained` with no candidate directory. The proposal
+fixture selected the known `pricing.base` component, passed G1--G4, produced
+`total: 120` for the host's observed input, and ended `candidate-validated`.
+Its validation envelope names correction run
+`cmd-474pbs7bykcgnn2kpajjzwksk2` as author and preserves the model-versus-host
+authority split. These controls prove host-loop mechanics only; the candidate
+content is deliberately deterministic and domain-specific.
+
+### Single DeepSeek correction
+
+The only live sample used the unchanged domain-blind feedback-correction
+manifest, the exact rejected-candidate feedback envelope, and DeepSeek. Host
+loop output `/private/tmp/ptc-repair-loop-deepseek-20260815` ended
+`correction-failed` with exit status 7 for correction run
+`cmd-48fg14tapr9szpy227d85kzaqy`. No candidate or validation run was created.
+
+The verdict came from `private-run-analysis-v1`, not a direct inspection-log
+read. PTC correlated a complete canonical trace with 42 inspection records,
+two complete model exchanges, three generated sources, and the original
+workflow `result_contract_failed` error. Both turns generated the identical
+program:
+
+```clojure
+(return :insufficient-evidence)
+```
+
+The first value failed the report schema at the root: the discriminator was
+`decision`, but the JSON value kind was a string rather than an object. The
+model received that exact structural diagnostic and repeated the same scalar
+on its final turn. Semantically this is the safe conclusion for the ambiguous
+fixture; mechanically it is not a usable correction report because it omits
+the cause, evidence, and missing evidence. The loop correctly did not coerce
+it into a host-authored abstention.
+
+This run also confirms the prior inspection fix under the exact failure that
+used to poison publication. The private analysis profile can now see the
+generated programs, feedback, model exchanges, and original result-contract
+diagnostic rather than an `inspection_sink_unavailable` replacement.
+
+### Friction and conclusions
+
+1. The host loop is enough to close one bounded repair cycle; a new public
+   `debug.nav` operation is not required for orchestration. Evidence discovery
+   stays in the explicit correction manifest, while lifecycle and validation
+   stay with the host.
+2. The remaining blocker in this cell is terminal protocol, not evidence or
+   stopping. DeepSeek chose the right branch twice but treated the branch name
+   as the whole value. More prompt text would repeat an already-delivered type
+   diagnostic. A later comparison should test host-encoded terminal actions or
+   structured-output synthesis, where `abstain` and `propose` cannot be
+   confused with their report payloads.
+3. The result must not be auto-coerced. Turning
+   `:insufficient-evidence` into a valid abstention would erase the required
+   explanation and allow a model shorthand to cross a host boundary as if it
+   were complete evidence.
+4. Private input staging has a sharp edge: the generic owner-only temporary
+   sibling helper creates a dot-prefixed directory, but application references
+   exclude that path and `--private-input` then fails as `reference_missing`.
+   The working loop uses a random owner-only, non-dot sibling, matching
+   `ptc.repair` validation staging.
+5. Unattended PTC analysis again required an already-created session trace
+   directory, and its directory must be pairwise separate from both resource
+   directories and the `--private-output` parent. The generic physical-
+   separation error did not identify the conflicting pair. After using sibling
+   output and session roots, analysis succeeded without further workaround.
