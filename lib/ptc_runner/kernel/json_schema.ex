@@ -289,6 +289,19 @@ defmodule PtcRunner.Kernel.JSONSchema do
 
   defp project_expected(_constraint, _value), do: :omit
 
+  @doc false
+  @spec declared_expected(atom(), map()) :: {:ok, number()} | :omit
+  def declared_expected(kind, schema) when is_atom(kind) and is_map(schema) do
+    with {:ok, constraint} <- Map.fetch(@constraint_keys, kind),
+         {:ok, declared} <- Map.fetch(schema, constraint) do
+      project_expected(constraint, declared)
+    else
+      _unsupported_or_absent -> :omit
+    end
+  end
+
+  def declared_expected(_kind, _schema), do: :omit
+
   defp normalize(_schema, depth) when depth > @max_depth, do: {:error, :invalid_schema}
 
   defp normalize(schema, depth) when is_map(schema) and not is_struct(schema) do

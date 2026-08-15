@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SourceCheck
   alias PtcRunner.Kernel.ValueContract
+  alias PtcRunner.Kernel.ValueContractDiagnostic
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RetainedSize
@@ -377,6 +378,16 @@ defmodule PtcRunner.Kernel.RuntimeTools do
            argument_projection: :raw
          }}
 
+      {"kernel-result-contract-failure" = name, callback} ->
+        {name,
+         %TrustedTool{
+           function: callback,
+           argument_projection: :raw,
+           ledger_arguments: &result_contract_failure_ledger_arguments/1,
+           prelude_namespaces: ["agent.core"],
+           visibility: :private
+         }}
+
       {"kernel-runtime-limit-failure" = name, callback} ->
         {name,
          %TrustedTool{
@@ -580,7 +591,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
       if ValueContract.valid?(contract, json_value) do
         %{status: :ok, value: %{enforced?: true, valid?: true}}
       else
-        invalid_result_contract(ValueContract.classify(contract, json_value))
+        invalid_result_contract(ValueContract.model_feedback(contract, json_value))
       end
     else
       {:error, _reason} ->
@@ -591,7 +602,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   defp invalid_json_result_contract(contract, value) do
     details =
       contract
-      |> ValueContract.classify(value)
+      |> ValueContract.model_feedback(value)
       |> Map.put(:json_value, false)
       |> Map.put(:violations, [])
 
@@ -600,6 +611,168 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
   defp invalid_result_contract(details) do
     %{status: :ok, value: %{enforced?: true, valid?: false, details: details}}
+  end
+
+  @doc false
+  @spec result_contract_failure(ValueContract.t() | nil, binary() | nil) :: (map() -> term())
+  def result_contract_failure(%ValueContract{} = contract, contract_source) do
+    fn
+      %{"value" => value, "agent_turns" => agent_turns} = arguments
+      when map_size(arguments) == 2 and agent_turns in 1..128 ->
+        result_contract_failure(contract, contract_source, value, agent_turns)
+
+      _invalid ->
+        invalid_result_contract_failure()
+    end
+  end
+
+  def result_contract_failure(_contract, _contract_source),
+    do: fn _arguments -> invalid_result_contract_failure() end
+
+  defp result_contract_failure(contract, contract_source, value, agent_turns) do
+    case Lisp.project_boundary_value(value, :kernel_json) do
+      {:ok, projected} ->
+        projected_result_contract_failure(
+          contract,
+          contract_source,
+          value,
+          projected,
+          agent_turns
+        )
+
+      {:error, _projection_error} ->
+        non_json_result_contract_failure(contract, contract_source, value, agent_turns)
+    end
+  end
+
+  defp projected_result_contract_failure(
+         contract,
+         contract_source,
+         original_value,
+         projected,
+         agent_turns
+       ) do
+    with {:ok, json_value} <- ValueContract.json_value(projected),
+         false <- ValueContract.valid?(contract, json_value),
+         {:ok, classification} <- ValueContractDiagnostic.classify(contract, json_value),
+         {:ok, details} <- terminal_contract_details(classification, contract_source, agent_turns) do
+      %TrustedError{
+        reason: :result_contract_failed,
+        message: "agent result contract correction exhausted",
+        details: details
+      }
+    else
+      {:error, reason} when reason in [:duplicate_key, :invalid_json] ->
+        non_json_result_contract_failure(contract, contract_source, original_value, agent_turns)
+
+      _invalid_or_satisfied ->
+        invalid_result_contract_failure()
+    end
+  end
+
+  defp non_json_result_contract_failure(contract, contract_source, value, agent_turns) do
+    case ValueContractDiagnostic.classify(contract, value) do
+      {:ok, classification} ->
+        details =
+          classification
+          |> Map.take([:contract_authority])
+          |> Map.put(:agent_turns, agent_turns)
+          |> Map.put(:constraint, :json_value)
+          |> Map.put(:violations, [])
+          |> maybe_put_contract_source(contract_source)
+
+        %TrustedError{
+          reason: :result_contract_failed,
+          message: "agent result contract correction exhausted",
+          details: details
+        }
+
+      {:error, :invalid_contract_classification} ->
+        invalid_result_contract_failure()
+    end
+  end
+
+  defp terminal_contract_details(classification, contract_source, agent_turns) do
+    case terminal_contract_violation(classification) do
+      %{kind: constraint} = violation when is_atom(constraint) ->
+        details =
+          classification
+          |> Map.take([:contract_authority])
+          |> Map.put(:agent_turns, agent_turns)
+          |> Map.put(:constraint, constraint)
+          |> Map.put(:violations, [Map.take(violation, [:kind, :path, :missing_required])])
+          |> maybe_put_contract_source(contract_source)
+
+        {:ok, details}
+
+      _unclassified ->
+        {:error, :invalid_contract_classification}
+    end
+  end
+
+  defp terminal_contract_violation(%{violations: violations}) when is_list(violations) do
+    violations
+    |> Enum.filter(fn
+      %{kind: kind, path: %{segments: segments}} when is_atom(kind) and is_list(segments) -> true
+      _invalid -> false
+    end)
+    |> Enum.sort_by(fn %{kind: kind, path: %{segments: segments}} ->
+      {segments == [], segments, Atom.to_string(kind)}
+    end)
+    |> List.first()
+  end
+
+  defp terminal_contract_violation(_classification), do: nil
+
+  defp maybe_put_contract_source(details, source) when is_binary(source),
+    do: Map.put(details, :contract_source, source)
+
+  defp maybe_put_contract_source(details, _source), do: details
+
+  defp invalid_result_contract_failure do
+    %TrustedError{
+      reason: :invalid_result_contract_failure,
+      message: "invalid result contract failure transition",
+      details: %{}
+    }
+  end
+
+  @doc false
+  def result_contract_failure_ledger_arguments(_arguments), do: %{"redacted" => true}
+
+  @doc false
+  @spec maybe_put_result_contract_failure(
+          map(),
+          RunState.t(),
+          term(),
+          ValueContract.t() | nil,
+          binary() | nil,
+          term()
+        ) :: map()
+  def maybe_put_result_contract_failure(
+        tools,
+        state,
+        event_sink,
+        contract,
+        contract_source,
+        bundle
+      )
+      when is_map(tools) do
+    if Library.shipped_component?(bundle, "agent.core") do
+      Map.put(
+        tools,
+        "kernel-result-contract-failure",
+        instrument(
+          state,
+          event_sink,
+          :workflow,
+          "kernel-result-contract-failure",
+          result_contract_failure(contract, contract_source)
+        )
+      )
+    else
+      tools
+    end
   end
 
   @doc "Wraps an internal runtime callback with canonical capability events."

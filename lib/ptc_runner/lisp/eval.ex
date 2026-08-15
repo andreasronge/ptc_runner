@@ -1658,6 +1658,14 @@ defmodule PtcRunner.Lisp.Eval do
   defp maybe_put_private_tool(tool_call, true), do: Map.put(tool_call, :private, true)
   defp maybe_put_private_tool(tool_call, false), do: tool_call
 
+  defp ledger_tool_args(args, true, projection) when is_function(projection, 1) do
+    projection.(args)
+  rescue
+    _exception -> %{"redacted" => true}
+  catch
+    _kind, _reason -> %{"redacted" => true}
+  end
+
   defp ledger_tool_args(args, true, _projection), do: redact_source_args(args)
   defp ledger_tool_args(args, false, :full), do: args
 

@@ -456,6 +456,122 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     end
 
     @tag :tmp_dir
+    test "agent result-contract exhaustion publishes its bounded final diagnosis", %{tmp_dir: dir} do
+      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
+
+      paths = write_application(dir)
+
+      write_agent_application(
+        paths,
+        ~S|(agent.core/run-result-value "Return a sum of at least 100" {"max_turns" 2})|
+      )
+
+      result_schema = %{
+        "type" => "object",
+        "additionalProperties" => false,
+        "required" => ["sum"],
+        "properties" => %{"sum" => %{"type" => "integer", "minimum" => 100}}
+      }
+
+      schema_path = Path.join(dir, "result.schema.json")
+      File.write!(schema_path, Jason.encode!(result_schema))
+
+      manifest = paths.manifest |> File.read!() |> Jason.decode!()
+
+      File.write!(
+        paths.manifest,
+        manifest
+        |> Map.put("contracts", %{"result_schema" => %{"path" => "result.schema.json"}})
+        |> Jason.encode!()
+      )
+
+      assert {:error, %CommandOutcome{} = first_miss} =
+               CommandEngine.dispatch(["run", paths.manifest, "--host-config", paths.host])
+
+      first_hash = replay_request_hash(first_miss)
+      first_response = invalid_result_response("first-invalid", 42)
+      write(dir, [%{"request_hash" => first_hash, "response" => first_response}])
+
+      assert {:error, %CommandOutcome{} = second_miss} =
+               CommandEngine.dispatch(["run", paths.manifest, "--host-config", paths.host])
+
+      second_hash = replay_request_hash(second_miss)
+
+      write(dir, [
+        %{"request_hash" => first_hash, "response" => first_response},
+        %{
+          "request_hash" => second_hash,
+          "response" => invalid_result_response("final-invalid", 99)
+        }
+      ])
+
+      trace_dir = Path.join(dir, "result-contract-traces")
+      File.mkdir_p!(trace_dir)
+
+      assert {:error, %CommandOutcome{} = exhausted} =
+               CommandEngine.dispatch([
+                 "run",
+                 paths.manifest,
+                 "--host-config",
+                 paths.host,
+                 "--trace-dir",
+                 trace_dir
+               ])
+
+      assert exhausted.envelope["error"] == %{
+               "code" => "result_contract_failed",
+               "message" =>
+                 "agent could not satisfy the result contract within 2 turns; last candidate violated minimum",
+               "notes" => [],
+               "path" => "/sum",
+               "phase" => "result_cleanup",
+               "provider_activity" => true,
+               "retryable" => false,
+               "source" => %{"kind" => "result_contract", "name" => "result.schema.json"},
+               "span" => nil,
+               "subject" => nil
+             }
+
+      assert exhausted.envelope["result"] == nil
+      assert CommandContract.valid_envelope?(exhausted.envelope)
+
+      {:ok, result_source} = CommandSource.new(:result_contract, "result.schema.json")
+
+      for invalid_message <- [
+            "agent could not satisfy the result contract within 0 turns; last candidate violated minimum",
+            "agent could not satisfy the result contract within 02 turns; last candidate violated minimum",
+            "agent could not satisfy the result contract within 129 turns; last candidate violated minimum",
+            "agent could not satisfy the result contract within 2 turns; last candidate violated private-value"
+          ] do
+        assert {:error, :invalid_command_diagnostic} =
+                 CommandDiagnostic.new(:result_cleanup, :result_contract_failed,
+                   message: invalid_message,
+                   source: result_source,
+                   provider_activity: true
+                 )
+
+        refute CommandContract.valid_envelope?(
+                 put_in(exhausted.envelope, ["error", "message"], invalid_message)
+               )
+      end
+
+      assert [trace_path] = Path.wildcard(Path.join(trace_dir, "*.jsonl"))
+      trace = File.read!(trace_path)
+      refute trace =~ "candidate-secret"
+
+      stopped =
+        trace
+        |> String.split("\n", trim: true)
+        |> Enum.map(&Jason.decode!/1)
+        |> Enum.find(&(&1["type"] == "run-stopped"))
+
+      assert stopped["data"]["failure_kind"] == "result-contract"
+      assert stopped["data"]["agent_turns"] == 2
+      assert stopped["data"]["constraint"] == "minimum"
+    end
+
+    @tag :tmp_dir
     test "parallel replay misses retain the authoring hash", %{tmp_dir: dir} do
       {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
@@ -853,6 +969,21 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
              )
 
     request_hash
+  end
+
+  defp invalid_result_response(id, sum) do
+    %{
+      "content" => nil,
+      "tool_calls" => [
+        %{
+          "id" => id,
+          "name" => "run_ptc_lisp",
+          "args" => %{
+            "program" => ~s|(return {"sum" #{sum} "secret" "candidate-secret"})|
+          }
+        }
+      ]
+    }
   end
 
   defp write_application(dir, opts \\ []) do

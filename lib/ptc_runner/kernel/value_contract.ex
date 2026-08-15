@@ -137,6 +137,19 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   def classify(_contract, _value), do: %{value_kind: :unknown}
 
+  @doc false
+  @spec model_feedback(t(), term()) :: map()
+  def model_feedback(%__MODULE__{} = contract, value) do
+    contract
+    |> classify(value)
+    |> Map.take([:value_kind, :json_value, :discriminator, :violations])
+    |> Map.update(:violations, [], fn violations ->
+      Enum.map(violations, &model_feedback_violation/1)
+    end)
+  end
+
+  def model_feedback(_contract, _value), do: %{value_kind: :unknown, violations: []}
+
   @spec classify_with_evidence(t(), term()) ::
           {map(), ValueContractClassification.t() | nil}
   @doc false
@@ -168,7 +181,7 @@ defmodule PtcRunner.Kernel.ValueContract do
         :violations,
         validator
         |> violations(value, schema, branch_index)
-        |> enrich_object_violations(path_schema, value)
+        |> enrich_violations(path_schema, value)
       )
 
     {classification, classification_evidence(contract, branch_index)}
@@ -381,7 +394,7 @@ defmodule PtcRunner.Kernel.ValueContract do
   # path so input classifications keep using the same attested CommandPath
   # channel. JSV can emit several keywords for one object; enrich only the first
   # retained record at each path so long schema names are not repeated.
-  defp enrich_object_violations(violations, schema, value) when is_map(schema) do
+  defp enrich_violations(violations, schema, value) when is_map(schema) do
     {enriched, _seen} =
       Enum.map_reduce(violations, MapSet.new(), fn violation, seen ->
         segments = Map.get(violation, :segments)
@@ -392,14 +405,16 @@ defmodule PtcRunner.Kernel.ValueContract do
           case schema_value_at_path(schema, value, segments) do
             {:ok, %{"type" => "object"} = object_schema, object_value} ->
               {
-                object_diagnostic(violation, object_schema, object_value),
+                violation
+                |> put_declared_expected(object_schema)
+                |> object_diagnostic(object_schema, object_value),
                 MapSet.put(seen, segments)
               }
 
-            :error ->
-              {violation, seen}
+            {:ok, node, _node_value} ->
+              {put_declared_expected(violation, node), MapSet.put(seen, segments)}
 
-            {:ok, _other_schema, _other_value} ->
+            :error ->
               {violation, seen}
           end
         end
@@ -408,7 +423,33 @@ defmodule PtcRunner.Kernel.ValueContract do
     enriched
   end
 
-  defp enrich_object_violations(violations, _schema, _value), do: violations
+  defp enrich_violations(violations, _schema, _value), do: violations
+
+  defp put_declared_expected(%{kind: kind} = violation, schema) do
+    case JSONSchema.declared_expected(kind, schema) do
+      {:ok, expected} -> Map.put(violation, :expected, expected)
+      :omit -> violation
+    end
+  end
+
+  defp put_declared_expected(violation, _schema), do: violation
+
+  defp model_feedback_violation(violation) when is_map(violation) do
+    Map.take(violation, [
+      :kind,
+      :segments,
+      :expected,
+      :allowed_keys,
+      :allowed_key_count,
+      :allowed_keys_truncated,
+      :missing_required,
+      :missing_required_count,
+      :missing_required_truncated,
+      :undeclared_key_count
+    ])
+  end
+
+  defp model_feedback_violation(_violation), do: %{}
 
   defp schema_value_at_path(schema, value, []), do: {:ok, schema, value}
 

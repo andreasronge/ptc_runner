@@ -21,6 +21,22 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   alias PtcRunner.Lisp.SpecialBuiltin
 
   @stable_parallel_errors [:memory_exceeded, :timeout, :parallel_capacity_exceeded]
+  @result_contract_constraints [
+    :additionalProperties,
+    :boolean_schema,
+    :const,
+    :enum,
+    :format,
+    :json_value,
+    :maximum,
+    :maxItems,
+    :maxLength,
+    :minimum,
+    :minItems,
+    :minLength,
+    :required,
+    :type
+  ]
   @parallel_run_deadline_message "the run deadline expired during a parallel operation"
   @safe_type_names [
     "boolean",
@@ -343,6 +359,38 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
       when limit in 1..128,
       do: reason
 
+  def sanitize_private_error(
+        {:result_contract_failed, message,
+         %{
+           agent_turns: turns,
+           constraint: constraint,
+           contract_authority: authority,
+           violations: violations
+         } = details}
+      )
+      when is_binary(message) and turns in 1..128 and
+             constraint in @result_contract_constraints and is_map(authority) and
+             is_list(violations) do
+    source = Map.get(details, :contract_source)
+
+    if (is_nil(source) or is_binary(source)) and
+         result_contract_violations?(violations, constraint) do
+      retained =
+        details
+        |> Map.take([
+          :agent_turns,
+          :constraint,
+          :contract_authority,
+          :contract_source,
+          :violations
+        ])
+
+      {:result_contract_failed, message, retained}
+    else
+      {:private_prelude_error, "private prelude evaluation failed"}
+    end
+  end
+
   def sanitize_private_error({:loop_limit_exceeded, limit}) when is_integer(limit),
     do: {:loop_limit_exceeded, limit}
 
@@ -390,6 +438,15 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   def sanitize_private_error(_reason),
     do: {:private_prelude_error, "private prelude evaluation failed"}
+
+  defp result_contract_violations?([], :json_value), do: true
+
+  defp result_contract_violations?([%{kind: constraint, path: path} = violation], constraint)
+       when is_map(path) do
+    Enum.all?(Map.keys(violation), &(&1 in [:kind, :path, :missing_required]))
+  end
+
+  defp result_contract_violations?(_violations, _constraint), do: false
 
   @doc false
   @spec sanitize_private_error(term(), term()) :: term()

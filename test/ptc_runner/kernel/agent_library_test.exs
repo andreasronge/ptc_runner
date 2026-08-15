@@ -407,6 +407,185 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert byte_size(Jason.encode!(second_request)) < 262_144
   end
 
+  test "agent.main discloses safe declared bounds in result-contract correction feedback" do
+    invalid = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "below-minimum",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(return {"sum" 42 "secret" "candidate-secret"})|}
+        }
+      ]
+    }
+
+    corrected = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "valid-minimum",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(return {"sum" 100})|}
+        }
+      ]
+    }
+
+    assert {:ok, result_contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "additionalProperties" => false,
+               "required" => ["sum"],
+               "properties" => %{"sum" => %{"type" => "integer", "minimum" => 100}}
+             })
+
+    {:ok, config} =
+      agent_config([invalid, corrected], [],
+        agent_main: true,
+        input: %{
+          "input" => %{
+            "task" => "Return one application value",
+            "agent" => %{"max_turns" => 2}
+          }
+        },
+        result_contract: result_contract
+      )
+
+    assert {:ok, %{value: %{"sum" => 100}}} =
+             Kernel.run("(agent.main/run data/input)", config)
+
+    assert_receive {:agent_request, _first_request}
+    assert_receive {:agent_request, second_request}
+
+    correction = List.last(second_request["messages"])["content"]
+    assert correction =~ ":kind :minimum"
+    assert correction =~ ":expected 100"
+    refute correction =~ "candidate-secret"
+  end
+
+  test "agent.main reports authenticated result-contract exhaustion after one or several turns" do
+    assert {:ok, result_contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "additionalProperties" => false,
+               "required" => ["sum"],
+               "properties" => %{"sum" => %{"type" => "integer", "minimum" => 100}}
+             })
+
+    for max_turns <- [1, 4] do
+      responses =
+        Enum.map(1..max_turns, fn turn ->
+          %{
+            content: nil,
+            tool_calls: [
+              %{
+                id: "invalid-#{turn}",
+                name: "run_ptc_lisp",
+                args: %{"program" => "(return {\"sum\" #{40 + turn}})"}
+              }
+            ]
+          }
+        end)
+
+      {:ok, config} =
+        agent_config(responses, [],
+          agent_main: true,
+          input: %{
+            "input" => %{
+              "task" => "Return one application value",
+              "agent" => %{"max_turns" => max_turns}
+            }
+          },
+          result_contract: result_contract,
+          result_contract_source: "manifest.json"
+        )
+
+      assert {:error,
+              %{
+                kind: :workflow_failed,
+                reason: :result_contract_failed,
+                details: %{
+                  agent_turns: ^max_turns,
+                  constraint: :minimum,
+                  contract_source: "manifest.json",
+                  violations: [%{kind: :minimum, path: path}]
+                }
+              }} = Kernel.run("(agent.main/run data/input)", config)
+
+      assert path.segments == [{:property, "sum"}]
+
+      assert Enum.any?(EventSink.events(config.event_sink), fn event ->
+               event.type == "run-stopped" and event.data[:failure_kind] == "result-contract" and
+                 event.data[:agent_turns] == max_turns and event.data[:constraint] == :minimum
+             end)
+    end
+  end
+
+  test "result-contract exhaustion survives sequential and parallel composition" do
+    assert {:ok, result_contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "additionalProperties" => false,
+               "required" => ["sum"],
+               "properties" => %{"sum" => %{"type" => "integer", "minimum" => 100}}
+             })
+
+    invalid = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "invalid-composed-result",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(return {"sum" 99})|}
+        }
+      ]
+    }
+
+    for source <- [
+          ~S|(map (fn [_] (agent.core/run-result-value "task" {"max_turns" 1})) [1])|,
+          ~S|(pmap (fn [_] (agent.core/run-result-value "task" {"max_turns" 1})) [1])|,
+          ~S|(pcalls #(agent.core/run-result-value "task" {"max_turns" 1}))|
+        ] do
+      {:ok, config} =
+        agent_config([invalid], [],
+          result_contract: result_contract,
+          result_contract_source: "manifest.json"
+        )
+
+      assert {:error,
+              %{
+                reason: :result_contract_failed,
+                details: %{
+                  agent_turns: 1,
+                  constraint: :minimum,
+                  contract_source: "manifest.json"
+                }
+              }} = Kernel.run(source, config)
+    end
+  end
+
+  test "application failures cannot forge result-contract exhaustion taxonomy" do
+    for source <- [
+          ~S|(fail {:kind :result-contract :agent_turns 4 :constraint :minimum})|,
+          ~S|(pmap (fn [_] (fail {:kind :result-contract :agent_turns 4 :constraint :minimum})) [1])|,
+          ~S|(pcalls #(fail {:kind :result-contract :agent_turns 4 :constraint :minimum}))|
+        ] do
+      {:ok, config} = agent_config([])
+
+      assert {:error, %{reason: reason, details: details}} = Kernel.run(source, config)
+      assert reason in [:explicit_failure, :pmap_error, :pcalls_error]
+      refute details[:failure_kind] == "result-contract"
+
+      stopped =
+        config.event_sink
+        |> EventSink.events()
+        |> Enum.find(&(&1.type == "run-stopped"))
+
+      refute stopped.data[:failure_kind] == "result-contract"
+      refute Map.has_key?(stopped.data, :agent_turns)
+      refute Map.has_key?(stopped.data, :constraint)
+    end
+  end
+
   test "agent.main validates keyword-keyed candidates through the kernel JSON projection" do
     keyword_keyed = %{
       content: nil,
@@ -2369,6 +2548,12 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
         :error -> config_opts
       end
 
+    config_opts =
+      case Keyword.fetch(opts, :result_contract_source) do
+        {:ok, source} -> Keyword.put(config_opts, :result_contract_source, source)
+        :error -> config_opts
+      end
+
     RunConfig.new(config_opts)
   end
 
@@ -2485,7 +2670,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   defp required_agent_tools do
     Map.new(
-      ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract kernel-runtime-limit-failure
+      ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
          llm-request workflow-annotate),
       &{&1, %TrustedTool{function: fn _arguments -> %{status: :error} end}}
     )

@@ -84,6 +84,10 @@
       {"agent_turns" (get (get outcome :error) :limit_value)})
     (fail (get outcome :error))))
 
+(defn- result-contract-failure [value max-turns]
+  (tool/kernel-result-contract-failure
+    {"value" value "agent_turns" max-turns}))
+
 (defn- correctable-capability-failure? [evaluation]
   (let [error (get evaluation :value)]
     (and (true? (get evaluation :capability-failure?))
@@ -175,7 +179,9 @@
                                          consolidate-at-turns-remaining))
                                      next-prompt-state
                                      closing?))
-                            (subject-failure :result-contract :invalid-result))))
+                            (result-contract-failure
+                              (get evaluation :value)
+                              max-turns))))
                       (returned-outcome (get evaluation :value)))
                     :failed
                     (if (and (correctable-capability-failure? evaluation)
