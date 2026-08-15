@@ -49,8 +49,8 @@ defmodule PtcRunner.TranscriptFrontend do
           result = capture_and_publish(handle, run_id, traces, inspection, capture_opts)
           finalize_handle(handle, result)
 
-        {:error, _reason} ->
-          {:error, :destination_unavailable, "private transcript destination unavailable"}
+        {:error, reason} ->
+          destination_error(reason)
       end
     else
       {:error, :invalid_arguments, "invalid transcript command"}
@@ -67,13 +67,12 @@ defmodule PtcRunner.TranscriptFrontend do
   defp capture_and_publish(handle, run_id, traces, inspection, capture_opts) do
     resources = %{"traces" => traces, "inspection" => inspection}
 
-    case validate_separation(handle, traces, inspection) do
+    case validate_sources_and_separation(handle, traces, inspection) do
       :ok ->
         capture_source(handle, run_id, resources, capture_opts)
 
-      {:error, _reason} ->
-        {:error, :source_separation_failed,
-         "private transcript sources and destination must be separate"}
+      {:error, _code, _message} = error ->
+        error
     end
   end
 
@@ -104,7 +103,8 @@ defmodule PtcRunner.TranscriptFrontend do
               {:error, :incomplete_evidence, "transcript evidence is incomplete or ambiguous"}
 
             {:error, :not_found} ->
-              {:error, :run_not_found, "analysis run not found"}
+              {:error, :run_not_found,
+               "RUN_ID was not found in the correlated --traces and --inspection sources"}
 
             {:error, :source_changed} ->
               {:error, :source_changed, "analysis source changed during capture"}
@@ -132,8 +132,17 @@ defmodule PtcRunner.TranscriptFrontend do
       {:error, :source_changed} ->
         {:error, :source_changed, "analysis source changed during capture"}
 
+      {:error, :empty_traces_resource} ->
+        {:error, :source_unavailable,
+         "--traces must contain at least one canonical trace artifact"}
+
+      {:error, :empty_inspection_resource} ->
+        {:error, :source_unavailable,
+         "--inspection must contain at least one correlated inspection artifact"}
+
       {:error, _reason} ->
-        {:error, :source_unavailable, "private transcript source unavailable"}
+        {:error, :source_unavailable,
+         "--traces or --inspection could not be captured as private transcript sources"}
     end
   end
 
@@ -150,17 +159,79 @@ defmodule PtcRunner.TranscriptFrontend do
 
   defp valid_capture_opts?(_opts), do: false
 
-  defp validate_separation(handle, traces, inspection) do
-    with {:ok, trace} <- AnalysisDirectory.resolve(traces),
-         {:ok, private} <- AnalysisDirectory.resolve(inspection),
+  defp validate_sources_and_separation(handle, traces, inspection) do
+    with {:ok, trace} <- resolve_source(traces, :traces),
+         {:ok, private} <- resolve_source(inspection, :inspection),
          {:ok, output} <-
-           handle |> PublicationHandle.path() |> Path.dirname() |> AnalysisDirectory.resolve(),
-         true <- AnalysisDirectory.pairwise_separate?([trace, private, output]) do
-      :ok
-    else
-      _ -> {:error, :invalid_directory_separation}
+           handle
+           |> PublicationHandle.path()
+           |> Path.dirname()
+           |> resolve_output_directory() do
+      validate_separation(trace, private, output)
     end
   end
+
+  defp resolve_source(directory, :traces) do
+    case AnalysisDirectory.resolve(directory) do
+      {:ok, resolved} ->
+        {:ok, resolved}
+
+      {:error, _reason} ->
+        {:error, :source_unavailable, "--traces must name an existing directory"}
+    end
+  end
+
+  defp resolve_source(directory, :inspection) do
+    case AnalysisDirectory.resolve(directory) do
+      {:ok, resolved} ->
+        {:ok, resolved}
+
+      {:error, _reason} ->
+        {:error, :source_unavailable, "--inspection must name an existing directory"}
+    end
+  end
+
+  defp resolve_output_directory(directory) do
+    case AnalysisDirectory.resolve(directory) do
+      {:ok, resolved} ->
+        {:ok, resolved}
+
+      {:error, _reason} ->
+        {:error, :destination_unavailable,
+         "the parent directory for --private-output is unavailable"}
+    end
+  end
+
+  defp validate_separation(trace, private, output) do
+    cond do
+      not AnalysisDirectory.pairwise_separate?([trace, private]) ->
+        separation_error("--traces", "--inspection")
+
+      not AnalysisDirectory.pairwise_separate?([trace, output]) ->
+        separation_error("--traces", "--private-output")
+
+      not AnalysisDirectory.pairwise_separate?([private, output]) ->
+        separation_error("--inspection", "--private-output")
+
+      true ->
+        :ok
+    end
+  end
+
+  defp separation_error(first, second) do
+    {:error, :source_separation_failed,
+     "directories for #{first} and #{second} must be physically separate; " <>
+       "neither may contain the other"}
+  end
+
+  defp destination_error(:destination_exists),
+    do: {:error, :destination_exists, "--private-output already exists; choose a new file"}
+
+  defp destination_error(:invalid_destination),
+    do: {:error, :destination_unavailable, "--private-output must name a valid new file"}
+
+  defp destination_error(_reason),
+    do: {:error, :destination_unavailable, "--private-output destination is unavailable"}
 
   defp finalize_handle(handle, :ok) do
     :ok = PublicationHandle.release(handle)

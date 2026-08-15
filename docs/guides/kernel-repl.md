@@ -216,15 +216,18 @@ available in the raw `model_exchanges` collection.
 For one complete conversation, use the simpler one-shot command:
 
 ```console
+mkdir -p tmp/tutorial-transcript
 ptc transcript RUN_ID \
   --traces tmp/tutorial-traces \
   --inspection tmp/tutorial-inspection \
   --private-unattended \
-  --private-output tmp/transcript.private.json
+  --private-output tmp/tutorial-transcript/conversation.private.json
 ```
 
 The destination is reserved at owner-only mode before capture. Incomplete or
-ambiguous evidence fails without publication.
+ambiguous evidence fails without publication. The trace, inspection, and
+output directories must be pairwise physically separate: none may equal or
+contain another.
 
 ### Private analysis without a terminal
 

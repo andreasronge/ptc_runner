@@ -37,8 +37,10 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   defp run_journey(output_dir, endpoint, name, program, wrapper?) do
     directory = Path.join(output_dir, name)
     :ok = File.mkdir(directory)
+    traces = Path.join(directory, "traces")
+    inspection = Path.join(directory, "inspection")
     files = Path.join(directory, "files")
-    :ok = File.mkdir(files)
+    Enum.each([traces, inspection, files], &File.mkdir!/1)
     :ok = File.write(Path.join(files, "value.txt"), "fixture-file")
     :ok = File.write(Path.join(directory, "workflow.clj"), workflow_source())
 
@@ -52,8 +54,8 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
 
     manifest = manifest(name, mission_components, wrapper?)
     manifest_path = Path.join(directory, "ptc.json")
-    trace_path = Path.join(directory, "run.jsonl")
-    inspection_path = Path.join(directory, "run.inspection.jsonl")
+    trace_path = Path.join(traces, "run.jsonl")
+    inspection_path = Path.join(inspection, "run.inspection.jsonl")
     :ok = File.write(manifest_path, Jason.encode!(manifest))
     registry = registry(endpoint, program, wrapper?, directory)
 

@@ -68,17 +68,19 @@ defmodule PtcRunner.Kernel.CommandRejection do
 
   @spec invalid_destination(
           CommandDeclaration.command(),
-          :envelope,
+          atom(),
           CommandDeclaration.frontend()
         ) :: t()
-  def invalid_destination(command, :envelope, frontend)
-      when command in [:validate, :run, :doctor, :models, :init] do
+  def invalid_destination(command, destination, frontend)
+      when (destination == :envelope and command in [:validate, :run, :doctor, :models, :init]) or
+             (command == :transcript and destination == :private_output) or
+             (command == :repl and destination in [:output, :private_output]) do
     %__MODULE__{
       command: command,
       code: :invalid_arguments,
       kind: :invalid_destination,
       accepted: [],
-      destination: CommandDeclaration.option_switch!(command, frontend, :envelope),
+      destination: CommandDeclaration.option_switch!(command, frontend, destination),
       conflicts: []
     }
   end

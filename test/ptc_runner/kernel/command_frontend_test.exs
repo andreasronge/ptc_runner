@@ -125,6 +125,38 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     refute_received :unexpected_bootstrap
   end
 
+  test "the one-shot frontend rejects transcript without invoking bootstrap" do
+    parent = self()
+
+    presentation =
+      CommandFrontend.execute(
+        [
+          "transcript",
+          "run-1",
+          "--traces",
+          "traces",
+          "--inspection",
+          "inspection",
+          "--private-unattended",
+          "--private-output",
+          "transcript.json"
+        ],
+        :standalone,
+        fn _arguments ->
+          send(parent, :unexpected_bootstrap)
+          {:ok, CommandRuntime.standalone()}
+        end
+      )
+
+    assert presentation.exit_status == 2
+    assert presentation.outcome.command_mode == :unknown
+
+    assert %{"code" => "invalid_command", "phase" => "arguments"} =
+             presentation.outcome.envelope["error"]
+
+    refute_received :unexpected_bootstrap
+  end
+
   @tag :tmp_dir
   test "a recoverable startup failure publishes one schema-valid envelope", %{tmp_dir: dir} do
     path = Path.join(dir, "command-envelope.json")

@@ -191,6 +191,14 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   defp rejection_suffix(%CommandRejection{kind: :init_destination_collision}),
     do: "; --envelope must be outside the init directory"
 
+  defp rejection_suffix(%CommandRejection{
+         command: :transcript,
+         code: :invalid_arguments,
+         kind: :generic
+       }),
+       do:
+         "; required: RUN_ID, --traces, --inspection, --private-unattended, and --private-output"
+
   defp rejection_suffix(_rejection), do: ""
 
   defp help_text(%{"usage" => usage, "options" => options, "notices" => notices}) do

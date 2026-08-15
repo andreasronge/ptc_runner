@@ -305,18 +305,20 @@ creates a correlated pair without a live model.
 For one transcript, avoid a REPL:
 
 ```console
+mkdir -p tmp/transcript
 ptc transcript RUN_ID \
   --traces tmp/traces \
   --inspection tmp/inspection \
   --private-unattended \
-  --private-output tmp/transcript.private.json
+  --private-output tmp/transcript/conversation.private.json
 ```
 
 The command reserves an owner-only destination before capture. Trace,
-inspection, and output directories must be physically separate. Ambiguous,
-incomplete, changed, unsupported, or oversized evidence fails without a
-partial output. `PtcRunner.TranscriptFrontend` defines the exact one-shot
-contract.
+inspection, and output directories must be pairwise physically separate: no
+directory may equal, contain, or be contained by either of the others.
+Ambiguous, incomplete, changed, unsupported, or oversized evidence fails
+without a partial output. `PtcRunner.TranscriptFrontend` defines the exact
+one-shot contract.
 
 Use `private-run-analysis-v1` when you need several correlated questions or
 custom PTC-Lisp analysis. Its results can include exact messages, generated
