@@ -103,6 +103,14 @@ Shipped components use the same dependency rules. For example:
 surface, so fixed profiles pin the complete resolved component list and must
 version public surface changes.
 
+`cap/fold-pages` is the single shipped traversal helper. It reduces page items
+into caller-owned bounded state, stops at `max_pages`, and returns the opaque
+`next_cursor` plus `snapshot_hash` needed to resume in another evaluation.
+Callers must keep the reducer state bounded; collecting every item merely moves
+the source-size heap problem into the accumulator. Cursor-cycle detection covers
+each bounded invocation; the helper deliberately does not retain an unbounded
+history across resumptions.
+
 [Building agents](building-agents.md) covers the `agent.core` loop and the
 `agent.prompt` policy seam these libraries provide.
 

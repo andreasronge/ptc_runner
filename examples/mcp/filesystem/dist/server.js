@@ -4,6 +4,12 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// src/server.ts
+import { createHash as createHash2, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { closeSync as closeSync2, openSync as openSync2, readSync as readSync2 } from "node:fs";
+import { resolve as resolve2 } from "node:path";
+import { fileURLToPath } from "node:url";
+
 // node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
 var __create = Object.create;
 var __defProp2 = Object.defineProperty;
@@ -10001,14 +10007,14 @@ function inputRequiredRoundsExceededMessage(method, maxRounds) {
   return `Multi-round-trip request '${method}' still required input after ${maxRounds} rounds (inputRequired.maxRounds)`;
 }
 function sleep(ms, signal) {
-  return new Promise((resolve2, reject) => {
+  return new Promise((resolve3, reject) => {
     if (signal?.aborted) {
       reject(signal.reason instanceof SdkError ? signal.reason : new SdkError(SdkErrorCode.RequestTimeout, String(signal.reason)));
       return;
     }
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
-      resolve2();
+      resolve3();
     }, ms);
     const onAbort = () => {
       clearTimeout(timer);
@@ -10802,7 +10808,7 @@ var Protocol = class {
     const flowStartedAt = Date.now();
     let onAbort;
     let cleanupMessageId;
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve3, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -10870,7 +10876,7 @@ var Protocol = class {
         }
         if (decoded.kind === "invalid") return reject(decoded.error);
         if (decoded.kind === "input_required") {
-          if (options?.allowInputRequired === true) return resolve2(manualInputRequiredValue(decoded));
+          if (options?.allowInputRequired === true) return resolve3(manualInputRequiredValue(decoded));
           const flow = {
             codec,
             request,
@@ -10882,11 +10888,11 @@ var Protocol = class {
               params
             }, resultSchema, legOptions)
           };
-          return resolve2(this._resolveNonCompleteResult(decoded, flow));
+          return resolve3(this._resolveNonCompleteResult(decoded, flow));
         }
         const result = decoded.result;
         validateStandardSchema(resultSchema, result).then((parseResult) => {
-          if (parseResult.success) resolve2(parseResult.data);
+          if (parseResult.success) resolve3(parseResult.data);
           else reject(new SdkError(SdkErrorCode.InvalidResult, `Invalid result for ${request.method}: ${parseResult.error}`));
         }, reject);
       });
@@ -11621,9 +11627,9 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
       const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
       return `${varKind} ${this.name}${rhs};` + _n;
     }
-    optimizeNames(names, constants) {
+    optimizeNames(names, constants2) {
       if (!names[this.name.str]) return;
-      if (this.rhs) this.rhs = optimizeExpr(this.rhs, names, constants);
+      if (this.rhs) this.rhs = optimizeExpr(this.rhs, names, constants2);
       return this;
     }
     get names() {
@@ -11640,9 +11646,9 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
     render({ _n }) {
       return `${this.lhs} = ${this.rhs};` + _n;
     }
-    optimizeNames(names, constants) {
+    optimizeNames(names, constants2) {
       if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects) return;
-      this.rhs = optimizeExpr(this.rhs, names, constants);
+      this.rhs = optimizeExpr(this.rhs, names, constants2);
       return this;
     }
     get names() {
@@ -11701,8 +11707,8 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
     optimizeNodes() {
       return `${this.code}` ? this : void 0;
     }
-    optimizeNames(names, constants) {
-      this.code = optimizeExpr(this.code, names, constants);
+    optimizeNames(names, constants2) {
+      this.code = optimizeExpr(this.code, names, constants2);
       return this;
     }
     get names() {
@@ -11728,12 +11734,12 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
       }
       return nodes.length > 0 ? this : void 0;
     }
-    optimizeNames(names, constants) {
+    optimizeNames(names, constants2) {
       const { nodes } = this;
       let i = nodes.length;
       while (i--) {
         const n = nodes[i];
-        if (n.optimizeNames(names, constants)) continue;
+        if (n.optimizeNames(names, constants2)) continue;
         subtractNames(names, n.names);
         nodes.splice(i, 1);
       }
@@ -11780,11 +11786,11 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
       if (cond === false || !this.nodes.length) return void 0;
       return this;
     }
-    optimizeNames(names, constants) {
+    optimizeNames(names, constants2) {
       var _a3;
-      this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants);
-      if (!(super.optimizeNames(names, constants) || this.else)) return;
-      this.condition = optimizeExpr(this.condition, names, constants);
+      this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants2);
+      if (!(super.optimizeNames(names, constants2) || this.else)) return;
+      this.condition = optimizeExpr(this.condition, names, constants2);
       return this;
     }
     get names() {
@@ -11806,9 +11812,9 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
     render(opts) {
       return `for(${this.iteration})` + super.render(opts);
     }
-    optimizeNames(names, constants) {
-      if (!super.optimizeNames(names, constants)) return;
-      this.iteration = optimizeExpr(this.iteration, names, constants);
+    optimizeNames(names, constants2) {
+      if (!super.optimizeNames(names, constants2)) return;
+      this.iteration = optimizeExpr(this.iteration, names, constants2);
       return this;
     }
     get names() {
@@ -11843,9 +11849,9 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
     render(opts) {
       return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
     }
-    optimizeNames(names, constants) {
-      if (!super.optimizeNames(names, constants)) return;
-      this.iterable = optimizeExpr(this.iterable, names, constants);
+    optimizeNames(names, constants2) {
+      if (!super.optimizeNames(names, constants2)) return;
+      this.iterable = optimizeExpr(this.iterable, names, constants2);
       return this;
     }
     get names() {
@@ -11884,11 +11890,11 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
       (_b = this.finally) === null || _b === void 0 || _b.optimizeNodes();
       return this;
     }
-    optimizeNames(names, constants) {
+    optimizeNames(names, constants2) {
       var _a3, _b;
-      super.optimizeNames(names, constants);
-      (_a3 = this.catch) === null || _a3 === void 0 || _a3.optimizeNames(names, constants);
-      (_b = this.finally) === null || _b === void 0 || _b.optimizeNames(names, constants);
+      super.optimizeNames(names, constants2);
+      (_a3 = this.catch) === null || _a3 === void 0 || _a3.optimizeNames(names, constants2);
+      (_b = this.finally) === null || _b === void 0 || _b.optimizeNames(names, constants2);
       return this;
     }
     get names() {
@@ -12137,7 +12143,7 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
   function addExprNames(names, from) {
     return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
   }
-  function optimizeExpr(expr, names, constants) {
+  function optimizeExpr(expr, names, constants2) {
     if (expr instanceof code_1.Name) return replaceName(expr);
     if (!canOptimize(expr)) return expr;
     return new code_1._Code(expr._items.reduce((items, c) => {
@@ -12147,13 +12153,13 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
       return items;
     }, []));
     function replaceName(n) {
-      const c = constants[n.str];
+      const c = constants2[n.str];
       if (c === void 0 || names[n.str] !== 1) return n;
       delete names[n.str];
       return c;
     }
     function canOptimize(e) {
-      return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants[c.str] !== void 0);
+      return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants2[c.str] !== void 0);
     }
   }
   function subtractNames(names, from) {
@@ -13813,7 +13819,7 @@ var require_compile = /* @__PURE__ */ __commonJSMin(((exports) => {
     ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, ref);
     const schOrFunc = root.refs[ref];
     if (schOrFunc) return schOrFunc;
-    let _sch = resolve2.call(this, root, ref);
+    let _sch = resolve3.call(this, root, ref);
     if (_sch === void 0) {
       const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
       const { schemaId } = this.opts;
@@ -13839,7 +13845,7 @@ var require_compile = /* @__PURE__ */ __commonJSMin(((exports) => {
   function sameSchemaEnv(s1, s2) {
     return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
   }
-  function resolve2(root, ref) {
+  function resolve3(root, ref) {
     let sch;
     while (typeof (sch = this.refs[ref]) == "string") ref = sch;
     return sch || this.schemas[ref] || resolveSchema.call(this, root, ref);
@@ -14289,7 +14295,7 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
     else if (typeof uri === "object") uri = parse3(serialize(uri, options), options);
     return uri;
   }
-  function resolve2(baseURI, relativeURI, options) {
+  function resolve3(baseURI, relativeURI, options) {
     const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
     const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
     schemelessOptions.skipEscape = true;
@@ -14463,7 +14469,7 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
   const fastUri = {
     SCHEMES,
     normalize,
-    resolve: resolve2,
+    resolve: resolve3,
     resolveComponent,
     equal,
     serialize,
@@ -19424,7 +19430,7 @@ var StdioServerTransport = class {
   }
   send(message) {
     if (this._closed) return Promise.reject(/* @__PURE__ */ new Error("StdioServerTransport is closed"));
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve3, reject) => {
       const json = serializeMessage(message);
       let settled = false;
       const onError = (error2) => {
@@ -19439,14 +19445,14 @@ var StdioServerTransport = class {
         settled = true;
         this._stdout.off("error", onError);
         this._stdout.off("drain", onDrain);
-        resolve2();
+        resolve3();
       };
       this._stdout.once("error", onError);
       if (this._stdout.write(json)) {
         if (settled) return;
         settled = true;
         this._stdout.off("error", onError);
-        resolve2();
+        resolve3();
       } else if (!settled) this._stdout.once("drain", onDrain);
     });
   }
@@ -19500,14 +19506,14 @@ var StdioConnectionChannel = class {
   */
   async whenRequestsAnswered(timeoutMs) {
     if (this._closed || this._pendingRequests.size === 0) return true;
-    return await new Promise((resolve2) => {
+    return await new Promise((resolve3) => {
       const waiter = () => {
         clearTimeout(timer);
-        resolve2(true);
+        resolve3(true);
       };
       const timer = setTimeout(() => {
         this._drainWaiters = this._drainWaiters.filter((pending) => pending !== waiter);
-        resolve2(false);
+        resolve3(false);
       }, timeoutMs);
       this._drainWaiters.push(waiter);
     });
@@ -19848,84 +19854,171 @@ function toError(value) {
 
 // src/snapshot.ts
 import { createHash } from "node:crypto";
-import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  mkdtempSync,
+  openSync,
+  opendirSync,
+  readSync,
+  rmSync,
+  statfsSync,
+  writeSync
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 var DEFAULT_LIMITS = {
   maxFiles: 4096,
-  maxFileBytes: 1048576,
-  maxTotalBytes: 33554432,
-  maxDepth: 32
+  maxDepth: 32,
+  maxDirectories: 8192,
+  maxEntries: 1e5,
+  maxFileBytes: Number.MAX_SAFE_INTEGER,
+  maxTotalBytes: Number.MAX_SAFE_INTEGER
 };
+var COPY_BUFFER_BYTES = 65536;
+var TEMP_DISK_RESERVE_BYTES = 64n * 1024n * 1024n;
 var CaptureError = class extends Error {
 };
 function capture(options) {
-  if (options.include.length === 0) {
-    throw new CaptureError("at least one include pattern is required");
-  }
+  if (options.include.length === 0) throw new CaptureError("at least one include pattern is required");
   const limits = { ...DEFAULT_LIMITS, ...options.limits };
+  validateLimits(limits);
   const root = resolve(options.root);
   const rootStat = statOrThrow(root, "root");
-  if (!rootStat.isDirectory()) {
-    throw new CaptureError("root is not a directory");
-  }
+  if (!rootStat.isDirectory()) throw new CaptureError("root is not a directory");
   const include = options.include.map(compileGlob);
   const exclude = (options.exclude ?? []).map(compileGlob);
+  const maxTotalBytes = Math.min(limits.maxTotalBytes, availableSnapshotBytes(tmpdir()));
+  const maxFileBytes = Math.min(limits.maxFileBytes, maxTotalBytes);
+  const snapshotRoot = mkdtempSync(join(tmpdir(), "ptc-runner-filesystem-"));
   const files = /* @__PURE__ */ new Map();
-  const truncated = { files: false, bytes: false, depth: false };
   let totalBytes = 0;
+  let visitedDirectories = 0;
+  let visitedEntries = 0;
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    rmSync(snapshotRoot, { recursive: true, force: true });
+  };
   const walk = (directory, prefix, depth) => {
-    if (depth > limits.maxDepth) {
-      truncated.depth = true;
-      return;
-    }
-    for (const entry of readdirSync(directory).sort()) {
-      if (files.size >= limits.maxFiles) {
-        truncated.files = true;
-        return;
+    if (depth > limits.maxDepth) throw new CaptureError("directory depth limit exceeded");
+    visitedDirectories += 1;
+    if (visitedDirectories > limits.maxDirectories) throw new CaptureError("directory limit exceeded");
+    const entries = opendirSync(directory);
+    try {
+      for (let entry = entries.readSync(); entry !== null; entry = entries.readSync()) {
+        visitedEntries += 1;
+        if (visitedEntries > limits.maxEntries) throw new CaptureError("directory entry limit exceeded");
+        const relativePath = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+        if (normalizeRelative(relativePath) === null) {
+          throw new CaptureError("path exceeds the supported relative-path contract");
+        }
+        if (matchesAny(relativePath, exclude)) continue;
+        const absolute = join(directory, entry.name);
+        const stat = lstatSync(absolute, { throwIfNoEntry: false });
+        if (!stat || stat.isSymbolicLink()) continue;
+        if (stat.isDirectory()) {
+          walk(absolute, relativePath, depth + 1);
+          continue;
+        }
+        if (!stat.isFile() || !matchesAny(relativePath, include)) continue;
+        if (files.size >= limits.maxFiles) throw new CaptureError("file limit exceeded");
+        const captured = captureFile(
+          absolute,
+          join(snapshotRoot, String(files.size)),
+          Math.min(maxFileBytes, maxTotalBytes - totalBytes)
+        );
+        if (captured === null) continue;
+        files.set(relativePath, captured);
+        totalBytes += captured.bytes;
       }
-      const absolute = join(directory, entry);
-      const relativePath = prefix === "" ? entry : `${prefix}/${entry}`;
-      if (matchesAny(relativePath, exclude)) continue;
-      const stat = lstatSync(absolute, { throwIfNoEntry: false });
-      if (!stat) continue;
-      if (stat.isSymbolicLink()) continue;
-      if (stat.isDirectory()) {
-        walk(absolute, relativePath, depth + 1);
-        continue;
-      }
-      if (!stat.isFile()) continue;
-      if (!matchesAny(relativePath, include)) continue;
-      if (stat.size > limits.maxFileBytes) continue;
-      if (totalBytes + stat.size > limits.maxTotalBytes) {
-        truncated.bytes = true;
-        return;
-      }
-      const raw = readFileSync(absolute);
-      const text = raw.toString("utf8");
-      if (!Buffer.from(text, "utf8").equals(raw)) continue;
-      totalBytes += stat.size;
-      files.set(relativePath, { lines: splitLines(text), bytes: stat.size });
+    } finally {
+      entries.closeSync();
     }
   };
-  walk(root, "", 0);
-  const paths = [...files.keys()].sort();
-  return { paths, files, hash: hashOf(paths, files), totalBytes, truncated };
+  try {
+    walk(root, "", 0);
+    const paths = [...files.keys()].sort();
+    return {
+      paths,
+      files,
+      hash: hashOf(paths, files),
+      totalBytes,
+      truncated: { files: false, depth: false },
+      cleanup
+    };
+  } catch (error2) {
+    cleanup();
+    if (error2 instanceof CaptureError) throw error2;
+    throw new CaptureError("capture failed");
+  }
+}
+function captureFile(sourcePath, snapshotPath, maxBytes) {
+  const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+  let source;
+  let target;
+  try {
+    try {
+      source = openSync(sourcePath, constants.O_RDONLY | noFollow);
+      const before = fstatSync(source);
+      if (!before.isFile()) return null;
+      if (before.size > maxBytes) throw new CaptureError("snapshot byte limit exceeded");
+      target = openSync(snapshotPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 384);
+      const digest = createHash("sha256");
+      const decoder = new TextDecoder("utf-8", { fatal: true });
+      const buffer = Buffer.allocUnsafe(COPY_BUFFER_BYTES);
+      let bytes = 0;
+      for (let count = readSync(source, buffer, 0, buffer.length, null); count > 0; ) {
+        if (bytes + count > maxBytes) throw new CaptureError("snapshot byte limit exceeded");
+        const chunk = buffer.subarray(0, count);
+        decoder.decode(chunk, { stream: true });
+        digest.update(chunk);
+        writeAll(target, chunk);
+        bytes += count;
+        count = readSync(source, buffer, 0, buffer.length, null);
+      }
+      decoder.decode();
+      const after = fstatSync(source);
+      if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || bytes !== after.size) {
+        throw new CaptureError("source changed during capture");
+      }
+      return { snapshotPath, bytes, contentHash: digest.digest("hex") };
+    } finally {
+      if (target !== void 0) closeSync(target);
+      if (source !== void 0) closeSync(source);
+    }
+  } catch (error2) {
+    rmSync(snapshotPath, { force: true });
+    if (error2 instanceof TypeError) return null;
+    throw error2;
+  }
+}
+function validateLimits(limits) {
+  const positive = [limits.maxFiles, limits.maxDirectories, limits.maxEntries, limits.maxFileBytes, limits.maxTotalBytes];
+  if (positive.some((value) => !Number.isSafeInteger(value) || value < 1) || !Number.isSafeInteger(limits.maxDepth) || limits.maxDepth < 0) {
+    throw new CaptureError("capture limits are not valid");
+  }
+}
+function availableSnapshotBytes(path) {
+  const stat = statfsSync(path, { bigint: true });
+  const available = stat.bavail * stat.bsize;
+  const usable = available > TEMP_DISK_RESERVE_BYTES ? available - TEMP_DISK_RESERVE_BYTES : 0n;
+  return Number(usable > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : usable);
+}
+function writeAll(descriptor, bytes) {
+  let offset = 0;
+  while (offset < bytes.length) offset += writeSync(descriptor, bytes, offset, bytes.length - offset);
 }
 function normalizeRelative(value) {
   if (value === "") return "";
-  if (value.includes("\0")) return null;
-  if (value.startsWith("/") || value.includes("\\")) return null;
-  if (value.length > 1024) return null;
-  if (/^[a-zA-Z]:/.test(value)) return null;
+  if (value.includes("\0") || value.startsWith("/") || value.includes("\\")) return null;
+  if (value.length > 1024 || /^[a-zA-Z]:/.test(value)) return null;
   const segments = value.split("/").filter((segment) => segment !== "");
   if (segments.some((segment) => segment === "." || segment === "..")) return null;
   return segments.join("/");
-}
-function splitLines(text) {
-  const normalized = text.replace(/\r\n/g, "\n");
-  const lines = normalized.split("\n");
-  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
-  return lines;
 }
 function hashOf(paths, files) {
   const digest = createHash("sha256");
@@ -19935,7 +20028,7 @@ function hashOf(paths, files) {
     digest.update("\0");
     digest.update(String(file.bytes), "utf8");
     digest.update("\0");
-    digest.update(file.lines.join("\n"), "utf8");
+    digest.update(file.contentHash, "ascii");
     digest.update("\0");
   }
   return `sha256:${digest.digest("hex")}`;
@@ -19959,12 +20052,8 @@ function compileGlob(pattern) {
         if (pattern[index + 1] === "/") {
           index += 1;
           source += "(?:[^/]+/)*";
-        } else {
-          source += ".*";
-        }
-      } else {
-        source += "[^/]*";
-      }
+        } else source += ".*";
+      } else source += "[^/]*";
       continue;
     }
     if (character === "?") {
@@ -19978,11 +20067,23 @@ function compileGlob(pattern) {
 
 // src/server.ts
 var MAX_PAGE = 200;
-var MAX_MATCHES = 500;
-var MAX_READ_LINES = 2e3;
-var MAX_RESULT_BYTES = 262144;
+var MAX_READ_CHUNKS = 8;
+var READ_CHUNK_BYTES = 2048;
+var SEARCH_BUFFER_BYTES = 8192;
+var SEARCH_SCAN_BYTES = 262144;
+var MAX_QUERY_BYTES = 256;
+var MAX_EVIDENCE_BYTES = 1024;
+var MAX_LOGICAL_RESULT_BYTES = 48e3;
 var ToolError = class extends Error {
 };
+var cursorKeys = /* @__PURE__ */ new WeakMap();
+function cursorKey(snapshot) {
+  const existing = cursorKeys.get(snapshot);
+  if (existing) return existing;
+  const created = randomBytes(32);
+  cursorKeys.set(snapshot, created);
+  return created;
+}
 function parseArguments(argv) {
   const parsed = { root: "", include: [], exclude: [] };
   for (let index = 0; index < argv.length; index += 1) {
@@ -19992,33 +20093,70 @@ function parseArguments(argv) {
     if (flag === "--root") parsed.root = value;
     else if (flag === "--include") parsed.include.push(value);
     else if (flag === "--exclude") parsed.exclude.push(value);
+    else if (flag === "--max-file-bytes") parsed.maxFileBytes = positiveIntegerOption(value, flag);
+    else if (flag === "--max-total-bytes") parsed.maxTotalBytes = positiveIntegerOption(value, flag);
     else throw new Error(`unknown option ${flag}`);
     index += 1;
   }
   if (parsed.root === "") throw new Error("--root is required");
   return parsed;
 }
-function encodeCursor(hash, offset) {
-  return Buffer.from(`${hash}:${offset}`, "utf8").toString("base64url");
+function positiveIntegerOption(value, flag) {
+  if (!/^[1-9][0-9]*$/.test(value)) throw new Error(`${flag} must be a positive integer`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) throw new Error(`${flag} is too large`);
+  return parsed;
 }
-function decodeCursor(hash, cursor) {
-  if (cursor === void 0) return 0;
-  const decoded = Buffer.from(cursor, "base64url").toString("utf8");
-  const separator = decoded.lastIndexOf(":");
-  if (separator === -1) throw new ToolError("cursor is not valid");
-  if (decoded.slice(0, separator) !== hash) {
-    throw new ToolError("cursor was issued for a different snapshot");
+function scopeOf(tool, arguments_) {
+  return createHash2("sha256").update(tool).update("\0").update(JSON.stringify(arguments_)).digest("hex");
+}
+function encodeCursor(snapshot, scope, position) {
+  const payload = Buffer.from(JSON.stringify({ v: 1, h: snapshot.hash, s: scope, p: position }), "utf8").toString(
+    "base64url"
+  );
+  const signature = createHmac("sha256", cursorKey(snapshot)).update(payload, "ascii").digest("base64url");
+  return `${payload}.${signature}`;
+}
+function decodeCursor(snapshot, scope, cursor, validPosition, first) {
+  if (cursor === void 0) return first;
+  if (typeof cursor !== "string" || cursor === "" || cursor.length > 4096) {
+    throw new ToolError("cursor is not valid");
   }
-  const offset = Number(decoded.slice(separator + 1));
-  if (!Number.isSafeInteger(offset) || offset < 0) throw new ToolError("cursor is not valid");
-  return offset;
+  try {
+    const parts = cursor.split(".");
+    if (parts.length !== 2 || parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part))) {
+      throw new ToolError("cursor is not valid");
+    }
+    const [payload, encodedSignature] = parts;
+    const signature = Buffer.from(encodedSignature, "base64url");
+    const expected = createHmac("sha256", cursorKey(snapshot)).update(payload, "ascii").digest();
+    if (signature.length !== expected.length || !timingSafeEqual(signature, expected)) {
+      throw new ToolError("cursor is not valid");
+    }
+    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (decoded.v !== 1 || decoded.h !== snapshot.hash || decoded.s !== scope || !validPosition(decoded.p) || Object.keys(decoded).sort().join(",") !== "h,p,s,v") {
+      throw new ToolError("cursor was issued for a different traversal");
+    }
+    return decoded.p;
+  } catch (error2) {
+    if (error2 instanceof ToolError) throw error2;
+    throw new ToolError("cursor is not valid");
+  }
 }
-function boundedPage(limit) {
-  if (limit === void 0) return MAX_PAGE;
+function offsetPosition(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+function searchPosition(snapshot, value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const position = value;
+  return Object.keys(position).sort().join(",") === "file,line,lineStart,matched,offset" && Number.isSafeInteger(position.file) && position.file >= 0 && position.file < snapshot.paths.length && Number.isSafeInteger(position.offset) && position.offset >= 0 && Number.isSafeInteger(position.lineStart) && position.lineStart >= 0 && position.lineStart <= position.offset && Number.isSafeInteger(position.line) && position.line >= 1 && typeof position.matched === "boolean";
+}
+function boundedPage(limit, maximum = MAX_PAGE) {
+  if (limit === void 0) return maximum;
   if (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 1) {
     throw new ToolError("limit must be a positive integer");
   }
-  return Math.min(limit, MAX_PAGE);
+  return Math.min(limit, maximum);
 }
 function requirePath(value, field) {
   if (typeof value !== "string") throw new ToolError(`${field} must be a string`);
@@ -20026,17 +20164,15 @@ function requirePath(value, field) {
   if (normalized === null) throw new ToolError(`${field} is not a relative path inside the snapshot`);
   return normalized;
 }
-function page(snapshot, items, offset, limit) {
-  const slice = items.slice(offset, offset + limit);
-  const next = offset + slice.length;
-  return {
-    snapshot_hash: snapshot.hash,
-    items: slice,
-    next_cursor: next < items.length ? encodeCursor(snapshot.hash, next) : void 0
-  };
+function requireQuery(value) {
+  if (typeof value !== "string" || value === "") throw new ToolError("query must be a non-empty string");
+  const bytes = Buffer.byteLength(value, "utf8");
+  if (bytes > MAX_QUERY_BYTES || value.includes("\n") || value.includes("\r")) {
+    throw new ToolError("query must be one line of at most 256 UTF-8 bytes");
+  }
+  return value;
 }
 var HASH = { type: "string" };
-var CURSOR = { type: "string" };
 function pagedOutput(itemProperties) {
   return {
     type: "object",
@@ -20045,18 +20181,42 @@ function pagedOutput(itemProperties) {
       items: {
         type: "array",
         items: { type: "object", properties: itemProperties, additionalProperties: false }
-      },
-      next_cursor: CURSOR
+      }
     },
+    // PtcRunner's deliberately small frozen schema subset has no nullable
+    // union. The runtime value always includes next_cursor, including null at
+    // completion; descriptions document it while this validator permits it as
+    // the sole forward-compatible extra field.
     required: ["snapshot_hash", "items"],
     additionalProperties: true
   };
 }
+function pageValue(snapshot, scope, start, candidates, finalPosition) {
+  const kept = [...candidates];
+  let next = finalPosition;
+  while (true) {
+    const value = {
+      snapshot_hash: snapshot.hash,
+      items: kept.map((candidate) => candidate.item),
+      next_cursor: next === null ? null : encodeCursor(snapshot, scope, next)
+    };
+    if (logicalResultBytes(value) <= MAX_LOGICAL_RESULT_BYTES) return value;
+    const removed = kept.pop();
+    if (removed === void 0) throw new ToolError("one result item exceeds the result ceiling");
+    next = kept.length === 0 ? start : kept[kept.length - 1].position;
+  }
+}
+function arrayPage(snapshot, scope, items, offset, limit) {
+  if (offset > items.length) throw new ToolError("cursor position is not valid");
+  const end = Math.min(offset + limit, items.length);
+  const candidates = items.slice(offset, end).map((item, index) => ({ item, position: offset + index + 1 }));
+  return pageValue(snapshot, scope, offset, candidates, end < items.length ? end : null);
+}
 function createServer(snapshot) {
   const server = new McpServer(
-    { name: "ptc-runner-filesystem-sample", version: "0.1.0" },
+    { name: "ptc-runner-filesystem-sample", version: "0.2.0" },
     {
-      instructions: "Read-only access to an immutable snapshot captured at startup. Paths are relative; the filesystem is never re-read."
+      instructions: "Read-only access to an immutable disk-backed snapshot captured at startup. Paths are relative; source files are never re-read."
     }
   );
   const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
@@ -20065,7 +20225,7 @@ function createServer(snapshot) {
     "list_directory",
     {
       title: "List directory",
-      description: "Sorted, paginated entries directly under a relative prefix of the snapshot.",
+      description: "Sorted entries directly under a relative prefix. Follow next_cursor until null.",
       annotations: readOnly,
       _meta: meta2,
       outputSchema: fromJsonSchema2(
@@ -20073,63 +20233,56 @@ function createServer(snapshot) {
       ),
       inputSchema: fromJsonSchema2({
         type: "object",
-        properties: {
-          path: { type: "string", description: "Relative directory prefix; omit for the root." },
-          cursor: { type: "string" },
-          limit: { type: "integer", minimum: 1, maximum: MAX_PAGE }
-        },
+        properties: { path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1 } },
         additionalProperties: false
       })
     },
     async (args) => {
       const prefix = args.path === void 0 ? "" : requirePath(args.path, "path");
-      const scope = prefix === "" ? "" : `${prefix}/`;
+      const traversalScope = scopeOf("list_directory", { path: prefix });
+      const offset = decodeCursor(snapshot, traversalScope, args.cursor, offsetPosition, 0);
+      const pathScope = prefix === "" ? "" : `${prefix}/`;
       const entries = /* @__PURE__ */ new Map();
       for (const path of snapshot.paths) {
-        if (!path.startsWith(scope)) continue;
-        const remainder = path.slice(scope.length);
+        if (!path.startsWith(pathScope)) continue;
+        const remainder = path.slice(pathScope.length);
+        if (remainder === "") continue;
         const separator = remainder.indexOf("/");
         if (separator === -1) entries.set(remainder, "file");
         else entries.set(remainder.slice(0, separator), "directory");
       }
-      const items = [...entries.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([name, kind]) => ({ name, kind, path: scope + name }));
-      const limit = boundedPage(args.limit);
-      return structured(page(snapshot, items, decodeCursor(snapshot.hash, args.cursor), limit));
+      const items = [...entries.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([name, kind]) => ({ name, kind, path: pathScope + name }));
+      return structured(arrayPage(snapshot, traversalScope, items, offset, boundedPage(args.limit)));
     }
   );
   server.registerTool(
     "search_files",
     {
       title: "Search files",
-      description: "Sorted, paginated snapshot paths matching a literal substring.",
+      description: "Sorted snapshot paths containing a literal substring. Follow next_cursor until null.",
       annotations: readOnly,
       _meta: meta2,
       outputSchema: fromJsonSchema2(pagedOutput({ path: { type: "string" } })),
       inputSchema: fromJsonSchema2({
         type: "object",
-        properties: {
-          query: { type: "string", minLength: 1 },
-          cursor: { type: "string" },
-          limit: { type: "integer", minimum: 1, maximum: MAX_PAGE }
-        },
+        properties: { query: { type: "string", minLength: 1 }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1 } },
         required: ["query"],
         additionalProperties: false
       })
     },
     async (args) => {
-      if (typeof args.query !== "string" || args.query === "") {
-        throw new ToolError("query must be a non-empty string");
-      }
-      const items = snapshot.paths.filter((path) => path.includes(args.query)).map((path) => ({ path }));
-      const limit = boundedPage(args.limit);
-      return structured(page(snapshot, items, decodeCursor(snapshot.hash, args.cursor), limit));
+      const query = requireQuery(args.query);
+      const traversalScope = scopeOf("search_files", { query });
+      const offset = decodeCursor(snapshot, traversalScope, args.cursor, offsetPosition, 0);
+      const items = snapshot.paths.filter((path) => path.includes(query)).map((path) => ({ path }));
+      return structured(arrayPage(snapshot, traversalScope, items, offset, boundedPage(args.limit)));
     }
   );
   server.registerTool(
     "search_text",
     {
       title: "Search text",
-      description: "Literal text search returning path and line evidence.",
+      description: "Streaming literal line search. Empty progress pages may carry next_cursor; follow it until null.",
       annotations: readOnly,
       _meta: meta2,
       outputSchema: fromJsonSchema2(
@@ -20141,66 +20294,44 @@ function createServer(snapshot) {
           query: { type: "string", minLength: 1 },
           path: { type: "string" },
           cursor: { type: "string" },
-          limit: { type: "integer", minimum: 1, maximum: MAX_PAGE }
+          limit: { type: "integer", minimum: 1 }
         },
         required: ["query"],
         additionalProperties: false
       })
     },
     async (args) => {
-      if (typeof args.query !== "string" || args.query === "") {
-        throw new ToolError("query must be a non-empty string");
-      }
-      const scope = args.path === void 0 ? "" : requirePath(args.path, "path");
-      const matches = [];
-      for (const path of snapshot.paths) {
-        if (scope !== "" && path !== scope && !path.startsWith(`${scope}/`)) continue;
-        const file = snapshot.files.get(path);
-        file.lines.forEach((text, offset) => {
-          if (matches.length >= MAX_MATCHES) return;
-          if (!text.includes(args.query)) return;
-          matches.push({ path, line: offset + 1, text: text.slice(0, 1024) });
-        });
-        if (matches.length >= MAX_MATCHES) break;
-      }
-      const limit = boundedPage(args.limit);
-      const result = page(snapshot, matches, decodeCursor(snapshot.hash, args.cursor), limit);
-      return structured({ ...result, match_limit_reached: matches.length >= MAX_MATCHES });
+      const query = requireQuery(args.query);
+      const path = args.path === void 0 ? "" : requirePath(args.path, "path");
+      const traversalScope = scopeOf("search_text", { path, query });
+      const first = { file: 0, offset: 0, lineStart: 0, line: 1, matched: false };
+      const start = decodeCursor(
+        snapshot,
+        traversalScope,
+        args.cursor,
+        (value) => searchPosition(snapshot, value),
+        first
+      );
+      const result = snapshotIO(() => scanText(snapshot, path, query, start, boundedPage(args.limit)));
+      return structured(pageValue(snapshot, traversalScope, start, result.candidates, result.next));
     }
   );
   server.registerTool(
     "read_text_file",
     {
       title: "Read text file",
-      description: "One bounded UTF-8 line range with stable line numbers and explicit end-of-file.",
+      description: "Bounded exact UTF-8 chunks. Concatenate item text and follow next_cursor until null.",
       annotations: readOnly,
       _meta: meta2,
-      outputSchema: fromJsonSchema2({
-        type: "object",
-        properties: {
-          snapshot_hash: HASH,
-          path: { type: "string" },
-          lines: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: { line: { type: "integer" }, text: { type: "string" } },
-              additionalProperties: false
-            }
-          },
-          total_lines: { type: "integer" },
-          end_of_file: { type: "boolean" },
-          truncated: { type: "boolean" }
-        },
-        required: ["snapshot_hash", "path", "lines", "total_lines", "end_of_file", "truncated"],
-        additionalProperties: false
-      }),
+      outputSchema: fromJsonSchema2(
+        pagedOutput({ byte_offset: { type: "integer" }, text: { type: "string" } })
+      ),
       inputSchema: fromJsonSchema2({
         type: "object",
         properties: {
           path: { type: "string", minLength: 1 },
-          start_line: { type: "integer", minimum: 1 },
-          line_count: { type: "integer", minimum: 1, maximum: MAX_READ_LINES }
+          cursor: { type: "string" },
+          limit: { type: "integer", minimum: 1, maximum: MAX_READ_CHUNKS }
         },
         required: ["path"],
         additionalProperties: false
@@ -20210,33 +20341,11 @@ function createServer(snapshot) {
       const path = requirePath(args.path, "path");
       const file = snapshot.files.get(path);
       if (!file) throw new ToolError("path is not part of the snapshot");
-      const start = args.start_line === void 0 ? 1 : Number(args.start_line);
-      if (!Number.isSafeInteger(start) || start < 1) throw new ToolError("start_line must be a positive integer");
-      const requested = args.line_count === void 0 ? MAX_READ_LINES : Number(args.line_count);
-      if (!Number.isSafeInteger(requested) || requested < 1) {
-        throw new ToolError("line_count must be a positive integer");
-      }
-      const count = Math.min(requested, MAX_READ_LINES);
-      const selected = file.lines.slice(start - 1, start - 1 + count);
-      let bytes = 0;
-      let truncated = false;
-      const lines = [];
-      for (const [offset, text] of selected.entries()) {
-        bytes += Buffer.byteLength(text, "utf8") + 1;
-        if (bytes > MAX_RESULT_BYTES) {
-          truncated = true;
-          break;
-        }
-        lines.push({ line: start + offset, text });
-      }
-      return structured({
-        snapshot_hash: snapshot.hash,
-        path,
-        lines,
-        total_lines: file.lines.length,
-        end_of_file: !truncated && start - 1 + selected.length >= file.lines.length,
-        truncated
-      });
+      const traversalScope = scopeOf("read_text_file", { path });
+      const offset = decodeCursor(snapshot, traversalScope, args.cursor, offsetPosition, 0);
+      return structured(
+        snapshotIO(() => readPage(snapshot, file, traversalScope, offset, boundedPage(args.limit, MAX_READ_CHUNKS)))
+      );
     }
   );
   server.registerTool(
@@ -20254,7 +20363,7 @@ function createServer(snapshot) {
           total_bytes: { type: "integer" },
           truncated: {
             type: "object",
-            properties: { files: { type: "boolean" }, bytes: { type: "boolean" }, depth: { type: "boolean" } },
+            properties: { files: { type: "boolean" }, depth: { type: "boolean" } },
             additionalProperties: false
           }
         },
@@ -20263,7 +20372,6 @@ function createServer(snapshot) {
       }),
       inputSchema: fromJsonSchema2({ type: "object", properties: {}, additionalProperties: false })
     },
-    // Deliberately reports no root, no host path, and no absolute location.
     async () => structured({
       snapshot_hash: snapshot.hash,
       file_count: snapshot.paths.length,
@@ -20273,19 +20381,191 @@ function createServer(snapshot) {
   );
   return server;
 }
-function structured(value) {
-  return {
-    content: [{ type: "text", text: JSON.stringify(value) }],
-    structuredContent: value
-  };
+function readPage(snapshot, file, scope, offset, limit) {
+  if (offset > file.bytes) throw new ToolError("cursor position is not valid");
+  const descriptor = openSync2(file.snapshotPath, "r");
+  const candidates = [];
+  let position = offset;
+  try {
+    while (position < file.bytes && candidates.length < limit) {
+      const requested = Math.min(READ_CHUNK_BYTES, file.bytes - position);
+      const buffer = Buffer.allocUnsafe(requested);
+      const count = readSync2(descriptor, buffer, 0, requested, position);
+      if (count <= 0) throw new ToolError("snapshot read failed");
+      const bytes = buffer.subarray(0, count);
+      const safeLength = position + count === file.bytes ? count : validUtf8Prefix(bytes);
+      if (safeLength <= 0) throw new ToolError("snapshot UTF-8 boundary is invalid");
+      const next = position + safeLength;
+      candidates.push({ item: { byte_offset: position, text: bytes.subarray(0, safeLength).toString("utf8") }, position: next });
+      position = next;
+    }
+  } finally {
+    closeSync2(descriptor);
+  }
+  return pageValue(snapshot, scope, offset, candidates, position < file.bytes ? position : null);
 }
-var isEntryPoint = process.argv[1] !== void 0;
+function validUtf8Prefix(bytes) {
+  for (let length = bytes.length; length >= Math.max(bytes.length - 3, 0); length -= 1) {
+    try {
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, length));
+      return length;
+    } catch {
+    }
+  }
+  return 0;
+}
+function scanText(snapshot, pathScope, query, start, limit) {
+  const queryBytes = Buffer.from(query, "utf8");
+  const failure = kmpFailure(queryBytes);
+  const candidates = [];
+  let position = { ...start };
+  let scanned = 0;
+  while (position.file < snapshot.paths.length && candidates.length < limit && scanned < SEARCH_SCAN_BYTES) {
+    const path = snapshot.paths[position.file];
+    if (pathScope !== "" && path !== pathScope && !path.startsWith(`${pathScope}/`)) {
+      position = nextFile(position.file);
+      continue;
+    }
+    const file = snapshot.files.get(path);
+    if (position.offset > file.bytes || position.lineStart > position.offset) throw new ToolError("cursor position is not valid");
+    const descriptor = openSync2(file.snapshotPath, "r");
+    try {
+      let matchState = restoreMatchState(descriptor, position, queryBytes, failure);
+      const buffer = Buffer.allocUnsafe(Math.min(SEARCH_BUFFER_BYTES, Math.max(file.bytes - position.offset, 1)));
+      while (position.offset < file.bytes && candidates.length < limit && scanned < SEARCH_SCAN_BYTES) {
+        const wanted = Math.min(buffer.length, file.bytes - position.offset, SEARCH_SCAN_BYTES - scanned);
+        const count = readSync2(descriptor, buffer, 0, wanted, position.offset);
+        if (count <= 0) throw new ToolError("snapshot read failed");
+        for (let index = 0; index < count; index += 1) {
+          const byte = buffer[index];
+          position.offset += 1;
+          scanned += 1;
+          if (byte === 10) {
+            if (position.matched) {
+              const item = { path, line: position.line, text: evidence(descriptor, position.lineStart, position.offset - 1) };
+              const resume = { ...position, lineStart: position.offset, line: position.line + 1, matched: false };
+              candidates.push({ item, position: resume });
+            }
+            position.lineStart = position.offset;
+            position.line += 1;
+            position.matched = false;
+            matchState = 0;
+            if (candidates.length >= limit) break;
+            continue;
+          }
+          matchState = kmpStep(queryBytes, failure, matchState, byte);
+          if (matchState === queryBytes.length) {
+            position.matched = true;
+            matchState = failure[matchState - 1] ?? 0;
+          }
+        }
+      }
+      if (position.offset >= file.bytes) {
+        if (position.matched && position.offset > position.lineStart && candidates.length < limit) {
+          const resume = nextFile(position.file);
+          candidates.push({
+            item: { path, line: position.line, text: evidence(descriptor, position.lineStart, position.offset) },
+            position: resume
+          });
+        }
+        position = nextFile(position.file);
+      }
+    } finally {
+      closeSync2(descriptor);
+    }
+  }
+  return { candidates, next: position.file < snapshot.paths.length ? position : null };
+}
+function nextFile(file) {
+  return { file: file + 1, offset: 0, lineStart: 0, line: 1, matched: false };
+}
+function restoreMatchState(descriptor, position, query, failure) {
+  const overlap = Math.min(query.length - 1, position.offset - position.lineStart);
+  if (overlap <= 0) return 0;
+  const bytes = Buffer.allocUnsafe(overlap);
+  const count = readSync2(descriptor, bytes, 0, overlap, position.offset - overlap);
+  if (count !== overlap) throw new ToolError("snapshot read failed");
+  let state = 0;
+  for (const byte of bytes) {
+    state = kmpStep(query, failure, state, byte);
+    if (state === query.length) state = failure[state - 1] ?? 0;
+  }
+  return state;
+}
+function evidence(descriptor, start, end) {
+  const length = Math.min(Math.max(end - start, 0), MAX_EVIDENCE_BYTES);
+  if (length === 0) return "";
+  const bytes = Buffer.allocUnsafe(length);
+  const count = readSync2(descriptor, bytes, 0, length, start);
+  if (count !== length) throw new ToolError("snapshot read failed");
+  const safeLength = end - start <= MAX_EVIDENCE_BYTES ? length : validUtf8Prefix(bytes);
+  return bytes.subarray(0, safeLength).toString("utf8").replace(/\r$/, "");
+}
+function kmpFailure(query) {
+  const failure = Array(query.length).fill(0);
+  for (let index = 1, prefix = 0; index < query.length; index += 1) {
+    while (prefix > 0 && query[index] !== query[prefix]) prefix = failure[prefix - 1];
+    if (query[index] === query[prefix]) prefix += 1;
+    failure[index] = prefix;
+  }
+  return failure;
+}
+function kmpStep(query, failure, state, byte) {
+  while (state > 0 && byte !== query[state]) state = failure[state - 1];
+  if (byte === query[state]) state += 1;
+  return state;
+}
+function structured(value) {
+  return { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value };
+}
+function logicalResultBytes(value) {
+  return Buffer.byteLength(JSON.stringify(structured(value)), "utf8");
+}
+function snapshotIO(operation) {
+  try {
+    return operation();
+  } catch (error2) {
+    if (error2 instanceof ToolError) throw error2;
+    throw new ToolError("snapshot backing store is unavailable");
+  }
+}
+var isEntryPoint = process.argv[1] !== void 0 && resolve2(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isEntryPoint) {
+  let snapshot;
+  let transport;
+  let shuttingDown = false;
+  const cleanup = () => snapshot?.cleanup();
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    if (transport === void 0) {
+      cleanup();
+      process.exit(0);
+    }
+    void Promise.resolve().then(() => transport.close()).finally(() => {
+      cleanup();
+      process.exit(0);
+    });
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+  process.once("exit", cleanup);
   try {
     const args = parseArguments(process.argv.slice(2));
-    const snapshot = capture({ root: args.root, include: args.include, exclude: args.exclude });
-    serveStdio(() => createServer(snapshot));
+    snapshot = capture({
+      root: args.root,
+      include: args.include,
+      exclude: args.exclude,
+      limits: {
+        ...args.maxFileBytes === void 0 ? {} : { maxFileBytes: args.maxFileBytes },
+        ...args.maxTotalBytes === void 0 ? {} : { maxTotalBytes: args.maxTotalBytes }
+      }
+    });
+    transport = serveStdio(() => createServer(snapshot), {
+      onerror: () => process.stderr.write("filesystem server transport error\n")
+    });
   } catch (error2) {
+    cleanup();
     process.stderr.write(`${error2 instanceof Error ? error2.message : "startup failed"}
 `);
     process.exit(64);

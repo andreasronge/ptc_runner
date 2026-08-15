@@ -1,6 +1,6 @@
 {
   "name": "ptc-runner-filesystem-sample",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Non-production immutable read-only filesystem MCP server used by PtcRunner tutorials and integration tests.",
   "license": "MIT",

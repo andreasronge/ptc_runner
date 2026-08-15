@@ -86,7 +86,15 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
              matches["items"]
 
     assert read["snapshot_hash"] == snapshot_hash
-    assert read["lines"] == [%{"line" => 2, "text" => "needle"}]
+
+    assert read["items"] == [
+             %{
+               "byte_offset" => 0,
+               "text" => "first\nneedle\nlast\n"
+             }
+           ]
+
+    assert read["next_cursor"] == nil
     refute inspect(values) =~ "TOP-SECRET"
   end
 
@@ -133,8 +141,7 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
           listed (tool/workspace.list {"path" "lib"})
           found (tool/workspace.find {"query" "target"})
           matches (tool/workspace.search {"query" "needle"})
-          read (tool/workspace.read
-                 {"path" "lib/nested/target.txt" "start_line" 2 "line_count" 1})]
+          read (tool/workspace.read {"path" "lib/nested/target.txt"})]
       (return
         {"info" info
          "listed" listed
@@ -198,7 +205,7 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
             "tool" => "snapshot_info",
             "field" => "snapshot_hash"
           },
-          "installation_revision" => "filesystem-sample-0.1.0",
+          "installation_revision" => "filesystem-sample-0.2.0",
           "ceilings" => %{
             "timeout_ms" => 15_000,
             "max_catalog_tools" => 8,

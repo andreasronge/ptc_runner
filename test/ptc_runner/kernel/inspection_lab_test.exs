@@ -64,8 +64,8 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
       assert Enum.any?(records, fn record ->
                record["record_type"] == "capability-output" and
                  record["payload"]["name"] == "filesystem.read" and
-                 get_in(record, ["payload", "result", "value", "lines"]) == [
-                   %{"line" => 1, "text" => "fixture-file"}
+                 get_in(record, ["payload", "result", "value", "items"]) == [
+                   %{"byte_offset" => 0, "text" => "fixture-file"}
                  ]
              end)
 

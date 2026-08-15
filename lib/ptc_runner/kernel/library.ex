@@ -21,10 +21,11 @@ defmodule PtcRunner.Kernel.Library do
   `cap` is `:discoverable` rather than `:prompt`. Its envelope and pagination
   helpers compose capabilities for other libraries and stay out of the prompt
   inventory; evaluated code still finds them with `(dir "cap")` and reads them
-  with `(doc "cap/collect-pages")`. `unwrap!` fails the program on an error
-  envelope rather than
-  returning it, `with-cursor` adds one opaque cursor to an argument map, and
-  `collect-pages` follows cursors only up to its explicit page bound.
+  with `(doc "cap/fold-pages")`. `unwrap!` fails the program on an error
+  envelope rather than returning it. `fold-pages` is the one traversal helper:
+  it reduces page items into bounded caller state, preserves a resumable cursor
+  at its explicit page bound, and rejects changed snapshots or cursor cycles
+  observed within one invocation without retaining source-sized resume history.
 
   Fetching one component with `component/1` does not expand its dependencies,
   and `PtcRunner.Kernel` refuses to compile an incomplete set. Manifests and
