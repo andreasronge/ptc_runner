@@ -4,9 +4,10 @@ This credential-free pair shows one PTC application navigating another
 application's immutable failed run. No model, network access, or credential is
 involved: both runs are deterministic.
 
-`target/` prices an order through a three-component mission. `pricing.rule`
-adds 2 while the captured call requires the subtotal plus 20, so the run fails.
-`pricing.discount` is an unused decoy: nothing in the failing call reaches it.
+`target/` prices an order through `orders` → `pricing.tax`, which branches to
+`pricing.base` and `pricing.rule`. The rule adds 2 while the captured call
+requires the subtotal plus 20, so the run fails. `pricing.discount` is an
+unused decoy: nothing in the failing call reaches it.
 
 `debugger/` installs the target's frozen trace and inspection directories as
 snapshot providers and walks the evidence with the shipped `debug.nav` prelude.
@@ -35,9 +36,10 @@ cat examples/debug-a-failed-run/debugger/.ptc/results/*.private.json
 ```
 
 It reports the boundary failure, the exact generated program including the
-required total, the frozen dependency closure `orders` → `pricing.tax` →
-`pricing.rule`, and the source of each. The decoy never appears, because the
-walk follows frozen dependency edges rather than the manifest component list.
+required total, the complete frozen dependency closure, and the source of each.
+The decoy never appears, because the walk follows frozen dependency edges
+rather than the manifest component list, and `closure_complete` says whether
+the walk saw the whole closure or stopped early.
 
 ## Check the diagnosis
 

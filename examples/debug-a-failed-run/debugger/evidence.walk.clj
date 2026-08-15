@@ -4,8 +4,10 @@
 
 (defn- first-item [page] (first (get page "items")))
 
-(defn- relation [item rel]
-  (first (filter #(= (get % "rel") rel) (get item "relationships"))))
+(defn- relations [item rel]
+  (filter #(= (get % "rel") rel) (get item "relationships")))
+
+(defn- relation [item rel] (first (relations item rel)))
 
 (defn- complete? [relationship]
   (and (map? relationship) (= (get relationship "state") "complete")))
@@ -13,18 +15,38 @@
 (defn- hop [run-id relationship]
   (first-item (get (debug.nav/follow run-id relationship {}) "page")))
 
-;; Walk the frozen dependency edges the failing call actually reached. The
-;; walk is bounded, stops at the first edge the host did not prove complete,
-;; and never widens to components outside that closure.
-(defn- dependency-closure [run-id entry]
+(defn- dependency-edges [item] (relations item "dependency_prelude_source"))
+
+;; Walk every frozen dependency edge the failing call reached, breadth first.
+;; A frozen graph orders dependencies before dependants, so it cannot cycle,
+;; but deduplicate by component anyway and keep explicit bounds. The walk
+;; reports whether it saw the whole closure: an edge the host did not prove
+;; complete, or either bound, makes the result partial rather than silently
+;; short.
+(defn- expand [run-id state]
+  (let [frontier (get state "frontier")
+        edges (mapcat dependency-edges frontier)
+        followable (filter complete? edges)
+        seen (get state "seen")
+        found (map #(hop run-id %) followable)
+        fresh (remove #(some (fn [id] (= id (get % "component_id"))) seen) found)]
+    {"chain" (concat (get state "chain") fresh)
+     "seen" (concat seen (map #(get % "component_id") fresh))
+     "frontier" fresh
+     "complete?" (and (get state "complete?") (= (count edges) (count followable)))}))
+
+(defn- closure [run-id entry]
   (reduce
-    (fn [chain _step]
-      (let [dependency (relation (last chain) "dependency_prelude_source")]
-        (if (complete? dependency)
-          (conj chain (hop run-id dependency))
-          chain)))
-    [entry]
-    (range 8)))
+    (fn [state _round]
+      (cond
+        (empty? (get state "frontier")) state
+        (>= (count (get state "seen")) 64) (assoc state "complete?" false)
+        :else (expand run-id state)))
+    {"chain" [entry]
+     "seen" [(get entry "component_id")]
+     "frontier" [entry]
+     "complete?" true}
+    (range 16)))
 
 (defn- states [items]
   (sort (distinct (mapcat #(map (fn [r] (get r "state")) (get % "relationships")) items))))
@@ -43,7 +65,8 @@
                       {"collection" "generated_sources"
                        "parent_evaluation_id" (get error "evaluation_id")}))
         entry (hop run-id (relation generated "referenced_prelude_source"))
-        chain (dependency-closure run-id entry)]
+        walk (closure run-id entry)
+        chain (get walk "chain")]
     {"run_id" run-id
      "terminal_reason" (get run "terminal_reason")
      "boundary_kind" (get error "kind")
@@ -51,6 +74,10 @@
      "generated_source" (get generated "source")
      "dependency_closure" (map #(get % "component_id") chain)
      "reached_sources" (map #(get % "source") chain)
+     ;; False means the walk stopped early: an edge the host could not prove,
+     ;; or a bound. A diagnosis must not treat a partial closure as the whole
+     ;; one.
+     "closure_complete" (get walk "complete?")
      ;; Report how well the host proved every edge on the path, so a caller can
      ;; tell a supported diagnosis from an incomplete or ambiguous picture
      ;; instead of assuming the walk saw everything.

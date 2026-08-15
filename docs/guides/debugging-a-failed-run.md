@@ -192,13 +192,27 @@ will report confident nonsense:
 | State | Meaning |
 | --- | --- |
 | `complete` | the host proved this edge; the filters are exact |
-| `incomplete` | evidence was truncated or the canonical run is not terminal |
-| `ambiguous` | several candidates match; each is offered as its own exact filter |
+| `incomplete` | the capture cannot answer, so no claim is made |
+| `ambiguous` | more than one item matches |
 | `unavailable` | a complete search proved there is no such target |
 
-`unavailable` is a finding, not a gap: it means the evidence exists and
-contains no match. `incomplete` means the capture cannot answer. Never follow
-a relationship whose filters are null.
+`incomplete` is the honest catch-all for "not established": a non-terminal or
+truncated canonical run, producer evidence that was cut off, an absent or
+malformed frozen prelude graph, or a program whose prelude-call analysis was
+never captured. It does not distinguish those causes, and a null-filtered
+`incomplete` relation cannot be followed at all.
+
+`unavailable` is a finding rather than a gap: the evidence exists and contains
+no match.
+
+`ambiguous` means different things by relation. Ambiguous boundary-producer
+candidates are emitted as several separate relations, each with its own exact
+filter, rather than one unbounded scan. An ambiguous prelude or turn
+association is a single relation whose one filter matches more than one item;
+following it returns them all, and choosing between them is the caller's
+problem.
+
+Never follow a relationship whose filters are null.
 
 Pages carry their own completeness separately from relationship state:
 `next_cursor`, `omitted_count`, `truncated`, and `snapshot_hash`. Turn pages
@@ -212,9 +226,9 @@ evidence, naming which edge was missing.
 ## Run the credential-free example
 
 The checked-in example needs no credential or network access. `target/` prices
-an order through `orders` → `pricing.tax` → `pricing.rule`; the rule adds 2
-while the captured call requires 20, so the run fails. `pricing.discount` is an
-unused decoy.
+an order through `orders` → `pricing.tax`, which branches to `pricing.base` and
+`pricing.rule`. The rule adds 2 while the captured call requires 20, so the run
+fails. `pricing.discount` is an unused decoy.
 
 Capture the failed run. It exits nonzero by design:
 
@@ -241,7 +255,8 @@ required total, and the frozen dependency closure with each component's source:
 ```json
 {
   "boundary_kind": "workflow_failed",
-  "dependency_closure": ["orders", "pricing.tax", "pricing.rule"],
+  "closure_complete": true,
+  "dependency_closure": ["orders", "pricing.tax", "pricing.base", "pricing.rule"],
   "evidence_states": ["complete", "incomplete", "unavailable"],
   "generated_source": "(let [quote (orders/place data/params)] (if (= (get quote \"total\") 120) quote (fail {:kind \"order-total-mismatch\"})))",
   "terminal_reason": "explicit_failure"
@@ -249,9 +264,15 @@ required total, and the frozen dependency closure with each component's source:
 ```
 
 The decoy never appears, because the walk follows frozen dependency edges
-rather than the manifest's component list. `evidence_states` includes
-`incomplete` because this run failed by calling `fail`, so no direct boundary
-producer was proven — a fact the report keeps rather than hides.
+rather than the manifest's component list. Both branches under `pricing.tax`
+do appear: a walk that followed one edge per component would silently drop the
+other, and might drop the defective one.
+
+Two fields keep the report honest about its own coverage. `closure_complete` is
+false whenever the walk stopped at an edge the host could not prove or hit its
+own bound, so a partial closure is never mistaken for the whole one.
+`evidence_states` includes `incomplete` here because this run failed by calling
+`fail`, so no direct boundary producer was proven.
 
 The generated program requires 120, the reached rule adds 2, and the closure
 contains exactly one component that decides the added amount. That is a

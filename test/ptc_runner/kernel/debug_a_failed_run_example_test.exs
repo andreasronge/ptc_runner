@@ -31,7 +31,12 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
 
     # The walk follows frozen dependency edges, so it reaches exactly the
     # closure the failing call used and never the unused decoy component.
-    assert evidence["dependency_closure"] == ["orders", "pricing.tax", "pricing.rule"]
+    # `pricing.tax` branches, so a walk that followed only its first edge
+    # would silently drop one of these.
+    assert Enum.sort(evidence["dependency_closure"]) ==
+             ["orders", "pricing.base", "pricing.rule", "pricing.tax"]
+
+    assert evidence["closure_complete"] == true
     assert evidence["terminal_reason"] == "explicit_failure"
     assert evidence["boundary_kind"] == "workflow_failed"
     assert evidence["nested_evaluations"] == 2
@@ -39,7 +44,7 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     # The generated program carries the requirement, and the reached rule
     # carries the defect. Together they are what makes a diagnosis supportable.
     assert evidence["generated_source"] =~ ~s|(get quote "total") 120|
-    assert List.last(evidence["reached_sources"]) =~ "(+ subtotal 2)"
+    assert Enum.any?(evidence["reached_sources"], &(&1 =~ "(+ subtotal 2)"))
     refute Enum.any?(evidence["reached_sources"], &(&1 =~ "pricing.discount"))
 
     # A run that fails by calling `fail` proves no direct boundary producer, so

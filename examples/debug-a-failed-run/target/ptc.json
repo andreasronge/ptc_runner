@@ -11,7 +11,12 @@
     "pricing": {
       "components": [
         {"id": "orders", "path": "orders.clj", "dependencies": ["pricing.tax"]},
-        {"id": "pricing.tax", "path": "pricing.tax.clj", "dependencies": ["pricing.rule"]},
+        {
+          "id": "pricing.tax",
+          "path": "pricing.tax.clj",
+          "dependencies": ["pricing.base", "pricing.rule"]
+        },
+        {"id": "pricing.base", "path": "pricing.base.clj"},
         {"id": "pricing.rule", "path": "pricing.rule.clj"},
         {"id": "pricing.discount", "path": "pricing.discount.clj"}
       ]
