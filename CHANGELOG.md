@@ -25,6 +25,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added the shipped `debug.nav` PTC-Lisp library for ordinary debugger
+  missions. It composes the existing snapshot-provider `runs`, `open`, and
+  `read` authority into a bounded latest-failure incident, immediate prelude
+  dependency sources, grouped evaluation evidence, and copyable follow-up
+  links without adding a privileged host operation.
+
+- Added `mix ptc.repair` to consume one structured generated repair, bind it to
+  the current component base hash, pass the existing G1-G4 materialization
+  gate, and execute a fresh validation run. Generated reports never control
+  paths, credentials, inputs, host configuration, effect-widening acceptance,
+  or promotion.
+
 - Added typed, followable run-analysis relationships from workflow boundary
   errors to directly proven child producers, generated source, producing turns,
   and referenced prelude source. Each relation supplies an exact target

@@ -74,8 +74,8 @@ validate authority; they never create it.
 
 ## Select a shipped prelude
 
-Shipped libraries such as `runtime`, `cap`, `kernel`, `llm`, `analysis`, and
-the agent and result libraries are selected by ID:
+Shipped libraries such as `runtime`, `cap`, `kernel`, `llm`, `analysis`,
+`debug.nav`, and the agent and result libraries are selected by ID:
 
 ```json
 "components": [
@@ -98,10 +98,15 @@ Shipped components use the same dependency rules. For example:
 | --- | --- |
 | `cap` | Fail-safe capability-envelope handling and bounded cursor traversal |
 | `analysis` | Three bounded public/private run-evidence navigation operations |
+| `debug.nav` | Coarse private incidents and typed follow-up views over snapshot-provider `runs/open/read` operations |
 
-`analysis` depends on `cap`. Adding an installed dependency widens the callable
-surface, so fixed profiles pin the complete resolved component list and must
-version public surface changes.
+`analysis` and `debug.nav` depend on `cap`. `analysis` belongs to the fixed
+analysis profiles. `debug.nav` belongs in an ordinary debugger mission and
+expects the correlated inspection snapshot provider to use the conventional
+alias `debug.nav`; it adds navigation policy without adding host authority.
+Adding an installed dependency widens the callable surface, so fixed profiles
+pin the complete resolved component list and must version public surface
+changes.
 
 `cap/fold-pages` is the single shipped traversal helper. It reduces page items
 into caller-owned bounded state, stops at `max_pages`, and returns the opaque

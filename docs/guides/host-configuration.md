@@ -319,6 +319,28 @@ immutable captures:
 }
 ```
 
+The shipped `debug.nav` prelude uses the inspection provider's alias as its
+stable capability boundary. Install that provider under the exact name
+`debug.nav` when a debugger mission selects `{"library": "debug.nav"}`:
+
+```json
+"debug.trace": {
+  "source": "ptc_trace_snapshot",
+  "installation_revision": "debug-trace-v1",
+  "directory": "traces"
+},
+"debug.nav": {
+  "source": "ptc_inspection_snapshot",
+  "installation_revision": "debug-nav-v1",
+  "directory": "inspection"
+}
+```
+
+Select both providers in the mission and set the trace provider's manifest
+config to `{"expose": false}`. `debug.nav` then wraps the inspection provider's
+existing `runs`, `open`, and `read` operations; it installs no callback and
+grants no additional authority.
+
 Directories resolve against the host document and are captured once.
 `ptc_trace_snapshot` reads ordinary traces.
 `ptc_private_trace_snapshot` reads ordinary and `.private.jsonl` traces and

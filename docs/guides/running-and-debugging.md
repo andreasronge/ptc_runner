@@ -18,6 +18,7 @@ switches.
 | `ptc transcript RUN_ID ...` | Publish one correlated private model transcript |
 | `ptc repl` | Open a direct, manifest-backed, or analysis session |
 | `mix ptc.materialize ...` | Gate model-authored source as a candidate component |
+| `mix ptc.repair ...` | Materialize a structured generated repair and validate it in a fresh run |
 | `mix ptc.viewer ...` | Browse traces in a source checkout |
 
 `PtcRunner.Kernel.CommandDeclaration` is the canonical command and option
@@ -160,6 +161,40 @@ The task creates evidence; it never installs the candidate. A new component
 needs a selected placeholder with its allowed dependencies and every export
 its consumers already call. Run `mix help ptc.materialize` for the full option
 and report contract.
+
+### Validate a structured generated repair
+
+A debugger can return a flat `propose-change` result containing the diagnosed
+run id, target environment and mission, component id, captured base hash, and
+complete candidate source. The host can bind that report to the current
+application and run the static and behavioral gates in one command:
+
+```console
+mix ptc.repair ptc.json \
+  --report private/repair.json \
+  --out private/candidate \
+  --origin-run-id debugger-run-id \
+  --host-config ptc-host.json \
+  --env-file .env \
+  --trace-dir private/validation-traces \
+  --inspect private/validation.inspection.jsonl \
+  --private-output private/validation-result.json \
+  --envelope private/validation-envelope.json
+```
+
+The task accepts only `decision: "propose-change"`, derives the materializer
+target and component from the report, refuses a stale captured base hash or a
+no-op source, passes no effect-widening acceptance, and executes a fresh
+`ptc run` with the verified descriptor. Paths, credentials, inputs, artifact
+destinations, authoring provenance, and host configuration remain host
+arguments rather than model output. The report's `run_id` identifies the
+diagnosed run; `--origin-run-id` separately records the debugger run that
+authored the candidate. A static pass followed by a failed run retains the
+private candidate for diagnosis and exits nonzero.
+
+Success does not install the component. Promotion remains a separate operator
+decision. The fresh run proves only its selected input and providers; use
+host-owned held-out inputs when semantic generalization matters.
 
 ## Read results and failures
 
@@ -337,6 +372,16 @@ custom PTC-Lisp analysis. Its results can include exact messages, generated
 source, effective components, capability payloads, prints, diagnostics, and
 terminal values. The attached-terminal and unattended switches are accident
 guards, not access control; treat every downstream sink as private.
+
+For an LLM-driven second run, select `{"library": "debug.nav"}` in a mission
+with the hidden canonical trace provider and the correlated inspection provider
+named `debug.nav`. Start with `(debug.nav/latest-failure {})`. It returns one
+bounded incident containing errors, reconstructed programs and feedback,
+sources for called components and their immediate dependencies, collection
+completeness, and typed links. Follow a returned
+`debug.nav/evaluation` or `debug.nav/component-source` call only when the
+incident lacks a material fact. Raw `debug.nav/read` remains available and its
+documentation shows the exact top-level filter shape.
 
 ## Browse with the development Viewer
 

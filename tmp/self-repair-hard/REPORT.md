@@ -151,3 +151,52 @@ its reconstructed feedback, called component sources, immediate dependency
 sources, and exact hypermedia-style follow-up call templates. Then repeat only
 the failed DeepSeek dependency control. If it still over-explores despite exact
 links, a dedicated navigation prelude becomes justified.
+
+## Shipped navigation follow-up
+
+The bounded incident experiment justified the dedicated prelude once it was
+implemented as policy over the existing provider operations rather than as new
+host authority. The shipped `debug.nav` component exposes `runs`, `open`,
+`read`, `latest-failure`, `evaluation`, and `component-source`. A debugger
+mission selects the correlated inspection snapshot provider under the
+conventional alias `debug.nav`; the component adds no callback or capability.
+
+DeepSeek was rerun against the unchanged transitive target and 12-turn budget
+with only `{"library": "debug.nav"}`—no local `debug.context` or
+`debug.evidence` components. Run `cmd-34vpvn2pehjzjg60v16y5sbj9c` succeeded in
+8 turns with zero protocol errors and returned the exact
+`pricing.tax/add-fixed` replacement. The raw-navigation baseline exhausted 12
+turns with five protocol errors; the intermediate custom dependency context
+succeeded in 9 turns with one protocol error. PTC reported complete turn
+evidence for the shipped-prelude run.
+
+The model still reopened the run and followed several evaluation views after
+the incident already contained enough evidence. `debug.nav` therefore fixes
+reliability and call-shape friction, but does not guarantee minimal reasoning.
+
+## Automatic host loop follow-up
+
+`mix ptc.repair` now consumes one structured `propose-change` result and keeps
+authority split as follows:
+
+- the report controls the logical target, component, captured base hash, and
+  complete candidate source;
+- the host controls the manifest, paths, authoring-run provenance, providers,
+  credentials, validation input, and artifact destinations;
+- the existing materializer controls G1-G4 and refuses effect widening;
+- a fresh `ptc run` controls behavioral success;
+- promotion remains a later operator decision.
+
+The real automatic path consumed DeepSeek report
+`cmd-34vpvn2pehjzjg60v16y5sbj9c`, materialized candidate source hash
+`sha256:7aa75d78b482d4d127b02a082b264b1d9ddf5499220b4715231be8dd42cf4074`,
+and launched Luna validation run `cmd-5zdsan4jk6cp12hx3wq7ktnrjz`. PTC opened
+that trace and inspection pair and reported one model call, zero errors,
+complete evidence, the verified override base/source hashes and authoring run,
+and result `{"total": 120}`.
+
+This automates generation-to-candidate and candidate-to-validation, not
+installation. Its fresh run proves the selected application scenario only;
+the next safety experiment should pass host-owned held-out inputs to
+`ptc.repair` and require every run to succeed before a candidate is considered
+promotion-ready.

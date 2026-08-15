@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.Library do
 
   Available component IDs are `kernel`, `runtime`, `cap`, `workflow.event`,
   `llm`, `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`,
-  `agent.prompt`, `agent.main`, `result`, and `analysis`.
+  `agent.prompt`, `agent.main`, `result`, `analysis`, and `debug.nav`.
 
   `agent.main` is a generic entry wrapper: a manifest names `agent.main/run`
   and supplies `task` and `agent` through input, instead of every application
@@ -53,6 +53,7 @@ defmodule PtcRunner.Kernel.Library do
   @agent_retry_path Path.expand("../../../priv/preludes/kernel/agent.retry.clj", __DIR__)
   @result_path Path.expand("../../../priv/preludes/kernel/result.clj", __DIR__)
   @analysis_path Path.expand("../../../priv/preludes/kernel/analysis.clj", __DIR__)
+  @debug_nav_path Path.expand("../../../priv/preludes/kernel/debug.nav.clj", __DIR__)
   @external_resource @kernel_path
   @external_resource @runtime_path
   @external_resource @cap_path
@@ -66,6 +67,7 @@ defmodule PtcRunner.Kernel.Library do
   @external_resource @agent_retry_path
   @external_resource @result_path
   @external_resource @analysis_path
+  @external_resource @debug_nav_path
   @sources %{
     "kernel" => File.read!(@kernel_path),
     "runtime" => File.read!(@runtime_path),
@@ -79,10 +81,12 @@ defmodule PtcRunner.Kernel.Library do
     "agent.feedback" => File.read!(@agent_feedback_path),
     "agent.retry" => File.read!(@agent_retry_path),
     "result" => File.read!(@result_path),
-    "analysis" => File.read!(@analysis_path)
+    "analysis" => File.read!(@analysis_path),
+    "debug.nav" => File.read!(@debug_nav_path)
   }
   @dependencies %{
     "analysis" => ["cap"],
+    "debug.nav" => ["cap"],
     "agent.prompt" => ["kernel"],
     "agent.core" => [
       "agent.feedback",

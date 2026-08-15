@@ -10,6 +10,8 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
   alias Mix.Tasks.Ptc
   alias Mix.Tasks.Ptc.Materialize
+  alias Mix.Tasks.Ptc.Repair
+  alias PtcRunner.Kernel.ComponentOverride
 
   # The placeholder idiom. It must stub every export its consumers call: a
   # component that declares nothing cannot be depended on, because the base
@@ -347,6 +349,64 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
     end
   end
 
+  @tag :tmp_dir
+  test "a structured repair report is materialized and validated in a fresh run", %{
+    tmp_dir: dir
+  } do
+    manifest = write_application(dir)
+    report = Path.join(dir, "repair.json")
+    out = Path.join(dir, "candidate")
+
+    File.write!(report, Jason.encode!(repair_report(ComponentOverride.hash(@placeholder))))
+
+    output =
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.repair")
+
+        Repair.run([
+          manifest,
+          "--report",
+          report,
+          "--out",
+          out,
+          "--origin-run-id",
+          "debugger-run-1"
+        ])
+      end)
+
+    assert output =~ "candidate ready"
+    assert output =~ "candidate validated in a fresh run"
+    assert output =~ "42"
+    assert File.read!(Path.join(out, "candidate.clj")) == @authored
+
+    assert %{
+             "base_source_hash" => base_hash,
+             "provenance" => %{"run_id" => "debugger-run-1"}
+           } = Jason.decode!(File.read!(Path.join(out, "descriptor.json")))
+
+    assert base_hash == ComponentOverride.hash(@placeholder)
+  end
+
+  @tag :tmp_dir
+  test "automatic repair refuses a stale captured base and discards the candidate", %{
+    tmp_dir: dir
+  } do
+    manifest = write_application(dir)
+    report = Path.join(dir, "repair.json")
+    out = Path.join(dir, "candidate")
+
+    File.write!(report, Jason.encode!(repair_report("sha256:" <> String.duplicate("0", 64))))
+
+    assert_raise Mix.Error, ~r/captured base hash does not match/, fn ->
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.repair")
+        Repair.run([manifest, "--report", report, "--out", out])
+      end)
+    end
+
+    refute File.exists?(out)
+  end
+
   defp write_application(dir) do
     File.write!(Path.join(dir, "helper.clj"), @placeholder)
 
@@ -393,5 +453,17 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
     path = Path.join(dir, "mission-ptc.json")
     File.write!(path, Jason.encode!(manifest))
     path
+  end
+
+  defp repair_report(base_source_hash) do
+    %{
+      "decision" => "propose-change",
+      "run_id" => "debugger-run-1",
+      "target_environment" => "workflow",
+      "target_mission" => "default",
+      "component_id" => "helper",
+      "base_source_hash" => base_source_hash,
+      "candidate_source" => @authored
+    }
   end
 end

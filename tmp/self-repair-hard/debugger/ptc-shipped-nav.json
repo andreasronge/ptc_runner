@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [{"library": "agent.main"}],
+    "entry": "agent.main/run"
+  },
+  "missions": {
+    "default": {
+      "components": [{"library": "debug.nav"}],
+      "providers": ["history", "debug.nav"]
+    }
+  },
+  "input": {
+    "value": {
+      "task": "Diagnose one failed PtcRunner run using only immutable evidence. Start with debug.nav/latest-failure {}. Work REPL-style, but follow the returned links only when the incident lacks a material fact. Use return only once, for the final report. Find the earliest component-owned invariant violation. If evidence proves one faulty prelude, return propose-change with exactly these flat keys: decision, run_id, cause, target_environment, target_mission, component_id, function_id, base_source_hash, candidate_source, invariant, evidence, validation_plan. function_id must be the namespace-qualified prelude reference in component/function form. evidence is an array of citation strings. validation_plan is an array of objects having only property and test string keys. candidate_source must be the complete replacement component source. Preserve namespace metadata, public names, documentation, signatures, dependencies, effects, and unrelated behavior. Otherwise return insufficient-evidence with exactly decision, run_id, cause, and missing_evidence.",
+      "agent": {
+        "max_turns": 12,
+        "max_observation_chars": 32768,
+        "max_transcript_chars": 300000,
+        "consolidate_at_turns_remaining": 4
+      }
+    }
+  },
+  "providers": {
+    "workflow": [{"name": "agent_model"}],
+    "mission": [
+      {"name": "history", "config": {"expose": false}},
+      {"name": "debug.nav"}
+    ]
+  },
+  "contracts": {"result_schema": {"path": "report.schema.json"}},
+  "limits": {
+    "run_duration_ms": 240000,
+    "workflow_timeout_ms": 240000,
+    "evaluation_timeout_ms": 30000,
+    "subordinate_evaluations": 20,
+    "workflow_capability_calls": 20,
+    "workflow_capability_calls_per_name": 20,
+    "mission_capability_calls": 64,
+    "mission_capability_calls_per_name": 64,
+    "normal_event_count": 2048
+  },
+  "labels": {
+    "name": "self-repair-hard-debugger-shipped-nav",
+    "tags": {"mode": "agent", "stage": "validating", "suite": "e2e"}
+  }
+}
