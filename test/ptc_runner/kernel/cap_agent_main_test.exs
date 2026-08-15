@@ -143,12 +143,14 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
     end
 
     test "traverses data larger than the old eager collector with constant accumulator state" do
-      source = ~S"""
+      payload = String.duplicate("x", 1_100)
+
+      source = """
       (cap/fold-pages
         (fn [cursor]
           (let [page (if cursor (parse-long cursor) 0)]
-            {"items" (mapv (fn [_] "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-                            (range 500))
+            {"items" (mapv (fn [item] (str page ":" item ":" "#{payload}"))
+                            (range 50))
              "next_cursor" (if (< page 99) (str (inc page)) nil)
              "snapshot_hash" "sha256:large"}))
         (fn [count _] (inc count))
@@ -156,8 +158,11 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
         {"max_pages" 100})
       """
 
-      assert run(source) ==
-               ~S|{"complete?" true "next_cursor" nil "pages" 100 "snapshot_hash" "sha256:large" "value" 50000}|
+      # The 5,000 unique items carry more than 5 MiB in aggregate, but only
+      # one 50-item page and the integer accumulator are live at a time. This
+      # is a heap-safety test, not a deadline test, so tolerate loaded CI hosts.
+      assert run(source, timeout: 30_000) ==
+               ~S|{"complete?" true "next_cursor" nil "pages" 100 "snapshot_hash" "sha256:large" "value" 5000}|
     end
   end
 
@@ -258,20 +263,29 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
        kernel llm result workflow.event)
   end
 
-  defp run(source) do
+  defp run(source, opts \\ []) do
     {:ok, components} = Library.components(["cap"])
     {:ok, bundle} = Kernel.compile_bundle(components)
 
-    {:ok, result} =
-      Lisp.run_native(source,
-        prelude: bundle.prelude,
-        tools: discovery_tools(),
-        filter_context: false,
-        caller: :kernel
+    run_opts =
+      Keyword.merge(
+        [
+          prelude: bundle.prelude,
+          tools: discovery_tools(),
+          filter_context: false,
+          caller: :kernel
+        ],
+        opts
       )
 
-    {rendered, _truncated} = Lisp.format_value(result.return)
-    rendered
+    case Lisp.run_native(source, run_opts) do
+      {:ok, result} ->
+        {rendered, _truncated} = Lisp.format_value(result.return)
+        rendered
+
+      {:error, result} ->
+        flunk("unexpected evaluator failure: #{inspect(result.fail, limit: 20)}")
+    end
   end
 
   # `cap` declares the discovery tools it wraps, so the bundle only attaches
