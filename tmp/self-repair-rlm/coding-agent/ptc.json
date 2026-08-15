@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [{"library": "agent.main"}],
+    "entry": "agent.main/run"
+  },
+  "missions": {
+    "reference": {
+      "components": [{"library": "debug.nav"}],
+      "providers": ["history", "debug.nav"]
+    },
+    "workspace": {
+      "components": [
+        {"library": "debug.nav"},
+        {"id": "debug.workspace", "path": "workspace.clj", "dependencies": ["debug.nav"]}
+      ],
+      "providers": ["history", "debug.nav"]
+    }
+  },
+  "input": {"path": "input-reference.json"},
+  "providers": {
+    "workflow": [{"name": "agent_model"}],
+    "mission": [
+      {"name": "history", "config": {"expose": false}},
+      {"name": "debug.nav"}
+    ]
+  },
+  "contracts": {"result_schema": {"path": "report.schema.json"}},
+  "limits": {
+    "run_duration_ms": 300000,
+    "workflow_timeout_ms": 300000,
+    "evaluation_timeout_ms": 30000,
+    "subordinate_evaluations": 8,
+    "workflow_capability_calls": 16,
+    "workflow_capability_calls_per_name": 16,
+    "mission_capability_calls": 64,
+    "mission_capability_calls_per_name": 64,
+    "normal_event_count": 4096
+  },
+  "labels": {
+    "name": "self-repair-coding-agent-context",
+    "tags": {"mode": "agent", "stage": "validating", "suite": "e2e"}
+  }
+}

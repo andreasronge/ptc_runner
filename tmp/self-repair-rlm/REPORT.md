@@ -122,3 +122,76 @@ ordinary `agent.main` debugger should identify the invalid terminal navigation
 within four model calls and recommend reserving `return` for the declared root
 actions. A second criterion should require it to finish once that comparison is
 available rather than spending the remaining budget on unrelated metadata.
+
+## Coding-agent context experiment
+
+The next comparison isolated two pieces of context the external coding agent
+had before reasoning:
+
+- **run reference**: the exact failed run id and generic
+  `execution/workflow_failed` message;
+- **working set**: the same plus a read-only `debug.workspace/changed` facade
+  returning the exact frozen `debug.rlm.workflow` and `debug.rlm` sources from
+  the failed run. Being in the working set was explicitly not evidence of
+  fault.
+
+The diagnosis prompt did not mention `return`, action protocols, or an expected
+cause. Both conditions retained unrestricted `debug.nav` and allowed four model
+calls. The prior no-context ten-turn runs were not repeated.
+
+| Context | Model | Debugger run | Result | Model / evidence calls |
+| --- | --- | --- | --- | --- |
+| run reference | Luna | `cmd-06dwmc8fmm6hc0vb215mc6dph1` | returned, missed cause | 4 / 5 |
+| run reference | DeepSeek | `cmd-1ez4d07a7tqkdwx2kyhe7h5gxw` | turn limit | 4 / 4 |
+| run reference + working set | Luna | `cmd-22f891w4n97apwnmq8drkjv4c0` | returned, missed cause | 4 / 7 |
+| run reference + working set | DeepSeek | `cmd-7ennehkhk21ea3xjb7ehyw63k9` | turn limit | 4 / 9 |
+
+The run reference removed discovery cost for Luna: it opened the exact run on
+turn one and read unfiltered `activity` plus `turns` on turn two. It therefore
+saw the terminal `(return (debug.nav/runs ...))`, but without the workflow
+source treated that call as valid and safely declined to infer a cause.
+DeepSeek ignored the supplied specificity, listed runs anyway, and spent its
+remaining calls on `open`, `execution_errors`, and `boundary_failure`; it never
+read `turns`.
+
+The working-set arm did not join the missing halves. Luna's first program used
+the nonexistent `json/encode`, so static checking spent one correction turn
+before any evidence call. Turn two successfully returned the exact changed
+sources. Turn three unnecessarily listed runs. Its final program requested
+`activity`, `turns`, and `capability_calls` and constructed a report in the same
+program. Because the model had not yet received those query results while
+authoring that terminal program, its conclusion remained a generic workflow
+failure rather than a comparison with the offending generated source.
+
+DeepSeek read the working set on turns two and three but also requested a
+nonexistent `run` collection and repeatedly reopened the catalog. It never read
+the target `turns` collection and did not return on the final turn.
+
+This rejects both small hypotheses under the four-call criterion:
+
+1. Supplying the run reference alone does not reproduce coding-agent behavior.
+2. Supplying the frozen changed sources alongside the same navigation API does
+   not reproduce it either.
+
+The external coding agent had the action contract in working memory and then
+received the generated program from one deterministic PTC query. The PTC
+agents had the same facts available, but in separate observations and with
+catalog, identifier, language-correction, and terminal-synthesis costs between
+them. A larger turn budget might eventually produce an answer, but would not
+test the intended coding-agent-like property.
+
+The next minimal experiment should therefore replace separate startup reads
+with one structural, non-diagnostic `debug.case/context` operation returning:
+
+```text
+run_id and terminal error
+directly nested evaluation and generated program
+that evaluation's terminal value
+frozen changed-component sources
+typed links for expansion
+```
+
+The operation must not label a cause or recommend a fix. Reuse the same generic
+prompt, two models, and four-call ceiling. Success would show that the missing
+primitive is co-location of runtime evidence and current source, analogous to
+a coding agent starting from a failed command while retaining its working set.

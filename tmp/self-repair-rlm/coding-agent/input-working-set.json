@@ -1,0 +1,10 @@
+{
+  "task": "The PtcRunner command failed with execution/workflow_failed and run reference cmd-65hrha6x8z5dv899byz4z44n00. Diagnose why this run stopped using its immutable captured evidence. The exact frozen sources that were being changed when the command ran are available through debug.workspace/changed; their presence is not evidence that they are faulty. Inspect whatever evidence and working-set source is useful. Return the cause, concrete supporting evidence, and the smallest useful correction. Distinguish observed facts from inference and do not assume the intended diagnosis from the task wording. Return exactly run_id, summary, evidence, and next_step; evidence is an array of strings. Use return only for the final report.",
+  "agent": {
+    "mission": "workspace",
+    "max_turns": 4,
+    "max_observation_chars": 32768,
+    "max_transcript_chars": 300000,
+    "consolidate_at_turns_remaining": 2
+  }
+}
