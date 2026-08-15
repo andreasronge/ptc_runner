@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "repair.temperature", "path": "workflow.clj", "dependencies": ["agent.core"]},
+      {"library": "agent.core"}
+    ],
+    "entry": "repair.temperature/run"
+  },
+  "missions": {
+    "default": {
+      "components": [{"id": "temperature", "path": "temperature.clj"}]
+    }
+  },
+  "input": {
+    "value": {
+      "task": "Call temperature/celsius->fahrenheit exactly once with 100. Return the value produced by temperature/celsius->fahrenheit. Do not perform the conversion yourself or work around the function."
+    }
+  },
+  "providers": {
+    "workflow": [{"name": "agent_model"}],
+    "mission": []
+  },
+  "contracts": {"result_schema": {"path": "result.schema.json"}},
+  "limits": {
+    "run_duration_ms": 120000,
+    "workflow_timeout_ms": 90000,
+    "evaluation_timeout_ms": 30000,
+    "subordinate_evaluations": 4,
+    "workflow_capability_calls": 4,
+    "workflow_capability_calls_per_name": 4,
+    "normal_event_count": 256
+  },
+  "labels": {
+    "name": "self-repair-shape-correct-semantic",
+    "tags": {"mode": "agent", "stage": "executing", "suite": "e2e"}
+  }
+}

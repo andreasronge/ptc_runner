@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "repair.inventory", "path": "workflow.clj", "dependencies": ["agent.core"]},
+      {"library": "agent.core"}
+    ],
+    "entry": "repair.inventory/run"
+  },
+  "missions": {
+    "default": {
+      "components": [{"id": "inventory", "path": "inventory.clj"}]
+    }
+  },
+  "input": {
+    "value": {
+      "task": "Call inventory/reserve exactly once with SKU \"sku-42\" and quantity 2. Return the value produced by inventory/reserve. Do not replace, catch, or work around a failed call."
+    }
+  },
+  "providers": {
+    "workflow": [{"name": "agent_model"}],
+    "mission": []
+  },
+  "contracts": {"result_schema": {"path": "result.schema.json"}},
+  "limits": {
+    "run_duration_ms": 120000,
+    "workflow_timeout_ms": 90000,
+    "evaluation_timeout_ms": 30000,
+    "subordinate_evaluations": 4,
+    "workflow_capability_calls": 4,
+    "workflow_capability_calls_per_name": 4,
+    "normal_event_count": 256
+  },
+  "labels": {
+    "name": "self-repair-inventory-wrong-field",
+    "tags": {"mode": "agent", "stage": "executing", "suite": "e2e"}
+  }
+}

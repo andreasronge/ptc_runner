@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "repair.target", "path": "workflow.clj", "dependencies": ["agent.core"]},
+      {"library": "agent.core"}
+    ],
+    "entry": "repair.target/run"
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {"id": "claims", "path": "claims.clj"}
+      ]
+    }
+  },
+  "input": {
+    "value": {
+      "task": "Call claims/submit exactly once with these two strings: [\"The main pool reopened on 14 April.\", \"The spa remains closed.\"]. Return the value produced by claims/submit. Do not replace, catch, or work around a failed call."
+    }
+  },
+  "providers": {
+    "workflow": [{"name": "agent_model"}],
+    "mission": []
+  },
+  "contracts": {
+    "result_schema": {"path": "result.schema.json"}
+  },
+  "limits": {
+    "run_duration_ms": 120000,
+    "workflow_timeout_ms": 90000,
+    "evaluation_timeout_ms": 30000,
+    "subordinate_evaluations": 4,
+    "workflow_capability_calls": 4,
+    "workflow_capability_calls_per_name": 4,
+    "normal_event_count": 256
+  },
+  "labels": {
+    "name": "self-repair-obvious-target",
+    "tags": {"mode": "agent", "stage": "executing", "suite": "e2e"}
+  }
+}

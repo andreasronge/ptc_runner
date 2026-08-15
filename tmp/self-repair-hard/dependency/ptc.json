@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "repair.orders", "path": "workflow.clj", "dependencies": ["agent.core"]},
+      {"library": "agent.core"}
+    ],
+    "entry": "repair.orders/run"
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {"id": "pricing.tax", "path": "tax.clj"},
+        {"id": "orders", "path": "orders.clj", "dependencies": ["pricing.tax"]}
+      ]
+    }
+  },
+  "input": {
+    "value": {
+      "task": "Call orders/place exactly once with subtotal 100. Return the value produced by orders/place. Do not replace, catch, or work around a failed call."
+    }
+  },
+  "providers": {
+    "workflow": [{"name": "agent_model"}],
+    "mission": []
+  },
+  "contracts": {"result_schema": {"path": "result.schema.json"}},
+  "limits": {
+    "run_duration_ms": 120000,
+    "workflow_timeout_ms": 90000,
+    "evaluation_timeout_ms": 30000,
+    "subordinate_evaluations": 4,
+    "workflow_capability_calls": 4,
+    "workflow_capability_calls_per_name": 4,
+    "normal_event_count": 256
+  },
+  "labels": {
+    "name": "self-repair-transitive-dependency",
+    "tags": {"mode": "agent", "stage": "executing", "suite": "e2e"}
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "limits": {
+    "run_duration_ms": 180000,
+    "workflow_timeout_ms": 180000,
+    "subordinate_evaluations": 8,
+    "workflow_capability_calls": 8,
+    "workflow_capability_calls_per_name": 8,
+    "normal_event_count": 1024
+  },
+  "credentials": {
+    "openrouter_key": {"env": "OPENROUTER_API_KEY"}
+  },
+  "install": {
+    "agent_model": {
+      "source": "llm",
+      "installation_revision": "self-repair-hard-target-deepseek-v1",
+      "model": "openrouter:deepseek/deepseek-v4-flash",
+      "credential": "openrouter_key",
+      "cache": false
+    }
+  }
+}
