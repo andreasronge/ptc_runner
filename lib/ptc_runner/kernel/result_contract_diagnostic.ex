@@ -59,6 +59,19 @@ defmodule PtcRunner.Kernel.ResultContractDiagnostic do
   def retain_details(_details), do: :error
 
   @doc false
+  @spec inspection_details(term()) :: {:ok, map()} | :error
+  def inspection_details(details) do
+    with {:ok, retained} <- retain_details(details) do
+      violations = Enum.map(retained.violations, &inspection_violation/1)
+
+      {:ok,
+       retained
+       |> Map.delete(:contract_authority)
+       |> Map.put(:violations, violations)}
+    end
+  end
+
+  @doc false
   @spec message(term(), term()) :: {:ok, binary()} | :error
   def message(turns, constraint) when turns in 1..128 and constraint in @constraints,
     do: {:ok, @prefix <> Integer.to_string(turns) <> @middle <> Atom.to_string(constraint)}
@@ -109,6 +122,15 @@ defmodule PtcRunner.Kernel.ResultContractDiagnostic do
   end
 
   defp retain_violations(_violations, _constraint, _authority), do: :error
+
+  defp inspection_violation(%{kind: kind, path: %CommandPath{} = path} = violation) do
+    %{kind: kind, path: CommandPath.to_pointer(path)}
+    |> then(fn projected ->
+      if Map.has_key?(violation, :missing_required),
+        do: Map.put(projected, :missing_required, violation.missing_required),
+        else: projected
+    end)
+  end
 
   defp valid_contract_source?(nil), do: true
 

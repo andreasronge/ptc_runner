@@ -462,6 +462,35 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
              ],
              "outcome" => "fail"
            } = Jason.decode!(File.read!(Path.join(validation_out, "report.json")))
+
+    assert %{
+             "kind" => "repair-validation-feedback",
+             "state" => "candidate-rejected",
+             "candidate" => %{
+               "authority" => "model-authored-untrusted",
+               "value" => %{"candidate_source" => ^hard_coded}
+             },
+             "validation" => %{
+               "authority" => "host-authored",
+               "outcome" => "fail",
+               "cases" => [
+                 %{
+                   "name" => "observed",
+                   "input" => %{"value" => 21},
+                   "expected" => 42,
+                   "actual" => %{"state" => "available", "value" => 42}
+                 },
+                 %{
+                   "name" => "held-out",
+                   "input" => %{"value" => 5},
+                   "expected" => 10,
+                   "actual" => %{"state" => "available", "value" => 42},
+                   "reason" => "result_mismatch"
+                 }
+               ]
+             },
+             "version" => 1
+           } = Jason.decode!(File.read!(Path.join(validation_out, "feedback.json")))
   end
 
   @tag :tmp_dir

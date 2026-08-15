@@ -769,3 +769,85 @@ poisoned the sink. Because private analysis cannot fall back to the retained
 private trace, this class of publication failure currently requires an
 out-of-band trace reader and still loses the generated source and capability
 payloads needed for causal diagnosis.
+
+## Host-authored validation-feedback envelope experiment
+
+The next increment removed the operator-written prose handoff. `ptc.repair`
+now writes owner-only `feedback.json` beside its aggregate validation report.
+The artifact has four top-level concepts:
+
+- `version` and `kind` identify the contract;
+- `state` is host-authored lifecycle state (`candidate-rejected` or
+  `candidate-validated`);
+- `candidate` labels the previous model report as
+  `model-authored-untrusted`; and
+- `validation` labels the host comparison as `host-authored` and retains each
+  case's input, expected value, available actual value, status, reason, and
+  artifact references.
+
+The command generated this envelope directly by rerunning the rejected
+ambiguous DeepSeek candidate through the reconstructed frozen target. The
+candidate bound to the exact original `orders` source hash
+`sha256:e9181edf...ce9cf0`, passed G1--G4, and failed the observed case with
+input `{"subtotal":100}`, expected `{"total":120}`, actual
+`{"total":100}`, and `result_mismatch`. No person summarized or copied those
+facts into a prompt.
+
+An experiment workflow then consumed that exact `feedback.json` as
+`--private-input`, reacquired the immutable incident projection by
+`diagnosed_run_id`, and passed both packets to a two-turn terminal-only
+correction phase. The envelope and workflow instruction remain domain-blind;
+the experiment manifest deliberately binds the ambiguous fixture's context
+mission and model policy.
+
+Run `cmd-29wsm8d6cmhhpwatzhpgz4yw0z` reached the model twice. Its surviving
+private canonical trace records two successful parsed source checks, two
+returned synthesis evaluations (468 and 456 source bytes), and two failed
+result-contract decisions. Thus the cross-run handoff and terminal boundary
+both worked mechanically, but DeepSeek still produced no contract-valid
+candidate or abstention in the fixed budget.
+
+The run then reproduced `inspection_sink_unavailable` at exactly the same
+terminal result-contract-failure transition as the prior experiment. The
+required PTC private-analysis attempt failed during profile setup because the
+inspection directory contained no artifact. The canonical trace could prove
+event order and counters, but the exact two decisions were again lost. No
+second live correction was allowed: it would be another model sample rather
+than evidence about the envelope seam.
+
+### Root cause and repair
+
+The recurring sink failure was model-independent. Authenticated result-contract
+details retain `CommandContractAuthority` and `CommandPath` structs internally.
+Those structs are correct for the runtime error boundary but are not JSON
+inspection values, so emitting the workflow `execution-error` poisoned the
+sink and replaced the real `result_contract_failed` outcome with
+`inspection_sink_error`.
+
+The spike now projects only the inspection copy: it drops the internal
+authority attestation and renders each already-authorized path as a JSON
+Pointer. The runtime error keeps its authenticated structs unchanged. A
+regression exercises one-turn and four-turn exhaustion with inspection enabled
+and verifies both the original failure taxonomy and the retained `/sum`
+diagnostic. This fix prevents future terminal-correction runs from destroying
+their own evidence, but it cannot recover the two already-lost model values.
+
+### Conclusions
+
+1. `feedback.json` is the missing cross-run data seam. It removes manual prose
+   serialization while preserving the crucial authority distinction between a
+   model candidate and host validation facts.
+2. The envelope alone does not make DeepSeek correct or abstain. On this
+   ambiguous case it produced two terminal, contract-invalid values, matching
+   the earlier prompt-serialized experiment at the level still observable.
+3. The generic product primitive should remain a private artifact emitted by
+   validation. The experiment-specific launcher that chooses a context mission,
+   model, contract, and turn budget is not yet a general repair orchestrator.
+4. The next experiment should not add another prompt or rerun this case. It
+   should test a host loop that accepts `feedback.json` plus an explicit
+   correction manifest, launches exactly one correction run, and if a new
+   candidate exists sends it back through `ptc.repair`. Lifecycle transitions
+   remain host-authored; the model never declares itself validated.
+5. PTC analysis fallback for a missing inspection artifact remains necessary
+   even with the producer fixed. Older runs and unrelated publication failures
+   can still leave a private canonical trace as the only surviving evidence.

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "observed-100",
+      "input": {"subtotal": 100},
+      "expected": {"total": 120}
+    }
+  ]
+}

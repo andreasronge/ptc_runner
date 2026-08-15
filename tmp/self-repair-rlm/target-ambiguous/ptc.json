@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "target", "path": "target.clj", "dependencies": ["kernel"]},
+      {"library": "kernel"}
+    ],
+    "entry": "target/run"
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {
+          "id": "pricing.base",
+          "path": "pricing.base.clj"
+        },
+        {
+          "id": "pricing.tax",
+          "path": "pricing.tax.clj"
+        },
+        {
+          "id": "orders",
+          "path": "orders.clj",
+          "dependencies": ["pricing.base", "pricing.tax"]
+        }
+      ]
+    }
+  },
+  "input": {"value": {"subtotal": 100}},
+  "limits": {
+    "run_duration_ms": 30000,
+    "subordinate_evaluations": 2
+  }
+}

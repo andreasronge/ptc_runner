@@ -446,6 +446,8 @@ defmodule PtcRunner.Kernel.Runner do
          reason: reason,
          details: details
        }) do
+    details = inspection_error_details(reason, details)
+
     InspectionSink.emit(
       sink,
       "execution-error",
@@ -453,6 +455,18 @@ defmodule PtcRunner.Kernel.Runner do
       %{environment: :workflow, kind: kind, reason: reason, details: details}
     )
   end
+
+  defp inspection_error_details(:result_contract_failed, details) do
+    boundary = Map.take(details, [:boundary_producer])
+    contract = Map.drop(details, [:boundary_producer])
+
+    case ResultContractDiagnostic.inspection_details(contract) do
+      {:ok, projected} -> Map.merge(projected, boundary)
+      :error -> boundary
+    end
+  end
+
+  defp inspection_error_details(_reason, details), do: details
 
   defp project_result(value, :native), do: {:ok, value}
 

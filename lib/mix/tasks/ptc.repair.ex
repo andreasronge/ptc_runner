@@ -21,7 +21,11 @@ defmodule Mix.Tasks.Ptc.Repair do
   admit private input. Test inputs are staged owner-only and removed after the
   suite. Results, traces, inspection, envelopes, and the aggregate report are
   written beneath the new private trial directory. Result values are never
-  printed.
+  printed. The directory also receives `feedback.json`, an owner-only handoff
+  that separates the model-authored candidate from host-authored comparisons
+  and retains each input, expected value, and available actual value. A later
+  correction run can consume that file as private input without reconstructing
+  validation facts in prose.
 
   `--allow-live-validation` is deliberately explicit: the application is run
   with its installed providers and can exercise their existing effects. The
@@ -276,7 +280,9 @@ defmodule Mix.Tasks.Ptc.Repair do
          {:ok, final_digest} <- application_digest(manifest),
          :ok <- same_application(base_digest, final_digest),
          aggregate <- validation_report(report, opts, base_digest, results),
-         :ok <- write_validation_report(validation.out, aggregate) do
+         feedback <- validation_feedback(report, opts, base_digest, results),
+         :ok <- write_validation_report(validation.out, aggregate),
+         :ok <- write_validation_feedback(validation.out, feedback) do
       failed = Enum.count(results, &(&1["status"] == "fail"))
 
       if failed == 0 do
@@ -365,15 +371,17 @@ defmodule Mix.Tasks.Ptc.Repair do
     presentation = MixCommandAdapter.execute(args)
     expected = validation_case["expected"]
 
+    result = read_json_value(output)
+
     {status, reason} =
-      case {presentation.exit_status, read_json_value(output)} do
+      case {presentation.exit_status, result} do
         {0, {:ok, value}} when value == expected -> {"pass", nil}
         {0, {:ok, _value}} -> {"fail", "result_mismatch"}
         {0, {:error, _reason}} -> {"fail", "result_unavailable"}
         {exit_status, _result} -> {"fail", "exit_status_#{exit_status}"}
       end
 
-    %{
+    summary = %{
       "name" => validation_case["name"],
       "input_class" => input_class,
       "status" => status,
@@ -385,6 +393,12 @@ defmodule Mix.Tasks.Ptc.Repair do
         "traces" => Path.relative_to(traces, root)
       }
     }
+
+    Map.put(summary, :feedback, %{
+      "input" => input_value,
+      "expected" => expected,
+      "actual" => feedback_actual(result)
+    })
   end
 
   defp validation_input(%{"input" => input}), do: {"--input", "normal", input}
@@ -402,13 +416,51 @@ defmodule Mix.Tasks.Ptc.Repair do
       "authoring_run_id" => Keyword.get(opts, :origin_run_id),
       "base_application_content_digest" => base_digest,
       "candidate_source_hash" => ComponentOverride.hash(report["candidate_source"]),
-      "cases" => results
+      "cases" => Enum.map(results, &Map.delete(&1, :feedback))
     }
   end
+
+  defp validation_feedback(report, opts, base_digest, results) do
+    failed? = Enum.any?(results, &(&1["status"] == "fail"))
+    outcome = if(failed?, do: "fail", else: "pass")
+
+    %{
+      "version" => 1,
+      "kind" => "repair-validation-feedback",
+      "state" => if(failed?, do: "candidate-rejected", else: "candidate-validated"),
+      "candidate" => %{
+        "authority" => "model-authored-untrusted",
+        "value" => report
+      },
+      "validation" => %{
+        "authority" => "host-authored",
+        "outcome" => outcome,
+        "diagnosed_run_id" => report["run_id"],
+        "authoring_run_id" => Keyword.get(opts, :origin_run_id),
+        "base_application_content_digest" => base_digest,
+        "candidate_source_hash" => ComponentOverride.hash(report["candidate_source"]),
+        "cases" => Enum.map(results, &validation_feedback_case/1)
+      }
+    }
+  end
+
+  defp validation_feedback_case(%{:feedback => comparison} = result) do
+    result
+    |> Map.delete(:feedback)
+    |> Map.merge(comparison)
+  end
+
+  defp feedback_actual({:ok, value}), do: %{"state" => "available", "value" => value}
+  defp feedback_actual({:error, _reason}), do: %{"state" => "unavailable"}
 
   defp write_validation_report(root, report) do
     with {:ok, encoded} <- DeterministicJSON.encode(report),
          do: write_private(Path.join(root, "report.json"), encoded)
+  end
+
+  defp write_validation_feedback(root, feedback) do
+    with {:ok, encoded} <- DeterministicJSON.encode(feedback),
+         do: write_private(Path.join(root, "feedback.json"), encoded)
   end
 
   defp host_args(opts) do

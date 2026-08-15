@@ -673,6 +673,12 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
           }
         end)
 
+      {:ok, inspection_sink} =
+        InspectionSink.start(
+          run_id: "contract-exhaustion-#{max_turns}",
+          trace_id: "contract-exhaustion-#{max_turns}"
+        )
+
       {:ok, config} =
         agent_config(responses, [],
           agent_main: true,
@@ -683,7 +689,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
             }
           },
           result_contract: result_contract,
-          result_contract_source: "manifest.json"
+          result_contract_source: "manifest.json",
+          inspection_sink: inspection_sink
         )
 
       assert {:error,
@@ -699,6 +706,19 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
               }} = Kernel.run("(agent.main/run data/input)", config)
 
       assert path.segments == [{:property, "sum"}]
+
+      assert {:ok, records} = InspectionSink.records(inspection_sink)
+      diagnostic = Enum.find(records, &(&1["record_type"] == "execution-error"))
+      assert diagnostic["payload"]["reason"] == "result_contract_failed"
+
+      assert diagnostic["payload"]["details"]
+             |> Map.take(~w(agent_turns constraint contract_source violations)) ==
+               %{
+                 "agent_turns" => max_turns,
+                 "constraint" => "minimum",
+                 "contract_source" => "manifest.json",
+                 "violations" => [%{"kind" => "minimum", "path" => "/sum"}]
+               }
 
       assert Enum.any?(EventSink.events(config.event_sink), fn event ->
                event.type == "run-stopped" and event.data[:failure_kind] == "result-contract" and

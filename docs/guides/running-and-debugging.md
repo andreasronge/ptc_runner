@@ -208,6 +208,15 @@ selected provider to admit private data. All cases run even after a failure;
 the private aggregate report records case status, input class, artifact names,
 candidate hash, diagnosed run, authoring run, and base application digest.
 
+The trial directory also contains owner-only `feedback.json`. It is a
+machine-readable cross-run handoff with four concepts: version and kind,
+lifecycle state, the model-authored untrusted candidate, and host-authored
+validation. Each validation case retains its input, expected value, and an
+available actual value or an explicit unavailable state. This artifact may be
+used as `--private-input` to a later bounded correction run; no operator-written
+summary is needed. Keep it private even when every suite input was normal,
+because it contains generated source and result values.
+
 Success does not install the component. Promotion remains a separate operator
 decision. Passing cases prove only those host-selected inputs and installed
 providers; include held-out cases when semantic generalization matters.
