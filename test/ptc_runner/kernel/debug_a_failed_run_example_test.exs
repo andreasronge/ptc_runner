@@ -41,8 +41,11 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     assert evidence["boundary_kind"] == "workflow_failed"
     assert evidence["nested_evaluations"] == 2
 
-    # The generated program carries the requirement, and the reached rule
-    # carries the defect. Together they are what makes a diagnosis supportable.
+    # The generated program carries both values the check ran on, and the
+    # reached rule carries the defect. Without the literal order in the capture
+    # a wrong input would be indistinguishable from a wrong component, so this
+    # is exactly what makes the example's diagnosis supported.
+    assert evidence["generated_source"] =~ ~s|(orders/place {"subtotal" 100})|
     assert evidence["generated_source"] =~ ~s|(get quote "total") 120|
     assert Enum.any?(evidence["reached_sources"], &(&1 =~ "(+ subtotal 2)"))
     refute Enum.any?(evidence["reached_sources"], &(&1 =~ "pricing.discount"))
@@ -51,6 +54,35 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     # the report keeps that honest `incomplete` rather than hiding it.
     assert evidence["evidence_states"] == ["complete", "incomplete", "unavailable"]
     assert evidence["diagnosis"] == nil
+  end
+
+  # The walk's component bound has to cover the roots too, not only later
+  # rounds. Reproducing that with a real >64-component closure would cost far
+  # more than it proves, so drive the same code path by zeroing the bound in a
+  # throwaway copy: every root is then withheld. Before the bound covered root
+  # seeding, the roots were followed regardless and the closure came back
+  # non-empty and complete.
+  @tag :tmp_dir
+  test "a withheld root leaves the closure empty and explicitly incomplete", %{
+    tmp_dir: directory
+  } do
+    example = Path.join(directory, "debug-a-failed-run")
+    File.cp_r!(@example, example)
+    File.rm_rf!(Path.join(example, "target/.ptc"))
+    File.rm_rf!(Path.join(example, "debugger/.ptc"))
+
+    walk = Path.join(example, "debugger/evidence.walk.clj")
+    source = File.read!(walk)
+    assert String.contains?(source, "(- 64 (count seen))")
+    File.write!(walk, String.replace(source, "(- 64 (count seen))", "(- 0 (count seen))"))
+
+    assert {_output, 5} = run(Path.join(example, "target.ptc-project.json"))
+    assert {_output, 0} = run(Path.join(example, "debugger.ptc-project.json"))
+
+    evidence = private_result!(Path.join(example, "debugger/.ptc/results"))
+
+    assert evidence["dependency_closure"] == []
+    assert evidence["closure_complete"] == false
   end
 
   defp run(project) do
