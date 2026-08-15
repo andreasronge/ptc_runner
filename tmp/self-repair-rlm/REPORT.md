@@ -1039,3 +1039,85 @@ exercise one declared terminal action on a different repairable incident where
 the expected result is a proposal, then prove the action-produced candidate
 continues through G1--G4 and host validation. That tests the proposal payload
 and end-to-end repair path rather than further measuring abstention wording.
+
+## Terminal proposal through deterministic validation
+
+The positive-path complement used the unrelated transitive pricing incident
+`cmd-0m05wjqpk4q7g5v61vhmb3gpm4`. This is not a new diagnosis benchmark: the
+incident had already been solved in earlier experiments. The new variable was
+whether DeepSeek could express the justified repair through the bare terminal
+proposal action and whether the one-shot host loop would carry that exact value
+through materialization and deterministic validation.
+
+The correction started from a genuine `repair-validation-feedback` envelope.
+Its deliberately weak, model-authored candidate changed the unused
+`pricing.discount/preview` helper; G1--G4 accepted that structurally valid edit,
+but all three host cases failed. This setup tests whether the correction follows
+the immutable incident packet and host result rather than trusting the rejected
+candidate. It does not reveal the expected patch in validator output.
+
+The single live sample succeeded. DeepSeek correction run
+`cmd-7242x8dadvy1vx4k4mxba0ns34` proposed replacing
+`pricing.rule/apply-standard` so it adds 20 rather than 2. The base hash was the
+captured `sha256:e9d90f...ff2dd`, and the replacement hash was
+`sha256:524fca...3a48`. The one-shot host loop passed the proposal through G1--G4
+and all three named validation cases, then and only then wrote the host-owned
+`candidate-validated` state.
+
+PTC private analysis, rather than direct inspection-log reading, established a
+complete correction trace with two model exchanges, three generated sources,
+and no execution errors. The synthesis trajectory was coding-agent-like:
+
+1. DeepSeek built the complete report with `(def report ...)` and returned
+   `nil`, retaining it in the evaluation continuation.
+2. After ordinary final-turn feedback, it called the bare
+   `repair.terminal/propose` action with the complete payload. The prelude's
+   internal return crossed the normal boundary and the result contract accepted
+   the resulting map.
+
+This demonstrates both the value and the remaining limitation of terminal
+actions. They remove the independent outer `return` convention from the final
+program, but they do not by themselves enforce a one-action phase. Because the
+current literal `terminal_only` checker cannot admit terminal prelude calls,
+this experiment allowed intermediate definitions; the model used exactly that
+freedom on its first call.
+
+The target was reconstructed from the frozen PTC evidence, including all four
+source hashes and the original dependency indices `[[], [], [1], [0, 2]]`.
+After correcting a locally misordered dependency list, the already-authored
+proposal was revalidated without another model sample. PTC independently
+opened all three exact validation runs and proved the same candidate override,
+the expected generated `orders/place` program, no execution errors, and these
+results:
+
+| Case | Run | Result |
+| --- | --- | --- |
+| observed subtotal 100 | `cmd-2bzykwah56c6k50cbj2abxdq44` | `{"total": 120}` |
+| held-out subtotal 0 | `cmd-15c459rtjn9denx52ywrhmdw0v` | `{"total": 20}` |
+| held-out subtotal -10 | `cmd-7rqtvs0p4jbzrevpdgyx68m9v3` | `{"total": 10}` |
+
+### Conclusions and limits
+
+1. The existing primitives are sufficient for one bounded generated-repair
+   cycle: immutable incident evidence, typed terminal proposal, host-owned
+   materialization, static gates, and host-owned behavioral tests compose
+   without a new coarse `debug.nav` operation.
+2. Static gates correctly accepted the unrelated discount edit; only live
+   validation rejected it. Conversely, the corrected rule passed held-out zero
+   and negative inputs, not only the observed subtotal.
+3. A general terminal-action mechanism still needs a declared-terminal source
+   policy. Prompting for exactly one action is not enforcement, and this run
+   concretely used an intermediate `def` before the action.
+4. `ptc.repair` again required the parent of a fresh candidate destination to
+   exist. The first exact deterministic rerun failed only as
+   `private_candidate_staging_failed`; creating the explicit owner-only parent
+   and rerunning unchanged succeeded. This is already recorded on issue #1367.
+5. This cell validates orchestration and the proposal payload, not broad repair
+   generality. The incident and correct source edit were seen in earlier
+   research, the rejected seed was synthetic, three examples do not prove the
+   invariant for all inputs, and no candidate was promoted into a checkout.
+
+The next generalization experiment should use a genuinely unseen incident with
+a different failure shape and component topology. It should keep this exact
+host loop and terminal action fixed, so success or failure measures evidence
+selection and repair judgment rather than another orchestration change.

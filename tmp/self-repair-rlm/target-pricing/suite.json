@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "observed-100",
+      "input": {"subtotal": 100},
+      "expected": {"total": 120}
+    },
+    {
+      "name": "heldout-zero",
+      "input": {"subtotal": 0},
+      "expected": {"total": 20}
+    },
+    {
+      "name": "heldout-negative",
+      "input": {"subtotal": -10},
+      "expected": {"total": 10}
+    }
+  ]
+}
