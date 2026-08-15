@@ -16,49 +16,74 @@
     (get response :value)
     (fail response)))
 
-(defn with-cursor
-  "Adds an opaque pagination cursor to a capability argument map.
+(defn- pagination-fail [kind reason]
+  (fail {:status :error :kind kind :reason reason}))
 
-  A nil cursor denotes the first page and removes any existing cursor.
-  Traversal stays explicit in the caller; this helper never follows or
-  interprets a cursor."
-  [arguments cursor]
-  (let [arguments (dissoc arguments "cursor" :cursor)]
-    (if (nil? cursor)
-      arguments
-      (assoc arguments "cursor" cursor))))
+(defn- valid-token? [value]
+  (and (string? value) (not (blank? value))))
 
-(defn- pagination-result [items pages complete? snapshot-hash]
-  (let [result {"items" items "pages" pages "complete?" complete?}]
-    (if (= snapshot-hash :absent)
-      result
-      (assoc result "snapshot_hash" snapshot-hash))))
+(defn- fold-result [value pages complete? next-cursor snapshot-hash]
+  {"value" value
+   "pages" pages
+   "complete?" complete?
+   "next_cursor" next-cursor
+   "snapshot_hash" snapshot-hash})
 
-(defn collect-pages
-  "Collects `items` from cursor-paginated responses up to `max-pages`.
+(defn fold-pages
+  "Reduces cursor-paginated items into bounded caller-owned state.
 
-  `fetch` receives nil for the first page and each opaque `next_cursor`
-  afterward. The result reports how many pages were read and whether the
-  source was exhausted. Snapshot-bound pages preserve their `snapshot_hash`
-  and traversal fails if that identity changes. A page bound that stops
-  traversal returns the collected prefix with `complete?` false; it never
-  presents the prefix as complete."
-  [fetch max-pages]
-  (if (and (integer? max-pages) (pos? max-pages))
-    (loop [cursor nil
-           pages 0
-           items []
-           snapshot-hash :unset]
-      (if (>= pages max-pages)
-        (pagination-result items pages false snapshot-hash)
-        (let [page (fetch cursor)
-              items (into items (get page "items"))
-              next-cursor (get page "next_cursor")
-              page-hash (get page "snapshot_hash" :absent)]
-          (if (or (= snapshot-hash :unset) (= snapshot-hash page-hash))
-            (let [snapshot-hash (if (= snapshot-hash :unset) page-hash snapshot-hash)]
-              (if (nil? next-cursor)
-                (pagination-result items (inc pages) true snapshot-hash)
-                (recur next-cursor (inc pages) items snapshot-hash)))
-            (fail {:status :error :kind :invalid-response :reason :snapshot-changed})))))
-    (fail {:status :error :kind :invalid-request :reason :invalid-max-pages})))
+  `fetch` receives nil for the first page or the opaque cursor supplied in
+  `opts`. `step` receives accumulator then item. Every page must contain
+  `items`, `next_cursor`, and a stable non-empty `snapshot_hash`.
+
+  `opts` requires a positive `max_pages`. Resuming with `cursor` also requires
+  the expected `snapshot_hash`. A page-bound stop returns `complete?` false and
+  preserves `next_cursor`, so another evaluation can continue without retaining
+  prior pages. Keep the accumulator bounded; pagination does not make an
+  unbounded collection safe. Repeated cursors within one invocation fail instead
+  of looping; a resumed invocation does not retain source-sized cursor history."
+  [fetch step initial opts]
+  (let [max-pages (get opts "max_pages")
+        start-cursor (get opts "cursor")
+        expected-hash (get opts "snapshot_hash")]
+    (cond
+      (not (and (integer? max-pages) (pos? max-pages)))
+        (pagination-fail :invalid-request :invalid-max-pages)
+      (and (not (nil? start-cursor)) (not (valid-token? start-cursor)))
+        (pagination-fail :invalid-request :invalid-cursor)
+      (and (not (nil? start-cursor)) (not (valid-token? expected-hash)))
+        (pagination-fail :invalid-request :missing-snapshot-hash)
+      :else
+        (loop [cursor start-cursor
+               pages 0
+               value initial
+               snapshot-hash expected-hash
+               seen (if (nil? start-cursor) {} {start-cursor true})]
+          (let [page (fetch cursor)
+                items (get page "items" :absent)
+                next-cursor (get page "next_cursor" :absent)
+                page-hash (get page "snapshot_hash" :absent)]
+            (cond
+              (not (sequential? items))
+                (pagination-fail :invalid-response :invalid-items)
+              (not (valid-token? page-hash))
+                (pagination-fail :invalid-response :missing-snapshot-hash)
+              (and (not (nil? snapshot-hash)) (not= snapshot-hash page-hash))
+                (pagination-fail :invalid-response :snapshot-changed)
+              (= next-cursor :absent)
+                (pagination-fail :invalid-response :missing-next-cursor)
+              (and (not (nil? next-cursor)) (not (valid-token? next-cursor)))
+                (pagination-fail :invalid-response :invalid-cursor)
+              (and (not (nil? next-cursor)) (contains? seen next-cursor))
+                (pagination-fail :invalid-response :cursor-cycle)
+              :else
+                (let [value (reduce step value items)
+                      pages (inc pages)]
+                  (cond
+                    (nil? next-cursor)
+                      (fold-result value pages true nil page-hash)
+                    (>= pages max-pages)
+                      (fold-result value pages false next-cursor page-hash)
+                    :else
+                      (recur next-cursor pages value page-hash
+                             (assoc seen next-cursor true))))))))))

@@ -205,7 +205,8 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
           }
         },
         timeout_ms: 15_000,
-        max_result_bytes: 64_000
+        max_result_bytes: 64_000,
+        installation_revision: "filesystem-sample-0.2.0"
       )
 
     {:ok, registry} =

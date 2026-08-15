@@ -32,7 +32,7 @@
           "effect": "read"
         }
       },
-      "installation_revision": "filesystem-sample-0.1.0",
+      "installation_revision": "filesystem-sample-0.2.0",
       "ceilings": {
         "timeout_ms": 15000,
         "max_catalog_tools": 8,

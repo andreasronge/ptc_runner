@@ -1,10 +1,11 @@
 (ns tutorial.files "Mission-only access to the granted file root." {:visibility :prompt})
 
-(defn read-text
-  "Read one UTF-8 file beneath the configured mission root."
-  {:signature "(path :string) -> :string"}
-  [path]
-  (let [response (tool/workspace.read {"path" path})]
+(defn read-page
+  "Read one bounded page of a UTF-8 file. Pass nil first, then next_cursor."
+  {:signature "(path :string, cursor :string?) -> :any"}
+  [path cursor]
+  (let [arguments (if cursor {"path" path "cursor" cursor} {"path" path})
+        response (tool/workspace.read arguments)]
     (if (= :ok (get response :status))
-      (str (str/join "\n" (map #(get % "text") (get-in response [:value "lines"]))) "\n")
+      (get response :value)
       (fail response))))

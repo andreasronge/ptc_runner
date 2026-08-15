@@ -7,21 +7,26 @@ deploy it.
 
 ## What it does
 
-Captures one host-supplied root into an immutable in-memory snapshot at
-startup, then answers five read-only tools from that snapshot. The filesystem
-is never read again, so a file that changes, appears, or disappears after
-capture cannot alter a result.
+Streams one host-supplied root into an immutable private disk snapshot at
+startup, then answers five read-only tools from that snapshot. File contents
+are not retained or capped in the Node heap. The source filesystem is never
+read again, so later changes cannot alter a result.
 
 | Tool | Returns |
 | --- | --- |
 | `list_directory` | Sorted, paginated entries directly under a relative prefix |
 | `search_files` | Sorted, paginated paths containing a literal substring |
-| `search_text` | Literal matches with path and line evidence |
-| `read_text_file` | A bounded UTF-8 line range with stable line numbers and explicit end-of-file |
+| `search_text` | Paginated literal matches with path and line evidence |
+| `read_text_file` | Paginated exact UTF-8 byte chunks |
 | `snapshot_info` | Content hash and inventory statistics, never the host root |
 
-Every data-bearing result carries the same `snapshot_hash`, so a citation binds
-to the exact bytes queried.
+All four data tools accept optional `cursor` and `limit` arguments and return
+exactly `snapshot_hash`, `items`, and `next_cursor`. Start without a cursor and
+follow the opaque `next_cursor` until it is null. Cursors are bound to the
+snapshot, tool, and query/path arguments; replay in another traversal fails.
+For `read_text_file`, concatenating item `text` reconstructs the file exactly.
+Every page carries the same `snapshot_hash`, so a citation binds to the bytes
+actually queried.
 
 ## Why it freezes
 
@@ -34,9 +39,8 @@ never requires otherwise. This sample freezes for three reasons of its own:
 - **A hashable set of bytes.** A digest can only cover a bounded capture, never
   "the filesystem". Freezing is what makes a content identity possible, not a
   consequence of having one.
-- **No races to defend against.** A capture that is never read twice cannot be
-  raced by a file that changes, appears, or disappears mid-run, so the
-  confinement rules below need no time-of-check logic.
+- **Bounded runtime memory.** Startup and queries use fixed-size buffers; file
+  size consumes private temporary disk rather than Node or BEAM heap.
 
 ## Publishing the content identity
 
@@ -68,7 +72,8 @@ node dist/server.js --root ./workspace --include 'lib/**' --include 'docs/**' --
 `--include` is mandatory and repeatable; the default is **no files**, so a
 server started without it exposes nothing. `--exclude` may only narrow what the
 includes selected. Excluded paths are skipped before any stat or open, so they
-are never inventoried.
+are never inventoried. Optional `--max-file-bytes` and `--max-total-bytes`
+positive-integer limits can reduce the capture budget for a deployment.
 
 ## Confinement
 
@@ -77,12 +82,27 @@ are never inventoried.
 - Symbolic links are skipped, not followed, so a link inside the root cannot
   reach bytes outside it.
 - Non-regular files and files that are not valid UTF-8 are not captured.
-- File count, per-file bytes, aggregate bytes, and directory depth are bounded
-  at startup; results are bounded per page, per match set, and per byte budget.
+- File count, directory depth, visited directories, and visited entries are
+  bounded at startup. Exceeding a bound fails instead of publishing a partial
+  snapshot. File bytes are streamed to private temporary disk. By default the
+  byte ceiling is the available temporary-volume capacity minus a 64 MiB safety
+  reserve; the command-line limits above can lower it. There is no fixed 1 MiB
+  per-file ceiling.
+- Results are fitted against the full decoded MCP result, and text search also
+  has a scan-byte budget. An empty search page can therefore carry a progress
+  cursor when a sparse file requires more scanning.
 - Errors are short actionable text — no stacktraces, no host paths.
 - Nothing is written, no subprocess or network is used, and no Roots, Sampling,
   Logging, MRTR, or Tasks capability is advertised.
 - stdout carries protocol messages only; diagnostics go to stderr.
+
+The selected root must be trusted and quiescent while startup capture runs.
+Portable Node path APIs cannot descriptor-confine every ancestor against a
+privileged actor swapping directories during that short window. The server
+rejects observed symlinks and uses a no-follow final open where supported; it
+does not claim to defend an actively hostile source root. Graceful close and
+catchable signals remove the temporary snapshot. `SIGKILL`, native crash, or
+power loss can leave an operating-system temporary-directory orphan.
 
 ## Building and testing
 

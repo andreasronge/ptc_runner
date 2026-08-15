@@ -29,7 +29,7 @@ sanitized transcripts.
 
 | Journey | Design | Viewer surfaces exercised |
 | --- | --- | --- |
-| `01-recovery` | The task names `demo.files/parse-lines`, which does not exist, then instructs recovery via `demo.files/read-text`. Expect an `:unbound_var` evaluation error, a tool-role correction message, and a successful second turn. | Multi-turn dialogue, error feedback then recovery, source-hash verification, ok status. |
+| `01-recovery` | The task names `demo.files/parse-lines`, which does not exist, then instructs recovery via `demo.files/read-page`. Expect an `:unbound_var` evaluation error, a tool-role correction message, and a successful second turn. | Multi-turn dialogue, error feedback then recovery, source-hash verification, ok status. |
 | `02-bulk` | The task calls `demo.files/sum-values`, which itself reads `index.txt` plus all 30 listed record files (31 `workspace.read` calls, just under the installed per-name quota of 32) and computes a sum the model cannot fabricate (3255). | Long capability lists in the transcript, per-call private payloads, deterministic bulk event volume (~76 events), ok status. |
 | `03-limits` | Same task, but the manifest lowers `mission_capability_calls_per_name` to 6, so `sum-values` exhausts the quota mid-evaluation and the model receives the failure as feedback. | `limit-exceeded` events, error feedback turns, quota-error envelopes in private payloads. |
 | `04-loop-limit` | The task calls `demo.files/spin-forever`, an unbounded `loop`/`recur`, which hits the evaluator's deterministic loop-iteration bound. | Error-outcome runs in the picker, `:loop_limit_exceeded` feedback turns, `explicit_failure` terminal reason. |

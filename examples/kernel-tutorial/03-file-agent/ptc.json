@@ -17,7 +17,7 @@
   },
   "input": {
     "value": {
-      "task": "Read brief.txt using (tutorial.files/read-text \"brief.txt\"). Return the exact file content as a string."
+      "task": "Read brief.txt with (tutorial.files/read-page \"brief.txt\" nil). Concatenate the text in items, following next_cursor with another read-page call until it is nil. Return the exact file content as a string."
     }
   },
   "providers": {

@@ -17,7 +17,7 @@
   },
   "input": {
     "value": {
-      "task": "First call (demo.files/parse-lines \"notes.txt\") and return its result. If an evaluation fails, recover: read the file with (demo.files/read-text \"notes.txt\") instead and return its exact content as a string.",
+      "task": "First call (demo.files/parse-lines \"notes.txt\") and return its result. If an evaluation fails, recover with (demo.files/read-page \"notes.txt\" nil), concatenate item text, follow next_cursor until nil, and return the exact content as a string.",
       "max_turns": 6
     }
   },

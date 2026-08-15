@@ -219,20 +219,22 @@ Prompt-visible wrappers make supported calls and return contracts clear:
 ```clojure
 (ns my.files "Mission access to the granted file root." {:visibility :prompt})
 
-(defn read-text
-  "Read one UTF-8 file beneath the configured root."
-  {:signature "(path :string) -> :string"}
-  [path]
-  (let [response (tool/workspace.read {"path" path})]
+(defn read-page
+  "Read one bounded UTF-8 page. Pass nil first, then next_cursor."
+  {:signature "(path :string, cursor :string?) -> :any"}
+  [path cursor]
+  (let [arguments (if cursor {"path" path "cursor" cursor} {"path" path})
+        response (tool/workspace.read arguments)]
     (if (= :ok (get response :status))
-      (str (str/join "\n"
-             (map #(get % "text") (get-in response [:value "lines"])))
-           "\n")
+      (get response :value)
       (fail response))))
 ```
 
 The signature validates the public function boundary. The capability still
 enforces its own schema, byte ceiling, timeout, quota, and environment grant.
+Concatenate each page's item `text` exactly, and pass `next_cursor` into the
+next call until it is nil. Do not collect an unbounded file into one evaluation;
+reduce pages into bounded state or resume in a later evaluation.
 
 ## Continue across turns
 
@@ -315,7 +317,7 @@ mix ptc run examples/kernel-tutorial/03-file-agent/ptc.json \
   --host-config examples/kernel-tutorial/ptc-host.json
 ```
 
-The model sees `tutorial.files/read-text`, not the host credential or an
+The model sees `tutorial.files/read-page`, not the host credential or an
 unrestricted filesystem. Add `--trace-dir DIRECTORY` for a sanitized trace,
 then inspect it with the fixed run-analysis profile described in
 [Running and debugging](running-and-debugging.md).
