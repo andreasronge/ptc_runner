@@ -458,3 +458,92 @@ The remaining product question is how to carry selected exploration findings
 into that synthesis phase without exposing raw private transcripts or requiring
 the model to obey a finish convention. That is a narrower runtime/workflow
 problem than adding more graph traversal operations.
+
+## Host-enforced phased-agent experiment
+
+The follow-up implemented the boundary as a domain-blind `agent.core`
+primitive rather than another debugger prelude. `run-phased-result-value`
+accepts one to eight ordered `{mission, max_turns, instruction?}` phases with a
+combined 128-turn ceiling. It retains the exact assistant tool call and tool
+observation messages, rebuilds the system prompt from the next mission's
+authority, and appends a host-authored transition instruction. A `return` ends
+a non-final phase but is retained as evidence; only the final phase may satisfy
+the application result contract and complete the agent. This prevents a
+plausible but semantically unchecked exploration report from bypassing the
+restricted synthesis mission.
+
+Integration coverage exercised three distinct paths:
+
+- an intermediate observation consumes the last exploration turn and crosses
+  the boundary with its assistant/tool correlation intact;
+- a non-final `return` becomes retained evidence rather than completing the
+  workflow; and
+- a three-phase plan gives its middle phase a phase-local budget rather than
+  the final workflow's `return`/`fail` instruction.
+
+The real-model experiment used two exploration turns with `debug.nav`, two
+synthesis turns with an empty mission, the existing host-preloaded structural
+packet, and the same compact four-field report contract. Every quality verdict
+below came from `private-run-analysis-v1`, including turn completeness, mission
+identity, generated source, and retained phase-transition messages:
+
+| Incident | Model | Debugger run | Model / subordinate evaluations | PTC verdict |
+| --- | --- | --- | --- | --- |
+| invalid root action | DeepSeek | `cmd-42zx46szssetmeefh4meyeardk` | 4 / 5 | correct diagnosis after enforced synthesis |
+| transitive pricing defect | Luna | `cmd-4m9r49q4s7fmq2kb9hy02gg46a` | 3 / 4 | correct cause and smallest correction |
+| ambiguous contract failure | Luna | `cmd-2z6czj98b6vchedfs1vpepfq32` | 3 / 4 | correct abstention |
+| ambiguous contract failure | DeepSeek | `cmd-13sm3hk1d395fs2e1w6hfc5650` | 4 / 5 | completed, but confidently wrong |
+
+DeepSeek's protocol trajectory is the direct paired confirmation. It spent
+both exploration turns on `debug.nav/open` and `debug.nav/read`. The first
+synthesis program repeated a `debug.nav/read`; the empty synthesis mission
+rejected that stale call as an unknown namespace. Its final turn then returned
+the correct report: the child evaluation successfully returned raw
+`debug.nav/runs` data, but the workflow required `debug.rlm/investigate` or
+`debug.rlm/finish`. The retained transcript was sufficient; no notebook,
+curator, or copied evidence API was needed.
+
+Luna's pricing exploration found and returned the right provisional report on
+its second turn. The host did not accept it early. The tool-free phase received
+that exact report and independently returned the same causal chain:
+`orders/place` requires subtotal plus 20, `pricing.tax` delegates to
+`pricing.rule`, and the frozen rule adds 2. The ambiguity run followed the same
+path and preserved the safe conclusion that a `const` violation at `total`
+does not reveal the required constant or distinguish a faulty implementation
+from a faulty contract.
+
+DeepSeek demonstrates the limit of phase control. Enforced synthesis made it
+stop, but it misread the same `const` violation as proof that `orders/place`
+used the wrong map-key representation. It proposed changing a string key to a
+keyword key even though that would not change the JSON result and would not
+satisfy the hidden total constraint. The boundary therefore solves authority
+and stopping behavior, not causal correctness or calibrated abstention.
+
+### Conclusions
+
+1. Exact correlated messages are a sufficient handoff mechanism for this
+   scale. A model-authored notebook or summarizer is not yet justified.
+2. Phase authority belongs in the generic agent loop. A debugger-specific
+   `finish` convention is weaker because the model can ignore it while tools
+   remain callable.
+3. Tool removal may initially cause one stale call. Ordinary evaluation-error
+   feedback recovered within the synthesis budget; the host did not need to
+   silently rewrite the program.
+4. A forced report is not evidence of a correct diagnosis. General analysis
+   still needs an explicit diagnosis-versus-insufficient-evidence decision and
+   host-side checks for mechanically testable claims before producing a repair
+   candidate.
+5. The next experiment should keep this phased loop fixed and vary the final
+   contract, not add navigation. A compact report with an explicit
+   `decision` enum plus a deterministic check of any proposed target/change
+   can test whether DeepSeek abstains rather than filling a mandatory diagnosis
+   slot with an invented explanation.
+
+### PTC-analysis friction
+
+The first unattended analysis attempt placed `--private-output` in a directory
+that was an ancestor of the trace and inspection resource directories. The CLI
+correctly rejected the unsafe layout, but reported only the generic
+`arguments/invalid_arguments` diagnostic. Moving the output to a physically
+separate sibling root worked. The diagnostic should identify the conflicting
+paths and the required separation, as the guide already explains.

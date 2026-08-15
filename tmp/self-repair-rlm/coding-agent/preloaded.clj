@@ -72,12 +72,20 @@
              (not (blank? investigation-mission))
              (map? cfg))
       (let [context (acquire-context run-id context-mission)
-            investigation-cfg (assoc cfg "mission" investigation-mission)]
-        (return
-          (agent.core/run-result-value
+            phased? (contains? cfg "phases")
+            first-mission (if phased?
+                            (get-in cfg ["phases" 0 "mission"])
+                            investigation-mission)
+            investigation-cfg (if phased?
+                                cfg
+                                (assoc cfg "mission" investigation-mission))
+            prepared-task
             (initial-task
               task
               (project-context context context-projection)
-              (= investigation-mission "investigate"))
-            investigation-cfg)))
+              (= first-mission "investigate"))]
+        (return
+          (if phased?
+            (agent.core/run-phased-result-value prepared-task investigation-cfg)
+            (agent.core/run-result-value prepared-task investigation-cfg))))
       (fail "preloaded debugger requires task, run_id, context_mission, and agent"))))

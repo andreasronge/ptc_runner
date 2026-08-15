@@ -25,6 +25,14 @@
       ],
       "providers": ["history", "debug.nav"]
     },
+    "case-ambiguous": {
+      "components": [
+        {"library": "debug.nav"},
+        {"id": "debug.workspace", "path": "workspace-ambiguous.clj", "dependencies": ["debug.nav"]},
+        {"id": "debug.case", "path": "case.clj", "dependencies": ["debug.nav", "debug.workspace"]}
+      ],
+      "providers": ["history", "debug.nav"]
+    },
     "investigate": {
       "components": [{"library": "debug.nav"}],
       "providers": ["history", "debug.nav"]

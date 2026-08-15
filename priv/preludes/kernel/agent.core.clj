@@ -39,6 +39,63 @@
     (get event :turns-remaining)
     consolidate-at-turns-remaining))
 
+(defn- nonblank-string? [value]
+  (and (string? value) (not (blank? value))))
+
+(defn- valid-phase? [phase]
+  (and (map? phase)
+       (nonblank-string? (get phase "mission"))
+       (integer? (get phase "max_turns"))
+       (pos? (get phase "max_turns"))
+       (<= (get phase "max_turns") 128)
+       (or (nil? (get phase "instruction"))
+           (nonblank-string? (get phase "instruction")))))
+
+(defn- configured-phases [cfg default-max-turns]
+  (if (contains? cfg "phases")
+    (let [phases (get cfg "phases")]
+      (if (and (vector? phases)
+               (seq phases)
+               (<= (count phases) 8)
+               (every? valid-phase? phases)
+               (<= (reduce + 0 (map #(get % "max_turns") phases)) 128))
+        phases
+        (fail (result/error :invalid-agent-config :invalid-phases))))
+    [{"mission" (or (get cfg "mission") "default")
+      "max_turns" default-max-turns}]))
+
+(defn- next-phase? [phases phase-index]
+  (< (inc phase-index) (count phases)))
+
+(defn- phase-effective-cfg [cfg phase]
+  (assoc (assoc cfg "mission" (get phase "mission"))
+         "max_turns" (get phase "max_turns")))
+
+(defn- phase-turn-budget
+  [turns-remaining consolidate-at-turns-remaining has-next-phase?]
+  (if (not has-next-phase?)
+    (agent.feedback/turn-budget turns-remaining consolidate-at-turns-remaining)
+    (str "PHASE BUDGET: " turns-remaining " "
+         (if (= turns-remaining 1) "turn remains" "turns remain")
+         " in the current mission phase, including the next program."
+         (cond
+           (= turns-remaining 1)
+           "\nFINAL PHASE TURN: close the most material evidence gap. The host will then switch mission authority and continue with the retained transcript."
+
+           (and (integer? consolidate-at-turns-remaining)
+                (<= turns-remaining consolidate-at-turns-remaining))
+           "\nCONSOLIDATE: prioritize the most material evidence gaps before the host changes phase."
+
+           :else ""))))
+
+(defn- with-phase-budget
+  [content turns-remaining consolidate-at-turns-remaining has-next-phase?]
+  (str content "\n\n"
+       (phase-turn-budget
+         turns-remaining
+         consolidate-at-turns-remaining
+         has-next-phase?)))
+
 ;; The model's own narration is its stated plan for the turn. Dropping it left
 ;; the next turn seeing a tool result with no record of why it was requested.
 (defn- append-correlated [messages action content]
@@ -50,6 +107,69 @@
     {"role" "tool"
      "tool_call_id" (get action :tool-call-id)
      "content" content}))
+
+(defn- append-agent-feedback [messages action content]
+  (if (map? action)
+    (append-correlated messages action content)
+    (conj messages {"role" "user" "content" content})))
+
+(defn- phase-transition-message
+  [phase consolidate-at-turns-remaining has-next-phase?]
+  (str "PHASE TRANSITION: The previous bounded mission phase is complete. "
+       "Continue from the correlated evidence retained above. The system prompt now advertises the authoritative API for mission "
+       (pr-str (get phase "mission")) ". Do not call APIs absent from that prompt.\n"
+       (or (get phase "instruction") "Continue the task under the new mission authority.")
+       "\n\n"
+       (phase-turn-budget
+         (get phase "max_turns")
+         consolidate-at-turns-remaining
+         has-next-phase?)))
+
+(defn- transitioned-state
+  [phases phase-index messages action content effective-cfg
+   consolidate-at-turns-remaining closing?]
+  (if (next-phase? phases phase-index)
+    (let [next-index (inc phase-index)
+          next-phase (get phases next-index)
+          next-cfg (phase-effective-cfg effective-cfg next-phase)
+          retained (append-agent-feedback messages action content)]
+      {:phase-index next-index
+       :turn 0
+       :messages
+       (conj retained
+             {"role" "user"
+              "content"
+              (phase-transition-message
+                next-phase
+                consolidate-at-turns-remaining
+                (next-phase? phases next-index))})
+       :prompt-state (agent.prompt/initial-state next-cfg)
+       :closing? closing?})
+    nil))
+
+(defn- continuation-state
+  [phases phase-index turn messages action content prompt-state effective-cfg
+   consolidate-at-turns-remaining closing? event-type]
+  (let [phase (get phases phase-index)
+        max-turns (get phase "max_turns")
+        event (completed-event event-type turn max-turns)]
+    (if (agent.retry/retry? turn max-turns)
+      {:phase-index phase-index
+       :turn (inc turn)
+       :messages
+       (append-agent-feedback
+         messages
+         action
+         (with-phase-budget
+           content
+           (get event :turns-remaining)
+           consolidate-at-turns-remaining
+           (next-phase? phases phase-index)))
+       :prompt-state (transition-prompt prompt-state event)
+       :closing? closing?}
+      (transitioned-state
+        phases phase-index messages action content effective-cfg
+        consolidate-at-turns-remaining closing?))))
 
 (defn- bounded-request [prompt-state messages cfg max-transcript-chars]
   (let [base-request {"system" (system-message prompt-state)
@@ -109,41 +229,60 @@
   generated-program error without misclassifying provider failure as subject
   behavior."
   [task cfg validate-result?]
-  (let [max-turns (positive-int-or (get cfg "max_turns") 4 128)
+  (let [default-max-turns (positive-int-or (get cfg "max_turns") 4 128)
+        phases (configured-phases cfg default-max-turns)
+        total-max-turns (reduce + 0 (map #(get % "max_turns") phases))
         consolidate-at-turns-remaining
         (consolidation-threshold
           (get cfg "consolidate_at_turns_remaining")
-          max-turns)
+          total-max-turns)
         max-program-chars (positive-int-or (get cfg "max_program_chars") 64000 1000000)
         max-observation-chars (positive-int-or (get cfg "max_observation_chars") 2048 65536)
         max-transcript-chars (positive-int-or (get cfg "max_transcript_chars") 262144 1000000)
         effective-cfg (assoc cfg
-                             "max_turns" max-turns
                              "max_program_chars" max-program-chars
                              "max_observation_chars" max-observation-chars
                              "max_transcript_chars" max-transcript-chars)
-        mission-name (or (get cfg "mission") "default")
-        initial-prompt-state (agent.prompt/initial-state effective-cfg)]
-    (if (not (and (string? mission-name) (not (blank? mission-name))))
-      (fail (result/error :invalid-agent-config :invalid-mission))
-      (if (not (map? initial-prompt-state))
+        initial-phase (first phases)
+        initial-effective-cfg (phase-effective-cfg effective-cfg initial-phase)
+        initial-prompt-state (agent.prompt/initial-state initial-effective-cfg)
+        phased? (contains? cfg "phases")]
+    (if (not (map? initial-prompt-state))
       (fail (result/error :invalid-prompt :invalid-initial-state))
       (loop [turn 0
+             agent-turn 0
+             phase-index 0
              messages [{"role" "user"
-                        "content" (with-turn-budget
-                                    task
-                                    max-turns
-                                    consolidate-at-turns-remaining)}]
+                        "content"
+                        (with-phase-budget
+                          task
+                          (get initial-phase "max_turns")
+                          consolidate-at-turns-remaining
+                          (next-phase? phases 0))}]
              prompt-state initial-prompt-state
              closing? false]
-        (if (>= turn max-turns)
-          (turn-limit-failure :turn-limit-exceeded max-turns)
-          (let [request (bounded-request prompt-state messages effective-cfg max-transcript-chars)
+        (let [phase (get phases phase-index)
+              max-turns (get phase "max_turns")
+              mission-name (get phase "mission")
+              current-effective-cfg (phase-effective-cfg effective-cfg phase)]
+          (if (>= turn max-turns)
+          (turn-limit-failure :turn-limit-exceeded total-max-turns)
+          (let [request (bounded-request
+                          prompt-state
+                          messages
+                          current-effective-cfg
+                          max-transcript-chars)
                 response (llm/request request)
                 action (agent.native/normalize response max-program-chars)]
             (workflow.event/annotate
               "agent-action"
-              {:turn turn :kind (get action :kind)})
+              (if phased?
+                {:turn agent-turn
+                 :phase phase-index
+                 :phase-turn turn
+                 :mission mission-name
+                 :kind (get action :kind)}
+                {:turn turn :kind (get action :kind)}))
             (case (get action :kind)
               :tool-call
               (let [evaluation (kernel/eval-source mission-name (get action :program))]
@@ -162,57 +301,74 @@
                         :terminal-provider-failure))
                     (case (get evaluation :outcome)
                     :returned
-                    (if validate-result?
-                      (let [validation (kernel/validate-result (get evaluation :value))]
-                        (if (true? (get validation :valid?))
-                          (returned-outcome (get evaluation :value))
-                          (if (agent.retry/retry? turn max-turns)
-                            (let [event (completed-event :result-contract-error turn max-turns)
-                                  next-prompt-state (transition-prompt prompt-state event)]
-                              (recur (inc turn)
-                                     (append-correlated
-                                       messages
-                                       action
-                                       (completed-feedback
-                                         (agent.feedback/result-contract validation)
-                                         event
-                                         consolidate-at-turns-remaining))
-                                     next-prompt-state
-                                     closing?))
-                            (result-contract-failure
-                              (get evaluation :value)
-                              max-turns))))
-                      (returned-outcome (get evaluation :value)))
+                    (if (next-phase? phases phase-index)
+                      (let [next-state
+                            (transitioned-state
+                              phases phase-index messages action
+                              (agent.feedback/success evaluation max-observation-chars)
+                              effective-cfg consolidate-at-turns-remaining closing?)]
+                        (recur (get next-state :turn)
+                               (inc agent-turn)
+                               (get next-state :phase-index)
+                               (get next-state :messages)
+                               (get next-state :prompt-state)
+                               (get next-state :closing?)))
+                      (if validate-result?
+                        (let [validation (kernel/validate-result (get evaluation :value))]
+                          (if (true? (get validation :valid?))
+                            (returned-outcome (get evaluation :value))
+                            (let [next-state
+                                  (continuation-state
+                                    phases phase-index turn messages action
+                                    (agent.feedback/result-contract validation)
+                                    prompt-state effective-cfg
+                                    consolidate-at-turns-remaining closing?
+                                    :result-contract-error)]
+                              (if next-state
+                                (recur (get next-state :turn)
+                                       (inc agent-turn)
+                                       (get next-state :phase-index)
+                                       (get next-state :messages)
+                                       (get next-state :prompt-state)
+                                       (get next-state :closing?))
+                                (result-contract-failure
+                                  (get evaluation :value)
+                                  total-max-turns)))))
+                        (returned-outcome (get evaluation :value))))
                     :failed
-                    (if (and (correctable-capability-failure? evaluation)
-                             (agent.retry/retry? turn max-turns))
-                      (let [event (completed-event :evaluation-error turn max-turns)
-                            next-prompt-state (transition-prompt prompt-state event)]
-                        (recur (inc turn)
-                               (append-correlated
-                                 messages
-                                 action
-                                 (completed-feedback
-                                   (agent.feedback/capability-error evaluation)
-                                   event
-                                   consolidate-at-turns-remaining))
-                               next-prompt-state
-                               closing?))
+                    (if (correctable-capability-failure? evaluation)
+                      (let [next-state
+                            (continuation-state
+                              phases phase-index turn messages action
+                              (agent.feedback/capability-error evaluation)
+                              prompt-state effective-cfg
+                              consolidate-at-turns-remaining closing?
+                              :evaluation-error)]
+                        (if next-state
+                          (recur (get next-state :turn)
+                                 (inc agent-turn)
+                                 (get next-state :phase-index)
+                                 (get next-state :messages)
+                                 (get next-state :prompt-state)
+                                 (get next-state :closing?))
+                          (subject-failure :model-program-failed (get evaluation :value))))
                       (subject-failure :model-program-failed (get evaluation :value)))
                     :continued
-                    (if (agent.retry/retry? turn max-turns)
-                      (let [event (completed-event :evaluation-success turn max-turns)
-                            next-prompt-state (transition-prompt prompt-state event)
-                            observation
-                            (completed-feedback
-                              (agent.feedback/success evaluation max-observation-chars)
-                              event
-                              consolidate-at-turns-remaining)]
-                        (recur (inc turn)
-                               (append-correlated messages action observation)
-                               next-prompt-state
-                               closing?))
-                      (turn-limit-failure :intermediate-result max-turns))
+                    (let [next-state
+                          (continuation-state
+                            phases phase-index turn messages action
+                            (agent.feedback/success evaluation max-observation-chars)
+                            prompt-state effective-cfg
+                            consolidate-at-turns-remaining closing?
+                            :evaluation-success)]
+                      (if next-state
+                        (recur (get next-state :turn)
+                               (inc agent-turn)
+                               (get next-state :phase-index)
+                               (get next-state :messages)
+                               (get next-state :prompt-state)
+                               (get next-state :closing?))
+                        (turn-limit-failure :intermediate-result total-max-turns)))
 
                     ;; A refused admission is a host condition, not something
                     ;; the model wrote: either another caller holds the run's
@@ -238,57 +394,78 @@
                       ;; decision from evidence already gathered rather than
                       ;; discarding every prior evaluation; a second unsafe
                       ;; failure ends it.
-                      (if (or closing? (not (agent.retry/retry? turn max-turns)))
+                      (if closing?
                         (subject-failure :non-retryable-evaluation (get evaluation :kind))
-                        (let [event (completed-event :evaluation-error turn max-turns)
-                              next-prompt-state (transition-prompt prompt-state event)]
-                          (recur (inc turn)
-                                 (append-correlated
-                                   messages
-                                   action
-                                   ;; The closing instruction must remain the last
-                                   ;; and strongest direction even when the hard
-                                   ;; turn limit has more runway.
-                                   (str (agent.feedback/turn-budget
-                                          (get event :turns-remaining)
-                                          consolidate-at-turns-remaining)
-                                        "\n\n"
-                                        (agent.feedback/non-retryable evaluation)))
-                                 next-prompt-state
-                                 true)))
-                      (if (agent.retry/retry? turn max-turns)
-                        (let [next-prompt-state
-                              (transition-prompt
-                                prompt-state
-                                (completed-event :evaluation-error turn max-turns))]
-                          (recur (inc turn)
-                                 (append-correlated
-                                   messages
-                                   action
-                                   (completed-feedback
-                                     (agent.feedback/evaluation-error evaluation)
-                                     (completed-event :evaluation-error turn max-turns)
-                                     consolidate-at-turns-remaining))
-                                 next-prompt-state
-                                 closing?))
-                        (turn-limit-failure :evaluation-error max-turns)))))))
+                        (if (agent.retry/retry? turn max-turns)
+                          (let [event (completed-event :evaluation-error turn max-turns)
+                                next-prompt-state (transition-prompt prompt-state event)]
+                            (recur (inc turn)
+                                   (inc agent-turn)
+                                   phase-index
+                                   (append-correlated
+                                     messages
+                                     action
+                                     ;; The closing instruction must remain the last
+                                     ;; and strongest direction even when the hard
+                                     ;; turn limit has more runway.
+                                     (str (agent.feedback/turn-budget
+                                            (get event :turns-remaining)
+                                            consolidate-at-turns-remaining)
+                                          "\n\n"
+                                          (agent.feedback/non-retryable evaluation)))
+                                   next-prompt-state
+                                   true))
+                          (let [next-state
+                                (continuation-state
+                                  phases phase-index turn messages action
+                                  (agent.feedback/non-retryable evaluation)
+                                  prompt-state effective-cfg
+                                  consolidate-at-turns-remaining true
+                                  :evaluation-error)]
+                            (if next-state
+                              (recur (get next-state :turn)
+                                     (inc agent-turn)
+                                     (get next-state :phase-index)
+                                     (get next-state :messages)
+                                     (get next-state :prompt-state)
+                                     (get next-state :closing?))
+                              (subject-failure
+                                :non-retryable-evaluation
+                                (get evaluation :kind))))))
+                      (let [next-state
+                            (continuation-state
+                              phases phase-index turn messages action
+                              (agent.feedback/evaluation-error evaluation)
+                              prompt-state effective-cfg
+                              consolidate-at-turns-remaining closing?
+                              :evaluation-error)]
+                        (if next-state
+                          (recur (get next-state :turn)
+                                 (inc agent-turn)
+                                 (get next-state :phase-index)
+                                 (get next-state :messages)
+                                 (get next-state :prompt-state)
+                                 (get next-state :closing?))
+                          (turn-limit-failure
+                            :evaluation-error
+                            total-max-turns))))))))
 
               :protocol-error
-              (if (agent.retry/retry? turn max-turns)
-                (let [next-prompt-state
-                      (transition-prompt
-                        prompt-state
-                        (completed-event :protocol-error turn max-turns))]
-                  (recur (inc turn)
-                         (conj messages
-                               {"role" "user"
-                                "content" (completed-feedback
-                                            (agent.feedback/protocol-error action)
-                                            (completed-event :protocol-error turn max-turns)
-                                            consolidate-at-turns-remaining)})
-                         next-prompt-state
-                         closing?))
-                (turn-limit-failure :protocol-error max-turns))
+              (let [next-state
+                    (continuation-state
+                      phases phase-index turn messages nil
+                      (agent.feedback/protocol-error action)
+                      prompt-state effective-cfg
+                      consolidate-at-turns-remaining closing?
+                      :protocol-error)]
+                (if next-state
+                  (recur (get next-state :turn)
+                         (inc agent-turn)
+                         (get next-state :phase-index)
+                         (get next-state :messages)
+                         (get next-state :prompt-state)
+                         (get next-state :closing?))
+                  (turn-limit-failure :protocol-error total-max-turns)))
 
               :provider-error
               (fail (result/error :llm-provider-error (get action :error)))
@@ -320,6 +497,20 @@
   "Runs the agent loop and validates model-authored completion against the
   manifest result contract before returning it to the calling workflow."
   {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any"}
+  [task cfg]
+  (let [outcome (run-outcome* task cfg true)]
+    (if (= :returned (get outcome :status))
+      (get outcome :value)
+      (propagate-subject-failure outcome))))
+
+(defn run-phased-result-value
+  "Runs a sequence of bounded mission phases while retaining the exact
+  correlated model and evaluation transcript. At each host-controlled phase
+  boundary, the system prompt is rebuilt from the next mission's authority and
+  that phase's instruction is appended as a user message. A return closes any
+  non-final phase and is retained as evidence; only the final phase can complete
+  the agent with a contract-valid result."
+  {:signature "(task :string, cfg {model :string?, phases [{mission :string, max_turns :int, instruction :string?}], max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
   (let [outcome (run-outcome* task cfg true)]
     (if (= :returned (get outcome :status))
