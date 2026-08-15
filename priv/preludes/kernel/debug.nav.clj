@@ -21,7 +21,7 @@
   (cap/unwrap! (tool/debug.nav.read (assoc options "run_id" run-id))))
 
 (defn follow
-  "Follow one typed relationship returned by an evidence item. The relationship supplies the exact target collection and filters; options may contain only limit and cursor. Unavailable or filterless relationships are refused. Returns the original relationship beside the complete native page envelope. Example: (debug.nav/follow run-id relationship {\"limit\" 20})."
+  "Follow one typed relationship returned by an evidence item. The relationship supplies the exact target collection and filters; options may contain only limit and cursor. Check the relationship first: one whose state is \"unavailable\", or whose filters are null, cannot be followed and calling follow on it fails the program instead of returning a page. Returns the original relationship beside the complete native page envelope. Example: (debug.nav/follow run-id relationship {\"limit\" 20})."
   {:signature "(run-id :string, relationship :map, options :map) -> :map"}
   [run-id relationship options]
   (if (not (empty? (dissoc options "limit" "cursor")))

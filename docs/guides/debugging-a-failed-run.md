@@ -260,14 +260,19 @@ supported diagnosis. Confirming it is a separate step: edit
 
 ## Let a model do the walking
 
-The same mission works for an agent. Keep `debug.nav` as the mission's only
-domain authority and let the shipped agent loop drive it:
+The same mission works for an agent. `debugger-agent/` in the example replaces
+the deterministic walk with the shipped agent loop over the same authority. It
+is the one part of the example that needs a credential:
+
+```console
+mix ptc run examples/debug-a-failed-run/debugger-agent.ptc-project.json
+```
+
+Keep `debug.nav` as the mission's only domain authority and select a model into
+the workflow:
 
 ```json
-"workflow": {
-  "components": [{"library": "agent.main"}],
-  "entry": "agent.main/run"
-},
+"workflow": {"components": [{"library": "agent.main"}], "entry": "agent.main/run"},
 "missions": {
   "evidence": {
     "components": [{"library": "debug.nav"}],
@@ -280,32 +285,59 @@ domain authority and let the shipped agent loop drive it:
 }
 ```
 
-Supply the task and turn budget through input, and require a result contract
-with an explicit decision so an abstention is a first-class answer rather than
-an empty diagnosis slot:
+Selecting an inspection snapshot fixes the run's class to `private_inspection`,
+so the model installation must declare
+`"accepts_data": ["normal", "private_inspection"]`. That declaration is the
+operator deciding to send captured private evidence — generated source, frozen
+component source, failure detail — to a model vendor. Make it deliberately.
+
+Name the mission that holds the evidence, and require a result contract with an
+explicit decision so an abstention is a first-class answer rather than an empty
+diagnosis slot:
 
 ```json
-"input": {
-  "value": {
-    "task": "Explain why the captured failed run did not produce its required value. Cite the exact evidence you read. If the evidence does not identify one faulty component, say so and name what is missing.",
-    "agent": {"max_turns": 8}
-  }
-},
+"input": {"value": {"task": "...", "agent": {"max_turns": 14, "mission": "evidence"}}},
 "contracts": {"result_schema": {"path": "report.schema.json"}}
 ```
 
-Two limits are worth knowing before trusting such a run.
+The agent loop runs inside one workflow evaluation, so `workflow_timeout_ms`
+must cover every model turn, not one call. Its installed default of 30 s ends a
+multi-turn investigation mid-flight; the example raises the host ceiling and
+the manifest together.
 
-A model that can still call evidence tools may keep verifying instead of
-concluding, even when the decisive comparison is already in its context.
-Budget for that, and treat an exhausted turn limit as an unfinished
-investigation rather than an absent cause.
+### What to expect
 
-A contract-valid report is not a correct one. A forced diagnosis slot invites
-an invented explanation. Where the claim is mechanically testable, test it:
-run the proposed change against host-owned cases before believing it. The
-model may diagnose and author; whether a change is accepted stays with the
-host.
+Four limits showed up repeatedly while this example was built against a live
+model, and all four are worth designing around.
+
+**Traversal beats budget.** Told only to "read the boundary error", the model
+looped on the public `activity` collection for eight turns and never reached
+`execution_errors`. Naming the collections and the intended order — API
+vocabulary, not answer hints — moved it onto the typed relationships
+immediately. Generic navigation authority does not imply a generic traversal
+plan.
+
+**Available tools postpone conclusions.** With the evidence chain fully read by
+turn 7, the model spent its remaining turns re-reading unrelated collections.
+An explicit stopping rule in the task fixed it. Treat an exhausted turn limit
+as an unfinished investigation, not an absent cause.
+
+**Report shape is a separate failure mode.** One run reached the right evidence
+and returned a report missing a single required field. The bounded contract
+feedback named exactly that field; the model resumed exploring instead of
+correcting. Stating the contract's fields in the task removed the problem.
+
+**Correct evidence does not make a correct diagnosis.** The final live run
+returned a contract-valid `diagnosed` report whose five evidence lines were all
+accurate and all genuinely read — and whose conclusion was wrong. It blamed the
+component that never calls the unused decoy, rather than the rule that adds the
+wrong amount. Nothing in the substrate could have prevented that, because the
+substrate deliberately does not choose a diagnosis.
+
+That last point is the reason this layer stops where it does. Where a claim is
+mechanically testable, test it: apply the proposed change and run it against
+host-owned cases before believing it. The model may diagnose and author;
+whether a change is accepted stays with the host.
 
 ## Scope and limits
 

@@ -50,6 +50,28 @@ rm -rf examples/debug-a-failed-run/target/.ptc
 mix ptc run examples/debug-a-failed-run/target.ptc-project.json
 ```
 
+## Optional: let a model walk it
+
+`debugger-agent/` runs the shipped agent loop over the same authority. It is
+the one part of this example that needs a credential, so create `.env` beside
+this README with `OPENROUTER_API_KEY=...` first:
+
+```console
+mix ptc run examples/debug-a-failed-run/debugger-agent.ptc-project.json
+cat examples/debug-a-failed-run/debugger-agent/.ptc/results/*.private.json
+```
+
+Selecting the inspection snapshot fixes the run's class to
+`private_inspection`, so the model installation declares
+`"accepts_data": ["normal", "private_inspection"]`. That is an operator
+decision to send captured private evidence to a model vendor.
+
+A verified live run reached the whole chain and returned a contract-valid
+report whose evidence lines were accurate — and whose conclusion blamed
+`orders` for not calling the unused decoy rather than the rule that adds the
+wrong amount. That is the point of the decoy, and the reason this layer reports
+evidence instead of choosing a diagnosis.
+
 ## What each file does
 
 | Path | Role |
@@ -59,6 +81,7 @@ mix ptc run examples/debug-a-failed-run/target.ptc-project.json
 | `ptc-host.json` | installs the target's capture as `failed-run-traces` and `debug.nav` |
 | `debugger/ptc.json` | selects `debug.nav` and the snapshot providers into the `evidence` mission |
 | `debugger/evidence.walk.clj` | the bounded walk over runs, errors, generated source, and prelude source |
+| `debugger-agent/ptc.json` | the optional live-model variant over the same mission authority |
 
 The inspection snapshot provider must be selected under the alias `debug.nav`,
 because the shipped prelude binds `<alias>.runs`, `<alias>.open`, and
