@@ -3,6 +3,7 @@ defmodule PtcRunner.TestSupport.TestHelpers do
   Shared test helper functions used across multiple test files.
   """
 
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunState
 
@@ -36,6 +37,36 @@ defmodule PtcRunner.TestSupport.TestHelpers do
          preflight: fn -> {:ok, fn %{} -> acquire.(config, context) end} end
        }}
     end)
+  end
+
+  @doc "Builds a valid current public LLM provider snapshot for trace tests."
+  def llm_snapshot(alias_name, revision, model) do
+    declaration = %{
+      "name" => alias_name,
+      "source" => "llm",
+      "installation_revision" => revision,
+      "data_class" => "normal",
+      "accepts_data" => ["normal"],
+      "authorization_mode" => "none",
+      "config" => %{
+        "default" => false,
+        "max_request_bytes" => 1_000_000,
+        "max_response_bytes" => 1_000_000
+      }
+    }
+
+    acquisition = %{"source" => "llm", "resolved_model" => model}
+    acquisition_hash = canonical_sha256(acquisition)
+
+    identity = %{
+      "declaration" => declaration,
+      "acquisition" => acquisition,
+      "acquisition_identity_hash" => acquisition_hash
+    }
+
+    identity
+    |> Map.put("provider", alias_name)
+    |> Map.put("snapshot_hash", canonical_sha256(identity))
   end
 
   @doc """
@@ -88,6 +119,11 @@ defmodule PtcRunner.TestSupport.TestHelpers do
 
   defp missing_executable_reason(names),
     do: "optional E2E executables are not available on PATH: #{Enum.join(names, ", ")}"
+
+  defp canonical_sha256(value) do
+    {:ok, bytes} = DeterministicJSON.encode(value)
+    :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
+  end
 
   @doc """
   A PTC-Lisp entry body that genuinely occupies its worker while a test

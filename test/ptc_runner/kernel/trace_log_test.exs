@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
 
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.TestSupport.TestHelpers
 
   test "analysis facts count only workflow llm-request exchanges" do
     events = [
@@ -936,9 +937,9 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   end
 
   test "counters group eligible LLM usage by each run's validated resolved model" do
-    first = llm_snapshot("writer", "stable-v1", "openrouter:vendor/model-a")
-    second = llm_snapshot("writer", "stable-v1", "openrouter:vendor/model-b")
-    reviewer = llm_snapshot("reviewer", "review-v2", "openrouter:vendor/model-a")
+    first = TestHelpers.llm_snapshot("writer", "stable-v1", "openrouter:vendor/model-a")
+    second = TestHelpers.llm_snapshot("writer", "stable-v1", "openrouter:vendor/model-b")
+    reviewer = TestHelpers.llm_snapshot("reviewer", "review-v2", "openrouter:vendor/model-a")
 
     events =
       llm_counter_run("first", first, "ok", %{"input" => 3, "output" => 2}) ++
@@ -1014,7 +1015,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   end
 
   test "invalid or ambiguous LLM snapshots make calls unattributed without failing counters" do
-    valid = llm_snapshot("writer", "stable-v1", "openrouter:vendor/model-a")
+    valid = TestHelpers.llm_snapshot("writer", "stable-v1", "openrouter:vendor/model-a")
     tampered = put_in(valid, ["acquisition", "resolved_model"], "openrouter:vendor/model-b")
 
     for {label, snapshots} <- [
@@ -1145,39 +1146,5 @@ defmodule PtcRunner.Kernel.TraceLogTest do
       decoded_event(run_id, 2, "capability-stopped", stopped_data),
       decoded_event(run_id, 3, "run-stopped", %{"outcome" => "ok"})
     ]
-  end
-
-  defp llm_snapshot(alias_name, revision, model) do
-    declaration = %{
-      "name" => alias_name,
-      "source" => "llm",
-      "installation_revision" => revision,
-      "data_class" => "normal",
-      "accepts_data" => ["normal"],
-      "authorization_mode" => "none",
-      "config" => %{
-        "default" => false,
-        "max_request_bytes" => 1_000_000,
-        "max_response_bytes" => 1_000_000
-      }
-    }
-
-    acquisition = %{"source" => "llm", "resolved_model" => model}
-    acquisition_hash = canonical_sha256(acquisition)
-
-    identity = %{
-      "declaration" => declaration,
-      "acquisition" => acquisition,
-      "acquisition_identity_hash" => acquisition_hash
-    }
-
-    identity
-    |> Map.put("provider", alias_name)
-    |> Map.put("snapshot_hash", canonical_sha256(identity))
-  end
-
-  defp canonical_sha256(value) do
-    {:ok, bytes} = DeterministicJSON.encode(value)
-    :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
   end
 end

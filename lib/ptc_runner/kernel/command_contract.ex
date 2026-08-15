@@ -1215,19 +1215,94 @@ defmodule PtcRunner.Kernel.CommandContract do
     capability_counts = count_map(@capability_name)
     event_counts = count_map(@event_type, ["$overflow"])
 
-    closed(
-      ~w(remaining_ms capability_calls subordinate_evaluations evaluations_by_mission protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped),
+    required =
+      ~w(remaining_ms capability_calls subordinate_evaluations evaluations_by_mission protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped llm_usage_state llm_usage llm_usage_by_model unattributed_model_calls)
+
+    common = %{
+      "remaining_ms" => nonnegative_integer(),
+      "capability_calls" => capability_counts,
+      "subordinate_evaluations" => nonnegative_integer(),
+      "evaluations_by_mission" => count_map(@alias),
+      "protocol_errors" => nonnegative_integer(),
+      "evaluation_memory_bytes" => nonnegative_integer(),
+      "evaluation_history_bytes" => nonnegative_integer(),
+      "evaluation_continuation_bytes" => nonnegative_integer(),
+      "events_dropped" => event_counts
+    }
+
+    %{
+      "oneOf" => [
+        closed(
+          required,
+          Map.merge(common, %{
+            "llm_usage_state" => %{"const" => "available"},
+            "llm_usage" => llm_usage_rows(llm_alias_row_schema()),
+            "llm_usage_by_model" => llm_usage_rows(llm_model_row_schema()),
+            "unattributed_model_calls" => nonnegative_integer()
+          })
+        ),
+        closed(
+          required,
+          Map.merge(common, %{
+            "llm_usage_state" => %{"const" => "unavailable"},
+            "llm_usage" => %{"type" => "null"},
+            "llm_usage_by_model" => %{"type" => "null"},
+            "unattributed_model_calls" => %{"type" => "null"}
+          })
+        )
+      ]
+    }
+  end
+
+  defp llm_usage_rows(row),
+    do: %{"type" => "array", "maxItems" => 128, "items" => row}
+
+  defp llm_alias_row_schema do
+    llm_usage_row_schema(
+      ~w(alias installation_revision),
       %{
-        "remaining_ms" => nonnegative_integer(),
-        "capability_calls" => capability_counts,
-        "subordinate_evaluations" => nonnegative_integer(),
-        "evaluations_by_mission" => count_map(@alias),
-        "protocol_errors" => nonnegative_integer(),
-        "evaluation_memory_bytes" => nonnegative_integer(),
-        "evaluation_history_bytes" => nonnegative_integer(),
-        "evaluation_continuation_bytes" => nonnegative_integer(),
-        "events_dropped" => event_counts
+        "alias" => %{"type" => "string", "pattern" => @alias},
+        "installation_revision" => %{"type" => "string", "pattern" => @alias}
       }
+    )
+  end
+
+  defp llm_model_row_schema do
+    llm_usage_row_schema(
+      ["resolved_model"],
+      %{
+        "resolved_model" => %{
+          "type" => "string",
+          "minLength" => 1,
+          "maxLength" => 256
+        }
+      }
+    )
+  end
+
+  defp llm_usage_row_schema(identity_fields, identity_properties) do
+    counters =
+      Map.new(~w(calls successful_calls usage_calls missing_usage_calls), fn name ->
+        {name, nonnegative_integer()}
+      end)
+
+    closed(
+      identity_fields ++ Map.keys(counters) ++ ["usage"],
+      identity_properties
+      |> Map.merge(counters)
+      |> Map.put("usage", llm_usage_values_schema())
+    )
+  end
+
+  defp llm_usage_values_schema do
+    token_properties =
+      Map.new(~w(input output cache_creation cache_read), fn name ->
+        {name, nonnegative_integer()}
+      end)
+
+    closed(
+      [],
+      Map.put(token_properties, "total_cost", %{"type" => "number", "minimum" => 0})
     )
   end
 

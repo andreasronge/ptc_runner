@@ -2,15 +2,19 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.ArtifactPublisher
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CapabilityInvocation
+  alias PtcRunner.Kernel.CommandRunOutcome
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RoutedCapability
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
@@ -367,6 +371,108 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
             }} = TraceLog.query(trace_log, :counters, %{"run_id" => "routing-events"})
   end
 
+  test "run envelopes and trace counters project the same sealed LLM usage" do
+    run_id = "routing-envelope-usage"
+    run_ref = "cmd-00000000000000000000000000"
+
+    leaf =
+      capability(self(), :metered_envelope, %{
+        content: "answer",
+        tokens: %{input: 11, output: 5, total_cost: 0.0042}
+      })
+
+    assert {:ok, router} =
+             LLMRouter.new([route("metered", "llm", "metered-v3", false, leaf)])
+
+    snapshot = TestHelpers.llm_snapshot("metered", "metered-v3", "openrouter:metered/model")
+    assert {:ok, config} = config(router, run_id, connector_snapshots: [snapshot])
+
+    assert {:ok, command_outcome, counters, _events} =
+             project_run(~S|(return (llm/request {"messages" []}))|, config, run_id, run_ref)
+
+    envelope_usage = command_outcome.envelope["execution"]["usage"]
+    assert envelope_usage["llm_usage_state"] == "available"
+
+    assert Map.take(envelope_usage, [
+             "llm_usage",
+             "llm_usage_by_model",
+             "unattributed_model_calls"
+           ]) ==
+             Map.take(counters, [
+               "llm_usage",
+               "llm_usage_by_model",
+               "unattributed_model_calls"
+             ])
+
+    assert envelope_usage["llm_usage"] == [
+             %{
+               "alias" => "metered",
+               "installation_revision" => "metered-v3",
+               "calls" => 1,
+               "successful_calls" => 1,
+               "usage_calls" => 1,
+               "missing_usage_calls" => 0,
+               "usage" => %{"input" => 11, "output" => 5, "total_cost" => 0.0042}
+             }
+           ]
+
+    assert envelope_usage["llm_usage_by_model"] == [
+             %{
+               "resolved_model" => "openrouter:metered/model",
+               "calls" => 1,
+               "successful_calls" => 1,
+               "usage_calls" => 1,
+               "missing_usage_calls" => 0,
+               "usage" => %{"input" => 11, "output" => 5, "total_cost" => 0.0042}
+             }
+           ]
+
+    assert envelope_usage["unattributed_model_calls"] == 0
+  end
+
+  test "a failed run envelope retains LLM usage completed before the execution error" do
+    run_id = "routing-envelope-failure"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = capability(self(), :failed_envelope, %{content: "answer", tokens: %{input: 7}})
+    assert {:ok, router} = LLMRouter.new([route("writer", "llm", "writer-v1", false, leaf)])
+
+    snapshot = TestHelpers.llm_snapshot("writer", "writer-v1", "openrouter:writer/model")
+    assert {:ok, config} = config(router, run_id, connector_snapshots: [snapshot])
+
+    source = ~S|(do (llm/request {"messages" []}) (fail "after paid call"))|
+
+    assert {:error, command_outcome, counters, _events} =
+             project_run(source, config, run_id, run_ref)
+
+    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+    usage = command_outcome.envelope["execution"]["usage"]
+    assert usage["llm_usage_state"] == "available"
+    assert usage["llm_usage"] == counters["llm_usage"]
+    assert usage["llm_usage_by_model"] == counters["llm_usage_by_model"]
+    assert usage["unattributed_model_calls"] == 0
+    assert get_in(usage, ["llm_usage", Access.at(0), "usage", "input"]) == 7
+  end
+
+  test "a sealed run without LLM calls publishes an available empty summary" do
+    run_id = "routing-envelope-empty"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = capability(self(), :unused_envelope, %{content: "unused", tokens: %{}})
+    assert {:ok, router} = LLMRouter.new([route("unused", "llm", "unused-v1", false, leaf)])
+    assert {:ok, config} = config(router, run_id)
+
+    assert {:ok, command_outcome, counters, _events} =
+             project_run(~S|(return 42)|, config, run_id, run_ref)
+
+    usage = command_outcome.envelope["execution"]["usage"]
+    assert usage["llm_usage_state"] == "available"
+    assert usage["llm_usage"] == []
+    assert usage["llm_usage_by_model"] == []
+    assert usage["unattributed_model_calls"] == 0
+
+    assert Map.take(usage, ~w(llm_usage llm_usage_by_model unattributed_model_calls)) ==
+             Map.take(counters, ~w(llm_usage llm_usage_by_model unattributed_model_calls))
+  end
+
   test "capability discovery names aliases and the default" do
     leaf = capability(self(), :discover, %{content: "unused", tokens: %{}})
 
@@ -431,7 +537,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     }
   end
 
-  defp config(router, run_id) do
+  defp config(router, run_id, opts \\ []) do
     {:ok, components} = Library.resolve_components([{:library, "llm"}, {:library, "cap"}])
     {:ok, bundle} = Kernel.compile_bundle(components)
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [router])
@@ -444,7 +550,34 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
       missions: %{"default" => mission},
       input: %{},
       limits: limits,
-      event_sink: sink
+      event_sink: sink,
+      connector_snapshots: Keyword.get(opts, :connector_snapshots, [])
     )
+  end
+
+  defp project_run(source, config, run_id, run_ref) do
+    {result, {:ok, events} = terminal_batch} = Kernel.run_and_events(source, config)
+    {:ok, authority} = PublicationAuthority.authorize(run_ref, [], :normal, :normal)
+
+    {:ok, outcome} =
+      ExecutionOutcome.capture(
+        result,
+        terminal_batch,
+        config.event_sink,
+        nil,
+        nil,
+        nil,
+        authority
+      )
+
+    {:ok, evidence} = ExecutionOutcome.open(outcome, authority)
+    settlement = ArtifactPublisher.publish(evidence, authority)
+    {status, command_outcome} = CommandRunOutcome.project(evidence, settlement, run_ref, true)
+    {:ok, trace_log} = TraceLog.new(source: config.event_sink, max_result_bytes: 100_000)
+    {:ok, counters} = TraceLog.query(trace_log, :counters, %{"run_id" => run_id})
+    ^events = EventSink.events(config.event_sink)
+    :ok = PublicationAuthority.close(authority)
+    :ok = EventSink.stop(config.event_sink)
+    {status, command_outcome, counters, events}
   end
 end
