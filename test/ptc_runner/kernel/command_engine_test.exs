@@ -744,6 +744,39 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
+  @tag :tmp_dir
+  test "doctor answers an unreadable environment file the same way run does", %{
+    tmp_dir: directory
+  } do
+    host_path = write_host_config(directory, "doctor-env-file", env_credential_host())
+    application = doctor_application(directory, "doctor-env-file", workflow: ["model"])
+    absent = Path.join(directory, "absent.env")
+
+    for argv <- [
+          ["doctor", application, "--host-config", host_path, "--env-file", absent, "--connect"],
+          ["run", application, "--host-config", host_path, "--env-file", absent]
+        ] do
+      assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch(argv)
+
+      assert outcome.envelope["error"]["phase"] == "local_preflight"
+      assert outcome.envelope["error"]["code"] == "environment_file_unavailable"
+      assert_schema_valid(outcome.envelope)
+    end
+  end
+
+  test "an embedding host's own setup failure stays undifferentiated" do
+    # Only the dotenv attachment knows the operator named a file. A caller
+    # supplying its own callback must not have an arbitrary failure relabelled
+    # as a bad --env-file.
+    assert {:ok, runtime} =
+             CommandRuntime.new(environment_setup: fn -> {:error, :environment_file_invalid} end)
+
+    assert CommandRuntime.setup_environment(runtime) == {:error, :environment_setup_failed}
+
+    assert CommandRuntime.setup_environment_diagnostic(runtime) ==
+             {:error, :environment_setup_failed}
+  end
+
   test "invocation-scoped local-preflight codes assert no provider activity" do
     # Every other local-preflight row spans the activity marker and admits either
     # value. These three are decided before any provider runs, so a `true` must

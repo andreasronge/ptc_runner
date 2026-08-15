@@ -157,18 +157,8 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
         :incomplete
       )
 
-  defp maybe_setup_environment(%{environment_setup_required: true}, runtime) do
-    case CommandRuntime.setup_environment(runtime) do
-      :ok ->
-        :ok
-
-      {:error, :environment_file_unavailable} ->
-        {:error, CommandDiagnostic.new!(:local_preflight, :environment_file_unavailable)}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
+  defp maybe_setup_environment(%{environment_setup_required: true}, runtime),
+    do: CommandRuntime.setup_environment_diagnostic(runtime)
 
   defp maybe_setup_environment(_preparation, _runtime), do: :ok
 

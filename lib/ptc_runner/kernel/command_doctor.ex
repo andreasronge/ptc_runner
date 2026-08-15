@@ -178,7 +178,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
 
   defp maybe_setup_environment(host, prepared, runtime) do
     if CommandAcquisition.environment_setup_required?(host, prepared),
-      do: CommandRuntime.setup_environment(runtime),
+      do: CommandRuntime.setup_environment_diagnostic(runtime),
       else: :ok
   end
 

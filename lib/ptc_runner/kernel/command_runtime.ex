@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   """
 
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.CommandDiagnostic
 
   @enforce_keys [
     :provider_application_mode,
@@ -87,10 +88,10 @@ defmodule PtcRunner.Kernel.CommandRuntime do
     if valid?(runtime) do
       case runtime.environment_setup.() do
         :ok -> :ok
-        # A named dotenv file that cannot be read is the operator's input, not a
-        # broken runtime, so it keeps its own reason. Any other setup failure —
-        # including an embedding host's own callback — stays undifferentiated.
-        {:error, :environment_file_invalid} -> {:error, :environment_file_unavailable}
+        # The dotenv attachment classifies its own failure, because only it
+        # knows the operator named the file. Everything else stays
+        # undifferentiated.
+        {:error, :environment_file_unavailable} -> {:error, :environment_file_unavailable}
         _failure -> {:error, :environment_setup_failed}
       end
     else
@@ -103,6 +104,27 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   end
 
   def setup_environment(_runtime), do: {:error, :environment_setup_failed}
+
+  @doc """
+  Runs environment setup and classifies a named environment file that failed.
+
+  Commands share this so `run` and `doctor` answer a bad `--env-file`, or a
+  project's `host.env_file`, with the same code instead of one of them
+  reporting an internal failure.
+  """
+  @spec setup_environment_diagnostic(t()) :: :ok | {:error, CommandDiagnostic.t() | atom()}
+  def setup_environment_diagnostic(runtime) do
+    case setup_environment(runtime) do
+      :ok ->
+        :ok
+
+      {:error, :environment_file_unavailable} ->
+        {:error, CommandDiagnostic.new!(:local_preflight, :environment_file_unavailable)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
   @doc false
   @spec with_environment(t(), (-> :ok | {:error, term()})) ::
