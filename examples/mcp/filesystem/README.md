@@ -23,7 +23,8 @@ read again, so later changes cannot alter a result.
 All four data tools accept optional `cursor` and `limit` arguments and return
 exactly `snapshot_hash`, `items`, and `next_cursor`. Start without a cursor and
 follow the opaque `next_cursor` until it is null. Cursors are bound to the
-snapshot, tool, and query/path arguments; replay in another traversal fails.
+snapshot, tool, and query/path arguments, and must be presented exactly as
+issued; replay in another traversal, or any edit to the string, fails.
 For `read_text_file`, concatenating item `text` reconstructs the file exactly.
 Every page carries the same `snapshot_hash`, so a citation binds to the bytes
 actually queried.

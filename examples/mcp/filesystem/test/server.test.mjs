@@ -138,6 +138,19 @@ async function withGeneratedServer(files, body) {
   }
 }
 
+const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+
+/** A different string for the same signature bytes, proving the encoding is not canonical. */
+function respell(signature) {
+  const bytes = Buffer.from(signature, 'base64url')
+  const sibling = [...BASE64URL]
+    .map((character) => `${signature.slice(0, -1)}${character}`)
+    .find((candidate) => candidate !== signature && Buffer.from(candidate, 'base64url').equals(bytes))
+
+  assert.ok(sibling, 'the signature must have an alternate spelling for this test to mean anything')
+  return sibling
+}
+
 function waitForSnapshot(createdBefore) {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + 15_000
@@ -315,6 +328,24 @@ test('cursors are bound to the snapshot, tool, and normalized query', async () =
       arguments: { query: '.ex', cursor: tampered },
     })
     assert.ok(response.result?.isError || response.error, 'a modified cursor must be rejected')
+  })
+})
+
+// The final base64url character of a 32-byte signature carries only four
+// significant bits, so fifteen of its sixteen legal values have a sibling that
+// decodes to the same bytes. A verifier that compares decoded signatures
+// therefore accepts cursor strings it never issued.
+test('a cursor whose signature is re-spelled without changing its bytes is rejected', async () => {
+  await withServer(INCLUDE_LIB, async (server) => {
+    const cursor = (await call(server, 'search_files', { query: '.ex', limit: 1 })).next_cursor
+    const [payload, signature] = cursor.split('.')
+    const sibling = respell(signature)
+
+    const response = await server.request('tools/call', {
+      name: 'search_files',
+      arguments: { query: '.ex', cursor: `${payload}.${sibling}` },
+    })
+    assert.ok(response.result?.isError || response.error, 'only the issued spelling of a cursor may resume')
   })
 })
 

@@ -20128,8 +20128,11 @@ function decodeCursor(snapshot, scope, cursor, validPosition, first) {
       throw new ToolError("cursor is not valid");
     }
     const [payload, encodedSignature] = parts;
-    const signature = Buffer.from(encodedSignature, "base64url");
-    const expected = createHmac("sha256", cursorKey(snapshot)).update(payload, "ascii").digest();
+    const signature = Buffer.from(encodedSignature, "ascii");
+    const expected = Buffer.from(
+      createHmac("sha256", cursorKey(snapshot)).update(payload, "ascii").digest("base64url"),
+      "ascii"
+    );
     if (signature.length !== expected.length || !timingSafeEqual(signature, expected)) {
       throw new ToolError("cursor is not valid");
     }
