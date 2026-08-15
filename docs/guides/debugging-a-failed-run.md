@@ -258,7 +258,7 @@ required total, and the frozen dependency closure with each component's source:
   "closure_complete": true,
   "dependency_closure": ["orders", "pricing.tax", "pricing.base", "pricing.rule"],
   "evidence_states": ["complete", "incomplete", "unavailable"],
-  "generated_source": "(let [quote (orders/place data/params)] (if (= (get quote \"total\") 120) quote (fail {:kind \"order-total-mismatch\"})))",
+  "generated_source": "(let [quote (orders/place {\"subtotal\" 100})] (if (= (get quote \"total\") 120) quote (fail {:kind \"order-total-mismatch\"})))",
   "terminal_reason": "explicit_failure"
 }
 ```
@@ -274,10 +274,22 @@ own bound, so a partial closure is never mistaken for the whole one.
 `evidence_states` includes `incomplete` here because this run failed by calling
 `fail`, so no direct boundary producer was proven.
 
-The generated program requires 120, the reached rule adds 2, and the closure
-contains exactly one component that decides the added amount. That is a
-supported diagnosis. Confirming it is a separate step: edit
-`target/pricing.rule.clj`, remove the stale capture, and rerun the target.
+The generated program is what makes this diagnosis supported rather than
+plausible. It carries both values the check ran on — subtotal 100 and required
+total 120 — so the reached sources settle the question: `pricing.base` returns
+the subtotal unchanged and `pricing.rule` adds 2, and no other component in the
+closure decides the amount.
+
+This is worth noticing, because the same example with `data/params` in the
+generated program instead of the literal order is genuinely insufficient
+evidence. The capture would still show the check and the whole source chain,
+but not the value checked, and a wrong input would then be indistinguishable
+from a wrong component. A live model given that earlier capture correctly
+refused to name a component for exactly this reason. What a run generates is
+what a later run can prove.
+
+Confirming the diagnosis is a separate step: edit `target/pricing.rule.clj`,
+remove the stale capture, and rerun the target.
 
 ## Let a model do the walking
 
@@ -349,16 +361,24 @@ and returned a report missing a single required field. The bounded contract
 feedback named exactly that field; the model resumed exploring instead of
 correcting. Stating the contract's fields in the task removed the problem.
 
-**Correct evidence does not make a correct diagnosis.** Two live runs of the
-identical configuration reached the same complete evidence and answered
-differently: one returned `insufficient-evidence`, the other a confident
-`diagnosed` report whose five evidence lines were all accurate and genuinely
-read, and whose conclusion was wrong — it blamed the component that never calls
-the unused decoy rather than the rule that adds the wrong amount. Nothing in
-the substrate could have prevented that, because the substrate deliberately
-does not choose a diagnosis. Treat a single sample as one opinion.
+**What the run generated decides what the debugger can prove.** Against the
+current capture, whose generated program carries both the order and the
+required total, the live model traced the branching chain and correctly named
+`pricing.rule`, citing that `pricing.base` returns the subtotal unchanged while
+the rule adds 2. Against an earlier capture whose program referenced
+`data/params` instead of the literal order, the same configuration correctly
+returned `insufficient-evidence`, reasoning that without the input value a
+wrong input and a wrong component are indistinguishable. Both answers were
+right about their own evidence.
 
-That last point is the reason this layer stops where it does. Where a claim is
+**A contract-valid report is still not a correct one.** A third run returned a
+confident `diagnosed` report whose evidence lines were all accurate and
+genuinely read, and whose conclusion was wrong — it blamed the component that
+never calls the unused decoy. Nothing in the substrate could have prevented
+that, because the substrate deliberately does not choose a diagnosis. Treat a
+single sample as one opinion.
+
+That is the reason this layer stops where it does. Where a claim is
 mechanically testable, test it: apply the proposed change and run it against
 host-owned cases before believing it. The model may diagnose and author;
 whether a change is accepted stays with the host.

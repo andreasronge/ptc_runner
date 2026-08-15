@@ -69,11 +69,12 @@ Selecting the inspection snapshot fixes the run's class to
 `"accepts_data": ["normal", "private_inspection"]`. That is an operator
 decision to send captured private evidence to a model vendor.
 
-Two live runs of this configuration reached the same complete evidence and
-answered differently: one abstained, the other confidently blamed `orders` for
-not calling the unused decoy rather than the rule that adds the wrong amount.
-That is the point of the decoy, and the reason this layer reports evidence
-instead of choosing a diagnosis.
+A verified live run traced the branching chain and correctly named
+`pricing.rule`. Earlier runs, against a capture whose generated program did not
+carry the order values, correctly abstained instead — and one run was
+confidently wrong, blaming `orders` for not calling the unused decoy. That is
+the point of the decoy, and the reason this layer reports evidence rather than
+choosing a diagnosis.
 
 ## What each file does
 

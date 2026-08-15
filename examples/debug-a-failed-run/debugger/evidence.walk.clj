@@ -33,43 +33,49 @@
     []
     edges))
 
-;; Walk every frozen dependency edge the failing call reached, breadth first.
-;; A frozen graph orders dependencies before dependants, so it cannot cycle,
-;; but deduplicate by component anyway and keep explicit bounds. Any edge the
-;; host did not prove complete, and any followed edge that returned no item,
-;; makes the result partial rather than silently short.
-(defn- expand [run-id state]
-  (let [seen (get state "seen")
-        edges (mapcat dependency-edges (get state "frontier"))
-        followable (filter complete? edges)
-        available (new-edges seen followable)
-        ;; Apply the component bound to this round's edges, not merely before
-        ;; it: one high-degree frontier could otherwise follow far more than
-        ;; the bound before anything notices.
+;; The single place that turns edges into items, so the 64-component bound and
+;; the deduplication apply to the roots exactly as they apply to every later
+;; round. Withholding an edge, or following one that returns no item, makes the
+;; walk partial rather than silently short.
+(defn- follow-edges [run-id seen edges]
+  (let [available (new-edges seen edges)
         wanted (take (max 0 (- 64 (count seen))) available)
         found (remove nil? (map #(hop run-id %) wanted))]
-    {"chain" (concat (get state "chain") found)
+    {"found" found
      ;; Record every attempted component, so a failed hop is not retried.
      "seen" (concat seen (map edge-component wanted))
-     "frontier" found
+     "complete?" (and (= (count wanted) (count available))
+                      (= (count found) (count wanted)))}))
+
+;; Walk every frozen dependency edge the failing call reached, breadth first.
+;; A frozen graph orders dependencies before dependants, so it cannot cycle,
+;; but deduplicate by component anyway. An edge the host did not prove complete
+;; also makes the result partial.
+(defn- expand [run-id state]
+  (let [edges (mapcat dependency-edges (get state "frontier"))
+        followable (filter complete? edges)
+        round (follow-edges run-id (get state "seen") followable)]
+    {"chain" (concat (get state "chain") (get round "found"))
+     "seen" (get round "seen")
+     "frontier" (get round "found")
      "complete?" (and (get state "complete?")
                       (= (count edges) (count followable))
-                      (= (count wanted) (count available))
-                      (= (count found) (count wanted)))}))
+                      (get round "complete?"))}))
 
 ;; A round that finds nothing new empties the frontier, so a frontier that
 ;; survives every round means the walk ran out of rounds with edges still
 ;; unchecked.
-(defn- closure [run-id roots complete?]
-  (let [walked (reduce
+(defn- closure [run-id seeded]
+  (let [roots (get seeded "found")
+        walked (reduce
                  (fn [state _round]
                    (if (empty? (get state "frontier"))
                      state
                      (expand run-id state)))
                  {"chain" roots
-                  "seen" (map #(get % "component_id") roots)
+                  "seen" (get seeded "seen")
                   "frontier" roots
-                  "complete?" complete?}
+                  "complete?" (get seeded "complete?")}
                  (range 16))]
     (assoc walked "complete?"
            (and (get walked "complete?") (empty? (get walked "frontier"))))))
@@ -91,15 +97,17 @@
                       {"collection" "generated_sources"
                        "parent_evaluation_id" (get error "evaluation_id")}))
         ;; A program may call several components. Seed the walk from every one
-        ;; the host proved, and let an unproven or empty reference make the
-        ;; whole closure partial rather than quietly narrowing it to the first.
+        ;; the host proved, through the same bounded follow every later round
+        ;; uses, and let an unproven reference make the closure partial rather
+        ;; than quietly narrowing it to the first.
         referenced (relations generated "referenced_prelude_source")
-        proven (new-edges [] (filter complete? referenced))
-        roots (remove nil? (map #(hop run-id %) proven))
+        followable (filter complete? referenced)
+        seeded (follow-edges run-id [] followable)
         walk (closure
                run-id
-               roots
-               (and (= (count referenced) (count proven)) (= (count roots) (count proven))))
+               (assoc seeded "complete?"
+                      (and (get seeded "complete?")
+                           (= (count referenced) (count followable)))))
         chain (get walk "chain")]
     {"run_id" run-id
      "terminal_reason" (get run "terminal_reason")
