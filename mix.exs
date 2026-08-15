@@ -409,6 +409,7 @@ defmodule PtcRunner.MixProject do
           "docs/guides/building-agents.md",
           "docs/guides/connecting-tools-with-mcp.md",
           "docs/guides/running-and-debugging.md",
+          "docs/guides/debugging-a-failed-run.md",
           "docs/guides/evaluating-with-replay.md",
           "docs/guides/kernel-repl.md",
           "docs/guides/components-and-preludes.md",

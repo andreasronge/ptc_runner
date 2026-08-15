@@ -34,6 +34,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added the shipped `debug.nav` component: `runs`, `open`, `read`, and a safe
+  `follow` over one immutable run-evidence capture. `follow` takes a typed
+  relationship exactly as an evidence item published it, refuses an unavailable
+  or filterless one, and returns the relationship beside the unchanged native
+  page envelope so cursors, completeness, and relationship state survive the
+  hop. It adds no host authority and no diagnosis policy.
+
+- Added the [Debug a failed run](docs/guides/debugging-a-failed-run.md) guide
+  and its credential-free `examples/debug-a-failed-run` pair, in which one
+  ordinary PTC run navigates another run's captured failure from the boundary
+  error through generated source and referenced prelude source to the frozen
+  dependency closure.
+
 - Added occurrence-qualified `dependency_prelude_source` relationships to
   effective prelude sources, so a debugger can walk a frozen dependency closure
   instead of guessing which copy of a shared component a call reached. A
