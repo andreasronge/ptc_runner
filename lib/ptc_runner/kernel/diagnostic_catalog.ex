@@ -97,7 +97,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:local_preflight, :environment_unavailable, 4, false,
      "a required local environment is unavailable"},
     {:local_preflight, :environment_file_unavailable, 4, false,
-     "the named environment file must be an existing readable file"},
+     "the named environment file must be readable UTF-8 under 1 MB"},
     {:local_preflight, :authorization_target_unknown, 4, false,
      "--authorize-mcp must name an installed provider the application selects"},
     {:local_preflight, :authorization_not_applicable, 4, false,

@@ -145,6 +145,59 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
+  test "an unreadable environment file renders the same requirement run and doctor do", %{
+    tmp_dir: directory
+  } do
+    # The REPL takes --env-file too, and rendered the bare reason atom while the
+    # other two commands named what the file has to be.
+    manifest_path = Path.join(directory, "env.json")
+    File.write!(Path.join(directory, "main.clj"), "(ns main) (defn run [input] (return input))")
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "main", "path" => "main.clj"}],
+          "entry" => "main/run"
+        },
+        "input" => %{"value" => %{}},
+        "providers" => %{"workflow" => [%{"name" => "model"}], "mission" => []}
+      })
+    )
+
+    host_path = Path.join(directory, "host.json")
+
+    File.write!(
+      host_path,
+      Jason.encode!(%{
+        "credentials" => %{"key" => %{"env" => "PTC_REPL_ABSENT_KEY"}},
+        "install" => %{
+          "model" => %{
+            "source" => "llm",
+            "installation_revision" => "model-v1",
+            "model" => "openrouter:test/model",
+            "credential" => "key"
+          }
+        }
+      })
+    )
+
+    assert_raise Mix.Error, ~r/must be readable UTF-8 under 1 MB/, fn ->
+      run_repl([
+        "--manifest",
+        manifest_path,
+        "--host-config",
+        host_path,
+        "--env-file",
+        Path.join(directory, "absent.env"),
+        "-e",
+        "(+ 1 2)"
+      ])
+    end
+  end
+
+  @tag :tmp_dir
   test "a private manifest rejects eval before authorizing its trace", %{tmp_dir: directory} do
     component_path = Path.join(directory, "helpers.clj")
     manifest_path = Path.join(directory, "private.json")
