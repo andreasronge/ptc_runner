@@ -15,6 +15,14 @@
         {"id": "debug.workspace", "path": "workspace.clj", "dependencies": ["debug.nav"]}
       ],
       "providers": ["history", "debug.nav"]
+    },
+    "case": {
+      "components": [
+        {"library": "debug.nav"},
+        {"id": "debug.workspace", "path": "workspace.clj", "dependencies": ["debug.nav"]},
+        {"id": "debug.case", "path": "case.clj", "dependencies": ["debug.nav", "debug.workspace"]}
+      ],
+      "providers": ["history", "debug.nav"]
     }
   },
   "input": {"path": "input-reference.json"},

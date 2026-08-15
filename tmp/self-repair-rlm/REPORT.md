@@ -195,3 +195,58 @@ The operation must not label a cause or recommend a fix. Reuse the same generic
 prompt, two models, and four-call ceiling. Success would show that the missing
 primitive is co-location of runtime evidence and current source, analogous to
 a coding agent starting from a failed command while retaining its working set.
+
+## Structural case-context experiment
+
+The experiment added that projection as an experiment-only `debug.case/context`
+prelude. It performs deterministic joins over `debug.nav` and
+`debug.workspace/changed` and returns the terminal workflow error, directly
+nested evaluation, generated program, single nested capability result, exact
+frozen changed sources, typed relationships, and completeness metadata. It
+does not name a cause, assign blame, or suggest a fix. The changed-component
+ids are fixed in this fixture; a product version would receive its working set
+from the host rather than hard-code it.
+
+Both models received the same failed run id, generic diagnosis task, open
+`debug.nav`, and four-model-call limit.
+
+| Model | Debugger run | Result | Model / evidence calls |
+| --- | --- | --- | --- |
+| Luna | `cmd-3arkjfkac6pr80qyf6c19rgtjc` | correct cause and next change | 4 / 11 |
+| DeepSeek | `cmd-3pryesyveyf3h60fe4rqf26d3x` | turn limit without report | 4 / 16 |
+
+Luna called `debug.case/context` immediately. The first observation already
+co-located the root program `(return (debug.nav/runs {"limit" 10}))`, the
+workflow's accepted `debug.rlm/investigate` and `debug.rlm/finish` actions,
+and the explicit failure. Luna spent two additional calls verifying errors,
+activity, and turns, then correctly reported that the root returned a raw
+navigation result rather than a recursive-workflow action. It recommended
+using navigation only as intermediate evidence gathering and crossing the
+root boundary with `investigate` or `finish`. This is the first open-ended PTC
+run in the experiment to reproduce the manual coding-agent diagnosis within
+the four-call criterion.
+
+DeepSeek also called `debug.case/context` first, but then requested the same
+complete projection again. It passed the projection's entire relationships
+array to `debug.nav/follow`, whose contract expects one relationship map, and
+used its final two calls to read boundary and child activity. It never
+synthesized a report. A separate PTC private-analysis query confirmed that the
+second-turn feedback contained 13,991 characters, including the faulty source,
+accepted action protocol, and completeness field, with no truncation marker.
+Its failure was therefore not caused by hidden or truncated decisive evidence.
+
+The result supports a narrower conclusion than “case context fixes debugging”:
+structural co-location can make an ordinary PTC agent behave like the manual
+coding-agent investigation, but it is not sufficient across models. The
+remaining friction is stopping and traversal ergonomics. Completeness metadata
+did not stop DeepSeek, repeated context reads remained possible, and a typed
+relationship was still easy to pass at the wrong container level.
+
+The useful product direction is a general, structural incident projection—not
+an RLM-specific diagnosis workflow—with safely followable links and clear
+working-set provenance. Before designing it into `debug.nav`, run the same
+unchanged projection shape against an unrelated failure. That experiment will
+test whether the join is genuinely general or merely fits this action-protocol
+canary. DeepSeek's behavior should be treated separately as evidence that a
+model-agnostic interface may also need an explicit evidence-sufficiency or
+bounded-synthesis affordance.
