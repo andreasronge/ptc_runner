@@ -547,3 +547,82 @@ correctly rejected the unsafe layout, but reported only the generic
 `arguments/invalid_arguments` diagnostic. Moving the output to a physically
 separate sibling root worked. The diagnostic should identify the conflicting
 paths and the required separation, as the guide already explains.
+
+## Explicit decision and host-gated repair experiment
+
+The next comparison kept the phased loop, exact correlated transcript, and
+evidence access unchanged. Only the final contract changed. The synthesis
+mission had to return one of two explicit decisions:
+
+- `propose-change`, with an exact component, base-source hash, complete
+  candidate source, and supporting evidence; or
+- `insufficient-evidence`, with the missing evidence named explicitly.
+
+A proposal was not treated as a fix. It was passed unchanged to `mix
+ptc.repair`, which applied the existing G1--G4 compatibility gates and then ran
+a host-owned deterministic validation suite. The validator invoked the target
+function through `kernel/eval-with`; it had no provider configuration and made
+zero LLM calls. This isolates candidate behavior from the debugger model and
+from a second model's judgment.
+
+| Incident | Model | Debugger run | Model outcome | Host outcome |
+| --- | --- | --- | --- | --- |
+| transitive pricing defect | Luna | `cmd-3bw7s35svxnfaz8vr25v5g452q` | correct `propose-change` | G1--G4 and all three behavioral cases passed |
+| ambiguous contract failure | DeepSeek | `cmd-6metqjtezfmg2bk4p7mgvyhfe2` | no decision within four turns | no candidate |
+| ambiguous contract failure | DeepSeek | `cmd-32gtth60sfgqaemjwa0pqcgghj` | wrong `propose-change` after one extra synthesis turn | G1--G4 passed; behavioral case rejected it |
+
+For pricing, Luna identified `pricing.rule/apply-standard`, supplied the exact
+base hash, and changed `(+ subtotal 2)` to `(+ subtotal 20)`. The three
+deterministic cases covered 100, 0, and -10. PTC private analysis of validation
+runs `cmd-32xd0awqr6sk6hgfqzb9069tjt`,
+`cmd-67d9mwkhjnw3dsqemh9hecvn94`, and
+`cmd-2k6dnv96wawc5yhf0drpz0txrx` verified the candidate override and a clean
+zero-LLM execution in each case.
+
+The four-turn DeepSeek ambiguity run exhausted its budget while trying
+nonexistent navigation and data-query functions in synthesis. One additional
+synthesis correction turn was allowed as a bounded stopping rule. It produced
+a contract-valid but incorrect candidate: change `orders/place` from a string
+`"total"` key to a keyword `:total` key. Its cause claimed that JSON required
+the keyword representation and that the observed `const` violation proved it.
+Neither claim follows from the evidence, and both key forms project to the same
+JSON key.
+
+That candidate still compiled, preserved prompt-visible exports, did not widen
+effects, and preserved dependencies, so G1--G4 all passed. The deterministic
+case rejected it with `result_mismatch`. PTC private analysis of validation run
+`cmd-4efbkxcv5q697cmphy2c989634` verified that the exact override was active,
+the run completed normally with no execution errors and zero LLM calls, and its
+result remained `{"total": 100}` instead of the host-required
+`{"total": 120}`. The gate therefore converted a confident hallucinated repair
+into a retained rejected candidate rather than a self-applied change.
+
+### Conclusions
+
+1. An explicit abstention enum did not calibrate DeepSeek on this ambiguity.
+   The richer schema increased correction pressure, and an extra turn merely
+   made the wrong explanation structurally valid.
+2. Static compatibility is necessary but insufficient. G1--G4 answer whether
+   a candidate can safely enter the environment, not whether it repairs the
+   observed behavior.
+3. A host-owned, no-model behavioral suite is a useful acceptance boundary.
+   The model may diagnose and author; the host owns accepted versus rejected.
+4. The general debugger result should therefore permit an optional candidate,
+   but the durable lifecycle state should be host-authored: diagnosed,
+   insufficient evidence, candidate rejected, or candidate validated. It
+   should not rely on the model to report its own success.
+5. The next small increment is not more prompt tuning. It is to make a rejected
+   validation result available as bounded evidence to a later repair phase and
+   test whether one correction attempt improves the candidate without changing
+   the investigation protocol.
+
+### Repair-path friction
+
+The first valid pricing candidate passed G1--G4 and was materialized, then
+`ptc.repair` failed with `validation_destination_unavailable` because the
+parent of `--validation-out` did not already exist. Creating that parent and
+rerunning succeeded. The command should validate or create the destination
+before publishing a candidate, and the diagnostic should name the missing
+parent path. As implemented, an incidental output-directory problem is
+reported only after the operator sees `candidate ready`, which makes the
+acceptance boundary harder to interpret and automate.

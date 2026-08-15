@@ -1,0 +1,14 @@
+{
+  "task": "The PtcRunner command failed with execution/workflow_failed and run reference cmd-0m05wjqpk4q7g5v61vhmb3gpm4. Diagnose why this run stopped using immutable captured evidence. A code change requires externally expected behavior and evidence that distinguishes one faulty implementation from its callers, dependencies, contracts, and inputs. If evidence proves one faulty prelude, return propose-change with exactly decision, run_id, cause, target_environment, target_mission, component_id, function_id, base_source_hash, candidate_source, and evidence. candidate_source must be the complete replacement component and preserve unrelated exports; evidence is an array of strings. Otherwise return insufficient-evidence with exactly decision, run_id, cause, evidence, and missing_evidence; both evidence fields are arrays of strings. Do not guess across incomplete or ambiguous evidence. Use return only for a phase report.",
+  "run_id": "cmd-0m05wjqpk4q7g5v61vhmb3gpm4",
+  "context_mission": "case-deep",
+  "agent": {
+    "phases": [
+      {"mission": "investigate", "max_turns": 2},
+      {"mission": "synthesize", "max_turns": 2, "instruction": "Return the best supported propose-change or insufficient-evidence decision now. Do not continue exploring."}
+    ],
+    "max_observation_chars": 32768,
+    "max_transcript_chars": 300000,
+    "consolidate_at_turns_remaining": 2
+  }
+}

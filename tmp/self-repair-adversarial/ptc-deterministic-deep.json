@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "repair.validation", "path": "deterministic-validator.clj", "dependencies": ["kernel"]},
+      {"library": "kernel"}
+    ],
+    "entry": "repair.validation/run"
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {"id": "pricing.rule", "path": "deep/rule.clj"},
+        {"id": "pricing.tax", "path": "deep/tax.clj", "dependencies": ["pricing.rule"]},
+        {"id": "pricing.discount", "path": "deep/discount.clj"},
+        {"id": "orders", "path": "deep/orders.clj", "dependencies": ["pricing.discount", "pricing.tax"]}
+      ]
+    }
+  },
+  "input": {"value": {"subtotal": 100}},
+  "providers": {"workflow": [], "mission": []},
+  "contracts": {"result_schema": {"path": "validation-result.schema.json"}},
+  "limits": {
+    "run_duration_ms": 30000,
+    "workflow_timeout_ms": 30000,
+    "evaluation_timeout_ms": 10000,
+    "subordinate_evaluations": 2,
+    "normal_event_count": 256
+  }
+}
