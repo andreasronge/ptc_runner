@@ -250,3 +250,60 @@ test whether the join is genuinely general or merely fits this action-protocol
 canary. DeepSeek's behavior should be treated separately as evidence that a
 model-agnostic interface may also need an explicit evidence-sufficiency or
 bounded-synthesis affordance.
+
+## Unrelated functional-failure generalization
+
+The next run kept the structural packet fields, generic diagnosis request,
+models, and four-call ceiling, but changed the incident to the adversarial
+`deep` fixture (`cmd-0m05wjqpk4q7g5v61vhmb3gpm4`). This is an unrelated
+transitive functional defect: the captured task requires subtotal plus 20,
+`orders/place` enforces that invariant through `pricing.tax`, and the frozen
+`pricing.rule` source adds 2. The working set contained all four mission
+components, including the unused discount decoy, without identifying a suspect.
+
+| Model | Debugger run | Result | Model / evidence calls |
+| --- | --- | --- | --- |
+| Luna | `cmd-2wa5pb2tkzv0kqbbsvvq5qz5w9` | returned, but misdiagnosed the explicit failure boundary | 4 / 20 |
+| DeepSeek | `cmd-6aaqy1hv0mh85bmnqjy4srb1dt` | turn limit without report | 4 / 27 |
+
+This did not fairly test whether the co-located evidence generalizes. Despite
+the prompt reserving `return` for the final report, both models first emitted
+`(return (debug.case/context ...))`. The result contract rejected the case map,
+so one of four calls was spent correcting terminal ceremony before either model
+could reason about the packet.
+
+Luna then bound the context and printed it. The complete representation was
+4,037 characters, but the print observation projected only 2,000; it included
+the task's plus-20 requirement and boundary metadata but cut off the working-set
+sources. The full value remained bound in evaluator memory, yet Luna never read
+its `working_set`. It finally blamed an unspecified explicit-failure path and
+recommended removing that path, which is not the demonstrated `pricing.rule`
+defect.
+
+DeepSeek bound the context without making it the program value, so its next
+observation contained only `#'ctx`. It then printed the map; the following
+observation exposed the `working_set` key but not the component source bodies.
+Its last call recomputed context and printed relationships instead of returning.
+
+PTC private analysis verified that evidence acquisition itself was complete.
+Each context evaluation made four successful `prelude_sources` reads; the
+captured `pricing.rule` item had source hash
+`sha256:e9d90f3d300507fac49da9e0b06c844546c3d4866d0c66e7846d7a1e905ff2dd`.
+The debugger runs simply did not surface and compare those sources within the
+remaining model calls.
+
+This exposes a more basic difference from a coding agent: startup context
+should not itself be a model-chosen tool call. A coding agent begins after the
+failed command with that context already present; it does not have to decide
+whether to `return`, bind, print, or recompute it. The next experiment should
+have a host workflow acquire the same non-diagnostic packet and place it in the
+agent's initial context before model turn one. That changes transport and
+budget accounting, not diagnostic content. Only then is another unrelated-case
+run a valid test of projection generality.
+
+One CLI friction item also appeared before provider activity: `--input` is
+resolved as a confined reference relative to the manifest directory, not as a
+path relative to the shell working directory. Supplying the repository-relative
+path produced `application/reference_missing` with source `input.json`; using
+the basename succeeded. The run guide says that `--input INPUT.json` replaces
+the manifest input but does not state this resolution rule.
