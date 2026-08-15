@@ -414,3 +414,47 @@ tool availability is inducing unbounded verification and a product path needs a
 host-enforced synthesis phase. If it still fails, the model cannot reliably
 synthesize this abstract contract mismatch from the packet under the current
 prompt and four-call budget.
+
+## Synthesis-only control
+
+The same DeepSeek/protocol compact packet was then passed to a separate
+`synthesize` mission with an empty component set and no selected mission
+providers. The initial instruction explicitly described this as a synthesis
+phase with no evidence-navigation functions. Context acquisition, packet
+contents, model, result schema, and four-call ceiling were unchanged.
+
+Run `cmd-160nqrcyc20atsavh86bztte38` returned the correct diagnosis in two model
+calls and used seven evidence calls, all from deterministic context acquisition.
+It made no investigation calls. PTC verified a 4,975-character untruncated
+initial message containing the generated navigation source, both accepted
+actions, and the no-navigation phase instruction.
+
+DeepSeek's first program already attempted to report that the mission returned
+raw `debug.nav/runs` data and the workflow subsequently rejected it. The program
+had an unclosed string at line 2, column 341, so normal parse-error feedback
+requested a corrected program. On turn two it returned a contract-valid report
+that:
+
+- identified the raw navigation result as neither `debug.rlm/investigate` nor
+  `debug.rlm/finish`;
+- cited the returned child evaluation, exact generated source, producer task,
+  and explicit workflow failure; and
+- recommended returning one of the protocol actions instead.
+
+The successful run took 164 seconds, so removing navigation improved behavioral
+completion rather than provider latency. Together with the paired compact run,
+this is evidence that available tools induced continued verification for this
+model and incident: with `debug.nav`, four valid reads and no report; without
+it, an immediate diagnosis attempt and a corrected report.
+
+This does not justify removing navigation from general debugging. Some incidents
+need evidence absent from their startup projection. It does support an explicit
+phase boundary: a bounded exploration phase may use `debug.nav`, but a separate
+host-enforced synthesis phase should receive the accumulated incident packet or
+notebook with no navigation authority. Merely printing `FINAL TURN` while
+leaving evidence tools callable was not sufficient for DeepSeek.
+
+The remaining product question is how to carry selected exploration findings
+into that synthesis phase without exposing raw private transcripts or requiring
+the model to obey a finish convention. That is a narrower runtime/workflow
+problem than adding more graph traversal operations.

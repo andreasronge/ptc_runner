@@ -28,6 +28,9 @@
     "investigate": {
       "components": [{"library": "debug.nav"}],
       "providers": ["history", "debug.nav"]
+    },
+    "synthesize": {
+      "components": []
     }
   },
   "input": {"path": "input-preloaded-action.json"},
