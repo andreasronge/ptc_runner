@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a required private-inspection retention failure remains fail-closed as
   `inspection_sink_error`.
 
+- MCP endpoint connection refusal, unresolved names, and admitted TLS handshake
+  failures now retain distinct closed diagnostics through acquisition and tool
+  invocation without exposing dependency or endpoint details. Dual-stack
+  endpoint connects race a bounded 16-address set under one deadline, preserve
+  not-dispatched provenance, and fall back across OAuth-approved addresses;
+  authorization-server discovery and token traffic remain generic.
+
 - Private inspection now retains an authenticated `result_contract_failed`
   diagnostic instead of destroying it. The retained runtime details carry
   internal contract-authority and command-path structs, which are not JSON

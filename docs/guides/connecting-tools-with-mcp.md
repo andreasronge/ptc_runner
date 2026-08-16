@@ -141,6 +141,23 @@ contacted, so a malformed or plain-`http` endpoint fails `mix ptc validate` and
 plain `mix ptc doctor` as `installation_endpoint_invalid` naming the
 installation — before anything is dialled.
 
+When direct endpoint acquisition does dial the server, `mix ptc run` and
+`mix ptc doctor --connect` distinguish three closed connection failures:
+
+- `provider_endpoint_connection_refused` means the endpoint rejected the TCP
+  connection and is marked retryable;
+- `provider_endpoint_name_unresolved` means the endpoint hostname did not
+  resolve; and
+- `provider_endpoint_tls_failed` means an admitted TLS configuration or
+  protocol alert prevented the handshake.
+
+These diagnostics name only the installed provider occurrence. They never
+include the endpoint, DNS response, certificate, TLS alert text, Mint value, or
+operating-system error. Other connection failures retain the generic
+`provider_unavailable` code. OAuth discovery and token traffic retain their
+existing closed authorization transport errors rather than exposing endpoint
+causes through grant state.
+
 Supported static schemes are `bearer`, `basic`, and header-named `api_key`.
 Protocol headers such as `authorization`, `content-type`, `host`, and `mcp-*`
 cannot be supplied as API-key headers. Upstream tool names are the server's own,

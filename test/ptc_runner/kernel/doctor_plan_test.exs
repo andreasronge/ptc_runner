@@ -384,6 +384,31 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
              )
   end
 
+  test "endpoint connection diagnostics settle acquisition connectivity rows" do
+    catalog = catalog(%{"provider" => [connectivity_mode: :acquisition]})
+    prepared = prepared(catalog, ["provider"])
+    assert {:ok, rows} = DoctorPlan.new(catalog, prepared, @environment, :connect)
+    occurrence = %{destination: :workflow, index: 0}
+
+    for code <- [
+          :provider_endpoint_connection_refused,
+          :provider_endpoint_name_unresolved,
+          :provider_endpoint_tls_failed
+        ] do
+      failure = diagnostic(:provider_acquisition, code, "provider", :acquisition, occurrence)
+
+      assert {:ok, settled} =
+               DoctorPlan.settle_failure(rows, failure, prepared, catalog, @environment)
+
+      assert {:ok, checks} = DoctorPlan.checks(settled)
+
+      assert %{"status" => "fail", "code" => rendered} =
+               fetch_check(checks, "provider/provider/connectivity")
+
+      assert rendered == Atom.to_string(code)
+    end
+  end
+
   test "unattributable diagnostics cannot synthesize failed rows" do
     catalog = catalog(%{"reachable" => [connectivity_mode: :probe, probe_effect: :metadata]})
     prepared = prepared(catalog, ["reachable"])

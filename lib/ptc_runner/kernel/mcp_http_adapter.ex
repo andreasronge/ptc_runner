@@ -22,7 +22,9 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
 
   This module deliberately emits no request-bearing Logger or Telemetry data.
   Returned errors are closed atoms and never retain Mint exceptions, endpoint
-  strings, headers, or bodies.
+  strings, headers, or bodies. Connect failures distinguish a refused socket,
+  an unresolved hostname, and an allowlisted TLS configuration or protocol
+  alert; every other transport value remains generic.
 
   ## Receive ceiling
 
@@ -100,6 +102,8 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
   the thing the reset exists to avoid.
   """
 
+  alias PtcRunner.Kernel.MCPAddressResolver
+
   @typedoc "A bounded response with downcased header names."
   @type response :: %{
           required(:status) => non_neg_integer(),
@@ -109,18 +113,54 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
         }
 
   @type dispatch_provenance :: :not_dispatched | :possibly_dispatched
-  @type reason :: :invalid_request | :timeout | :transport_error | :response_exceeded
+  @type reason ::
+          :invalid_request
+          | :timeout
+          | :transport_error
+          | :response_exceeded
+          | :connection_refused
+          | :name_not_resolved
+          | :tls_handshake_failed
 
   @default_max_headers 64
   @default_max_header_bytes 32_768
   @default_max_body_bytes 2_097_152
   @default_max_receive_bytes 65_536
+  @max_connect_candidates 16
+  @max_connect_candidates_per_family 8
 
   # The TLS record plaintext maximum (RFC 8446 §5.1). It is both the smallest
   # per-message ceiling TLS can honour and the size of the carry-over a TLS
   # delivery may add to one buffer's worth of ciphertext.
   @tls_record_bytes 16_384
   @max_max_receive_bytes 1_048_576
+  @tls_configuration_alerts [
+    :unexpected_message,
+    :bad_record_mac,
+    :record_overflow,
+    :handshake_failure,
+    :bad_certificate,
+    :unsupported_certificate,
+    :certificate_revoked,
+    :certificate_expired,
+    :certificate_unknown,
+    :illegal_parameter,
+    :unknown_ca,
+    :decode_error,
+    :decrypt_error,
+    :protocol_version,
+    :insufficient_security,
+    :inappropriate_fallback,
+    :unsupported_extension,
+    :missing_extension,
+    :certificate_required,
+    :certificate_unobtainable,
+    :unrecognized_name,
+    :bad_certificate_status_response,
+    :bad_certificate_hash_value,
+    :unknown_psk_identity,
+    :no_application_protocol
+  ]
 
   @spec request(keyword()) ::
           {:ok, response()}
@@ -228,7 +268,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
     else
       false -> {:error, :transport_error, :not_dispatched}
       {:error, :timeout} -> {:error, :timeout, :not_dispatched}
-      {:error, _reason} -> {:error, :transport_error, :not_dispatched}
+      {:error, reason} -> {:error, reason, :not_dispatched}
     end
   rescue
     _exception -> {:error, :transport_error, :not_dispatched}
@@ -302,7 +342,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
            optional_connected_peer(Keyword.get(opts, :connected_peer)) do
       {:ok,
        %{
-         scheme: String.to_existing_atom(uri.scheme),
+         scheme: scheme_atom(uri.scheme),
          address: address,
          hostname: uri.host,
          port: uri.port || default_port(uri.scheme),
@@ -349,7 +389,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
   defp optional_address(nil, %URI{host: host}), do: {:ok, host}
 
   defp optional_address(address, _uri)
-       when is_tuple(address) or is_binary(address),
+       when is_tuple(address) or is_binary(address) or is_list(address),
        do: {:ok, address}
 
   defp optional_address(_address, _uri), do: {:error, :invalid_request}
@@ -379,30 +419,391 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
   defp default_port("http"), do: 80
   defp default_port("https"), do: 443
 
-  defp connect(request) do
-    with remaining when remaining > 0 <- remaining_ms(request),
-         transport_opts = transport_opts(request.scheme, request.address, remaining),
-         opts = [
-           hostname: request.hostname,
-           protocols: [:http1],
-           max_header_list_size: request.max_header_bytes,
-           # Passive is the only mode whose `initiate/5` leaves the socket
-           # unarmed, which is what makes the receive ceiling below authoritative
-           # rather than a race against a read already in flight.
-           mode: :passive,
-           transport_opts: transport_opts
-         ],
-         {:ok, connection} <-
-           Mint.HTTP.connect(request.scheme, request.address, request.port, opts) do
-      activate(connection, request)
-    else
-      remaining when is_integer(remaining) and remaining <= 0 ->
-        {:error, :timeout}
+  @spec scheme_atom(binary()) :: :http | :https
+  defp scheme_atom("http"), do: :http
+  defp scheme_atom("https"), do: :https
 
-      {:error, reason} ->
-        if timeout_reason?(reason), do: {:error, :timeout}, else: {:error, :transport_error}
+  defp connect(request) do
+    case literal_address(request.address) do
+      {:ok, [address]} -> connect_address(request, address)
+      {:ok, addresses} -> connect_addresses(request, addresses)
+      :hostname -> connect_hostname(request)
+      :invalid -> {:error, :transport_error}
     end
   end
+
+  defp literal_address(address) when is_tuple(address) do
+    if :inet.is_ip_address(address), do: {:ok, [address]}, else: :invalid
+  end
+
+  defp literal_address(address) when is_binary(address) do
+    case :inet.parse_address(String.to_charlist(address)) do
+      {:ok, parsed} -> {:ok, [parsed]}
+      {:error, :einval} -> :hostname
+    end
+  end
+
+  defp literal_address(addresses) when is_list(addresses) do
+    if length(addresses) in 1..@max_connect_candidates and
+         addresses == Enum.uniq(addresses) and Enum.all?(addresses, &:inet.is_ip_address/1),
+       do: {:ok, addresses},
+       else: :invalid
+  end
+
+  defp connect_addresses(request, addresses) do
+    parent = self()
+    ref = make_ref()
+
+    initial_race_state()
+    |> start_connectors(parent, ref, request, addresses)
+    |> then(&await_connect_race(request, ref, &1))
+  end
+
+  defp connect_hostname(request) do
+    parent = self()
+    ref = make_ref()
+    hostname = String.to_charlist(request.address)
+
+    resolvers = MCPAddressResolver.start_family_queries(hostname, parent, ref)
+
+    await_connect_race(request, ref, %{initial_race_state() | resolvers: resolvers})
+  end
+
+  defp initial_race_state do
+    %{
+      resolvers: MapSet.new(),
+      connectors: MapSet.new(),
+      addresses: MapSet.new(),
+      deferred_addresses: [],
+      resolution_results: [],
+      connect_failures: [],
+      overflow?: false
+    }
+  end
+
+  defp await_connect_race(request, ref, state) do
+    if race_finished?(state) do
+      finish_connect_race(state)
+    else
+      remaining = remaining_ms(request)
+
+      if remaining > 0 do
+        receive do
+          {^ref, :resolved, resolver, result} ->
+            state
+            |> accept_resolution(request, ref, resolver, result)
+            |> then(&await_connect_race(request, ref, &1))
+
+          {^ref, :connect_failed, connector, failure} ->
+            state
+            |> Map.update!(:connectors, &MapSet.delete(&1, connector))
+            |> Map.update!(:connect_failures, &[failure | &1])
+            |> then(&await_connect_race(request, ref, &1))
+
+          {^ref, :connected, connector, connection} ->
+            adopt_connection(request, ref, state, connector, connection)
+        after
+          remaining ->
+            terminate_race(state)
+            {:error, collapse_connect_failures([:timeout | race_failures(state)])}
+        end
+      else
+        terminate_race(state)
+        {:error, collapse_connect_failures([:timeout | race_failures(state)])}
+      end
+    end
+  end
+
+  defp accept_resolution(state, request, ref, resolver, result) do
+    parent = self()
+
+    state =
+      state
+      |> Map.update!(:resolvers, &MapSet.delete(&1, resolver))
+      |> Map.update!(:resolution_results, &[result | &1])
+
+    case result do
+      {:ok, addresses} when is_list(addresses) ->
+        invalid? = Enum.any?(addresses, &(not :inet.is_ip_address(&1)))
+        known = MapSet.union(state.addresses, MapSet.new(state.deferred_addresses))
+
+        candidates =
+          addresses
+          |> Enum.filter(&:inet.is_ip_address/1)
+          |> Enum.uniq()
+          |> Enum.reject(&MapSet.member?(known, &1))
+
+        {accepted, deferred, overflow?} =
+          partition_connect_candidates(
+            state.addresses,
+            candidates,
+            @max_connect_candidates_per_family
+          )
+
+        state =
+          state
+          |> Map.update!(:deferred_addresses, &(&1 ++ deferred))
+          |> Map.update!(:overflow?, &(&1 or overflow? or invalid?))
+          |> start_connectors(parent, ref, request, accepted)
+
+        if MapSet.size(state.resolvers) == 0,
+          do: release_deferred_connectors(state, parent, ref, request),
+          else: state
+
+      _failure ->
+        if MapSet.size(state.resolvers) == 0,
+          do: release_deferred_connectors(state, parent, ref, request),
+          else: state
+    end
+  end
+
+  defp start_connectors(state, parent, ref, request, addresses) do
+    Enum.reduce(addresses, state, fn address, state ->
+      connector = spawn_link(fn -> connect_candidate(parent, ref, request, address) end)
+
+      state
+      |> Map.update!(:addresses, &MapSet.put(&1, address))
+      |> Map.update!(:connectors, &MapSet.put(&1, connector))
+    end)
+  end
+
+  @doc false
+  @spec partition_connect_candidates(
+          MapSet.t(:inet.ip_address()),
+          [:inet.ip_address()],
+          pos_integer()
+        ) :: {[:inet.ip_address()], [:inet.ip_address()], boolean()}
+  def partition_connect_candidates(seen, addresses, per_family_limit)
+      when is_struct(seen, MapSet) and is_list(addresses) and per_family_limit > 0 do
+    candidates =
+      addresses
+      |> Enum.filter(&:inet.is_ip_address/1)
+      |> Enum.uniq()
+      |> Enum.reject(&MapSet.member?(seen, &1))
+
+    family_counts = Enum.frequencies_by(seen, &tuple_size/1)
+
+    {accepted, deferred, _family_counts} =
+      Enum.reduce(candidates, {[], [], family_counts}, fn address, {accepted, deferred, counts} ->
+        family = tuple_size(address)
+
+        if length(accepted) + MapSet.size(seen) < @max_connect_candidates and
+             Map.get(counts, family, 0) < per_family_limit do
+          {[address | accepted], deferred, Map.update(counts, family, 1, &(&1 + 1))}
+        else
+          {accepted, [address | deferred], counts}
+        end
+      end)
+
+    deferred = Enum.reverse(deferred)
+
+    deferred_capacity =
+      max(@max_connect_candidates - MapSet.size(seen) - length(accepted), 0)
+
+    {kept_deferred, discarded} = Enum.split(deferred, deferred_capacity)
+    {Enum.reverse(accepted), kept_deferred, discarded != []}
+  end
+
+  defp release_deferred_connectors(state, parent, ref, request) do
+    {accepted, discarded} =
+      release_deferred_candidates(state.addresses, state.deferred_addresses)
+
+    state
+    |> Map.put(:deferred_addresses, [])
+    |> Map.update!(:overflow?, &(&1 or discarded != []))
+    |> start_connectors(parent, ref, request, accepted)
+  end
+
+  @doc false
+  @spec release_deferred_candidates(MapSet.t(:inet.ip_address()), [:inet.ip_address()]) ::
+          {[:inet.ip_address()], [:inet.ip_address()]}
+  def release_deferred_candidates(seen, deferred)
+      when is_struct(seen, MapSet) and is_list(deferred) do
+    capacity = max(@max_connect_candidates - MapSet.size(seen), 0)
+    Enum.split(deferred, capacity)
+  end
+
+  defp connect_candidate(parent, ref, request, address) do
+    case mint_connect(request, address) do
+      {:ok, connection} ->
+        send(parent, {ref, :connected, self(), connection})
+
+        receive do
+          {^ref, :adopt, ^parent} ->
+            result = transfer_connection(connection, request.scheme, parent)
+            if result != :ok, do: close(connection)
+            send(parent, {ref, :adopted, self(), result})
+
+          {^ref, :reject, ^parent} ->
+            close(connection)
+        after
+          max(remaining_ms(request), 1) -> close(connection)
+        end
+
+      {:error, reason} ->
+        send(
+          parent,
+          {ref, :connect_failed, self(), classify_connect_error(request.scheme, reason)}
+        )
+    end
+  rescue
+    _exception -> send(parent, {ref, :connect_failed, self(), :transport_error})
+  catch
+    _kind, _reason -> send(parent, {ref, :connect_failed, self(), :transport_error})
+  end
+
+  defp mint_connect(request, address) do
+    remaining = remaining_ms(request)
+
+    if remaining > 0 do
+      opts = [
+        hostname: request.hostname,
+        protocols: [:http1],
+        max_header_list_size: request.max_header_bytes,
+        # Passive is the only mode whose `initiate/5` leaves the socket
+        # unarmed, which is what makes the receive ceiling below authoritative
+        # rather than a race against a read already in flight.
+        mode: :passive,
+        transport_opts: transport_opts(request.scheme, address, remaining)
+      ]
+
+      Mint.HTTP.connect(request.scheme, mint_address(address), request.port, opts)
+    else
+      {:error, %Mint.TransportError{reason: :timeout}}
+    end
+  end
+
+  defp adopt_connection(request, ref, state, connector, connection) do
+    send(connector, {ref, :adopt, self()})
+    remaining = remaining_ms(request)
+
+    if remaining > 0 do
+      receive do
+        {^ref, :adopted, ^connector, :ok} ->
+          state
+          |> Map.update!(:connectors, &MapSet.delete(&1, connector))
+          |> terminate_race()
+
+          flush_race_messages(ref)
+          activate(connection, request)
+
+        {^ref, :adopted, ^connector, _failure} ->
+          state
+          |> Map.update!(:connectors, &MapSet.delete(&1, connector))
+          |> Map.update!(:connect_failures, &[:transport_error | &1])
+          |> then(&await_connect_race(request, ref, &1))
+      after
+        remaining ->
+          terminate_race(state)
+          {:error, collapse_connect_failures([:timeout | race_failures(state)])}
+      end
+    else
+      terminate_race(state)
+      {:error, collapse_connect_failures([:timeout | race_failures(state)])}
+    end
+  end
+
+  defp transfer_connection(connection, :http, parent),
+    do: :gen_tcp.controlling_process(Mint.HTTP.get_socket(connection), parent)
+
+  defp transfer_connection(connection, :https, parent),
+    do: :ssl.controlling_process(Mint.HTTP.get_socket(connection), parent)
+
+  defp mint_address(address) do
+    address
+    |> :inet.ntoa()
+    |> List.to_string()
+  end
+
+  defp race_finished?(state),
+    do: MapSet.size(state.resolvers) == 0 and MapSet.size(state.connectors) == 0
+
+  defp finish_connect_race(%{addresses: addresses, resolution_results: results} = state) do
+    if MapSet.size(addresses) == 0 do
+      case MCPAddressResolver.classify_results(results) do
+        {:error, :nxdomain} -> {:error, :name_not_resolved}
+        _other -> {:error, :transport_error}
+      end
+    else
+      {:error, collapse_connect_failures(race_failures(state))}
+    end
+  end
+
+  defp race_failures(state) do
+    resolution_failures =
+      if Enum.any?(state.resolution_results, fn
+           {:error, reason} when reason != :nxdomain -> true
+           _result -> false
+         end),
+         do: [:transport_error],
+         else: []
+
+    overflow_failures = if state.overflow?, do: [:transport_error], else: []
+    overflow_failures ++ resolution_failures ++ state.connect_failures
+  end
+
+  defp terminate_race(state) do
+    state.resolvers
+    |> MapSet.union(state.connectors)
+    |> MapSet.to_list()
+    |> terminate_workers()
+  end
+
+  @doc false
+  @spec terminate_workers([pid()], (pid() -> term())) :: :ok
+  def terminate_workers(pids, after_kill \\ fn _pid -> :ok end)
+      when is_list(pids) and is_function(after_kill, 1) do
+    previous_trap_exit = Process.flag(:trap_exit, true)
+    monitors = Enum.map(pids, &{&1, Process.monitor(&1)})
+
+    try do
+      Enum.each(monitors, fn {pid, _monitor} ->
+        Process.exit(pid, :kill)
+        after_kill.(pid)
+      end)
+
+      Enum.each(monitors, fn {pid, monitor} ->
+        receive do
+          {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+        end
+      end)
+
+      Enum.each(pids, fn pid ->
+        receive do
+          {:EXIT, ^pid, _reason} -> :ok
+        after
+          0 -> :ok
+        end
+      end)
+
+      :ok
+    after
+      Process.flag(:trap_exit, previous_trap_exit)
+    end
+  end
+
+  defp flush_race_messages(ref) do
+    receive do
+      {^ref, _event, _pid, _result} -> flush_race_messages(ref)
+    after
+      0 -> :ok
+    end
+  end
+
+  defp connect_address(request, address) do
+    case mint_connect(request, address) do
+      {:ok, connection} -> activate(connection, request)
+      {:error, reason} -> {:error, classify_connect_error(request.scheme, reason)}
+    end
+  end
+
+  @doc false
+  @spec collapse_connect_failures([reason()]) :: reason()
+  def collapse_connect_failures([failure | rest]) do
+    if Enum.all?(rest, &(&1 == failure)), do: failure, else: :transport_error
+  end
+
+  def collapse_connect_failures([]), do: :transport_error
 
   defp activate(connection, request) do
     # The ceiling goes on before the peer verifier, not after. Over TLS the
@@ -418,10 +819,34 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
          {:ok, connection} <- Mint.HTTP.set_mode(connection, :active) do
       {:ok, connection}
     else
-      {:error, _reason} = error ->
+      {:error, _reason} ->
         close(connection)
-        error
+        {:error, :transport_error}
     end
+  end
+
+  @doc false
+  @spec classify_connect_error(:http | :https, term()) ::
+          :timeout
+          | :transport_error
+          | :connection_refused
+          | :name_not_resolved
+          | :tls_handshake_failed
+  def classify_connect_error(_scheme, %Mint.TransportError{reason: :econnrefused}),
+    do: :connection_refused
+
+  def classify_connect_error(_scheme, %Mint.TransportError{reason: :nxdomain}),
+    do: :name_not_resolved
+
+  def classify_connect_error(
+        :https,
+        %Mint.TransportError{reason: {:tls_alert, {alert, _description}}}
+      )
+      when alert in @tls_configuration_alerts,
+      do: :tls_handshake_failed
+
+  def classify_connect_error(_scheme, reason) do
+    if timeout_reason?(reason), do: :timeout, else: :transport_error
   end
 
   # Public only so the `:https` branch can be exercised against a real TLS
@@ -464,9 +889,6 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
 
   defp address_family_options(address) when is_tuple(address) and tuple_size(address) == 4,
     do: [inet6: false, inet4: true]
-
-  defp address_family_options(address) when is_binary(address),
-    do: [inet6: true, inet4: true]
 
   defp verify_connected_peer(_connection, _scheme, nil), do: :ok
 

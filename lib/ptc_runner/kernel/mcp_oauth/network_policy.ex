@@ -4,11 +4,12 @@ defmodule PtcRunner.Kernel.MCPOAuth.NetworkPolicy do
 
   An endpoint must use an installed origin. Every candidate address is
   classified before connection; one denied address rejects the complete DNS
-  answer. Callers connect to one returned address while preserving the
-  original hostname and verify the connected peer against the same approved
-  set before sending request bytes.
+  answer. Callers race the returned addresses while preserving the original
+  hostname and verify the connected peer against the same approved set before
+  sending request bytes.
   """
 
+  alias PtcRunner.Kernel.MCPAddressResolver
   alias PtcRunner.Kernel.MCPOAuth.Authority
 
   @max_addresses 16
@@ -38,7 +39,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.NetworkPolicy do
              port: :inet.port_number(),
              origin: binary()
            }}
-          | {:error, :egress_denied | :resolution_failed}
+          | {:error, :egress_denied | :name_not_resolved | :resolution_failed}
   def resolve(url, authority, opts \\ [])
 
   def resolve(url, %Authority{} = authority, opts)
@@ -65,7 +66,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.NetworkPolicy do
          true <- private_allowed? or Enum.all?(addresses, &public_address?/1) do
       {:ok, Map.put(target, :addresses, addresses)}
     else
-      {:error, :resolution_failed} = error -> error
+      {:error, reason} = error when reason in [:name_not_resolved, :resolution_failed] -> error
       :expired -> {:error, :resolution_failed}
       _denied -> {:error, :egress_denied}
     end
@@ -208,6 +209,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.NetworkPolicy do
 
       case Task.yield(task, remaining_ms) || Task.shutdown(task, :brutal_kill) do
         {:ok, {:ok, addresses}} when is_list(addresses) -> {:ok, addresses}
+        {:ok, {:error, :nxdomain}} -> {:error, :name_not_resolved}
         _failure -> {:error, :resolution_failed}
       end
     else
@@ -223,19 +225,5 @@ defmodule PtcRunner.Kernel.MCPOAuth.NetworkPolicy do
     _kind, _reason -> {:error, :resolution_failed}
   end
 
-  defp default_resolver(hostname) do
-    host = String.to_charlist(hostname)
-
-    addresses =
-      [:inet, :inet6]
-      |> Enum.flat_map(fn family ->
-        case :inet.getaddrs(host, family) do
-          {:ok, values} -> values
-          {:error, _reason} -> []
-        end
-      end)
-      |> Enum.uniq()
-
-    if addresses == [], do: {:error, :nxdomain}, else: {:ok, addresses}
-  end
+  defp default_resolver(hostname), do: MCPAddressResolver.resolve(hostname)
 end

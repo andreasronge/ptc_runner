@@ -399,7 +399,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.Discovery do
   defp request_function(opts, authority) do
     case Keyword.get(opts, :request) do
       function when is_function(function, 5) ->
-        {:ok, function}
+        {:ok,
+         fn method, url, headers, body, timeout_ms ->
+           function.(method, url, headers, body, timeout_ms)
+           |> normalize_request_result()
+         end}
 
       nil ->
         resolver = Keyword.get(opts, :resolver)
@@ -413,6 +417,12 @@ defmodule PtcRunner.Kernel.MCPOAuth.Discovery do
         {:error, :invalid_request_adapter}
     end
   end
+
+  defp normalize_request_result({:error, reason})
+       when reason in [:connection_refused, :name_not_resolved, :tls_handshake_failed],
+       do: {:error, :transport_error}
+
+  defp normalize_request_result(result), do: result
 
   defp network_request(authority, resolver, method, url, headers, body, timeout_ms) do
     deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
@@ -431,16 +441,20 @@ defmodule PtcRunner.Kernel.MCPOAuth.Discovery do
         body: body,
         timeout_ms: remaining_ms,
         max_body_bytes: @max_metadata_bytes,
-        address: hd(target.addresses),
+        address: target.addresses,
         connected_peer: NetworkPolicy.peer_verifier(target.addresses)
       )
       |> case do
         {:ok, response} -> {:ok, response}
-        {:error, reason, _provenance} -> {:error, reason}
+        {:error, :timeout, _provenance} -> {:error, :timeout}
+        {:error, _reason, _provenance} -> {:error, :transport_error}
       end
     else
       remaining_ms when is_integer(remaining_ms) and remaining_ms <= 0 ->
         {:error, :timeout}
+
+      {:error, :name_not_resolved} ->
+        {:error, :transport_error}
 
       error ->
         error

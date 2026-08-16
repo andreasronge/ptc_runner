@@ -13,6 +13,12 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
   # this a later narrowing would silently degrade every affected reason into
   # "the command failed internally" with nothing failing.
   @expected [
+    {:mcp_endpoint_connection_refused, :provider_acquisition,
+     :provider_endpoint_connection_refused, :acquisition},
+    {:mcp_endpoint_name_unresolved, :provider_acquisition, :provider_endpoint_name_unresolved,
+     :acquisition},
+    {:mcp_endpoint_tls_failed, :provider_acquisition, :provider_endpoint_tls_failed,
+     :acquisition},
     {:mcp_transport_error, :provider_acquisition, :provider_unavailable, :acquisition},
     {:mcp_timeout, :provider_acquisition, :provider_unavailable, :acquisition},
     {:mcp_remote_error, :provider_acquisition, :provider_unavailable, :acquisition},
@@ -61,6 +67,23 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
       assert diagnostic.subject.operation == operation
       assert diagnostic.subject.occurrence == %{destination: :workflow, index: 3}
       assert diagnostic.provider_activity
+    end
+  end
+
+  test "endpoint connection diagnostics have fixed messages and retry policy" do
+    for {reason, message, retryable?} <- [
+          {:mcp_endpoint_connection_refused, "the installed endpoint refused the connection",
+           true},
+          {:mcp_endpoint_name_unresolved, "the installed endpoint hostname could not be resolved",
+           false},
+          {:mcp_endpoint_tls_failed, "the installed endpoint did not complete a TLS handshake",
+           false}
+        ] do
+      diagnostic = AcquisitionReason.diagnostic(reason, @occurrence)
+
+      assert diagnostic.message == message
+      assert diagnostic.retryable == retryable?
+      assert diagnostic.exit_status == 4
     end
   end
 
