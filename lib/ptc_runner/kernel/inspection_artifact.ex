@@ -17,7 +17,12 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   excessive structural depth, malformed lines, mixed identities, non-contiguous
   sequences, and records outside the exact V6 vocabulary. Private records use
   a required `mission_name` on mission-owned source and capability
-  records while forbidding it on workflow-owned records. V6 joins at most one
+  records while forbidding it on workflow-owned records. Effective prelude
+  source is proven, not asserted: the `prelude-source` records of an
+  environment must name exactly the components the canonical `run-started`
+  projection lists, and their source hashes must reduce back to the bundle
+  identity that projection committed to. Self-consistent source a caller
+  computed for itself therefore cannot pass as the source that compiled. V6 joins at most one
   static prelude-call analysis to each subordinate evaluation source and also
   admits at most one strictly JSON terminal result whose self-hash must match
   the successful canonical `run-stopped` event. A missing capability or
@@ -41,12 +46,14 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   """
 
   alias Jason.OrderedObject
+  alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InspectionRecordTypes
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ResultIdentity
 
+  @bundle_hash ~r/\A[0-9a-f]{64}\z/
   @max_bytes 16_000_000
   @max_record_bytes 2_000_000
   @schema_version 6
@@ -668,19 +675,14 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
 
     with {:ok, capabilities} <- canonical_capabilities(events),
          {:ok, evaluations} <- canonical_evaluations(events),
-         :ok <- validate_result_correlation(records, events) do
-      prelude_components =
-        Enum.reduce(events, %{}, fn event, acc ->
-          acc
-          |> merge_prelude_ids({"workflow", nil}, event_data(event, :workflow_prelude))
-          |> merge_named_prelude_ids(event_data(event, :missions))
-        end)
-
+         {:ok, preludes} <- canonical_preludes(events),
+         :ok <- validate_result_correlation(records, events),
+         :ok <- validate_prelude_identities(records, preludes) do
       validate_record_correlations(
         records,
         capabilities,
         evaluations,
-        prelude_components,
+        preludes,
         proven_dropped_counts(events)
       )
     end
@@ -707,6 +709,145 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       _invalid ->
         {:error, :inspection_correlation_missing}
     end
+  end
+
+  # The prelude projections come from the one canonical `run-started` event,
+  # taken whole. Reducing over every event and unioning the component sets
+  # would let any additional event widen what a private record may claim, and
+  # would leave no single bundle identity to prove those records against.
+  defp canonical_preludes(events) do
+    case Enum.filter(events, &(event_value(&1, :type) == "run-started")) do
+      [] ->
+        {:ok, %{}}
+
+      [event] ->
+        {%{}, :ok}
+        |> put_prelude({"workflow", nil}, event_data(event, :workflow_prelude))
+        |> put_named_preludes(event_data(event, :missions))
+        |> case do
+          {preludes, :ok} -> {:ok, preludes}
+          {_preludes, :error} -> {:error, :inspection_correlation_missing}
+        end
+
+      _duplicate ->
+        {:error, :inspection_correlation_missing}
+    end
+  end
+
+  defp put_prelude({preludes, :ok}, key, projection) when is_map(projection) do
+    case prelude_projection(projection) do
+      {:ok, projection} -> {Map.put(preludes, key, projection), :ok}
+      :error -> {preludes, :error}
+    end
+  end
+
+  defp put_prelude({preludes, status}, _key, nil), do: {preludes, status}
+  defp put_prelude({preludes, _status}, _key, _projection), do: {preludes, :error}
+
+  defp put_named_preludes({_preludes, :error} = failed, _missions), do: failed
+
+  defp put_named_preludes(acc, missions) when is_map(missions) do
+    Enum.reduce(missions, acc, fn {name, metadata}, inner_acc ->
+      projection = if is_map(metadata), do: map_value(metadata, :prelude)
+
+      put_prelude(inner_acc, {"mission", to_string(name)}, projection)
+    end)
+  end
+
+  # An absent mission map projects no mission preludes rather than failing: a
+  # mission record then finds no projection to be proven against and is
+  # rejected on its own.
+  defp put_named_preludes(acc, _missions), do: acc
+
+  # Canonical loading already proves this shape; an artifact validated against
+  # a caller-supplied event list has not, so the same rules are enforced before
+  # the projection is trusted as a commitment.
+  defp prelude_projection(projection) do
+    ids = map_value(projection, :component_ids) || []
+    indices = map_value(projection, :dependency_indices) || []
+    hash = map_value(projection, :hash)
+
+    valid? =
+      is_list(ids) and Enum.all?(ids, &is_binary/1) and ids == Enum.uniq(ids) and
+        is_list(indices) and length(indices) == length(ids) and
+        valid_dependency_indices?(indices) and valid_bundle_hash?(hash, ids)
+
+    if valid?,
+      do: {:ok, %{component_ids: ids, dependency_indices: indices, hash: hash}},
+      else: :error
+  end
+
+  defp valid_dependency_indices?(indices) do
+    indices
+    |> Enum.with_index()
+    |> Enum.all?(fn {entry, position} ->
+      is_list(entry) and entry == Enum.sort(entry) and entry == Enum.uniq(entry) and
+        Enum.all?(entry, &(is_integer(&1) and &1 >= 0 and &1 < position))
+    end)
+  end
+
+  defp valid_bundle_hash?(nil, ids), do: ids == []
+  defp valid_bundle_hash?(hash, ids) when is_binary(hash), do: ids != [] and hash =~ @bundle_hash
+  defp valid_bundle_hash?(_hash, _ids), do: false
+
+  # Membership proves only that a component with that ID was compiled. The
+  # effective source of every component in an environment is reduced back to
+  # the bundle identity the canonical trace committed to, so a record whose
+  # source was not the source that compiled cannot survive.
+  defp validate_prelude_identities(records, preludes) do
+    groups =
+      records
+      |> Enum.filter(&(&1["record_type"] == "prelude-source"))
+      |> Enum.group_by(
+        &{&1["payload"]["environment"], &1["payload"]["mission_name"]},
+        &{&1["correlation"]["component_id"], &1["payload"]["source_hash"]}
+      )
+
+    populated =
+      for {key, projection} <- preludes,
+          projection.component_ids != [],
+          into: MapSet.new(),
+          do: key
+
+    groups
+    |> Map.keys()
+    |> MapSet.new()
+    |> MapSet.union(populated)
+    |> Enum.reduce_while(:ok, fn key, :ok ->
+      case prelude_identity_proven?(Map.get(groups, key, []), Map.get(preludes, key)) do
+        true -> {:cont, :ok}
+        false -> {:halt, {:error, :inspection_correlation_missing}}
+      end
+    end)
+  end
+
+  defp prelude_identity_proven?(_sources, nil), do: false
+
+  defp prelude_identity_proven?(sources, projection) do
+    hashes = Map.new(sources)
+    ids = projection.component_ids
+
+    with true <- map_size(hashes) == length(sources),
+         true <- MapSet.new(Map.keys(hashes)) == MapSet.new(ids),
+         {:ok, identity} <- FrozenBundle.identity(prelude_components(projection, hashes)) do
+      identity == projection.hash
+    else
+      _unproven -> false
+    end
+  end
+
+  defp prelude_components(projection, hashes) do
+    ids = projection.component_ids
+
+    projection.dependency_indices
+    |> Enum.with_index()
+    |> Enum.map(fn {indices, position} ->
+      %{
+        id: Enum.at(ids, position),
+        dependencies: Enum.map(indices, &Enum.at(ids, &1)),
+        source_hash: Map.fetch!(hashes, Enum.at(ids, position))
+      }
+    end)
   end
 
   defp canonical_capabilities(events) do
@@ -856,10 +997,10 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          },
          _capabilities,
          evaluations,
-         prelude_components,
+         preludes,
          missing
        ) do
-    component_ids = Map.get(prelude_components, {"mission", mission_name}, MapSet.new())
+    component_ids = prelude_component_ids(preludes, {"mission", mission_name})
 
     if Enum.all?(calls, &MapSet.member?(component_ids, &1["component_id"])),
       do:
@@ -885,22 +1026,17 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
        when record_type in ["execution-prints", "execution-error"],
        do: correlate_evaluation_or_mark_missing(evaluations, id, {"workflow", nil, :any}, missing)
 
+  # Component-ID membership no longer decides a `prelude-source` record: the
+  # whole environment is proven against the canonical bundle identity by
+  # `validate_prelude_identities/2` before any record is streamed here.
   defp validate_record_correlation(
-         %{
-           "correlation" => %{"component_id" => id},
-           "payload" => %{"environment" => environment} = payload
-         },
+         %{"record_type" => "prelude-source", "correlation" => %{"component_id" => _id}},
          _capabilities,
          _evaluations,
-         prelude_components,
+         _preludes,
          missing
-       ) do
-    key = {environment, payload["mission_name"]}
-
-    if MapSet.member?(Map.get(prelude_components, key, MapSet.new()), id),
-      do: {:cont, {:ok, missing}},
-      else: missing_correlation()
-  end
+       ),
+       do: {:cont, {:ok, missing}}
 
   defp validate_record_correlation(
          _record,
@@ -997,29 +1133,12 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
 
   defp missing_correlation, do: {:halt, {:error, :inspection_correlation_missing}}
 
-  defp merge_prelude_ids(acc, key, prelude) when is_map(prelude) do
-    ids =
-      (Map.get(prelude, :component_ids) || Map.get(prelude, "component_ids") || [])
-      |> List.wrap()
-      |> Enum.filter(&is_binary/1)
-
-    Map.update(acc, key, MapSet.new(ids), &MapSet.union(&1, MapSet.new(ids)))
+  defp prelude_component_ids(preludes, key) do
+    case Map.fetch(preludes, key) do
+      {:ok, projection} -> MapSet.new(projection.component_ids)
+      :error -> MapSet.new()
+    end
   end
-
-  defp merge_prelude_ids(acc, _key, _prelude), do: acc
-
-  defp merge_named_prelude_ids(acc, missions) when is_map(missions) do
-    Enum.reduce(missions, acc, fn {name, metadata}, inner_acc ->
-      prelude =
-        if is_map(metadata),
-          do: Map.get(metadata, :prelude) || Map.get(metadata, "prelude"),
-          else: nil
-
-      merge_prelude_ids(inner_acc, {"mission", to_string(name)}, prelude)
-    end)
-  end
-
-  defp merge_named_prelude_ids(acc, _missions), do: acc
 
   defp event_value(event, key), do: Map.get(event, key) || Map.get(event, Atom.to_string(key))
 

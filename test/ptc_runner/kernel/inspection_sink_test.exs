@@ -3,9 +3,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.ExecutionOutcome
+  alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InspectionSnapshot
@@ -24,6 +27,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
   @source "(return 42)"
   @source_hash :crypto.hash(:sha256, @source) |> Base.encode16(case: :lower)
+  @checkpoint_workflow_source ~S|(ns app) (defn run [input] (return {"seen" input}))|
 
   test "retains only normalized exact current records and fails closed" do
     {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
@@ -1596,6 +1600,144 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     )
     |> RunLifecycle.build(registry, trace_path: trace_path, inspect: inspection_path)
     |> RunLifecycle.execute()
+  end
+
+  test "prelude source is proven against the canonical bundle identity" do
+    {:ok, bundle} = compiled_bundle()
+    events = [run_started_event(bundle)]
+
+    assert :ok =
+             InspectionArtifact.validate_correlations(
+               prelude_records(effective_sources()),
+               events
+             )
+
+    forged = %{effective_sources() | "main" => "(ns main) (def value 99)"}
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(prelude_records(forged), events)
+  end
+
+  test "prelude proof requires the exact canonical set and one canonical projection" do
+    {:ok, bundle} = compiled_bundle()
+    events = [run_started_event(bundle)]
+    sources = effective_sources()
+    [_first | incomplete] = prelude_records(sources)
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(incomplete, events)
+
+    unlisted = prelude_records(Map.put(sources, "ghost", "(ns ghost)"))
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(unlisted, events)
+
+    widening =
+      canonical_event(2, "capability-started", %{
+        "capability_id" => "cap-1",
+        "environment" => "workflow",
+        "name" => "read",
+        "workflow_prelude" => %{
+          "component_ids" => ["base", "main", "ghost"],
+          "dependency_indices" => [[], [0], []],
+          "hash" => bundle.hash
+        }
+      })
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(unlisted, events ++ [widening])
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(
+               prelude_records(sources),
+               events ++ [run_started_event(bundle, 3)]
+             )
+  end
+
+  @tag :tmp_dir
+  test "an overridden component proves its candidate source, not the manifest source", %{
+    tmp_dir: dir
+  } do
+    manifest = checkpoint_manifest()
+    candidate = ~S|(ns app) (defn run [input] (return {"overridden" true}))|
+
+    descriptor = %{
+      "target" => %{"environment" => "workflow"},
+      "component_id" => "app",
+      "base_source_hash" => ComponentOverride.hash(@checkpoint_workflow_source),
+      "source_hash" => ComponentOverride.hash(candidate),
+      "path" => "candidate.clj"
+    }
+
+    manifest_path = Path.join(dir, "ptc.json")
+    inspection_path = Path.join(dir, "run.inspection.jsonl")
+    File.write!(manifest_path, Jason.encode!(manifest))
+    File.write!(Path.join(dir, "workflow.clj"), @checkpoint_workflow_source)
+    File.write!(Path.join(dir, "candidate.clj"), candidate)
+    File.write!(Path.join(dir, "override.json"), Jason.encode!(descriptor))
+
+    {:ok, registry} = ProviderRegistry.new(%{})
+
+    assert {:ok, _result} =
+             manifest_path
+             |> ApplicationPackage.request_directory(
+               inspection_capture: true,
+               result_projection: :json,
+               component_override_descriptor: Path.join(dir, "override.json"),
+               installed_limits: registry.installed_limits
+             )
+             |> RunLifecycle.build(registry,
+               trace_path: Path.join(dir, "run.private.jsonl"),
+               inspect: inspection_path,
+               private_output: Path.join(dir, "run.result.json")
+             )
+             |> RunLifecycle.execute()
+
+    assert {:ok, records} = InspectionArtifact.load(inspection_path)
+    prelude = Enum.find(records, &(&1["record_type"] == "prelude-source"))
+    assert prelude["payload"]["source"] == candidate
+  end
+
+  defp compiled_bundle do
+    sources = effective_sources()
+
+    {:ok, base} = Component.new(id: "base", source: sources["base"], dependencies: [])
+    {:ok, main} = Component.new(id: "main", source: sources["main"], dependencies: ["base"])
+
+    PtcRunner.Kernel.compile_bundle([base, main])
+  end
+
+  defp effective_sources,
+    do: %{"base" => "(ns base) (def value 1)", "main" => "(ns main) (def value 2)"}
+
+  defp run_started_event(bundle, sequence \\ 1) do
+    {:ok, projection} = FrozenBundle.trace_metadata(bundle)
+
+    canonical_event(sequence, "run-started", %{
+      "missions" => %{},
+      "workflow_prelude" => %{
+        "component_ids" => projection.component_ids,
+        "dependency_indices" => projection.dependency_indices,
+        "hash" => projection.hash
+      }
+    })
+  end
+
+  # Frozen order places dependencies first, which is the order a run captures.
+  defp prelude_records(sources) do
+    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+
+    for id <- ["base", "main", "ghost"], source = sources[id], source != nil do
+      emit!(sink, "prelude-source", %{component_id: id}, %{
+        environment: :workflow,
+        source: source,
+        source_hash: :crypto.hash(:sha256, source) |> Base.encode16(case: :lower),
+        source_bytes: byte_size(source)
+      })
+    end
+
+    {:ok, records} = InspectionSink.records(sink)
+    records
   end
 
   defp checkpoint_manifest(event_policy \\ "private") do
