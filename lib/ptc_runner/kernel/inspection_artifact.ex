@@ -800,7 +800,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       |> Enum.filter(&(&1["record_type"] == "prelude-source"))
       |> Enum.group_by(
         &{&1["payload"]["environment"], &1["payload"]["mission_name"]},
-        &{&1["correlation"]["component_id"], &1["payload"]["source_hash"]}
+        &{&1["correlation"]["component_id"], retained_source_hash(&1["payload"])}
       )
 
     # Every environment that compiled a bundle is proven, including one that
@@ -824,6 +824,13 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       end
     end)
   end
+
+  # Derived from the retained bytes rather than read from `source_hash`, so the
+  # proof holds for a caller-supplied record list that has not been shape
+  # validated. Trusting the declared digest would let forged source travel
+  # under the hash of the source that actually compiled.
+  defp retained_source_hash(%{"source" => source}) when is_binary(source), do: sha256(source)
+  defp retained_source_hash(_payload), do: nil
 
   defp prelude_identity_proven?(_sources, nil), do: false
 

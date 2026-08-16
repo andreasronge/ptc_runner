@@ -1654,6 +1654,30 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
   end
 
+  # validate_correlations/2 is public and TraceSnapshot.validate_inspection/2
+  # forwards caller-supplied records, so the proof must not depend on an
+  # earlier shape validation having tied source_hash to the retained bytes.
+  test "prelude proof reads the retained bytes, not the declared source hash" do
+    {:ok, bundle} = compiled_bundle()
+    events = [run_started_event(bundle)]
+    records = prelude_records(effective_sources())
+
+    swapped =
+      Enum.map(records, fn record ->
+        if record["correlation"]["component_id"] == "main",
+          do: put_in(record, ["payload", "source"], "(ns main) (def value 99)"),
+          else: record
+      end)
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(swapped, events)
+
+    dropped = Enum.map(records, &(pop_in(&1, ["payload", "source"]) |> elem(1)))
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(dropped, events)
+  end
+
   test "an environment that compiled no component is proven, not excused" do
     {:ok, identity} = FrozenBundle.identity([])
 

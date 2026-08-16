@@ -318,7 +318,9 @@ mission's alike — is validated to producer grade rather than interpreted
 leniently: unique component IDs, a `dependency_indices` list of the same
 length as `component_ids` whose entries are unique and ascending and name only
 strictly earlier positions, and a `hash` that is a bare lowercase SHA-256
-digest, present exactly when the projection names components. The projection
+digest. A nil `hash` means no bundle at all and can therefore name no
+components; a bundle always commits to a digest, whether or not it compiled
+any component. The projection
 is the only canonical commitment a private `prelude-source` record can be
 proven against, so a projection that cannot be reconstructed is
 `:malformed_source` rather than a weaker fact.
