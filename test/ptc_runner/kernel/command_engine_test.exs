@@ -5762,6 +5762,105 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
+  # Six structurally different authoring mistakes used to report the same six
+  # words with a null path, so "I misspelled something" and "this feature does
+  # not exist" were indistinguishable and the profile's edges could only be
+  # found by bisecting the schema one keyword at a time.
+  @tag :tmp_dir
+  test "a rejected contract schema names its rule and its location", %{tmp_dir: directory} do
+    cases = [
+      {"bare-enum", %{"type" => "object", "properties" => %{"sum" => %{"enum" => [1, 2]}}},
+       ~s(contract schema node declares no "type"), "/properties/sum"},
+      {"bare-const", %{"type" => "object", "properties" => %{"sum" => %{"const" => 5}}},
+       ~s(contract schema node declares no "type"), "/properties/sum"},
+      {"misspelled-type",
+       %{"type" => "object", "properties" => %{"sum" => %{"type" => "intger"}}},
+       ~s(contract schema declares an unsupported "type"), "/properties/sum/type"},
+      {"unsupported-keyword",
+       %{
+         "type" => "object",
+         "properties" => %{"sum" => %{"type" => "integer", "multipleOf" => 7}}
+       }, "contract schema uses a keyword outside the supported profile",
+       "/properties/sum/multipleOf"},
+      {"excluded-bound",
+       %{
+         "type" => "object",
+         "properties" => %{"n" => %{"type" => "integer", "exclusiveMinimum" => 0}}
+       }, "contract schema uses a keyword outside the supported profile",
+       "/properties/n/exclusiveMinimum"},
+      {"unsatisfiable-bound",
+       %{
+         "type" => "object",
+         "properties" => %{
+           "sum" => %{"type" => "integer", "minimum" => 100, "maximum" => 99}
+         }
+       }, "contract schema declares a minimum above its maximum", "/properties/sum/minimum"},
+      {"unsupported-format",
+       %{
+         "type" => "object",
+         "properties" => %{"s" => %{"type" => "string", "format" => "date-time"}}
+       }, ~s(contract schema declares an unsupported "format"), "/properties/s/format"},
+      {"undeclared-required",
+       %{
+         "type" => "object",
+         "properties" => %{"a" => %{"type" => "string"}},
+         "required" => ["b"]
+       }, "contract schema requires a property it does not declare", "/required"}
+    ]
+
+    messages =
+      for {name, schema, message, pointer} <- cases do
+        path =
+          write_application(
+            directory,
+            "contract-#{name}",
+            valid_manifest(%{
+              "contracts" => %{"result_schema" => %{"path" => "result.schema.json"}}
+            }),
+            %{"result.schema.json" => Jason.encode!(schema)}
+          )
+
+        outcome = assert_error(["validate", path], "application", "contract_invalid")
+
+        assert outcome.envelope["error"]["message"] == message
+        assert outcome.envelope["error"]["path"] == pointer
+
+        assert outcome.envelope["error"]["source"] == %{
+                 "kind" => "result_contract",
+                 "name" => "result.schema.json"
+               }
+
+        {:stderr, rendered} = CommandRenderer.render(outcome)
+        assert rendered =~ "#{message} at #{pointer} in result.schema.json "
+
+        {message, pointer}
+      end
+
+    # A distinct cause must produce a distinct diagnostic; the bare-enum and
+    # bare-const rows deliberately share one rule at two locations.
+    assert length(Enum.uniq(messages)) == length(cases) - 1
+
+    # A contract document that is not an object at all reaches the compiler and
+    # is named as such. Refusing it before compilation would leave the
+    # commonest "wrong thing entirely" mistake on the blind message.
+    for document <- ["[]", "\"result\"", "42", "null"] do
+      path =
+        write_application(
+          directory,
+          "contract-non-object-#{byte_size(document)}",
+          valid_manifest(%{
+            "contracts" => %{"result_schema" => %{"path" => "result.schema.json"}}
+          }),
+          %{"result.schema.json" => document}
+        )
+
+      outcome = assert_error(["validate", path], "application", "contract_invalid")
+
+      assert outcome.envelope["error"]["message"] == "contract schema node is not a JSON object"
+      assert outcome.envelope["error"]["path"] == nil
+    end
+  end
+
   @tag :tmp_dir
   test "compile diagnostics classify safe reasons without exposing compiler details", %{
     tmp_dir: directory

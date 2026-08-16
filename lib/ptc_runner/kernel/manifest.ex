@@ -68,6 +68,7 @@ defmodule PtcRunner.Kernel.Manifest do
 
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.LimitCatalog
@@ -922,23 +923,35 @@ defmodule PtcRunner.Kernel.Manifest do
     do: [{:property, "contracts"}, {:property, "result_schema"}]
 
   defp load_contract(source, role, path) do
-    result =
-      with {:ok, raw} <- ApplicationSource.read_reference(source, path, @max_contract_bytes),
-           {:ok, schema} <- StrictJSON.decode(raw),
-           true <- is_map(schema) and not is_struct(schema),
-           {:ok, contract} <- ValueContract.compile(schema) do
+    case read_contract(source, path) do
+      {:ok, schema, raw} -> compile_contract(schema, raw, role, path)
+      {:error, reason} -> {:error, {:source_role, role, path, reason}}
+    end
+  end
+
+  # Any decoded JSON value is handed to the compiler, including arrays and
+  # scalars. Filtering non-objects here would refuse them without a rule and
+  # leave the commonest "I wrote the wrong thing entirely" mistake reporting
+  # the same blind message the rules exist to replace.
+  defp read_contract(source, path) do
+    with {:ok, raw} <- ApplicationSource.read_reference(source, path, @max_contract_bytes),
+         {:ok, schema} <- StrictJSON.decode(raw) do
+      {:ok, schema, raw}
+    end
+  end
+
+  # The rejected document stays in scope so the fault can be located inside it.
+  # A contract that fails to compile has no compiled path schema, so the
+  # submitted document, named by the reference that loaded it, is the only
+  # authority for the pointer.
+  defp compile_contract(schema, raw, role, path) do
+    case ValueContract.compile(schema) do
+      {:ok, contract} ->
         {:ok, contract, raw}
-      end
 
-    case result do
-      {:ok, _contract, _raw} = success ->
-        success
-
-      {:error, reason} ->
-        {:error, {:source_role, role, path, reason}}
-
-      _invalid ->
-        {:error, {:source_role, role, path, :invalid_contracts}}
+      {:error, {:invalid_value_contract, rejection}} ->
+        detail = ContractSchemaDiagnostic.detail(path, schema, rejection)
+        {:error, {:source_role, role, path, {:contract_schema_invalid, detail}}}
     end
   end
 

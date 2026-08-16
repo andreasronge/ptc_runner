@@ -550,44 +550,64 @@ defmodule PtcRunner.Kernel.ValueContractTest do
     open = Map.put(propose, "additionalProperties", true)
 
     invalid = [
-      %{"oneOf" => [no_change]},
-      %{"oneOf" => ambiguous},
-      %{"oneOf" => [no_change, mismatched]},
-      %{"oneOf" => [no_change, repeated]},
-      %{"oneOf" => [no_change, open]},
-      %{"oneOf" => List.duplicate(no_change, 17)}
+      {%{"oneOf" => [no_change]}, :union_branch_count, [property: "oneOf"]},
+      {%{"oneOf" => ambiguous}, :union_discriminator_missing, [property: "oneOf"]},
+      {%{"oneOf" => [no_change, mismatched]}, :union_discriminator_missing, [property: "oneOf"]},
+      {%{"oneOf" => [no_change, repeated]}, :union_discriminator_missing, [property: "oneOf"]},
+      {%{"oneOf" => [no_change, open]}, :union_branch_not_closed_object,
+       [property: "oneOf", index: 1, property: "additionalProperties"]},
+      {%{"oneOf" => List.duplicate(no_change, 17)}, :union_branch_count, [property: "oneOf"]}
     ]
 
-    for schema <- invalid do
-      assert {:error, :invalid_value_contract} = ValueContract.compile(schema)
+    for {schema, rule, segments} <- invalid do
+      assert {:error, {:invalid_value_contract, %{rule: ^rule, segments: ^segments}}} =
+               ValueContract.compile(schema)
     end
   end
 
   test "does not enable general composition or references" do
     invalid = [
-      %{"oneOf" => [branch("a"), branch("b")], "$ref" => "#/$defs/decision"},
-      %{"allOf" => [branch("a"), branch("b")]},
-      %{
-        "oneOf" => [
-          branch("a"),
-          put_in(branch("b"), ["properties", "nested"], %{
-            "oneOf" => [%{"type" => "string"}, %{"type" => "null"}]
-          })
-        ]
-      },
-      %{
-        "oneOf" => [
-          branch("a"),
-          put_in(branch("b"), ["properties", "value"], %{
-            "type" => "string",
-            "pattern" => "^unsafe"
-          })
-        ]
-      }
+      {%{"oneOf" => [branch("a"), branch("b")], "$ref" => "#/$defs/decision"},
+       [property: "$ref"]},
+      {%{"allOf" => [branch("a"), branch("b")]}, [property: "allOf"]},
+      {%{
+         "oneOf" => [
+           branch("a"),
+           put_in(branch("b"), ["properties", "nested"], %{
+             "oneOf" => [%{"type" => "string"}, %{"type" => "null"}]
+           })
+         ]
+       },
+       [
+         property: "oneOf",
+         index: 1,
+         property: "properties",
+         property: "nested",
+         property: "oneOf"
+       ]},
+      {%{
+         "oneOf" => [
+           branch("a"),
+           put_in(branch("b"), ["properties", "value"], %{
+             "type" => "string",
+             "pattern" => "^unsafe"
+           })
+         ]
+       },
+       [
+         property: "oneOf",
+         index: 1,
+         property: "properties",
+         property: "value",
+         property: "pattern"
+       ]}
     ]
 
-    for schema <- invalid do
-      assert {:error, :invalid_value_contract} = ValueContract.compile(schema)
+    for {schema, segments} <- invalid do
+      assert {:error, {:invalid_value_contract, %{rule: :unsupported_keyword} = rejection}} =
+               ValueContract.compile(schema)
+
+      assert rejection.segments == segments
     end
   end
 

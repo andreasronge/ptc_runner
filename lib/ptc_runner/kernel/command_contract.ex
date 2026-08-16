@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandSource
+  alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.ResultContractDiagnostic
@@ -1072,6 +1073,19 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{"properties" => %{"kind" => %{"const" => "result_contract"}}}
        ),
        do: ResultContractDiagnostic.message_schema(row.message)
+
+  # Only a contract source carries a rule-derived message. The application
+  # source reports the same code for a malformed `contracts` section, which has
+  # no schema document to locate a rule in, so it keeps the catalog literal.
+  defp diagnostic_message_schema(
+         %{phase: :application, code: :contract_invalid} = row,
+         %{"properties" => %{"kind" => %{"const" => kind}}}
+       )
+       when kind in ["input_contract", "result_contract"],
+       do: ContractSchemaDiagnostic.message_schema(row.message)
+
+  defp diagnostic_message_schema(%{phase: :application, code: :contract_invalid} = row, _source),
+    do: %{"const" => row.message}
 
   defp diagnostic_message_schema(row, %{"type" => "null"}), do: %{"const" => row.message}
   defp diagnostic_message_schema(row, _source_schema), do: DiagnosticCatalog.message_schema(row)

@@ -42,10 +42,16 @@ defmodule PtcRunner.Kernel.JSONSchemaAnnotationTest do
 
   test "rejects unknown, malformed, and nested dialect markers" do
     unknown = %{"$schema" => "not-a-dialect-uri", "type" => "object"}
-    assert {:error, :invalid_schema} = JSONSchema.compile(unknown)
+
+    assert {:error, {:invalid_schema, %{rule: :unsupported_dialect, segments: segments}}} =
+             JSONSchema.compile(unknown)
+
+    assert segments == [property: "$schema"]
 
     malformed = %{"$schema" => 42, "type" => "object"}
-    assert {:error, :invalid_schema} = JSONSchema.compile(malformed)
+
+    assert {:error, {:invalid_schema, %{rule: :unsupported_dialect}}} =
+             JSONSchema.compile(malformed)
 
     nested = %{
       "type" => "object",
@@ -57,7 +63,10 @@ defmodule PtcRunner.Kernel.JSONSchemaAnnotationTest do
       }
     }
 
-    assert {:error, :invalid_schema} = JSONSchema.compile(nested)
+    assert {:error, {:invalid_schema, %{rule: :unsupported_keyword, segments: nested_segments}}} =
+             JSONSchema.compile(nested)
+
+    assert nested_segments == [property: "properties", property: "query", property: "$schema"]
   end
 
   test "accepts and drops default annotations without applying them" do
@@ -77,7 +86,11 @@ defmodule PtcRunner.Kernel.JSONSchemaAnnotationTest do
     invalid =
       put_in(schema, ["properties", "path", "default"], %{self() => "not JSON"})
 
-    assert {:error, :invalid_schema} = JSONSchema.compile(invalid)
+    # `JSONValue.map?/1` proves the whole document is JSON before any keyword
+    # is read, so a non-JSON annotation is refused as a document fault at the
+    # root rather than located at the annotation it hides in.
+    assert {:error, {:invalid_schema, %{rule: :not_a_schema_object, segments: []}}} =
+             JSONSchema.compile(invalid)
   end
 
   test "supports only the bounded sha256 format" do
@@ -99,10 +112,12 @@ defmodule PtcRunner.Kernel.JSONSchemaAnnotationTest do
     refute JSONSchema.valid?(compiled, %{"hash" => String.duplicate("a", 71)})
     refute JSONSchema.valid?(compiled, %{"hash" => "sha256:" <> String.duplicate("A", 64)})
 
-    assert {:error, :invalid_schema} =
+    assert {:error, {:invalid_schema, %{rule: :unsupported_format, segments: segments}}} =
              schema
              |> put_in(["properties", "hash", "format"], "regex")
              |> JSONSchema.compile()
+
+    assert segments == [property: "properties", property: "hash", property: "format"]
   end
 
   test "still rejects unsupported semantic keywords" do
@@ -111,6 +126,9 @@ defmodule PtcRunner.Kernel.JSONSchemaAnnotationTest do
       "properties" => %{"q" => %{"anyOf" => [%{"type" => "string"}]}}
     }
 
-    assert {:error, :invalid_schema} = JSONSchema.compile(schema)
+    assert {:error, {:invalid_schema, %{rule: :unsupported_keyword, segments: segments}}} =
+             JSONSchema.compile(schema)
+
+    assert segments == [property: "properties", property: "q", property: "anyOf"]
   end
 end

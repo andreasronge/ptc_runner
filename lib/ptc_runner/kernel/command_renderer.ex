@@ -4,9 +4,11 @@ defmodule PtcRunner.Kernel.CommandRenderer do
 
   Provider failures include the validated provider subject already present in
   the public command envelope. Manifest and value-contract failures with a
-  non-root, schema-authorized path include its JSON Pointer. Unusual
-  contract-authored pointers use an escaped quoted representation before they
-  enter a terminal. Rendering never derives labels from a rejected value,
+  non-root, schema-authorized path include its JSON Pointer. A contract schema
+  rejected before it compiles also names the document its pointer indexes,
+  because a manifest may carry two and the pointer means nothing without it.
+  Unusual contract-authored pointers and logical names use an escaped quoted
+  representation before they enter a terminal. Rendering never derives labels from a rejected value,
   provider response, credential, or unvalidated path. Component compile
   failures with a proven byte span render the logical component name and
   canonical half-open byte range already present in the envelope; rendering
@@ -19,6 +21,9 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.DiagnosticCatalog
+
+  @pointer_pattern ~r/\A\/[A-Za-z0-9._~\/-]+\z/
+  @source_name_pattern ~r/\A[A-Za-z0-9._~-][A-Za-z0-9._~\/-]*\z/
 
   @spec render(CommandOutcome.t(), CommandRejection.t() | nil) ::
           {:stdout | :stderr, binary()}
@@ -143,12 +148,29 @@ defmodule PtcRunner.Kernel.CommandRenderer do
        when is_binary(path) and path != "",
        do: " at " <> terminal_contract_path(path) <> " "
 
+  # A rejected contract schema is located inside a document the author opens,
+  # and a manifest may carry two of them, so the pointer is meaningless without
+  # the file it indexes.
+  defp location_suffix(%{
+         "phase" => "application",
+         "code" => "contract_invalid",
+         "source" => %{"kind" => kind, "name" => name},
+         "path" => path
+       })
+       when kind in ["input_contract", "result_contract"] and is_binary(name) and
+              is_binary(path) and path != "",
+       do: " at #{terminal_contract_path(path)} in #{terminal_source_name(name)} "
+
   defp location_suffix(_error), do: " "
 
-  defp terminal_contract_path(path) do
-    case path =~ ~r/\A\/[A-Za-z0-9._~\/-]+\z/ do
-      true -> path
-      false -> inspect(path, binaries: :as_strings, limit: :infinity, printable_limit: :infinity)
+  defp terminal_contract_path(path), do: terminal_literal(path, @pointer_pattern)
+
+  defp terminal_source_name(name), do: terminal_literal(name, @source_name_pattern)
+
+  defp terminal_literal(text, pattern) do
+    case text =~ pattern do
+      true -> text
+      false -> inspect(text, binaries: :as_strings, limit: :infinity, printable_limit: :infinity)
     end
   end
 
