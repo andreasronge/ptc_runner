@@ -259,6 +259,9 @@ input object.
 
 ## Refinement backlog (still open)
 
+Round 3 (run lifecycle, project details panel, missions) is specified in
+[viewer-live-run-round3.md](viewer-live-run-round3.md).
+
 - `--viewer-url` CLI flag + project-config field (see decision above)
 - REPL / manifest-REPL / analysis-session reporter coverage
 - Frame + launch authentication (share the `x-ptc-viewer-session` pattern)
