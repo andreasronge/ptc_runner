@@ -797,6 +797,12 @@ defmodule PtcRunner.Kernel.CommandContract do
             ] and code in [:invalid_arguments, :conflicting_arguments],
        do: true
 
+  # Only the two commands that need a host installation can reach it: `models`
+  # reports installed aliases, and `doctor --connect` makes real requests.
+  defp diagnostic_pair_allowed?(mode, :arguments, :project_host_undeclared)
+       when mode in [:models, :doctor, {:doctor, :connect}],
+       do: true
+
   defp diagnostic_pair_allowed?(mode, :arguments, :invalid_arguments)
        when mode in [:help, :version],
        do: true

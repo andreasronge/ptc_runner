@@ -183,6 +183,57 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   end
 
   @tag :tmp_dir
+  test "a project declaring no host says so rather than blaming the arguments", %{
+    tmp_dir: directory
+  } do
+    # `ptc init` scaffolds no host block, so the two commands that need one are
+    # reached with exactly the argument form their own --help prints. Blaming
+    # the command line sends the reader back to the syntax, which was correct.
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+
+    for argv <- [["models", project], ["doctor", project, "--connect"]] do
+      assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch(argv)
+
+      assert outcome.envelope["error"]["code"] == "project_host_undeclared"
+      assert outcome.envelope["error"]["phase"] == "arguments"
+      assert outcome.envelope["error"]["message"] =~ "--host-config"
+    end
+  end
+
+  @tag :tmp_dir
+  test "an explicit --host-config still serves a project that declares no host", %{
+    tmp_dir: directory
+  } do
+    # The rejection must name a missing declaration, not forbid the command, so
+    # the documented alternative in `ptc models --help` keeps working.
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    host_path = Path.join(target, "ptc-host.json")
+
+    File.write!(
+      host_path,
+      Jason.encode!(%{
+        "credentials" => %{"key" => %{"env" => "PTC_PROJECT_ABSENT_KEY"}},
+        "install" => %{
+          "model" => %{
+            "source" => "llm",
+            "installation_revision" => "model-v1",
+            "model" => "openrouter:test/model",
+            "credential" => "key"
+          }
+        }
+      })
+    )
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["models", "--host-config", host_path])
+
+    assert [%{"alias" => "model"}] = outcome.envelope["result"]["installations"]
+  end
+
+  @tag :tmp_dir
   test "repl rejects ambiguous project authority modes", %{tmp_dir: directory} do
     target = Path.join(directory, "demo")
     assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])

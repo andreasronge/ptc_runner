@@ -53,8 +53,12 @@ defmodule PtcRunner.Kernel.ProjectResolver do
     end
   end
 
+  # The resolver is the only layer that knows a project was supplied and that it
+  # declares no host. Downstream sees an absent `--host-config` and can only
+  # report the arguments, which are exactly what `--help` prints for both of
+  # these commands.
   defp project_argv("models", _rest, %ProjectConfig{host: nil}, _run_ref),
-    do: {:error, :models}
+    do: {:error, CommandRejection.generic(:models, :project_host_undeclared)}
 
   defp project_argv("models", rest, project, _run_ref) do
     if switch?(rest, "--host-config") do
@@ -65,12 +69,23 @@ defmodule PtcRunner.Kernel.ProjectResolver do
   end
 
   defp project_argv(command, rest, project, run_ref) do
-    base = [command, project.application | rest]
-    {argv, derived} = add_host(base, rest, project, [])
-    {argv, derived} = add_environment(command, argv, rest, project, derived)
-    {argv, derived} = add_artifacts(command, argv, rest, project, run_ref, derived)
-    {:ok, argv, project, derived}
+    if connect_without_host?(command, rest, project) do
+      {:error, CommandRejection.generic(:doctor, :project_host_undeclared)}
+    else
+      base = [command, project.application | rest]
+      {argv, derived} = add_host(base, rest, project, [])
+      {argv, derived} = add_environment(command, argv, rest, project, derived)
+      {argv, derived} = add_artifacts(command, argv, rest, project, run_ref, derived)
+      {:ok, argv, project, derived}
+    end
   end
+
+  # Passive `doctor` on a host-less project is legitimate and stays legitimate;
+  # only `--connect`, which makes real provider requests, needs the declaration.
+  defp connect_without_host?("doctor", rest, %ProjectConfig{host: nil}),
+    do: switch?(rest, "--connect") and not switch?(rest, "--host-config")
+
+  defp connect_without_host?(_command, _rest, _project), do: false
 
   defp expand_repl(argv, rest, _run_ref) do
     case take_project(rest) do

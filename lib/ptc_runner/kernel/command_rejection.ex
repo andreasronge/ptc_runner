@@ -10,7 +10,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
   alias PtcRunner.Kernel.CommandDeclaration
 
   @commands [:help, :version, :unknown | CommandDeclaration.commands()]
-  @codes [:invalid_command, :invalid_arguments, :conflicting_arguments]
+  @codes [:invalid_command, :invalid_arguments, :conflicting_arguments, :project_host_undeclared]
   @destination_keys [:trace_dir, :inspect, :output, :private_output]
   @enforce_keys [
     :command,
@@ -31,7 +31,8 @@ defmodule PtcRunner.Kernel.CommandRejection do
             | :invalid_destination
             | :destination_collision
             | :private_output_recovery_collision
-            | :init_destination_collision,
+            | :init_destination_collision
+            | :project_host_undeclared,
           accepted: [binary()],
           destination: binary() | nil,
           conflicts: [binary()]

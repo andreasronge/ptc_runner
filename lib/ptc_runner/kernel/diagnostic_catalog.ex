@@ -17,6 +17,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:arguments, :invalid_arguments, 2, false, "use the documented arguments for this command"},
     {:arguments, :conflicting_arguments, 2, false,
      "choose only one option from the conflicting argument group"},
+    {:arguments, :project_host_undeclared, 2, false,
+     "the project document declares no host; pass --host-config HOST.json"},
     {:host, :host_unavailable, 3, false, "the host configuration is unavailable"},
     {:host, :host_invalid, 3, false, "the host configuration is invalid"},
     {:host, :host_schema_invalid, 3, false, "the host configuration does not satisfy its schema"},
