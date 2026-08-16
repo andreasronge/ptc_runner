@@ -282,7 +282,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
          provider_activity,
          :private
        )
-       when reason in [:explicit_failure, :pmap_error, :pcalls_error],
+       when reason in [:explicit_failure, :pmap_error, :pcalls_error, :llm_provider_failed],
        do: diagnostic(:execution, :workflow_failed, provider_activity)
 
   defp failure_diagnostic(failure, provider_activity, _result_class),
@@ -343,6 +343,47 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   defp failure_diagnostic(
          %Error{
            kind: :workflow_failed,
+           reason: reason,
+           details: %{replay_request_hash: request_hash}
+         },
+         provider_activity
+       )
+       when reason in [:explicit_failure, :pmap_error, :pcalls_error, :llm_provider_failed] do
+    case LLMReplayDiagnostic.message(request_hash) do
+      {:ok, message} ->
+        diagnostic(:execution, :replay_fixture_missing, provider_activity,
+          message: message,
+          source: CommandSource.fixed(:runtime)
+        )
+
+      :error ->
+        diagnostic(:execution, :workflow_failed, provider_activity)
+    end
+  end
+
+  defp failure_diagnostic(
+         %Error{
+           kind: :workflow_failed,
+           reason: reason,
+           details: %{
+             failure_kind: "llm-provider-error",
+             llm_provider_failure: provider_failure,
+             llm_provider_retryable?: retryable?
+           }
+         },
+         provider_activity
+       )
+       when reason in [:explicit_failure, :pmap_error, :pcalls_error, :llm_provider_failed] do
+    diagnostic(
+      :execution,
+      llm_failure_code(provider_failure, retryable?),
+      provider_activity
+    )
+  end
+
+  defp failure_diagnostic(
+         %Error{
+           kind: :workflow_failed,
            reason: :runtime_limit_exceeded,
            details: %{limit: :subordinate_evaluations, limit_value: limit}
          },
@@ -377,27 +418,6 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     end
   end
 
-  defp failure_diagnostic(
-         %Error{
-           kind: :workflow_failed,
-           reason: reason,
-           details: %{replay_request_hash: request_hash}
-         },
-         provider_activity
-       )
-       when reason in [:explicit_failure, :pmap_error, :pcalls_error] do
-    case LLMReplayDiagnostic.message(request_hash) do
-      {:ok, message} ->
-        diagnostic(:execution, :replay_fixture_missing, provider_activity,
-          message: message,
-          source: CommandSource.fixed(:runtime)
-        )
-
-      :error ->
-        diagnostic(:execution, :workflow_failed, provider_activity)
-    end
-  end
-
   defp failure_diagnostic(%Error{kind: :workflow_failed}, provider_activity),
     do: diagnostic(:execution, :workflow_failed, provider_activity)
 
@@ -414,6 +434,16 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
 
   defp failure_diagnostic(_reason, provider_activity),
     do: diagnostic(:internal, :internal_error, provider_activity)
+
+  defp llm_failure_code(:authentication_failed, false), do: :llm_authentication_failed
+  defp llm_failure_code(:payment_required, false), do: :llm_payment_required
+  defp llm_failure_code(:rate_limited, true), do: :llm_rate_limited
+  defp llm_failure_code(:not_found, false), do: :llm_model_not_found
+  defp llm_failure_code(:invalid_request, false), do: :llm_request_invalid
+  defp llm_failure_code(:denied, false), do: :llm_access_denied
+  defp llm_failure_code(:timeout, true), do: :llm_timeout
+  defp llm_failure_code(_failure, true), do: :llm_provider_unavailable
+  defp llm_failure_code(_failure, false), do: :llm_provider_failed
 
   defp result_contract_diagnostic(details, provider_activity) when is_map(details) do
     source = result_contract_source(details)

@@ -53,6 +53,7 @@ defmodule PtcRunner.Kernel.RunState do
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMReplayDiagnostic
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Lisp
@@ -213,26 +214,20 @@ defmodule PtcRunner.Kernel.RunState do
   # release_provider_slot/1 answers. Only the exit becomes :run_closed; a reply
   # the owner actually sent is passed through, so a bad token still reaches the
   # caller as the unhandled :closed it has always been.
-  @spec finish_provider(t(), binary() | nil) ::
-          :ok | {:error, :run_closed | :invalid_request_hash}
-  @doc "Atomically releases a provider slot, accepts completion, and records replay provenance."
-  def finish_provider(state, replay_request_hash \\ nil)
-
-  def finish_provider(state, nil),
-    do: safe_call(state, {:finish_provider, nil}, {:error, :run_closed})
-
-  def finish_provider(state, replay_request_hash) when is_binary(replay_request_hash) do
-    if LLMReplayDiagnostic.valid_request_hash?(replay_request_hash),
-      do:
-        safe_call(
-          state,
-          {:finish_provider, replay_request_hash},
-          {:error, :run_closed}
-        ),
-      else: {:error, :invalid_request_hash}
+  @spec finish_provider(t(), binary() | nil, ProviderError.t() | nil) ::
+          :ok | {:error, :run_closed | :invalid_provider_evidence}
+  @doc "Atomically releases a provider slot, accepts completion, and records trusted evidence."
+  def finish_provider(state, replay_request_hash \\ nil, llm_provider_error \\ nil) do
+    if valid_provider_evidence?(replay_request_hash, llm_provider_error) do
+      safe_call(
+        state,
+        {:finish_provider, replay_request_hash, llm_provider_error},
+        {:error, :run_closed}
+      )
+    else
+      {:error, :invalid_provider_evidence}
+    end
   end
-
-  def finish_provider(_state, _replay_request_hash), do: {:error, :invalid_request_hash}
 
   @doc false
   @spec replay_miss?(t(), binary()) :: boolean()
@@ -240,6 +235,14 @@ defmodule PtcRunner.Kernel.RunState do
     do: safe_call(state, {:replay_miss?, request_hash}, false)
 
   def replay_miss?(_state, _request_hash), do: false
+
+  @doc false
+  @spec consume_llm_provider_failure(t(), ProviderError.kind(), boolean()) :: :ok | :error
+  def consume_llm_provider_failure(state, kind, retryable?)
+      when is_atom(kind) and is_boolean(retryable?),
+      do: safe_call(state, {:consume_llm_provider_failure, kind, retryable?}, :error)
+
+  def consume_llm_provider_failure(_state, _kind, _retryable?), do: :error
 
   @doc false
   @spec mark_evaluation_terminal_provider_failure(t()) :: :ok | {:error, :closed}
@@ -484,6 +487,7 @@ defmodule PtcRunner.Kernel.RunState do
        source_checks: 0,
        protocol_errors: 0,
        replay_misses: MapSet.new(),
+       llm_provider_failures: MapSet.new(),
        terminal_failure: nil,
        continuations: %{},
        evaluation_lease: nil,
@@ -563,22 +567,42 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   def handle_call(
-        {token, {:finish_provider, replay_request_hash}},
+        {token, {:finish_provider, replay_request_hash, llm_provider_error}},
         {caller, _tag},
         %{token: token} = state
       ) do
+    reservation = Map.get(state.reservations, caller)
     state = release_reservation(state, caller)
 
     if unavailable?(state) do
       {:reply, {:error, :run_closed}, state}
     else
-      state = maybe_record_replay_miss(state, replay_request_hash)
+      state =
+        state
+        |> maybe_record_replay_miss(replay_request_hash)
+        |> maybe_record_llm_provider_failure(reservation, llm_provider_error)
+
       {:reply, :ok, state}
     end
   end
 
   def handle_call({token, {:replay_miss?, request_hash}}, _from, %{token: token} = state),
     do: {:reply, MapSet.member?(state.replay_misses, request_hash), state}
+
+  def handle_call(
+        {token, {:consume_llm_provider_failure, kind, retryable?}},
+        _from,
+        %{token: token} = state
+      ) do
+    evidence = {kind, retryable?}
+
+    if MapSet.member?(state.llm_provider_failures, evidence) do
+      {:reply, :ok,
+       %{state | llm_provider_failures: MapSet.delete(state.llm_provider_failures, evidence)}}
+    else
+      {:reply, :error, state}
+    end
+  end
 
   def handle_call(
         {token, :mark_evaluation_terminal_provider_failure},
@@ -1045,10 +1069,9 @@ defmodule PtcRunner.Kernel.RunState do
 
   if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
     @impl GenServer
-    def format_status(status), do: redact_status(status)
-  else
-    def format_status(status), do: redact_status(status)
   end
+
+  def format_status(status), do: redact_status(status)
 
   @impl GenServer
   def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
@@ -1140,6 +1163,7 @@ defmodule PtcRunner.Kernel.RunState do
       true ->
         reservation = %{
           environment: environment,
+          name: name,
           evaluation_lease: active_evaluation_lease(state, environment),
           caller_ref: Process.monitor(caller),
           provider: nil,
@@ -1582,6 +1606,23 @@ defmodule PtcRunner.Kernel.RunState do
 
   defp maybe_record_replay_miss(state, request_hash),
     do: %{state | replay_misses: MapSet.put(state.replay_misses, request_hash)}
+
+  defp maybe_record_llm_provider_failure(
+         state,
+         %{name: "llm-request"},
+         %ProviderError{} = error
+       ) do
+    evidence = {error.kind, error.retryable?}
+    %{state | llm_provider_failures: MapSet.put(state.llm_provider_failures, evidence)}
+  end
+
+  defp maybe_record_llm_provider_failure(state, _reservation, _error), do: state
+
+  defp valid_provider_evidence?(replay_request_hash, llm_provider_error) do
+    (is_nil(replay_request_hash) or
+       LLMReplayDiagnostic.valid_request_hash?(replay_request_hash)) and
+      (is_nil(llm_provider_error) or ProviderError.valid?(llm_provider_error))
+  end
 
   defp deadline_expired?(state),
     do: System.monotonic_time(:millisecond) >= state.deadline_ms

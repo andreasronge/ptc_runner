@@ -232,7 +232,7 @@
          "In map types, field? means the field may be omitted; type? means nil is allowed.\n\n"
          (join "\n" (map render-entry entries))
          "\n")
-    "Available API\n"))
+    "Available API\n- No mission-specific data, functions, or tools are available.\n"))
 
 (defn render
   "Renders the system prompt and model-visible mission API for one policy state."
@@ -264,14 +264,14 @@
              "- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n"
              "- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n"
              "- Value references are values; call only function references.\n"
-             "- The API below is the prompt-visible subset: (dir) lists namespaces, (dir \"ns\") its exports, (apropos \"term\") searches, (doc \"ns/name\") prints documentation, (export-meta \"ns/name\") returns it as data. Exports found this way are callable.\n"
+             "- The Available API section below is complete for mission data, prompt-visible mission functions, and granted tools.\n"
+             "- dir/apropos/doc discover mission prelude exports only; they do not list fixed built-ins, data references, or direct tool capabilities. (dir) lists those prelude namespaces, (dir \"ns\") their exports, (apropos \"term\") searches them, (doc \"ns/name\") prints documentation, and (export-meta \"ns/name\") returns it as data.\n"
              "- Call granted capabilities only with the exact tool/... forms shown below.\n"
              "- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n"
              "- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\n"
              "Examples\n"
              "Turn 1: (defn add-one [x] (+ x 1))\n"
              "Turn 2: (return (add-one 41))\n"
-             "(let [rows (get data/input \"rows\") active (filter #(true? (get % \"active\")) rows)] (return (mapv #(get % \"id\") active)))\n"
              "(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\n"
              (render-api
                (get context "namespaces" [])

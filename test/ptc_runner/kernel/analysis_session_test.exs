@@ -609,6 +609,9 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
 
     assert Enum.map(items, & &1["run_id"]) == ["seed"]
 
+    assert Map.keys(hd(items)) |> Enum.sort() ==
+             ~w(complete duration_ms evaluations llm_calls run_id status terminal_reason truncated)
+
     assert Map.keys(usage.capability_calls) |> Enum.sort() ==
              PublicRunAnalysisProfile.explicit_capabilities()
 
@@ -624,6 +627,12 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
              AnalysisSession.evaluate(session, "(analysis/runs {})")
 
     assert Enum.map(still_frozen, & &1["run_id"]) == ["seed"]
+
+    assert {:ok, %{value: %{"items" => [full]}}} =
+             AnalysisSession.evaluate(session, ~S|(analysis/runs {"view" "full"})|)
+
+    assert full["trace_id"] == "seed"
+    assert full["schema_version"] == 2
   end
 
   @tag :tmp_dir

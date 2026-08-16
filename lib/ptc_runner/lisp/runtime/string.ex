@@ -645,15 +645,20 @@ defmodule PtcRunner.Lisp.Runtime.String do
 
   @doc """
   Java-style string formatting with `%s`, `%d`, `%f`, `%e`, `%x`, `%o`, `%%`.
+  Supports field width, `-` left alignment, `0` numeric padding, and numeric
+  precision. Width is bounded to 1,000,000 characters.
 
   Extra args are ignored (Clojure behavior). Too few args raises an error.
 
   - `(format "Hello %s" "world")` returns `"Hello world"`
   - `(format "%d items" 5)` returns `"5 items"`
+  - `(format "[%5s][%-4s][%03d]" "a" "b" 7)` returns `"[    a][b   ][007]"`
   - `(format "%.2f" 3.14159)` returns `"3.14"`
   - `(format "100%%")` returns `"100%"`
   """
   alias PtcRunner.Lisp.Runtime.SpecialValues
+
+  @max_format_width 1_000_000
 
   def format_variadic([fmt | args]) when is_binary(fmt) do
     {result, _remaining} = format_parse(fmt, args)
@@ -686,34 +691,38 @@ defmodule PtcRunner.Lisp.Runtime.String do
   end
 
   defp parse_specifier(rest, args) do
-    # Accept common width/alignment hints from printf-style formats, but keep
-    # PTC-Lisp formatting semantics intentionally small.
-    rest = drop_ignored_width_hint(rest)
+    {flags, rest} = parse_format_flags(rest, %{left?: false, zero?: false})
+    {width, rest} = parse_width(rest)
     {precision, rest} = parse_precision(rest)
+    format = Map.put(flags, :width, width)
 
     case rest do
-      "s" <> rest2 -> format_s(args, rest2)
-      "d" <> rest2 -> format_d(args, rest2)
-      "f" <> rest2 -> format_f(args, precision, rest2)
-      "e" <> rest2 -> format_e(args, precision, rest2)
-      "x" <> rest2 -> format_x(args, rest2)
-      "o" <> rest2 -> format_o(args, rest2)
+      "s" <> rest2 -> format_s(args, format, rest2)
+      "d" <> rest2 -> format_d(args, format, rest2)
+      "f" <> rest2 -> format_f(args, format, precision, rest2)
+      "e" <> rest2 -> format_e(args, format, precision, rest2)
+      "x" <> rest2 -> format_x(args, format, rest2)
+      "o" <> rest2 -> format_o(args, format, rest2)
       _ -> raise ArgumentError, "unsupported format specifier in: %#{rest}"
     end
   end
 
-  defp drop_ignored_width_hint(rest) do
-    rest
-    |> drop_ignored_width_flags()
-    |> drop_digits()
+  defp parse_format_flags("-" <> rest, flags),
+    do: parse_format_flags(rest, %{flags | left?: true})
+
+  defp parse_format_flags("0" <> rest, flags),
+    do: parse_format_flags(rest, %{flags | zero?: true})
+
+  defp parse_format_flags(rest, flags), do: {flags, rest}
+
+  defp parse_width(rest) do
+    {digits, remaining} = take_optional_digits(rest, [])
+
+    case digits do
+      "" -> {nil, remaining}
+      digits -> {bounded_width!(digits), remaining}
+    end
   end
-
-  defp drop_ignored_width_flags("-" <> rest), do: drop_ignored_width_flags(rest)
-  defp drop_ignored_width_flags("0" <> rest), do: drop_ignored_width_flags(rest)
-  defp drop_ignored_width_flags(rest), do: rest
-
-  defp drop_digits(<<c, rest::binary>>) when c in ?0..?9, do: drop_digits(rest)
-  defp drop_digits(rest), do: rest
 
   defp parse_precision("." <> rest) do
     {digits, rest2} = take_digits(rest, [])
@@ -734,82 +743,120 @@ defmodule PtcRunner.Lisp.Runtime.String do
     {acc |> Enum.reverse() |> IO.iodata_to_binary(), rest}
   end
 
+  defp take_optional_digits(<<c, rest::binary>>, acc) when c in ?0..?9,
+    do: take_optional_digits(rest, [<<c>> | acc])
+
+  defp take_optional_digits(rest, acc),
+    do: {acc |> Enum.reverse() |> IO.iodata_to_binary(), rest}
+
+  defp bounded_width!(digits) do
+    case Integer.parse(digits) do
+      {width, ""} when width in 1..@max_format_width -> width
+      _invalid -> raise ArgumentError, "format width must be between 1 and #{@max_format_width}"
+    end
+  end
+
   defp pop_arg!([arg | rest]), do: {arg, rest}
   defp pop_arg!([]), do: raise(ArgumentError, "not enough arguments for format string")
 
-  defp format_s(args, rest) do
+  defp format_s(args, format, rest) do
     {arg, remaining} = pop_arg!(args)
-    {to_str(arg), rest, remaining}
+    {pad(to_str(arg), format, false), rest, remaining}
   end
 
-  defp format_d(args, rest) do
+  defp format_d(args, format, rest) do
     {arg, remaining} = pop_arg!(args)
 
     cond do
       is_integer(arg) ->
-        {Integer.to_string(arg), rest, remaining}
+        {pad(Integer.to_string(arg), format, true), rest, remaining}
 
       is_float(arg) and arg == Kernel.trunc(arg) ->
-        {Integer.to_string(Kernel.trunc(arg)), rest, remaining}
+        {pad(Integer.to_string(Kernel.trunc(arg)), format, true), rest, remaining}
 
       true ->
         raise ArgumentError, "%d expects an integer, got: #{inspect(arg)}"
     end
   end
 
-  defp format_f(args, precision, rest) do
+  defp format_f(args, format, precision, rest) do
     {arg, remaining} = pop_arg!(args)
     prec = precision || 6
 
     cond do
       SpecialValues.special?(arg) ->
-        {to_str(arg), rest, remaining}
+        {pad(to_str(arg), format, false), rest, remaining}
 
       is_number(arg) ->
-        {:erlang.float_to_binary(arg / 1, decimals: prec) |> format_result(), rest, remaining}
+        {(arg / 1) |> :erlang.float_to_binary(decimals: prec) |> pad(format, true), rest,
+         remaining}
 
       true ->
         raise ArgumentError, "%f expects a number, got: #{inspect(arg)}"
     end
   end
 
-  defp format_e(args, precision, rest) do
+  defp format_e(args, format, precision, rest) do
     {arg, remaining} = pop_arg!(args)
     prec = precision || 6
 
     cond do
       SpecialValues.special?(arg) ->
-        {to_str(arg), rest, remaining}
+        {pad(to_str(arg), format, false), rest, remaining}
 
       is_number(arg) ->
-        {:erlang.float_to_binary(arg / 1, scientific: prec) |> format_result(), rest, remaining}
+        {(arg / 1) |> :erlang.float_to_binary(scientific: prec) |> pad(format, true), rest,
+         remaining}
 
       true ->
         raise ArgumentError, "%e expects a number, got: #{inspect(arg)}"
     end
   end
 
-  defp format_x(args, rest) do
+  defp format_x(args, format, rest) do
     {arg, remaining} = pop_arg!(args)
 
     if is_integer(arg) do
-      {Integer.to_string(arg, 16) |> String.downcase(), rest, remaining}
+      {arg |> Integer.to_string(16) |> String.downcase() |> pad(format, true), rest, remaining}
     else
       raise ArgumentError, "%x expects an integer, got: #{inspect(arg)}"
     end
   end
 
-  defp format_o(args, rest) do
+  defp format_o(args, format, rest) do
     {arg, remaining} = pop_arg!(args)
 
     if is_integer(arg) do
-      {Integer.to_string(arg, 8), rest, remaining}
+      {arg |> Integer.to_string(8) |> pad(format, true), rest, remaining}
     else
       raise ArgumentError, "%o expects an integer, got: #{inspect(arg)}"
     end
   end
 
-  defp format_result(s), do: s
+  defp pad(value, %{width: nil}, _numeric?), do: value
+
+  defp pad(value, %{width: width} = format, numeric?) when is_binary(value) do
+    length = String.length(value)
+
+    if length >= width,
+      do: value,
+      else: pad_short(value, length, format, numeric?)
+  end
+
+  defp pad_short(value, length, %{left?: true, width: width}, _numeric?),
+    do: value <> String.duplicate(" ", width - length)
+
+  defp pad_short(value, length, %{zero?: true, width: width}, true) do
+    count = width - length
+
+    case value do
+      "-" <> magnitude -> "-" <> String.duplicate("0", count) <> magnitude
+      value -> String.duplicate("0", count) <> value
+    end
+  end
+
+  defp pad_short(value, length, %{width: width}, _numeric?),
+    do: String.duplicate(" ", width - length) <> value
 
   # ============================================================
   # Name

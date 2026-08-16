@@ -117,27 +117,44 @@ defmodule PtcRunner.Kernel.ProjectResolver do
         {:error, :repl}
 
       {:ok, project_path, option_arguments, positional_suffix} ->
-        if Enum.any?(
-             ["--manifest", "-m", "--profile", "--describe-profile"],
+        expand_repl_project(project_path, option_arguments, positional_suffix)
+    end
+  end
+
+  defp expand_repl_project(project_path, option_arguments, positional_suffix) do
+    with false <-
+           Enum.any?(
+             ["--manifest", "-m", "--describe-profile"],
              &switch?(option_arguments, &1)
-           ) do
-          {:error, CommandRejection.generic(:repl, :conflicting_arguments)}
-        else
-          case ProjectConfig.load(project_path) do
-            {:ok, project} ->
-              argv = ["repl" | option_arguments] ++ ["--manifest", project.application]
-              derived = [:manifest]
-              {argv, derived} = add_host(argv, option_arguments, project, derived)
+           ),
+         {:ok, project} <- ProjectConfig.load(project_path) do
+      expand_loaded_repl_project(project, option_arguments, positional_suffix)
+    else
+      true -> {:error, CommandRejection.generic(:repl, :conflicting_arguments)}
+      {:error, _reason} -> {:error, :repl}
+    end
+  end
 
-              {argv, derived} =
-                add_environment("repl", argv, option_arguments, project, derived)
+  defp expand_loaded_repl_project(project, option_arguments, positional_suffix) do
+    case option_value(option_arguments, "--profile") do
+      nil ->
+        argv = ["repl" | option_arguments] ++ ["--manifest", project.application]
+        derived = [:manifest]
+        {argv, derived} = add_host(argv, option_arguments, project, derived)
+        {argv, derived} = add_environment("repl", argv, option_arguments, project, derived)
+        {:ok, argv ++ positional_suffix, project, derived}
 
-              {:ok, argv ++ positional_suffix, project, derived}
+      profile ->
+        {argv, derived} =
+          add_profile_resources(
+            ["repl" | option_arguments],
+            option_arguments,
+            project,
+            profile,
+            []
+          )
 
-            {:error, _reason} ->
-              {:error, :repl}
-          end
-        end
+        {:ok, argv ++ positional_suffix, project, derived}
     end
   end
 
@@ -244,6 +261,45 @@ defmodule PtcRunner.Kernel.ProjectResolver do
 
   defp add_artifacts(_command, argv, _rest, _project, _run_ref, derived), do: {argv, derived}
 
+  defp add_profile_resources(
+         argv,
+         rest,
+         %ProjectConfig{artifact_root: root, artifacts: artifacts},
+         profile,
+         derived
+       )
+       when is_binary(root) do
+    {argv, derived} =
+      maybe_add_profile_resource(
+        argv,
+        rest,
+        profile in ["run-analysis-v1", "private-run-analysis-v1"] and artifacts.trace,
+        "traces",
+        Path.join(root, "traces"),
+        derived
+      )
+
+    maybe_add_profile_resource(
+      argv,
+      rest,
+      profile == "private-run-analysis-v1" and artifacts.inspection,
+      "inspection",
+      Path.join(root, "inspection"),
+      derived
+    )
+  end
+
+  defp add_profile_resources(argv, _rest, _project, _profile, derived), do: {argv, derived}
+
+  defp maybe_add_profile_resource(argv, rest, true, name, path, derived) do
+    if resource_named?(rest, name),
+      do: {argv, derived},
+      else: {argv ++ ["--resource", "#{name}=#{path}"], put_derived(derived, :resource)}
+  end
+
+  defp maybe_add_profile_resource(argv, _rest, false, _name, _path, derived),
+    do: {argv, derived}
+
   defp maybe_add_artifact(argv, rest, true, switch, key, value, derived) do
     if switch?(rest, switch),
       do: {argv, derived},
@@ -256,6 +312,26 @@ defmodule PtcRunner.Kernel.ProjectResolver do
   defp switch?(arguments, switch) do
     Enum.any?(arguments, &(&1 == switch or String.starts_with?(&1, switch <> "=")))
   end
+
+  defp option_value([switch, value | _rest], switch) when value != "", do: value
+
+  defp option_value([argument | rest], switch) do
+    case String.split(argument, "=", parts: 2) do
+      [^switch, value] when value != "" -> value
+      _other -> option_value(rest, switch)
+    end
+  end
+
+  defp option_value([], _switch), do: nil
+
+  defp resource_named?(["--resource", value | rest], name),
+    do: String.starts_with?(value, name <> "=") or resource_named?(rest, name)
+
+  defp resource_named?(["--resource=" <> value | rest], name),
+    do: String.starts_with?(value, name <> "=") or resource_named?(rest, name)
+
+  defp resource_named?([_argument | rest], name), do: resource_named?(rest, name)
+  defp resource_named?([], _name), do: false
 
   defp context(nil, _derived), do: nil
 

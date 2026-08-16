@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Library
+  alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SafeMetadata
@@ -193,6 +194,76 @@ defmodule PtcRunner.Kernel.RuntimeTools do
       kind: :protocol_error,
       reason: :invalid_runtime_limit_failure
     }
+  end
+
+  @doc false
+  @spec llm_provider_failure(RunState.t()) :: (map() -> term())
+  def llm_provider_failure(state) do
+    fn arguments ->
+      case SafeMetadata.llm_provider_failure(arguments) do
+        %{
+          llm_provider_failure: failure,
+          llm_provider_retryable?: retryable?
+        } = details ->
+          case RunState.consume_llm_provider_failure(state, failure, retryable?) do
+            :ok ->
+              %TrustedError{
+                reason: :llm_provider_failed,
+                message: "LLM provider request failed",
+                details:
+                  details
+                  |> Map.put(:failure_kind, "llm-provider-error")
+                  |> maybe_put_authenticated_replay(arguments, state)
+              }
+
+            :error ->
+              invalid_llm_provider_failure()
+          end
+
+        %{} ->
+          invalid_llm_provider_failure()
+      end
+    end
+  end
+
+  defp invalid_llm_provider_failure do
+    %{
+      status: :error,
+      kind: :protocol_error,
+      reason: :invalid_llm_provider_failure
+    }
+  end
+
+  defp maybe_put_authenticated_replay(details, arguments, state) do
+    case LLMReplayDiagnostic.failure_metadata(arguments) do
+      %{replay_request_hash: request_hash} = replay ->
+        if RunState.replay_miss?(state, request_hash),
+          do: Map.merge(details, replay),
+          else: details
+
+      %{} ->
+        details
+    end
+  end
+
+  @doc false
+  @spec maybe_put_llm_provider_failure(map(), RunState.t(), term(), term()) :: map()
+  def maybe_put_llm_provider_failure(tools, state, event_sink, bundle) when is_map(tools) do
+    if Library.shipped_component?(bundle, "agent.core") do
+      Map.put(
+        tools,
+        "kernel-llm-provider-failure",
+        instrument(
+          state,
+          event_sink,
+          :workflow,
+          "kernel-llm-provider-failure",
+          llm_provider_failure(state)
+        )
+      )
+    else
+      tools
+    end
   end
 
   @doc false
@@ -384,6 +455,14 @@ defmodule PtcRunner.Kernel.RuntimeTools do
            function: callback,
            argument_projection: :raw,
            ledger_arguments: &result_contract_failure_ledger_arguments/1,
+           prelude_namespaces: ["agent.core"],
+           visibility: :private
+         }}
+
+      {"kernel-llm-provider-failure" = name, callback} ->
+        {name,
+         %TrustedTool{
+           function: callback,
            prelude_namespaces: ["agent.core"],
            visibility: :private
          }}

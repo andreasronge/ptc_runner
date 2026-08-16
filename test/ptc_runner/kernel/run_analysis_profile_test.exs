@@ -42,7 +42,7 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
     # this contract is not told half of it.
     assert description["frontend"] == %{
              "continue_on_error" => "forbidden",
-             "input_modes" => ["interactive"],
+             "input_modes" => ["interactive", "load"],
              "output_formats" => ["clojure"],
              "private_terminal" => "required",
              "private_unattended" => %{
@@ -56,7 +56,16 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
 
     {:ok, recipe} = AnalysisProfileRegistry.fetch(@profile_id)
 
-    for input_mode <- [:eval, :load, :script, :stdin] do
+    assert :ok =
+             AnalysisProfileRegistry.authorize_frontend(recipe, %{
+               input_mode: :load,
+               output_format: :clojure,
+               continue_on_error: false,
+               private_terminal: true,
+               terminal_attached: true
+             })
+
+    for input_mode <- [:eval, :script, :stdin] do
       assert {:error, :unsupported_profile_input} =
                AnalysisProfileRegistry.authorize_frontend(recipe, %{
                  input_mode: input_mode,
@@ -174,7 +183,7 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
     assert %{input_modes: [:eval, :load, :script, :stdin], output_formats: [:clojure, :jsonl]} =
              AnalysisProfileRegistry.reachable_frontend(recipe, true)
 
-    assert %{input_modes: [:interactive], output_formats: [:clojure]} =
+    assert %{input_modes: [:interactive, :load], output_formats: [:clojure]} =
              AnalysisProfileRegistry.reachable_frontend(recipe, false)
 
     # ...and the machine-readable output format.

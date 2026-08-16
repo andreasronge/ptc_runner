@@ -82,7 +82,8 @@ defmodule PtcRunner.Kernel.RunAnalysisCapability do
       "model" => string_schema(),
       "provider" => string_schema(),
       "from" => string_schema(),
-      "to" => string_schema()
+      "to" => string_schema(),
+      "view" => %{"type" => "string", "enum" => ["summary", "full"]}
     })
   end
 

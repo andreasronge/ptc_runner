@@ -11,6 +11,14 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandDiagnostic
 
+  @environment_file_errors [
+    :environment_file_not_found,
+    :environment_file_not_regular,
+    :environment_file_unreadable,
+    :environment_file_too_large,
+    :environment_file_invalid_utf8
+  ]
+
   @enforce_keys [
     :provider_application_mode,
     :authorization_targets,
@@ -78,8 +86,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   def valid?(_runtime), do: false
 
   @doc false
-  @spec setup_environment(t()) ::
-          :ok | {:error, :environment_setup_failed | :environment_file_unavailable}
+  @spec setup_environment(t()) :: :ok | {:error, atom()}
   def setup_environment(%__MODULE__{environment_setup: nil} = runtime) do
     if valid?(runtime), do: :ok, else: {:error, :environment_setup_failed}
   end
@@ -91,7 +98,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
         # The dotenv attachment classifies its own failure, because only it
         # knows the operator named the file. Everything else stays
         # undifferentiated.
-        {:error, :environment_file_unavailable} -> {:error, :environment_file_unavailable}
+        {:error, reason} when reason in @environment_file_errors -> {:error, reason}
         _failure -> {:error, :environment_setup_failed}
       end
     else
@@ -118,8 +125,8 @@ defmodule PtcRunner.Kernel.CommandRuntime do
       :ok ->
         :ok
 
-      {:error, :environment_file_unavailable} ->
-        {:error, CommandDiagnostic.new!(:local_preflight, :environment_file_unavailable)}
+      {:error, reason} when reason in @environment_file_errors ->
+        {:error, CommandDiagnostic.new!(:local_preflight, reason)}
 
       {:error, reason} ->
         {:error, reason}

@@ -90,7 +90,7 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
 
   def frontend(:private) do
     %{
-      input_modes: [:interactive],
+      input_modes: [:interactive, :load],
       output_formats: [:clojure],
       continue_on_error: :forbidden,
       private_terminal: :required

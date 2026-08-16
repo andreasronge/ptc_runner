@@ -32,6 +32,8 @@ defmodule PtcRunner.Kernel.ProviderError do
     :domain_error,
     :invalid_result,
     :authentication_failed,
+    :payment_required,
+    :rate_limited,
     :timeout,
     :transport_error
   ]
@@ -55,6 +57,8 @@ defmodule PtcRunner.Kernel.ProviderError do
           | :domain_error
           | :invalid_result
           | :authentication_failed
+          | :payment_required
+          | :rate_limited
           | :timeout
           | :transport_error
   @type mutation_state :: :indeterminate

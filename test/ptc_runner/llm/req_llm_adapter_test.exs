@@ -88,11 +88,12 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
       cases = [
         {400, :invalid_request, false},
         {401, :authentication_failed, false},
+        {402, :payment_required, false},
         {403, :denied, false},
         {408, :timeout, true},
         {409, :invalid_request, true},
         {425, :invalid_request, true},
-        {429, :unavailable, true},
+        {429, :rate_limited, true},
         {503, :unavailable, true}
       ]
 

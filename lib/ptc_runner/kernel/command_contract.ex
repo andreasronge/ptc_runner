@@ -1376,7 +1376,9 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp init_result,
     do:
       closed(~w(created), %{
-        "created" => %{"const" => ["main.clj", "ptc.json", "ptc-project.json"]}
+        "created" => %{
+          "const" => [".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
+        }
       })
 
   defp validate_result do

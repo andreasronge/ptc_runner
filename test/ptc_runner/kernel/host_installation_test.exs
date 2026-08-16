@@ -1532,7 +1532,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     list_runs = Enum.find(built.capabilities, &(&1.name == "history.runs"))
 
     assert {:ok, %{"items" => [%{"run_id" => "private-run", "source" => "private"}]}} =
-             list_runs.callback.(%{})
+             list_runs.callback.(%{"view" => "full"})
 
     assert built.data_class == :private_inspection
     assert built.accepts_data == [:normal, :private_inspection]

@@ -275,6 +275,14 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
        when is_map(details),
        do: error
 
+  defp classify_runner_error(
+         {:llm_provider_failed, _message, details} = error,
+         _type,
+         _index
+       )
+       when is_map(details),
+       do: error
+
   defp classify_runner_error(:parallel_capacity_exceeded, _type, _index),
     do:
       {:parallel_capacity_exceeded,
@@ -331,6 +339,7 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
          {:worker_control, :fail,
           value
           |> SafeMetadata.failure_taxonomy()
+          |> Map.merge(SafeMetadata.llm_provider_failure(value))
           |> Map.merge(LLMReplayDiagnostic.failure_metadata(value))}
 
   defp captured_failure(
@@ -363,6 +372,14 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
 
   defp parallel_abort_error(
          {:result_contract_failed, _message, details} = error,
+         _type,
+         _index
+       )
+       when is_map(details),
+       do: error
+
+  defp parallel_abort_error(
+         {:llm_provider_failed, _message, details} = error,
          _type,
          _index
        )

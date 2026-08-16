@@ -1476,7 +1476,8 @@
     },
     %{
       name: "format",
-      description: "Java-style format string",
+      description:
+        "Java-style format string with bounded width, left alignment, zero padding, and numeric precision",
       binding: :collect,
       category: :string,
       dispatch: :env,

@@ -291,7 +291,8 @@
                 (turn-limit-failure :protocol-error max-turns))
 
               :provider-error
-              (fail (result/error :llm-provider-error (get action :error)))
+              (tool/kernel-llm-provider-failure
+                (result/error :llm-provider-error (get action :error)))
 
               (fail (result/error :unknown-action (get action :kind)))))))))))
 

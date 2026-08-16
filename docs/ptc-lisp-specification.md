@@ -2353,7 +2353,7 @@ out-of-bounds vector indices.
 | `index-of` | `(index-of s value from-index)` | Index of first occurrence from position |
 | `last-index-of` | `(last-index-of s value)` | Index of last occurrence, or `nil` if not found |
 | `last-index-of` | `(last-index-of s value from-index)` | Index of last occurrence up to position |
-| `format` | `(format fmt-string & args)` | Java-style format string |
+| `format` | `(format fmt-string & args)` | Java-style `%s`/`%d`/`%f`/`%e`/`%x`/`%o` formatting with bounded width, `-` left alignment, `0` numeric padding, and numeric precision |
 | `name` | `(name x)` | Returns name string of keyword or string |
 
 **Type coercion:** `str` converts values to strings using these rules:

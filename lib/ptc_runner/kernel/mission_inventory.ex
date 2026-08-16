@@ -26,6 +26,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ModelContract
+  alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Export
 
@@ -168,10 +169,49 @@ defmodule PtcRunner.Kernel.MissionInventory do
 
   defp model_entries(mission) do
     with {:ok, exports} <- model_exports(mission),
-         {:ok, capabilities} <- model_capabilities(mission) do
-      {:ok, exports ++ capabilities}
+         {:ok, capabilities} <- model_capabilities(mission),
+         {:ok, data} <- model_data(mission) do
+      {:ok, exports ++ capabilities ++ data}
     end
   end
+
+  defp model_data(%{data: data}) when is_map(data) and not is_struct(data) do
+    data
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.reduce_while({:ok, []}, fn {name, value}, {:ok, entries} ->
+      with {:ok, form} <- data_form(name),
+           {:ok, contract} <- ModelContract.json_value(value) do
+        entry =
+          model_entry(
+            "value",
+            form,
+            contract,
+            :read,
+            "Mission data supplied by the application manifest."
+          )
+
+        {:cont, {:ok, [entry | entries]}}
+      else
+        :skip -> {:cont, {:ok, entries}}
+        {:error, :unsupported_contract} -> {:cont, {:ok, entries}}
+      end
+    end)
+    |> reverse_entries()
+  end
+
+  defp model_data(_mission), do: {:ok, []}
+
+  defp data_form(name) when is_binary(name) do
+    case Parser.parse("data/" <> name) do
+      {:ok, {:ns_symbol, :data, parsed}} ->
+        if to_string(parsed) == name, do: {:ok, "data/" <> name}, else: :skip
+
+      _not_a_source_reference ->
+        :skip
+    end
+  end
+
+  defp data_form(_name), do: :skip
 
   defp model_exports(%{bundle: %{prelude: prelude}} = mission) do
     prelude

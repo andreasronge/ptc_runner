@@ -221,10 +221,13 @@ defmodule PtcRunner.Kernel.RunAnalysis do
     with :ok <-
            validate_keys(
              arguments,
-             ~w(limit cursor status run_id trace_id tags name bundle model provider from to)
+             ~w(limit cursor status run_id trace_id tags name bundle model provider from to view)
            ),
-         :ok <- validate_limit(arguments) do
-      TraceSnapshot.query(analysis.traces, :list_runs, arguments)
+         :ok <- validate_limit(arguments),
+         {:ok, view} <- run_view(arguments),
+         {:ok, page} <-
+           TraceSnapshot.query(analysis.traces, :list_runs, Map.delete(arguments, "view")) do
+      {:ok, Map.update!(page, "items", &project_runs(&1, view))}
     end
   end
 
@@ -266,6 +269,21 @@ defmodule PtcRunner.Kernel.RunAnalysis do
   end
 
   defp execute(_analysis, :read, _arguments), do: {:error, :invalid_query}
+
+  defp run_view(%{"view" => "full"}), do: {:ok, :full}
+  defp run_view(%{"view" => "summary"}), do: {:ok, :summary}
+
+  defp run_view(arguments) when is_map(arguments) and not is_map_key(arguments, "view"),
+    do: {:ok, :summary}
+
+  defp run_view(_arguments), do: {:error, :invalid_query}
+
+  @summary_run_fields ~w(run_id status duration_ms llm_calls evaluations terminal_reason complete truncated)
+
+  defp project_runs(items, :full) when is_list(items), do: items
+
+  defp project_runs(items, :summary) when is_list(items),
+    do: Enum.map(items, &Map.take(&1, @summary_run_fields))
 
   defp fetch_collection(name) do
     case Map.fetch(@collections_by_name, name) do

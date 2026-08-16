@@ -38,6 +38,10 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     assertion-failed
     unknown-action
   )
+  @llm_provider_failures ~w(
+    authentication-failed payment-required rate-limited denied not-found timeout
+    invalid-request unavailable transport-error internal domain-error invalid-result
+  )
 
   @spec normalize_labels(term()) :: {:ok, map()} | {:error, :invalid_safe_metadata}
   @doc "Validates labels and fingerprints caller-defined identifier fields."
@@ -103,6 +107,51 @@ defmodule PtcRunner.Kernel.SafeMetadata do
 
   def failure_taxonomy(_value), do: %{}
 
+  @doc "Projects an agent LLM failure to one closed, payload-free provider class."
+  @spec llm_provider_failure(term()) :: map()
+  def llm_provider_failure(value) when is_map(value) and not is_struct(value) do
+    with {:ok, kind} <- fetch_named(value, "kind"),
+         "llm-provider-error" <- normalize_name(kind),
+         {:ok, reason} when is_map(reason) and not is_struct(reason) <-
+           fetch_named(value, "reason"),
+         {:ok, provider_reason} <- fetch_named(reason, "reason"),
+         normalized when normalized in @llm_provider_failures <- normalize_name(provider_reason),
+         {:ok, retryable?} when is_boolean(retryable?) <- fetch_named(reason, "retryable?") do
+      %{
+        llm_provider_failure: provider_failure_atom(normalized),
+        llm_provider_retryable?: retryable?
+      }
+    else
+      _not_a_known_llm_failure -> %{}
+    end
+  end
+
+  def llm_provider_failure(_value), do: %{}
+
+  @doc false
+  @spec retain_llm_provider_failure_fields(term()) :: map()
+  def retain_llm_provider_failure_fields(%{
+        llm_provider_failure: failure,
+        llm_provider_retryable?: retryable?
+      })
+      when failure in [
+             :authentication_failed,
+             :payment_required,
+             :rate_limited,
+             :denied,
+             :not_found,
+             :timeout,
+             :invalid_request,
+             :unavailable,
+             :transport_error,
+             :internal,
+             :domain_error,
+             :invalid_result
+           ] and is_boolean(retryable?),
+      do: %{llm_provider_failure: failure, llm_provider_retryable?: retryable?}
+
+  def retain_llm_provider_failure_fields(_metadata), do: %{}
+
   @doc false
   @spec retain_failure_taxonomy(term()) :: map()
   def retain_failure_taxonomy(%{failure_kind: kind} = taxonomy)
@@ -141,6 +190,37 @@ defmodule PtcRunner.Kernel.SafeMetadata do
       if metadata_name(key) == "kind", do: kind
     end)
   end
+
+  defp fetch_named(value, name) do
+    case Enum.find(value, fn {key, _field} -> metadata_name(key) == name end) do
+      {_key, field} -> {:ok, field}
+      nil -> :error
+    end
+  end
+
+  defp normalize_name(%PtcRunner.Lisp.Keyword{name: name}), do: normalize_name(name)
+
+  defp normalize_name(value) when is_atom(value),
+    do: value |> Atom.to_string() |> normalize_name()
+
+  defp normalize_name(value) when is_binary(value) and byte_size(value) in 1..64 do
+    if String.valid?(value), do: String.replace(value, "_", "-"), else: nil
+  end
+
+  defp normalize_name(_value), do: nil
+
+  defp provider_failure_atom("authentication-failed"), do: :authentication_failed
+  defp provider_failure_atom("payment-required"), do: :payment_required
+  defp provider_failure_atom("rate-limited"), do: :rate_limited
+  defp provider_failure_atom("denied"), do: :denied
+  defp provider_failure_atom("not-found"), do: :not_found
+  defp provider_failure_atom("timeout"), do: :timeout
+  defp provider_failure_atom("invalid-request"), do: :invalid_request
+  defp provider_failure_atom("unavailable"), do: :unavailable
+  defp provider_failure_atom("transport-error"), do: :transport_error
+  defp provider_failure_atom("internal"), do: :internal
+  defp provider_failure_atom("domain-error"), do: :domain_error
+  defp provider_failure_atom("invalid-result"), do: :invalid_result
 
   defp metadata_name(%PtcRunner.Lisp.Keyword{name: name}), do: name
   defp metadata_name(value) when is_atom(value), do: Atom.to_string(value)

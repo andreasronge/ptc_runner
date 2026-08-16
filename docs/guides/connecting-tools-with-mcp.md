@@ -8,6 +8,17 @@ that installation but cannot invent or widen it.
 Start with [Building agents](building-agents.md) if you have not yet run the
 shipped agent loop. This guide adds one file-reading tool to that working path.
 
+Two small servers are ready to copy:
+
+- [`examples/mcp/filesystem`](https://github.com/andreasronge/ptc_runner/tree/main/examples/mcp/filesystem) is a
+  paginated, read-only file grant with a committed JavaScript bundle.
+- [`examples/mcp/writer`](https://github.com/andreasronge/ptc_runner/tree/main/examples/mcp/writer) is a confined
+  report writer with an explicit write effect and retry guidance.
+
+They are source examples, not release payloads. A separately cloned project
+should vendor the chosen bundle or install an equivalent server at a stable
+location; the PtcRunner release does not add Node.js or copy these examples.
+
 ## Run the checked-in file agent
 
 The tutorial server is a committed JavaScript bundle. It requires Node.js 22 or
@@ -82,6 +93,11 @@ write is never retried automatically and may report
 `mutation_state: "indeterminate"`; the external mutation may already have
 happened.
 
+The checked-in [writer sample](https://github.com/andreasronge/ptc_runner/tree/main/examples/mcp/writer) shows the
+complete installation, mandatory `allow` list, basename confinement, and the
+rule that the caller must reconcile an indeterminate result rather than repeat
+the mutation blindly.
+
 A prompt-visible PTC-Lisp wrapper can present a smaller domain API than the raw
 tool:
 
@@ -119,6 +135,11 @@ literal environment values:
   "env": {"VENDOR_TOKEN": {"binding": "vendor_token"}}
 }
 ```
+
+Relative entries in `args` are interpreted by the child under that resolved
+`cwd`. If the host document lives outside this checkout, a path into
+`examples/mcp/...` must therefore be copied into the project or expressed as a
+deliberate cross-repository/absolute path.
 
 Plain doctor resolves the executable without launching it. Missing commands
 fail their local provider check as `command_not_found`. The optional

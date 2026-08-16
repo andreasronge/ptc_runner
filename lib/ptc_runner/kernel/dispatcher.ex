@@ -627,7 +627,11 @@ defmodule PtcRunner.Kernel.Dispatcher do
       {:provider_result, ^pid, result} ->
         await_down(pid, ref)
 
-        case RunState.finish_provider(state, replay_request_hash(result)) do
+        case RunState.finish_provider(
+               state,
+               replay_request_hash(result),
+               llm_provider_error(capability, result)
+             ) do
           :ok ->
             normalize_result(state, environment, capability, result)
 
@@ -841,6 +845,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
   end
 
   defp replay_request_hash(_result), do: nil
+
+  defp llm_provider_error(
+         %Capability{name: "llm-request"},
+         {:error, %ProviderError{} = error}
+       ) do
+    if ProviderError.valid?(error), do: error, else: nil
+  end
+
+  defp llm_provider_error(_capability, _result), do: nil
 
   defp terminal_provider_failure?({:error, %ProviderError{} = error}) do
     ProviderError.valid?(error) and

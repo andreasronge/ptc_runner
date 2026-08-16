@@ -578,6 +578,11 @@ defmodule PtcRunner.Kernel.Runner do
       config.result_contract_source,
       config.workflow_environment.bundle
     )
+    |> RuntimeTools.maybe_put_llm_provider_failure(
+      state,
+      config.event_sink,
+      config.workflow_environment.bundle
+    )
     |> RuntimeTools.maybe_put_runtime_limit_failure(
       state,
       config.event_sink,
@@ -633,6 +638,13 @@ defmodule PtcRunner.Kernel.Runner do
       |> SafeMetadata.retain_failure_taxonomy_fields()
 
     Map.merge(stopped_data, taxonomy)
+  end
+
+  defp maybe_put_failure_taxonomy(
+         stopped_data,
+         {:error, %Error{reason: :llm_provider_failed, details: details}}
+       ) do
+    Map.merge(stopped_data, SafeMetadata.retain_failure_taxonomy_fields(details))
   end
 
   defp maybe_put_failure_taxonomy(
@@ -806,6 +818,26 @@ defmodule PtcRunner.Kernel.Runner do
   end
 
   defp workflow_error_details(
+         %{reason: :llm_provider_failed, details: details} = fail,
+         _timeout_ms,
+         _limits,
+         sink
+       ) do
+    if EventSink.policy(sink) != :normal do
+      workflow_error_details_for_class(:private, fail)
+    else
+      retained = SafeMetadata.retain_llm_provider_failure_fields(details)
+
+      if map_size(retained) == 2,
+        do:
+          retained
+          |> Map.put(:failure_kind, "llm-provider-error")
+          |> Map.merge(LLMReplayDiagnostic.retain_candidate_metadata(details)),
+        else: %{}
+    end
+  end
+
+  defp workflow_error_details(
          %{
            reason: :runtime_limit_exceeded,
            details: %{limit: :subordinate_evaluations, limit_value: limit}
@@ -851,7 +883,8 @@ defmodule PtcRunner.Kernel.Runner do
         _private_or_unavailable -> workflow_error_details_for_class(:private, fail)
       end
 
-    Map.merge(details, SafeMetadata.retain_failure_taxonomy_fields(fail.details))
+    details
+    |> Map.merge(SafeMetadata.retain_failure_taxonomy_fields(fail.details))
   end
 
   # Both stable parallel messages are compared by suffix because the
