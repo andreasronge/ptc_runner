@@ -77,6 +77,7 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.DirectorySeparation
   alias PtcRunner.Kernel.ManifestRepl
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ReplSession
@@ -373,11 +374,14 @@ defmodule PtcRunner.ReplFrontend do
 
   defp run_profile_session(opts, arguments) do
     case reserve_profile_result(opts) do
-      {:ok, result_handle} ->
+      {:ok, nil} ->
+        run_profile_session(opts, arguments, nil, nil)
+
+      {:ok, result_handle, result_role} ->
         try do
-          run_profile_session(opts, arguments, result_handle)
+          run_profile_session(opts, arguments, result_handle, result_role)
         after
-          if result_handle, do: PublicationHandle.discard(result_handle)
+          PublicationHandle.discard(result_handle)
         end
 
       {:error, _reason} ->
@@ -385,11 +389,17 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
-  defp run_profile_session(opts, arguments, result_handle) do
+  defp run_profile_session(opts, arguments, result_handle, result_role) do
     with {:ok, recipe} <- AnalysisProfileRegistry.fetch(opts[:profile]),
          {:ok, resources} <- profile_resources(opts, recipe),
          {:ok, output_directory, temporary?} <- profile_output_directory(opts) do
-      case separate_directories(Map.values(resources), output_directory, result_handle) do
+      case separate_directories(
+             resources,
+             output_directory,
+             temporary?,
+             result_handle,
+             result_role
+           ) do
         {:ok, output_identity} ->
           start_profile_session(
             opts,
@@ -401,9 +411,9 @@ defmodule PtcRunner.ReplFrontend do
             result_handle
           )
 
-        {:error, message} ->
+        {:error, message, extra} ->
           cleanup_temporary_directory(output_directory, temporary?)
-          command_error(opts, :cli, message)
+          command_error(opts, :cli, message, extra)
       end
     else
       {:error, category, message} -> command_error(opts, category, message)
@@ -412,10 +422,24 @@ defmodule PtcRunner.ReplFrontend do
 
   defp reserve_profile_result(opts) do
     case {opts[:output], opts[:private_output]} do
-      {nil, nil} -> {:ok, nil}
-      {path, nil} when is_binary(path) -> PublicationHandle.reserve(path, :result, 0o600)
-      {nil, path} when is_binary(path) -> PublicationHandle.reserve(path, :result, 0o600)
-      _ -> {:error, :invalid_destination}
+      {nil, nil} ->
+        {:ok, nil}
+
+      {path, nil} when is_binary(path) ->
+        reserved_result(path, %{id: "output", label: "--output"})
+
+      {nil, path} when is_binary(path) ->
+        reserved_result(path, %{id: "private_output", label: "--private-output"})
+
+      _ ->
+        {:error, :invalid_destination}
+    end
+  end
+
+  defp reserved_result(path, role) do
+    case PublicationHandle.reserve(path, :result, 0o600) do
+      {:ok, handle} -> {:ok, handle, role}
+      {:error, _reason} = error -> error
     end
   end
 
@@ -511,23 +535,61 @@ defmodule PtcRunner.ReplFrontend do
     _exception -> {:error, :setup, "could not create a private session trace directory"}
   end
 
-  defp separate_directories(input_directories, output_directory, result_handle) do
-    with {:ok, output} <- AnalysisDirectory.resolve(output_directory),
-         {:ok, inputs} <- AnalysisDirectory.resolve_all(input_directories),
-         {:ok, result_outputs} <- result_output_directories(result_handle),
-         true <- AnalysisDirectory.pairwise_separate?([output | result_outputs ++ inputs]) do
+  defp separate_directories(resources, output_directory, temporary?, result_handle, result_role) do
+    with {:ok, inputs} <- resource_directories(resources),
+         {:ok, {_role, output} = session_trace} <-
+           resolve_role_directory(output_directory, session_trace_role(temporary?)),
+         {:ok, result_outputs} <- result_output_directories(result_handle, result_role),
+         :ok <- DirectorySeparation.verify(inputs ++ [session_trace] ++ result_outputs) do
       {:ok, output.identity}
     else
-      _ -> {:error, "input and session trace directories must be physically separate"}
+      {:error, {:unavailable, role}} ->
+        {:error, "#{role.label} became unavailable before the analysis session started", %{}}
+
+      {:error, conflict} ->
+        {:error, conflict.message,
+         %{
+           "directory_conflict" => %{
+             "left_role" => conflict.left_role,
+             "right_role" => conflict.right_role,
+             "relation" => conflict.relation
+           }
+         }}
     end
   end
 
-  defp result_output_directories(nil), do: {:ok, []}
+  defp resource_directories(resources) do
+    resources
+    |> Enum.sort()
+    |> Enum.reduce_while({:ok, []}, fn {name, directory}, {:ok, resolved} ->
+      role = %{id: "resource.#{name}", label: "--resource #{name}"}
 
-  defp result_output_directories(handle) do
-    case handle |> PublicationHandle.path() |> Path.dirname() |> AnalysisDirectory.resolve() do
-      {:ok, directory} -> {:ok, [directory]}
-      {:error, _reason} -> {:error, :invalid_result_directory}
+      case resolve_role_directory(directory, role) do
+        {:ok, labelled} -> {:cont, {:ok, resolved ++ [labelled]}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp resolve_role_directory(directory, role) do
+    case AnalysisDirectory.resolve(directory) do
+      {:ok, resolved} -> {:ok, {role, resolved}}
+      {:error, _reason} -> {:error, {:unavailable, role}}
+    end
+  end
+
+  defp session_trace_role(true),
+    do: %{id: "session_trace_auto", label: "the auto-created session trace directory"}
+
+  defp session_trace_role(false),
+    do: %{id: "session_trace", label: "--session-trace-dir"}
+
+  defp result_output_directories(nil, _role), do: {:ok, []}
+
+  defp result_output_directories(handle, role) do
+    case handle |> PublicationHandle.path() |> Path.dirname() |> resolve_role_directory(role) do
+      {:ok, labelled} -> {:ok, [labelled]}
+      {:error, _reason} = error -> error
     end
   end
 

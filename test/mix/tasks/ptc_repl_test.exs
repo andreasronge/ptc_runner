@@ -903,37 +903,249 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
-  test "profile mode rejects nested and symlink-parent output directories", %{tmp_dir: directory} do
+  test "profile mode names the conflicting pair and its physical relationship", %{
+    tmp_dir: directory
+  } do
     source = Path.join(directory, "source")
     nested = Path.join(source, "nested")
     alias_root = Path.join(directory, "alias")
     deep = Path.join(source, "deep")
     deep_output = Path.join(deep, "output")
+    outer = Path.join(directory, "outer")
+    inner_source = Path.join(outer, "inner-source")
     File.mkdir!(source)
     File.mkdir!(nested)
     File.mkdir!(deep)
     File.mkdir!(deep_output)
-    seed_trace(source, "seed")
-
-    assert_raise Mix.Error, ~r/physically separate/, fn ->
-      run_repl(profile_args(source, nested) ++ ["-e", "42"])
-    end
-
+    File.mkdir!(outer)
+    File.mkdir!(inner_source)
     File.ln_s!(directory, alias_root)
-    aliased_nested = Path.join(alias_root, "source/nested")
+    seed_trace(source, "seed")
+    seed_trace(inner_source, "seed")
 
-    assert_raise Mix.Error, ~r/physically separate/, fn ->
-      run_repl(profile_args(source, aliased_nested) ++ ["-e", "42"])
-    end
+    cases = [
+      {"equal", source, source,
+       "directories for --resource traces and --session-trace-dir must be physically " <>
+         "separate; they resolve to the same physical directory"},
+      {"nested", source, nested,
+       "directories for --resource traces and --session-trace-dir must be physically " <>
+         "separate; --resource traces contains --session-trace-dir"},
+      {"reverse nested", inner_source, outer,
+       "directories for --resource traces and --session-trace-dir must be physically " <>
+         "separate; --session-trace-dir contains --resource traces"},
+      {"symlink alias", source, Path.join(alias_root, "source"),
+       "directories for --resource traces and --session-trace-dir must be physically " <>
+         "separate; they resolve to the same physical directory"},
+      {"symlink parent", source, Path.join(alias_root, "source/deep/output"),
+       "directories for --resource traces and --session-trace-dir must be physically " <>
+         "separate; --resource traces contains --session-trace-dir"}
+    ]
 
-    File.rm!(alias_root)
-    File.ln_s!(deep, alias_root)
+    for {label, traces, session_trace_dir, message} <- cases do
+      error =
+        assert_raise Mix.Error, fn ->
+          run_repl(profile_args(traces, session_trace_dir) ++ ["-e", "42"])
+        end
 
-    assert_raise Mix.Error, ~r/physically separate/, fn ->
-      run_repl(profile_args(source, Path.join(alias_root, "output")) ++ ["-e", "42"])
+      assert error.message =~ message, "#{label} case reported: #{error.message}"
+      refute error.message =~ directory
     end
 
     assert File.ls!(nested) == []
+    assert File.ls!(deep_output) == []
+  end
+
+  test "profile mode attributes a conflict with the auto-created session trace directory" do
+    # No --session-trace-dir, so the session trace directory is generated under
+    # the system temporary directory - which this resource contains.
+    error =
+      assert_raise Mix.Error, fn ->
+        run_repl([
+          "--profile",
+          "run-analysis-v1",
+          "--resource",
+          "traces=#{System.tmp_dir!()}",
+          "-e",
+          "42"
+        ])
+      end
+
+    assert error.message =~
+             "directories for --resource traces and the auto-created session trace " <>
+               "directory must be physically separate; --resource traces contains " <>
+               "the auto-created session trace directory"
+
+    refute error.message =~ System.tmp_dir!()
+  end
+
+  @tag :tmp_dir
+  test "profile mode attributes source and result destination conflicts to their own options",
+       %{tmp_dir: directory} do
+    fixture = PrivateInspectionFixture.create!(directory, "separation")
+    nested_inspection = Path.join(fixture.traces, "inspection")
+    File.mkdir!(nested_inspection)
+
+    private_args = [
+      "--profile",
+      "private-run-analysis-v1",
+      "--private-unattended",
+      "-e",
+      "42"
+    ]
+
+    resources = fn traces, inspection ->
+      ["--resource", "traces=#{traces}", "--resource", "inspection=#{inspection}"]
+    end
+
+    error =
+      assert_raise Mix.Error, fn ->
+        run_repl(
+          private_args ++
+            resources.(fixture.traces, nested_inspection) ++
+            ["--session-trace-dir", fixture.output]
+        )
+      end
+
+    assert error.message =~
+             "directories for --resource inspection and --resource traces must be " <>
+               "physically separate; --resource traces contains --resource inspection"
+
+    # A --private-output whose parent sits inside an input directory is attributed
+    # to --private-output, never generically to the input.
+    error =
+      assert_raise Mix.Error, fn ->
+        run_repl(
+          private_args ++
+            resources.(fixture.traces, fixture.inspection) ++
+            [
+              "--session-trace-dir",
+              fixture.output,
+              "--private-output",
+              Path.join(fixture.traces, "result.private.json")
+            ]
+        )
+      end
+
+    assert error.message =~
+             "directories for --resource traces and --private-output must be physically " <>
+               "separate; they resolve to the same physical directory"
+
+    refute File.exists?(Path.join(fixture.traces, "result.private.json"))
+    refute error.message =~ directory
+  end
+
+  @tag :tmp_dir
+  test "profile mode leaves non-conflicting sibling directories accepted", %{tmp_dir: directory} do
+    source = Path.join(directory, "source")
+    output_directory = Path.join(directory, "output")
+    results = Path.join(directory, "results")
+    Enum.each([source, output_directory, results], &File.mkdir!/1)
+    seed_trace(source, "seed")
+
+    result = Path.join(results, "value.json")
+
+    capture_io(fn ->
+      run_repl(profile_args(source, output_directory) ++ ["--output", result, "-e", "42"])
+    end)
+
+    assert File.read!(result) |> Jason.decode!() == 42
+  end
+
+  @tag :tmp_dir
+  test "profile mode names a session trace and result destination conflict", %{
+    tmp_dir: directory
+  } do
+    source = Path.join(directory, "source")
+    output_directory = Path.join(directory, "output")
+    File.mkdir!(source)
+    File.mkdir!(output_directory)
+    seed_trace(source, "seed")
+
+    result = Path.join(output_directory, "value.json")
+
+    error =
+      assert_raise Mix.Error, fn ->
+        run_repl(profile_args(source, output_directory) ++ ["--output", result, "-e", "42"])
+      end
+
+    assert error.message =~
+             "directories for --session-trace-dir and --output must be physically " <>
+               "separate; they resolve to the same physical directory"
+
+    refute File.exists?(result)
+    refute error.message =~ directory
+  end
+
+  @tag :tmp_dir
+  test "profile mode reports the same first conflicting pair when several conflict", %{
+    tmp_dir: directory
+  } do
+    # traces contains inspection, the session trace directory, and the
+    # --private-output parent, so four pairs conflict at once. Input pairs are
+    # ordered before the session trace and the result destination, so the
+    # reported pair is stable rather than incidental.
+    fixture = PrivateInspectionFixture.create!(directory, "ordering")
+
+    argv = [
+      "--profile",
+      "private-run-analysis-v1",
+      "--private-unattended",
+      "--resource",
+      "traces=#{directory}",
+      "--resource",
+      "inspection=#{fixture.inspection}",
+      "--session-trace-dir",
+      fixture.output,
+      "--private-output",
+      Path.join(fixture.traces, "value.private.json"),
+      "-e",
+      "42"
+    ]
+
+    messages =
+      for _attempt <- 1..3 do
+        assert_raise(Mix.Error, fn -> run_repl(argv) end).message
+      end
+
+    for message <- messages do
+      assert message =~
+               "directories for --resource inspection and --resource traces must be " <>
+                 "physically separate; --resource traces contains --resource inspection"
+    end
+  end
+
+  @tag :tmp_dir
+  test "profile JSONL reports a directory conflict as structured roles", %{tmp_dir: directory} do
+    source = Path.join(directory, "source")
+    nested = Path.join(source, "nested")
+    File.mkdir!(source)
+    File.mkdir!(nested)
+    seed_trace(source, "seed")
+
+    output =
+      capture_io(fn ->
+        assert_raise Mix.Error, fn ->
+          run_repl(profile_args(source, nested) ++ ["--format", "jsonl", "-e", "42"])
+        end
+      end)
+
+    assert [record] = decode_jsonl(output)
+
+    assert record["schema_version"] == 1
+    assert record["type"] == "command-error"
+    assert record["category"] == "cli"
+
+    assert record["message"] ==
+             "directories for --resource traces and --session-trace-dir must be physically " <>
+               "separate; --resource traces contains --session-trace-dir"
+
+    assert record["directory_conflict"] == %{
+             "left_role" => "resource.traces",
+             "right_role" => "session_trace",
+             "relation" => "left_contains_right"
+           }
+
+    refute output =~ directory
   end
 
   @tag :tmp_dir

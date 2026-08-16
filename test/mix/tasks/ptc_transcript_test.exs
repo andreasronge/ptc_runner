@@ -82,17 +82,25 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     alias_root = Path.join(root, "root-alias")
     File.ln_s!(root, alias_root)
     aliased_traces = Path.join(alias_root, "traces")
+    nested_inspection = Path.join(fixture.traces, "nested-inspection")
+    File.mkdir!(nested_inspection)
 
     cases = [
       {fixture.traces, fixture.traces, Path.join(fixture.output, "same-source.json"),
-       ["--traces", "--inspection"]},
-      {fixture.traces, fixture.inspection, Path.join(root, "ancestor-output.json"),
-       ["--traces", "--private-output"]},
+       "directories for --traces and --inspection must be physically separate; " <>
+         "they resolve to the same physical directory"},
       {fixture.traces, aliased_traces, Path.join(fixture.output, "aliased-source.json"),
-       ["--traces", "--inspection"]}
+       "directories for --traces and --inspection must be physically separate; " <>
+         "they resolve to the same physical directory"},
+      {fixture.traces, nested_inspection, Path.join(fixture.output, "nested-source.json"),
+       "directories for --traces and --inspection must be physically separate; " <>
+         "--traces contains --inspection"},
+      {fixture.traces, fixture.inspection, Path.join(root, "ancestor-output.json"),
+       "directories for --traces and --private-output must be physically separate; " <>
+         "--private-output contains --traces"}
     ]
 
-    for {traces, inspection, output, switches} <- cases do
+    for {traces, inspection, output, message} <- cases do
       presentation =
         MixCommandAdapter.execute(
           transcript_argv(fixture, output, traces: traces, inspection: inspection)
@@ -100,8 +108,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
 
       assert presentation.exit_status == 1
       assert presentation.stderr =~ "transcript/source_separation_failed"
-      assert presentation.stderr =~ "physically separate"
-      Enum.each(switches, &assert(presentation.stderr =~ &1))
+      assert presentation.stderr =~ message
       refute presentation.stderr =~ root
       refute File.exists?(output)
     end

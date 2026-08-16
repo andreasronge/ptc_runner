@@ -285,9 +285,10 @@ mix ptc transcript RUN_ID \
 
 The command reserves an owner-only destination before capture. Trace,
 inspection, and output directories must be pairwise physically separate: no
-directory may equal, contain, or be contained by either of the others.
-Ambiguous, incomplete, changed, unsupported, or oversized evidence fails
-without a partial output.
+directory may equal, contain, or be contained by either of the others. A
+rejection names the two conflicting switches and their physical relationship,
+and discloses no path. Ambiguous, incomplete, changed, unsupported, or
+oversized evidence fails without a partial output.
 
 Use `private-run-analysis-v1` when you need several correlated questions or
 custom PTC-Lisp analysis. Its results can include exact messages, generated

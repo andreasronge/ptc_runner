@@ -16,6 +16,7 @@ defmodule PtcRunner.TranscriptFrontend do
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.ConversationProjection
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.DirectorySeparation
   alias PtcRunner.Kernel.PrivateRunAnalysisProfile
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.RunAnalysis
@@ -203,25 +204,16 @@ defmodule PtcRunner.TranscriptFrontend do
   end
 
   defp validate_separation(trace, private, output) do
-    cond do
-      not AnalysisDirectory.pairwise_separate?([trace, private]) ->
-        separation_error("--traces", "--inspection")
+    labelled = [
+      {%{id: "traces", label: "--traces"}, trace},
+      {%{id: "inspection", label: "--inspection"}, private},
+      {%{id: "private_output", label: "--private-output"}, output}
+    ]
 
-      not AnalysisDirectory.pairwise_separate?([trace, output]) ->
-        separation_error("--traces", "--private-output")
-
-      not AnalysisDirectory.pairwise_separate?([private, output]) ->
-        separation_error("--inspection", "--private-output")
-
-      true ->
-        :ok
+    case DirectorySeparation.verify(labelled) do
+      :ok -> :ok
+      {:error, %{message: message}} -> {:error, :source_separation_failed, message}
     end
-  end
-
-  defp separation_error(first, second) do
-    {:error, :source_separation_failed,
-     "directories for #{first} and #{second} must be physically separate; " <>
-       "neither may contain the other"}
   end
 
   defp destination_error(:destination_exists),

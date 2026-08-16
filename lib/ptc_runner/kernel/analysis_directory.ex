@@ -8,6 +8,25 @@ defmodule PtcRunner.Kernel.AnalysisDirectory do
           required(:lineage) => MapSet.t(identity())
         }
 
+  @typedoc """
+  How two resolved directories sit relative to each other on the filesystem.
+
+  `:same` covers both an identical path and distinct paths that resolve to one
+  physical directory through a symbolic link; an alias is a cause of `:same`,
+  not a relationship of its own. Only `:separate` satisfies the physical
+  separation rule.
+  """
+  @type relationship :: :separate | :same | :left_contains_right | :right_contains_left
+
+  @typedoc """
+  A resolved directory tagged with the caller's own name for its role.
+
+  Roles are opaque here: the kernel never interprets them, and callers use
+  them to attribute a rejection to the option or resource that supplied the
+  directory.
+  """
+  @type labelled :: {term(), resolved()}
+
   @doc false
   @spec resolve(term()) :: {:ok, resolved()} | {:error, :directory_identity_unavailable}
   def resolve(directory) when is_binary(directory) do
@@ -28,34 +47,52 @@ defmodule PtcRunner.Kernel.AnalysisDirectory do
   def resolve(_directory), do: {:error, :directory_identity_unavailable}
 
   @doc false
-  @spec resolve_all([term()]) ::
-          {:ok, [resolved()]} | {:error, :directory_identity_unavailable}
-  def resolve_all(directories) when is_list(directories) do
-    Enum.reduce_while(directories, {:ok, []}, fn directory, {:ok, resolved} ->
-      case resolve(directory) do
-        {:ok, value} -> {:cont, {:ok, [value | resolved]}}
-        {:error, _reason} = error -> {:halt, error}
-      end
-    end)
-  end
-
-  def resolve_all(_directories), do: {:error, :directory_identity_unavailable}
-
-  @doc false
   @spec pairwise_separate?([resolved()]) :: boolean()
   def pairwise_separate?(directories) when is_list(directories) do
-    Enum.with_index(directories)
-    |> Enum.all?(fn {%{identity: identity, lineage: lineage}, index} ->
-      directories
-      |> Enum.drop(index + 1)
-      |> Enum.all?(fn %{identity: other_identity, lineage: other_lineage} ->
-        not MapSet.member?(other_lineage, identity) and
-          not MapSet.member?(lineage, other_identity)
-      end)
-    end)
+    directories
+    |> Enum.map(&{nil, &1})
+    |> first_conflict()
+    |> is_nil()
   end
 
   def pairwise_separate?(_directories), do: false
+
+  @doc false
+  @spec relationship(resolved(), resolved()) :: relationship()
+  def relationship(
+        %{identity: left_identity, lineage: left_lineage},
+        %{identity: right_identity, lineage: right_lineage}
+      ) do
+    cond do
+      left_identity == right_identity -> :same
+      MapSet.member?(right_lineage, left_identity) -> :left_contains_right
+      MapSet.member?(left_lineage, right_identity) -> :right_contains_left
+      true -> :separate
+    end
+  end
+
+  @doc """
+  Returns the first pair of labelled directories that are not physically
+  separate, in the caller's own order, or `nil` when every pair is separate.
+
+  The pair is reported as `{left_role, right_role, relationship}` so a
+  frontend can attribute the rejection without re-deriving it.
+  """
+  @spec first_conflict([labelled()]) :: {term(), term(), relationship()} | nil
+  def first_conflict(directories) when is_list(directories) do
+    directories
+    |> Enum.with_index()
+    |> Enum.find_value(fn {{left_role, left}, index} ->
+      directories
+      |> Enum.drop(index + 1)
+      |> Enum.find_value(fn {right_role, right} ->
+        case relationship(left, right) do
+          :separate -> nil
+          conflict -> {left_role, right_role, conflict}
+        end
+      end)
+    end)
+  end
 
   defp physical_directory_path(directory) do
     relative = Path.relative_to(directory, "/")
