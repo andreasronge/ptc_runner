@@ -5,7 +5,7 @@ defmodule PtcViewer.ServerTest do
 
   test "inspection startup preserves an unsupported schema version error" do
     assert {:error,
-            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 6}}} =
+            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 7}}} =
              PtcViewer.start(
                inspection_file: "run.inspection.jsonl",
                inspection_adapter: TestInspectionAdapter,

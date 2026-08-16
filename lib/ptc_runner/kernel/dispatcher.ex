@@ -32,6 +32,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
   """
 
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.CapabilityExceptionDiagnostic
   alias PtcRunner.Kernel.CapabilityInvocation
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
@@ -317,7 +318,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
     case Events.emit(state, event_sink, "capability-started", data) do
       :ok ->
-        {result, input_captured?} =
+        {invocation_result, input_captured?} =
           case inspection_input(
                  inspection_sink,
                  capability_id,
@@ -341,8 +342,28 @@ defmodule PtcRunner.Kernel.Dispatcher do
               {inspection_failure(state), false}
           end
 
+        {result, exception_diagnostic} = split_exception_diagnostic(invocation_result)
+
+        inspection_attempt = %{
+          sink: inspection_sink,
+          capability_id: capability_id,
+          environment: environment,
+          name: public_name,
+          mission_name: invocation.event_attributes[:mission_name]
+        }
+
+        {result, output_allowed?} =
+          maybe_capture_exception(
+            result,
+            exception_diagnostic,
+            input_captured?,
+            state,
+            inspection_attempt,
+            capability
+          )
+
         result =
-          if input_captured? do
+          if output_allowed? do
             case inspection_output(
                    inspection_sink,
                    capability_id,
@@ -425,8 +446,81 @@ defmodule PtcRunner.Kernel.Dispatcher do
     )
   end
 
+  defp maybe_capture_exception(
+         result,
+         _diagnostic,
+         false,
+         _state,
+         _inspection_attempt,
+         _capability
+       ),
+       do: {result, false}
+
+  defp maybe_capture_exception(
+         result,
+         nil,
+         true,
+         _state,
+         _inspection_attempt,
+         _capability
+       ),
+       do: {result, true}
+
+  defp maybe_capture_exception(
+         result,
+         diagnostic,
+         true,
+         state,
+         inspection_attempt,
+         capability
+       ) do
+    case inspection_exception(
+           inspection_attempt.sink,
+           inspection_attempt.capability_id,
+           inspection_attempt.environment,
+           inspection_attempt.name,
+           diagnostic,
+           inspection_attempt.mission_name
+         ) do
+      :ok ->
+        {result, true}
+
+      {:error, :inspection_sink_error} ->
+        failed =
+          state
+          |> inspection_failure()
+          |> post_invocation_failure(inspection_attempt.environment, capability)
+
+        {failed, false}
+    end
+  end
+
+  defp inspection_exception(
+         sink,
+         capability_id,
+         environment,
+         name,
+         diagnostic,
+         mission_name
+       ) do
+    InspectionSink.emit(
+      sink,
+      "capability-exception",
+      %{capability_id: capability_id},
+      environment
+      |> capability_inspection_identity(name, mission_name)
+      |> Map.merge(diagnostic)
+    )
+  end
+
   defp capability_inspection_payload(environment, name, key, value, mission_name) do
-    %{key => value, environment: environment, name: name}
+    environment
+    |> capability_inspection_identity(name, mission_name)
+    |> Map.put(key, value)
+  end
+
+  defp capability_inspection_identity(environment, name, mission_name) do
+    %{environment: environment, name: name}
     |> then(fn payload ->
       if environment == :mission and is_binary(mission_name),
         do: Map.put(payload, :mission_name, mission_name),
@@ -490,7 +584,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
           receive do
             ^go ->
-              result = safely_invoke(capability.callback, arguments, context)
+              result = safely_invoke(capability.callback, arguments, context, parent)
 
               if terminal_provider_failure?(result),
                 do: RunState.mark_evaluation_terminal_provider_failure(state)
@@ -538,6 +632,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
             normalize_result(state, environment, capability, result)
 
           {:error, :run_closed} ->
+            cancel_exception_diagnostic(result)
+
             state
             |> limit_error(nil, :run_closed)
             |> post_invocation_failure(environment, capability)
@@ -575,14 +671,44 @@ defmodule PtcRunner.Kernel.Dispatcher do
     }
   end
 
-  defp safely_invoke(callback, arguments, context) do
+  defp safely_invoke(callback, arguments, context, diagnostic_owner) do
     if is_function(callback, 2), do: callback.(arguments, context), else: callback.(arguments)
   rescue
-    _exception -> {:raised, :exception}
+    exception -> raised_exception(exception, __STACKTRACE__, context, diagnostic_owner)
   catch
     :exit, _reason -> {:raised, :exit}
     _kind, _reason -> {:raised, :throw}
   end
+
+  defp raised_exception(
+         exception,
+         stacktrace,
+         %{inspection_sink: %InspectionSink{}},
+         diagnostic_owner
+       ) do
+    case CapabilityExceptionDiagnostic.start(exception, stacktrace, diagnostic_owner) do
+      {:ok, pid, exception_class} ->
+        {:raised, :exception, {:diagnostic_worker, pid, exception_class}}
+
+      {:error, exception_class} ->
+        {:raised, :exception, {:diagnostic_unavailable, exception_class}}
+    end
+  end
+
+  defp raised_exception(_exception, _stacktrace, _context, _diagnostic_owner),
+    do: {:raised, :exception}
+
+  defp split_exception_diagnostic({:with_exception_diagnostic, result, diagnostic}),
+    do: {result, diagnostic}
+
+  defp split_exception_diagnostic(result), do: {result, nil}
+
+  defp cancel_exception_diagnostic(
+         {:raised, :exception, {:diagnostic_worker, pid, _exception_class}}
+       ),
+       do: CapabilityExceptionDiagnostic.cancel(pid)
+
+  defp cancel_exception_diagnostic(_result), do: :ok
 
   defp normalize_result(state, environment, capability, {:ok, value}) do
     cap = capability_result_limit(state)
@@ -645,6 +771,28 @@ defmodule PtcRunner.Kernel.Dispatcher do
       environment,
       capability
     )
+  end
+
+  defp normalize_result(
+         state,
+         environment,
+         capability,
+         {:raised, :exception, {:diagnostic_worker, pid, exception_class}}
+       ) do
+    {:with_exception_diagnostic,
+     normalize_result(state, environment, capability, {:raised, :exception}),
+     CapabilityExceptionDiagnostic.await(pid, exception_class)}
+  end
+
+  defp normalize_result(
+         state,
+         environment,
+         capability,
+         {:raised, :exception, {:diagnostic_unavailable, exception_class}}
+       ) do
+    {:with_exception_diagnostic,
+     normalize_result(state, environment, capability, {:raised, :exception}),
+     CapabilityExceptionDiagnostic.unavailable(exception_class)}
   end
 
   defp normalize_result(_state, environment, capability, _result),

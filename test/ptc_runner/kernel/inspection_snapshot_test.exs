@@ -111,13 +111,80 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
             }} = limited_result.callback.(%{"run_id" => run_id})
   end
 
+  @tag :tmp_dir
+  test "projects complete and interrupted capability exception evidence", %{tmp_dir: root} do
+    {trace, inspection} = source_directories(root)
+    write_run(trace, inspection, "exception-complete", :exception)
+    write_run(trace, inspection, "exception-prefix", :exception_prefix)
+
+    {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
+
+    {:ok, snapshot} =
+      InspectionSnapshot.start({:directory, inspection}, trace_snapshot, owner: self())
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(snapshot)
+      TraceSnapshot.stop(trace_snapshot)
+    end)
+
+    assert {:ok,
+            %{
+              "counts" => %{"capability_exceptions" => 1}
+            }} = InspectionSnapshot.query(snapshot, :get_run, %{"run_id" => "exception-complete"})
+
+    assert {:ok,
+            %{
+              "items" => [
+                %{"name" => "workspace.read", "complete?" => true} = complete
+              ]
+            }} =
+             InspectionSnapshot.query(snapshot, :capability_calls, %{
+               "run_id" => "exception-complete"
+             })
+
+    assert complete["input_sequence"] < complete["exception_sequence"]
+    assert complete["exception_sequence"] < complete["output_sequence"]
+    assert is_binary(complete["exception_timestamp"])
+
+    assert complete["exception"] == %{
+             "exception_class" => "Elixir.RuntimeError",
+             "message" => "private exception-complete failure",
+             "message_truncated" => false,
+             "stacktrace" => "    private stacktrace",
+             "stacktrace_truncated" => false
+           }
+
+    assert {:ok,
+            %{
+              "items" => [
+                %{"name" => "workspace.read", "complete?" => false} = interrupted
+              ]
+            }} =
+             InspectionSnapshot.query(snapshot, :capability_calls, %{
+               "run_id" => "exception-prefix"
+             })
+
+    assert interrupted["exception"]["message"] == "private exception-prefix failure"
+    assert interrupted["input_sequence"] < interrupted["exception_sequence"]
+    refute Map.has_key?(interrupted, "result")
+    refute Map.has_key?(interrupted, "output_sequence")
+
+    assert {:ok, %{"items" => [model_exchange]}} =
+             InspectionSnapshot.query(snapshot, :model_exchanges, %{
+               "run_id" => "exception-complete"
+             })
+
+    refute Map.has_key?(model_exchange, "exception")
+    refute Map.has_key?(model_exchange, "exception_sequence")
+  end
+
   test "effective preludes qualify repeated component IDs by mission" do
     records =
       ["reader", "writer"]
       |> Enum.with_index(1)
       |> Enum.map(fn {mission_name, sequence} ->
         %{
-          "schema_version" => 6,
+          "schema_version" => 7,
           "run_id" => "qualified-preludes",
           "trace_id" => "trace-qualified-preludes",
           "sequence" => sequence,
@@ -243,7 +310,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert {:ok,
             %{
-              "items" => [%{"run_id" => "mcp-run", "schema_version" => 6}],
+              "items" => [%{"run_id" => "mcp-run", "schema_version" => 7}],
               "next_cursor" => nil,
               "snapshot_hash" => ^snapshot_hash
             }} =
@@ -890,7 +957,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     on_exit(fn -> TraceSnapshot.stop(trace_snapshot) end)
 
     assert {:error,
-            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 6}}} =
+            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 7}}} =
              InspectionSnapshot.start({:directory, inspection}, trace_snapshot, owner: self())
   end
 
@@ -1164,12 +1231,32 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       })
     end
 
-    emit!(sink, "capability-output", %{capability_id: "tool-#{run_id}"}, %{
-      environment: :mission,
-      mission_name: "default",
-      name: "workspace.read",
-      result: %{status: :ok, value: %{"text" => "secret-#{run_id}"}}
-    })
+    if variant in [:exception, :exception_prefix] do
+      emit!(sink, "capability-exception", %{capability_id: "tool-#{run_id}"}, %{
+        environment: :mission,
+        mission_name: "default",
+        name: "workspace.read",
+        exception_class: RuntimeError,
+        message: "private #{run_id} failure",
+        message_truncated: false,
+        stacktrace: "    private stacktrace",
+        stacktrace_truncated: false
+      })
+    end
+
+    if variant != :exception_prefix do
+      result =
+        if variant == :exception,
+          do: %{status: :error, kind: :provider_error, reason: :exception, retryable?: false},
+          else: %{status: :ok, value: %{"text" => "secret-#{run_id}"}}
+
+      emit!(sink, "capability-output", %{capability_id: "tool-#{run_id}"}, %{
+        environment: :mission,
+        mission_name: "default",
+        name: "workspace.read",
+        result: result
+      })
+    end
 
     emit!(sink, "evaluation-source", %{evaluation_id: "eval-#{run_id}"}, %{
       environment: :mission,
@@ -1220,7 +1307,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
   defp inspection_record(run_id, trace_id, sequence, record_type, correlation, payload) do
     %{
-      "schema_version" => 6,
+      "schema_version" => 7,
       "run_id" => run_id,
       "trace_id" => trace_id,
       "sequence" => sequence,

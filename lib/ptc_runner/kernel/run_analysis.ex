@@ -71,6 +71,7 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       sequence_domain: "private_inspection",
       identifier_locations: %{
         "capability_id" => "capability_id",
+        "exception_sequence" => "exception_sequence",
         "input_sequence" => "input_sequence",
         "output_sequence" => "output_sequence"
       },
@@ -86,6 +87,7 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       sequence_domain: "private_inspection",
       identifier_locations: %{
         "capability_id" => "capability_id",
+        "exception_sequence" => "exception_sequence",
         "input_sequence" => "input_sequence",
         "output_sequence" => "output_sequence"
       },
