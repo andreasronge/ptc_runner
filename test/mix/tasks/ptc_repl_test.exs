@@ -31,6 +31,22 @@ defmodule PtcRunner.ReplFrontendTest do
     assert output =~ "value\n42\n43\n"
   end
 
+  test "direct REPL uses configurable bounded structural previews" do
+    payload = String.duplicate("x", 10_000)
+    source = ~s|{"aaa_payload" "#{payload}" "status" "ok" "trace_id" "trace-1"}|
+
+    output =
+      capture_io(fn ->
+        run_repl(["--preview-chars", "256", "-e", source])
+      end)
+
+    assert output =~ ~S|"status"|
+    assert output =~ ~S|"trace_id"|
+    assert output =~ "preview truncated"
+    refute output =~ String.duplicate("x", 1_000)
+    assert output |> String.split("\n", trim: true) |> hd() |> String.length() <= 256
+  end
+
   test "direct eval reports the first surplus closer to developers" do
     output =
       capture_io(:stderr, fn ->
@@ -159,15 +175,22 @@ defmodule PtcRunner.ReplFrontendTest do
           manifest_path,
           "--mission",
           "review",
+          "--preview-chars",
+          "256",
           "-e",
           "(review/answer)",
           "-e",
-          "(dir)"
+          "(dir)",
+          "-e",
+          ~s|{"payload" "#{String.duplicate("x", 10_000)}" "status" "ok"}|
         ])
       end)
 
     assert output =~ "42\n"
     assert output =~ ~s(["review"])
+    assert output =~ "preview truncated"
+    assert output =~ ~S|"status"|
+    refute output =~ String.duplicate("x", 1_000)
     refute output =~ "workflow/secret"
 
     assert_raise Mix.Error, ~r/unknown namespace workflow\//, fn ->

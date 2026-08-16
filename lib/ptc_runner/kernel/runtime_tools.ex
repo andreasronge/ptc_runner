@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.Evaluation
+  alias PtcRunner.Kernel.EvaluationObservation
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Library
@@ -287,6 +288,9 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
+  # The branches below enumerate the closed kernel-eval envelope variants; the
+  # repetition keeps every accepted map shape exact and rejects extra fields.
+  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
   defp dispatch_kernel_eval(
          state,
          target,
@@ -308,6 +312,27 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             event_sink,
             inspection_sink,
             evaluation_opts
+          )
+        else
+          invalid_kernel_eval_request(state)
+        end
+
+      %{
+        "kind" => kind,
+        "source" => source,
+        "observation_chars" => observation_chars
+      } = arguments
+      when is_binary(source) and observation_chars in 1..65_536 and map_size(arguments) == 3 ->
+        if keyword_name(kind) == "source" do
+          evaluate_source(
+            state,
+            target,
+            source,
+            limits,
+            event_sink,
+            inspection_sink,
+            evaluation_opts,
+            observation_chars
           )
         else
           invalid_kernel_eval_request(state)
@@ -487,23 +512,32 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          limits,
          event_sink,
          inspection_sink,
-         evaluation_opts
+         evaluation_opts,
+         observation_chars \\ nil
        ) do
+    evaluation =
+      state
+      |> Evaluation.evaluate_source(
+        mission_name,
+        mission,
+        source,
+        limits.evaluation_timeout_ms,
+        event_sink,
+        inspection_sink,
+        evaluation_opts
+      )
+      |> maybe_project_observation(observation_chars)
+
     %{
       status: :ok,
-      value:
-        state
-        |> Evaluation.evaluate_source(
-          mission_name,
-          mission,
-          source,
-          limits.evaluation_timeout_ms,
-          event_sink,
-          inspection_sink,
-          evaluation_opts
-        )
+      value: evaluation
     }
   end
+
+  defp maybe_project_observation(evaluation, max_chars) when is_integer(max_chars),
+    do: EvaluationObservation.project(evaluation, max_chars)
+
+  defp maybe_project_observation(evaluation, nil), do: evaluation
 
   defp evaluate_source_with(
          state,

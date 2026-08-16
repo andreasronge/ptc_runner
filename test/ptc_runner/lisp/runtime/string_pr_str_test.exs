@@ -44,6 +44,11 @@ defmodule PtcRunner.Lisp.Runtime.StringPrStrTest do
     test "map" do
       assert run!("(pr-str {:a 1})") == "{:a 1}"
     end
+
+    test "remains exact beyond the automatic preview ceiling" do
+      value = String.duplicate("x", 5_000)
+      assert run!(~s|(pr-str "#{value}")|) == ~s|"#{value}"|
+    end
   end
 
   describe "(pr-str) with multiple arguments" do

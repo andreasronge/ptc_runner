@@ -122,7 +122,7 @@ it does not add task-specific prompt policy.
 | `mission` | `"default"` | non-empty string | Selects the mission whose API is rendered and whose environment evaluates programs. |
 | `max_turns` | `4` | integer, 1–128 | Bounds provider requests and generated programs in this loop. |
 | `max_program_chars` | `64000` | integer, 1–1,000,000 | Bounds one `run_ptc_lisp` program string. |
-| `max_observation_chars` | `2048` | integer, 1–65,536 | Bounds the untrusted body of one successful observation. |
+| `max_observation_chars` | `2048` | integer, 1–65,536 | Bounds the untrusted structural preview and `println` body of one successful observation. |
 | `max_transcript_chars` | `262144` | integer, 1–1,000,000 | Bounds the JSON-encoded prospective provider request. |
 | `consolidate_at_turns_remaining` | omitted | integer, 1–effective `max_turns` | Adds generic consolidation guidance at and below this remaining-turn count. |
 | `result_envelope` | `true` | boolean | Changes only `agent.core/run`; `false` returns the raw value. |
@@ -245,10 +245,25 @@ definitions and history.
 
 ## Feedback bounds and disclosure
 
-Successful observations contain the native value preview and chronological
-`println` output. The body is marked as untrusted, escapes its closing marker,
-and is capped at `max_observation_chars` with an explicit truncation marker.
-Closures and other executable values cross only as inert display labels.
+Successful observations contain a heap-proportional structural preview and
+chronological `println` output. Preview traversal has independent collection,
+depth, node, string, character, and UTF-8 byte ceilings; it does not first
+serialize the complete value. When truncated, feedback reports the ceilings
+hit, sampled map keys (including bounded nested samples), and reminds the model
+that the complete committed value remains in `*1`. The body is marked as
+untrusted and escapes its closing marker. Closures and other executable values
+cross only as inert display labels.
+
+The preview is non-authoritative presentation work: a preview failure cannot
+turn a committed evaluation into a failure. A retained-memory or `*1` history
+commit rejection instead rolls the candidate continuation back and reports
+actionable guidance. Programs with only read effects may be corrected and
+retried; after a write or unknown effect, the loop tells the model not to
+repeat the program because the external effect cannot be rolled back.
+
+Heap and compile-heap feedback explicitly says that the failed program was
+rolled back, earlier definitions remain available, and a corrected program
+should filter, page, project, or reduce before collecting a large result.
 
 Evaluation-error feedback contains a bounded outcome, error code, and safe
 message. A correctable capability error contains its public `kind` and

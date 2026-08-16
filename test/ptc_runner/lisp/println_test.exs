@@ -1,6 +1,7 @@
 defmodule PtcRunner.Lisp.PrintlnTest do
   use ExUnit.Case, async: true
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Java.Time.Instant
 
   test "println output is preserved through function calls" do
     source = ~S"""
@@ -37,6 +38,50 @@ defmodule PtcRunner.Lisp.PrintlnTest do
     assert Enum.at(step.prints, 0) == ~S|{:a 1 :b [2 3]}|
     assert Enum.at(step.prints, 1) == ~S|#{1 2}|
     assert Enum.at(step.prints, 2) == "#fn[x]"
+  end
+
+  test "println structurally previews a huge map before capturing it" do
+    payload = String.duplicate("x", 10_000)
+
+    source =
+      ~s|(println {"aaa_payload" "#{payload}" "status" "ok" "trace_id" "trace-1"})|
+
+    assert {:ok, step} = Lisp.run(source, max_print_length: 256)
+    [output] = step.prints
+
+    assert output =~ ~S|"status"|
+    assert output =~ ~S|"trace_id"|
+    assert output =~ "preview truncated"
+    assert String.length(output) <= 256
+    refute output =~ String.duplicate("x", 1_000)
+  end
+
+  test "println preserves canonical native Java labels" do
+    assert {:ok, instant} = Instant.parse(["2024-01-02T03:04:05Z"])
+
+    assert {:ok, step} = Lisp.run_native("(println value)", memory: %{"value" => instant})
+    assert step.prints == ["#java[java.time.Instant 2024-01-02T03:04:05Z]"]
+  end
+
+  test "println renders composite callables opaquely" do
+    source = """
+    (println (constantly "token"))
+    (println (partial + 1))
+    (println (juxt inc dec))
+    (println (comp inc dec))
+    (println (complement nil?))
+    (println (every-pred int? pos?))
+    (println (some-fn nil? pos?))
+    (println (fnil + 0))
+    """
+
+    assert {:ok, step} = Lisp.run(source)
+    assert step.prints == List.duplicate("#fn[...]", 8)
+  end
+
+  test "println marks omitted trailing arguments at the exact print boundary" do
+    assert {:ok, step} = Lisp.run(~S|(println "abc" "d")|, max_print_length: 3)
+    assert step.prints == ["abc... (3/4 chars)"]
   end
 
   test "println works inside functions" do
@@ -216,6 +261,17 @@ defmodule PtcRunner.Lisp.PrintlnTest do
 
       {:ok, step} = Lisp.run(source)
       assert step.prints == [~S|["a" 1 "b"]|]
+    end
+
+    test "println does not infer a char list from a bounded prefix" do
+      prefix = Enum.map_join(1..64, " ", fn _ -> ~S|"a"| end)
+      source = "(println [#{prefix} 42])"
+
+      assert {:ok, step} = Lisp.run(source, max_print_length: 64)
+      [output] = step.prints
+
+      assert output =~ "preview truncated"
+      refute output == String.duplicate("a", 63) <> "…"
     end
 
     test "println handles nested char list in expression" do

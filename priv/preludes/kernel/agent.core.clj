@@ -99,6 +99,16 @@
          (or (true? (get error :retryable?))
              (false? (get error :retryable?))))))
 
+(defn- evaluate-agent-source [mission-name source max-observation-chars]
+  (let [response
+        (tool/kernel-eval {:kind :source
+                           :source source
+                           :mission mission-name
+                           :observation_chars max-observation-chars})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      response)))
+
 (defn- run-outcome*
   "Runs the agent loop and distinguishes model-authored completion from a
   bounded subject-attributable failure.
@@ -146,7 +156,10 @@
               {:turn turn :kind (get action :kind)})
             (case (get action :kind)
               :tool-call
-              (let [evaluation (kernel/eval-source mission-name (get action :program))]
+              (let [evaluation (evaluate-agent-source
+                                 mission-name
+                                 (get action :program)
+                                 max-observation-chars)]
                 ;; Host policy and malformed/provider-initiated MCP exchanges
                 ;; are not argument mistakes the model can correct. The Kernel
                 ;; derives this provenance from the private capability ledger,

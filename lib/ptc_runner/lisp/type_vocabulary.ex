@@ -1,6 +1,7 @@
 defmodule PtcRunner.Lisp.TypeVocabulary do
   @moduledoc "Converts Elixir values to human-readable type labels."
 
+  alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
   alias PtcRunner.Lisp.Java.Time.Duration, as: JavaDuration
@@ -8,6 +9,8 @@ defmodule PtcRunner.Lisp.TypeVocabulary do
   alias PtcRunner.Lisp.Java.Time.LocalDate, as: JavaLocalDate
   alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.RuntimeCallable
+  alias PtcRunner.Lisp.SpecialBuiltin
 
   @doc """
   Returns a type label for any value.
@@ -63,22 +66,38 @@ defmodule PtcRunner.Lisp.TypeVocabulary do
       "fn"
   """
   @spec type_of(term()) :: String.t()
-  def type_of([]), do: "list[0]"
-  def type_of(list) when is_list(list), do: "list[#{length(list)}]"
-  def type_of(%MapSet{} = set), do: "set[#{MapSet.size(set)}]"
-  # Temporal structs are scalars semantically, even though they're maps in
-  # Elixir's runtime. These clauses must precede the generic `is_map` match
-  # below — the LLM-facing data inventory should say "datetime", not "map[7]".
-  def type_of(%DateTime{}), do: "datetime"
-  def type_of(%NaiveDateTime{}), do: "datetime"
-  def type_of(%Date{}), do: "date"
-  def type_of(%Time{}), do: "time"
-  def type_of(%LispKeyword{}), do: "keyword"
+  def type_of(value) do
+    case semantic_type(value) do
+      "list" -> "list[#{length(value)}]"
+      "map" -> "map[#{map_size(value)}]"
+      "set" -> "set[#{MapSet.size(value)}]"
+      "function" -> if(match?({:closure, _, _, _, _, _}, value), do: "#fn[...]", else: "fn")
+      type -> type
+    end
+  end
 
-  def type_of(%JavaCallable{} = callable),
-    do: if(JavaCallable.valid?(callable), do: "fn", else: "invalid-java-value")
+  @doc "Returns a traversal-free semantic type label suitable for bounded summaries."
+  @spec semantic_type(term()) :: String.t()
+  def semantic_type(nil), do: "nil"
+  def semantic_type(value) when is_boolean(value), do: "boolean"
+  def semantic_type(:nan), do: "nan"
+  def semantic_type(:infinity), do: "infinity"
+  def semantic_type(:negative_infinity), do: "infinity"
+  def semantic_type(value) when is_integer(value), do: "integer"
+  def semantic_type(value) when is_float(value), do: "float"
+  def semantic_type(value) when is_binary(value), do: "string"
+  def semantic_type(%LispKeyword{}), do: "keyword"
+  def semantic_type(value) when is_list(value), do: "list"
+  def semantic_type(%MapSet{}), do: "set"
+  def semantic_type(%DateTime{}), do: "datetime"
+  def semantic_type(%NaiveDateTime{}), do: "datetime"
+  def semantic_type(%Date{}), do: "date"
+  def semantic_type(%Time{}), do: "time"
 
-  def type_of(%JavaPrimitive{kind: kind} = primitive) do
+  def semantic_type(%JavaCallable{} = callable),
+    do: if(JavaCallable.valid?(callable), do: "function", else: "invalid-java-value")
+
+  def semantic_type(%JavaPrimitive{kind: kind} = primitive) do
     cond do
       not JavaPrimitive.valid?(primitive) -> "invalid-java-value"
       kind in [:int, :long] -> "integer"
@@ -86,36 +105,51 @@ defmodule PtcRunner.Lisp.TypeVocabulary do
     end
   end
 
-  def type_of(%JavaLocalDate{} = value),
+  def semantic_type(%JavaLocalDate{} = value),
     do: java_object_type(JavaLocalDate, value, "java.time.LocalDate")
 
-  def type_of(%JavaInstant{} = value),
+  def semantic_type(%JavaInstant{} = value),
     do: java_object_type(JavaInstant, value, "java.time.Instant")
 
-  def type_of(%JavaDuration{} = value),
+  def semantic_type(%JavaDuration{} = value),
     do: java_object_type(JavaDuration, value, "java.time.Duration")
 
-  def type_of(%JavaDate{} = value), do: java_object_type(JavaDate, value, "java.util.Date")
+  def semantic_type(%JavaDate{} = value),
+    do: java_object_type(JavaDate, value, "java.util.Date")
 
-  def type_of(map) when is_map(map) and not is_struct(map), do: "map[#{map_size(map)}]"
-  def type_of(s) when is_binary(s), do: "string"
-  def type_of(n) when is_integer(n), do: "integer"
-  def type_of(f) when is_float(f), do: "float"
-  def type_of(true), do: "boolean"
-  def type_of(false), do: "boolean"
-  def type_of(nil), do: "nil"
-  def type_of(a) when is_atom(a), do: "keyword"
-  def type_of({:closure, _, _, _, _, _}), do: "#fn[...]"
-  def type_of({:juxt_fn, fns}) when is_list(fns), do: "fn"
-  def type_of({tag, _}) when tag in [:complement_fn, :constantly_fn], do: "fn"
+  def semantic_type(value) when is_map(value) and not is_struct(value), do: "map"
+  def semantic_type(value) when is_function(value), do: "function"
+  def semantic_type(value) when is_atom(value), do: "keyword"
+  def semantic_type(value), do: if(callable?(value), do: "function", else: "unknown")
 
-  def type_of({tag, fns}) when tag in [:comp_fn, :every_pred_fn, :some_fn] and is_list(fns),
-    do: "fn"
+  @doc "Returns whether a runtime value is one of PTC-Lisp's callable representations."
+  @spec callable?(term()) :: boolean()
+  def callable?(%Builtin{}), do: true
+  def callable?(%RuntimeCallable{}), do: true
+  def callable?(%JavaCallable{} = callable), do: JavaCallable.valid?(callable)
+  def callable?(value) when is_function(value), do: true
+  def callable?({:closure, _, _, _, _, _}), do: true
+  def callable?({:normal, function}), do: is_function(function)
+  def callable?({:variadic, function, _identity}), do: is_function(function)
 
-  def type_of({:partial_fn, _f, fixed}) when is_list(fixed), do: "fn"
-  def type_of({:fnil_fn, _f, _default}), do: "fn"
-  def type_of(f) when is_function(f), do: "fn"
-  def type_of(_), do: "unknown"
+  def callable?({:variadic_nonempty, name, function}),
+    do: is_atom(name) and is_function(function)
+
+  def callable?({:multi_arity, name, functions}),
+    do: is_atom(name) and is_tuple(functions)
+
+  def callable?({:special, name}), do: SpecialBuiltin.callable?(name)
+  def callable?({:collect, function}), do: is_function(function)
+  def callable?({:juxt_fn, functions}), do: is_list(functions)
+
+  def callable?({tag, _value}) when tag in [:complement_fn, :constantly_fn], do: true
+
+  def callable?({tag, functions}) when tag in [:comp_fn, :every_pred_fn, :some_fn],
+    do: is_list(functions)
+
+  def callable?({:partial_fn, _function, fixed}), do: is_list(fixed)
+  def callable?({:fnil_fn, _function, _default}), do: true
+  def callable?(_value), do: false
 
   defp java_object_type(module, value, label) do
     if module.valid?(value), do: label, else: "invalid-java-value"

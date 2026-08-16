@@ -2650,7 +2650,7 @@ Integer-only bit manipulation, mirroring `clojure.core`. All arguments must be i
 | `ifn?` | Is directly invokable? (functions, keywords, maps, and sets; not vectors). Higher-order argument validation also accepts sets, but currently rejects maps; wrap a map lookup in a closure. |
 | `map-entry?` | Always false — no MapEntry type on BEAM |
 | `type` | Returns the type as a keyword: `:boolean`, `:number`, `:string`, `:vector`, `:map`, `:set`, `:keyword`, `:regex`, `:function`, `:java_object` for a validated native Java wrapper, or `:unknown` for an unclassified value such as an inert quoted-symbol reference. For `nil`, returns `nil` (not `:nil`). |
-| `describe` | Returns a bounded map summary for data shape, type histograms, key coverage, examples, and optional nested paths. Forms: `(describe x)`, `(describe x opts)`. Options: `{:paths true :depth 2 :sample 3}`. |
+| `describe` | Returns a bounded map summary for data shape, type histograms, key coverage, structurally bounded examples, and optional nested paths. Forms: `(describe x)`, `(describe x opts)`. Options: `{:paths true :depth 2 :sample 3}`. |
 
 ```clojure
 ;; coll? returns true for vectors, maps, and sets
@@ -3056,10 +3056,17 @@ write to stdout or to a canonical execution trace; a host or frontend must
 render or retain the returned entries explicitly.
 
 **Behavior:**
-- Arguments are converted to Clojure syntax strings.
+- String arguments remain plain text. Other arguments use the same bounded
+  structural renderer as REPL and model-observation previews.
 - Multiple arguments are separated by single spaces.
 - Each `println` call appends one entry to the `prints` list.
 - Returns `nil`.
+
+Structural rendering bounds collection items, depth, nodes, strings,
+characters, and UTF-8 bytes while traversing. A clipped diagnostic includes an
+explicit preview marker instead of cutting a nested value at an arbitrary byte.
+This does not change `pr-str`: explicit `pr-str` remains exact and may allocate
+in proportion to its input.
 
 ```clojure
 (def results (tool/search {:q "test"}))

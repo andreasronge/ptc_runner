@@ -48,6 +48,8 @@ defmodule PtcRunner.ReplFrontend do
       `--format jsonl`. Mutually exclusive with `--private-terminal`;
     * `--format clojure|jsonl` — choose human output or non-interactive
       profile-mode JSON Lines;
+    * `--preview-chars COUNT` — set the structural preview character ceiling
+      for direct, manifest, and profile human output (64–65536; default 2048);
     * `--continue-on-error` — evaluate later repeated `--eval` forms after a
       recoverable profile evaluation error, then exit unsuccessfully;
     * `--describe-profile` — print a safe static profile contract;
@@ -95,9 +97,9 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.ManifestRepl
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ReplSession
-  alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Registry
   alias PtcRunner.Lisp.Result, as: LispResult
+  alias PtcRunner.Lisp.ValuePreview
   alias PtcRunner.ReplError
   alias PtcRunner.ReplLineEditor, as: LineEditor
 
@@ -164,13 +166,14 @@ defmodule PtcRunner.ReplFrontend do
     format = Keyword.get(opts, :format, "clojure")
     evals = Keyword.get_values(opts, :eval)
     resources = Keyword.get_values(opts, :resource)
+    preview_chars = Keyword.get(opts, :preview_chars)
 
-    with :ok <- validate_common_command(arguments, invalid, evals, format) do
+    with :ok <- validate_common_command(arguments, invalid, evals, format, preview_chars) do
       select_command(opts, arguments, evals, resources, format, terminal_attached?)
     end
   end
 
-  defp validate_common_command(arguments, invalid, evals, format) do
+  defp validate_common_command(arguments, invalid, evals, format, preview_chars) do
     cond do
       invalid != [] ->
         {:error, "invalid ptc repl options: #{inspect(invalid)}"}
@@ -183,6 +186,9 @@ defmodule PtcRunner.ReplFrontend do
 
       format not in ["clojure", "jsonl"] ->
         {:error, "invalid ptc repl format: #{inspect(format)}"}
+
+      not is_nil(preview_chars) and preview_chars not in 64..65_536 ->
+        {:error, "--preview-chars must be between 64 and 65536"}
 
       true ->
         :ok
@@ -318,8 +324,10 @@ defmodule PtcRunner.ReplFrontend do
     if output_format(opts) == :jsonl do
       emit_jsonl(Map.merge(description, %{"schema_version" => 1, "type" => "profile"}))
     else
-      {formatted, _truncated?} = Format.to_clojure(description)
-      info(formatted)
+      description
+      |> ValuePreview.render_with_notice(max_chars: preview_chars(opts))
+      |> Map.fetch!(:text)
+      |> info()
     end
   end
 
@@ -640,7 +648,10 @@ defmodule PtcRunner.ReplFrontend do
          result_handle
        ) do
     builder_options =
-      [expected_destination_identity: output_identity]
+      [
+        expected_destination_identity: output_identity,
+        preview_chars: preview_chars(opts)
+      ]
       |> maybe_private_terminal(opts)
 
     case AnalysisSessionBuilder.start(
@@ -1320,21 +1331,25 @@ defmodule PtcRunner.ReplFrontend do
     do: "ptc repl setup failed: #{code}"
 
   defp evaluate_mode(session, opts, arguments) do
-    with {:ok, session} <- maybe_load(session, opts[:load]) do
+    preview_chars = preview_chars(opts)
+
+    with {:ok, session} <- maybe_load(session, opts[:load], preview_chars) do
       cond do
-        opts[:eval] -> run_sources(session, Keyword.get_values(opts, :eval))
-        arguments == ["-"] -> read_stdin(session)
-        arguments != [] -> run_file(session, hd(arguments))
-        true -> interactive(session, session_mode(opts))
+        opts[:eval] -> run_sources(session, Keyword.get_values(opts, :eval), preview_chars)
+        arguments == ["-"] -> read_stdin(session, preview_chars)
+        arguments != [] -> run_file(session, hd(arguments), preview_chars)
+        true -> interactive(session, session_mode(opts), preview_chars)
       end
     end
   end
 
-  defp maybe_load(session, nil), do: {:ok, session}
+  defp preview_chars(opts), do: Keyword.get(opts, :preview_chars, 2_048)
 
-  defp maybe_load(session, path) do
+  defp maybe_load(session, nil, _preview_chars), do: {:ok, session}
+
+  defp maybe_load(session, path, preview_chars) do
     with {:ok, source} <- File.read(path),
-         {:ok, _step, session} <- evaluate(session, source, :noninteractive) do
+         {:ok, _step, session} <- evaluate(session, source, :noninteractive, preview_chars) do
       info("Loaded #{path}")
       {:ok, session}
     else
@@ -1343,32 +1358,32 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
-  defp run_sources(session, sources) do
+  defp run_sources(session, sources, preview_chars) do
     Enum.reduce_while(sources, {:ok, session}, fn source, {:ok, current} ->
-      case evaluate(current, source, :noninteractive) do
+      case evaluate(current, source, :noninteractive, preview_chars) do
         {:ok, _step, next} -> {:cont, {:ok, next}}
         {:error, step, next} -> {:halt, {:error, step, next}}
       end
     end)
   end
 
-  defp read_stdin(session) do
+  defp read_stdin(session, preview_chars) do
     case IO.read(:stdio, :eof) do
-      source when is_binary(source) -> evaluate_outcome(session, source)
+      source when is_binary(source) -> evaluate_outcome(session, source, preview_chars)
       :eof -> {:ok, session}
       {:error, reason} -> {:error, reason, session}
     end
   end
 
-  defp run_file(session, path) do
+  defp run_file(session, path, preview_chars) do
     case File.read(path) do
-      {:ok, source} -> evaluate_outcome(session, source)
+      {:ok, source} -> evaluate_outcome(session, source, preview_chars)
       {:error, reason} -> {:error, reason, session}
     end
   end
 
-  defp evaluate_outcome(session, source) do
-    case evaluate(session, source, :noninteractive) do
+  defp evaluate_outcome(session, source, preview_chars) do
+    case evaluate(session, source, :noninteractive, preview_chars) do
       {:ok, _step, session} -> {:ok, session}
       {:error, step, session} -> {:error, step, session}
     end
@@ -1381,9 +1396,9 @@ defmodule PtcRunner.ReplFrontend do
   # The line editor owns the banner: under the interactive reader it is the
   # reader's own slogan, which keeps it ahead of the first prompt instead of
   # racing it.
-  defp interactive(session, mode) do
+  defp interactive(session, mode, preview_chars) do
     banner = session_banner(ReplSession.mode_info(session))
-    LineEditor.run(mode, banner, fn -> loop(session) end)
+    LineEditor.run(mode, banner, fn -> loop(session, preview_chars) end)
   end
 
   defp session_banner(%{
@@ -1403,14 +1418,14 @@ defmodule PtcRunner.ReplFrontend do
 
   defp session_banner(_mode), do: LineEditor.banner()
 
-  defp loop(session) do
+  defp loop(session, preview_chars) do
     case read_expression("ptc> ", "") do
       :eof ->
         info("\nGoodbye!")
         {:ok, session}
 
       "" ->
-        loop(session)
+        loop(session, preview_chars)
 
       command when command in [":quit", ":exit"] ->
         info("Goodbye!")
@@ -1418,12 +1433,12 @@ defmodule PtcRunner.ReplFrontend do
 
       ":" <> command ->
         handle_command(String.trim(command), session)
-        loop(session)
+        loop(session, preview_chars)
 
       source ->
-        case evaluate(session, source, :interactive) do
-          {:ok, _step, next} -> loop(next)
-          {:error, _step, next} -> loop(next)
+        case evaluate(session, source, :interactive, preview_chars) do
+          {:ok, _step, next} -> loop(next, preview_chars)
+          {:error, _step, next} -> loop(next, preview_chars)
         end
     end
   end
@@ -1466,10 +1481,10 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
-  defp evaluate(session, source, mode) do
+  defp evaluate(session, source, mode, preview_chars) do
     case ReplSession.eval(session, source) do
       {:ok, step, next} ->
-        print_step(step)
+        print_step(step, preview_chars)
         {:ok, step, next}
 
       {:error, step, next} ->
@@ -1479,10 +1494,16 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
-  defp print_step(step) do
+  defp print_step(step, preview_chars) do
     Enum.each(step.prints, &info/1)
-    {formatted, _truncated?} = Format.to_clojure(LispResult.unwrap_return(step.return))
-    info(formatted)
+
+    preview =
+      ValuePreview.render_with_notice(LispResult.unwrap_return(step.return),
+        max_chars: preview_chars,
+        max_bytes: preview_chars * 4
+      )
+
+    info(preview.text)
   end
 
   defp format_error(%{fail: %{reason: reason, message: message}}),

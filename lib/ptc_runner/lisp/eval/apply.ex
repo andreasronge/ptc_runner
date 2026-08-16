@@ -23,7 +23,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Eval.ParallelCall
   alias PtcRunner.Lisp.Eval.Patterns
-  alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Introspection
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Condition, as: JavaCondition
@@ -37,6 +36,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Runtime.Predicates
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.SpecialBuiltin
+  alias PtcRunner.Lisp.ValuePreview
 
   @hof_callback_error :__ptc_hof_callback_error__
   @parallel_specials SpecialBuiltin.names(:parallel)
@@ -288,11 +288,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # Special builtin: println
   # Detects char lists (from `(take n string)`) and joins them back into strings
   defp do_apply_fun({:special, :println}, args, eval_ctx, _do_eval_fn) do
-    message =
-      Enum.map_join(args, " ", fn
-        s when is_binary(s) -> s
-        v -> format_for_println(v)
-      end)
+    message = format_println_args(args, eval_ctx.max_print_length)
 
     {:ok, nil, EvalContext.append_print(eval_ctx, message)}
   end
@@ -880,7 +876,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       message =
         case arg do
           s when is_binary(s) -> s
-          v -> format_for_println(v)
+          v -> format_for_println(v, eval_ctx.max_print_length)
         end
 
       _updated_context = EvalContext.append_print(eval_ctx, message)
@@ -907,16 +903,104 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # Internal Helpers
   # ============================================================
 
-  # Detect char lists (result of `(take n string)`) and join them for readable output
-  defp format_for_println(list) when is_list(list) do
-    if char_list?(list) do
-      Enum.join(list)
+  defp format_println_args([string], _max_chars) when is_binary(string), do: string
+  defp format_println_args([value], max_chars), do: format_for_println(value, max_chars)
+
+  defp format_println_args(args, max_chars) do
+    {parts, truncated?} = format_println_args(args, max_chars, [])
+    message = parts |> Enum.reverse() |> Enum.join()
+    if(truncated?, do: message <> "…", else: message)
+  end
+
+  defp format_println_args([], _remaining, parts), do: {parts, false}
+  defp format_println_args(_args, remaining, parts) when remaining <= 0, do: {parts, true}
+
+  defp format_println_args([value | rest], remaining, parts) do
+    separator = if(parts == [], do: "", else: " ")
+    available = remaining - String.length(separator)
+
+    if available <= 0 do
+      {parts, true}
     else
-      Format.to_clojure(list) |> elem(0)
+      text =
+        if is_binary(value),
+          do: bounded_plain_text(value, available),
+          else: format_for_println(value, available)
+
+      consumed = String.length(separator) + String.length(text)
+
+      format_println_args(
+        rest,
+        max(remaining - consumed, 0),
+        [separator <> text | parts]
+      )
     end
   end
 
-  defp format_for_println(v), do: Format.to_clojure(v) |> elem(0)
+  # Detect character lists without first traversing the complete list. Once a
+  # list exceeds the print budget, the sampled prefix is enough to render a
+  # bounded character preview; later elements cannot make printing allocate in
+  # proportion to the full value.
+  defp format_for_println(list, max_chars) when is_list(list) do
+    case bounded_char_list(list, max_chars) do
+      {:ok, text, false} -> text
+      :not_char_list -> preview_for_println(list, max_chars)
+    end
+  end
+
+  defp format_for_println(value, max_chars) do
+    case ValuePreview.scalar_text(value) do
+      {:ok, text} -> bounded_plain_text(text, max_chars)
+      :error -> preview_for_println(value, max_chars)
+    end
+  end
+
+  defp preview_for_println(value, max_chars) do
+    value
+    |> ValuePreview.render_with_notice(max_chars: max_chars, max_bytes: max(max_chars * 4, 1))
+    |> Map.fetch!(:text)
+  end
+
+  defp bounded_plain_text(text, max_chars) do
+    case take_text_graphemes(text, max_chars, []) do
+      {prefix, false} -> prefix
+      {prefix, true} when max_chars > 1 -> String.slice(prefix, 0, max_chars - 1) <> "…"
+      {_prefix, true} -> "…"
+    end
+  end
+
+  defp bounded_char_list(list, max_chars), do: bounded_char_list(list, max_chars, [])
+
+  defp bounded_char_list([], _remaining, []), do: :not_char_list
+
+  defp bounded_char_list([], _remaining, chars),
+    do: {:ok, chars |> Enum.reverse() |> Enum.join(), false}
+
+  # A bounded prefix cannot prove that the unseen tail is also character data.
+  # Fall back to the structural renderer rather than misclassifying a mixed
+  # vector after the preview budget is exhausted.
+  defp bounded_char_list(_rest, 0, _chars), do: :not_char_list
+
+  defp bounded_char_list([char | rest], remaining, chars) when is_binary(char) do
+    if String.length(char) == 1,
+      do: bounded_char_list(rest, remaining - 1, [char | chars]),
+      else: :not_char_list
+  end
+
+  defp bounded_char_list(_list, _remaining, _chars), do: :not_char_list
+
+  defp take_text_graphemes("", _remaining, chars),
+    do: {chars |> Enum.reverse() |> IO.iodata_to_binary(), false}
+
+  defp take_text_graphemes(rest, 0, chars),
+    do: {chars |> Enum.reverse() |> IO.iodata_to_binary(), rest != ""}
+
+  defp take_text_graphemes(text, remaining, chars) do
+    case String.next_grapheme(text) do
+      {grapheme, rest} -> take_text_graphemes(rest, remaining - 1, [grapheme | chars])
+      nil -> {chars |> Enum.reverse() |> IO.iodata_to_binary(), false}
+    end
+  end
 
   defp apply_comp_rest(rest, value, %EvalContext{} = eval_ctx, do_eval_fn) do
     Enum.reduce_while(rest, {:ok, value, eval_ctx}, fn f, {:ok, acc, ctx} ->
@@ -967,16 +1051,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp truthy?(nil), do: false
   defp truthy?(false), do: false
   defp truthy?(_), do: true
-
-  # A char list is a list where all elements are single-character strings
-  defp char_list?([]), do: false
-
-  defp char_list?(list) do
-    Enum.all?(list, fn
-      s when is_binary(s) -> String.length(s) == 1
-      _ -> false
-    end)
-  end
 
   defp last_arg_to_list(nil),
     do: {:error, {:type_error, "apply expects collection as last argument, got nil", nil}}
