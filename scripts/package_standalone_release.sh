@@ -140,12 +140,14 @@ capture_license() {
   local license
   license="$(find -L "$prefix" -maxdepth 2 \( -name 'LICENSE*' -o -name 'COPYING*' \) -print -quit 2> /dev/null || true)"
 
-  if [ -n "$license" ]; then
-    mkdir -p "$license_dir"
-    cp "$license" "$license_dir/$name.license"
-  else
-    echo "note: no license file found beside $source" >&2
+  if [ -z "$license" ]; then
+    echo "no license file found beside $source" >&2
+    echo "a vendored library ships inside the artifact and its license must travel with it" >&2
+    exit 1
   fi
+
+  mkdir -p "$license_dir"
+  cp "$license" "$license_dir/$name.license"
 }
 
 close_dependencies() {
@@ -185,6 +187,23 @@ if ! mach_o_files | python3 scripts/macho_closure.py "$release_root"; then
   exit 1
 fi
 
+# Every Mach-O carries the oldest macOS it will load on, and the artifact's
+# floor is the highest of them. It is a property of the build host rather than
+# a constant -- a runtime installed for the current OS raises it -- so the
+# artifact states its own floor instead of documentation guessing.
+minimum_macos() {
+  while IFS= read -r -d '' mach_o; do
+    otool -l "$mach_o" | awk '$1 == "minos" { print $2 }'
+  done < <(mach_o_files) | sort -V -u | tail -1
+}
+
+macos_floor="$(minimum_macos)"
+if [ -z "$macos_floor" ]; then
+  echo 'could not determine the minimum macOS version of the packaged release' >&2
+  exit 1
+fi
+printf '%s\n' "$macos_floor" > "$release_root/MINIMUM_MACOS"
+
 # The gate runs against the packaged tree, not a rebuild of it.
 PTC_RELEASE_ROOT="$release_root" scripts/verify_standalone_release.sh
 
@@ -193,4 +212,4 @@ artifact="$output_dir/ptc-$version-macos-$architecture.tar.gz"
 tar czf "$artifact" -C "$package_tmp_dir" ptc
 (cd "$output_dir" && shasum -a 256 "$(basename "$artifact")" > "$(basename "$artifact").sha256")
 
-echo "packaged $artifact"
+echo "packaged $artifact (requires macOS $macos_floor or newer)"

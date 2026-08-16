@@ -20,11 +20,22 @@ import sys
 SYSTEM_PREFIXES = ("/usr/lib/", "/System/Library/")
 
 
+class Uninspectable(Exception):
+    """`otool` could not read a file that `file` called Mach-O."""
+
+
 def otool(flag, path):
     result = subprocess.run(
         ["otool", flag, path], capture_output=True, text=True, check=False
     )
-    return result.stdout if result.returncode == 0 else ""
+
+    # Returning empty output here would make an uninspectable binary look
+    # dependency-free, which is the one answer this checker must never give by
+    # accident.
+    if result.returncode != 0:
+        raise Uninspectable(f"otool {flag} failed: {result.stderr.strip()}")
+
+    return result.stdout
 
 
 def dependencies(path):
@@ -100,15 +111,19 @@ def main():
         if not path:
             continue
 
-        for reference in dependencies(path):
-            if not resolve(reference, path, release_root):
-                unresolved.append(f"{path} -> {reference}")
+        try:
+            for reference in dependencies(path):
+                if not resolve(reference, path, release_root):
+                    unresolved.append(f"{path} -> {reference}")
 
-        # An absolute rpath is a standing invitation for a later runtime bump
-        # to link against the build host and still pass every check above.
-        for entry in rpaths(path):
-            if entry.startswith("/") and not contained(entry, release_root):
-                unresolved.append(f"{path} -> LC_RPATH {entry}")
+            # An absolute rpath is a standing invitation for a later runtime
+            # bump to link against the build host and still pass every check
+            # above.
+            for entry in rpaths(path):
+                if entry.startswith("/") and not contained(entry, release_root):
+                    unresolved.append(f"{path} -> LC_RPATH {entry}")
+        except Uninspectable as failure:
+            unresolved.append(f"{path} -> {failure}")
 
     for line in unresolved:
         print(line)

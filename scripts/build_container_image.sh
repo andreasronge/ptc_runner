@@ -40,6 +40,46 @@ docker buildx build \
   "$@" \
   .
 
+# The in-image gate installs `expect` and `diffutils` to run, and an installed
+# package can drag in a library the shipped image lacks -- verification that
+# supplies its own dependencies can pass for an image that would fail in a
+# user's hands. These probes drive the finished image with nothing added, so a
+# missing runtime library shows up as the broken output it would really be.
+probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/ptc-image-probe.XXXXXX")"
+trap 'rm -rf "$probe_dir"' EXIT
+
+cat > "$probe_dir/main.clj" <<'EOF'
+(ns smoke.main)
+
+(defn run [input]
+  (return input))
+EOF
+
+cat > "$probe_dir/ptc.json" <<'EOF'
+{
+  "version": 1,
+  "workflow": {
+    "components": [{"id": "smoke.main", "path": "main.clj"}],
+    "entry": "smoke.main/run"
+  },
+  "input": {"value": {"city": "Malmö"}},
+  "providers": {"workflow": [], "mission": []}
+}
+EOF
+
+docker run --rm --volume "$probe_dir:/work" "$image_tag" --version > "$probe_dir/version.stdout"
+grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' "$probe_dir/version.stdout"
+
+# Standard output carries a machine contract: a runtime that writes a startup
+# warning there corrupts it, and only an untouched image can prove it does not.
+docker run --rm --volume "$probe_dir:/work" "$image_tag" run /work/ptc.json \
+  > "$probe_dir/run.stdout" 2> /dev/null
+printf '%s\n' '{"city":"Malmö"}' > "$probe_dir/run.expected"
+cmp "$probe_dir/run.expected" "$probe_dir/run.stdout"
+
+test "$(docker run --rm --entrypoint id "$image_tag" --user)" != "0"
+
 echo
-echo "built $image_tag; the standalone verification passed inside it"
+echo "built $image_tag; the standalone verification passed inside it,"
+echo "and the finished image answers correctly with nothing added to it"
 echo "try: docker run --rm -it -v \"\$PWD:/work\" $image_tag repl"

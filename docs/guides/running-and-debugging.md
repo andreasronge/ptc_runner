@@ -192,14 +192,20 @@ artifact that runs elsewhere, package it:
 scripts/package_standalone_release.sh
 ```
 
-The script vendors every non-system library into the release, rewrites the
-references to loader-relative paths, re-signs what it rewrote, runs the
-standalone verification against the packaged tree, and writes
+The script vendors every non-system library into the release together with its
+license, rewrites the references to loader-relative paths, re-signs what it
+rewrote, runs the standalone verification against the packaged tree, and writes
 `ptc-VERSION-macos-ARCH.tar.gz` with its SHA-256 beside it. It fails rather
-than shipping an artifact that still points outside itself. macOS artifacts are
-ad-hoc signed: they are not Developer ID signed and not notarized, so a
-download that carries a quarantine flag — a browser download, not `curl` —
-needs `xattr -d com.apple.quarantine` before first run.
+than shipping an artifact that still points outside itself.
+
+The artifact runs on macOS from the version recorded in its `MINIMUM_MACOS`
+file upward. That floor comes from the Erlang runtime the build host supplied,
+not from a project setting, so a runtime installed for the current macOS
+produces an artifact that requires it; artifacts published by the release
+workflow are built on macOS 15. macOS artifacts are ad-hoc signed: they are not
+Developer ID signed and not notarized, so a download that carries a quarantine
+flag — a browser download, not `curl` — needs
+`xattr -d com.apple.quarantine` before first run.
 
 Linux is a container target rather than an archive. `scripts/build_container_image.sh`
 builds local scaffolding from digest-pinned bases and runs the same
