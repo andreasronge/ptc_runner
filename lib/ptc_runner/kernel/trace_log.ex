@@ -54,6 +54,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   @max_cursor_bytes 1_024
   @max_string_bytes 256
   @event_type ~r/\A[a-z][a-z0-9-]{0,127}\z/
+  @bundle_hash ~r/\A[0-9a-f]{64}\z/
   @event_keys ~w(schema_version run_id trace_id sequence timestamp type data)
   @append_lock_timeout_ms 30_000
   @append_lock_helper ~S"""
@@ -2458,7 +2459,8 @@ defmodule PtcRunner.Kernel.TraceLog do
 
     if is_map(data["missions"]) and Enum.all?(singular, &(not Map.has_key?(data, &1))) and
          not Map.has_key?(data, "mission_name") and
-         valid_workflow_prelude?(data["workflow_prelude"]) do
+         valid_prelude_projection?(data["workflow_prelude"]) and
+         valid_mission_preludes?(data["missions"]) do
       :ok
     else
       {:error, :malformed_source}
@@ -2487,27 +2489,52 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp valid_workflow_prelude?(nil), do: true
-
-  defp valid_workflow_prelude?(prelude) when is_map(prelude) do
-    component_ids = prelude["component_ids"]
-    hash = prelude["hash"]
-    dependency_indices = prelude["dependency_indices"]
-
-    is_list(component_ids) and Enum.all?(component_ids, &(valid_string(&1) == :ok)) and
-      (is_nil(hash) or valid_string(hash) == :ok) and
-      (is_nil(dependency_indices) or valid_dependency_indices?(dependency_indices))
-  end
-
-  defp valid_workflow_prelude?(_prelude), do: false
-
-  defp valid_dependency_indices?(dependency_indices) when is_list(dependency_indices) do
-    Enum.all?(dependency_indices, fn indices ->
-      is_list(indices) and Enum.all?(indices, &(is_integer(&1) and &1 >= 0))
+  defp valid_mission_preludes?(missions) do
+    Enum.all?(missions, fn {_name, metadata} ->
+      is_map(metadata) and valid_prelude_projection?(metadata["prelude"])
     end)
   end
 
-  defp valid_dependency_indices?(_dependency_indices), do: false
+  # The prelude projection is the only canonical commitment a private
+  # `prelude-source` record can be proven against, so it is validated to
+  # producer grade here rather than interpreted leniently later. A component
+  # list without an aligned dependency list, or an identity that is not a bare
+  # digest, cannot be reconstructed and is rejected as malformed.
+  defp valid_prelude_projection?(nil), do: true
+
+  defp valid_prelude_projection?(prelude) when is_map(prelude) do
+    component_ids = prelude["component_ids"]
+
+    is_list(component_ids) and Enum.all?(component_ids, &(valid_string(&1) == :ok)) and
+      component_ids == Enum.uniq(component_ids) and
+      valid_prelude_hash?(prelude["hash"], component_ids) and
+      valid_dependency_indices?(prelude["dependency_indices"], length(component_ids))
+  end
+
+  defp valid_prelude_projection?(_prelude), do: false
+
+  defp valid_prelude_hash?(nil, component_ids), do: component_ids == []
+
+  defp valid_prelude_hash?(hash, component_ids) when is_binary(hash),
+    do: component_ids != [] and hash =~ @bundle_hash
+
+  defp valid_prelude_hash?(_hash, _component_ids), do: false
+
+  defp valid_dependency_indices?(dependency_indices, count) when is_list(dependency_indices) do
+    length(dependency_indices) == count and
+      dependency_indices
+      |> Enum.with_index()
+      |> Enum.all?(fn {indices, position} -> valid_dependency_list?(indices, position) end)
+  end
+
+  defp valid_dependency_indices?(_dependency_indices, _count), do: false
+
+  defp valid_dependency_list?(indices, position) when is_list(indices) do
+    Enum.all?(indices, &(is_integer(&1) and &1 >= 0 and &1 < position)) and
+      indices == Enum.sort(indices) and indices == Enum.uniq(indices)
+  end
+
+  defp valid_dependency_list?(_indices, _position), do: false
 
   defp validate_run_stopped_usage("run-stopped", data) do
     case Map.fetch(data, "usage") do
