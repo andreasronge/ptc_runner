@@ -787,7 +787,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   end
 
   defp valid_bundle_hash?(nil, ids), do: ids == []
-  defp valid_bundle_hash?(hash, ids) when is_binary(hash), do: ids != [] and hash =~ @bundle_hash
+  defp valid_bundle_hash?(hash, _ids) when is_binary(hash), do: hash =~ @bundle_hash
   defp valid_bundle_hash?(_hash, _ids), do: false
 
   # Membership proves only that a component with that ID was compiled. The
@@ -803,16 +803,20 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
         &{&1["correlation"]["component_id"], &1["payload"]["source_hash"]}
       )
 
-    populated =
+    # Every environment that compiled a bundle is proven, including one that
+    # compiled no component: its identity is still a commitment, and an
+    # environment excused from proof is an environment records can be invented
+    # for.
+    committed =
       for {key, projection} <- preludes,
-          projection.component_ids != [],
+          projection.hash != nil,
           into: MapSet.new(),
           do: key
 
     groups
     |> Map.keys()
     |> MapSet.new()
-    |> MapSet.union(populated)
+    |> MapSet.union(committed)
     |> Enum.reduce_while(:ok, fn key, :ok ->
       case prelude_identity_proven?(Map.get(groups, key, []), Map.get(preludes, key)) do
         true -> {:cont, :ok}

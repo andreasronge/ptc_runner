@@ -1654,6 +1654,44 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
   end
 
+  test "an environment that compiled no component is proven, not excused" do
+    {:ok, identity} = FrozenBundle.identity([])
+
+    events = [
+      canonical_event(1, "run-started", %{
+        "missions" => %{},
+        "workflow_prelude" => %{
+          "component_ids" => [],
+          "dependency_indices" => [],
+          "hash" => identity
+        }
+      }),
+      canonical_event(2, "capability-started", %{
+        "capability_id" => "cap-1",
+        "environment" => "mission",
+        "mission_name" => "default",
+        "name" => "read"
+      })
+    ]
+
+    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+    assert :ok = emit_small(sink, "cap-1")
+    assert {:ok, unrelated} = InspectionSink.records(sink)
+
+    # Nothing to prove, and the committed identity is the empty one.
+    assert :ok = InspectionArtifact.validate_correlations(unrelated, events)
+
+    mismatched = put_in(events, [Access.at(0), "data", "workflow_prelude", "hash"], @source_hash)
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(unrelated, mismatched)
+
+    invented = unrelated ++ prelude_records(%{"base" => "(ns base) (def value 1)"})
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(invented, events)
+  end
+
   # An artifact must not be publishable against a projection the canonical
   # trace would itself refuse to load.
   test "prelude correlation refuses a projection the trace log would reject" do

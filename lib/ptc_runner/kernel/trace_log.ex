@@ -2513,11 +2513,10 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp valid_prelude_projection?(_prelude), do: false
 
+  # A nil identity means no bundle at all, which can name no components. A
+  # bundle always carries a digest, whether or not it compiled any component.
   defp valid_prelude_hash?(nil, component_ids), do: component_ids == []
-
-  defp valid_prelude_hash?(hash, component_ids) when is_binary(hash),
-    do: component_ids != [] and hash =~ @bundle_hash
-
+  defp valid_prelude_hash?(hash, _component_ids) when is_binary(hash), do: hash =~ @bundle_hash
   defp valid_prelude_hash?(_hash, _component_ids), do: false
 
   defp valid_dependency_indices?(dependency_indices, count) when is_list(dependency_indices) do

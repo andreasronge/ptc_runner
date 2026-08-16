@@ -151,7 +151,14 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     end
 
     assert {:ok, _page} = load.(valid, "valid")
-    assert {:ok, _page} = load.(%{"component_ids" => [], "dependency_indices" => []}, "empty")
+    assert {:ok, _page} = load.(%{"component_ids" => [], "dependency_indices" => []}, "no-bundle")
+
+    # A bundle that compiled no component still commits to an identity.
+    assert {:ok, _page} =
+             load.(
+               %{"component_ids" => [], "dependency_indices" => [], "hash" => hash},
+               "empty-bundle"
+             )
 
     rejected = %{
       "duplicate-ids" => %{valid | "component_ids" => ["kernel", "kernel", "agent.core"]},
@@ -164,10 +171,10 @@ defmodule PtcRunner.Kernel.TraceLogTest do
       "prefixed-hash" => %{valid | "hash" => "sha256:" <> hash},
       "uppercase-hash" => %{valid | "hash" => String.upcase(hash)},
       "absent-hash" => Map.delete(valid, "hash"),
-      "hash-without-components" => %{
-        "component_ids" => [],
-        "dependency_indices" => [],
-        "hash" => hash
+      "components-without-hash" => %{valid | "hash" => nil},
+      "hash-without-projection" => %{
+        "component_ids" => ["kernel"],
+        "dependency_indices" => [[]]
       }
     }
 
