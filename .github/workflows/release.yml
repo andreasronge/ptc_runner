@@ -27,6 +27,15 @@ jobs:
             exit 1
           fi
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      # Without this a mistagged commit publishes a release titled for one
+      # version carrying an artifact named and reporting another.
+      - name: Require the tag to match the project version
+        if: github.ref_type == 'tag'
+        run: |
+          expected_tag="v$(grep -m1 -E '^ +version: "' mix.exs | sed -E 's/.*"(.+)".*/\1/')"
+          test -n "$expected_tag"
+          test "$GITHUB_REF_NAME" = "$expected_tag"
       - uses: actions/setup-java@v5
         with:
           distribution: temurin

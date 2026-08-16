@@ -48,7 +48,10 @@ MIX_ENV=prod mix release ptc_runner --overwrite --path "$release_root"
 
 version="$("$release_root/bin/ptc" --version)"
 architecture="$(uname -m)"
-mkdir -p "$vendor_dir"
+
+# The origin map is packaging bookkeeping, not part of the artifact.
+vendor_manifest="$package_tmp_dir/vendor-origins"
+mkdir -p "$vendor_dir" "$vendor_manifest"
 
 # Mach-O files are found by inspection, not by a list of names: a runtime bump
 # can add a NIF, and a list would keep passing while the new library stayed
@@ -90,6 +93,19 @@ vendor_dependency() {
   local name
   name="$(basename "$source")"
   local vendored="$vendor_dir/$name"
+
+  # Vendored files are keyed by basename, so two libraries that share one would
+  # collapse into whichever arrived first while both dependents were rewritten
+  # to it -- and the closure check would still pass. Record the origin of each
+  # name and refuse the second one.
+  local origin_record="$vendor_manifest/$name"
+  if [ -f "$origin_record" ] && [ "$(cat "$origin_record")" != "$source" ]; then
+    echo "two different libraries are named $name:" >&2
+    echo "  already vendored from $(cat "$origin_record")" >&2
+    echo "  now required from $source" >&2
+    exit 1
+  fi
+  printf '%s' "$source" > "$origin_record"
 
   if [ ! -f "$vendored" ]; then
     cp "$source" "$vendored"
@@ -161,19 +177,11 @@ done < <(mach_o_files)
 
 # The closure is only proven by re-reading the tree: a rewrite that silently
 # failed, or a library reached only through another vendored library, shows up
-# here and nowhere else.
-remaining="$package_tmp_dir/remaining.txt"
-: > "$remaining"
-while IFS= read -r -d '' mach_o; do
-  for dependency in $(dependencies_of "$mach_o"); do
-    is_system_dependency "$dependency" && continue
-    printf '%s -> %s\n' "$mach_o" "$dependency" >> "$remaining"
-  done
-done < <(mach_o_files)
-
-if [ -s "$remaining" ]; then
-  echo 'the packaged release still references libraries outside the artifact:' >&2
-  cat "$remaining" >&2
+# here and nowhere else. The checker resolves `@rpath` through each file's
+# `LC_RPATH` entries and `@loader_path` against its directory, because a
+# loader-relative reference is not the same thing as a contained one.
+if ! mach_o_files | python3 scripts/macho_closure.py "$release_root"; then
+  echo 'the packaged release still references libraries outside the artifact' >&2
   exit 1
 fi
 

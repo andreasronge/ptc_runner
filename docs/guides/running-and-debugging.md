@@ -203,9 +203,23 @@ needs `xattr -d com.apple.quarantine` before first run.
 
 Linux is a container target rather than an archive. `scripts/build_container_image.sh`
 builds local scaffolding from digest-pinned bases and runs the same
-verification inside the image. It is not a published install route yet; the
-remaining targets and the publication contract are tracked in
-`docs/plans/lisp-kernel/stable-cli-contract.md`.
+verification inside the shipped runtime image — not inside the builder that
+produced it, which is where a missing runtime library hides. It is not a
+published install route yet; the remaining targets and the publication
+contract are tracked in `docs/plans/lisp-kernel/stable-cli-contract.md`.
+
+```console
+scripts/build_container_image.sh
+docker run --rm -v "$PWD:/work" ptc:dev run /work/ptc.json
+docker run --rm -it -v "$PWD:/work" ptc:dev repl
+```
+
+The container runs as a non-root user and takes applications, host
+configuration, and outputs through explicit mounts. Use `-it` for the REPL:
+line editing needs both a terminal and a terminal type, and the editor falls
+back to the plain reader when `TERM` is unset or `dumb` — where `Ctrl+A`
+inserts a literal control byte into the expression rather than moving the
+cursor.
 
 ### Diagnose a failed run
 

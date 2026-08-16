@@ -45,7 +45,7 @@ defmodule PtcRunner.ReplLineEditor do
   """
   @spec run(mode(), (-> result)) :: result when result: term()
   def run(mode, fun) when mode in [:direct, :manifest] and is_function(fun, 0) do
-    if AnalysisTerminal.attached?(), do: install(mode)
+    if AnalysisTerminal.attached?() and reads_standard_io?(), do: install(mode)
 
     IO.puts(banner())
 
@@ -78,6 +78,14 @@ defmodule PtcRunner.ReplLineEditor do
     send(caller, {__MODULE__, :group, self()})
     spawn(fn -> Process.sleep(:infinity) end)
   end
+
+  # `AnalysisTerminal.attached?/0` answers for the OS descriptors, which stay
+  # pointed at the developer's terminal even when this process reads from
+  # somewhere else. `ExUnit.CaptureIO` is the case that matters: it swaps the
+  # calling process's group leader for a capture server, and a test that
+  # reached the installer would take over that terminal for the whole VM,
+  # escape the capture, and write history from a test run.
+  defp reads_standard_io?, do: Process.group_leader() == Process.whereis(:user)
 
   defp install(mode) do
     configure(mode)

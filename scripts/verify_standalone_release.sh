@@ -89,7 +89,15 @@ if [ -z "${PTC_RELEASE_ROOT:-}" ]; then
 fi
 
 test -x "$command_bin"
-test -d "$release_root/erts-$(elixir -e 'IO.write(:erlang.system_info(:version))')"
+
+if command -v elixir > /dev/null; then
+  test -d "$release_root/erts-$(elixir -e 'IO.write(:erlang.system_info(:version))')"
+else
+  # Verifying a packaged artifact where no toolchain sits beside it -- inside
+  # the runtime container, for instance. What matters there is that the runtime
+  # travelled with the artifact, not which toolchain assembled it.
+  test "$(find "$release_root" -maxdepth 1 -type d -name 'erts-*' | wc -l)" -eq 1
+fi
 find "$release_root/lib" -maxdepth 1 -type d -name 'req_llm-*' -print -quit | grep -q .
 "$release_root/bin/ptc_runner" eval '
   true = PtcRunner.Kernel.SemanticRevision.runtime_dependency_artifacts_verified?()
@@ -212,6 +220,13 @@ else
     echo 'expect(1) is required to verify the interactive REPL' >&2
     exit 1
   }
+
+  # The editor reads the terminal type: with `TERM` unset or `dumb` -- a build
+  # container, a bare CI step -- the group runs in dumb mode, and `Ctrl+A`
+  # lands in the expression as a literal byte instead of moving the cursor.
+  # That fallback is correct behavior, but it is not what this gate exists to
+  # check, so the gate supplies a terminal type rather than inheriting one.
+  export TERM="${TERM:-xterm}"
 
   HOME="$release_tmp_dir/home" expect -f - "$command_bin" > "$release_tmp_dir/pty.stdout" <<'EXPECT'
 set timeout 60
