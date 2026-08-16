@@ -467,6 +467,12 @@ defmodule PtcRunner.Sandbox do
       })
     end
 
+    :telemetry.execute(
+      [:ptc_runner, :sandbox, :armed],
+      %{baseline_words: baseline, ceiling_words: baseline + max_heap},
+      %{pid: self(), max_heap: max_heap}
+    )
+
     baseline
   end
 

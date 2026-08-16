@@ -85,7 +85,7 @@ export function createAnalyzeButton(label, kind, runId, requestTemplate, documen
 }
 
 export function nextTabName(current, key) {
-  const tabs = ['runs', 'repl'];
+  const tabs = ['runs', 'repl', 'live'];
   if (key === 'Home') return tabs[0];
   if (key === 'End') return tabs.at(-1);
   const index = Math.max(tabs.indexOf(current), 0);

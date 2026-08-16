@@ -1206,6 +1206,12 @@ defmodule PtcRunner.Lisp do
 
     parallel_budget = ParallelBudget.new(max_parallel_workers)
 
+    :telemetry.execute(
+      [:ptc_runner, :parallel, :budget],
+      %{capacity: max_parallel_workers},
+      %{budget: parallel_budget}
+    )
+
     eval_opts =
       [
         max_print_length: max_print_length,

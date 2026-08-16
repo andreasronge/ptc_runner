@@ -1,6 +1,7 @@
 defmodule PtcViewer.Router do
   use Plug.Router
 
+  alias PtcViewer.LiveStore
   alias PtcViewer.ReplError
   alias PtcViewer.ReplStore
 
@@ -116,6 +117,38 @@ defmodule PtcViewer.Router do
     send_analysis(conn, PtcViewer.Api.preludes(viewer_config(conn), run_id))
   end
 
+  post "/api/live/runs/:run_id" do
+    with {:ok, body, conn} <- json_body(conn),
+         {:ok, _pid} <- LiveStore.ensure_started(),
+         :ok <- LiveStore.put_frame(run_id, body) do
+      send_live_json(conn, 200, %{"status" => "ok"})
+    else
+      {:error, reason, conn} -> send_live_json(conn, 400, %{"error" => to_string(reason)})
+      {:error, reason} -> send_live_json(conn, 400, %{"error" => to_string(reason)})
+    end
+  end
+
+  get "/api/live/runs" do
+    {:ok, _pid} = LiveStore.ensure_started()
+    send_live_json(conn, 200, %{"runs" => LiveStore.snapshot()})
+  end
+
+  get "/api/live/stream" do
+    {:ok, _pid} = LiveStore.ensure_started()
+    {:ok, snapshot} = LiveStore.subscribe(self())
+
+    conn =
+      conn
+      |> put_resp_header("content-type", "text/event-stream")
+      |> put_resp_header("cache-control", "no-cache")
+      |> send_chunked(200)
+
+    case send_live_frames(conn, snapshot) do
+      {:ok, conn} -> live_stream_loop(conn)
+      {:error, conn} -> conn
+    end
+  end
+
   match "/api/*path" do
     if conn.request_path in @repl_paths do
       case repl_store(conn) do
@@ -146,6 +179,39 @@ defmodule PtcViewer.Router do
     case Keyword.get(viewer_config(conn), :repl_store) do
       store when is_pid(store) -> {:ok, store}
       _none -> {:error, :repl_not_configured}
+    end
+  end
+
+  defp send_live_json(conn, status, body) do
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(status, Jason.encode!(body))
+  end
+
+  defp send_live_frames(conn, jsons) do
+    Enum.reduce_while(jsons, {:ok, conn}, fn json, {:ok, conn} ->
+      case chunk(conn, "data: " <> json <> "\n\n") do
+        {:ok, conn} -> {:cont, {:ok, conn}}
+        {:error, _reason} -> {:halt, {:error, conn}}
+      end
+    end)
+  end
+
+  # One process per connection under Bandit; blocking in receive is the
+  # intended shape for SSE. Heartbeat comments keep proxies from timing out.
+  defp live_stream_loop(conn) do
+    receive do
+      {:live_frame, json} ->
+        case chunk(conn, "data: " <> json <> "\n\n") do
+          {:ok, conn} -> live_stream_loop(conn)
+          {:error, _reason} -> conn
+        end
+    after
+      15_000 ->
+        case chunk(conn, ": heartbeat\n\n") do
+          {:ok, conn} -> live_stream_loop(conn)
+          {:error, _reason} -> conn
+        end
     end
   end
 

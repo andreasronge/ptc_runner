@@ -109,16 +109,20 @@ defmodule PtcRunner.Kernel.Runner do
   end
 
   defp run_claimed(entry_source, config, state) do
+    reporter = PtcRunner.LiveStatus.maybe_start(config, state)
+
     execution =
       try do
         result = run_workflow(entry_source, config, state)
         result = apply_terminal_failure(result, state)
+        _ = PtcRunner.LiveStatus.complete(reporter, outcome(result), terminal_reason(result))
         {:ok, result}
       catch
         kind, reason ->
           {:raised, kind, reason, __STACKTRACE__}
       after
         close_run_state(state)
+        PtcRunner.LiveStatus.stop(reporter)
       end
 
     usage = run_state_usage(state)

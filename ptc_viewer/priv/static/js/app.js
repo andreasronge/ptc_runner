@@ -3,6 +3,7 @@ import { renderKernelTranscript } from './kernel-transcript.js';
 import { renderSemanticConversation } from './semantic-conversation.js';
 import { createAnalyzeButton, createReplController, nextTabName, readViewerConfig } from './repl.js';
 import { createRunCatalog } from './run-catalog.js';
+import { createLiveController } from './live.js';
 import { commitCurrentLoad } from './current-load.js';
 import { truncate } from './utils.js';
 
@@ -202,6 +203,7 @@ const runCatalog = createRunCatalog({
 function currentRoute() {
   const hash = location.hash.replace(/^#\/?/, '');
   if (hash === 'repl') return { tab: 'repl', runId: null };
+  if (hash === 'live') return { tab: 'live', runId: null };
   const match = hash.match(/^run\/(.+)$/);
   if (match) return { tab: 'runs', runId: decodeURIComponent(match[1]) };
   return { tab: 'runs', runId: null };
@@ -385,17 +387,21 @@ function activateTab(name, { focus = false } = {}) {
   state.activeTab = name;
   const isRuns = name === 'runs';
   document.getElementById('runs-panel').hidden = !isRuns;
-  document.getElementById('repl-panel').hidden = isRuns;
+  document.getElementById('repl-panel').hidden = name !== 'repl';
+  document.getElementById('live-panel').hidden = name !== 'live';
   document.getElementById('breadcrumb').hidden = !isRuns;
 
-  for (const [tabName, tab] of [['runs', document.getElementById('runs-tab')], ['repl', document.getElementById('repl-tab')]]) {
+  for (const tabName of ['runs', 'repl', 'live']) {
+    const tab = document.getElementById(`${tabName}-tab`);
+    if (!tab) continue;
     const selected = tabName === name;
     tab.classList.toggle('active', selected);
     tab.setAttribute('aria-selected', String(selected));
     tab.tabIndex = selected ? 0 : -1;
   }
   if (focus) document.getElementById(`${name}-tab`).focus();
-  state.repl?.setActive(!isRuns);
+  state.repl?.setActive(name === 'repl');
+  state.live?.setActive(name === 'live');
   requestAnimationFrame(() => window.scrollTo(0, state.scrollPositions[name] || 0));
 }
 
@@ -404,13 +410,17 @@ function navigateToTab(name) {
     location.hash = '#/repl';
     return;
   }
+  if (name === 'live') {
+    location.hash = '#/live';
+    return;
+  }
   location.hash = state.selectedRunId ? `#/run/${encodeURIComponent(state.selectedRunId)}` : '#/';
 }
 
 function setupTabs() {
   const tabs = document.getElementById('primary-tabs');
   tabs.hidden = false;
-  for (const name of ['runs', 'repl']) {
+  for (const name of ['runs', 'repl', 'live']) {
     document.getElementById(`${name}-tab`).addEventListener('click', () => navigateToTab(name));
   }
   tabs.addEventListener('keydown', event => {
@@ -426,8 +436,8 @@ function setupTabs() {
 }
 
 const config = readViewerConfig();
+setupTabs();
 if (config.repl_enabled) {
-  setupTabs();
   state.repl = createReplController({
     pageNonce: config.page_bootstrap_nonce,
     getSelectedRunId: () => state.currentRun?.metadata?.run_id || null,
@@ -435,7 +445,14 @@ if (config.repl_enabled) {
     refreshRuns: () => runCatalog.refresh(),
     onAvailabilityChange: setReplAvailability
   });
+} else {
+  document.getElementById('repl-tab').hidden = true;
 }
+state.live = createLiveController({
+  onLiveCount: count => {
+    document.getElementById('live-tab').classList.toggle('has-live', count > 0);
+  }
+});
 
 window.addEventListener('hashchange', () => void applyRoute());
 
