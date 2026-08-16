@@ -59,7 +59,8 @@ while IFS= read -r path || [ -n "$path" ]; do
       # Disposable plans do not participate in product or documentation gates.
       ;;
 
-    docs/function-reference.md|docs/java-interop.md|docs/conformance/*)
+    docs/function-reference.md|docs/java-interop.md|docs/kernel-limits-reference.md|\
+      docs/prelude-reference.md|docs/conformance/*)
       # These files are generated. The core gate verifies their sources.
       core=true
       docs=true

@@ -154,8 +154,9 @@ reader uses.
 
 When behavior changes, update the owning module docs, relevant guide or
 specification, tests, examples, and generated references together. Generated
-`docs/function-reference.md`, `docs/java-interop.md`, and
-`docs/conformance/` pages must be changed through their `priv/*.exs` sources
+`docs/function-reference.md`, `docs/java-interop.md`,
+`docs/kernel-limits-reference.md`, `docs/prelude-reference.md`, and
+`docs/conformance/` pages must be changed through their owning source catalogs
 and `mix ptc.gen_docs`, not edited directly.
 
 Run focused doctests or documentation tests, then:

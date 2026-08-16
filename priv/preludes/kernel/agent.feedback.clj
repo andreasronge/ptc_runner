@@ -32,7 +32,9 @@
 (defn- cap-observation [body max-chars]
   (cap-with-marker body max-chars (observation-truncation-marker)))
 
-(defn success [evaluation max-chars]
+(defn success
+  "Renders a bounded, explicitly untrusted observation from a successful evaluation."
+  [evaluation max-chars]
   (let [value-preview (pr-str (get evaluation :value))
         prints (get evaluation :prints [])
         body (str "user=> " value-preview
@@ -49,11 +51,15 @@
          "</untrusted_ptc_output>\n"
          "Definitions created by this successful program remain available.")))
 
-(defn protocol-error [action]
+(defn protocol-error
+  "Renders correction guidance for an invalid model action."
+  [action]
   (str "Protocol error: " (get action :reason)
        ". Call run_ptc_lisp exactly once with one program string."))
 
-(defn evaluation-error [evaluation]
+(defn evaluation-error
+  "Renders bounded correction guidance for a failed evaluation."
+  [evaluation]
   (let [outcome (get evaluation :outcome)
         code (or (get evaluation :kind)
                  (get evaluation :reason)
@@ -79,21 +85,27 @@
       (str "; violations=" (join "; " (map argument-violation violations)))
       "")))
 
-(defn capability-error [evaluation]
+(defn capability-error
+  "Renders correction guidance for a safely retryable capability failure."
+  [evaluation]
   (let [error (get evaluation :value)]
     (str "The capability call failed without an unsafe effect. "
          "kind=" (get error :kind) "; reason=" (get error :reason)
          (argument-violation-feedback error)
          ". Send one corrected run_ptc_lisp call with corrected capability arguments.")))
 
-(defn non-retryable [evaluation]
+(defn non-retryable
+  "Renders closing guidance after a failure whose external effects may be unsafe to repeat."
+  [evaluation]
   (str "The PTC-Lisp evaluation did not return successfully and cannot be retried, "
        "because it already performed an effect this runtime cannot undo. "
        "error_code=" (or (get evaluation :kind) (get evaluation :outcome))
        ". Do not repeat that program. Return your best decision from the evidence "
        "you have already gathered, using return or fail on this turn."))
 
-(defn result-contract [validation]
+(defn result-contract
+  "Renders bounded correction guidance for an invalid application result."
+  [validation]
   (let [diagnostics (pr-str (get validation :details))
         bounded (cap-with-marker diagnostics
                                  (contract-diagnostic-max-chars)

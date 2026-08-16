@@ -114,6 +114,11 @@ defmodule PtcRunner.Kernel.Library do
     ],
     "agent.main" => ["agent.core"]
   }
+  @component_ids @sources |> Map.keys() |> Enum.sort()
+
+  @spec component_ids() :: [binary()]
+  @doc "Returns every shipped component ID in lexical order."
+  def component_ids, do: @component_ids
 
   @spec component(binary()) :: {:ok, Component.t()} | {:error, :unknown_library}
   @doc "Returns one shipped component by its stable component ID."

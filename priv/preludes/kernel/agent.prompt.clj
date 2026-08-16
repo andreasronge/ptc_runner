@@ -1,6 +1,8 @@
 (ns agent.prompt "Domain-blind system-prompt policy for agent.core." {:visibility :discoverable})
 
-(defn initial-state [cfg]
+(defn initial-state
+  "Creates the initial domain-blind prompt-policy state from agent configuration."
+  [cfg]
   {:revision 0
    ;; The prompt renders the API of the mission this agent evaluates into, so
    ;; two agents in one run can be given two different mission APIs without a
@@ -232,7 +234,9 @@
          "\n")
     "Available API\n"))
 
-(defn render [state]
+(defn render
+  "Renders the system prompt and model-visible mission API for one policy state."
+  [state]
   (if (map? state)
     (let [context (json/parse-string
                     (kernel/mission-model-context (or (get state :mission) "default")))]
@@ -276,7 +280,9 @@
         nil))
     nil))
 
-(defn transition [state event]
+(defn transition
+  "Advances prompt-policy state after one agent-loop event."
+  [state event]
   (if (and (map? state) (map? event))
     (assoc state
            :revision (inc (get state :revision 0))

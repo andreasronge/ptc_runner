@@ -2,6 +2,7 @@ defmodule Mix.Tasks.Ptc.GenDocsTest do
   use ExUnit.Case, async: true
 
   alias Mix.Tasks.Ptc.GenDocs
+  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.LimitCatalog
 
   test "generated function reference explains the PtcRunner extension marker" do
@@ -18,6 +19,32 @@ defmodule Mix.Tasks.Ptc.GenDocsTest do
       assert reference =~ "`#{row.name}`"
       assert reference =~ row.description
     end
+  end
+
+  test "generated prelude reference covers every shipped component and excludes private helpers" do
+    reference = File.read!("docs/prelude-reference.md")
+    {:ok, components} = Library.components(Library.component_ids())
+    {:ok, bundle} = PtcRunner.Kernel.compile_bundle(components)
+
+    for id <- Library.component_ids() do
+      assert reference =~ "### `#{id}`"
+      assert reference =~ ~s({"library": "#{id}"})
+    end
+
+    for export <- bundle.prelude.exports do
+      assert reference =~ "##### `#{export.ref}`"
+    end
+
+    assert reference =~ "Selecting it also installs"
+    assert reference =~ "Directly used by"
+    assert reference =~ "Reserved Kernel operations"
+
+    assert reference =~
+             "- **Selecting it also installs:** `agent.core`, `agent.feedback`, `agent.native`, `agent.prompt`, `agent.retry`, `kernel`, `llm`, `result`, `workflow.event`"
+
+    assert reference =~ ~r/##### `llm\/request`.*?- \*\*Effect:\*\* `unknown`/s
+    refute reference =~ "agent.feedback/cap-with-marker"
+    refute reference =~ "agent.core/run-outcome*"
   end
 
   @tag :tmp_dir
