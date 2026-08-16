@@ -1,6 +1,8 @@
 (ns agent.native "Strict run_ptc_lisp model-action protocol." {:visibility :prompt})
 
-(defn tool-schema []
+(defn tool-schema
+  "Returns the strict provider-neutral run_ptc_lisp tool schema."
+  []
   {"type" "function"
    "function"
    {"name" "run_ptc_lisp"
@@ -26,7 +28,9 @@
       (json/parse-string arguments)
       arguments)))
 
-(defn normalize [response max-program-chars]
+(defn normalize
+  "Normalizes one provider response into a tool call, provider error, or protocol error."
+  [response max-program-chars]
   (let [max-program-chars (if (and (integer? max-program-chars)
                                    (pos? max-program-chars)
                                    (<= max-program-chars 1000000))

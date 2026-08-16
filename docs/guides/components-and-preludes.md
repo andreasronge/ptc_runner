@@ -100,6 +100,11 @@ Shipped components use the same dependency rules. For example:
 | `cap` | Fail-safe capability-envelope handling and bounded cursor traversal |
 | `analysis` | Three bounded public/private run-evidence navigation operations |
 
+The generated [shipped prelude reference](../prelude-reference.md) groups every
+installed component by purpose and lists its visibility, direct and transitive
+dependencies, reverse dependents, public functions, contracts, effects, and
+backing capability requirements.
+
 `analysis` depends on `cap`. Adding an installed dependency widens the callable
 surface, so fixed profiles pin the complete resolved component list and must
 version public surface changes.
@@ -114,6 +119,12 @@ history across resumptions.
 
 [Building agents](building-agents.md) covers the `agent.core` loop and the
 `agent.prompt` policy seam these libraries provide.
+
+Local components use new IDs; they cannot shadow a selected shipped library
+ID. A hash-checked
+[component override](evaluating-with-replay.md#evaluate-the-candidate-without-installing-it)
+can evaluate replacement source for one selected component on a run, but it is
+an invocation option rather than a permanent manifest library installation.
 
 ## Boundaries
 

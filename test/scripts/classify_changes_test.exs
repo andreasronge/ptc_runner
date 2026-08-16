@@ -9,6 +9,16 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
     assert classify(["docs/guides/replay.md"]) ==
              all_false() |> Map.put("docs", "true")
 
+    for generated_reference <- [
+          "docs/kernel-limits-reference.md",
+          "docs/prelude-reference.md"
+        ] do
+      assert classify([generated_reference]) ==
+               all_false()
+               |> Map.put("core", "true")
+               |> Map.put("docs", "true")
+    end
+
     assert classify(["docs/guides/quickstart.md"]) ==
              all_false()
              |> Map.put("core", "true")

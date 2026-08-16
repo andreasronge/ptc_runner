@@ -237,6 +237,7 @@ and
 
 [PTC-Lisp specification](docs/ptc-lisp-specification.md),
 [function reference](docs/function-reference.md),
+[shipped prelude reference](docs/prelude-reference.md),
 [signature syntax](docs/signature-syntax.md),
 [Kernel limits](docs/kernel-limits-reference.md),
 [TraceLog contract](docs/trace-log-contract.md), and the

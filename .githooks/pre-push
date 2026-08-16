@@ -81,6 +81,8 @@ DOC_PATTERNS = [
 GENERATED_DOC_PATTERNS = [
     re.compile(r"^docs/function-reference\.md$"),
     re.compile(r"^docs/java-interop\.md$"),
+    re.compile(r"^docs/kernel-limits-reference\.md$"),
+    re.compile(r"^docs/prelude-reference\.md$"),
     re.compile(r"^docs/conformance/.*$"),
 ]
 

@@ -1,7 +1,14 @@
 (ns cap "Capability discovery and envelope composition helpers." {:visibility :discoverable})
 
-(defn list [] (tool/cap-list {}))
-(defn describe [name] (tool/cap-describe {:name name}))
+(defn list
+  "Lists capabilities installed in the current environment."
+  []
+  (tool/cap-list {}))
+
+(defn describe
+  "Returns the installed description for one capability name."
+  [name]
+  (tool/cap-describe {:name name}))
 
 (defn unwrap!
   "Returns a capability response's value, failing the program on any error.

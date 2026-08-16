@@ -398,6 +398,7 @@ defmodule PtcRunner.MixProject do
           "docs/function-reference.md",
           "docs/java-interop.md",
           "docs/kernel-limits-reference.md",
+          "docs/prelude-reference.md",
           "docs/signature-syntax.md",
           "docs/trace-log-contract.md",
           "docs/conformance/index.md",
@@ -425,7 +426,7 @@ defmodule PtcRunner.MixProject do
         Contracts: ~r/docs\/trace-log-contract\.md/,
         Guides: ~r/docs\/guides\/.+\.md/,
         Reference:
-          ~r/docs\/(agent-library|ptc-lisp|clojure|function-reference|java-|kernel-limits|signature-).+\.md/,
+          ~r/docs\/(agent-library|ptc-lisp|clojure|function-reference|java-|kernel-limits|prelude-|signature-).+\.md/,
         Conformance: ~r/docs\/conformance\/.+\.md/
       ]
     ]

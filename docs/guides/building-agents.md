@@ -310,6 +310,13 @@ profile described in [Running and debugging](running-and-debugging.md).
 when a different prompt policy is required. Keep the loop and its failure rules
 unchanged while experimenting with how the model is instructed.
 
+Evaluate a replacement for the selected `agent.prompt` component with a
+hash-checked component override. Ordinary manifests cannot permanently shadow
+that shipped ID. For permanent application-specific composition, create custom
+loop and prompt components under new IDs. The
+[shipped prelude reference](../prelude-reference.md#customize-or-replace-a-component)
+distinguishes those paths.
+
 Prompt-visible mission functions form a facade: when any exist, they suppress
 raw `tool/...` entries. Without a facade, the prompt lists direct mission
 capabilities. Numeric limits remain enforced but are not rendered into the
