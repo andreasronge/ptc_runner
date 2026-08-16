@@ -23,7 +23,12 @@ defmodule PtcRunner.Kernel.MCPSource do
   streaming boundary: a completed SSE response, response-size rejection, or
   SSE parser rejection halts and closes the response stream. Deadline expiry,
   caller death, provider close, and source-owner death terminate the request
-  task and likewise close the stream. HTTP never sends
+  task and likewise close the stream. Before dispatch, MCP endpoint HTTP,
+  including an OAuth-protected resource request, preserves closed causes for
+  refused connections, unresolved endpoint names, and allowlisted TLS
+  configuration or protocol failures. Raw dependency,
+  endpoint, certificate, and operating-system details never cross the source
+  boundary. HTTP never sends
   `notifications/cancelled`; that protocol notification remains specific to
   stdio. Both transports support schema-valid structured object results with
   exact text or embedded text-resource companions. Unstructured results expose
@@ -46,6 +51,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.MCPRequestContext
   alias PtcRunner.Kernel.MCPStdioTransport
+  alias PtcRunner.Kernel.MCPTransportReason
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
 
@@ -163,7 +169,9 @@ defmodule PtcRunner.Kernel.MCPSource do
   transport acquisition, discovery, or RPC. Assembly returns
   `{:ok, %{capabilities: list, snapshot: map, close: zero_arity_function}}` or a
   stable atom error: `:mcp_authentication_failed`, `:mcp_timeout`,
-  `:mcp_transport_error`, `:mcp_protocol_error`, `:mcp_remote_error`,
+  `:mcp_transport_error`, `:mcp_endpoint_connection_refused`,
+  `:mcp_endpoint_name_unresolved`, `:mcp_endpoint_tls_failed`,
+  `:mcp_protocol_error`, `:mcp_remote_error`,
   `:mcp_response_exceeded`, `:mcp_catalog_exceeded`, `:mcp_invalid_catalog`,
   `:mcp_invalid_tool_schema`, `:mcp_capability_negotiation_error`,
   `:mcp_authorization_required`,
@@ -189,7 +197,10 @@ defmodule PtcRunner.Kernel.MCPSource do
   results become `mcp_capability_negotiation_error` because this client
   advertises no input capabilities, and malformed or method-inapplicable
   results remain `mcp_protocol_error`.
-  A closed transport reports the terminal `mcp_transport_closed` cause, and a
+  A refused connection, unresolved endpoint name, or admitted TLS handshake
+  failure preserves its stable cause and `:not_dispatched` provenance. Refused
+  connections are retryable; name-resolution and TLS failures are not. A
+  closed transport reports the terminal `mcp_transport_closed` cause, and a
   stdio transport failure is likewise terminal, because neither session can be
   re-established within the run; only an in-flight HTTP transport failure stays
   retryable. Parameter-header projection, outbound-header validation, and a
@@ -1257,6 +1268,8 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp mark_possibly_dispatched({:error, reason}),
     do: {:error, reason, :possibly_dispatched}
 
+  defp mark_possibly_dispatched({:error, _reason, _provenance} = error), do: error
+
   defp mark_possibly_dispatched(
          {:authorization_transition, _status, _response, _auth, _deadline} = transition
        ),
@@ -1291,6 +1304,7 @@ defmodule PtcRunner.Kernel.MCPSource do
         bounded_outcome(body, method, max_bytes)
       end
     end)
+    |> strip_http_provenance()
   end
 
   defp rpc(
@@ -1550,6 +1564,9 @@ defmodule PtcRunner.Kernel.MCPSource do
       |> MCPHTTPAdapter.request()
       |> classify_http_response(payload, request)
     else
+      {:error, :name_not_resolved} ->
+        {:error, :mcp_endpoint_name_unresolved, :not_dispatched}
+
       {:error, reason} when reason in [:egress_denied, :resolution_failed] ->
         {:error, :mcp_transport_error}
 
@@ -1575,7 +1592,7 @@ defmodule PtcRunner.Kernel.MCPSource do
       {:ok,
        [
          timeout_ms: remaining_ms,
-         address: hd(target.addresses),
+         address: target.addresses,
          connected_peer: NetworkPolicy.peer_verifier(target.addresses)
        ]}
     else
@@ -1626,14 +1643,13 @@ defmodule PtcRunner.Kernel.MCPSource do
        when status in 200..299,
        do: {:ok, response}
 
-  defp classify_http_response({:error, :timeout, _provenance}, _payload, _request),
-    do: {:error, :mcp_timeout}
+  defp classify_http_response({:error, reason, provenance}, _payload, _request),
+    do: MCPTransportReason.from_http(reason, provenance)
 
-  defp classify_http_response({:error, :response_exceeded, _provenance}, _payload, _request),
-    do: {:error, :mcp_response_exceeded}
+  defp classify_http_response(_response, _payload, _request), do: {:error, :mcp_transport_error}
 
-  defp classify_http_response(_response, _payload, _request),
-    do: {:error, :mcp_transport_error}
+  defp strip_http_provenance({:error, reason, _provenance}), do: {:error, reason}
+  defp strip_http_provenance(result), do: result
 
   defp finish_authorization_transition(
          {:authorization_transition, status, response, authorization, deadline_ms}
@@ -1900,8 +1916,12 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp provider_error(:mcp_transport_error, :stdio, effect, provenance),
     do: provider_error(:transport_error, "mcp_transport_error", false, effect, provenance)
 
-  defp provider_error(_reason, _transport, effect, provenance),
-    do: provider_error(:transport_error, "mcp_transport_error", true, effect, provenance)
+  defp provider_error(reason, _transport, effect, provenance) do
+    case MCPTransportReason.provider_error(reason, effect, provenance) do
+      {:ok, error} -> error
+      :error -> provider_error(:transport_error, "mcp_transport_error", true, effect, provenance)
+    end
+  end
 
   defp provider_error(kind, details, retryable?, effect, provenance) do
     mutation_options =

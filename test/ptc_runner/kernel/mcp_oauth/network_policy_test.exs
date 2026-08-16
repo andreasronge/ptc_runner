@@ -152,6 +152,20 @@ defmodule PtcRunner.Kernel.MCPOAuth.NetworkPolicyTest do
     assert System.monotonic_time(:millisecond) - deadline_ms < 5_000
   end
 
+  test "preserves only a genuine negative DNS answer", %{authority: authority} do
+    assert {:error, :name_not_resolved} =
+             NetworkPolicy.resolve("https://auth.example/token", authority,
+               resolver: fn _hostname -> {:error, :nxdomain} end
+             )
+
+    for reason <- [:timeout, :servfail, :econnrefused] do
+      assert {:error, :resolution_failed} =
+               NetworkPolicy.resolve("https://auth.example/token", authority,
+                 resolver: fn _hostname -> {:error, reason} end
+               )
+    end
+  end
+
   test "classifies representative reserved IPv4 and IPv6 ranges" do
     for address <- [
           {10, 0, 0, 1},

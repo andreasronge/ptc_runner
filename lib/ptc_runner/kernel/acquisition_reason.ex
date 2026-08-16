@@ -91,6 +91,12 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
     :provider_acquisition_failed
   ]
 
+  @endpoint_reasons %{
+    mcp_endpoint_connection_refused: :provider_endpoint_connection_refused,
+    mcp_endpoint_name_unresolved: :provider_endpoint_name_unresolved,
+    mcp_endpoint_tls_failed: :provider_endpoint_tls_failed
+  }
+
   @protocol_reasons [
     :mcp_protocol_error,
     :mcp_capability_negotiation_error,
@@ -149,6 +155,9 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   Classifies one callback reason against the occurrence that produced it.
   """
   @spec diagnostic(term(), occurrence()) :: CommandDiagnostic.t()
+  def diagnostic(reason, occurrence) when is_map_key(@endpoint_reasons, reason),
+    do: acquisition_diagnostic(Map.fetch!(@endpoint_reasons, reason), occurrence)
+
   def diagnostic(reason, occurrence) when reason in @unavailable_reasons,
     do: acquisition_diagnostic(:provider_unavailable, occurrence)
 

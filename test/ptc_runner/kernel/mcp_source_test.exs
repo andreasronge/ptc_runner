@@ -124,31 +124,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       fixture = fixture(self(), tool_http_error: tool_http_error)
       manager = oauth_manager(fixture.endpoint, interceptor)
 
-      builder =
-        MCPSource.builder(
-          transport:
-            {:streamable_http,
-             endpoint: fixture.endpoint, authorization: manager, allow_insecure_loopback: true},
-          tools: %{"structured" => %{as: "remote.structured", effect: :read}},
-          timeout_ms: 2_000
-        )
-
-      {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
-      {:ok, limits} = Limits.new()
+      builder = streamable_oauth_builder(fixture.endpoint, manager, 2_000)
 
       assert {:ok, %{capabilities: [capability], close: close}} =
-               ProviderRegistry.build(
-                 registry,
-                 "fixture-mcp",
-                 %{"allow" => ["remote.structured"]},
-                 %{
-                   application_content_digest: String.duplicate("0", 64),
-                   destination: :mission,
-                   limits: limits,
-                   installed_limits: limits,
-                   owner: self()
-                 }
-               )
+               build_fixture_provider(builder)
 
       result =
         capability.callback.(%{"query" => "x"}, %{
@@ -185,31 +164,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       fixture = fixture(self(), tool_http_error: {403, headers})
       manager = oauth_manager(fixture.endpoint, fn _operation, _timeout -> :delegate end)
 
-      builder =
-        MCPSource.builder(
-          transport:
-            {:streamable_http,
-             endpoint: fixture.endpoint, authorization: manager, allow_insecure_loopback: true},
-          tools: %{"structured" => %{as: "remote.structured", effect: :read}},
-          timeout_ms: 2_000
-        )
-
-      {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
-      {:ok, limits} = Limits.new()
+      builder = streamable_oauth_builder(fixture.endpoint, manager, 2_000)
 
       assert {:ok, %{capabilities: [capability], close: close}} =
-               ProviderRegistry.build(
-                 registry,
-                 "fixture-mcp",
-                 %{"allow" => ["remote.structured"]},
-                 %{
-                   application_content_digest: String.duplicate("0", 64),
-                   destination: :mission,
-                   limits: limits,
-                   installed_limits: limits,
-                   owner: self()
-                 }
-               )
+               build_fixture_provider(builder)
 
       assert {:error,
               %ProviderError{
@@ -274,31 +232,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         end
       end)
 
-    builder =
-      MCPSource.builder(
-        transport:
-          {:streamable_http,
-           endpoint: fixture.endpoint, authorization: manager, allow_insecure_loopback: true},
-        tools: %{"structured" => %{as: "remote.structured", effect: :read}},
-        timeout_ms: 1_000
-      )
-
-    {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
-    {:ok, limits} = Limits.new()
+    builder = streamable_oauth_builder(fixture.endpoint, manager, 1_000)
 
     assert {:ok, %{capabilities: [capability], close: close}} =
-             ProviderRegistry.build(
-               registry,
-               "fixture-mcp",
-               %{"allow" => ["remote.structured"]},
-               %{
-                 application_content_digest: String.duplicate("0", 64),
-                 destination: :mission,
-                 limits: limits,
-                 installed_limits: limits,
-                 owner: self()
-               }
-             )
+             build_fixture_provider(builder)
 
     {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
     authorization_config = :sys.get_state(manager.pid).config
@@ -1513,6 +1450,93 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
             }} = capability.callback.(%{"query" => "x"}, nil)
   end
 
+  test "a refused invocation preserves not-dispatched provenance for reads and writes" do
+    for effect <- [:read, :write] do
+      fixture = fixture(self())
+
+      builder =
+        MCPSource.builder(
+          transport:
+            {:streamable_http, endpoint: fixture.endpoint, allow_insecure_loopback: true},
+          tools: %{"structured" => %{as: "remote.structured", effect: effect}},
+          timeout_ms: 1_000
+        )
+
+      assert {:ok, %{capabilities: [capability], close: close}} =
+               build_fixture_provider(builder)
+
+      assert :ok = fixture.close.()
+
+      assert {:error,
+              %ProviderError{
+                kind: :transport_error,
+                details: "mcp_endpoint_connection_refused",
+                retryable?: true,
+                dispatch_provenance: :not_dispatched,
+                mutation_state: nil
+              }} = capability.callback.(%{"query" => "x"}, nil)
+
+      assert :ok = close.()
+    end
+  end
+
+  test "a refused discovery retains its closed acquisition reason" do
+    {:ok, listener} =
+      :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}])
+
+    {:ok, {_address, port}} = :inet.sockname(listener)
+    :ok = :gen_tcp.close(listener)
+
+    builder =
+      MCPSource.builder(
+        transport:
+          {:streamable_http,
+           endpoint: "http://127.0.0.1:#{port}/mcp", allow_insecure_loopback: true},
+        tools: %{"structured" => %{as: "remote.structured", effect: :read}},
+        timeout_ms: 1_000
+      )
+
+    assert {:error, :mcp_endpoint_connection_refused} =
+             build_fixture_provider(builder)
+  end
+
+  test "OAuth-protected resource DNS retains its closed acquisition reason" do
+    endpoint = "https://mcp.example/mcp"
+
+    manager =
+      oauth_manager(endpoint, fn _operation, _timeout -> :delegate end,
+        resolver: fn _hostname -> {:error, :nxdomain} end
+      )
+
+    builder =
+      MCPSource.builder(
+        transport: {:streamable_http, endpoint: endpoint, authorization: manager},
+        tools: %{"structured" => %{as: "remote.structured", effect: :read}},
+        timeout_ms: 1_000
+      )
+
+    assert {:error, :mcp_endpoint_name_unresolved} = build_fixture_provider(builder)
+    Process.exit(manager.pid, :kill)
+  end
+
+  test "OAuth-protected resource falls back across its approved address set" do
+    fixture = fixture(self())
+
+    manager =
+      oauth_manager(fixture.endpoint, fn _operation, _timeout -> :delegate end,
+        resolver: fn _hostname ->
+          {:ok, [{0, 0, 0, 0, 0, 0, 0, 1}, {127, 0, 0, 1}]}
+        end
+      )
+
+    builder = streamable_oauth_builder(fixture.endpoint, manager, 1_000)
+
+    assert {:ok, %{close: close}} = build_fixture_provider(builder)
+    assert :ok = close.()
+    Process.exit(manager.pid, :kill)
+    assert :ok = fixture.close.()
+  end
+
   @tag :tmp_dir
   test "rejects unknown modern result types", %{tmp_dir: dir} do
     parent = self()
@@ -1623,6 +1647,15 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       MCPSource.builder(
         transport:
           {:streamable_http, endpoint: "https://example.com/mcp", command: "/inapplicable"},
+        tools: mappings()
+      )
+    end
+
+    assert_raise ArgumentError, fn ->
+      MCPSource.builder(
+        transport:
+          {:streamable_http,
+           endpoint: "https://example.com/mcp", request: fn _request -> :fabricated end},
         tools: mappings()
       )
     end
@@ -2386,7 +2419,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     registry
   end
 
-  defp oauth_manager(endpoint, interceptor) do
+  defp oauth_manager(endpoint, interceptor, opts \\ []) do
     uri = URI.parse(endpoint)
     private_origin = "#{uri.scheme}://#{uri.host}:#{uri.port}"
 
@@ -2484,7 +2517,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         owner: self(),
         context: wrapped_context,
         authority: authority,
-        authority_epoch: epoch
+        authority_epoch: epoch,
+        resolver: Keyword.get(opts, :resolver)
       )
 
     manager
@@ -2636,6 +2670,34 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     [snapshot] = built.config.connector_snapshots
     assert :ok = RunBuilder.close(built)
     snapshot
+  end
+
+  defp build_fixture_provider(builder) do
+    {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
+    {:ok, limits} = Limits.new()
+
+    ProviderRegistry.build(
+      registry,
+      "fixture-mcp",
+      %{"allow" => ["remote.structured"]},
+      %{
+        application_content_digest: String.duplicate("0", 64),
+        destination: :mission,
+        limits: limits,
+        installed_limits: limits,
+        owner: self()
+      }
+    )
+  end
+
+  defp streamable_oauth_builder(endpoint, manager, timeout_ms) do
+    MCPSource.builder(
+      transport:
+        {:streamable_http,
+         endpoint: endpoint, authorization: manager, allow_insecure_loopback: true},
+      tools: %{"structured" => %{as: "remote.structured", effect: :read}},
+      timeout_ms: timeout_ms
+    )
   end
 
   defp fixture(parent, opts \\ []) do

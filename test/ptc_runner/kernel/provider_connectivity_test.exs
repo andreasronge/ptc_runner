@@ -599,6 +599,31 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
            )
   end
 
+  test "endpoint connection causes retain distinct acquisition diagnostics" do
+    for {reason, code} <- [
+          mcp_endpoint_connection_refused: :provider_endpoint_connection_refused,
+          mcp_endpoint_name_unresolved: :provider_endpoint_name_unresolved,
+          mcp_endpoint_tls_failed: :provider_endpoint_tls_failed
+        ] do
+      %{prepared: prepared, execution: execution} =
+        fixture(%{
+          "endpoint" => [
+            destination: :workflow,
+            connectivity_mode: :acquisition,
+            builder_error: reason
+          ]
+        })
+
+      assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+      assert diagnostic.phase == :provider_acquisition
+      assert diagnostic.code == code
+      assert diagnostic.provider_activity
+      assert diagnostic.subject.name == "endpoint"
+      assert diagnostic.subject.operation == :acquisition
+      assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
+    end
+  end
+
   test "a reason the table does not know still fails closed" do
     # Translations are added with their producers. An unrecognised reason must
     # not be forced into the nearest acquisition code, because that would report

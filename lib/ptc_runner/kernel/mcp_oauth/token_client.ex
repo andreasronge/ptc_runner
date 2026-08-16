@@ -230,9 +230,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenClient do
         body: body,
         timeout_ms: remaining_ms,
         max_body_bytes: @max_token_response_bytes,
-        address: hd(target.addresses),
+        address: target.addresses,
         connected_peer: NetworkPolicy.peer_verifier(target.addresses)
       )
+      |> normalize_network_result()
     else
       remaining_ms when is_integer(remaining_ms) and remaining_ms <= 0 ->
         {:error, :timeout, :not_dispatched}
@@ -241,6 +242,12 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenClient do
         {:error, :transport_error, :not_dispatched}
     end
   end
+
+  defp normalize_network_result({:error, reason, provenance})
+       when reason in [:connection_refused, :name_not_resolved, :tls_handshake_failed],
+       do: {:error, :transport_error, provenance}
+
+  defp normalize_network_result(result), do: result
 
   defp before_dispatch(opts) do
     case Keyword.get(opts, :before_dispatch, fn -> :ok end) do
