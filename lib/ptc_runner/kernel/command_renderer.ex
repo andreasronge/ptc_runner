@@ -20,6 +20,9 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.DiagnosticCatalog
 
+  @pointer_pattern ~r/\A\/[A-Za-z0-9._~\/-]+\z/
+  @source_name_pattern ~r/\A[A-Za-z0-9._~-][A-Za-z0-9._~\/-]*\z/
+
   @spec render(CommandOutcome.t(), CommandRejection.t() | nil) ::
           {:stdout | :stderr, binary()}
   def render(%CommandOutcome{} = outcome, rejection \\ nil) do
@@ -143,12 +146,29 @@ defmodule PtcRunner.Kernel.CommandRenderer do
        when is_binary(path) and path != "",
        do: " at " <> terminal_contract_path(path) <> " "
 
+  # A rejected contract schema is located inside a document the author opens,
+  # and a manifest may carry two of them, so the pointer is meaningless without
+  # the file it indexes.
+  defp location_suffix(%{
+         "phase" => "application",
+         "code" => "contract_invalid",
+         "source" => %{"kind" => kind, "name" => name},
+         "path" => path
+       })
+       when kind in ["input_contract", "result_contract"] and is_binary(name) and
+              is_binary(path) and path != "",
+       do: " at #{terminal_contract_path(path)} in #{terminal_source_name(name)} "
+
   defp location_suffix(_error), do: " "
 
-  defp terminal_contract_path(path) do
-    case path =~ ~r/\A\/[A-Za-z0-9._~\/-]+\z/ do
-      true -> path
-      false -> inspect(path, binaries: :as_strings, limit: :infinity, printable_limit: :infinity)
+  defp terminal_contract_path(path), do: terminal_literal(path, @pointer_pattern)
+
+  defp terminal_source_name(name), do: terminal_literal(name, @source_name_pattern)
+
+  defp terminal_literal(text, pattern) do
+    case text =~ pattern do
+      true -> text
+      false -> inspect(text, binaries: :as_strings, limit: :infinity, printable_limit: :infinity)
     end
   end
 

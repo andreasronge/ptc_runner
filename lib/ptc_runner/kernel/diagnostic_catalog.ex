@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   """
 
   alias PtcRunner.Kernel.CompileDiagnostic
+  alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -269,6 +270,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
       }),
       do: ResultContractDiagnostic.message_schema(fallback)
 
+  def message_schema(%{phase: :application, code: :contract_invalid, message: fallback}),
+    do: ContractSchemaDiagnostic.message_schema(fallback)
+
   def message_schema(%{code: code, message: fallback}),
     do: CompileDiagnostic.message_schema(code, fallback)
 
@@ -280,6 +284,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:result_cleanup, :result_contract_failed, message),
     do: ResultContractDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:application, :contract_invalid, message),
+    do: ContractSchemaDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(_phase, code, message),
     do: CompileDiagnostic.valid_message?(code, message)

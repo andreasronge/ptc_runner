@@ -44,17 +44,34 @@ defmodule PtcRunner.Kernel.ValueContract do
           attestation: binary()
         }
 
-  @spec compile(map()) :: {:ok, t()} | {:error, :invalid_value_contract}
+  @type rejection :: JSONSchema.rejection()
+
+  @spec compile(map()) :: {:ok, t()} | {:error, {:invalid_value_contract, rejection()}}
   def compile(schema) when is_map(schema) and not is_struct(schema) do
     case Map.has_key?(schema, "oneOf") do
       true -> compile_tagged_union(schema)
       false -> compile_object(schema)
     end
   rescue
-    _exception -> {:error, :invalid_value_contract}
+    _exception -> invalid(:unsupported_schema, [])
   end
 
-  def compile(_schema), do: {:error, :invalid_value_contract}
+  def compile(_schema), do: invalid(:not_a_schema_object, [])
+
+  @doc """
+  Returns the rules a tagged-union rejection can carry beyond the object profile.
+  """
+  @spec union_rules() :: [atom()]
+  def union_rules do
+    [
+      :union_branch_count,
+      :union_branch_not_closed_object,
+      :union_discriminator_missing
+    ]
+  end
+
+  defp invalid(rule, segments),
+    do: {:error, {:invalid_value_contract, %{rule: rule, segments: segments}}}
 
   @spec sealed?(term()) :: boolean()
   @doc "Checks that a contract is the unchanged result of bounded compilation."
@@ -614,8 +631,8 @@ defmodule PtcRunner.Kernel.ValueContract do
       {:ok, normalized, validator} ->
         {:ok, seal(normalized, validator)}
 
-      {:error, :invalid_schema} ->
-        {:error, :invalid_value_contract}
+      {:error, {:invalid_schema, rejection}} ->
+        {:error, {:invalid_value_contract, rejection}}
     end
   end
 
@@ -637,25 +654,58 @@ defmodule PtcRunner.Kernel.ValueContract do
   end
 
   defp compile_tagged_union(schema) do
-    with true <- JSONValue.map?(schema),
-         true <- Map.keys(schema) -- @root_keys == [],
+    with :ok <- union_root_keys(schema),
          {:ok, root} <- normalize_root(schema),
-         branches when is_list(branches) <- root["oneOf"],
-         true <- length(branches) in 2..@max_branches,
+         {:ok, branches} <- union_branches(root),
          {:ok, normalized_branches} <- compile_branches(branches),
-         {:ok, _discriminator} <- shared_discriminator(normalized_branches),
+         {:ok, _discriminator} <- union_discriminator(normalized_branches),
          normalized = Map.put(root, "oneOf", normalized_branches),
-         {:ok, encoded} <- DeterministicJSON.encode(normalized),
-         true <- byte_size(encoded) <= @max_contract_bytes,
-         {:ok, validator} <-
-           JSV.build(normalized,
-             atoms: false,
-             formats: [SHA256Format],
-             warnings: :silent
-           ) do
+         {:ok, encoded} <- encode_contract(normalized),
+         :ok <- validate_contract_size(encoded),
+         {:ok, validator} <- build_union(normalized) do
       {:ok, seal(normalized, validator)}
+    end
+  end
+
+  defp union_root_keys(schema) do
+    if JSONValue.map?(schema) do
+      case schema |> Map.keys() |> Enum.reject(&(&1 in @root_keys)) |> Enum.sort() do
+        [] -> :ok
+        [key | _rest] when is_binary(key) -> invalid(:unsupported_keyword, [{:property, key}])
+        _non_binary -> invalid(:unsupported_keyword, [])
+      end
     else
-      _reason -> {:error, :invalid_value_contract}
+      invalid(:not_a_schema_object, [])
+    end
+  end
+
+  defp union_branches(root) do
+    case root["oneOf"] do
+      branches when is_list(branches) and length(branches) in 2..@max_branches ->
+        {:ok, branches}
+
+      _invalid ->
+        invalid(:union_branch_count, [{:property, "oneOf"}])
+    end
+  end
+
+  defp encode_contract(normalized) do
+    case DeterministicJSON.encode(normalized) do
+      {:ok, encoded} -> {:ok, encoded}
+      {:error, _reason} -> invalid(:unsupported_schema, [])
+    end
+  end
+
+  defp validate_contract_size(encoded) do
+    if byte_size(encoded) <= @max_contract_bytes,
+      do: :ok,
+      else: invalid(:schema_too_large, [])
+  end
+
+  defp build_union(normalized) do
+    case JSV.build(normalized, atoms: false, formats: [SHA256Format], warnings: :silent) do
+      {:ok, validator} -> {:ok, validator}
+      _invalid -> invalid(:unsupported_schema, [])
     end
   end
 
@@ -669,7 +719,7 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   defp valid_dialect(nil), do: :ok
   defp valid_dialect(value) when value in @dialects, do: :ok
-  defp valid_dialect(_value), do: {:error, :invalid_value_contract}
+  defp valid_dialect(_value), do: invalid(:unsupported_dialect, [{:property, "$schema"}])
 
   defp optional_text(schema, key) do
     case Map.fetch(schema, key) do
@@ -677,21 +727,23 @@ defmodule PtcRunner.Kernel.ValueContract do
         :ok
 
       {:ok, value} when is_binary(value) ->
-        if String.valid?(value), do: :ok, else: {:error, :invalid_value_contract}
+        if String.valid?(value), do: :ok, else: invalid(:invalid_keyword_value, key_segments(key))
 
       {:ok, _value} ->
-        {:error, :invalid_value_contract}
+        invalid(:invalid_keyword_value, key_segments(key))
     end
   end
 
+  # A branch carries its own rejection, relocated under the branch it came
+  # from: `/oneOf/1/properties/kind/type` is a location the author can open,
+  # while "one of the branches is invalid" is another blind refusal.
   defp compile_branches(branches) do
-    Enum.reduce_while(branches, {:ok, []}, fn branch, {:ok, normalized} ->
-      case JSONSchema.compile(branch) do
-        {:ok, %{"type" => "object", "additionalProperties" => false} = compiled, _validator} ->
-          {:cont, {:ok, [compiled | normalized]}}
-
-        _invalid ->
-          {:halt, {:error, :invalid_value_contract}}
+    branches
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {branch, index}, {:ok, normalized} ->
+      case compile_branch(branch, index) do
+        {:ok, compiled} -> {:cont, {:ok, [compiled | normalized]}}
+        error -> {:halt, error}
       end
     end)
     |> case do
@@ -699,6 +751,33 @@ defmodule PtcRunner.Kernel.ValueContract do
       error -> error
     end
   end
+
+  defp compile_branch(branch, index) do
+    case JSONSchema.compile(branch) do
+      {:ok, %{"type" => "object", "additionalProperties" => false} = compiled, _validator} ->
+        {:ok, compiled}
+
+      {:ok, _open, _validator} ->
+        invalid(
+          :union_branch_not_closed_object,
+          branch_segments(index) ++ [{:property, "additionalProperties"}]
+        )
+
+      {:error, {:invalid_schema, %{rule: rule, segments: segments}}} ->
+        invalid(rule, branch_segments(index) ++ segments)
+    end
+  end
+
+  defp union_discriminator(branches) do
+    case shared_discriminator(branches) do
+      {:ok, name} -> {:ok, name}
+      _invalid -> invalid(:union_discriminator_missing, [{:property, "oneOf"}])
+    end
+  end
+
+  defp branch_segments(index), do: [{:property, "oneOf"}, {:index, index}]
+
+  defp key_segments(key) when is_binary(key), do: [{:property, key}]
 
   defp shared_discriminator([first | rest] = branches) do
     candidates =
@@ -712,12 +791,10 @@ defmodule PtcRunner.Kernel.ValueContract do
       [name] ->
         values = Enum.map(branches, &get_in(&1, ["properties", name, "const"]))
 
-        if distinct_discriminator_values?(values),
-          do: {:ok, name},
-          else: {:error, :invalid_value_contract}
+        if distinct_discriminator_values?(values), do: {:ok, name}, else: :error
 
       _none_or_ambiguous ->
-        {:error, :invalid_value_contract}
+        :error
     end
   end
 

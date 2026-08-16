@@ -26,7 +26,11 @@ defmodule PtcRunner.Kernel.CommandPath do
   @type t :: %__MODULE__{
           segments: [segment()],
           authority:
-            :host | :manifest | :component_override | {:contract, CommandContractAuthority.t()},
+            :host
+            | :manifest
+            | :component_override
+            | :value_contract_schema
+            | {:contract, CommandContractAuthority.t()},
           attestation: binary()
         }
 
@@ -53,6 +57,21 @@ defmodule PtcRunner.Kernel.CommandPath do
 
   def contract(_contract, _segments), do: {:error, :invalid_command_path}
 
+  @doc """
+  Locates a fault inside a value-contract schema document that failed to compile.
+
+  A rejected contract has no compiled path schema to authorize against, so the
+  submitted document is the authority: a pointer is minted only when every
+  segment resolves in the document the author wrote. The pointer therefore
+  always names a key or index that file actually carries.
+  """
+  @spec value_contract_schema(map(), [segment()]) :: {:ok, t()} | {:error, :invalid_command_path}
+  def value_contract_schema(document, segments)
+      when is_map(document) and not is_struct(document) and is_list(segments),
+      do: attest(segments, :value_contract_schema, resolves?(segments, document))
+
+  def value_contract_schema(_document, _segments), do: {:error, :invalid_command_path}
+
   @spec valid?(term()) :: boolean()
   def valid?(%__MODULE__{authority: authority, attestation: attestation} = path),
     do:
@@ -72,9 +91,13 @@ defmodule PtcRunner.Kernel.CommandPath do
     end)
   end
 
-  defp authorize(segments, schema, authority) when is_list(segments) do
-    with true <- authorized?(segments, schema),
-         pointer <- render(segments),
+  defp authorize(segments, schema, authority) when is_list(segments),
+    do: attest(segments, authority, authorized?(segments, schema))
+
+  defp authorize(_segments, _schema, _authority), do: {:error, :invalid_command_path}
+
+  defp attest(segments, authority, true) do
+    with pointer <- render(segments),
          true <- byte_size(pointer) <= @max_bytes,
          true <- pointer |> String.to_charlist() |> length() <= @max_codepoints do
       path = %__MODULE__{segments: segments, authority: authority, attestation: <<>>}
@@ -84,10 +107,11 @@ defmodule PtcRunner.Kernel.CommandPath do
     end
   end
 
-  defp authorize(_segments, _schema, _authority), do: {:error, :invalid_command_path}
+  defp attest(_segments, _authority, false), do: {:error, :invalid_command_path}
 
-  defp valid_authority?(authority) when authority in [:host, :manifest, :component_override],
-    do: true
+  defp valid_authority?(authority)
+       when authority in [:host, :manifest, :component_override, :value_contract_schema],
+       do: true
 
   defp valid_authority?({:contract, %CommandContractAuthority{} = authority}),
     do: CommandContractAuthority.valid?(authority)
@@ -112,6 +136,26 @@ defmodule PtcRunner.Kernel.CommandPath do
     do: Enum.any?(branches, &authorized?(segments, &1))
 
   defp authorized?(_segments, _schema), do: false
+
+  defp resolves?([], _node), do: true
+
+  defp resolves?([{:property, name} | rest], node)
+       when is_binary(name) and is_map(node) and not is_struct(node) do
+    case Map.fetch(node, name) do
+      {:ok, child} -> resolves?(rest, child)
+      :error -> false
+    end
+  end
+
+  defp resolves?([{:index, index} | rest], node)
+       when is_integer(index) and index >= 0 and is_list(node) do
+    case Enum.fetch(node, index) do
+      {:ok, child} -> resolves?(rest, child)
+      :error -> false
+    end
+  end
+
+  defp resolves?(_segments, _node), do: false
 
   defp render(segments) do
     Enum.map_join(segments, "", fn

@@ -166,7 +166,13 @@ a sibling `type`, so `{"enum": ["a", "b"]}` is rejected and
 
 The supported keyword profile above is deliberately closed. Unsupported schema
 composition is rejected during inert application loading rather than being
-partially interpreted at runtime.
+partially interpreted at runtime. A `contract_invalid` rejection names the rule
+it broke and the JSON Pointer of the offending node inside the schema document
+— for example `contract schema declares an unsupported "type" at
+/properties/sum/type in result.schema.json` — so a misspelled type, a keyword
+outside the profile, and an unsatisfiable bound are told apart without
+bisecting the schema. Every reported segment is a key or index the submitted
+document carries, and the same pointer appears in the envelope's `path`.
 
 `--output PATH` atomically publishes only the validated result value without
 replacing an existing file. Use `--private-output` for a private run; it

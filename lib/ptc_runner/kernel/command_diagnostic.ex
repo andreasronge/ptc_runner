@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -244,6 +245,17 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   defp valid_path_authority?(:manifest, nil, :application, %{phase: :application}), do: true
   defp valid_path_authority?(:host, nil, :host, %{phase: :host}), do: true
 
+  # A contract that failed to compile has no compiled contract authority to
+  # bind, so its fault is located inside the submitted schema document instead.
+  defp valid_path_authority?(
+         :value_contract_schema,
+         nil,
+         kind,
+         %{phase: :application, code: :contract_invalid}
+       )
+       when kind in [:input_contract, :result_contract],
+       do: true
+
   defp valid_path_authority?(
          :component_override,
          nil,
@@ -302,6 +314,14 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %CommandSource{kind: :result_contract}
        ),
        do: ResultContractDiagnostic.valid_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: :contract_invalid},
+         %CommandSource{kind: kind}
+       )
+       when kind in [:input_contract, :result_contract],
+       do: ContractSchemaDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
          _message,

@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandSource
+  alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.SchemaPath
   alias PtcRunner.Kernel.ValueContractDiagnostic
@@ -16,11 +17,23 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
     source = command_source(source_role, source_name)
     {source, path_value} = contract_diagnostic_parts(source, reason, path_value)
 
-    CommandDiagnostic.new!(:application, code,
-      source: source,
-      path: command_path(source_role, path_value)
+    CommandDiagnostic.new!(
+      :application,
+      code,
+      [source: source, path: command_path(source_role, path_value)] ++ message_option(reason)
     )
   end
+
+  # A rejected contract schema names its rule; every other reason keeps the
+  # catalog literal, including a rule this boundary has no message for.
+  defp message_option({:contract_schema_invalid, %{rule: rule}}) do
+    case ContractSchemaDiagnostic.message(rule) do
+      {:ok, message} -> [message: message]
+      :error -> []
+    end
+  end
+
+  defp message_option(_reason), do: []
 
   defp source_role({:source_role, role, reason})
        when role in [:external_input, :component_override],
@@ -88,6 +101,10 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
        do: {:input_contract_failed, classification}
 
   defp projection(_role, :invalid_contracts), do: {:contract_invalid, nil}
+
+  defp projection(role, {:contract_schema_invalid, %{path: path}})
+       when role in [:input_contract, :result_contract],
+       do: {:contract_invalid, path}
 
   defp projection(role, _reason) when role in [:input_contract, :result_contract],
     do: {:contract_invalid, nil}
