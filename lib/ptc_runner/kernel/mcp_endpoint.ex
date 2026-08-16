@@ -46,10 +46,20 @@ defmodule PtcRunner.Kernel.MCPEndpoint do
     String.valid?(endpoint) and
       endpoint
       |> String.to_charlist()
-      |> Enum.all?(fn codepoint -> codepoint > 0x20 and codepoint not in 0x7F..0x9F end)
+      |> Enum.all?(&safe_codepoint?/1)
   end
 
   def safe_characters?(_endpoint), do: false
+
+  # ASCII control characters and space, C1 controls, and every Unicode space
+  # separator. The last group is not idle strictness: the schema mirror excludes
+  # `\s`, so admitting a non-breaking space here would let decoding accept an
+  # endpoint the schema refuses — the one direction the mirror must never take.
+  defp safe_codepoint?(codepoint) do
+    codepoint > 0x20 and codepoint not in 0x7F..0x9F and
+      codepoint not in 0x2000..0x200A and
+      codepoint not in [0xA0, 0x1680, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000]
+  end
 
   @doc """
   Returns whether an origin may be contacted.
@@ -85,7 +95,8 @@ defmodule PtcRunner.Kernel.MCPEndpoint do
     case URI.parse(endpoint) do
       %URI{scheme: scheme, host: host, userinfo: nil, fragment: nil} = uri ->
         if origin_allowed?(scheme, host, allow_insecure_loopback) and
-             allow_insecure_loopback == (scheme == "http") and port_written_plainly?(uri),
+             allow_insecure_loopback == (scheme == "http") and
+             written_plainly?(endpoint, uri),
            do: :ok,
            else: {:error, :invalid_endpoint}
 
@@ -94,17 +105,27 @@ defmodule PtcRunner.Kernel.MCPEndpoint do
     end
   end
 
-  # `URI.parse/1` answers with the scheme's default port when it cannot read the
-  # one it was given, so `https://mcp.example.test:bad` silently becomes 443 and
-  # `http://[::1]:bad` becomes 80. An installed endpoint has to mean what it
-  # says, so a written port must round-trip and land in range.
-  defp port_written_plainly?(%URI{authority: authority, port: port})
-       when is_binary(authority) and is_integer(port) do
-    case Regex.run(~r/:([^\]:]*)\z/, authority) do
-      nil -> true
-      [_match, written] -> written == Integer.to_string(port) and port in 1..65_535
-    end
+  # `URI.parse/1` is forgiving in two ways an installed endpoint must not be. It
+  # answers with the scheme's default port when it cannot read the one it was
+  # given, so `https://mcp.example.test:bad` silently becomes 443 and
+  # `http://[::1]:bad` becomes 80; and it lowercases the scheme, so `HTTPS://`
+  # parses as `https` while the schema mirror — which cannot fold case in a
+  # portable pattern — refuses it.
+  #
+  # Both are answered the same way: a fixed endpoint has to be written the way
+  # it is read. The scheme must already be lowercase, and the authority must be
+  # exactly the parsed host, bracketed when it is IPv6, plus at most an explicit
+  # in-range port. Comparing the whole authority rather than its tail is what
+  # rejects `example.test:bad:443` and `[2001:db8::1]garbage:443`, where a
+  # trailing `:443` looks well formed on its own.
+  defp written_plainly?(endpoint, %URI{authority: authority, host: host, port: port} = uri)
+       when is_binary(authority) and is_binary(host) and is_integer(port) do
+    bare = if String.contains?(host, ":"), do: "[" <> host <> "]", else: host
+
+    String.starts_with?(endpoint, uri.scheme <> "://") and
+      port in 1..65_535 and
+      authority in [bare, bare <> ":" <> Integer.to_string(port)]
   end
 
-  defp port_written_plainly?(_uri), do: false
+  defp written_plainly?(_endpoint, _uri), do: false
 end
