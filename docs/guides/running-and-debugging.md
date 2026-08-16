@@ -215,8 +215,12 @@ mix ptc run ptc.json \
 
 Each inspection artifact includes the frozen component sources. It adds
 execution prints and any provider-backed private activity that occurred. A
-failure can add detailed `execution-error` evidence. Read it only through an
-authorized private sink.
+failure can add detailed `execution-error` evidence. A raised capability
+callback additionally records its bounded exception class, message, and
+formatted stacktrace while the canonical trace retains only the closed
+`provider_error / exception` category. Exception text and stacktrace paths can
+contain sensitive data and are not reliably redactable; read the artifact only
+through an authorized private sink.
 
 To debug compilation with the manifest bundle, use manifest mode:
 

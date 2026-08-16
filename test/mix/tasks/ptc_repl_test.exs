@@ -478,7 +478,7 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
-  test "inspection analysis recursively reads a private V6 trace and correlated result", %{
+  test "inspection analysis recursively reads a private V7 trace and correlated result", %{
     tmp_dir: directory
   } do
     value = %{"answer" => 42}
@@ -578,6 +578,7 @@ defmodule PtcRunner.ReplFrontendTest do
 
     assert opened["inspection"]["counts"] == %{
              "capability_calls" => 2,
+             "capability_exceptions" => 0,
              "effective_preludes" => 0,
              "evaluation_analyses" => 0,
              "execution_errors" => 0,
@@ -618,7 +619,7 @@ defmodule PtcRunner.ReplFrontendTest do
     PrivateInspectionFixture.rewrite_schema!(fixture.inspection, 4)
 
     message =
-      ~r/ptc repl profile setup failed: an inspection artifact declares schema version 4; this build supports version 6/
+      ~r/ptc repl profile setup failed: an inspection artifact declares schema version 4; this build supports version 7/
 
     capture_io(fn ->
       assert_raise Mix.Error, message, fn ->

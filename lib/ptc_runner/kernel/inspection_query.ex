@@ -29,7 +29,8 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   environment, and exact bounded diagnostic payload.
   Projections include `mission_name` on every mission-owned result so
   repeated component and capability names remain unambiguous.
-  V6 adds one singular, non-paginated terminal `result` projection per run and
+  V7 adds correlated private callback exception diagnostics to capability
+  attempts. V6 added one singular, non-paginated terminal `result` projection per run and
   joins static prelude-call analysis to generated source by `evaluation_id`.
   Generated source and reconstructed turns copy the canonical
   `parent_evaluation_id` edge rather than inferring one from snapshot-local
@@ -157,6 +158,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
         "model_exchanges" => length(model_exchanges),
         "incomplete_model_exchanges" => incomplete_count(model_exchanges),
         "capability_calls" => length(capability_calls),
+        "capability_exceptions" => exception_count(capability_pairs),
         "incomplete_capability_calls" => incomplete_count(capability_calls),
         "generated_sources" => length(generated_sources),
         "evaluation_analyses" => map_size(evaluation_analyses),
@@ -202,10 +204,20 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       |> records_of_type("capability-output")
       |> Map.new(&{&1["correlation"]["capability_id"], &1})
 
+    exceptions =
+      records
+      |> records_of_type("capability-exception")
+      |> Map.new(&{&1["correlation"]["capability_id"], &1})
+
     pairs =
       inputs
       |> Enum.map(fn {capability_id, input} ->
-        capability_pair(capability_id, input, Map.get(outputs, capability_id))
+        capability_pair(
+          capability_id,
+          input,
+          Map.get(outputs, capability_id),
+          Map.get(exceptions, capability_id)
+        )
       end)
       |> Enum.sort_by(& &1["input_sequence"])
 
@@ -248,18 +260,36 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     end
   end
 
-  defp capability_pair(capability_id, input, nil) do
+  defp capability_pair(capability_id, input, nil, exception) do
     capability_input(capability_id, input)
     |> Map.put("complete?", false)
+    |> maybe_put_exception(exception)
   end
 
-  defp capability_pair(capability_id, input, output) do
+  defp capability_pair(capability_id, input, output, exception) do
     capability_input(capability_id, input)
     |> Map.merge(%{
       "complete?" => true,
       "output_sequence" => output["sequence"],
       "output_timestamp" => output["timestamp"],
       "result" => output["payload"]["result"]
+    })
+    |> maybe_put_exception(exception)
+  end
+
+  defp maybe_put_exception(item, nil), do: item
+
+  defp maybe_put_exception(item, exception) do
+    payload = exception["payload"]
+
+    Map.merge(item, %{
+      "exception_sequence" => exception["sequence"],
+      "exception_timestamp" => exception["timestamp"],
+      "exception" =>
+        Map.take(
+          payload,
+          ~w(exception_class message message_truncated stacktrace stacktrace_truncated)
+        )
     })
   end
 
@@ -280,6 +310,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   end
 
   defp incomplete_count(items), do: Enum.count(items, &(&1["complete?"] == false))
+  defp exception_count(items), do: Enum.count(items, &Map.has_key?(&1, "exception"))
 
   defp provider_pair(capability_id, request_id, request, response) do
     request_payload = request["payload"]

@@ -37,8 +37,11 @@ unrecognized `kind` is retained only as a one-way fingerprint.
 A **private inspection artifact** is an explicit `0600` host development
 authority. It adds the frozen component sources, the exact generated programs,
 capability arguments and results, model exchanges, prints, and detailed
-failures. Read it only through an authorized private sink, and never publish it
-alongside a normal trace.
+failures. Raised capability callbacks can include their bounded exception
+message and formatted stacktrace here, but never in the correlated canonical
+trace. Those strings may contain secrets or local paths and cannot be reliably
+redacted. Read the artifact only through an authorized private sink, and never
+publish it alongside a normal trace.
 
 A project document captures both:
 

@@ -48,13 +48,35 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert :ok =
              InspectionSink.emit(
                sink,
+               "capability-exception",
+               %{capability_id: "cap-1"},
+               %{
+                 environment: :mission,
+                 mission_name: "default",
+                 name: "remote.read",
+                 exception_class: RuntimeError,
+                 message: "private failure",
+                 message_truncated: false,
+                 stacktrace: "    private stacktrace",
+                 stacktrace_truncated: false
+               }
+             )
+
+    assert :ok =
+             InspectionSink.emit(
+               sink,
                "capability-output",
                %{"capability_id" => "cap-1"},
                %{
                  environment: :mission,
                  mission_name: "default",
                  name: "remote.read",
-                 result: %{status: :ok, value: 42}
+                 result: %{
+                   status: :error,
+                   kind: :provider_error,
+                   reason: :exception,
+                   retryable?: false
+                 }
                }
              )
 
@@ -89,19 +111,33 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                }
              )
 
-    assert {:ok, [input, output, source, analysis, prelude]} = InspectionSink.records(sink)
+    assert {:ok, [input, exception, output, source, analysis, prelude]} =
+             InspectionSink.records(sink)
 
-    assert Enum.map([input, output, source, analysis, prelude], & &1["sequence"]) == [
+    assert Enum.map([input, exception, output, source, analysis, prelude], & &1["sequence"]) == [
              1,
              2,
              3,
              4,
-             5
+             5,
+             6
            ]
 
-    assert Enum.all?([input, output, source, analysis, prelude], &(&1["schema_version"] == 6))
+    assert Enum.all?(
+             [input, exception, output, source, analysis, prelude],
+             &(&1["schema_version"] == 7)
+           )
+
     assert input["payload"]["environment"] == "mission"
-    assert output["payload"]["result"] == %{"status" => "ok", "value" => 42}
+    assert exception["payload"]["exception_class"] == "Elixir.RuntimeError"
+
+    assert output["payload"]["result"] == %{
+             "status" => "error",
+             "kind" => "provider_error",
+             "reason" => "exception",
+             "retryable?" => false
+           }
+
     assert source["payload"]["source"] == @source
 
     assert analysis["payload"]["prelude_calls"] == [
@@ -158,7 +194,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
 
     assert {:ok, [request_record, response_record]} = InspectionSink.records(sink)
-    assert request_record["schema_version"] == 6
+    assert request_record["schema_version"] == 7
     assert request_record["payload"]["body"] == request
     assert response_record["payload"]["body"] == response
   end
@@ -207,7 +243,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
 
     assert {:ok, [prints_record, error_record]} = InspectionSink.records(sink)
-    assert prints_record["schema_version"] == 6
+    assert prints_record["schema_version"] == 7
     assert prints_record["correlation"] == %{"evaluation_id" => "eval-1"}
 
     assert prints_record["payload"] == %{
@@ -361,7 +397,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              InspectionSink.emit(sink, "run-result", %{}, %{result_hash: hash, value: value})
 
     assert {:ok, [record]} = InspectionSink.records(sink)
-    assert record["schema_version"] == 6
+    assert record["schema_version"] == 7
     assert record["correlation"] == %{}
     assert record["payload"] == %{"result_hash" => hash, "value" => value}
 
@@ -494,6 +530,29 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     assert {:ok, [input, output]} = InspectionSink.records(sink)
 
+    exception = %{
+      input
+      | "record_type" => "capability-exception",
+        "payload" => %{
+          "environment" => "mission",
+          "mission_name" => "default",
+          "name" => "read",
+          "exception_class" => "Elixir.RuntimeError",
+          "message" => "private failure",
+          "message_truncated" => false,
+          "stacktrace" => "    private stacktrace",
+          "stacktrace_truncated" => false
+        }
+    }
+
+    exception_output =
+      put_in(output, ["payload", "result"], %{
+        "status" => "error",
+        "kind" => "provider_error",
+        "reason" => "exception",
+        "retryable?" => false
+      })
+
     events = [
       %{
         run_id: "run-1",
@@ -516,6 +575,41 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                duplicate_input,
                events
              )
+
+    assert :ok =
+             InspectionArtifact.persist(
+               Path.join(dir, "exception-prefix.inspection.jsonl"),
+               resequence([input, exception]),
+               events
+             )
+
+    assert :ok =
+             InspectionArtifact.persist(
+               Path.join(dir, "exception-complete.inspection.jsonl"),
+               resequence([input, exception, exception_output]),
+               events
+             )
+
+    for {name, invalid_records} <- [
+          {"exception-only", [exception]},
+          {"duplicate-exception", [input, exception, exception]},
+          {"exception-after-output", [input, exception_output, exception]},
+          {"exception-success-output", [input, exception, output]},
+          {"oversized-exception",
+           [
+             input,
+             put_in(exception, ["payload", "message"], String.duplicate("x", 4_097))
+           ]},
+          {"extra-exception-field", [input, put_in(exception, ["payload", "extra"], true)]},
+          {"mismatched-exception", [input, put_in(exception, ["payload", "name"], "other")]}
+        ] do
+      assert {:error, :invalid_inspection_artifact} =
+               InspectionArtifact.persist(
+                 Path.join(dir, "#{name}.inspection.jsonl"),
+                 resequence(invalid_records),
+                 events
+               )
+    end
 
     assert {:error, :invalid_inspection_artifact} =
              InspectionArtifact.persist(
@@ -859,7 +953,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
       records
       |> hd()
       |> Jason.encode!()
-      |> String.replace_prefix("{", ~S|{"schema_version":6,|)
+      |> String.replace_prefix("{", ~S|{"schema_version":7,|)
 
     File.write!(duplicate, duplicate_line <> "\n")
     assert {:error, :malformed_inspection_artifact} = InspectionArtifact.load(duplicate)
@@ -891,7 +985,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     )
 
     assert {:error,
-            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 6}}} =
+            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 7}}} =
              InspectionArtifact.load(unsupported)
 
     mixed = Path.join(dir, "mixed-schema.inspection.jsonl")
@@ -901,7 +995,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(mixed)
 
     capability_input = %{
-      "schema_version" => 6,
+      "schema_version" => 7,
       "run_id" => "run-1",
       "trace_id" => "trace-1",
       "sequence" => 1,
@@ -1116,7 +1210,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     nested = Enum.reduce(1..64, true, fn _level, value -> [value] end)
 
     record = %{
-      "schema_version" => 6,
+      "schema_version" => 7,
       "run_id" => "deep",
       "trace_id" => "deep",
       "sequence" => 1,

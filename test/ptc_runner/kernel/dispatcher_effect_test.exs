@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.TestSupport.ObservedException
   alias PtcRunner.TestSupport.TestHelpers
 
   @effects [:read, :write, :unknown]
@@ -155,6 +156,203 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
   test "raised mission callbacks are non-retryable" do
     assert_unclassified_mission_failure(fn -> raise "private failure" end, :exception)
+  end
+
+  test "raised callbacks retain a correlated private diagnostic without changing the public result" do
+    {:ok, inspection_sink} =
+      InspectionSink.start(
+        run_id: "dispatcher-exception-run",
+        trace_id: "dispatcher-exception-trace"
+      )
+
+    result =
+      dispatch_mission(:read, fn -> raise "private failure" end, inspection_sink: inspection_sink)
+
+    assert result == %{
+             status: :error,
+             kind: :provider_error,
+             reason: :exception,
+             retryable?: false
+           }
+
+    assert {:ok, [input, diagnostic, output]} = InspectionSink.records(inspection_sink)
+    assert input["record_type"] == "capability-input"
+
+    assert %{
+             "record_type" => "capability-exception",
+             "correlation" => %{"capability_id" => capability_id},
+             "payload" => %{
+               "environment" => "mission",
+               "mission_name" => "default",
+               "name" => "effect-fixture",
+               "exception_class" => "Elixir.RuntimeError",
+               "message" => "private failure",
+               "message_truncated" => false,
+               "stacktrace" => stacktrace,
+               "stacktrace_truncated" => false
+             }
+           } = diagnostic
+
+    assert input["correlation"] == %{"capability_id" => capability_id}
+    assert stacktrace =~ "dispatcher_effect_test.exs"
+
+    assert output["record_type"] == "capability-output"
+    assert output["correlation"] == %{"capability_id" => capability_id}
+
+    assert output["payload"]["result"] == %{
+             "status" => "error",
+             "kind" => "provider_error",
+             "reason" => "exception",
+             "retryable?" => false
+           }
+  end
+
+  test "inspection-disabled raises do not format or retain exception details" do
+    owner = self()
+
+    assert %{
+             status: :error,
+             kind: :provider_error,
+             reason: :exception,
+             retryable?: false
+           } =
+             dispatch_mission(:read, fn ->
+               :erlang.raise(
+                 :error,
+                 %ObservedException{owner: owner, value: "inspection-disabled-secret"},
+                 []
+               )
+             end)
+
+    refute_receive {:exception_message_formatted, _message}
+  end
+
+  test "a blocking exception formatter cannot change the public or canonical outcome" do
+    {:ok, inspection_sink} =
+      InspectionSink.start(
+        run_id: "blocking-formatter-run",
+        trace_id: "blocking-formatter-trace"
+      )
+
+    callback = fn ->
+      :erlang.raise(:error, %ObservedException{mode: :block}, [])
+    end
+
+    {result, events} = dispatch_mission_with_events([], 100, callback, inspection_sink)
+
+    assert result == %{
+             status: :error,
+             kind: :provider_error,
+             reason: :exception,
+             retryable?: false
+           }
+
+    assert %{data: %{status: :error}} =
+             Enum.find(events, &(&1.type == "capability-stopped"))
+
+    refute Enum.any?(events, &(&1.type == "limit-exceeded"))
+
+    assert {:ok, [_input, diagnostic, output]} = InspectionSink.records(inspection_sink)
+    assert diagnostic["payload"]["message"] == "exception message unavailable"
+    assert diagnostic["payload"]["message_truncated"]
+    assert diagnostic["payload"]["stacktrace_truncated"]
+    assert output["payload"]["result"]["reason"] == "exception"
+  end
+
+  test "workflow raises retain diagnostics without mission attribution" do
+    {:ok, inspection_sink} =
+      InspectionSink.start(
+        run_id: "workflow-exception-run",
+        trace_id: "workflow-exception-trace"
+      )
+
+    assert %{kind: :provider_error, reason: :exception} =
+             dispatch_workflow(fn -> raise "workflow failure" end,
+               inspection_sink: inspection_sink
+             )
+
+    assert {:ok, [_input, diagnostic, _output]} = InspectionSink.records(inspection_sink)
+    assert diagnostic["record_type"] == "capability-exception"
+    assert diagnostic["payload"]["environment"] == "workflow"
+    refute Map.has_key?(diagnostic["payload"], "mission_name")
+  end
+
+  test "exit and throw retain no exception diagnostic" do
+    for callback <- [fn -> exit(:private_failure) end, fn -> throw(:private_failure) end] do
+      {:ok, inspection_sink} =
+        InspectionSink.start(
+          run_id: "non-exception-run-#{System.unique_integer([:positive])}",
+          trace_id: "non-exception-trace"
+        )
+
+      assert %{kind: :provider_error} =
+               dispatch_mission(:read, callback, inspection_sink: inspection_sink)
+
+      assert {:ok, [input, output]} = InspectionSink.records(inspection_sink)
+      assert input["record_type"] == "capability-input"
+      assert output["record_type"] == "capability-output"
+    end
+  end
+
+  test "exception diagnostic sink failure preserves the terminal inspection contract" do
+    for effect <- [:read, :write] do
+      {:ok, inspection_sink} =
+        InspectionSink.start(
+          run_id: "exception-sink-failure-#{effect}",
+          trace_id: "exception-sink-failure-trace",
+          max_record_bytes: 2_000,
+          max_total_bytes: 10_000
+        )
+
+      result =
+        dispatch_mission(
+          effect,
+          fn ->
+            :erlang.raise(
+              :error,
+              %ObservedException{value: String.duplicate("private", 1_000)},
+              []
+            )
+          end,
+          inspection_sink: inspection_sink
+        )
+
+      assert result.kind == :inspection_sink_error
+      assert result.reason == :inspection_sink_error
+      assert result.retryable? == false
+
+      if effect == :write,
+        do: assert(result.mutation_state == :indeterminate),
+        else: refute(Map.has_key?(result, :mutation_state))
+    end
+  end
+
+  test "private exception capture leaves the canonical failure projection unchanged" do
+    {:ok, inspection_sink} =
+      InspectionSink.start(
+        run_id: "canonical-separation-run",
+        trace_id: "canonical-separation-trace"
+      )
+
+    callback = fn -> raise "canonical-separation-private-secret" end
+
+    {captured_result, captured_events} =
+      dispatch_mission_with_events([], 100, callback, inspection_sink)
+
+    {plain_result, plain_events} = dispatch_mission_with_events([], 100, callback)
+
+    assert captured_result == plain_result
+
+    captured_stop = Enum.find(captured_events, &(&1.type == "capability-stopped"))
+    plain_stop = Enum.find(plain_events, &(&1.type == "capability-stopped"))
+
+    assert Map.drop(captured_stop.data, [:duration_ms, :capability_id]) ==
+             Map.drop(plain_stop.data, [:duration_ms, :capability_id])
+
+    canonical = inspect(captured_events)
+    refute canonical =~ "canonical-separation-private-secret"
+    refute canonical =~ "RuntimeError"
+    refute canonical =~ "dispatcher_effect_test.exs"
   end
 
   test "exiting mission callbacks are non-retryable" do
@@ -539,7 +737,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
     )
   end
 
-  defp dispatch_workflow(callback) do
+  defp dispatch_workflow(callback, opts \\ []) do
     {:ok, state} = RunState.start(Limits.defaults())
     {:ok, capability} = capability(:read, callback)
     {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
@@ -552,11 +750,11 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
       %{},
       TestHelpers.dispatch_context(state, :workflow, 100),
       nil,
-      nil
+      Keyword.get(opts, :inspection_sink)
     )
   end
 
-  defp dispatch_mission_with_events(limit_opts, timeout_ms, callback) do
+  defp dispatch_mission_with_events(limit_opts, timeout_ms, callback, inspection_sink \\ nil) do
     {:ok, limits} = Limits.new(limit_opts)
     {:ok, state} = RunState.start(limits)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "mission-limit-attribution")
@@ -579,7 +777,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
           mission_name: "reader"
         },
         sink,
-        nil
+        inspection_sink
       )
 
     {result, EventSink.events(sink)}

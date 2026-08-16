@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Raised capability callbacks now retain their bounded exception class,
+  message, and formatted stacktrace only in explicitly enabled private
+  inspection. Inspection V7 correlates that sensitive evidence with the
+  capability attempt. When retention succeeds, the Lisp result and canonical
+  event stream keep the existing closed `provider_error / exception` envelope;
+  a required private-inspection retention failure remains fail-closed as
+  `inspection_sink_error`.
+
 - Private inspection now retains an authenticated `result_contract_failed`
   diagnostic instead of destroying it. The retained runtime details carry
   internal contract-authority and command-path structs, which are not JSON

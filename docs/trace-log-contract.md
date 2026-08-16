@@ -442,9 +442,14 @@ collections as unavailable and reject reads without changing authority.
 Every raw `model_exchanges` and `capability_calls` item carries `complete?`.
 Completed items retain their result, output sequence, and output timestamp.
 An interrupted input-only attempt has `complete?: false` and omits those three
-terminal fields. The run metadata counts all admitted attempts and separately
-reports `incomplete_model_exchanges` and `incomplete_capability_calls`, including
-zero on complete runs.
+terminal fields. When a callback raised under inspection authority, the item
+also carries an `exception` object plus `exception_sequence` and
+`exception_timestamp`; these fields remain present if interruption occurred
+after the exception evidence was retained but before the normalized output was
+retained. Items without such evidence omit the fields rather than setting them
+to null. The run metadata counts all admitted attempts and separately reports
+`capability_exceptions`, `incomplete_model_exchanges`, and
+`incomplete_capability_calls`, including zero on complete runs.
 
 `turns` is the only compiled convenience collection. Each item is one model
 turn with the newly added messages, response, matching generated programs, and
@@ -652,7 +657,7 @@ JSON object with this exact envelope:
 
 ```json
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "run_id": "run-id",
   "trace_id": "trace-id",
   "sequence": 1,
@@ -664,7 +669,7 @@ JSON object with this exact envelope:
 ```
 
 Keys are exact. `sequence` is positive and strictly increasing within the
-artifact. The timestamp is UTC ISO 8601. Except for the V6 `run-result`,
+artifact. The timestamp is UTC ISO 8601. Except for `run-result`,
 `correlation` contains exactly one of `capability_id`, `evaluation_id`, or
 `component_id`. Capability and evaluation values must occur in the canonical
 trace for the same run unless that trace explicitly proves the corresponding
@@ -675,6 +680,7 @@ types and payloads are:
 | Record type | Correlation | Exact payload fields |
 | --- | --- | --- |
 | `capability-input` | `capability_id` | `environment`, `name`, `arguments` |
+| `capability-exception` | `capability_id` | `environment`, `name`, `exception_class`, `message`, `message_truncated`, `stacktrace`, `stacktrace_truncated` |
 | `capability-output` | `capability_id` | `environment`, `name`, `result` |
 | `evaluation-source` | `evaluation_id` | `environment`, `program_kind`, `source`, `source_hash`, `source_bytes` |
 | `evaluation-analysis` | `evaluation_id` | `environment`, `mission_name`, `prelude_calls` |
@@ -685,14 +691,15 @@ types and payloads are:
 | `execution-error` | `evaluation_id` | `environment`, `kind`, `reason`, `details` |
 
 Named-mission ownership is explicit. Mission `capability-input`,
-`capability-output`, `evaluation-source`, `evaluation-analysis`,
+`capability-exception`, `capability-output`, `evaluation-source`, `evaluation-analysis`,
 `prelude-source`, `mcp-request`, and `mcp-response` payloads require
 `mission_name`; workflow payloads forbid it.
 Prelude uniqueness is `(environment, mission_name, component_id)`, so the same
 component ID can be inspected independently in multiple missions. Every
 mission-owned query result preserves `mission_name`.
 
-V6 includes at most one successful terminal-result record:
+V7 retains the successful terminal-result record introduced in V6, at most one
+per run:
 
 | Record type | Correlation | Exact payload fields |
 | --- | --- | --- |
@@ -711,6 +718,21 @@ rejected unless the supplied value is already strict JSON. `result` is the
 bounded Dispatcher envelope returned to Lisp, so `llm-request` input/output
 records contain the provider-neutral model request and normalized response, and
 MCP records contain the public connector arguments and normalized result/error.
+When a capability callback raises, `capability-exception` retains the exception
+module name, its message at no more than 4,096 valid UTF-8 bytes, and a formatted
+stacktrace at no more than 64 frames and 65,536 valid UTF-8 bytes. Independent
+flags say whether either string was truncated or unavailable. Formatting does
+not generically inspect or retain the raw exception struct or callback
+arguments. The exception-defined message formatter does receive that struct,
+however, and its authored text plus source paths in a stacktrace can expose
+embedded payloads, credentials, or other sensitive data that cannot be reliably
+redacted. This record therefore exists only under explicit private-inspection
+authority. Exit, throw, timeout, provider-process death, and inspection-disabled
+runs retain no exception record. The normalized `capability-output` and
+canonical `capability-stopped` event remain the existing closed
+`provider_error / exception` shape when private retention succeeds. Failure to
+retain the required exception record follows the existing fail-closed
+inspection contract and replaces that outcome with `inspection_sink_error`.
 `evaluation-source` is emitted only for subordinate mission evaluation. Its
 hash and byte count must equal the corresponding canonical
 `evaluation-started` fields. After successful static analysis of that source,
@@ -742,7 +764,9 @@ not treated as provenance. An empty complete list means the direct result did
 not expose a valid child identity; a false completion flag forbids that
 conclusion. The value itself is not duplicated in this metadata.
 
-The input record is accepted before the callback starts. A subordinate
+The input record is accepted before the callback starts. A raised callback's
+exception record is accepted after the bounded provider worker has stopped and
+before its normalized output is accepted. A subordinate
 `evaluation-started` event is attempted before its source record is accepted,
 and the source record is accepted before Lisp execution starts. The output
 record is accepted after normalization and before the canonical stop event. A
@@ -752,12 +776,16 @@ execution. Failure after an external read has completed fails the run but
 cannot retroactively undo that read.
 
 Artifact validation rejects ambiguous joins before persistence or Viewer
-pinning. There may be at most one input and one output for a capability ID, one
+pinning. There may be at most one input, exception, and output for a capability ID, one
 source and one subsequent analysis for an evaluation ID, and one source for an
 environment/component pair.
-A capability output requires an earlier matching input; an input without an
-output is valid only as an interrupted attempt. Private queries retain that
-input as `complete?: false` and do not synthesize terminal fields. MCP provider
+A capability exception requires an earlier matching input, must precede any
+output, and must repeat the exact environment, mission, and public capability
+name. A following output must be the closed non-retryable
+`provider_error / exception` envelope. An input, or input plus exception,
+without an output is valid only as an interrupted retained prefix. Private
+queries retain that input as `complete?: false` and do not synthesize terminal
+fields. MCP provider
 exchange projections still require a validated request/response pair; the
 inspection sink retains each pair atomically so interruption cannot leave a
 request without its response. Private
@@ -833,7 +861,7 @@ JSONL.
 
 A host-installed inspection snapshot composes its correlated canonical trace
 through the three navigation operations. `analysis/open` includes an eligible
-immutable V6 result value and canonical `result_hash`; an unknown run and a
+immutable V7 result value and canonical `result_hash`; an unknown run and a
 known run without an eligible result remain distinct internally. Both encoded
 and retained sizes must fit the snapshot result ceiling. Possessing a private
 canonical event source, local Viewer access, or the active run does not imply
