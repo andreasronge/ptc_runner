@@ -13,12 +13,24 @@ defmodule PtcRunner.Kernel.ProjectResolver do
           {:ok, CommandArguments.t()} | {:error, CommandRejection.t()}
   def parse(argv, frontend, run_ref)
       when is_list(argv) and frontend in [:standalone, :mix] and is_binary(run_ref) do
-    with {:ok, expanded, project, derived} <- expand(argv, run_ref),
-         {:ok, arguments} <- CommandParser.parse(expanded, frontend) do
-      {:ok, %{arguments | project: context(project, derived)}}
-    else
-      {:error, %CommandRejection{} = rejection} -> {:error, rejection}
-      {:error, command} -> {:error, CommandRejection.generic(command, :invalid_arguments)}
+    case expand(argv, run_ref) do
+      {:ok, expanded, project, derived} ->
+        case CommandParser.parse(expanded, frontend) do
+          {:ok, arguments} ->
+            {:ok, %{arguments | project: context(project, derived)}}
+
+          # The parser decides first, so an unknown switch, a duplicate, or a
+          # terminator still reports itself. Only its unqualified verdict is
+          # reconsidered, and only when a supplied project explains it.
+          {:error, %CommandRejection{} = rejection} ->
+            {:error, undeclared_host_rejection(rejection, project)}
+        end
+
+      {:error, %CommandRejection{} = rejection} ->
+        {:error, rejection}
+
+      {:error, command} ->
+        {:error, CommandRejection.generic(command, :invalid_arguments)}
     end
   rescue
     _exception -> {:error, CommandRejection.generic(:unknown, :invalid_arguments)}
@@ -53,8 +65,20 @@ defmodule PtcRunner.Kernel.ProjectResolver do
     end
   end
 
-  defp project_argv("models", _rest, %ProjectConfig{host: nil}, _run_ref),
-    do: {:error, :models}
+  # The resolver is the only layer that knows a project was supplied and that it
+  # declares no host. Downstream sees an absent `--host-config` and can only
+  # report the arguments, which are exactly what `--help` prints for both of
+  # these commands.
+  # A project and `--host-config` are documented alternatives, so combining them
+  # stays an argument fault whether or not the project declares a host —
+  # otherwise the project argument would be silently ignored. Without the
+  # switch nothing is added, the parser rejects for itself, and
+  # `undeclared_host_rejection/2` supplies the reason.
+  defp project_argv("models", rest, %ProjectConfig{host: nil} = project, _run_ref) do
+    if switch?(rest, "--host-config"),
+      do: {:error, :models},
+      else: {:ok, ["models" | rest], project, []}
+  end
 
   defp project_argv("models", rest, project, _run_ref) do
     if switch?(rest, "--host-config") do
@@ -71,6 +95,18 @@ defmodule PtcRunner.Kernel.ProjectResolver do
     {argv, derived} = add_artifacts(command, argv, rest, project, run_ref, derived)
     {:ok, argv, project, derived}
   end
+
+  # `models` needs an installed host to list, and `doctor --connect` needs one
+  # to reach. Passive `doctor`, `run`, `validate`, and `repl --project` do not,
+  # and a project declaring no host is ordinary for them.
+  defp undeclared_host_rejection(
+         %CommandRejection{kind: :generic, code: :invalid_arguments, command: command},
+         %ProjectConfig{host: nil}
+       )
+       when command in [:models, :doctor],
+       do: CommandRejection.undeclared_project_host(command)
+
+  defp undeclared_host_rejection(rejection, _project), do: rejection
 
   defp expand_repl(argv, rest, _run_ref) do
     case take_project(rest) do
