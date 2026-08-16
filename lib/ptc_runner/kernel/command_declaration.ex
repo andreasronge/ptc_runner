@@ -32,6 +32,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         "ptc init DIRECTORY",
         "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE",
         "ptc repl [OPTIONS] [SCRIPT|-]",
+        "ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS]",
         "ptc --version"
       ],
       options: [
@@ -341,13 +342,35 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           aliases: [:h]
         }
       ]
+    },
+    viewer: %{
+      usage: ["ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS]"],
+      options: [
+        %{
+          key: :port,
+          type: :string,
+          syntax: ["--port PORT"],
+          description: "override the project's Viewer port"
+        },
+        %{
+          key: :listen,
+          type: :string,
+          syntax: ["--listen 127.0.0.1|0.0.0.0"],
+          description: "bind address; 0.0.0.0 exposes the Viewer beyond this host"
+        },
+        @help_option
+      ]
     }
   }
 
-  @commands [:init, :validate, :run, :doctor, :models, :transcript, :repl]
+  @commands [:init, :validate, :run, :doctor, :models, :transcript, :repl, :viewer]
   @topics [:root | @commands]
+  # Commands the shared engine never dispatches: their frontend owns the
+  # process for as long as it runs and returns no envelope.
+  @frontend_commands [:transcript, :repl, :viewer]
 
-  @type command :: :init | :validate | :run | :doctor | :models | :transcript | :repl
+  @type command ::
+          :init | :validate | :run | :doctor | :models | :transcript | :repl | :viewer
   @type topic :: :root | command()
   @type frontend :: :standalone | :mix
 
@@ -356,6 +379,9 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
 
   @spec topics() :: [topic()]
   def topics, do: @topics
+
+  @spec frontend_commands() :: [command()]
+  def frontend_commands, do: @frontend_commands
 
   @spec command_atom(binary()) :: {:ok, command()} | :error
   def command_atom(name) when is_binary(name) do

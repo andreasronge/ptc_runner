@@ -37,10 +37,24 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   defp run_journey(output_dir, endpoint, name, program, wrapper?) do
     directory = Path.join(output_dir, name)
     :ok = File.mkdir(directory)
-    traces = Path.join(directory, "traces")
-    inspection = Path.join(directory, "inspection")
+    # The conventional project artifact root: exactly these four children, each
+    # owner-only. Laying the journey out this way lets `ptc viewer` read it
+    # directly, and gives the private inspection artifact a parent as
+    # restrictive as the artifact itself.
+    artifacts = Path.join(directory, "artifacts")
+    traces = Path.join(artifacts, "traces")
+    inspection = Path.join(artifacts, "inspection")
     files = Path.join(directory, "files")
-    Enum.each([traces, inspection, files], &File.mkdir!/1)
+    :ok = File.mkdir(artifacts)
+    :ok = File.chmod(artifacts, 0o700)
+
+    Enum.each(~w(envelopes inspection results traces), fn child ->
+      child_path = Path.join(artifacts, child)
+      :ok = File.mkdir!(child_path)
+      :ok = File.chmod(child_path, 0o700)
+    end)
+
+    File.mkdir!(files)
     :ok = File.write(Path.join(files, "value.txt"), "fixture-file")
     :ok = File.write(Path.join(directory, "workflow.clj"), workflow_source())
 

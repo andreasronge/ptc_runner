@@ -17,8 +17,8 @@ switches.
 | `ptc models PROJECT.json` or `--host-config HOST.json` | List public installed model-alias declarations |
 | `ptc transcript RUN_ID ...` | Publish one correlated private model transcript |
 | `ptc repl` | Open a direct, manifest-backed, or analysis session |
+| `ptc viewer PROJECT.json` | Browse a project's captured traces in a local web UI |
 | `mix ptc.materialize ...` | Gate model-authored source as a candidate component |
-| `mix ptc.viewer PROJECT.json` | Browse a project's captured traces in a source checkout |
 
 Help is generated from the same declarations as the strict parser, so use
 `mix ptc help COMMAND` as the canonical command and option reference.
@@ -49,7 +49,7 @@ For normal local use, keep stable paths in a project document:
 
 ```console
 mix ptc run ptc-project.json
-mix ptc.viewer ptc-project.json
+mix ptc viewer ptc-project.json
 ```
 
 The project form creates its fixed owner-only artifact layout as needed. See
@@ -194,7 +194,7 @@ classified failures use their diagnostic catalog status; caught internal
 failures use `70`.
 
 `run`, `validate`, `doctor`, `models`, and `init` accept `--envelope`.
-`repl`, `transcript`, help, and version do not. A private run envelope omits the
+`repl`, `transcript`, `viewer`, help, and version do not. A private run envelope omits the
 result value. Build the runtime-included release with:
 
 ```console
@@ -242,10 +242,15 @@ contract are tracked in `docs/plans/lisp-kernel/stable-cli-contract.md`.
 scripts/build_container_image.sh
 docker run --rm -v "$PWD:/work" ptc:dev run /work/ptc.json
 docker run --rm -it -v "$PWD:/work" ptc:dev repl
+docker run --rm -p 127.0.0.1:4123:4123 -v "$PWD:/work" \
+  ptc:dev viewer /work/ptc-project.json --listen 0.0.0.0
 ```
 
 The container runs as a non-root user and takes applications, host
-configuration, and outputs through explicit mounts. Use `-it` for the REPL:
+configuration, and outputs through explicit mounts. The Viewer invocation is
+explained under [Expose it deliberately, or not at
+all](#expose-it-deliberately-or-not-at-all); the `127.0.0.1:` prefix is what
+keeps it off the network. Use `-it` for the REPL:
 line editing needs both a terminal and a terminal type, and the editor falls
 back to the plain reader when `TERM` is unset or `dumb` — where `Ctrl+A`
 inserts a literal control byte into the expression rather than moving the
@@ -417,21 +422,53 @@ To walk the same capture from an ordinary application rather than a session,
 [Debug a failed run](debugging-a-failed-run.md) installs it as a snapshot
 provider and follows typed evidence links with the shipped `debug.nav` prelude.
 
-## Browse with the development Viewer
-
-From a source checkout:
+## Browse traces in the Viewer
 
 ```console
-mix ptc.viewer ptc-project.json
+mix ptc viewer ptc-project.json
+bin/ptc viewer ptc-project.json
 ```
 
 The project document supplies the trace root and optional inspection root, plus
 the port, browser-opening preference, REPL setting, and private-data grant. The
-Viewer binds to loopback, pins the selected data, and can open a bounded
-analysis REPL over an immutable capture. It is a development path dependency,
-not part of the published Hex package. See the
+Viewer pins the selected data and can open a bounded analysis REPL over an
+immutable capture. `--port` overrides the project's port; `0` asks the
+operating system for a free one. The command runs in the foreground until
+`Ctrl+C`, and opens a browser only when the project asks for it *and* a
+terminal is attached.
+
+The Viewer ships inside the standalone release and the container image. It is
+not part of the published Hex package, where `ptc doctor` reports it as an
+unavailable optional companion and `ptc viewer` says so rather than failing
+obscurely. See the
 [Viewer documentation](https://github.com/andreasronge/ptc_runner/tree/main/ptc_viewer)
-for its complete command and HTTP API.
+for its complete HTTP API.
+
+### Expose it deliberately, or not at all
+
+The Viewer has no authentication and can display private inspection records
+when the project grants them, so it binds `127.0.0.1` and reaches nothing else.
+`--listen 0.0.0.0` is the only way to change that, it accepts no other address,
+and it prints a warning when used. Authenticated remote Viewer hosting is not a
+goal of this command.
+
+A container is the one place the wildcard is routine, because it is not an
+exposure decision there. Inside a container `127.0.0.1` is the container's own
+loopback, while a published port forwards to the container's external
+interface, so a loopback bind refuses every connection a `-p` mapping delivers.
+Binding `0.0.0.0` *inside the container's network namespace* is what makes the
+mapping reachable, and the host-side exposure decision moves to the publish
+rule:
+
+```console
+docker run --rm -p 127.0.0.1:4123:4123 -v "$PWD:/work" \
+  ptc:dev viewer /work/ptc-project.json --listen 0.0.0.0
+```
+
+The `127.0.0.1:` prefix on `-p` is what keeps this equivalent to a loopback
+bind. Writing `-p 4123:4123` instead publishes an unauthenticated trace browser
+to every host that can reach the machine. The command cannot enforce that
+prefix; the operator must write it.
 
 ## Test a workflow
 

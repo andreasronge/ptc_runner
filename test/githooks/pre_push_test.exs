@@ -123,18 +123,22 @@ defmodule PtcRunner.GitHooks.PrePushTest do
              ["ci-gate launcher"]
   end
 
-  test "Viewer-only changes do not run the root gate" do
+  # The Viewer ships inside the standalone release, and the core release gate
+  # starts it and serves a trace through it, so its own validation is no longer
+  # the only gate a Viewer change can break.
+  test "Viewer changes run the Viewer gate and the root gate" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_change("ptc_viewer/lib/ptc_viewer.ex")
 
     {output, status} = run_hook(repo, path)
 
-    assert status == 0
+    assert status == 0, output
     assert output =~ "Viewer validation"
-    refute output =~ "core tests"
+    assert output =~ "core tests"
 
-    assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
-             ["ci-gate viewer"]
+    markers = mix_marker |> File.read!() |> String.split("\n", trim: true)
+    assert "ci-gate viewer" in markers
+    assert "ci-gate core-release" in markers
   end
 
   @tag :slow

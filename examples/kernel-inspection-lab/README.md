@@ -22,17 +22,21 @@ Run it from the repository root:
 mix run examples/kernel-inspection-lab/run.exs
 ```
 
-The command prints its temporary artifact directory and an exact `mix
-ptc.viewer` command. To keep artifacts at a chosen location, pass one new empty
-directory:
+The command prints its temporary artifact directory, writes one project
+document per journey beside it, and prints an exact `mix ptc viewer` command
+for the `direct` journey. Those project documents grant the Viewer the private
+inspection artifacts, so treat the browser tab as a private sink. To keep
+artifacts at a chosen location, pass one new empty directory:
 
 ```console
 mix run examples/kernel-inspection-lab/run.exs /tmp/ptc-inspection-lab
 ```
 
-Each journey writes canonical artifacts under `traces/` and private artifacts
-under `inspection/`. Those sibling directories can be passed directly to
-`mix ptc transcript`; create a third sibling directory for `--private-output`.
+Each journey writes canonical artifacts under `artifacts/traces/` and private
+artifacts under `artifacts/inspection/`, the conventional owner-only project
+artifact root. Those sibling directories can be passed directly to
+`mix ptc transcript`; create a third directory outside the root for
+`--private-output`.
 
 Inspection artifacts contain full model requests/responses, generated source,
 and capability payloads. They are not sanitized traces and should not be

@@ -1,0 +1,353 @@
+defmodule PtcRunner.ViewerFrontend do
+  @moduledoc """
+  Serves one project's captured traces through the local PTC Viewer.
+
+      ptc viewer ptc-project.json
+      ptc viewer ptc-project.json --port 4123
+      ptc viewer ptc-project.json --listen 0.0.0.0
+
+  The project must enable trace artifacts. The trace root, optional inspection
+  root, port, browser-opening preference, analysis-REPL setting, and
+  private-data grant all come from the named project document; there is no
+  implicit project discovery and no separate Viewer path grammar.
+
+  The command binds loopback unless `--listen 0.0.0.0` is given. That address
+  publishes an unauthenticated trace browser — which can display private
+  inspection records when the project grants them — to every host that can
+  reach the port, so it is never reached by default and never inferred. Inside
+  a container it is the only address a published port can forward to; the host
+  exposure decision moves to the `docker run -p 127.0.0.1:` prefix, which the
+  operator must write.
+
+  The Viewer is an optional companion. It ships in the assembled release and
+  the container image, and is absent from the Hex package, where this command
+  reports `viewer_unavailable` rather than failing obscurely.
+
+  The command runs in the foreground until the Viewer stops or the process is
+  signalled; `SIGINT` and `SIGTERM` both end it cleanly.
+  """
+
+  alias PtcRunner.Kernel.AnalysisTerminal
+  alias PtcRunner.Kernel.CommandArguments
+  alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.InspectionSnapshot
+  alias PtcRunner.Kernel.ProjectArtifactRoot
+  alias PtcRunner.Kernel.ProjectConfig
+  alias PtcRunner.Kernel.TraceSnapshot
+  alias PtcRunner.Kernel.ViewerBinding
+
+  # `scripts/verify_core_package.sh` compiles the packaged Hex source with
+  # `--warnings-as-errors` and without this optional companion, where a literal
+  # `PtcViewer.start/1` is an undefined-module warning and therefore a gate
+  # failure. `PtcRunner.Kernel.DoctorEnvironment` probes the same companion the
+  # same way, and never calls it.
+  #
+  # Every call below goes through `apply/3`, which is the only form that stays
+  # opaque: Elixir's type inference resolves `@viewer.start(options)` and even
+  # `viewer_module().start(options)` back to the attribute and warns on both.
+  # That is why the `Credo.Check.Refactor.Apply` suppressions below are
+  # deliberate rather than laziness -- removing them reintroduces the warning
+  # and breaks the packaged-source build.
+  @viewer PtcViewer
+  @capture_timeout_ms 15_000
+
+  @spec run(CommandArguments.t(), CommandRuntime.t()) :: :ok | {:error, atom(), binary()}
+  def run(arguments, runtime), do: run(arguments, runtime, [])
+
+  @doc false
+  @spec run(CommandArguments.t(), CommandRuntime.t(), keyword()) ::
+          :ok | {:error, atom(), binary()}
+  def run(
+        %CommandArguments{command: :viewer, application: project_path, options: options},
+        %CommandRuntime{},
+        opts
+      )
+      when is_binary(project_path) do
+    if companion_installed?() do
+      case overrides(options) do
+        {:ok, overrides} -> serve(project_path, overrides, opts)
+        :error -> {:error, :invalid_arguments, "invalid viewer command"}
+      end
+    else
+      {:error, :viewer_unavailable, "the PTC Viewer companion is not installed in this build"}
+    end
+  rescue
+    _exception -> {:error, :internal_error, "viewer command failed"}
+  catch
+    _kind, _reason -> {:error, :internal_error, "viewer command failed"}
+  end
+
+  def run(_arguments, _runtime, _opts),
+    do: {:error, :invalid_arguments, "invalid viewer command"}
+
+  @doc false
+  @spec start(binary(), map(), keyword()) ::
+          {:ok, pid(), ViewerBinding.address(), non_neg_integer()} | {:error, atom()}
+  def start(project_path, overrides \\ %{}, opts \\ [])
+
+  def start(project_path, overrides, opts)
+      when is_binary(project_path) and is_map(overrides) and is_list(opts) do
+    with :ok <- companion_available(),
+         {:ok, callbacks} <- callbacks(opts),
+         {:ok, project} <- ProjectConfig.load(project_path),
+         :ok <- require_trace(project),
+         :ok <- ProjectArtifactRoot.ensure(project.artifact_root) do
+      capture_deadline_ms = System.monotonic_time(:millisecond) + @capture_timeout_ms
+      start_captured(project, overrides, capture_deadline_ms, callbacks)
+    end
+  end
+
+  def start(_project_path, _overrides, _opts), do: {:error, :project_invalid}
+
+  @doc false
+  @spec await(pid()) :: :ok | {:error, :viewer_stopped}
+  def await(pid) when is_pid(pid) do
+    ref = Process.monitor(pid)
+
+    receive do
+      :stop ->
+        Process.demonitor(ref, [:flush])
+        stop_viewer(pid)
+
+      {:DOWN, ^ref, :process, ^pid, _reason} ->
+        {:error, :viewer_stopped}
+    end
+  end
+
+  def await(_pid), do: {:error, :viewer_stopped}
+
+  defp serve(project_path, overrides, opts) do
+    case start(project_path, overrides, opts) do
+      {:ok, pid, address, port} ->
+        announce(address, port, Keyword.get(opts, :device, :stdio))
+
+        case await(pid) do
+          :ok -> :ok
+          {:error, reason} -> {:error, reason, "PTC Viewer stopped"}
+        end
+
+      {:error, reason} ->
+        {:error, reason, "could not start PTC Viewer"}
+    end
+  end
+
+  # Both values are already accepted by the parser; re-resolving them here keeps
+  # the frontend usable from a test or an embedding host that never parsed argv.
+  defp overrides(options) do
+    with {:ok, address} <- ViewerBinding.address(Map.get(options, :listen)),
+         {:ok, port} <- override_port(Map.get(options, :port)),
+         do: {:ok, %{address: address, port: port}}
+  end
+
+  defp override_port(nil), do: {:ok, nil}
+  defp override_port(port), do: ViewerBinding.port(port)
+
+  @doc false
+  @spec announce(ViewerBinding.address(), non_neg_integer(), IO.device()) :: :ok
+  def announce(address, port, device) do
+    IO.puts(device, "PTC Viewer listening on http://#{:inet.ntoa(address)}:#{port}")
+
+    if ViewerBinding.exposed?(address) do
+      IO.puts(
+        :stderr,
+        "warning: --listen #{:inet.ntoa(address)} serves the Viewer to every host that can " <>
+          "reach this port. It is unauthenticated and can display private inspection " <>
+          "records when the project grants them."
+      )
+    end
+
+    IO.puts(device, "Press Ctrl+C to stop")
+  end
+
+  defp companion_available do
+    if companion_installed?(), do: :ok, else: {:error, :viewer_unavailable}
+  end
+
+  defp companion_installed?, do: Code.ensure_loaded?(@viewer)
+
+  defp require_trace(%{artifact_root: root, artifacts: %{trace: true}}) when is_binary(root),
+    do: :ok
+
+  defp require_trace(_project), do: {:error, :project_traces_disabled}
+
+  defp capture_trace(project, capture_deadline_ms) do
+    source =
+      if project.viewer.private,
+        do: {:private_authorized_directory, Path.join(project.artifact_root, "traces")},
+        else: {:directory, Path.join(project.artifact_root, "traces")}
+
+    TraceSnapshot.start(source, capture_deadline_ms: capture_deadline_ms)
+  end
+
+  defp capture_inspection(
+         %{artifacts: %{inspection: true}, viewer: %{private: true}, artifact_root: root},
+         trace,
+         capture_deadline_ms
+       ) do
+    InspectionSnapshot.start(
+      {:directory, Path.join(root, "inspection")},
+      trace,
+      capture_deadline_ms: capture_deadline_ms
+    )
+  end
+
+  defp capture_inspection(_project, _trace, _capture_deadline_ms), do: {:ok, nil}
+
+  defp start_captured(project, overrides, capture_deadline_ms, callbacks) do
+    case capture_trace(project, capture_deadline_ms) do
+      {:ok, trace} ->
+        capture_inspection_and_start(project, overrides, trace, capture_deadline_ms, callbacks)
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp capture_inspection_and_start(project, overrides, trace, capture_deadline_ms, callbacks) do
+    case invoke_capture(callbacks.capture_inspection, project, trace, capture_deadline_ms) do
+      {:ok, inspection} ->
+        start_viewer(project, overrides, trace, inspection, callbacks)
+
+      {:error, _reason} = error ->
+        TraceSnapshot.stop(trace)
+        error
+    end
+  end
+
+  defp start_viewer(project, overrides, trace, inspection, callbacks) do
+    options = viewer_options(project, overrides, trace, inspection)
+
+    # credo:disable-for-next-line Credo.Check.Refactor.Apply
+    case apply(@viewer, :start, [options]) do
+      {:ok, pid} ->
+        finish_start(pid, Keyword.fetch!(options, :ip), trace, inspection, callbacks)
+
+      {:error, _reason} = error ->
+        cleanup_snapshots(trace, inspection)
+        error
+    end
+  end
+
+  defp finish_start(pid, address, trace, inspection, callbacks) do
+    result =
+      with :ok <- TraceSnapshot.transfer_owner(trace, pid),
+           :ok <- transfer_inspection(inspection, pid),
+           {:ok, {^address, port}} <- invoke_listener_info(callbacks.listener_info, pid) do
+        {:ok, pid, address, port}
+      end
+
+    case result do
+      {:ok, _pid, _address, _port} = success ->
+        success
+
+      {:error, _reason} = error ->
+        stop_viewer(pid)
+        cleanup_snapshots(trace, inspection)
+        error
+
+      _unexpected_listener ->
+        stop_viewer(pid)
+        cleanup_snapshots(trace, inspection)
+        {:error, :viewer_start_failed}
+    end
+  end
+
+  defp callbacks(opts) do
+    if Keyword.keyword?(opts) do
+      keys = Keyword.keys(opts)
+      capture = Keyword.get(opts, :capture_inspection, &capture_inspection/3)
+      listener = Keyword.get_lazy(opts, :listener_info, &default_listener_info/0)
+
+      if keys -- [:capture_inspection, :listener_info, :device] == [] and
+           length(keys) == MapSet.size(MapSet.new(keys)) and is_function(capture, 3) and
+           is_function(listener, 1),
+         do: {:ok, %{capture_inspection: capture, listener_info: listener}},
+         else: {:error, :invalid_viewer_config}
+    else
+      {:error, :invalid_viewer_config}
+    end
+  end
+
+  defp default_listener_info do
+    # credo:disable-for-next-line Credo.Check.Refactor.Apply
+    fn pid -> apply(@viewer, :listener_info, [pid]) end
+  end
+
+  defp invoke_capture(callback, project, trace, capture_deadline_ms) do
+    case callback.(project, trace, capture_deadline_ms) do
+      {:ok, _inspection} = success -> success
+      {:error, _reason} = error -> error
+      _invalid -> {:error, :viewer_start_failed}
+    end
+  rescue
+    _exception -> {:error, :viewer_start_failed}
+  catch
+    _kind, _reason -> {:error, :viewer_start_failed}
+  end
+
+  defp invoke_listener_info(callback, pid) do
+    case callback.(pid) do
+      {:ok, {address, port}} = success when port in 1..65_535 ->
+        if ViewerBinding.address?(address), do: success, else: {:error, :viewer_start_failed}
+
+      {:error, _reason} = error ->
+        error
+
+      _invalid ->
+        {:error, :viewer_start_failed}
+    end
+  rescue
+    _exception -> {:error, :viewer_start_failed}
+  catch
+    _kind, _reason -> {:error, :viewer_start_failed}
+  end
+
+  defp cleanup_snapshots(trace, inspection) do
+    InspectionSnapshot.stop(inspection)
+    TraceSnapshot.stop(trace)
+    :ok
+  end
+
+  defp stop_viewer(pid) do
+    # credo:disable-for-next-line Credo.Check.Refactor.Apply
+    if Process.alive?(pid), do: apply(@viewer, :stop, [pid])
+    :ok
+  rescue
+    _exception -> :ok
+  catch
+    _kind, _reason -> :ok
+  end
+
+  defp viewer_options(project, overrides, trace, inspection) do
+    private? = project.viewer.private
+
+    [
+      ip: Map.get(overrides, :address) || ViewerBinding.loopback(),
+      port: Map.get(overrides, :port) || project.viewer.port,
+      trace_dir: Path.join(project.artifact_root, "traces"),
+      private_traces: private?,
+      open: project.viewer.open and AnalysisTerminal.attached?(),
+      trace_source: {:trace_snapshot, trace},
+      inspection_source: if(inspection, do: {:inspection_snapshot, inspection}),
+      kernel_trace_adapter: PtcRunner.Kernel.ProjectViewerAdapter,
+      inspection_adapter: if(inspection, do: PtcRunner.Kernel.ProjectViewerAdapter),
+      repl_adapter: repl_adapter(project, private?),
+      repl_config: repl_config(project, private?)
+    ]
+  end
+
+  defp repl_adapter(%{viewer: %{repl: true}}, false),
+    do: PtcRunner.Kernel.ViewerReplAdapter
+
+  defp repl_adapter(_project, _private?), do: nil
+
+  defp repl_config(%{viewer: %{repl: true}, artifact_root: root}, false),
+    do: %{trace_dir: Path.join(root, "traces"), profile_id: "run-analysis-v1"}
+
+  defp repl_config(_project, _private?), do: %{}
+
+  defp transfer_inspection(nil, _pid), do: :ok
+
+  defp transfer_inspection(inspection, pid),
+    do: InspectionSnapshot.transfer_owner(inspection, pid)
+end

@@ -8,6 +8,11 @@ defmodule PtcViewer.Server do
   alias PtcViewer.ReplStore
 
   @shutdown_timeout_ms 30_000
+  @loopback {127, 0, 0, 1}
+  # Closed, so a typo cannot become a different exposure. The wildcard exists
+  # for one reason: inside a container it is the only address a published port
+  # can forward to, and the host exposure decision moves to the publish rule.
+  @addresses [@loopback, {0, 0, 0, 0}]
 
   def start(opts), do: GenServer.start(__MODULE__, opts)
   def stop(pid), do: GenServer.call(pid, :stop, @shutdown_timeout_ms + 5_000)
@@ -19,6 +24,7 @@ defmodule PtcViewer.Server do
     Process.flag(:trap_exit, true)
 
     port = Keyword.get(opts, :port, 4123)
+    ip = Keyword.get(opts, :ip, @loopback)
     trace_dir = opts |> Keyword.get(:trace_dir, "traces") |> Path.expand()
     kernel_adapter = Keyword.get(opts, :kernel_trace_adapter)
     inspection_file = Keyword.get(opts, :inspection_file)
@@ -29,9 +35,10 @@ defmodule PtcViewer.Server do
     trace_source = Keyword.get(opts, :trace_source)
     inspection_source = Keyword.get(opts, :inspection_source)
 
-    if is_integer(port) and port in 0..65_535 do
+    if is_integer(port) and port in 0..65_535 and ip in @addresses do
       params = %{
         port: port,
+        ip: ip,
         trace_dir: trace_dir,
         kernel_adapter: kernel_adapter,
         inspection_file: inspection_file,
@@ -111,7 +118,7 @@ defmodule PtcViewer.Server do
     case Bandit.start_link(
            plug: {PtcViewer.Router, config},
            port: params.port,
-           ip: {127, 0, 0, 1}
+           ip: params.ip
          ) do
       {:ok, bandit} ->
         Process.unlink(bandit)

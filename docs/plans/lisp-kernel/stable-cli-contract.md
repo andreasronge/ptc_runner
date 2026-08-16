@@ -133,7 +133,8 @@ own target evidence is out of contract.
 For every target, build from a clean checkout and run the existing packaged
 verification paths plus a provider-bearing fixture. Prove at least:
 
-- `help`, `version`, `init`, `validate`, `run`, `doctor`, `models`, and `repl`;
+- `help`, `version`, `init`, `validate`, `run`, `doctor`, `models`, `repl`,
+  and `viewer`;
 - successful and failed envelope publication;
 - normal and private artifact policy;
 - launcher discovery and one local provider operation;

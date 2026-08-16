@@ -23,6 +23,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.CommandAcquisition
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandContract
+  alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandDestination
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandDoctor
@@ -41,6 +42,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.PublicationAuthority
 
   @fallback_run_ref "cmd-00000000000000000000000000"
+  @frontend_commands CommandDeclaration.frontend_commands()
 
   @type prepared :: CommandPreparation.t() | CommandOutcome.t()
 
@@ -72,7 +74,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
           end
 
         {:ok, %CommandEntry{arguments: %{command: command}} = entry}
-        when command in [:repl, :transcript] ->
+        when command in @frontend_commands ->
           {:error, outcome(:unknown, entry.run_ref, :arguments, :invalid_command)}
 
         {:ok, %CommandEntry{} = entry} ->
@@ -111,7 +113,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
          _runtime,
          _presentation?
        )
-       when command in [:repl, :transcript],
+       when command in @frontend_commands,
        do: with_rejection(one_shot_failure(entry.run_ref, :invalid_command))
 
   defp dispatch_entry_context(
@@ -161,7 +163,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   def entry_failure(
         %CommandEntry{rejection: %CommandRejection{command: command} = rejection} = entry
       )
-      when command in [:repl, :transcript],
+      when command in @frontend_commands,
       do: one_shot_failure(entry.run_ref, rejection.code)
 
   def entry_failure(%CommandEntry{rejection: %CommandRejection{} = rejection} = entry),
@@ -170,7 +172,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   @doc false
   @spec startup_failure(CommandEntry.t()) :: {:error, CommandOutcome.t()}
   def startup_failure(%CommandEntry{arguments: %CommandArguments{command: command}} = entry)
-      when command in [:repl, :transcript],
+      when command in @frontend_commands,
       do: one_shot_failure(entry.run_ref, :invalid_command)
 
   def startup_failure(%CommandEntry{
@@ -201,7 +203,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   defp prepare_with_ref(argv, run_ref, runtime) do
     case ProjectResolver.parse(argv, :standalone, run_ref) do
-      {:ok, %CommandArguments{command: command}} when command in [:repl, :transcript] ->
+      {:ok, %CommandArguments{command: command}} when command in @frontend_commands ->
         one_shot_failure(run_ref, :invalid_command)
 
       {:ok, %CommandArguments{frontend_options: []} = arguments} ->
@@ -233,7 +235,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
         {:error, arguments_outcome(arguments, run_ref, :arguments, :invalid_arguments)}
 
       {:error, %CommandRejection{command: command} = rejection}
-      when command in [:repl, :transcript] ->
+      when command in @frontend_commands ->
         one_shot_failure(run_ref, rejection.code)
 
       {:error, %CommandRejection{} = rejection} ->

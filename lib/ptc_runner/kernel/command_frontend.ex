@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.CommandFrontend do
   @moduledoc false
 
   alias PtcRunner.Kernel.CommandArguments
+  alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandEnvelope
@@ -10,6 +11,8 @@ defmodule PtcRunner.Kernel.CommandFrontend do
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.ProjectArtifactRoot
+
+  @frontend_commands CommandDeclaration.frontend_commands()
 
   @type bootstrap ::
           (CommandArguments.t() ->
@@ -35,7 +38,7 @@ defmodule PtcRunner.Kernel.CommandFrontend do
   end
 
   def present_entry(%CommandEntry{arguments: %{command: command}} = entry, _bootstrap)
-      when command in [:repl, :transcript] do
+      when command in @frontend_commands do
     {:error, outcome} = CommandEngine.dispatch_entry(entry, CommandRuntime.standalone())
     present(entry, outcome, nil)
   end

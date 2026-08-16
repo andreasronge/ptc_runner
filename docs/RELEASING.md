@@ -24,6 +24,17 @@ artifact and attaches it, with its `.sha256`, to a draft GitHub release. That
 release stays a draft until a maintainer publishes it, exactly as the launcher
 release does.
 
+The assembled release and the container image carry the `ptc_viewer`
+companion, so the packaged `ptc viewer` command works from an extracted tarball
+with no toolchain beside it. The Hex package does not: `ptc_viewer` is
+unpublished, and `mix.exs` therefore names it only when the sibling checkout
+exists and the invocation is a development, test, or `release` one.
+`scripts/verify_core_package.sh` asserts both halves — the built package
+carries no `ptc_viewer` requirement and no `ptc_viewer` sources, and its
+sources still compile at `prod` with the companion absent. Do not turn that
+into an optional Hex requirement without publishing the package first; Hex
+cannot resolve a requirement naming a package that does not exist.
+
 Those artifacts are ad-hoc signed — not Developer ID signed, not notarized —
 and the installation documentation must say so in those words. macOS arm64 is
 the only published target: macOS x86_64 and the Linux container images require

@@ -5,8 +5,9 @@ defmodule PtcRunner.Kernel.CommandArguments do
   Acquisition paths remain confined to this command-boundary value and are
   consumed before `RunCoordinator`. Artifact destinations are captured against
   the invocation working directory after parsing. `run` destinations move into
-  the sealed phase-6 command continuation; one-shot `repl` and `transcript`
-  destinations remain on the arguments passed to their dedicated frontends.
+  the sealed phase-6 command continuation; `repl` and `transcript` destinations
+  remain on the arguments passed to their dedicated frontends. `viewer` has no
+  destination: it publishes nothing.
   """
 
   @enforce_keys [
@@ -21,7 +22,16 @@ defmodule PtcRunner.Kernel.CommandArguments do
   defstruct @enforce_keys ++ [project: nil]
 
   @type command ::
-          :help | :version | :init | :validate | :run | :doctor | :models | :transcript | :repl
+          :help
+          | :version
+          | :init
+          | :validate
+          | :run
+          | :doctor
+          | :models
+          | :transcript
+          | :repl
+          | :viewer
   @type t :: %__MODULE__{
           command: command(),
           application: binary() | nil,

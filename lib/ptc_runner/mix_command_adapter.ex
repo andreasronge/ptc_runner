@@ -6,6 +6,7 @@ defmodule PtcRunner.MixCommandAdapter do
   alias PtcRunner.MixCommandRuntime
   alias PtcRunner.ReplFrontend
   alias PtcRunner.TranscriptFrontend
+  alias PtcRunner.ViewerFrontend
 
   @doc false
   @spec execute([binary()]) :: CommandPresentation.t()
@@ -29,6 +30,9 @@ defmodule PtcRunner.MixCommandAdapter do
 
   defp run_one_shot(%{command: :transcript} = arguments, runtime, _frontend_opts),
     do: TranscriptFrontend.run(arguments, runtime)
+
+  defp run_one_shot(%{command: :viewer} = arguments, runtime, _frontend_opts),
+    do: ViewerFrontend.run(arguments, runtime)
 
   @doc false
   @spec run_task([binary()]) :: CommandPresentation.t() | no_return()
