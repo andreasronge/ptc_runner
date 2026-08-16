@@ -31,6 +31,18 @@ docker buildx version > /dev/null 2>&1 || {
 
 cd "$project_root"
 
+# Extra arguments are forwarded to buildx, but not these two: choosing another
+# target or another Dockerfile skips the in-image gate while the probes below
+# still pass, and the script would report a verification that never ran.
+for argument in "$@"; do
+  case "$argument" in
+    --target | --target=* | -f | --file | --file=*)
+      echo "$argument is not accepted: it would bypass the in-image verification" >&2
+      exit 64
+      ;;
+  esac
+done
+
 # `--load` keeps the result in the local daemon, which only works for one
 # platform at a time. Multi-architecture manifests belong to the publication
 # increment, not to local scaffolding.
@@ -38,6 +50,7 @@ docker buildx build \
   --tag "$image_tag" \
   --load \
   "$@" \
+  --target released \
   .
 
 # The in-image gate installs `expect` and `diffutils` to run, and an installed

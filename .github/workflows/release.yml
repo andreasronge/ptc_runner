@@ -122,7 +122,15 @@ jobs:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A rerun may legitimately refresh a draft's assets, but a published
+          # release is a promise already made: replacing its assets changes
+          # what a verified digest refers to.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            if [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" != "true" ]; then
+              echo "release $GITHUB_REF_NAME is already published; refusing to replace its assets" >&2
+              exit 1
+            fi
+
             gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP"/artifacts/* --clobber
           else
             gh release create \
