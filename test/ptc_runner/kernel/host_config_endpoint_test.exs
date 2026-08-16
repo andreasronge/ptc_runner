@@ -1,0 +1,224 @@
+defmodule PtcRunner.Kernel.HostConfigEndpointTest do
+  use ExUnit.Case, async: true
+
+  # Regression coverage for #1422. Every one of these documents used to load,
+  # pass `validate` and passive `doctor`, and only fail later as an
+  # occurrence-attributed `provider_unavailable` — the same code an unreachable
+  # server produces. They are static facts about the document, so they are
+  # settled before anything is contacted.
+
+  alias PtcRunner.Kernel.CommandAcquisition
+  alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.MCPSource
+
+  describe "endpoints refused at load time" do
+    @tag :tmp_dir
+    test "a string that is not a URL never reaches a connectivity check", %{tmp_dir: dir} do
+      assert_refused(dir, "not-a-url")
+    end
+
+    @tag :tmp_dir
+    test "plain http is refused without the allowance", %{tmp_dir: dir} do
+      assert_refused(dir, "http://127.0.0.1:8055")
+    end
+
+    @tag :tmp_dir
+    test "a name that merely resolves to loopback is not a loopback address", %{tmp_dir: dir} do
+      assert_refused(dir, "http://localhost:8055", %{"allow_insecure_loopback" => true})
+    end
+
+    @tag :tmp_dir
+    test "a routable address is refused even with the allowance", %{tmp_dir: dir} do
+      assert_refused(dir, "http://10.0.0.7:8055", %{"allow_insecure_loopback" => true})
+    end
+
+    @tag :tmp_dir
+    test "the allowance against an https endpoint is stale, not redundant", %{tmp_dir: dir} do
+      assert_refused(dir, "https://mcp.example.test/mcp", %{"allow_insecure_loopback" => true})
+    end
+
+    @tag :tmp_dir
+    test "userinfo and fragments are refused on both schemes", %{tmp_dir: dir} do
+      assert_refused(dir, "https://user:pw@mcp.example.test/mcp")
+      assert_refused(dir, "https://mcp.example.test/mcp#frag")
+
+      assert_refused(dir, "http://user@127.0.0.1:8055", %{"allow_insecure_loopback" => true})
+      assert_refused(dir, "http://127.0.0.1:8055#frag", %{"allow_insecure_loopback" => true})
+    end
+  end
+
+  describe "the allowance is credential-free" do
+    @tag :tmp_dir
+    test "a static auth binding may not cross a plaintext socket", %{tmp_dir: dir} do
+      assert_refused(
+        dir,
+        "http://127.0.0.1:8055",
+        %{
+          "allow_insecure_loopback" => true,
+          "auth" => [%{"scheme" => "bearer", "binding" => "server_token"}]
+        }
+      )
+    end
+
+    @tag :tmp_dir
+    test "an OAuth authority may not cross a plaintext socket", %{tmp_dir: dir} do
+      assert_refused(
+        dir,
+        "http://127.0.0.1:8055",
+        %{"allow_insecure_loopback" => true, "oauth" => oauth_block()}
+      )
+    end
+
+    @tag :tmp_dir
+    test "an explicitly empty auth list is not a credential", %{tmp_dir: dir} do
+      assert {:ok, host} =
+               dir
+               |> write(
+                 config("http://127.0.0.1:8055", %{
+                   "allow_insecure_loopback" => true,
+                   "auth" => []
+                 })
+               )
+               |> HostConfig.load()
+
+      assert host.install["workspace"].transport.allow_insecure_loopback
+      assert host.install["workspace"].transport.auth == []
+    end
+  end
+
+  describe "endpoints admitted at load time" do
+    @tag :tmp_dir
+    test "https carries no allowance", %{tmp_dir: dir} do
+      assert {:ok, host} =
+               dir |> write(config("https://mcp.example.test/mcp")) |> HostConfig.load()
+
+      refute host.install["workspace"].transport.allow_insecure_loopback
+    end
+
+    @tag :tmp_dir
+    test "the literal loopback addresses are reachable with the allowance", %{tmp_dir: dir} do
+      for endpoint <- ["http://127.0.0.1:8055", "http://[::1]:8055/mcp", "http://127.0.0.1"] do
+        assert {:ok, host} =
+                 dir
+                 |> write(
+                   config(endpoint, %{"allow_insecure_loopback" => true}),
+                   unique_name()
+                 )
+                 |> HostConfig.load()
+
+        assert host.install["workspace"].transport.endpoint == endpoint
+        assert host.install["workspace"].transport.allow_insecure_loopback
+      end
+    end
+  end
+
+  describe "the command path names the installation" do
+    @tag :tmp_dir
+    test "a refused endpoint is a host diagnostic naming its alias", %{tmp_dir: dir} do
+      path = write(dir, config("not-a-url"))
+
+      assert {:error, %CommandDiagnostic{} = diagnostic} = CommandAcquisition.catalog(path)
+      assert diagnostic.phase == :host
+      assert diagnostic.code == :installation_endpoint_invalid
+      assert diagnostic.subject.name == "workspace"
+      assert diagnostic.subject.operation == :declaration
+      assert diagnostic.path == nil
+    end
+
+    @tag :tmp_dir
+    test "an admitted loopback endpoint builds a catalog", %{tmp_dir: dir} do
+      path = write(dir, config("http://127.0.0.1:8055", %{"allow_insecure_loopback" => true}))
+
+      assert {:ok, _host, _catalog} = CommandAcquisition.catalog(path)
+    end
+  end
+
+  describe "the in-process API applies the same rule" do
+    test "localhost is not admitted as a loopback address" do
+      assert_raise ArgumentError, fn ->
+        MCPSource.builder(
+          transport:
+            {:streamable_http, endpoint: "http://localhost:8055", allow_insecure_loopback: true},
+          tools: mappings()
+        )
+      end
+    end
+
+    test "the allowance against an https endpoint is refused" do
+      assert_raise ArgumentError, fn ->
+        MCPSource.builder(
+          transport:
+            {:streamable_http,
+             endpoint: "https://mcp.example.test/mcp", allow_insecure_loopback: true},
+          tools: mappings()
+        )
+      end
+    end
+
+    test "the literal loopback addresses remain admitted" do
+      for endpoint <- ["http://127.0.0.1:8055", "http://[::1]:8055/mcp"] do
+        assert {:staged, builder, nil} =
+                 MCPSource.builder(
+                   transport:
+                     {:streamable_http, endpoint: endpoint, allow_insecure_loopback: true},
+                   tools: mappings()
+                 )
+
+        assert is_function(builder, 2)
+      end
+    end
+  end
+
+  defp assert_refused(dir, endpoint, overrides \\ %{}) do
+    path = write(dir, config(endpoint, overrides), unique_name())
+
+    assert {:error, :invalid_host_config} = HostConfig.load(path)
+
+    assert {:error, {:installation_endpoint_invalid, "workspace"}} =
+             HostConfig.load_command(path)
+  end
+
+  defp config(endpoint, overrides \\ %{}) do
+    transport =
+      %{"type" => "streamable_http", "endpoint" => endpoint} |> Map.merge(overrides)
+
+    %{
+      "credentials" => %{"server_token" => %{"env" => "SERVER_TOKEN"}},
+      "install" => %{
+        "workspace" => %{
+          "source" => "mcp",
+          "installation_revision" => "workspace-v1",
+          "transport" => transport,
+          "tools" => %{"echo" => %{"as" => "workspace.echo", "effect" => "read"}}
+        }
+      }
+    }
+  end
+
+  defp oauth_block do
+    %{
+      "installation_id" => "workspace",
+      "issuer" => "https://issuer.example.test",
+      "scope_ceiling" => ["read"],
+      "client" => %{
+        "registration" => "pre_registered",
+        "client_id" => "client",
+        "token_endpoint_auth_method" => "none",
+        "grant_types" => ["authorization_code"],
+        "loopback_redirect" => %{"host" => "127.0.0.1", "path" => "/callback"}
+      }
+    }
+  end
+
+  defp mappings, do: %{"echo" => %{as: "workspace.echo", effect: :read}}
+
+  defp write(dir, config, name \\ "host.json") do
+    path = Path.join(dir, name)
+    File.write!(path, Jason.encode!(config))
+    path
+  end
+
+  defp unique_name,
+    do: "host-#{System.unique_integer([:positive, :monotonic])}.json"
+end

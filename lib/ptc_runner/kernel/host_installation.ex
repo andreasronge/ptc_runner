@@ -1020,6 +1020,19 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  # The decoded loopback allowance travels with the endpoint it was declared
+  # against, so the source re-applies the rule the host document was already
+  # checked with instead of defaulting to a stricter one and rejecting a
+  # transport decoding admitted. An OAuth or `auth`-bearing installation never
+  # carries it: `HostConfig` refuses a credential over plain HTTP.
+  defp http_transport_options(transport, extra) when is_list(extra) do
+    {:streamable_http,
+     [
+       endpoint: transport.endpoint,
+       allow_insecure_loopback: transport.allow_insecure_loopback
+     ] ++ extra}
+  end
+
   defp installed_options(installation, transport, _credential_names) do
     options = [
       tools: installation.tools,
@@ -1035,9 +1048,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
         try do
           _builder =
             MCPSource.builder([
-              {:transport,
-               {:streamable_http, endpoint: transport.endpoint, headers: fn -> [] end}}
-              | options
+              {:transport, http_transport_options(transport, headers: fn -> [] end)} | options
             ])
 
           {:ok, options}
@@ -1079,9 +1090,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
        ) do
     with {:ok, headers} <- render_headers(transport.auth, credentials) do
       options =
-        [
-          transport: {:streamable_http, endpoint: transport.endpoint, headers: fn -> headers end}
-        ] ++ options
+        [transport: http_transport_options(transport, headers: fn -> headers end)] ++ options
 
       MCPSource.acquire(options, selected, context)
       |> classify(installation, selected, context.provider)
@@ -1107,9 +1116,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
              authority_epoch: authority_epoch
            ) do
       source_options =
-        [
-          transport: {:streamable_http, endpoint: transport.endpoint, authorization: manager}
-        ] ++ options
+        [transport: http_transport_options(transport, authorization: manager)] ++ options
 
       result =
         MCPSource.acquire(source_options, selected, context)

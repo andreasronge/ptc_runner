@@ -32,6 +32,17 @@ defmodule PtcRunner.Kernel.HostConfig do
   Stdio MCP transports always run with the runtime-owned `LC_ALL=C.UTF-8`;
   credential environment bindings cannot replace that protocol locale.
 
+  A `streamable_http` endpoint is settled here rather than at acquisition, so a
+  malformed or inadmissible URL is a host fault naming its installation instead
+  of the connectivity failure of an unreachable server. It requires `https`.
+  Plain `http` is admitted only against the literal loopback addresses
+  `127.0.0.1` and `::1`, only with `allow_insecure_loopback`, and only when the
+  transport declares neither `auth` nor `oauth`, so no configured credential
+  crosses a plaintext socket. The allowance is refused against an `https`
+  endpoint rather than ignored. Upstream MCP tool names are the installed
+  server's, so they follow `PtcRunner.Kernel.MCPProtocol.valid_tool_name?/1`;
+  only the public `as` name uses PtcRunner's own naming rule.
+
   `schema/0` is the canonical structural description shipped for editor and
   human feedback. Runtime decoding remains authoritative for semantic checks
   such as unique public tool names, credential references, reserved headers,
@@ -43,7 +54,9 @@ defmodule PtcRunner.Kernel.HostConfig do
   alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.MCPEndpoint
   alias PtcRunner.Kernel.MCPOAuth.Authority
+  alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.SchemaPath
   alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Lisp.RetainedSize
@@ -125,6 +138,7 @@ defmodule PtcRunner.Kernel.HostConfig do
           | %{
               type: :streamable_http,
               endpoint: binary(),
+              allow_insecure_loopback: boolean(),
               auth: [map()],
               oauth: Authority.t() | nil
             }
@@ -245,6 +259,7 @@ defmodule PtcRunner.Kernel.HostConfig do
              :host_unavailable
              | :host_invalid
              | {:installation_revision_missing, binary()}
+             | {:installation_endpoint_invalid, binary()}
              | {:host_schema_invalid, [PtcRunner.Kernel.CommandPath.segment()]}
              | {:installed_limit_invalid, [PtcRunner.Kernel.CommandPath.segment()]}}
   def load_command(path) when is_binary(path) do
@@ -287,6 +302,7 @@ defmodule PtcRunner.Kernel.HostConfig do
       {:error, {code, _detail}} = error
       when code in [
              :installation_revision_missing,
+             :installation_endpoint_invalid,
              :host_schema_invalid,
              :installed_limit_invalid
            ] ->
@@ -329,6 +345,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   @doc false
   def decode_command(value, directory) when is_map(value) and is_binary(directory) do
     with :ok <- require_installation_revisions(value),
+         :ok <- require_admissible_endpoints(value),
          :ok <- validate_command_schema(value),
          :ok <-
            schema_result(
@@ -387,6 +404,44 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp require_installation_revisions(_value), do: :ok
+
+  # An inadmissible endpoint is a static fact about the document, so it is
+  # reported here rather than as the connectivity failure it used to become at
+  # acquisition. It names the installation through a subject, not through the
+  # path: `SchemaPath` deliberately stops at `install` rather than echoing an
+  # operator-chosen alias, and the alias is safe here only because it is
+  # matched against `@name` first.
+  #
+  # This runs ahead of the generic schema pass so the refusal says which rule
+  # was broken. Anything structurally unfit for the check is left to that pass.
+  defp require_admissible_endpoints(%{"install" => installations})
+       when is_map(installations) do
+    installations
+    |> Map.keys()
+    |> Enum.sort()
+    |> Enum.find(fn name ->
+      valid_name?(name) and inadmissible_endpoint?(Map.get(installations, name))
+    end)
+    |> case do
+      nil -> :ok
+      name -> {:error, {:installation_endpoint_invalid, name}}
+    end
+  end
+
+  defp require_admissible_endpoints(_value), do: :ok
+
+  defp inadmissible_endpoint?(%{"transport" => %{"type" => "streamable_http"} = transport})
+       when is_map(transport) do
+    endpoint = Map.get(transport, "endpoint")
+    insecure_loopback = Map.get(transport, "allow_insecure_loopback", false)
+    auth = Map.get(transport, "auth", [])
+    oauth = Map.get(transport, "oauth")
+
+    is_binary(endpoint) and is_boolean(insecure_loopback) and is_list(auth) and
+      installed_endpoint(endpoint, insecure_loopback, auth, oauth) != :ok
+  end
+
+  defp inadmissible_endpoint?(_installation), do: false
 
   defp schema_result(:ok, _segments), do: :ok
 
@@ -917,18 +972,47 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp http_transport(value, credentials) do
-    with :ok <- exact_keys(value, ~w(type endpoint auth oauth), ~w(type endpoint)),
+    with :ok <-
+           exact_keys(
+             value,
+             ~w(type endpoint allow_insecure_loopback auth oauth),
+             ~w(type endpoint)
+           ),
          endpoint when is_binary(endpoint) <- value["endpoint"],
          true <- valid_string?(endpoint, 4_096),
+         insecure_loopback when is_boolean(insecure_loopback) <-
+           Map.get(value, "allow_insecure_loopback", false),
          {:ok, auth} <- auth(Map.get(value, "auth", []), credentials),
          {:ok, oauth} <-
            oauth_authority(Map.get(value, "oauth"), endpoint, credentials),
-         true <- auth == [] or is_nil(oauth) do
-      {:ok, %{type: :streamable_http, endpoint: endpoint, auth: auth, oauth: oauth}}
+         true <- auth == [] or is_nil(oauth),
+         :ok <- installed_endpoint(endpoint, insecure_loopback, auth, oauth) do
+      {:ok,
+       %{
+         type: :streamable_http,
+         endpoint: endpoint,
+         allow_insecure_loopback: insecure_loopback,
+         auth: auth,
+         oauth: oauth
+       }}
     else
       _reason -> {:error, :invalid_transport}
     end
   end
+
+  # Runtime decoding owns this rule; `http_schema/0` mirrors it so an editor can
+  # report the same refusal, and `admissible_endpoints/1` reports it as its own
+  # diagnostic before the generic schema failure.
+  #
+  # The allowance is credential-free: an installed `auth` binding or an OAuth
+  # authority must never cross a plaintext socket. That is a guarantee about
+  # configured host credentials and nothing more — tool arguments and results
+  # travelling over a loopback socket are still plaintext.
+  defp installed_endpoint(_endpoint, true, auth, oauth) when auth != [] or not is_nil(oauth),
+    do: {:error, :invalid_endpoint}
+
+  defp installed_endpoint(endpoint, insecure_loopback, _auth, _oauth),
+    do: MCPEndpoint.validate(endpoint, insecure_loopback)
 
   defp oauth_authority(nil, _endpoint, _credentials), do: {:ok, nil}
 
@@ -1013,10 +1097,13 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp tools(_value), do: {:error, :invalid_tools}
 
+  # The upstream key is the server's own tool name, so it is held to the MCP
+  # protocol rule rather than to PtcRunner's naming rule. Only `as` crosses the
+  # capability boundary, and that one stays lowercase-dotted.
   defp tool(upstream, value) do
     allowed = ~w(as effect description error_feedback model_visible)
 
-    with true <- valid_name?(upstream),
+    with true <- MCPProtocol.valid_tool_name?(upstream),
          true <- is_map(value),
          :ok <- exact_keys(value, allowed, ~w(as effect)),
          as when is_binary(as) <- value["as"],
@@ -1481,6 +1568,7 @@ defmodule PtcRunner.Kernel.HostConfig do
     %{
       "type" => %{"const" => "streamable_http"},
       "endpoint" => bounded_string(4_096),
+      "allow_insecure_loopback" => %{"type" => "boolean", "default" => false},
       "auth" => %{
         "type" => "array",
         "maxItems" => 8,
@@ -1494,6 +1582,31 @@ defmodule PtcRunner.Kernel.HostConfig do
       "required" => ["auth", "oauth"],
       "properties" => %{"auth" => %{"minItems" => 1}}
     })
+    |> Map.put("oneOf", [secure_endpoint_schema(), loopback_endpoint_schema()])
+  end
+
+  # Mirrors `installed_endpoint/4`, which stays authoritative. An HTTPS endpoint
+  # carries no allowance; a plain-HTTP endpoint requires one, reaches a literal
+  # loopback address only, and admits no configured host credential.
+  defp secure_endpoint_schema do
+    %{
+      "properties" => %{
+        "endpoint" => %{"pattern" => "^https://"},
+        "allow_insecure_loopback" => %{"const" => false}
+      }
+    }
+  end
+
+  defp loopback_endpoint_schema do
+    %{
+      "properties" => %{
+        "endpoint" => %{"pattern" => "^http://(127\\.0\\.0\\.1|\\[::1\\])(:[0-9]+)?([/?]|$)"},
+        "allow_insecure_loopback" => %{"const" => true},
+        "auth" => %{"maxItems" => 0}
+      },
+      "required" => ["allow_insecure_loopback"],
+      "not" => %{"required" => ["oauth"]}
+    }
   end
 
   defp oauth_schema do
@@ -1657,7 +1770,7 @@ defmodule PtcRunner.Kernel.HostConfig do
       "type" => "object",
       "minProperties" => 1,
       "maxProperties" => @max_tools,
-      "propertyNames" => name_schema(),
+      "propertyNames" => upstream_tool_name_schema(),
       "additionalProperties" =>
         required_object(
           %{
@@ -1706,6 +1819,11 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp name_schema,
     do: %{"type" => "string", "pattern" => "^[a-z][a-z0-9._-]{0,127}$"}
+
+  # Mirrors `PtcRunner.Kernel.MCPProtocol.valid_tool_name?/1`: an upstream name
+  # is whatever the installed server advertises.
+  defp upstream_tool_name_schema,
+    do: %{"type" => "string", "pattern" => "^[^\\s\\x00-\\x1f\\x7f]{1,128}$"}
 
   defp installation_revision_schema, do: name_schema()
 

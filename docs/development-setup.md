@@ -139,6 +139,11 @@ go -C test/support/mcp_go_stateless build \
 "$mcp_server_dir/ptc-mcp-http-server" -host 127.0.0.1 -port 8000
 ```
 
+This server speaks plain HTTP, so a host document reaching it needs
+`"allow_insecure_loopback": true` on the transport. See
+[reaching a local server over plain HTTP](guides/connecting-tools-with-mcp.md#reach-a-local-server-over-plain-http)
+for the rule and a `doctor --connect` baseline.
+
 The credential-free interoperability test runs as a dedicated PR check and can
 be run from another terminal:
 

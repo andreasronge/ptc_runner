@@ -135,17 +135,68 @@ Streamable HTTP names a remote endpoint and optional static authentication:
 }
 ```
 
-The endpoint must be `https`. A host document cannot name a plain-`http`
-endpoint, including on loopback, so a local server reached this way needs TLS;
-the in-process Elixir API has a separate loopback allowance that host documents
-deliberately do not expose. A rejected endpoint fails the installation's
-connectivity check, which `mix ptc doctor --connect` reports as
-`provider_unavailable`.
+The endpoint must be `https`, with one narrow exception for local development
+described below. It is checked when the document loads, not when the server is
+contacted, so a malformed or plain-`http` endpoint fails `mix ptc validate` and
+plain `mix ptc doctor` as `installation_endpoint_invalid` naming the
+installation — before anything is dialled.
 
 Supported static schemes are `bearer`, `basic`, and header-named `api_key`.
 Protocol headers such as `authorization`, `content-type`, `host`, and `mcp-*`
-cannot be supplied as API-key headers. The generated host schema contains the
-complete transport shape and bounds.
+cannot be supplied as API-key headers. Upstream tool names are the server's own,
+so they are held to the MCP protocol rule rather than PtcRunner's; only the
+public `as` name must be lowercase-dotted. The generated host schema contains
+the complete transport shape and bounds.
+
+## Reach a local server over plain HTTP
+
+TLS against a development server is usually more trouble than it is worth, so a
+transport may opt out for loopback only:
+
+```json
+"transport": {
+  "type": "streamable_http",
+  "endpoint": "http://127.0.0.1:8055",
+  "allow_insecure_loopback": true
+}
+```
+
+The rule is deliberately narrow. Plain `http` is admitted only when
+
+- `allow_insecure_loopback` is `true`,
+- the host is the literal `127.0.0.1` or `[::1]` — `localhost` is a name that
+  resolves wherever the resolver says, so it is not a loopback address here,
+- the transport declares no `auth` entries, and
+- the transport declares no `oauth` block.
+
+The last two make the allowance credential-free: **no configured host credential
+crosses a plaintext socket.** That is a guarantee about `auth` bindings and
+OAuth tokens, and nothing more — tool arguments and results still travel over
+that socket in the clear, so do not point this at data you would not want a
+local process to read.
+
+Setting the flag against an `https` endpoint is refused rather than ignored, so
+moving a server to TLS without removing the allowance fails loudly.
+
+The repository ships a server you can check this against. From a source
+checkout:
+
+```console
+go -C test/support/mcp_go_stateless build -o /tmp/ptc-mcp-http-server .
+/tmp/ptc-mcp-http-server -host 127.0.0.1 -port 8055 &
+```
+
+Install its `cityTime` tool with the transport above and confirm the round trip
+without any credential:
+
+```console
+$ mix ptc doctor ptc.json --host-config ptc-host.json --connect
+{"checks":[…,{"code":"available","name":"provider/workspace/connectivity","status":"pass"}],
+ "readiness":"ready"}
+```
+
+That is the baseline to diff a real host document against when a remote
+installation will not connect.
 
 ## Authorize OAuth-protected HTTP explicitly
 
