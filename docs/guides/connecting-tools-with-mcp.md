@@ -178,22 +178,121 @@ local process to read.
 Setting the flag against an `https` endpoint is refused rather than ignored, so
 moving a server to TLS without removing the allowance fails loudly.
 
-The repository ships a server you can check this against. From a source
-checkout:
+### A complete local example
+
+The repository ships a server to check this against, so remote MCP has a
+baseline that runs before you debug one that does not. From a source checkout:
 
 ```console
 go -C test/support/mcp_go_stateless build -o /tmp/ptc-mcp-http-server .
 /tmp/ptc-mcp-http-server -host 127.0.0.1 -port 8055 &
 ```
 
-Install its `cityTime` tool with the transport above and confirm the round trip
-without any credential:
+It exposes one read tool, `cityTime`. Four files reach it, with no credential
+anywhere. The host document installs it:
+
+```json
+{
+  "install": {
+    "workspace": {
+      "source": "mcp",
+      "installation_revision": "workspace-v1",
+      "transport": {
+        "type": "streamable_http",
+        "endpoint": "http://127.0.0.1:8055",
+        "allow_insecure_loopback": true
+      },
+      "tools": {
+        "cityTime": {
+          "as": "workspace.city_time",
+          "effect": "read",
+          "description": "Get the current time in nyc, sf, or boston."
+        }
+      }
+    }
+  }
+}
+```
+
+`cityTime` is the server's own name and is written exactly as the server spells
+it; only the public `as` name follows PtcRunner's lowercase-dotted rule.
+
+The manifest selects the installation into a mission, because **MCP providers
+are mission-only** — a workflow component that calls `tool/workspace.city_time`
+directly fails with `capability_requirement_missing`:
+
+```json
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "main", "path": "main.clj", "dependencies": ["kernel"]},
+      {"library": "kernel"}
+    ],
+    "entry": "main/run"
+  },
+  "input": {"value": {"city": "nyc"}},
+  "providers": {
+    "mission": [{"name": "workspace", "config": {"allow": ["workspace.city_time"]}}]
+  },
+  "missions": {
+    "default": {
+      "components": [{"id": "clock", "path": "clock.clj"}],
+      "providers": ["workspace"]
+    }
+  }
+}
+```
+
+The mission component owns the tool call, and the workflow drives the mission
+through `kernel/eval-source`, so this example needs no model:
+
+```clojure
+;; clock.clj — mission-only access to the installed server
+(ns clock "Mission-only access to the installed MCP server." {:visibility :prompt})
+
+(defn city-time
+  "Return the current time in one named city."
+  {:signature "(city :string) -> :any"}
+  [city]
+  (let [response (tool/workspace.city_time {"city" city})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      (fail response))))
+```
+
+```clojure
+;; main.clj — workflow entry
+(ns main "Workflow entry: drive the mission without a model." {:visibility :prompt})
+
+(defn run
+  "Ask the mission for one city's time."
+  {:signature "(input :map) -> :any"}
+  [input]
+  (return (kernel/eval-source "default"
+            (str "(clock/city-time \"" (get input "city") "\")"))))
+```
+
+`doctor --connect` proves the installation is reachable:
 
 ```console
 $ mix ptc doctor ptc.json --host-config ptc-host.json --connect
 {"checks":[…,{"code":"available","name":"provider/workspace/connectivity","status":"pass"}],
  "readiness":"ready"}
 ```
+
+That check answers for the transport only. A configuration can pass it and
+still fail at run time — a mission the manifest never grants the provider to,
+for instance — so run the thing as well:
+
+```console
+$ mix ptc run ptc.json --host-config ptc-host.json
+{"outcome":"continued","duration_ms":19,
+ "value":{"text":["The current time in New York City is 2026-08-16T07:07:52-04:00"]}}
+```
+
+When a real remote installation will not connect, diff its host document
+against this one.
 
 That is the baseline to diff a real host document against when a remote
 installation will not connect.
