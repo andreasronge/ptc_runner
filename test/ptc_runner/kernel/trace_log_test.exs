@@ -84,10 +84,14 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     complete_prelude = %{
       "component_ids" => ["kernel", "llm", "agent.core"],
       "dependency_indices" => [[], [], [0, 1]],
-      "hash" => "abc"
+      "hash" => String.duplicate("a", 64)
     }
 
-    minimal_prelude = %{"component_ids" => ["kernel"], "hash" => "def"}
+    minimal_prelude = %{
+      "component_ids" => ["kernel"],
+      "dependency_indices" => [[]],
+      "hash" => String.duplicate("d", 64)
+    }
 
     path = Path.join(directory, "trace.jsonl")
 
@@ -113,7 +117,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
 
     summaries = Map.new(items, &{&1["run_id"], &1})
 
-    # Optional dependency indices are passed through rather than invented.
+    # Dependency indices are passed through rather than invented.
     assert summaries["complete-run"]["workflow_prelude"] == complete_prelude
     assert summaries["minimal-run"]["workflow_prelude"] == minimal_prelude
     assert summaries["complete-run"]["component_overrides"] == [component_override]
@@ -121,15 +125,117 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   end
 
   @tag :tmp_dir
-  test "run summaries expose total evaluations and filter by workflow bundle", %{
+  test "prelude projections load only at producer grade", %{tmp_dir: directory} do
+    hash = String.duplicate("a", 64)
+
+    valid = %{
+      "component_ids" => ["kernel", "llm", "agent.core"],
+      "dependency_indices" => [[], [], [0, 1]],
+      "hash" => hash
+    }
+
+    # Written directly, because appending an invalid projection already fails
+    # closed on the producer side; loading must not be the weaker gate.
+    load = fn prelude, run_id ->
+      path = Path.join(directory, "#{run_id}.jsonl")
+
+      events = [
+        decoded_event(run_id, 1, "run-started", %{"workflow_prelude" => prelude}),
+        decoded_event(run_id, 2, "run-stopped", %{"outcome" => "ok"})
+      ]
+
+      File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+
+      with {:ok, trace_log} <- TraceLog.new(source: {:file, path}),
+           do: TraceLog.query(trace_log, :list_runs, %{})
+    end
+
+    assert {:ok, _page} = load.(valid, "valid")
+    assert {:ok, _page} = load.(%{"component_ids" => [], "dependency_indices" => []}, "no-bundle")
+
+    # A bundle that compiled no component still commits to an identity.
+    assert {:ok, _page} =
+             load.(
+               %{"component_ids" => [], "dependency_indices" => [], "hash" => hash},
+               "empty-bundle"
+             )
+
+    rejected = %{
+      "duplicate-ids" => %{valid | "component_ids" => ["kernel", "kernel", "agent.core"]},
+      "absent-indices" => Map.delete(valid, "dependency_indices"),
+      "short-indices" => %{valid | "dependency_indices" => [[], []]},
+      "forward-reference" => %{valid | "dependency_indices" => [[], [2], [0, 1]]},
+      "self-reference" => %{valid | "dependency_indices" => [[], [], [2]]},
+      "unsorted-indices" => %{valid | "dependency_indices" => [[], [], [1, 0]]},
+      "duplicate-indices" => %{valid | "dependency_indices" => [[], [], [0, 0]]},
+      "prefixed-hash" => %{valid | "hash" => "sha256:" <> hash},
+      "uppercase-hash" => %{valid | "hash" => String.upcase(hash)},
+      "absent-hash" => Map.delete(valid, "hash"),
+      "components-without-hash" => %{valid | "hash" => nil},
+      "hash-without-projection" => %{
+        "component_ids" => ["kernel"],
+        "dependency_indices" => [[]]
+      }
+    }
+
+    for {run_id, prelude} <- rejected do
+      assert {:error, :malformed_source} = load.(prelude, run_id),
+             "expected #{run_id} to fail closed"
+    end
+
+    assert {:error, :malformed_source} =
+             TraceLog.append_jsonl(
+               Path.join(directory, "appended.jsonl"),
+               [
+                 decoded_event("appended", 1, "run-started", %{
+                   "workflow_prelude" => rejected["absent-indices"]
+                 })
+               ]
+             )
+  end
+
+  @tag :tmp_dir
+  test "mission prelude projections are validated like the workflow projection", %{
     tmp_dir: directory
   } do
     path = Path.join(directory, "trace.jsonl")
 
     events = [
+      decoded_event("mission-run", 1, "run-started", %{
+        "missions" => %{
+          "default" => %{
+            "prelude" => %{
+              "component_ids" => ["kernel"],
+              "dependency_indices" => [[0]],
+              "hash" => String.duplicate("a", 64)
+            }
+          }
+        }
+      }),
+      decoded_event("mission-run", 2, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+    assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
+  end
+
+  @tag :tmp_dir
+  test "run summaries expose total evaluations and filter by workflow bundle", %{
+    tmp_dir: directory
+  } do
+    path = Path.join(directory, "trace.jsonl")
+    bundle_a = String.duplicate("a", 64)
+    bundle_b = String.duplicate("b", 64)
+
+    events = [
       decoded_event("bundle-a-run", 1, "run-started", %{
         "labels" => %{"name" => "sha256:same-name"},
-        "workflow_prelude" => %{"component_ids" => ["kernel"], "hash" => "bundle-a"}
+        "workflow_prelude" => %{
+          "component_ids" => ["kernel"],
+          "dependency_indices" => [[]],
+          "hash" => bundle_a
+        }
       }),
       decoded_event("bundle-a-run", 2, "evaluation-started", %{
         "environment" => "workflow",
@@ -143,7 +249,11 @@ defmodule PtcRunner.Kernel.TraceLogTest do
       decoded_event("bundle-a-run", 4, "run-stopped", %{"outcome" => "ok"}),
       decoded_event("bundle-b-run", 1, "run-started", %{
         "labels" => %{"name" => "sha256:same-name"},
-        "workflow_prelude" => %{"component_ids" => ["kernel"], "hash" => "bundle-b"}
+        "workflow_prelude" => %{
+          "component_ids" => ["kernel"],
+          "dependency_indices" => [[]],
+          "hash" => bundle_b
+        }
       }),
       decoded_event("bundle-b-run", 2, "run-stopped", %{"outcome" => "ok"})
     ]
@@ -160,16 +270,16 @@ defmodule PtcRunner.Kernel.TraceLogTest do
                   "subordinate_evaluations" => 0
                 }
               ]
-            }} = TraceLog.query(trace_log, :list_runs, %{"bundle" => "bundle-a"})
+            }} = TraceLog.query(trace_log, :list_runs, %{"bundle" => bundle_a})
 
     assert {:ok, %{"items" => [%{"run_id" => "bundle-b-run"}]}} =
-             TraceLog.query(trace_log, :list_runs, %{"bundle" => "bundle-b"})
+             TraceLog.query(trace_log, :list_runs, %{"bundle" => bundle_b})
 
     assert {:ok, %{"runs" => 1, "evaluations" => 1}} =
-             TraceLog.query(trace_log, :counters, %{"bundle" => "bundle-a"})
+             TraceLog.query(trace_log, :counters, %{"bundle" => bundle_a})
 
     assert {:error, :invalid_query} =
-             TraceLog.query(trace_log, :list_runs, %{"bundle_hash" => "bundle-a"})
+             TraceLog.query(trace_log, :list_runs, %{"bundle_hash" => bundle_a})
   end
 
   @tag :tmp_dir

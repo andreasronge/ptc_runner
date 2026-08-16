@@ -313,6 +313,18 @@ Every event uses schema version 2. `run-started` requires the plural
 `mission_name`; workflow and lifecycle events forbid it. Unsupported versions
 and missing current fields fail closed rather than being inferred or projected.
 
+Every prelude projection on `run-started` — the workflow projection and each
+mission's alike — is validated to producer grade rather than interpreted
+leniently: unique component IDs, a `dependency_indices` list of the same
+length as `component_ids` whose entries are unique and ascending and name only
+strictly earlier positions, and a `hash` that is a bare lowercase SHA-256
+digest. A nil `hash` means no bundle at all and can therefore name no
+components; a bundle always commits to a digest, whether or not it compiled
+any component. The projection
+is the only canonical commitment a private `prelude-source` record can be
+proven against, so a projection that cannot be reconstructed is
+`:malformed_source` rather than a weaker fact.
+
 ## Required run metadata
 
 `analysis/runs` and `analysis/open` expose bounded sanitized metadata

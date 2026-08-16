@@ -33,6 +33,9 @@ defmodule PtcRunner.Kernel.FrozenBundle do
   and `valid?/1` support the Kernel's construction boundary.
   """
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.DeterministicJSON
+
+  @hash_domain <<"ptc.frozen-bundle.v2", 0>>
 
   @enforce_keys [:components, :component_ids, :hash, :prelude]
   defstruct [:components, :component_ids, :hash, :prelude, :attestation]
@@ -95,6 +98,82 @@ defmodule PtcRunner.Kernel.FrozenBundle do
 
       {:error, _reason} = error ->
         error
+    end
+  end
+
+  @spec identity([%{id: binary(), dependencies: [binary()], source_hash: binary()}]) ::
+          {:ok, binary()} | {:error, :invalid_bundle}
+  @doc """
+  Computes the graph hash of a component identity set.
+
+  The sole owner of the `ptc.frozen-bundle.v2` framing documented above. The
+  compiler derives a bundle's hash through it, and validators recompute the
+  same identity from a canonical projection plus independently supplied source
+  hashes, so a proven identity cannot drift from the one the compiler sealed.
+
+  Each entry needs only `id`, direct `dependencies`, and `source_hash`;
+  ordering and dependency deduplication are imposed here rather than trusted
+  from the caller.
+  """
+  def identity(components) when is_list(components) do
+    # Every entry is proven before any is sorted, so a caller that supplies a
+    # malformed set is refused rather than raising partway through framing.
+    if Enum.all?(components, &framable?/1),
+      do: components |> Enum.sort_by(& &1.id) |> framed_identity(),
+      else: {:error, :invalid_bundle}
+  end
+
+  def identity(_components), do: {:error, :invalid_bundle}
+
+  defp framable?(%{id: id, dependencies: dependencies, source_hash: source_hash}),
+    do:
+      is_binary(id) and is_binary(source_hash) and is_list(dependencies) and
+        Enum.all?(dependencies, &is_binary/1)
+
+  defp framable?(_component), do: false
+
+  defp framed_identity(components) do
+    components
+    |> Enum.reduce_while({:ok, []}, fn component, {:ok, records} ->
+      case component_record(component) do
+        {:ok, record} -> {:cont, {:ok, [record | records]}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, records} ->
+        framed = [@hash_domain, <<length(records)::unsigned-big-32>>, Enum.reverse(records)]
+
+        {:ok, :crypto.hash(:sha256, IO.iodata_to_binary(framed)) |> Base.encode16(case: :lower)}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp component_record(%{id: id, dependencies: dependencies, source_hash: source_hash}) do
+    encoded =
+      DeterministicJSON.encode(
+        {:object,
+         [
+           {"dependencies", Enum.sort(Enum.uniq(dependencies))},
+           {"source_hash", source_hash}
+         ]}
+      )
+
+    case encoded do
+      {:ok, payload} ->
+        {:ok,
+         [
+           <<0x01>>,
+           <<byte_size(id)::unsigned-big-32>>,
+           id,
+           <<byte_size(payload)::unsigned-big-64>>,
+           payload
+         ]}
+
+      {:error, _reason} ->
+        {:error, :invalid_bundle}
     end
   end
 

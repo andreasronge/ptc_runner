@@ -1,6 +1,7 @@
 defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
   @moduledoc false
 
+  alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.ResultIdentity
@@ -168,11 +169,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     [
       event(run_id, 1, "run-started", %{
         "missions" => %{"default" => %{}},
-        "workflow_prelude" => %{
-          "component_ids" => ["component-#{run_id}"],
-          "dependency_indices" => [],
-          "hash" => "prelude-hash"
-        }
+        "workflow_prelude" => prelude_projection("component-#{run_id}")
       }),
       event(run_id, 2, "capability-started", %{
         "capability_id" => "llm-#{run_id}",
@@ -211,15 +208,34 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     ]
   end
 
+  @doc """
+  Projects a one-component environment whose only source is the fixture source.
+
+  Framed exactly as the compiler frames it, so a `prelude-source` record
+  naming `component_id` can be proven against it rather than merely asserted.
+  """
+  def prelude_projection(component_id) do
+    {:ok, hash} =
+      FrozenBundle.identity([
+        %{id: component_id, dependencies: [], source_hash: @source_hash}
+      ])
+
+    %{
+      "component_ids" => [component_id],
+      "dependency_indices" => [[]],
+      "hash" => hash
+    }
+  end
+
   defp boundary_failure_events(run_id) do
     [started | rest] = canonical_events(run_id)
 
     started =
-      put_in(started, ["data", "missions", "default", "prelude"], %{
-        "component_ids" => ["mission-component-#{run_id}"],
-        "dependency_indices" => [],
-        "hash" => "mission-prelude-hash"
-      })
+      put_in(
+        started,
+        ["data", "missions", "default", "prelude"],
+        prelude_projection("mission-component-#{run_id}")
+      )
 
     [started | rest]
   end
@@ -293,6 +309,13 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
       prelude_calls: [
         %{ref: "fixture/value", component_id: "mission-component-#{run_id}"}
       ]
+    })
+
+    emit!(sink, "prelude-source", %{component_id: "component-#{run_id}"}, %{
+      environment: :workflow,
+      source: @source,
+      source_hash: @source_hash,
+      source_bytes: byte_size(@source)
     })
 
     emit!(sink, "prelude-source", %{component_id: "mission-component-#{run_id}"}, %{
