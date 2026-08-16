@@ -233,24 +233,37 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
 
   defp valid_path_for_row?(
          %CommandPath{authority: authority},
-         %CommandSource{kind: kind, contract_authority: contract_authority},
+         %CommandSource{kind: kind} = source,
          row
        ) do
     DiagnosticCatalog.path_policy(row.phase, row.code, kind) == :optional and
-      valid_path_authority?(authority, contract_authority, kind, row)
+      valid_path_authority?(authority, source, row)
   end
 
   defp valid_path_for_row?(_path, _source, _row), do: false
 
-  defp valid_path_authority?(:manifest, nil, :application, %{phase: :application}), do: true
-  defp valid_path_authority?(:host, nil, :host, %{phase: :host}), do: true
+  defp valid_path_authority?(
+         :manifest,
+         %CommandSource{kind: :application, contract_authority: nil},
+         %{phase: :application}
+       ),
+       do: true
+
+  defp valid_path_authority?(
+         :host,
+         %CommandSource{kind: :host, contract_authority: nil},
+         %{phase: :host}
+       ),
+       do: true
 
   # A contract that failed to compile has no compiled contract authority to
   # bind, so its fault is located inside the submitted schema document instead.
+  # The authority carries the document's logical name and must equal the source
+  # the diagnostic names, so a pointer minted for one contract file can never be
+  # attached to a diagnostic about another.
   defp valid_path_authority?(
-         :value_contract_schema,
-         nil,
-         kind,
+         {:value_contract_schema, name},
+         %CommandSource{kind: kind, name: name, contract_authority: nil},
          %{phase: :application, code: :contract_invalid}
        )
        when kind in [:input_contract, :result_contract],
@@ -258,16 +271,14 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
 
   defp valid_path_authority?(
          :component_override,
-         nil,
-         :component_override,
+         %CommandSource{kind: :component_override, contract_authority: nil},
          %{phase: :application, code: :override_invalid}
        ),
        do: true
 
   defp valid_path_authority?(
          {:contract, authority},
-         authority,
-         kind,
+         %CommandSource{kind: kind, contract_authority: authority},
          %{phase: :application, code: :input_contract_failed}
        )
        when kind in [:application, :external_input, :input_contract],
@@ -275,8 +286,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
 
   defp valid_path_authority?(
          {:contract, authority},
-         authority,
-         kind,
+         %CommandSource{kind: kind, contract_authority: authority},
          %{phase: :application, code: code}
        )
        when kind in [:input_contract, :result_contract] and
@@ -285,13 +295,12 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
 
   defp valid_path_authority?(
          {:contract, authority},
-         authority,
-         :result_contract,
+         %CommandSource{kind: :result_contract, contract_authority: authority},
          %{phase: :result_cleanup, code: :result_contract_failed}
        ),
        do: true
 
-  defp valid_path_authority?(_authority, _contract_authority, _kind, _row), do: false
+  defp valid_path_authority?(_authority, _source, _row), do: false
 
   defp valid_span?(nil, _source), do: true
 

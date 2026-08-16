@@ -44,19 +44,21 @@ defmodule PtcRunner.Kernel.ContractSchemaDiagnostic do
   @type detail :: %{rule: atom(), path: CommandPath.t() | nil}
 
   @doc """
-  Locates a rejection inside the document it came from.
+  Locates a rejection inside the named document it came from.
 
-  The path is dropped rather than guessed when the segments do not resolve, so
-  the diagnostic degrades to the catalog message instead of pointing somewhere
-  the author cannot open.
+  The name and the document are taken together so a pointer can never be minted
+  against one contract file and reported under another. The path is dropped
+  rather than guessed when the segments do not resolve — a non-object contract
+  document has no pointer at all — so the diagnostic degrades to a location-free
+  rule instead of naming somewhere the author cannot open.
   """
-  @spec detail(map(), term()) :: detail()
-  def detail(document, %{rule: rule, segments: segments})
+  @spec detail(binary(), term(), term()) :: detail()
+  def detail(name, document, %{rule: rule, segments: segments})
       when is_atom(rule) and is_list(segments) do
-    %{rule: rule, path: authorized_path(document, segments)}
+    %{rule: rule, path: authorized_path(name, document, segments)}
   end
 
-  def detail(_document, _rejection), do: %{rule: :unsupported_schema, path: nil}
+  def detail(_name, _document, _rejection), do: %{rule: :unsupported_schema, path: nil}
 
   @doc "Renders one rule as its fixed message, or declines so the catalog literal stands."
   @spec message(term()) :: {:ok, binary()} | :error
@@ -86,8 +88,8 @@ defmodule PtcRunner.Kernel.ContractSchemaDiagnostic do
   @spec rules() :: [atom()]
   def rules, do: JSONSchema.rules() ++ ValueContract.union_rules()
 
-  defp authorized_path(document, segments) do
-    case CommandPath.value_contract_schema(document, segments) do
+  defp authorized_path(name, document, segments) do
+    case CommandPath.value_contract_schema(name, document, segments) do
       {:ok, path} -> path
       {:error, :invalid_command_path} -> nil
     end

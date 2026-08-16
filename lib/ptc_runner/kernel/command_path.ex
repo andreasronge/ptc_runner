@@ -4,11 +4,14 @@ defmodule PtcRunner.Kernel.CommandPath do
 
   Paths are minted only after every property or index has been walked through
   the host/manifest schema, the exact selected branch of one compiled value
-  contract, or the shared discriminator projection when no tagged-union branch
-  matches. The attestation prevents a caller-authored segment list from being
-  substituted at the diagnostic boundary.
+  contract, the shared discriminator projection when no tagged-union branch
+  matches, or — for a contract schema rejected before it compiles — the
+  submitted document itself. The attestation prevents a caller-authored segment
+  list from being substituted at the diagnostic boundary, and carries the
+  authority that admitted it so a path cannot be moved to another document.
   """
 
+  alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandContractAuthority
   alias PtcRunner.Kernel.ComponentOverride
@@ -29,7 +32,7 @@ defmodule PtcRunner.Kernel.CommandPath do
             :host
             | :manifest
             | :component_override
-            | :value_contract_schema
+            | {:value_contract_schema, binary()}
             | {:contract, CommandContractAuthority.t()},
           attestation: binary()
         }
@@ -64,13 +67,21 @@ defmodule PtcRunner.Kernel.CommandPath do
   submitted document is the authority: a pointer is minted only when every
   segment resolves in the document the author wrote. The pointer therefore
   always names a key or index that file actually carries.
-  """
-  @spec value_contract_schema(map(), [segment()]) :: {:ok, t()} | {:error, :invalid_command_path}
-  def value_contract_schema(document, segments)
-      when is_map(document) and not is_struct(document) and is_list(segments),
-      do: attest(segments, :value_contract_schema, resolves?(segments, document))
 
-  def value_contract_schema(_document, _segments), do: {:error, :invalid_command_path}
+  The document's logical name is attested with the segments. A diagnostic
+  boundary requires it to equal the source it names, so a pointer minted for
+  one contract file cannot be attached to a diagnostic about another.
+  """
+  @spec value_contract_schema(binary(), map(), [segment()]) ::
+          {:ok, t()} | {:error, :invalid_command_path}
+  def value_contract_schema(name, document, segments)
+      when is_binary(name) and is_map(document) and not is_struct(document) and is_list(segments) do
+    if ApplicationSource.valid_name?(name),
+      do: attest(segments, {:value_contract_schema, name}, resolves?(segments, document)),
+      else: {:error, :invalid_command_path}
+  end
+
+  def value_contract_schema(_name, _document, _segments), do: {:error, :invalid_command_path}
 
   @spec valid?(term()) :: boolean()
   def valid?(%__MODULE__{authority: authority, attestation: attestation} = path),
@@ -109,9 +120,11 @@ defmodule PtcRunner.Kernel.CommandPath do
 
   defp attest(_segments, _authority, false), do: {:error, :invalid_command_path}
 
-  defp valid_authority?(authority)
-       when authority in [:host, :manifest, :component_override, :value_contract_schema],
-       do: true
+  defp valid_authority?(authority) when authority in [:host, :manifest, :component_override],
+    do: true
+
+  defp valid_authority?({:value_contract_schema, name}) when is_binary(name),
+    do: ApplicationSource.valid_name?(name)
 
   defp valid_authority?({:contract, %CommandContractAuthority{} = authority}),
     do: CommandContractAuthority.valid?(authority)

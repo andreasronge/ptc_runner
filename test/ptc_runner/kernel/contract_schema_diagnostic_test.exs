@@ -1,10 +1,14 @@
 defmodule PtcRunner.Kernel.ContractSchemaDiagnosticTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandPath
+  alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.ValueContract
+
+  @name "input.schema.json"
 
   # A rule the compiler can emit but this boundary has no message for degrades
   # silently to the catalog literal, which is the blind refusal this closed
@@ -80,7 +84,7 @@ defmodule PtcRunner.Kernel.ContractSchemaDiagnosticTest do
     }
 
     assert %{rule: :unsupported_type, path: %CommandPath{} = path} =
-             ContractSchemaDiagnostic.detail(document, %{
+             ContractSchemaDiagnostic.detail(@name, document, %{
                rule: :unsupported_type,
                segments: [property: "properties", property: "f", property: "type"]
              })
@@ -88,7 +92,7 @@ defmodule PtcRunner.Kernel.ContractSchemaDiagnosticTest do
     assert CommandPath.to_pointer(path) == "/properties/f/type"
 
     assert {:ok, indexed} =
-             CommandPath.value_contract_schema(document, property: "oneOf", index: 0)
+             CommandPath.value_contract_schema(@name, document, property: "oneOf", index: 0)
 
     assert CommandPath.to_pointer(indexed) == "/oneOf/0"
 
@@ -100,13 +104,55 @@ defmodule PtcRunner.Kernel.ContractSchemaDiagnosticTest do
           ["properties"]
         ] do
       assert {:error, :invalid_command_path} =
-               CommandPath.value_contract_schema(document, fabricated)
+               CommandPath.value_contract_schema(@name, document, fabricated)
 
       assert %{rule: :unsupported_type, path: nil} =
-               ContractSchemaDiagnostic.detail(document, %{
+               ContractSchemaDiagnostic.detail(@name, document, %{
                  rule: :unsupported_type,
                  segments: fabricated
                })
     end
+
+    # A contract document that is not an object at all has no location to name.
+    assert %{rule: :not_a_schema_object, path: nil} =
+             ContractSchemaDiagnostic.detail(@name, [], %{
+               rule: :not_a_schema_object,
+               segments: []
+             })
+  end
+
+  # Without the name in the attested authority, a pointer proven against one
+  # contract file could be attached to a diagnostic naming another, publishing
+  # a location the reader would open in the wrong document.
+  test "a pointer cannot be moved to a diagnostic about another contract document" do
+    document = %{"type" => "object", "properties" => %{"secret-key" => %{"type" => "intger"}}}
+
+    assert {:ok, path} =
+             CommandPath.value_contract_schema(@name, document,
+               property: "properties",
+               property: "secret-key"
+             )
+
+    assert {:ok, own_source} = CommandSource.new(:input_contract, @name)
+    assert {:ok, other_source} = CommandSource.new(:result_contract, "result.schema.json")
+
+    assert {:ok, _diagnostic} =
+             CommandDiagnostic.new(:application, :contract_invalid,
+               source: own_source,
+               path: path,
+               message: ContractSchemaDiagnostic.message(:unsupported_type) |> elem(1)
+             )
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:application, :contract_invalid,
+               source: other_source,
+               path: path,
+               message: ContractSchemaDiagnostic.message(:unsupported_type) |> elem(1)
+             )
+
+    assert CommandPath.value_contract_schema("../escape", document, []) ==
+             {:error, :invalid_command_path}
+
+    assert CommandPath.value_contract_schema(@name, [], []) == {:error, :invalid_command_path}
   end
 end

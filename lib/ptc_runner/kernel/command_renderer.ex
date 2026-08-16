@@ -4,9 +4,11 @@ defmodule PtcRunner.Kernel.CommandRenderer do
 
   Provider failures include the validated provider subject already present in
   the public command envelope. Manifest and value-contract failures with a
-  non-root, schema-authorized path include its JSON Pointer. Unusual
-  contract-authored pointers use an escaped quoted representation before they
-  enter a terminal. Rendering never derives labels from a rejected value,
+  non-root, schema-authorized path include its JSON Pointer. A contract schema
+  rejected before it compiles also names the document its pointer indexes,
+  because a manifest may carry two and the pointer means nothing without it.
+  Unusual contract-authored pointers and logical names use an escaped quoted
+  representation before they enter a terminal. Rendering never derives labels from a rejected value,
   provider response, credential, or unvalidated path. Component compile
   failures with a proven byte span render the logical component name and
   canonical half-open byte range already present in the envelope; rendering

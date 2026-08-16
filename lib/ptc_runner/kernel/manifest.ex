@@ -929,27 +929,28 @@ defmodule PtcRunner.Kernel.Manifest do
     end
   end
 
+  # Any decoded JSON value is handed to the compiler, including arrays and
+  # scalars. Filtering non-objects here would refuse them without a rule and
+  # leave the commonest "I wrote the wrong thing entirely" mistake reporting
+  # the same blind message the rules exist to replace.
   defp read_contract(source, path) do
     with {:ok, raw} <- ApplicationSource.read_reference(source, path, @max_contract_bytes),
-         {:ok, schema} <- StrictJSON.decode(raw),
-         true <- is_map(schema) and not is_struct(schema) do
+         {:ok, schema} <- StrictJSON.decode(raw) do
       {:ok, schema, raw}
-    else
-      {:error, reason} -> {:error, reason}
-      _invalid -> {:error, :invalid_contracts}
     end
   end
 
   # The rejected document stays in scope so the fault can be located inside it.
   # A contract that fails to compile has no compiled path schema, so the
-  # submitted document is the only authority for the pointer.
+  # submitted document, named by the reference that loaded it, is the only
+  # authority for the pointer.
   defp compile_contract(schema, raw, role, path) do
     case ValueContract.compile(schema) do
       {:ok, contract} ->
         {:ok, contract, raw}
 
       {:error, {:invalid_value_contract, rejection}} ->
-        detail = ContractSchemaDiagnostic.detail(schema, rejection)
+        detail = ContractSchemaDiagnostic.detail(path, schema, rejection)
         {:error, {:source_role, role, path, {:contract_schema_invalid, detail}}}
     end
   end
