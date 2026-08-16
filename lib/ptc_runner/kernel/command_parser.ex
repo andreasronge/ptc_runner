@@ -384,6 +384,7 @@ defmodule PtcRunner.Kernel.CommandParser do
       :host_config,
       :trace,
       :format,
+      :preview_chars,
       :private_terminal
     ]
 
@@ -392,7 +393,7 @@ defmodule PtcRunner.Kernel.CommandParser do
   end
 
   defp direct_arguments_valid?(options, format) do
-    allowed = [:eval, :load, :trace, :format, :mission]
+    allowed = [:eval, :load, :trace, :format, :mission, :preview_chars]
 
     format == "clojure" and Map.keys(options) -- allowed == [] and
       valid_optional_nonempty_string?(options, :mission)

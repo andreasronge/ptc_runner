@@ -1956,7 +1956,7 @@
         }
       ],
       notes:
-        "Options map supports `:depth` (1-5), `:paths true`, and `:sample` (1-3). Output is capped; `:truncated true` and `:caps_hit` identify traversal caps. For capped root vectors, `:count_capped true` means `:count` is the scanned count. The summary is keyword-keyed, and those keys encode, so `(json/generate-string (describe x))` works for JSON-native data. `:examples` and `:sample` hold values verbatim, so describing data that itself contains keywords or ##Inf/##NaN yields a positioned type_error rather than coercing them and misreporting the type the summary just named.",
+        "Options map supports `:depth` (1-5), `:paths true`, and `:sample` (1-3). Output is capped; `:truncated true` and `:caps_hit` identify traversal caps. For capped root vectors, `:count_capped true` means `:count` is the scanned count. The summary is keyword-keyed, and those keys encode, so `(json/generate-string (describe x))` works for JSON-native data. Scalar `:examples` and `:sample` values remain native; containers, callables, and Java values use inert bounded display strings. A native keyword or ##Inf/##NaN example still yields a positioned type_error when JSON encoding is requested.",
       see_also: ["keys", "type", "json/parse-lines", "json/generate-string"],
       clojure_var: nil,
       divergences: nil

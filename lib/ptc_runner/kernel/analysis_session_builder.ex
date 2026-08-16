@@ -58,7 +58,8 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
     :evaluation_hook,
     :builder_fault_hook,
     :resource_cleanup_hook,
-    :expected_destination_identity
+    :expected_destination_identity,
+    :preview_chars
   ]
   @inspection_options [
     :inspection_capture_hook,
@@ -126,7 +127,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
         else: @common_options
 
     if Keyword.keys(opts) -- allowed == [] and valid_builder_hooks?(opts) and
-         valid_capture_hooks?(opts) and valid_private_terminal?(opts) do
+         valid_capture_hooks?(opts) and valid_private_terminal?(opts) and valid_preview?(opts) do
       :ok
     else
       {:error, recipe.invalid_source_error()}
@@ -155,6 +156,8 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
 
   defp valid_optional_hook?(nil, _arity), do: true
   defp valid_optional_hook?(hook, arity), do: is_function(hook, arity)
+
+  defp valid_preview?(opts), do: Keyword.get(opts, :preview_chars, 2_048) in 64..65_536
 
   defp authorize_private_profile(recipe, opts) do
     terminal? = Keyword.get(opts, :private_terminal, false)
@@ -392,7 +395,8 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
          {:ok, session} <-
            AnalysisSession.start(assembly,
              evaluation_hook: Keyword.get(opts, :evaluation_hook),
-             initialization_hook: Keyword.get(opts, :builder_fault_hook)
+             initialization_hook: Keyword.get(opts, :builder_fault_hook),
+             preview_chars: Keyword.get(opts, :preview_chars, 2_048)
            ) do
       finish_session_start(
         recipe,

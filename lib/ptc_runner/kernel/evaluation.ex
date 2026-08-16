@@ -442,7 +442,16 @@ defmodule PtcRunner.Kernel.Evaluation do
         |> put_terminal_host_failure(step)
 
       {:ok, step} ->
-        commit_result(state, lease, history, step, projection_boundary, result_limit_bytes)
+        commit_result(
+          state,
+          environment,
+          lease,
+          history,
+          step,
+          mission_calls_before,
+          projection_boundary,
+          result_limit_bytes
+        )
         |> put_terminal_provider_failure(step)
         |> put_terminal_host_failure(step)
 
@@ -456,11 +465,28 @@ defmodule PtcRunner.Kernel.Evaluation do
   defp evaluation_data(data, :error), do: data
   defp evaluation_data(data, {:ok, params}), do: Map.put(data, "params", params)
 
-  defp commit_result(state, lease, history, step, projection_boundary, result_limit_bytes) do
+  defp commit_result(
+         state,
+         environment,
+         lease,
+         history,
+         step,
+         mission_calls_before,
+         projection_boundary,
+         result_limit_bytes
+       ) do
     case Lisp.project_boundary_value(step.return, projection_boundary) do
       {:ok, projected_return} ->
         if result_within_limit?(projected_return, result_limit_bytes) do
-          commit_projected_result(state, lease, history, step, projected_return)
+          commit_projected_result(
+            state,
+            environment,
+            lease,
+            history,
+            step,
+            projected_return,
+            mission_calls_before
+          )
         else
           :ok = RunState.release_evaluation(state, lease)
           result_limit_failure(step)
@@ -472,7 +498,15 @@ defmodule PtcRunner.Kernel.Evaluation do
     end
   end
 
-  defp commit_projected_result(state, lease, history, step, projected_return) do
+  defp commit_projected_result(
+         state,
+         environment,
+         lease,
+         history,
+         step,
+         projected_return,
+         mission_calls_before
+       ) do
     candidate_history = history_after_success(history, step.return)
 
     case RunState.commit_evaluation(state, lease, step.memory, candidate_history) do
@@ -488,18 +522,26 @@ defmodule PtcRunner.Kernel.Evaluation do
         )
 
       {:error, :memory_exceeded} ->
-        %{
-          outcome: :memory_exceeded,
-          prints: Map.get(step, :prints, []),
-          continuation_effect: :preserved
-        }
+        commit_limit_failure(
+          :memory_exceeded,
+          :evaluation_memory_bytes,
+          "candidate definitions exceeded the retained evaluation-memory limit",
+          state,
+          environment,
+          step,
+          mission_calls_before
+        )
 
       {:error, :history_exceeded} ->
-        %{
-          outcome: :history_exceeded,
-          prints: Map.get(step, :prints, []),
-          continuation_effect: :preserved
-        }
+        commit_limit_failure(
+          :history_exceeded,
+          :evaluation_history_bytes,
+          "candidate result exceeded the retained evaluation-history limit",
+          state,
+          environment,
+          step,
+          mission_calls_before
+        )
 
       {:error, :run_closed} ->
         case RunState.terminal_failure(state) do
@@ -531,6 +573,34 @@ defmodule PtcRunner.Kernel.Evaluation do
           continuation_effect: :preserved
         }
     end
+  end
+
+  defp commit_limit_failure(
+         kind,
+         reason,
+         message,
+         state,
+         environment,
+         step,
+         mission_calls_before
+       ) do
+    {capability_activity?, unsafe_activity?} =
+      evaluation_activity(state, environment, step, mission_calls_before)
+
+    %{
+      outcome: kind,
+      kind: kind,
+      reason: reason,
+      details: %{
+        phase: :commit,
+        message: message,
+        capability_activity?: capability_activity?
+      },
+      prints: Map.get(step, :prints, []),
+      continuation_effect: :preserved,
+      capability_activity?: capability_activity?,
+      retryable?: not unsafe_activity?
+    }
   end
 
   defp classify_success(step, {:__ptc_return__, value}) do

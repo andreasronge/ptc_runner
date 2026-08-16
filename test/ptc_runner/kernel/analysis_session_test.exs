@@ -352,7 +352,9 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
               value: nil,
               value_available?: false,
               formatted: formatted,
-              formatted_truncated?: true
+              formatted_truncated?: true,
+              formatted_caps_hit: caps_hit,
+              formatted_sampled_keys: []
             }} =
              AnalysisSession.evaluate(
                session,
@@ -361,6 +363,38 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
 
     assert is_binary(formatted)
     assert byte_size(formatted) <= 65_536
+    assert :items in caps_hit
+  end
+
+  @tag :tmp_dir
+  test "profile sessions honor a configurable structural preview ceiling", %{tmp_dir: directory} do
+    seed_trace(directory, "seed")
+
+    assert {:ok, session, _info} =
+             start_log_session(
+               {:directory, directory},
+               {:directory, directory},
+               preview_chars: 256
+             )
+
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    payload = String.duplicate("x", 10_000)
+    source = ~s|(return {"payload" "#{payload}" "status" "ok" "trace_id" "trace-1"})|
+
+    assert {:ok,
+            %{
+              status: :ok,
+              outcome: :returned,
+              formatted: formatted,
+              formatted_truncated?: true,
+              formatted_sampled_keys: sampled_keys
+            }} = AnalysisSession.evaluate(session, source)
+
+    assert String.length(formatted) <= 256
+    assert sampled_keys == ["payload", "status", "trace_id"]
+    assert formatted =~ "preview truncated"
+    refute formatted =~ String.duplicate("x", 100)
   end
 
   @tag :tmp_dir

@@ -15,6 +15,26 @@ Successful definitions and exact `*1`, `*2`, and `*3` history persist for one
 command. A failed form preserves the previously committed state. Profile and
 manifest modes are mutually exclusive because they carry different authority.
 
+All three modes render successful values with the same bounded structural
+preview used for model observations. Collection items, nesting, nodes, strings,
+characters, and UTF-8 bytes are bounded during traversal, so displaying a large
+value does not first build its complete printable representation. Truncation is
+explicit and includes sampled map keys where available. The exact native value
+still remains in session history; use `*1`, `(describe *1)`, `take`, `get-in`,
+`select-keys`, or `reduce` to inspect or summarize a smaller part.
+
+The default output ceiling is 2,048 characters. Set it for direct, manifest,
+or profile sessions with `--preview-chars` (64–65,536):
+
+```console
+mix ptc repl --preview-chars 4096 -e '(range 0 10000)'
+```
+
+This presentation ceiling is independent of retained continuation, result,
+and transcript limits. Explicit `(pr-str value)` remains an exact language
+operation and can itself consume the evaluator heap; prefer `describe` or a
+bounded projection when exploring a large value.
+
 Run `mix ptc help repl` for the exact switch grammar, including option
 combinations and JSON Lines records.
 
@@ -31,9 +51,9 @@ mix ptc repl script.clj
 mix ptc repl - < script.clj
 ```
 
-A successful `return` prints its value, including when it is the final form in
-a loaded setup file. The evaluator's internal return control wrapper is never
-part of REPL output.
+A successful `return` prints a structural preview of its value, including when
+it is the final form in a loaded setup file. The evaluator's internal return
+control wrapper is never part of REPL output.
 
 Attach the same frozen workflow bundle, input, limits, labels, event policy,
 and workflow capabilities as `mix ptc run`:

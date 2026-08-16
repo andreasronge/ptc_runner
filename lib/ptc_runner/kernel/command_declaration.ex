@@ -317,6 +317,12 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           description: "choose human or JSON Lines profile output"
         },
         %{
+          key: :preview_chars,
+          type: :integer,
+          syntax: ["--preview-chars COUNT"],
+          description: "REPL structural preview character ceiling"
+        },
+        %{
           key: :continue_on_error,
           type: :boolean,
           syntax: ["--continue-on-error"],
