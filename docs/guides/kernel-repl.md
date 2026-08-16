@@ -1,11 +1,15 @@
 # Kernel REPL
 
-`mix ptc repl` has three deliberately separate session modes:
+`mix ptc repl` keeps its workflow, manifest-mission, and code-owned profile
+environments deliberately separate:
 
-- direct or manifest-backed workflow sessions;
-- `run-analysis-v1` over immutable canonical traces; and
-- `private-run-analysis-v1` over correlated canonical and private inspection
-  evidence.
+| Session | Selection | Environment | Authority |
+| --- | --- | --- | --- |
+| Direct scratchpad | no selector | fresh workflow | core REPL only |
+| Manifest workflow | `--project` or `--manifest` | manifest workflow | workflow capabilities and model routes |
+| Manifest mission | `--project` or `--manifest` plus `--mission NAME` | selected manifest mission | direct mission capabilities plus provider dependency closure |
+| Public analysis profile | `--profile run-analysis-v1` | fixed code-owned mission | immutable canonical traces |
+| Private analysis profile | `--profile private-run-analysis-v1` | fixed code-owned mission | correlated canonical and private inspection evidence |
 
 Successful definitions and exact `*1`, `*2`, and `*3` history persist for one
 command. A failed form preserves the previously committed state. Profile and
@@ -49,6 +53,43 @@ defaults while preserving the manifest REPL input grammar. It conflicts with
 A provider-bearing manifest requires `--host-config`. The session performs the
 same audited-local checks, acquires one provider session, and reuses it for
 every expression. Direct and profile modes reject host configuration.
+
+## Work directly in one manifest mission
+
+Select a declared mission without starting its workflow:
+
+```console
+mix ptc repl --project ptc-project.json --mission review
+mix ptc repl --manifest ptc.json --host-config ptc-host.json --mission review
+mix ptc repl --project ptc-project.json --mission default
+mix ptc repl --project ptc-project.json --mission review -e '(dir)'
+```
+
+The project form is the normal local command: the project supplies the
+application, host configuration, and lazy environment-file paths, while
+`--mission` remains an explicit invocation choice. Mission names are not
+duplicated in `ptc-project.json`. The manifest form is the equivalent low-level
+command. Omitting `--mission` keeps the workflow REPL behavior.
+
+A mission session starts with a fresh continuation and evaluates through the
+same strict JSON boundary as ordinary mission execution. It exposes that
+mission's components and data, but no workflow bundle, workflow capabilities,
+model route, or other missions. Only the mission's direct providers and their
+dependency closure are opened; unrelated providers do not run local checks,
+start applications, request authorization or credentials, or acquire
+resources. Dependency-only providers support the session without contributing
+task capabilities.
+
+The interactive banner names the selected mission, components, and direct
+provider aliases. Mission sessions add one meta-command:
+
+```text
+:context          Show the exact frozen model context and its SHA-256 hash
+```
+
+`--mission` requires a manifest (directly or after project expansion) and
+cannot be combined with `--profile` or `--describe-profile`. An unknown name
+lists declared missions in sorted order before sinks or provider activity.
 
 Interactive meta-commands are:
 

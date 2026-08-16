@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
   alias PtcRunner.Kernel.ManifestReplPreparation
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
+  alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
@@ -33,13 +34,31 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
   @spec start(ManifestReplPreparation.t(), PublicationAuthority.t(), binary() | nil, pid()) ::
           {:ok, t()} | {:error, term()}
   def start(preparation, authority, trace_path, caller) when is_pid(caller) do
+    start(preparation, authority, trace_path, caller, :workflow)
+  end
+
+  def start(_preparation, _authority, _trace_path, _caller),
+    do: {:error, :invalid_manifest_repl}
+
+  @doc false
+  @spec start(
+          ManifestReplPreparation.t(),
+          PublicationAuthority.t(),
+          binary() | nil,
+          pid(),
+          :workflow | MissionReplTarget.t()
+        ) :: {:ok, t()} | {:error, term()}
+  def start(preparation, authority, trace_path, caller, target) when is_pid(caller) do
     if ManifestReplPreparation.valid?(preparation) and
          PublicationAuthority.authorized?(authority) and
          PublicationAuthority.matches_prepared?(authority, preparation.prepared_run) and
-         (is_nil(trace_path) or is_binary(trace_path)) do
+         (is_nil(trace_path) or is_binary(trace_path)) and valid_target?(preparation, target) do
       token = make_ref()
 
-      case GenServer.start(__MODULE__, {token, caller, preparation, authority, trace_path}) do
+      case GenServer.start(
+             __MODULE__,
+             {token, caller, preparation, authority, trace_path, target}
+           ) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
         {:error, reason} -> {:error, reason}
       end
@@ -48,7 +67,7 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
     end
   end
 
-  def start(_preparation, _authority, _trace_path, _caller),
+  def start(_preparation, _authority, _trace_path, _caller, _target),
     do: {:error, :invalid_manifest_repl}
 
   @doc false
@@ -87,7 +106,7 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
   def pid(%__MODULE__{pid: pid}), do: pid
 
   @impl GenServer
-  def init({token, caller, preparation, authority, trace_path}) do
+  def init({token, caller, preparation, authority, trace_path, target}) do
     state = %{
       token: token,
       caller: caller,
@@ -95,6 +114,7 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
       preparation: preparation,
       authority: authority,
       trace_path: trace_path,
+      target: target,
       opened_sinks: nil,
       repl_pid: nil,
       repl_token: nil,
@@ -116,11 +136,11 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
       {:ok, repl_pid, repl_token} ->
         state = %{state | repl_pid: repl_pid, repl_token: repl_token}
 
-        case RunBuilder.open_prepared_sinks(preparation.prepared_run, authority, self()) do
+        case open_prepared_sinks(preparation, authority, target) do
           {:ok, opened_sinks} ->
             state = %{state | opened_sinks: opened_sinks}
 
-            if preparation.prepared_run.provider_declarations == [],
+            if provider_free?(preparation, target),
               do: open_provider_free(state),
               else: open_provider_backed(state)
 
@@ -273,23 +293,13 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
     preparation = state.preparation
 
     result =
-      with :ok <-
-             RunCoordinator.local_checks(
-               preparation.prepared_run,
-               preparation.catalog,
-               preparation.runtime_services
-             ),
+      with :ok <- local_checks(preparation, state.target),
            {:ok, registry} <-
              ProviderRegistry.new(%{},
                installed_limits: preparation.catalog.installed_limits
              ) do
         try do
-          RunBuilder.build_prepared_owned(
-            preparation.prepared_run,
-            registry,
-            state.authority,
-            state.opened_sinks
-          )
+          build_provider_free(preparation, registry, state)
         after
           ProviderRegistry.close(registry)
         end
@@ -328,14 +338,7 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
                        state.preparation.runtime_services,
                        []
                      ) do
-                ProviderExecution.open_repl(
-                  state.preparation.prepared_run,
-                  state.authority,
-                  state.opened_sinks,
-                  execution,
-                  tracker,
-                  owner
-                )
+                open_provider_repl(state, execution, tracker, owner)
               end
 
             send(owner, {token, :opening_result, self(), result})
@@ -396,7 +399,8 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
           config,
           run_state,
           opening,
-          state.trace_path
+          state.trace_path,
+          repl_mode(state.target)
         )
       end
 
@@ -500,4 +504,106 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
   catch
     _kind, _reason -> :ok
   end
+
+  defp valid_target?(_preparation, :workflow), do: true
+
+  defp valid_target?(preparation, %MissionReplTarget{} = target),
+    do:
+      MissionReplTarget.valid_for?(
+        target,
+        preparation.prepared_run,
+        preparation.catalog
+      )
+
+  defp valid_target?(_preparation, _target), do: false
+
+  defp open_prepared_sinks(preparation, authority, :workflow),
+    do: RunBuilder.open_prepared_sinks(preparation.prepared_run, authority, self())
+
+  defp open_prepared_sinks(preparation, authority, %MissionReplTarget{} = target),
+    do: RunBuilder.open_prepared_sinks(preparation.prepared_run, authority, self(), target)
+
+  defp provider_free?(preparation, :workflow),
+    do: preparation.prepared_run.provider_declarations == []
+
+  defp provider_free?(_preparation, %MissionReplTarget{} = target),
+    do: MissionReplTarget.provider_free?(target)
+
+  defp local_checks(preparation, :workflow),
+    do:
+      RunCoordinator.local_checks(
+        preparation.prepared_run,
+        preparation.catalog,
+        preparation.runtime_services
+      )
+
+  defp local_checks(preparation, %MissionReplTarget{} = target),
+    do:
+      RunCoordinator.local_checks(
+        preparation.prepared_run,
+        preparation.catalog,
+        preparation.runtime_services,
+        target
+      )
+
+  defp build_provider_free(preparation, registry, %{target: :workflow} = state),
+    do:
+      RunBuilder.build_prepared_owned(
+        preparation.prepared_run,
+        registry,
+        state.authority,
+        state.opened_sinks
+      )
+
+  defp build_provider_free(
+         preparation,
+         registry,
+         %{target: %MissionReplTarget{} = target} = state
+       ),
+       do:
+         RunBuilder.build_mission_repl_owned(
+           preparation.prepared_run,
+           registry,
+           state.authority,
+           state.opened_sinks,
+           target
+         )
+
+  defp open_provider_repl(%{target: :workflow} = state, execution, tracker, owner),
+    do:
+      ProviderExecution.open_repl(
+        state.preparation.prepared_run,
+        state.authority,
+        state.opened_sinks,
+        execution,
+        tracker,
+        owner
+      )
+
+  defp open_provider_repl(
+         %{target: %MissionReplTarget{} = target} = state,
+         execution,
+         tracker,
+         owner
+       ),
+       do:
+         ProviderExecution.open_repl(
+           state.preparation.prepared_run,
+           state.authority,
+           state.opened_sinks,
+           execution,
+           target,
+           tracker,
+           owner
+         )
+
+  defp repl_mode(:workflow), do: :workflow
+
+  defp repl_mode(%MissionReplTarget{} = target),
+    do: %{
+      kind: :mission,
+      name: target.mission_name,
+      component_ids: target.component_ids,
+      direct_provider_aliases: target.direct_aliases
+    }
 end

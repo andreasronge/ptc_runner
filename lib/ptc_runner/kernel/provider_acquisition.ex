@@ -44,6 +44,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LLMRouter
+  alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderCallbackBoundary
   alias PtcRunner.Kernel.ProviderRegistry
@@ -53,7 +54,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   @type input_class :: :normal | :private_inspection
   @type artifact_preflight :: (input_class() -> :ok | {:error, term()})
   @type occurrence :: %{destination: :workflow | :mission, index: non_neg_integer()}
-  @type targets :: [occurrence()] | :all
+  @type targets :: [occurrence()] | :all | map()
   @type result ::
           {:ok, map()}
           | {:error, term()}
@@ -115,14 +116,15 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
         targets,
         credentials
       )
-      when (is_list(targets) or targets == :all) and is_map(credentials) and
+      when (is_list(targets) or targets == :all or is_struct(targets, MissionReplTarget)) and
+             is_map(credentials) and
              not is_struct(credentials) do
     package = prepared.request.package
     max_heap_words = package.limits.provider_heap_words
 
     with :ok <- bound(prepared, catalog, session),
          {:ok, occurrences} <- sealed_occurrences(prepared, catalog),
-         {:ok, closure} <- sealed_closure(occurrences, targets),
+         {:ok, closure} <- sealed_closure(occurrences, targets, prepared, catalog),
          {:ok, preparations} <-
            prepare_providers(package, registry, session, max_heap_words, closure),
          :ok <- declarations_honored(preparations, closure, session) do
@@ -130,7 +132,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
         preparations,
         registry,
         session,
-        prepared.effective_data_class,
+        target_effective_data_class(prepared, targets),
         max_heap_words,
         credentials
       )
@@ -270,14 +272,24 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   # occurrence. An application that reaches acquisition with none is refused
   # rather than succeeding with nothing acquired, exactly as an empty target
   # list is.
-  defp sealed_closure([], :all), do: {:error, :invalid_provider_acquisition}
-  defp sealed_closure(occurrences, :all), do: {:ok, occurrences}
+  defp sealed_closure([], :all, _prepared, _catalog),
+    do: {:error, :invalid_provider_acquisition}
+
+  defp sealed_closure(occurrences, :all, _prepared, _catalog), do: {:ok, occurrences}
+
+  defp sealed_closure(occurrences, %MissionReplTarget{} = target, prepared, catalog) do
+    sites = MapSet.new(target.closure_occurrences, &site/1)
+
+    if MissionReplTarget.valid_for?(target, prepared, catalog) and MapSet.size(sites) > 0,
+      do: {:ok, Enum.filter(occurrences, &MapSet.member?(sites, site(&1)))},
+      else: {:error, :invalid_provider_acquisition}
+  end
 
   # The closure comes from sealed `requires`/`provides` alone, so it is decided
   # before any builder runs. Phase 5 already proved the graph is satisfiable and
   # acyclic over these same values, which is why following it to a fixed point
   # terminates and cannot silently drop a requirement.
-  defp sealed_closure(occurrences, targets) do
+  defp sealed_closure(occurrences, targets, _prepared, _catalog) do
     by_site = Map.new(occurrences, &{{&1.destination, &1.index}, &1})
 
     if targets != [] and Enum.all?(targets, &Map.has_key?(by_site, site(&1))) do
@@ -292,6 +304,11 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       {:error, :invalid_provider_acquisition}
     end
   end
+
+  defp target_effective_data_class(_prepared, %MissionReplTarget{} = target),
+    do: target.effective_data_class
+
+  defp target_effective_data_class(prepared, _targets), do: prepared.effective_data_class
 
   defp site(%{destination: destination, index: index}), do: {destination, index}
 

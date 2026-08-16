@@ -33,7 +33,7 @@ Time values are milliseconds. Heap values are BEAM process heap words, not bytes
 | `subordinate_evaluations` | Subordinate mission evaluations in one run. | count | 16 | 16 | 1–2,592,000,000 |
 | `subordinate_source_bytes` | Source accepted by one subordinate check or evaluation. | bytes | 131,072 | 131,072 | 1–2,592,000,000 |
 | `subordinate_source_checks` | Advisory subordinate source checks in one run. | count | 16 | 16 | 1–2,592,000,000 |
-| `terminal_result_bytes` | Encoded terminal workflow result. | bytes | 1,000,000 | 1,000,000 | 1–2,592,000,000 |
+| `terminal_result_bytes` | Encoded terminal workflow or mission-session result. | bytes | 1,000,000 | 1,000,000 | 1–2,592,000,000 |
 | `workflow_capability_calls` | Total workflow capability calls in one run. | count | 64 | 64 | 1–2,592,000,000 |
 | `workflow_capability_calls_per_name` | Workflow capability calls to any one public name in one run. | count | 16 | 16 | 1–2,592,000,000 |
 | `workflow_heap_words` | Heap of the workflow evaluator process. | BEAM heap words | 8,000,000 | 8,000,000 | 1–2,592,000,000 |

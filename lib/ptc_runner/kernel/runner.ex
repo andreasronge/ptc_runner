@@ -22,6 +22,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.StrictJSON
+  alias PtcRunner.Kernel.TerminalResultLimit
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Eval.Helpers
@@ -240,7 +241,7 @@ defmodule PtcRunner.Kernel.Runner do
         with {:ok, value} <-
                Lisp.project_boundary_value(LispResult.unwrap_return(step.return), :kernel_json),
              {:ok, value} <- project_result(value, config.result_projection) do
-          if terminal_result_within_limit?(value, config.limits.terminal_result_bytes) do
+          if TerminalResultLimit.within_limit?(value, config.limits.terminal_result_bytes) do
             value = RetainedSize.detach_binaries(value)
             :ok = capture_execution_prints(config, state, evaluation_id, step.prints)
 
@@ -599,19 +600,6 @@ defmodule PtcRunner.Kernel.Runner do
     if byte_size(source) <= limits.entry_source_bytes,
       do: :ok,
       else: {:error, :entry_source_exceeded}
-  end
-
-  defp terminal_result_within_limit?(value, limit) do
-    case {RetainedSize.bytes_with_cap(value, limit), safe_encoded_size(value)} do
-      {bytes, encoded} when is_integer(bytes) and bytes <= limit and encoded <= limit -> true
-      _ -> false
-    end
-  end
-
-  defp safe_encoded_size(value) do
-    :erlang.external_size(value)
-  rescue
-    _exception -> :infinity
   end
 
   defp outcome({:ok, _result}), do: :ok

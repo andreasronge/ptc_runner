@@ -166,6 +166,16 @@ sink, and active-provider prefix as a one-shot run. It then transfers the
 opening and run state to `ReplSessionOwner`. `ReplSession` is process-affine;
 passing its public value does not transfer ownership.
 
+An explicit manifest mission first derives an attested target from the inactive
+`PreparedRun` and its exact installation catalog. That target seals direct
+occurrences, dependency-closure declarations and aliases, and the closure's
+effective data/event policy. Every provider-facing opening phase consumes that
+same target. The built `RunConfig` contains an empty workflow environment and
+only the selected mission; dependency providers remain lifecycle support while
+direct occurrences alone contribute task capabilities. `ReplSessionOwner`
+atomically adopts the mission mode with the config, and `ReplSession` dispatches
+forms through ordinary `Evaluation` rather than the workflow evaluator.
+
 ## Bundles and authority
 
 `PtcRunner.Kernel.compile_bundle/1` compiles a closed component dependency

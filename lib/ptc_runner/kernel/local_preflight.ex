@@ -125,6 +125,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
@@ -177,9 +178,26 @@ defmodule PtcRunner.Kernel.LocalPreflight do
           Deadline.t()
         ) :: :ok | {:error, CommandDiagnostic.t()}
   def run(prepared, catalog, services, deadline) do
+    run_scoped(prepared, catalog, services, deadline, :all)
+  end
+
+  @doc false
+  @spec run(
+          PreparedRun.t(),
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t(),
+          Deadline.t(),
+          MissionReplTarget.t()
+        ) :: :ok | {:error, CommandDiagnostic.t()}
+  def run(prepared, catalog, services, deadline, %MissionReplTarget{} = target) do
+    run_scoped(prepared, catalog, services, deadline, target)
+  end
+
+  defp run_scoped(prepared, catalog, services, deadline, target) do
     with true <- bound?(prepared, catalog, services, :inactive),
+         {:ok, declarations} <- MissionReplTarget.declarations_for(prepared, catalog, target),
          true <- Deadline.valid?(deadline),
-         occurrences = applicable(catalog, prepared, :audited_local),
+         occurrences = applicable(catalog, declarations, :audited_local),
          true <- trusted?(catalog, occurrences) do
       check_each(occurrences, prepared, catalog, services, deadline, audited_step(:runtime))
     else
@@ -208,7 +226,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   def collect(prepared, catalog, services, deadline) do
     with true <- bound?(prepared, catalog, services, :inactive),
          true <- Deadline.valid?(deadline),
-         occurrences = applicable(catalog, prepared, :audited_local),
+         occurrences = applicable(catalog, prepared.provider_declarations, :audited_local),
          true <- trusted?(catalog, occurrences) do
       occurrences
       |> collect_each(
@@ -253,14 +271,46 @@ defmodule PtcRunner.Kernel.LocalPreflight do
           boolean()
         ) :: :ok | {:error, CommandDiagnostic.t()}
   def run_unverified(prepared, catalog, services, session, provider_activity) do
+    run_unverified_scoped(prepared, catalog, services, session, provider_activity, :all)
+  end
+
+  @doc false
+  @spec run_unverified(
+          PreparedRun.t(),
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t(),
+          ProviderSession.t(),
+          boolean(),
+          MissionReplTarget.t()
+        ) :: :ok | {:error, CommandDiagnostic.t()}
+  def run_unverified(
+        prepared,
+        catalog,
+        services,
+        session,
+        provider_activity,
+        %MissionReplTarget{} = target
+      ) do
+    run_unverified_scoped(prepared, catalog, services, session, provider_activity, target)
+  end
+
+  defp run_unverified_scoped(
+         prepared,
+         catalog,
+         services,
+         session,
+         provider_activity,
+         target
+       ) do
     deadline = ProviderSession.run_deadline(session)
 
     with true <- bound?(prepared, catalog, services, :active),
+         {:ok, declarations} <- MissionReplTarget.declarations_for(prepared, catalog, target),
          true <- owns_operation?(session, prepared),
          true <- Deadline.valid?(deadline),
          true <- is_boolean(provider_activity) do
       catalog
-      |> applicable(prepared, :unverified)
+      |> applicable(declarations, :unverified)
       |> check_each(
         prepared,
         catalog,
@@ -330,8 +380,8 @@ defmodule PtcRunner.Kernel.LocalPreflight do
       ProviderSession.compatible_limits?(session, prepared.request.package.limits)
   end
 
-  defp applicable(catalog, prepared, mode) do
-    Enum.filter(prepared.provider_declarations, fn declaration ->
+  defp applicable(catalog, declarations, mode) do
+    Enum.filter(declarations, fn declaration ->
       match?(%{local_preflight: ^mode}, catalog.descriptors[declaration.name])
     end)
   end

@@ -119,6 +119,123 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
+  test "a manifest mission session uses mission components and data without workflow access", %{
+    tmp_dir: directory
+  } do
+    manifest_path = Path.join(directory, "ptc.json")
+
+    File.write!(
+      Path.join(directory, "workflow.clj"),
+      "(ns workflow) (defn secret [] 99) (defn run [input] (return input))"
+    )
+
+    File.write!(
+      Path.join(directory, "review.clj"),
+      "(ns review) (defn answer [] data/answer)"
+    )
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "workflow", "path" => "workflow.clj"}],
+          "entry" => "workflow/run"
+        },
+        "missions" => %{
+          "review" => %{
+            "components" => [%{"id" => "review", "path" => "review.clj"}],
+            "data" => %{"answer" => 42}
+          }
+        },
+        "input" => %{"value" => %{}}
+      })
+    )
+
+    output =
+      capture_io(fn ->
+        run_repl([
+          "--manifest",
+          manifest_path,
+          "--mission",
+          "review",
+          "-e",
+          "(review/answer)",
+          "-e",
+          "(dir)"
+        ])
+      end)
+
+    assert output =~ "42\n"
+    assert output =~ ~s(["review"])
+    refute output =~ "workflow/secret"
+
+    assert_raise Mix.Error, ~r/unknown namespace workflow\//, fn ->
+      run_repl([
+        "--manifest",
+        manifest_path,
+        "--mission",
+        "review",
+        "-e",
+        "(workflow/secret)"
+      ])
+    end
+  end
+
+  @tag :tmp_dir
+  test "an unknown manifest mission lists declared names before opening a session", %{
+    tmp_dir: directory
+  } do
+    manifest_path = Path.join(directory, "ptc.json")
+    File.write!(Path.join(directory, "main.clj"), "(ns app) (defn run [x] (return x))")
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "app", "path" => "main.clj"}],
+          "entry" => "app/run"
+        },
+        "missions" => %{"writing" => %{}, "review" => %{}, "default" => %{}},
+        "input" => %{"value" => %{}}
+      })
+    )
+
+    assert_raise Mix.Error,
+                 ~r/unknown mission "revie"; declared: default, review, writing/,
+                 fn ->
+                   run_repl([
+                     "--manifest",
+                     manifest_path,
+                     "--mission",
+                     "revie",
+                     "-e",
+                     "42"
+                   ])
+                 end
+  end
+
+  test "--mission is manifest-only and cannot select a code-owned profile" do
+    assert_raise Mix.Error, ~r/--mission requires --manifest/, fn ->
+      run_repl(["--mission", "review", "-e", "42"])
+    end
+
+    assert_raise Mix.Error, ~r/--mission cannot be combined with --profile/, fn ->
+      run_repl([
+        "--mission",
+        "review",
+        "--profile",
+        "run-analysis-v1",
+        "--resource",
+        "traces=/missing",
+        "-e",
+        "42"
+      ])
+    end
+  end
+
+  @tag :tmp_dir
   test "--trace persists canonical session events through the shared loader", %{
     tmp_dir: directory
   } do

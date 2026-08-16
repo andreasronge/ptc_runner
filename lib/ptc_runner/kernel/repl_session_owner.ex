@@ -62,7 +62,18 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
   @spec adopt(pid(), reference(), RunConfig.t(), RunState.t(), term(), binary() | nil) ::
           :ok | {:error, :session_owner_mismatch}
   def adopt(pid, token, config, run_state, opening, trace_path) do
-    GenServer.call(pid, {token, {:adopt, config, run_state, opening, trace_path}}, :infinity)
+    adopt(pid, token, config, run_state, opening, trace_path, :workflow)
+  end
+
+  @doc false
+  @spec adopt(pid(), reference(), RunConfig.t(), RunState.t(), term(), binary() | nil, term()) ::
+          :ok | {:error, :session_owner_mismatch}
+  def adopt(pid, token, config, run_state, opening, trace_path, mode) do
+    GenServer.call(
+      pid,
+      {token, {:adopt, config, run_state, opening, trace_path, mode}},
+      :infinity
+    )
   catch
     :exit, _reason -> {:error, :session_owner_mismatch}
   end
@@ -70,6 +81,12 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
   @spec resources(pid(), reference()) ::
           {:ok, RunConfig.t(), RunState.t()} | {:error, :session_owner_mismatch}
   def resources(pid, token), do: GenServer.call(pid, {token, :resources})
+
+  @doc false
+  @spec session_resources(pid(), reference()) ::
+          {:ok, RunConfig.t(), RunState.t(), :workflow | map()}
+          | {:error, :session_owner_mismatch}
+  def session_resources(pid, token), do: GenServer.call(pid, {token, :session_resources})
 
   @spec release(pid(), reference()) :: :ok | {:error, :session_owner_mismatch}
   def release(pid, token) do
@@ -121,6 +138,7 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
        opening: nil,
        opening_ref: nil,
        trace_path: trace_path,
+       mode: :workflow,
        terminalized?: false,
        terminal_batch: nil,
        provider_cleanup: nil
@@ -140,6 +158,7 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
        opening: nil,
        opening_ref: nil,
        trace_path: nil,
+       mode: :workflow,
        terminalized?: false,
        terminal_batch: nil,
        provider_cleanup: nil
@@ -151,11 +170,20 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
     do: resources_reply(state)
 
   def handle_call(
-        {token, {:adopt, %RunConfig{} = config, %RunState{} = run_state, opening, trace_path}},
+        {token, :session_resources},
+        {caller, _tag},
+        %{token: token, owner: caller} = state
+      ),
+      do: session_resources_reply(state)
+
+  def handle_call(
+        {token,
+         {:adopt, %RunConfig{} = config, %RunState{} = run_state, opening, trace_path, mode}},
         {caller, _tag},
         %{token: token, config: nil, run_state: nil} = state
       ) do
-    if valid_adoption?(state, caller, config, run_state, opening, trace_path) do
+    if valid_adoption?(state, caller, config, run_state, opening, trace_path) and
+         valid_mode?(mode, config) do
       opening_pid = ManifestReplOpening.pid(opening)
       Process.link(run_state.pid)
 
@@ -166,7 +194,8 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
            run_state: run_state,
            opening: opening,
            opening_ref: Process.monitor(opening_pid),
-           trace_path: trace_path
+           trace_path: trace_path,
+           mode: mode
        }}
     else
       {:reply, {:error, :session_owner_mismatch}, state}
@@ -311,6 +340,14 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
   defp resources_reply(state),
     do: {:reply, {:error, :session_owner_mismatch}, state}
 
+  defp session_resources_reply(
+         %{config: %RunConfig{} = config, run_state: %RunState{} = run_state, mode: mode} = state
+       ),
+       do: {:reply, {:ok, config, run_state, mode}, state}
+
+  defp session_resources_reply(state),
+    do: {:reply, {:error, :session_owner_mismatch}, state}
+
   defp valid_adoption?(state, caller, config, run_state, opening, trace_path) do
     ManifestReplOpening.valid?(opening) and ManifestReplOpening.pid(opening) == caller and
       RunState.repl_owner?(
@@ -333,6 +370,26 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
   catch
     :exit, _reason -> false
   end
+
+  defp valid_mode?(:workflow, %RunConfig{}), do: true
+
+  defp valid_mode?(
+         %{
+           kind: :mission,
+           name: name,
+           component_ids: component_ids,
+           direct_provider_aliases: direct_provider_aliases
+         } = mode,
+         %RunConfig{missions: missions}
+       )
+       when is_binary(name) and is_list(component_ids) and is_list(direct_provider_aliases) do
+    Enum.sort(Map.keys(mode)) ==
+      [:component_ids, :direct_provider_aliases, :kind, :name] and
+      Map.keys(missions) == [name] and Enum.all?(component_ids, &is_binary/1) and
+      Enum.all?(direct_provider_aliases, &is_binary/1)
+  end
+
+  defp valid_mode?(_mode, _config), do: false
 
   defp close_provider_session(%{provider_cleanup: nil, config: nil} = state),
     do: {:ok, %{state | provider_cleanup: :ok}}

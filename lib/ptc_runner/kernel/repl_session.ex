@@ -28,6 +28,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   releasing its resources.
   """
 
+  alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
@@ -96,9 +97,12 @@ defmodule PtcRunner.Kernel.ReplSession do
   @doc false
   @spec attach(pid(), reference()) :: {:ok, t()} | {:error, term()}
   def attach(owner_pid, owner_token) when is_pid(owner_pid) and is_reference(owner_token) do
-    case ReplSessionOwner.resources(owner_pid, owner_token) do
-      {:ok, %RunConfig{}, %RunState{}} -> register_access(owner_pid, owner_token)
-      {:error, _reason} = error -> error
+    case ReplSessionOwner.session_resources(owner_pid, owner_token) do
+      {:ok, %RunConfig{}, %RunState{}, mode} when mode == :workflow or is_map(mode) ->
+        register_access(owner_pid, owner_token, mode)
+
+      {:error, _reason} = error ->
+        error
     end
   catch
     :exit, _reason -> {:error, :session_closed}
@@ -133,6 +137,34 @@ defmodule PtcRunner.Kernel.ReplSession do
     :exit, _reason -> {:error, :session_closed}
   end
 
+  @doc false
+  @spec mode_info(t()) :: map() | {:error, atom()}
+  def mode_info(%__MODULE__{} = session) do
+    with {:ok, owned} <- owned_session(session), do: owned_mode_info(owned)
+  catch
+    :exit, _reason -> {:error, :session_closed}
+  end
+
+  @doc false
+  @spec mission_context(t()) :: {:ok, map()} | {:error, atom()}
+  def mission_context(%__MODULE__{} = session) do
+    with {:ok, owned} <- owned_session(session),
+         %{kind: :mission, name: name} <- owned.mode,
+         %{inventory: inventory} <- Map.fetch!(owned.config.missions, name) do
+      {:ok,
+       %{
+         mission: name,
+         model_context: inventory.model_rendered,
+         model_context_hash: inventory.model_hash
+       }}
+    else
+      :workflow -> {:error, :not_mission_session}
+      {:error, _reason} = error -> error
+    end
+  catch
+    :exit, _reason -> {:error, :session_closed}
+  end
+
   @spec eval(t(), binary()) ::
           {:ok, Native.t(), t()}
           | {:error, Native.t(), t()}
@@ -157,7 +189,7 @@ defmodule PtcRunner.Kernel.ReplSession do
             session_closed(owned)
           end
 
-        public_result(result)
+        public_result(result, owned.mode)
 
       {:error, :session_closed} ->
         session_closed(session)
@@ -169,7 +201,7 @@ defmodule PtcRunner.Kernel.ReplSession do
     :exit, _reason -> session_closed(session)
   end
 
-  defp eval_open(session, source) do
+  defp eval_open(%{mode: :workflow} = session, source) do
     case RunState.reserve_workflow_evaluation(session.state) do
       {:ok, memory, history, lease} ->
         session = Map.merge(session, %{memory: memory, history: history})
@@ -178,6 +210,26 @@ defmodule PtcRunner.Kernel.ReplSession do
       {:error, reason} ->
         evaluation_reservation_failure(session, reason)
     end
+  catch
+    :exit, _reason -> session_closed(session)
+  end
+
+  defp eval_open(%{mode: %{kind: :mission, name: name}} = session, source) do
+    mission = Map.fetch!(session.config.missions, name)
+
+    result =
+      Evaluation.evaluate_source(
+        session.state,
+        name,
+        mission.environment,
+        source,
+        session.config.limits.evaluation_timeout_ms,
+        session.config.event_sink,
+        session.config.inspection_sink,
+        result_limit_bytes: session.config.limits.terminal_result_bytes
+      )
+
+    mission_result(session, result)
   catch
     :exit, _reason -> session_closed(session)
   end
@@ -947,7 +999,7 @@ defmodule PtcRunner.Kernel.ReplSession do
     do: Process.alive?(session.config.event_sink.pid) and Process.alive?(session.state.pid)
 
   defp owned_session(session) do
-    with {:ok, pid, token} <- access_resources(session),
+    with {:ok, pid, token, mode} <- access_resources(session),
          {:ok, config, state} <- owner_resources(session, pid, token) do
       {:ok,
        Map.merge(Map.from_struct(session), %{
@@ -955,6 +1007,7 @@ defmodule PtcRunner.Kernel.ReplSession do
          owner_token: token,
          config: config,
          state: state,
+         mode: mode,
          memory: %{},
          history: [],
          attempts: bounded_counter(session.attempts),
@@ -975,10 +1028,13 @@ defmodule PtcRunner.Kernel.ReplSession do
       end
   end
 
-  defp register_access(pid, token) do
+  defp register_access(pid, token), do: register_access(pid, token, :workflow)
+
+  defp register_access(pid, token, mode) do
     access = access_table()
     id = make_ref()
     true = :ets.insert(access, {id, {pid, token}})
+    true = :ets.insert(access, {{id, :mode}, mode})
     {:ok, %__MODULE__{access: access, id: id}}
   rescue
     exception ->
@@ -989,7 +1045,10 @@ defmodule PtcRunner.Kernel.ReplSession do
   defp access_resources(%__MODULE__{access: access, id: id}) do
     case :ets.lookup(access, id) do
       [{^id, {pid, token}}] when is_pid(pid) and is_reference(token) ->
-        {:ok, pid, token}
+        case :ets.lookup(access, {id, :mode}) do
+          [{{^id, :mode}, mode}] -> {:ok, pid, token, mode}
+          _missing -> {:error, :session_owner_mismatch}
+        end
 
       [{^id, :closed}] ->
         {:error, :session_closed}
@@ -1008,6 +1067,7 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp close_access(%__MODULE__{access: access, id: id}) do
     :ets.delete(access, id)
+    :ets.delete(access, {id, :mode})
     :ok
   rescue
     ArgumentError -> :ok
@@ -1043,10 +1103,14 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp observed_memory(session), do: Map.get(session, :memory, %{})
 
-  defp public_result({status, step, session}) when status in [:ok, :error] do
+  defp public_result({status, step, session}, :workflow) when status in [:ok, :error] do
     {public_status, public_step} = Lisp.project_native_result({status, step})
     {public_status, public_step, public_session(session)}
   end
+
+  defp public_result({status, %Native{} = step, session}, %{kind: :mission})
+       when status in [:ok, :error],
+       do: {status, step, public_session(session)}
 
   defp public_session(session) do
     %__MODULE__{
@@ -1059,4 +1123,50 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp prelude(%{bundle: nil}), do: nil
   defp prelude(%{bundle: bundle}), do: bundle.prelude
+
+  defp owned_mode_info(%{mode: :workflow}), do: %{kind: :workflow}
+
+  defp owned_mode_info(%{mode: %{kind: :mission, name: name} = mode, config: config}) do
+    inventory = Map.fetch!(config.missions, name).inventory
+
+    %{
+      kind: :mission,
+      mission: name,
+      component_ids: mode.component_ids,
+      direct_provider_aliases: mode.direct_provider_aliases,
+      inventory_hash: inventory.hash,
+      model_context_hash: inventory.model_hash
+    }
+  end
+
+  defp mission_result(session, %{outcome: outcome, value: value} = result)
+       when outcome in [:continued, :returned] do
+    step = %{Native.ok(value, %{}) | prints: Map.get(result, :prints, [])}
+    {:ok, step, %{session | attempts: increment_counter(session.attempts)}}
+  end
+
+  defp mission_result(session, %{outcome: :failed, value: value} = result) do
+    step =
+      Native.error(
+        :explicit_failure,
+        "REPL evaluation explicitly failed",
+        %{},
+        %{value: value}
+      )
+      |> Map.put(:prints, Map.get(result, :prints, []))
+
+    {:error, step, increment_error(session)}
+  end
+
+  defp mission_result(session, result) do
+    reason = Map.get(result, :kind, Map.get(result, :reason, Map.get(result, :outcome)))
+    details = Map.get(result, :details, %{})
+    message = Map.get(details, :message, "mission evaluation failed")
+
+    step =
+      Native.error(reason || :evaluation_error, message, %{}, details)
+      |> Map.put(:prints, Map.get(result, :prints, []))
+
+    {:error, step, increment_error(session)}
+  end
 end

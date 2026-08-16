@@ -33,6 +33,7 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.TerminalResultLimit
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.TrustedTool
@@ -77,6 +78,11 @@ defmodule PtcRunner.Kernel.Evaluation do
       |> Keyword.get(:parent_evaluation_id)
       |> validate_parent_evaluation_id!()
 
+    result_limit_bytes =
+      opts
+      |> Keyword.get(:result_limit_bytes)
+      |> validate_result_limit!()
+
     result =
       evaluate_detailed(
         state,
@@ -90,7 +96,8 @@ defmodule PtcRunner.Kernel.Evaluation do
           Keyword.get(opts, :after_started_hook),
           projection_boundary,
           Keyword.fetch(opts, :params),
-          parent_evaluation_id
+          parent_evaluation_id,
+          result_limit_bytes
         },
         mission_name
       )
@@ -187,7 +194,8 @@ defmodule PtcRunner.Kernel.Evaluation do
            after_started_hook,
            projection_boundary,
            params,
-           parent_evaluation_id
+           parent_evaluation_id,
+           result_limit_bytes
          },
          mission_name
        ) do
@@ -235,7 +243,8 @@ defmodule PtcRunner.Kernel.Evaluation do
           timeout_ms,
           {memory, history, lease},
           capture,
-          {deadline_ms, projection_boundary, params, mission_name, evaluation_id}
+          {deadline_ms, projection_boundary, params, mission_name, evaluation_id,
+           result_limit_bytes}
         )
 
       _ = maybe_emit_limit(state, capture.event_sink, result, mission_name)
@@ -322,6 +331,14 @@ defmodule PtcRunner.Kernel.Evaluation do
     raise ArgumentError, "invalid parent evaluation ID"
   end
 
+  defp validate_result_limit!(nil), do: nil
+  defp validate_result_limit!(limit) when is_integer(limit) and limit > 0, do: limit
+
+  defp validate_result_limit!(limit) do
+    raise ArgumentError,
+          "invalid result limit #{inspect(limit)}; expected a positive integer or nil"
+  end
+
   defp put_parent_evaluation_id(data, nil), do: data
 
   defp put_parent_evaluation_id(data, parent_evaluation_id),
@@ -334,7 +351,8 @@ defmodule PtcRunner.Kernel.Evaluation do
          timeout_ms,
          {memory, history, lease},
          capture,
-         {deadline_ms, projection_boundary, params, mission_name, evaluation_id}
+         {deadline_ms, projection_boundary, params, mission_name, evaluation_id,
+          result_limit_bytes}
        ) do
     limits = RunState.limits(state)
 
@@ -387,7 +405,8 @@ defmodule PtcRunner.Kernel.Evaluation do
           lease,
           history,
           mission_calls_before,
-          projection_boundary
+          projection_boundary,
+          result_limit_bytes
         )
 
       {:error, :inspection_sink_error} ->
@@ -404,7 +423,8 @@ defmodule PtcRunner.Kernel.Evaluation do
          lease,
          history,
          mission_calls_before,
-         projection_boundary
+         projection_boundary,
+         result_limit_bytes
        ) do
     case result do
       {:ok, %{return: {:__ptc_fail__, value}} = step} ->
@@ -415,13 +435,14 @@ defmodule PtcRunner.Kernel.Evaluation do
           step,
           value,
           mission_calls_before,
-          projection_boundary
+          projection_boundary,
+          result_limit_bytes
         )
         |> put_terminal_provider_failure(step)
         |> put_terminal_host_failure(step)
 
       {:ok, step} ->
-        commit_result(state, lease, history, step, projection_boundary)
+        commit_result(state, lease, history, step, projection_boundary, result_limit_bytes)
         |> put_terminal_provider_failure(step)
         |> put_terminal_host_failure(step)
 
@@ -435,10 +456,15 @@ defmodule PtcRunner.Kernel.Evaluation do
   defp evaluation_data(data, :error), do: data
   defp evaluation_data(data, {:ok, params}), do: Map.put(data, "params", params)
 
-  defp commit_result(state, lease, history, step, projection_boundary) do
+  defp commit_result(state, lease, history, step, projection_boundary, result_limit_bytes) do
     case Lisp.project_boundary_value(step.return, projection_boundary) do
       {:ok, projected_return} ->
-        commit_projected_result(state, lease, history, step, projected_return)
+        if result_within_limit?(projected_return, result_limit_bytes) do
+          commit_projected_result(state, lease, history, step, projected_return)
+        else
+          :ok = RunState.release_evaluation(state, lease)
+          result_limit_failure(step)
+        end
 
       {:error, reason} ->
         :ok = RunState.release_evaluation(state, lease)
@@ -534,6 +560,25 @@ defmodule PtcRunner.Kernel.Evaluation do
     }
   end
 
+  defp result_limit_failure(step) do
+    %{
+      outcome: :result_exceeded,
+      kind: :result_exceeded,
+      reason: :terminal_result_bytes,
+      prints: Map.get(step, :prints, []),
+      continuation_effect: :preserved
+    }
+  end
+
+  defp result_within_limit?(_value, nil), do: true
+
+  defp result_within_limit?({:__ptc_return__, value}, limit),
+    do: result_within_limit?(value, limit)
+
+  defp result_within_limit?(value, limit) do
+    TerminalResultLimit.within_limit?(value, limit)
+  end
+
   defp history_after_success(history, {:__ptc_return__, _value}), do: history
   defp history_after_success(history, value), do: Enum.take(history ++ [value], -3)
 
@@ -544,7 +589,8 @@ defmodule PtcRunner.Kernel.Evaluation do
          step,
          value,
          mission_calls_before,
-         projection_boundary
+         projection_boundary,
+         result_limit_bytes
        ) do
     {capability_activity?, unsafe_activity?} =
       evaluation_activity(state, environment, step, mission_calls_before)
@@ -555,15 +601,19 @@ defmodule PtcRunner.Kernel.Evaluation do
 
     case Lisp.project_boundary_value(value, projection_boundary) do
       {:ok, projected} ->
-        %{
-          outcome: :failed,
-          value: projected,
-          prints: Map.get(step, :prints, []),
-          continuation_effect: :preserved,
-          capability_activity?: capability_activity?,
-          capability_failure?: capability_failure?,
-          retryable?: not unsafe_activity?
-        }
+        if result_within_limit?(projected, result_limit_bytes) do
+          %{
+            outcome: :failed,
+            value: projected,
+            prints: Map.get(step, :prints, []),
+            continuation_effect: :preserved,
+            capability_activity?: capability_activity?,
+            capability_failure?: capability_failure?,
+            retryable?: not unsafe_activity?
+          }
+        else
+          result_limit_failure(step)
+        end
 
       {:error, reason} ->
         projection_failure(step, reason)

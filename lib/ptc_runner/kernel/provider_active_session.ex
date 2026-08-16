@@ -36,6 +36,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LocalPreflight
+  alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderApplicationGate
@@ -64,7 +65,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
          true <- prepared.catalog_attestation == catalog.attestation,
          true <- ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding),
          true <- prepared.provider_declarations != [] do
-      open_consumed(prepared, catalog, services, {:owned, lifecycle_owner, handoff})
+      open_consumed(prepared, catalog, services, {:owned, lifecycle_owner, handoff}, :all)
     else
       _invalid -> {:error, internal_diagnostic(false)}
     end
@@ -78,6 +79,32 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
         _handoff
       ),
       do: {:error, internal_diagnostic(false)}
+
+  @doc false
+  def open_consumed_setup(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services,
+        lifecycle_owner,
+        handoff,
+        %MissionReplTarget{} = target
+      )
+      when is_pid(lifecycle_owner) and is_function(handoff, 1) do
+    with true <- PreparedRun.consumed_valid?(prepared),
+         true <- MissionReplTarget.valid_for?(target, prepared, catalog),
+         true <- ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding),
+         false <- MissionReplTarget.provider_free?(target) do
+      open_consumed(
+        prepared,
+        catalog,
+        services,
+        {:owned, lifecycle_owner, handoff},
+        target
+      )
+    else
+      _invalid -> {:error, internal_diagnostic(false)}
+    end
+  end
 
   @doc """
   Anchors the operation clock this operation is entitled to and validates
@@ -107,7 +134,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
          prepared.catalog_attestation == catalog.attestation and
          ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding) and
          ProviderSession.bound_to_operation?(session, prepared.attestation) do
-      do_begin_run(session, prepared, catalog, services, operation)
+      do_begin_run(session, prepared, catalog, services, operation, :all)
     else
       reject_begin_run(session, prepared)
     end
@@ -116,16 +143,36 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   def begin_owned_operation(_session, _prepared, _catalog, _services, _operation),
     do: {:error, internal_diagnostic(false)}
 
-  defp open_consumed(prepared, catalog, services, ownership) do
+  @doc false
+  def begin_owned_operation(
+        session,
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services,
+        operation,
+        %MissionReplTarget{} = target
+      )
+      when operation in [:run, :connect] do
+    if PreparedRun.active_valid?(prepared) and
+         MissionReplTarget.valid_for?(target, prepared, catalog) and
+         ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding) and
+         ProviderSession.bound_to_operation?(session, prepared.attestation) do
+      do_begin_run(session, prepared, catalog, services, operation, target)
+    else
+      reject_begin_run(session, prepared)
+    end
+  end
+
+  defp open_consumed(prepared, catalog, services, ownership, target) do
     case ProviderActivity.mark(prepared.provider_activity) do
-      :ok -> open_marked(prepared, catalog, services, ownership)
+      :ok -> open_marked(prepared, catalog, services, ownership, target)
       {:error, _reason} -> {:error, internal_diagnostic(false)}
     end
   end
 
-  defp open_marked(prepared, catalog, services, ownership) do
+  defp open_marked(prepared, catalog, services, ownership, target) do
     case start_session(prepared, ownership) do
-      {:ok, session} -> admit_open_session(session, prepared, catalog, services)
+      {:ok, session} -> admit_open_session(session, prepared, catalog, services, target)
       {:error, _reason} -> {:error, internal_diagnostic(false)}
     end
   end
@@ -139,8 +186,14 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
         handoff
       )
 
-  defp admit_open_session(session, prepared, catalog, services) do
-    case ProviderApplicationGate.admit(prepared, catalog, services) do
+  defp admit_open_session(session, prepared, catalog, services, target) do
+    result =
+      case target do
+        :all -> ProviderApplicationGate.admit(prepared, catalog, services)
+        %MissionReplTarget{} -> ProviderApplicationGate.admit(prepared, catalog, services, target)
+      end
+
+    case result do
       :ok ->
         {:ok, session}
 
@@ -149,21 +202,17 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  defp do_begin_run(session, prepared, catalog, services, operation) do
+  defp do_begin_run(session, prepared, catalog, services, operation, target) do
     case ProviderSession.begin_operation(session, operation) do
       {:ok, session} ->
-        validate_open_session(session, prepared, catalog, services)
+        validate_open_session(session, prepared, catalog, services, target)
 
       # `ProviderSession.begin_operation/2` queues token-authenticated cleanup when its
       # bounded call becomes unavailable. Do not follow that timeout with an
       # unbounded synchronous close against the same unavailable process.
       {:error, _reason} ->
         application_activity =
-          ProviderApplicationGate.startup_attempted_after_admission?(
-            prepared,
-            catalog,
-            services
-          )
+          application_activity(prepared, catalog, services, target)
 
         {:error, internal_diagnostic(application_activity)}
     end
@@ -179,20 +228,20 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   # selection the validator then rejects. The earlier ordering justified itself
   # with "a local check contacts nothing" — true of an audited-local check in
   # phase 7, and precisely untrue of this one.
-  defp validate_open_session(session, prepared, catalog, services) do
-    application_activity =
-      ProviderApplicationGate.startup_attempted_after_admission?(prepared, catalog, services)
+  defp validate_open_session(session, prepared, catalog, services, target) do
+    application_activity = application_activity(prepared, catalog, services, target)
+    declarations = declarations(prepared, target)
 
     with {:ok, provider_activity} <-
-           validate_active_selections(session, prepared, catalog, application_activity),
-         :ok <-
-           LocalPreflight.run_unverified(
+           validate_active_selections(
+             session,
              prepared,
              catalog,
-             services,
-             session,
-             provider_activity
-           ) do
+             declarations,
+             application_activity
+           ),
+         :ok <-
+           run_unverified(prepared, catalog, services, session, provider_activity, target) do
       {:ok, session}
     else
       {:error, %CommandDiagnostic{} = diagnostic} -> fail_with_session(session, diagnostic)
@@ -204,9 +253,15 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     _kind, _reason -> fail_with_session(session, internal_diagnostic(true))
   end
 
-  defp validate_active_selections(session, prepared, catalog, provider_activity) do
+  defp validate_active_selections(
+         session,
+         prepared,
+         catalog,
+         declarations,
+         provider_activity
+       ) do
     Enum.reduce_while(
-      prepared.provider_declarations,
+      declarations,
       {:ok, provider_activity},
       fn declaration, {:ok, activity} ->
         if declaration.validation_state == :active_required do
@@ -220,6 +275,53 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
       end
     )
   end
+
+  defp declarations(prepared, :all), do: prepared.provider_declarations
+
+  defp declarations(_prepared, %MissionReplTarget{} = target) do
+    policy = %{
+      effective_data_class: target.effective_data_class,
+      effective_flow: target.effective_flow,
+      effective_event_policy: target.effective_event_policy
+    }
+
+    Enum.map(target.declarations, fn declaration ->
+      Map.update!(declaration, :selection_context, &Map.merge(&1, policy))
+    end)
+  end
+
+  defp application_activity(prepared, catalog, services, :all),
+    do: ProviderApplicationGate.startup_attempted_after_admission?(prepared, catalog, services)
+
+  defp application_activity(prepared, catalog, services, %MissionReplTarget{} = target),
+    do:
+      ProviderApplicationGate.startup_attempted_after_admission?(
+        prepared,
+        catalog,
+        services,
+        target
+      )
+
+  defp run_unverified(prepared, catalog, services, session, provider_activity, :all),
+    do: LocalPreflight.run_unverified(prepared, catalog, services, session, provider_activity)
+
+  defp run_unverified(
+         prepared,
+         catalog,
+         services,
+         session,
+         provider_activity,
+         %MissionReplTarget{} = target
+       ),
+       do:
+         LocalPreflight.run_unverified(
+           prepared,
+           catalog,
+           services,
+           session,
+           provider_activity,
+           target
+         )
 
   defp validate_selection(session, prepared, catalog, declaration, provider_activity) do
     case ProviderSession.open_registrar(session) do

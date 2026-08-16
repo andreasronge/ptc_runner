@@ -311,7 +311,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
                prepared,
                catalog,
                runtime_services,
-               environment_setup_required?(host, prepared)
+               environment_setup_aliases(host, prepared)
              ) do
         {:ok, preparation}
       else
@@ -343,9 +343,16 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   def environment_setup_required?(nil, %PreparedRun{}), do: false
 
   def environment_setup_required?(%HostConfig{} = host, %PreparedRun{} = prepared) do
+    environment_setup_aliases(host, prepared) != []
+  end
+
+  defp environment_setup_aliases(nil, %PreparedRun{}), do: []
+
+  defp environment_setup_aliases(%HostConfig{} = host, %PreparedRun{} = prepared) do
     selected = MapSet.new(prepared.provider_declarations, & &1.name)
 
-    Enum.any?(selected, fn name ->
+    selected
+    |> Enum.filter(fn name ->
       with %{source: :llm, credential: credential} <- Map.get(host.install, name),
            %{source: :env} <- Map.get(host.credentials, credential) do
         true
@@ -353,6 +360,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
         _other -> false
       end
     end)
+    |> Enum.sort()
   end
 
   defp validation_outcome(arguments, run_ref, prepared) do

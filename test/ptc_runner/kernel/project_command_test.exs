@@ -125,6 +125,24 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   end
 
   @tag :tmp_dir
+  test "project-backed repl preserves an explicit mission selector", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+
+    assert {:ok, entry} =
+             CommandEntry.open_with_ref(
+               ["repl", "--project", project, "--mission", "review", "--eval", "42"],
+               :mix,
+               "cmd-00000000000000000000000000"
+             )
+
+    assert entry.arguments.options.manifest == Path.join(target, "ptc.json")
+    assert entry.arguments.options.mission == "review"
+    assert Keyword.get(entry.arguments.ordered_options, :mission) == "review"
+  end
+
+  @tag :tmp_dir
   test "project-backed analysis derives artifact resources and preserves overrides", %{
     tmp_dir: directory
   } do

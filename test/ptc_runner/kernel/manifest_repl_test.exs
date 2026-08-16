@@ -175,6 +175,148 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   end
 
   @tag :tmp_dir
+  test "mission mode owns its context and preserves strict mission continuation", %{
+    tmp_dir: directory
+  } do
+    marker = Path.join(directory, "mission-provider-lifecycle")
+    {manifest, host} = write_mcp_mission_application(directory, marker)
+
+    assert {:ok, session} =
+             ManifestRepl.open(manifest, host,
+               mission: "review",
+               input_mode: :interactive,
+               terminal_attached: true
+             )
+
+    assert %{
+             kind: :mission,
+             mission: "review",
+             component_ids: ["review"],
+             direct_provider_aliases: ["workspace"]
+           } = ReplSession.mode_info(session)
+
+    assert {:ok, %{mission: "review", model_context: rendered, model_context_hash: hash}} =
+             ReplSession.mission_context(session)
+
+    assert is_binary(rendered)
+    assert byte_size(rendered) > 0
+    assert hash == :crypto.hash(:sha256, rendered) |> Base.encode16(case: :lower)
+
+    assert {:ok, %{return: %{"return" => 1, "fail" => 2}}, session} =
+             ReplSession.eval(session, ~S|{"return" 1 "fail" 2}|)
+
+    assert {:ok, _step, session} = ReplSession.eval(session, "(def retained 40)")
+    assert {:error, _step, session} = ReplSession.eval(session, "missing")
+
+    assert {:error, %{fail: %{reason: :public_projection_collision}}, session} =
+             ReplSession.eval(session, ~S|{:zzzz_collision 1 "zzzz_collision" 2}|)
+
+    assert {:ok, %{return: 42}, session} = ReplSession.eval(session, "(+ retained 2)")
+    assert {:ok, _events} = ReplSession.close(session)
+    assert_eventually(fn -> "session-closed" in lifecycle(marker) end)
+  end
+
+  @tag :tmp_dir
+  test "mission mode rejects oversized returned and failed values without committing", %{
+    tmp_dir: directory
+  } do
+    manifest = write_provider_free_application(directory, :normal)
+    document = manifest |> File.read!() |> Jason.decode!()
+
+    document =
+      document
+      |> Map.put("limits", %{"terminal_result_bytes" => 256})
+      |> Map.put("missions", %{
+        "review" => %{
+          "components" => [],
+          "data" => %{},
+          "providers" => []
+        }
+      })
+
+    File.write!(manifest, Jason.encode!(document))
+
+    assert {:ok, session} =
+             ManifestRepl.open(manifest, nil,
+               mission: "review",
+               input_mode: :interactive,
+               terminal_attached: true
+             )
+
+    oversized = inspect(String.duplicate("x", 2_048))
+
+    assert {:ok, _step, session} = ReplSession.eval(session, "(def retained 40)")
+
+    assert {:error, %{fail: %{reason: :result_exceeded}}, session} =
+             ReplSession.eval(session, "(do (def leaked 1) (return #{oversized}))")
+
+    assert {:error, _step, session} = ReplSession.eval(session, "leaked")
+    assert {:ok, %{return: 42}, session} = ReplSession.eval(session, "(+ retained 2)")
+
+    assert {:error, %{fail: %{reason: :result_exceeded}}, session} =
+             ReplSession.eval(session, "(fail #{oversized})")
+
+    assert {:ok, _events} = ReplSession.close(session)
+  end
+
+  @tag :tmp_dir
+  test "mission mode charges immediate scalar values to the terminal result limit", %{
+    tmp_dir: directory
+  } do
+    manifest = write_provider_free_application(directory, :normal)
+    document = manifest |> File.read!() |> Jason.decode!()
+
+    document =
+      document
+      |> Map.put("limits", %{"terminal_result_bytes" => 1})
+      |> Map.put("missions", %{"review" => %{}})
+
+    File.write!(manifest, Jason.encode!(document))
+
+    assert {:ok, session} =
+             ManifestRepl.open(manifest, nil,
+               mission: "review",
+               input_mode: :interactive,
+               terminal_attached: true
+             )
+
+    assert {:error, %{fail: %{reason: :result_exceeded}}, session} =
+             ReplSession.eval(session, "42")
+
+    assert {:ok, _events} = ReplSession.close(session)
+  end
+
+  @tag :tmp_dir
+  test "a provider-free mission leaves an unrelated workflow provider inert", %{
+    tmp_dir: directory
+  } do
+    {manifest, host} = write_llm_mission_application(directory, :workflow)
+    configure_host_llm()
+    parent = self()
+
+    {:ok, runtime} =
+      CommandRuntime.new(
+        provider_application_mode: :host_owned,
+        environment_setup: fn -> send(parent, :unrelated_environment_setup) && :ok end
+      )
+
+    assert {:ok, session} =
+             ManifestRepl.open(manifest, host,
+               mission: "review",
+               runtime: runtime,
+               input_mode: :interactive,
+               terminal_attached: true
+             )
+
+    assert %{kind: :mission, direct_provider_aliases: []} = ReplSession.mode_info(session)
+    assert {:ok, %{return: 42}, session} = ReplSession.eval(session, "(+ data/answer 2)")
+    assert {:ok, _events} = ReplSession.close(session)
+    refute_received :unrelated_environment_setup
+    refute_received {:host_llm_ensure_ready, _worker}
+    refute_received {:host_llm_request, _model, _request}
+  end
+
+  @tag :tmp_dir
   test "killing an adopted session owner also terminates its run state", %{tmp_dir: directory} do
     manifest = write_provider_free_application(directory, :normal)
     trace_path = Path.join(directory, "killed-owner.jsonl")
@@ -399,6 +541,71 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
       })
     )
 
+    {manifest, host}
+  end
+
+  defp write_llm_mission_application(directory, destination) do
+    write_component(directory)
+    File.write!(Path.join(directory, "review.clj"), "(ns review)")
+    manifest = Path.join(directory, "llm-mission-#{destination}.json")
+    host = Path.join(directory, "llm-mission-host.json")
+
+    providers = %{
+      "workflow" =>
+        if(destination == :workflow, do: [%{"name" => "model", "config" => %{}}], else: []),
+      "mission" =>
+        if(destination == :mission, do: [%{"name" => "model", "config" => %{}}], else: [])
+    }
+
+    mission_providers = if destination == :mission, do: ["model"], else: []
+
+    document =
+      manifest_document(:normal, providers)
+      |> Map.put("missions", %{
+        "review" => %{
+          "components" => [%{"id" => "review", "path" => "review.clj"}],
+          "data" => %{"answer" => 40},
+          "providers" => mission_providers
+        }
+      })
+
+    File.write!(manifest, Jason.encode!(document))
+
+    File.write!(
+      host,
+      Jason.encode!(%{
+        "credentials" => %{"key" => %{"env" => "UNRELATED_REPL_KEY"}},
+        "install" => %{
+          "model" => %{
+            "source" => "llm",
+            "installation_revision" => "manifest-mission-repl-test-v1",
+            "model" => "openrouter:test/model",
+            "credential" => "key"
+          }
+        }
+      })
+    )
+
+    {manifest, host}
+  end
+
+  defp write_mcp_mission_application(directory, marker) do
+    {manifest, host} = write_mcp_application(directory, marker, 20_000, "mark-close")
+    File.write!(Path.join(directory, "review.clj"), "(ns review)")
+
+    document =
+      manifest
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.put("missions", %{
+        "review" => %{
+          "components" => [%{"id" => "review", "path" => "review.clj"}],
+          "data" => %{"answer" => 40},
+          "providers" => ["workspace"]
+        }
+      })
+
+    File.write!(manifest, Jason.encode!(document))
     {manifest, host}
   end
 

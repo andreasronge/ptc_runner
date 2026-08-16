@@ -338,7 +338,7 @@ defmodule PtcRunner.Kernel.CommandParser do
 
       Map.has_key?(options, :describe_profile) ->
         positional == [] and
-          Map.keys(options) -- [:describe_profile, :format] == []
+          Map.keys(options) -- [:describe_profile, :format, :mission] == []
 
       Map.has_key?(options, :profile) ->
         profile_arguments_valid?(options, positional, evals, resources, format)
@@ -376,14 +376,33 @@ defmodule PtcRunner.Kernel.CommandParser do
   end
 
   defp manifest_arguments_valid?(options, resources, format) do
-    allowed = [:eval, :load, :manifest, :host_config, :trace, :format, :private_terminal]
+    allowed = [
+      :eval,
+      :load,
+      :manifest,
+      :mission,
+      :host_config,
+      :trace,
+      :format,
+      :private_terminal
+    ]
 
-    resources == [] and format == "clojure" and Map.keys(options) -- allowed == []
+    resources == [] and format == "clojure" and Map.keys(options) -- allowed == [] and
+      valid_optional_nonempty_string?(options, :mission)
   end
 
   defp direct_arguments_valid?(options, format) do
-    allowed = [:eval, :load, :trace, :format]
-    format == "clojure" and Map.keys(options) -- allowed == []
+    allowed = [:eval, :load, :trace, :format, :mission]
+
+    format == "clojure" and Map.keys(options) -- allowed == [] and
+      valid_optional_nonempty_string?(options, :mission)
+  end
+
+  defp valid_optional_nonempty_string?(options, key) do
+    case Map.fetch(options, key) do
+      :error -> true
+      {:ok, value} -> valid_nonempty_string?(value)
+    end
   end
 
   defp arguments(command, fields \\ []) do

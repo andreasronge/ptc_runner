@@ -56,6 +56,16 @@ The project form creates its fixed owner-only artifact layout as needed. See
 [Project configuration](project-configuration.md). Direct manifest invocation
 remains the explicit low-level form below.
 
+To inspect one mission with the same project paths but without starting the
+workflow, name it at invocation time:
+
+```console
+mix ptc repl --project ptc-project.json --mission review
+```
+
+The project document remains the only path/configuration file the operator
+normally supplies; mission declarations continue to live only in `ptc.json`.
+
 The trace directory must already exist:
 
 ```console
