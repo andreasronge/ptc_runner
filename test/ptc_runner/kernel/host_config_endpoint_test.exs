@@ -39,6 +39,35 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
     end
 
     @tag :tmp_dir
+    test "control characters are refused before they reach the request target", %{tmp_dir: dir} do
+      # `URI.parse/1` puts what it cannot place into the path, so a CRLF passes
+      # every scheme, host, userinfo, and fragment check. Mint then refuses the
+      # request target, which turned a static configuration fault into a
+      # transport failure — the exact confusion #1422 is about.
+      assert_refused(dir, "https://mcp.example.test/x\r\nX-Injected: 1")
+      assert_refused(dir, "https://mcp.example.test/x y")
+      assert_refused(dir, "http://127.0.0.1:8055\n", %{"allow_insecure_loopback" => true})
+
+      assert_refused(
+        dir,
+        "http://127.0.0.1:8055/x\r\nX-Injected: 1",
+        %{"allow_insecure_loopback" => true}
+      )
+    end
+
+    @tag :tmp_dir
+    test "a port that does not round-trip is refused rather than silently defaulted",
+         %{tmp_dir: dir} do
+      # `URI.parse/1` answers with the scheme default when it cannot read the
+      # written port, so these used to connect to 443 and 80 respectively while
+      # the operator believed otherwise.
+      assert_refused(dir, "https://mcp.example.test:bad/mcp")
+      assert_refused(dir, "https://mcp.example.test:99999/mcp")
+      assert_refused(dir, "http://[::1]:bad", %{"allow_insecure_loopback" => true})
+      assert_refused(dir, "http://127.0.0.1:0", %{"allow_insecure_loopback" => true})
+    end
+
+    @tag :tmp_dir
     test "userinfo and fragments are refused on both schemes", %{tmp_dir: dir} do
       assert_refused(dir, "https://user:pw@mcp.example.test/mcp")
       assert_refused(dir, "https://mcp.example.test/mcp#frag")
@@ -124,6 +153,29 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
       assert diagnostic.subject.name == "workspace"
       assert diagnostic.subject.operation == :declaration
       assert diagnostic.path == nil
+    end
+
+    @tag :tmp_dir
+    test "the endpoint diagnostic is reserved for MCP installations", %{tmp_dir: dir} do
+      # A non-MCP installation carrying a stray streamable_http-shaped transport
+      # is a plain schema fault, not an endpoint one.
+      llm = %{
+        "install" => %{
+          "brain" => %{
+            "source" => "llm",
+            "installation_revision" => "brain-v1",
+            "model" => "openrouter:some/model",
+            "credential" => "api_key",
+            "transport" => %{"type" => "streamable_http", "endpoint" => "not-a-url"}
+          }
+        },
+        "credentials" => %{"api_key" => %{"env" => "API_KEY"}}
+      }
+
+      path = write(dir, llm)
+
+      assert {:error, %CommandDiagnostic{} = diagnostic} = CommandAcquisition.catalog(path)
+      assert diagnostic.code == :host_schema_invalid
     end
 
     @tag :tmp_dir

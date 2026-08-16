@@ -292,6 +292,16 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
+  # `:allow_insecure_loopback` deliberately does not forbid `:authorization`
+  # here, though `HostConfig` forbids the pair outright. The two answer
+  # different questions. A host document is operator-authored configuration
+  # whose credentials PtcRunner resolves, so it must never be able to send one
+  # over plaintext; this option is an explicit grant by trusted in-process
+  # Elixir code that already holds the token, and the credential-free local
+  # OAuth harness in `mcp_oauth_remote_e2e_test.exs` exists precisely to carry a
+  # bearer across a real loopback MCP protocol boundary. Widening the host rule
+  # to here would delete that coverage without protecting anything the host
+  # layer has not already closed.
   defp installed_transport({:streamable_http, opts}) when is_list(opts) do
     allowed = [:endpoint, :headers, :authorization, :allow_insecure_loopback]
 

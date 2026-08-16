@@ -430,7 +430,10 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp require_admissible_endpoints(_value), do: :ok
 
-  defp inadmissible_endpoint?(%{"transport" => %{"type" => "streamable_http"} = transport})
+  defp inadmissible_endpoint?(%{
+         "source" => "mcp",
+         "transport" => %{"type" => "streamable_http"} = transport
+       })
        when is_map(transport) do
     endpoint = Map.get(transport, "endpoint")
     insecure_loopback = Map.get(transport, "allow_insecure_loopback", false)
@@ -1588,10 +1591,15 @@ defmodule PtcRunner.Kernel.HostConfig do
   # Mirrors `installed_endpoint/4`, which stays authoritative. An HTTPS endpoint
   # carries no allowance; a plain-HTTP endpoint requires one, reaches a literal
   # loopback address only, and admits no configured host credential.
+  #
+  # The mirror is deliberately one-directional: it must never reject an endpoint
+  # decoding accepts, or a valid document would fail as a generic schema fault.
+  # The reverse is harmless, and does happen — a regex `$` also matches before a
+  # trailing newline, which `MCPEndpoint.safe_characters?/1` refuses outright.
   defp secure_endpoint_schema do
     %{
       "properties" => %{
-        "endpoint" => %{"pattern" => "^https://"},
+        "endpoint" => %{"pattern" => "^https://[^\\s\\x00-\\x1f\\x7f-\\x9f]*$"},
         "allow_insecure_loopback" => %{"const" => false}
       }
     }
@@ -1600,7 +1608,10 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp loopback_endpoint_schema do
     %{
       "properties" => %{
-        "endpoint" => %{"pattern" => "^http://(127\\.0\\.0\\.1|\\[::1\\])(:[0-9]+)?([/?]|$)"},
+        "endpoint" => %{
+          "pattern" =>
+            "^http://(127\\.0\\.0\\.1|\\[::1\\])(:[0-9]+)?([/?][^\\s\\x00-\\x1f\\x7f-\\x9f]*)?$"
+        },
         "allow_insecure_loopback" => %{"const" => true},
         "auth" => %{"maxItems" => 0}
       },
