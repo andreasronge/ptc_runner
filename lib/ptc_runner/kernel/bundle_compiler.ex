@@ -10,14 +10,12 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Kernel.Component
-  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.Prelude.ErrorSpan
   alias PtcRunner.Lisp.Prelude.ValidationError
 
-  @bundle_hash_domain <<"ptc.frozen-bundle.v2", 0>>
   @max_components 128
   @max_edges 512
   @max_source_bytes 2_000_000
@@ -110,18 +108,11 @@ defmodule PtcRunner.Kernel.BundleCompiler do
          :ok <- dependencies_exist(by_id),
          {:ok, ordered} <- topological_order(by_id),
          {:ok, compiled} <- describe_ordered(ordered),
-         {:ok, prelude} <- compile_prelude(ordered, compiled) do
-      ids = Enum.map(compiled, & &1.id)
-
-      hash =
-        compiled
-        |> bundle_hash_bytes()
-        |> then(&:crypto.hash(:sha256, &1))
-        |> Base.encode16(case: :lower)
-
+         {:ok, prelude} <- compile_prelude(ordered, compiled),
+         {:ok, hash} <- FrozenBundle.identity(compiled) do
       bundle = %FrozenBundle{
         components: compiled,
-        component_ids: ids,
+        component_ids: Enum.map(compiled, & &1.id),
         hash: hash,
         prelude: prelude
       }
@@ -378,34 +369,6 @@ defmodule PtcRunner.Kernel.BundleCompiler do
 
   defp source_hash(source),
     do: :crypto.hash(:sha256, source) |> Base.encode16(case: :lower)
-
-  defp bundle_hash_bytes(components) do
-    records =
-      components
-      |> Enum.sort_by(& &1.id)
-      |> Enum.map(&bundle_component_record/1)
-
-    IO.iodata_to_binary([@bundle_hash_domain, <<length(records)::unsigned-big-32>>, records])
-  end
-
-  defp bundle_component_record(component) do
-    {:ok, payload} =
-      DeterministicJSON.encode(
-        {:object,
-         [
-           {"dependencies", Enum.sort(Enum.uniq(component.dependencies))},
-           {"source_hash", component.source_hash}
-         ]}
-      )
-
-    [
-      <<0x01>>,
-      <<byte_size(component.id)::unsigned-big-32>>,
-      component.id,
-      <<byte_size(payload)::unsigned-big-64>>,
-      payload
-    ]
-  end
 
   defp error_message(%{message: message}) when is_binary(message),
     do: String.slice(message, 0, 4_096)
