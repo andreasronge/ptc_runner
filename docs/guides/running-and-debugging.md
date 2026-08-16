@@ -183,6 +183,30 @@ The release includes ERTS. Like `mix ptc`, it reads only a dotenv file named by
 `--env-file`; without that flag, credentials come from the inherited process
 environment or other trusted host-document bindings.
 
+That assembled tree runs on the machine that built it. `mix release` copies the
+Erlang runtime but not the libraries it links against, so the crypto NIF still
+records an absolute path into the OpenSSL of the build host. To produce an
+artifact that runs elsewhere, package it:
+
+```console
+scripts/package_standalone_release.sh
+```
+
+The script vendors every non-system library into the release, rewrites the
+references to loader-relative paths, re-signs what it rewrote, runs the
+standalone verification against the packaged tree, and writes
+`ptc-VERSION-macos-ARCH.tar.gz` with its SHA-256 beside it. It fails rather
+than shipping an artifact that still points outside itself. macOS artifacts are
+ad-hoc signed: they are not Developer ID signed and not notarized, so a
+download that carries a quarantine flag — a browser download, not `curl` —
+needs `xattr -d com.apple.quarantine` before first run.
+
+Linux is a container target rather than an archive. `scripts/build_container_image.sh`
+builds local scaffolding from digest-pinned bases and runs the same
+verification inside the image. It is not a published install route yet; the
+remaining targets and the publication contract are tracked in
+`docs/plans/lisp-kernel/stable-cli-contract.md`.
+
 ### Diagnose a failed run
 
 The command reports a closed phase/code pair. If a workflow deliberately calls
@@ -247,6 +271,29 @@ forms preserve prior state. Manifest providers are acquired once and reused.
 Private manifest sessions require an attached terminal and
 `--private-terminal`. The [Kernel REPL guide](kernel-repl.md) covers all modes,
 input forms, privacy gates, JSON Lines, bounds, and cleanup.
+
+An interactive session on a terminal runs under the Erlang line editor, so the
+usual editing keys work — `Ctrl+A`/`Ctrl+E`, word motion, `Ctrl+K`/`Ctrl+U`
+and yank, arrow-key history, and `Ctrl+R` reverse search. Two keys behave
+differently there than in a plain terminal reader:
+
+- `:quit` leaves the session. `Ctrl+D` deletes the character under the cursor
+  instead of ending input, because the editor binds it that way and offers no
+  end-of-input binding to rebind it to.
+- `Ctrl+C` opens the BEAM break menu, as it does in `iex`. Press `c` to return
+  to the prompt or `a` to abort the command.
+
+A direct session keeps its submitted lines between runs, under
+`ptc/repl-history` in the user cache directory, so the previous session's
+expressions are one arrow key away. A manifest session can carry a private
+event policy, so it edits and recalls within the session but writes nothing to
+disk.
+
+Analysis profile sessions (`--profile`) read under the source limit that mode
+enforces, which the line editor cannot drive. They keep the plain reader, and
+with it `Ctrl+D` as end of input; `:quit` works there too. Every
+non-interactive form — `-e`, a script argument, `-`, or redirected input —
+reads exactly as before.
 
 ## Query canonical traces
 

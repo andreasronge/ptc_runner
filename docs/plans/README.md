@@ -15,6 +15,10 @@ belongs in guides or retained specifications.
 - [`lisp-kernel/stable-cli-contract.md`](lisp-kernel/stable-cli-contract.md)
   retains only the unfinished macOS/container distribution and final
   acceptance work for the completed standalone command.
+- [`lisp-kernel/repl-line-editing.md`](lisp-kernel/repl-line-editing.md) gives
+  the interactive REPL the OTP line editor — emacs keys, history, and reverse
+  search — in both frontends, and records the `Ctrl+D` and profile-REPL
+  consequences that come with it.
 - [`lisp-kernel/product-readiness.md`](lisp-kernel/product-readiness.md)
   tracks the remaining command-line, diagnostics, model-boundary,
   distribution, and release work.

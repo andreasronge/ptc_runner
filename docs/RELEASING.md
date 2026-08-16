@@ -13,7 +13,22 @@ MIX_ENV=prod mix hex.build
 
 Dispatch the release gate from the versioned commit on `main`. After it is
 green and release approval is explicit, create and push `vX.Y.Z`. The tag
-workflow re-runs the package and documentation gates; it does not publish.
+workflow re-runs the package and documentation gates; it does not publish to
+Hex.
+
+The tag workflow additionally packages the standalone macOS arm64 artifact with
+`scripts/package_standalone_release.sh`, which closes the release's runtime
+library set, re-signs what it rewrote, and verifies the packaged tree with
+`scripts/verify_standalone_release.sh`. It records build provenance for the
+artifact and attaches it, with its `.sha256`, to a draft GitHub release. That
+release stays a draft until a maintainer publishes it, exactly as the launcher
+release does.
+
+Those artifacts are ad-hoc signed — not Developer ID signed, not notarized —
+and the installation documentation must say so in those words. macOS arm64 is
+the only published target: macOS x86_64 and the Linux container images require
+their own target evidence first, and publishing one without it is out of
+contract.
 
 Hex and HexDocs publication is a separate, explicit maintainer action performed
 from the tagged `main` commit. Publish the package with
