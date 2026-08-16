@@ -161,8 +161,8 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
       end)
 
     assert_receive {:timeout_worker, worker}
-    assert_receive {:timeout_cleanup, ^caller}
     worker_ref = Process.monitor(worker)
+    assert_receive {:timeout_cleanup, ^caller}
     Process.exit(caller, :kill)
     assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}
   end
