@@ -9,7 +9,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-release_root="$release_tmp_dir/release"
+# Packaging rewrites and re-signs the assembled tree, so the artifact a user
+# runs is not the tree `mix release` produced. `PTC_RELEASE_ROOT` points this
+# gate at an already-packaged release and skips assembly, which is how the
+# packaging script proves what it is about to publish rather than a rebuild of
+# it.
+release_root="${PTC_RELEASE_ROOT:-$release_tmp_dir/release}"
 fixture_root="$release_tmp_dir/fixture"
 application_root="$fixture_root/application"
 command_bin="$release_root/bin/ptc"
@@ -79,10 +84,20 @@ cat > "$fixture_root/provider-application.json" <<'EOF'
 EOF
 
 cd "$project_root"
-MIX_ENV=prod mix release ptc_runner --overwrite --path "$release_root"
+if [ -z "${PTC_RELEASE_ROOT:-}" ]; then
+  MIX_ENV=prod mix release ptc_runner --overwrite --path "$release_root"
+fi
 
 test -x "$command_bin"
-test -d "$release_root/erts-$(elixir -e 'IO.write(:erlang.system_info(:version))')"
+
+if command -v elixir > /dev/null; then
+  test -d "$release_root/erts-$(elixir -e 'IO.write(:erlang.system_info(:version))')"
+else
+  # Verifying a packaged artifact where no toolchain sits beside it -- inside
+  # the runtime container, for instance. What matters there is that the runtime
+  # travelled with the artifact, not which toolchain assembled it.
+  test "$(find "$release_root" -maxdepth 1 -type d -name 'erts-*' | wc -l)" -eq 1
+fi
 find "$release_root/lib" -maxdepth 1 -type d -name 'req_llm-*' -print -quit | grep -q .
 "$release_root/bin/ptc_runner" eval '
   true = PtcRunner.Kernel.SemanticRevision.runtime_dependency_artifacts_verified?()
@@ -190,6 +205,67 @@ grep -q '"installations"' "$release_tmp_dir/models.stdout"
 "$command_bin" repl -e -10 > "$release_tmp_dir/repl.stdout"
 printf '%s\n' '-10' > "$release_tmp_dir/repl.expected"
 cmp "$release_tmp_dir/repl.expected" "$release_tmp_dir/repl.stdout"
+
+# The interactive REPL installs OTP's line editor only when stdin is a
+# terminal, so every other check above runs the plain reader and none of them
+# can observe it. Drive the packaged command through a pseudo-terminal:
+# assemble one expression with emacs keys, recall it from history, then prove
+# the recall survives process exit. `PTC_SKIP_PTY_GATE` exists for a host that
+# knowingly cannot provide a terminal; the workflow installs `expect` instead
+# of setting it.
+if [ -n "${PTC_SKIP_PTY_GATE:-}" ]; then
+  echo 'note: PTC_SKIP_PTY_GATE set, skipped the interactive REPL check' >&2
+else
+  command -v expect > /dev/null || {
+    echo 'expect(1) is required to verify the interactive REPL' >&2
+    exit 1
+  }
+
+  # The editor reads the terminal type: with `TERM` unset or `dumb` -- a build
+  # container, a bare CI step -- the group runs in dumb mode, and `Ctrl+A`
+  # lands in the expression as a literal byte instead of moving the cursor.
+  # That fallback is correct behavior, but it is not what this gate exists to
+  # check, so the gate supplies a terminal type rather than inheriting one.
+  export TERM="${TERM:-xterm}"
+
+  HOME="$release_tmp_dir/home" expect -f - "$command_bin" > "$release_tmp_dir/pty.stdout" <<'EXPECT'
+set timeout 60
+log_user 1
+spawn [lindex $argv 0] repl
+expect "ptc> "
+send "+ 2 3"
+after 300
+send "\001("
+after 200
+send "\005)\r"
+expect -re "\r\n5\r\n"
+send "\033\[A"
+after 300
+send "\r"
+expect -re "\r\n5\r\n"
+send ":quit\r"
+expect eof
+EXPECT
+
+  HOME="$release_tmp_dir/home" expect -f - "$command_bin" > "$release_tmp_dir/pty-history.stdout" <<'EXPECT'
+set timeout 60
+log_user 1
+spawn [lindex $argv 0] repl
+expect "ptc> "
+after 500
+send "\033\[A"
+after 300
+send "\033\[A"
+after 300
+send "\r"
+expect -re "\r\n5\r\n"
+send ":quit\r"
+expect eof
+EXPECT
+
+  grep -q '(+ 2 3)' "$release_tmp_dir/pty.stdout"
+  grep -q '(+ 2 3)' "$release_tmp_dir/pty-history.stdout"
+fi
 
 set +e
 "$command_bin" repl --manifest "$application_root/private-ptc.json" --private-terminal \

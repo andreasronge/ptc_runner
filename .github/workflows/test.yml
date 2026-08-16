@@ -359,6 +359,12 @@ jobs:
           cache-plt: 'false'
           install-babashka: 'false'
 
+      # The interactive REPL check drives the packaged command through a
+      # pseudo-terminal, which no other gate can supply. macOS ships `expect`;
+      # this image does not, and the check refuses to pass by skipping.
+      - name: Install the pseudo-terminal driver
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends expect
+
       - name: Verify release packages
         run: scripts/ci/core-release.sh
 

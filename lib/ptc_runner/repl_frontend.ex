@@ -51,7 +51,15 @@ defmodule PtcRunner.ReplFrontend do
 
   A positional file runs as one script. `-` reads one script from standard
   input. With no script or `--eval`, the task starts an interactive multi-line
-  REPL. Ctrl+D exits.
+  REPL; `:quit` exits it.
+
+  An interactive workflow REPL attached to a terminal runs under the Erlang
+  line editor, so emacs key bindings, arrow-key history, and reverse search
+  work, `Ctrl+D` deletes forward rather than exiting, and `Ctrl+C` opens the
+  BEAM break menu. A direct session persists its history under the user cache
+  directory; a manifest session, which can carry a private event policy, keeps
+  history in memory. Profile sessions and every non-terminal input path keep
+  the plain reader, where `Ctrl+D` still ends input.
 
   Direct and manifest sessions evaluate the workflow environment. Profile mode
   evaluates one serialized mission continuation over the exact resources
@@ -85,6 +93,7 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Lisp.Registry
   alias PtcRunner.Lisp.Result, as: LispResult
   alias PtcRunner.ReplError
+  alias PtcRunner.ReplLineEditor, as: LineEditor
 
   @spec run(CommandArguments.t(), CommandRuntime.t()) :: :ok | {:error, binary()}
   def run(arguments, runtime), do: run(arguments, runtime, [])
@@ -806,8 +815,11 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
+  # The profile reader is bounded per character to enforce the profile source
+  # limit, which the interactive line editor cannot drive, so this loop keeps
+  # the plain reader and with it `Ctrl+D`.
   defp interactive_profile(session, opts, state) do
-    info("PTC-Lisp REPL [#{opts[:profile]}] (Ctrl+D to exit; :help for commands)\n")
+    info("PTC-Lisp REPL [#{opts[:profile]}] (Ctrl+D or :quit to exit; :help for commands)\n")
 
     profile_loop(session, opts, state)
   end
@@ -825,8 +837,15 @@ defmodule PtcRunner.ReplFrontend do
           "profile interactive input exceeds the #{profile_source_bytes(opts)}-byte source limit"
         )
 
+      {:error, reason} ->
+        put_failure(state, :frontend, "profile interactive input failed: #{inspect(reason)}")
+
       "" ->
         profile_loop(session, opts, state)
+
+      command when command in [":quit", ":exit"] ->
+        info("Goodbye!")
+        ensure_evaluation_failure(state)
 
       ":" <> command ->
         handle_profile_command(String.trim(command), opts[:profile])
@@ -1015,6 +1034,7 @@ defmodule PtcRunner.ReplFrontend do
       :doc <name>      Show core function documentation
       :find <pattern>  Search core functions
       :help            Show this help
+      :quit            Leave the REPL
 
     Profile: #{profile_id}; components: #{components}; exported namespaces: #{namespaces}
     Use (tool/runtime-usage {}) to inspect remaining bounded usage.
@@ -1258,7 +1278,7 @@ defmodule PtcRunner.ReplFrontend do
         opts[:eval] -> run_sources(session, Keyword.get_values(opts, :eval))
         arguments == ["-"] -> read_stdin(session)
         arguments != [] -> run_file(session, hd(arguments))
-        true -> interactive(session)
+        true -> interactive(session, session_mode(opts))
       end
     end
   end
@@ -1307,10 +1327,14 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
-  defp interactive(session) do
-    info("PTC-Lisp REPL (Ctrl+D to exit; :help for commands)\n")
-    loop(session)
-  end
+  # A manifest session can carry a private event policy, so it line-edits
+  # without persisting anything to disk. See `PtcRunner.ReplLineEditor`.
+  defp session_mode(opts), do: if(opts[:manifest], do: :manifest, else: :direct)
+
+  # The line editor owns the banner: under the interactive reader it is the
+  # reader's own slogan, which keeps it ahead of the first prompt instead of
+  # racing it.
+  defp interactive(session, mode), do: LineEditor.run(mode, fn -> loop(session) end)
 
   defp loop(session) do
     case read_expression("ptc> ", "") do
@@ -1320,6 +1344,10 @@ defmodule PtcRunner.ReplFrontend do
 
       "" ->
         loop(session)
+
+      command when command in [":quit", ":exit"] ->
+        info("Goodbye!")
+        {:ok, session}
 
       ":" <> command ->
         handle_command(String.trim(command), session)
@@ -1333,9 +1361,18 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
+  # An interrupted read answers an error tuple rather than a line and is not
+  # end of input: the prompt returns. Any other read error means the stream is
+  # no longer usable, and looping on it would spin.
   defp read_expression(prompt, buffer) do
     case IO.gets(prompt) do
       :eof ->
+        :eof
+
+      {:error, :interrupted} ->
+        read_expression(prompt, buffer)
+
+      {:error, _reason} ->
         :eof
 
       line ->
@@ -1441,6 +1478,7 @@ defmodule PtcRunner.ReplFrontend do
       :doc <name>      Show core function documentation
       :find <pattern>  Search core functions
       :help            Show this help
+      :quit            Leave the REPL
 
     Successful results and definitions persist. *1, *2, and *3 read recent results.
     """)
@@ -1463,7 +1501,7 @@ defmodule PtcRunner.ReplFrontend do
   end
 
   defp handle_command(_command, _session),
-    do: info("Unknown command. Available: :doc <name>, :find <pattern>, :help")
+    do: info("Unknown command. Available: :doc <name>, :find <pattern>, :help, :quit")
 
   defp format_registry_doc(entry) do
     details =
