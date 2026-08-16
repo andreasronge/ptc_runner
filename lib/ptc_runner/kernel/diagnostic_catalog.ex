@@ -26,6 +26,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:host, :installed_limit_invalid, 3, false, "an installed limit is invalid"},
     {:host, :installation_revision_missing, 3, false,
      "an installed provider is missing its behavior revision"},
+    {:host, :installation_endpoint_invalid, 3, false,
+     "an installed MCP endpoint is not admissible; streamable_http requires an https URL, or allow_insecure_loopback with a credential-free plain-http loopback address"},
     {:application, :application_unavailable, 3, false, "the application is unavailable"},
     {:application, :application_not_found, 3, false, "the application manifest does not exist"},
     {:application, :invalid_json, 3, false, "an application document is not valid JSON"},
@@ -393,6 +395,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   @spec subject_policy(phase(), atom()) :: :required | :optional | :forbidden
   def subject_policy(:host, :installation_revision_missing), do: :required
+  def subject_policy(:host, :installation_endpoint_invalid), do: :required
 
   # A missing bundle requirement describes the capability surface assembled
   # from all providers granted to an environment. No single occurrence is the
@@ -428,6 +431,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   @spec subject_operations(phase(), atom()) :: [atom()]
   def subject_operations(:host, :installation_revision_missing), do: [:declaration]
+  def subject_operations(:host, :installation_endpoint_invalid), do: [:declaration]
   def subject_operations(:provider_declaration, :provider_unknown), do: [:declaration]
 
   def subject_operations(:provider_declaration, code)
@@ -535,6 +539,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   @spec source_kinds(phase(), atom()) :: [atom()]
   def source_kinds(:host, :installation_revision_missing), do: []
+  def source_kinds(:host, :installation_endpoint_invalid), do: []
   def source_kinds(:host, _code), do: [:host]
 
   def source_kinds(:application, code)

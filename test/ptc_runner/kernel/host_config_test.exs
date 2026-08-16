@@ -575,6 +575,41 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert {:error, _details} = JSV.validate(over_limit, root, cast: false)
   end
 
+  test "an upstream tool name is the server's, so it is held to the MCP protocol rule" do
+    # #1422: the host layer used to force upstream names to PtcRunner's
+    # lowercase-dotted rule, which no operator controls. The shipped Go harness
+    # advertises `cityTime`, so no host document could install it.
+    {:ok, root} = JSV.build(HostConfig.schema(), atoms: false, warnings: :silent)
+
+    camel =
+      put_in(valid_config(), ["install", "workspace", "tools"], %{
+        "cityTime" => %{"as" => "workspace.city_time", "effect" => "read"}
+      })
+
+    assert {:ok, decoded} = HostConfig.decode(camel, "/tmp")
+    assert Map.has_key?(decoded.install["workspace"].tools, "cityTime")
+    assert {:ok, _validated} = JSV.validate(camel, root, cast: false)
+
+    # Only the public name crosses the capability boundary, so that one keeps
+    # PtcRunner's naming rule.
+    public =
+      put_in(valid_config(), ["install", "workspace", "tools"], %{
+        "cityTime" => %{"as" => "workspace.cityTime", "effect" => "read"}
+      })
+
+    assert {:error, :invalid_host_config} = HostConfig.decode(public, "/tmp")
+    assert {:error, _details} = JSV.validate(public, root, cast: false)
+
+    # An upstream name the protocol itself rejects is still refused.
+    whitespace =
+      put_in(valid_config(), ["install", "workspace", "tools"], %{
+        "city Time" => %{"as" => "workspace.city_time", "effect" => "read"}
+      })
+
+    assert {:error, :invalid_host_config} = HostConfig.decode(whitespace, "/tmp")
+    assert {:error, _details} = JSV.validate(whitespace, root, cast: false)
+  end
+
   defp valid_config do
     %{
       "credentials" => %{"server_token" => %{"env" => "SERVER_TOKEN"}},

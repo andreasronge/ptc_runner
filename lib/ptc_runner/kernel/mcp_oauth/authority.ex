@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authority do
   """
 
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.MCPEndpoint
   alias PtcRunner.Kernel.MCPOAuth.Scope
 
   @max_id_bytes 256
@@ -181,18 +182,9 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authority do
     allow_insecure_loopback = Keyword.get(opts, :allow_insecure_loopback, false)
 
     case URI.parse(value) do
-      %URI{
-        scheme: scheme,
-        host: host,
-        userinfo: nil,
-        query: nil,
-        fragment: nil
-      }
-      when is_binary(host) and host != "" and
-             (scheme == "https" or
-                (allow_insecure_loopback and scheme == "http" and
-                   host in ["127.0.0.1", "::1"])) ->
-        if byte_size(value) <= 4_096 and String.valid?(value) and
+      %URI{scheme: scheme, host: host, userinfo: nil, query: nil, fragment: nil} ->
+        if MCPEndpoint.origin_allowed?(scheme, host, allow_insecure_loopback) and
+             byte_size(value) <= 4_096 and String.valid?(value) and
              Keyword.keys(opts) -- [:allow_insecure_loopback] == [],
            do: {:ok, value},
            else: {:error, :invalid_issuer}
@@ -236,7 +228,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authority do
   def resource(_value, _opts), do: {:error, :invalid_resource}
 
   defp canonical_resource(value, opts, allow_insecure_loopback, uri) do
-    with true <- resource_origin_allowed?(uri.scheme, uri.host, allow_insecure_loopback),
+    with true <- MCPEndpoint.origin_allowed?(uri.scheme, uri.host, allow_insecure_loopback),
          true <- byte_size(value) <= 4_096 and String.valid?(value),
          true <- Keyword.keys(opts) -- [:allow_insecure_loopback] == [] do
       canonical_host = canonical_host(uri.host)
@@ -251,13 +243,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authority do
       false -> {:error, :invalid_resource}
     end
   end
-
-  defp resource_origin_allowed?("https", _host, _allow_insecure_loopback), do: true
-
-  defp resource_origin_allowed?("http", host, true),
-    do: host in ["127.0.0.1", "::1"]
-
-  defp resource_origin_allowed?(_scheme, _host, _allow_insecure_loopback), do: false
 
   @doc "Returns whether this authority can use the CLI loopback interaction."
   @spec cli_compatible?(t()) :: boolean()

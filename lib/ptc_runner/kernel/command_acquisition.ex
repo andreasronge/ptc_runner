@@ -100,6 +100,10 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
         {:ok, subject} = CommandSubject.provider(name, :declaration)
         {:error, CommandDiagnostic.new!(:host, :installation_revision_missing, subject: subject)}
 
+      {:error, {:installation_endpoint_invalid, name}} ->
+        {:ok, subject} = CommandSubject.provider(name, :declaration)
+        {:error, CommandDiagnostic.new!(:host, :installation_endpoint_invalid, subject: subject)}
+
       {:error, {:host_schema_invalid, segments}} ->
         {:error, host_path_diagnostic(:host_schema_invalid, segments)}
 

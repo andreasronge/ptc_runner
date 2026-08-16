@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Discovery do
   resource metadata URL is authoritative and never falls through.
   """
 
+  alias PtcRunner.Kernel.MCPEndpoint
   alias PtcRunner.Kernel.MCPHTTPAdapter
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.BearerChallenge
@@ -128,24 +129,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.Discovery do
   defp optional_metadata_url(nil, _authority), do: {:ok, nil}
 
   defp optional_metadata_url(value, authority) when is_binary(value) do
-    allow_insecure_loopback =
-      match?(
-        %URI{scheme: "http", host: host} when host in ["127.0.0.1", "::1"],
-        URI.parse(authority.resource)
-      )
+    allow_insecure_loopback = loopback_http?(authority.resource)
 
     case URI.parse(value) do
-      %URI{
-        scheme: scheme,
-        host: host,
-        userinfo: nil,
-        fragment: nil
-      }
-      when is_binary(host) and host != "" and
-             (scheme == "https" or
-                (allow_insecure_loopback and scheme == "http" and
-                   host in ["127.0.0.1", "::1"])) ->
-        {:ok, value}
+      %URI{scheme: scheme, host: host, userinfo: nil, fragment: nil} ->
+        if MCPEndpoint.origin_allowed?(scheme, host, allow_insecure_loopback),
+          do: {:ok, value},
+          else: {:error, :invalid_resource_metadata_url}
 
       _invalid ->
         {:error, :invalid_resource_metadata_url}
@@ -154,6 +144,15 @@ defmodule PtcRunner.Kernel.MCPOAuth.Discovery do
 
   defp optional_metadata_url(_value, _authority),
     do: {:error, :invalid_resource_metadata_url}
+
+  # A metadata URL inherits the allowance from the resource it describes: only a
+  # resource already admitted over plain-HTTP loopback can point at one.
+  defp loopback_http?(resource) do
+    case URI.parse(resource) do
+      %URI{scheme: "http", host: host} -> MCPEndpoint.loopback_host?(host)
+      _uri -> false
+    end
+  end
 
   defp protected_resource(authority, %{resource_metadata: source}, request, deadline_ms) do
     case fetch_json(source, :metadata, request, deadline_ms) do
