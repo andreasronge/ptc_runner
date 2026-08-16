@@ -17,6 +17,13 @@ defmodule PtcRunner.Dotenv do
 
   @max_bytes 1_000_000
 
+  @type file_error ::
+          :environment_file_not_found
+          | :environment_file_not_regular
+          | :environment_file_unreadable
+          | :environment_file_too_large
+          | :environment_file_invalid_utf8
+
   @doc """
   Parse `path` as a `.env` file and set the variables it declares.
 
@@ -24,23 +31,23 @@ defmodule PtcRunner.Dotenv do
   single or double quotes are stripped from the value. Existing environment
   variables are never overwritten.
   """
-  @spec load_file(String.t()) :: :ok | {:error, :environment_file_invalid}
+  @spec load_file(String.t()) :: :ok | {:error, file_error()}
   def load_file(path) when is_binary(path) do
     with {:ok, canonical} <- ConfinedFile.resolve_absolute(Path.expand(path)),
-         {:ok, %File.Stat{type: :regular}} <- File.lstat(canonical),
          {:ok, bytes} <-
-           ConfinedFile.read(Path.dirname(canonical), Path.basename(canonical), @max_bytes) do
-      parse(bytes)
+           ConfinedFile.read(Path.dirname(canonical), Path.basename(canonical), @max_bytes),
+         :ok <- parse(bytes) do
+      :ok
     else
-      _failure -> {:error, :environment_file_invalid}
+      {:error, reason} -> {:error, file_error(reason)}
     end
   rescue
-    _exception -> {:error, :environment_file_invalid}
+    _exception -> {:error, :environment_file_unreadable}
   catch
-    _kind, _reason -> {:error, :environment_file_invalid}
+    _kind, _reason -> {:error, :environment_file_unreadable}
   end
 
-  def load_file(_path), do: {:error, :environment_file_invalid}
+  def load_file(_path), do: {:error, :environment_file_unreadable}
 
   @doc false
   @spec parse(binary()) :: :ok | {:error, :environment_file_invalid}
@@ -71,7 +78,7 @@ defmodule PtcRunner.Dotenv do
         # callback from an embedding host's own and would relabel any caller
         # that happened to answer with a dotenv parse reason.
         CommandRuntime.with_environment(runtime, fn ->
-          with {:error, _reason} <- load_file(path), do: {:error, :environment_file_unavailable}
+          load_file(path)
         end)
 
       :error ->
@@ -83,6 +90,14 @@ defmodule PtcRunner.Dotenv do
   end
 
   def attach_environment(_runtime, _frontend_options), do: {:error, :invalid_command_runtime}
+
+  defp file_error(:not_found), do: :environment_file_not_found
+  defp file_error(:not_regular), do: :environment_file_not_regular
+  defp file_error(:unreadable), do: :environment_file_unreadable
+  defp file_error(:too_large), do: :environment_file_too_large
+  defp file_error(:invalid_utf8), do: :environment_file_invalid_utf8
+  defp file_error(:environment_file_invalid), do: :environment_file_invalid_utf8
+  defp file_error(_reason), do: :environment_file_unreadable
 
   defp parse_env_line(""), do: :ok
   defp parse_env_line("#" <> _), do: :ok

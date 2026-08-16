@@ -42,6 +42,14 @@ defmodule PtcRunner.Kernel.ModelContract do
     end
   end
 
+  @doc "Builds a value contract from only the top-level kind of a JSON value."
+  @spec json_value(term()) :: {:ok, term()} | {:error, :unsupported_contract}
+  def json_value(value) do
+    with {:ok, value_type} <- json_value_type(value) do
+      {:ok, object([{"value", value_type}])}
+    end
+  end
+
   @spec capability(map(), map() | nil) ::
           {:ok, term()} | {:error, :unsupported_contract}
   def capability(input_schema, output_schema) when is_map(input_schema) do
@@ -108,6 +116,27 @@ defmodule PtcRunner.Kernel.ModelContract do
   end
 
   defp type(_type), do: {:error, :unsupported_contract}
+
+  defp json_value_type(nil), do: {:ok, object([{"kind", "nil"}, {"nullable", true}])}
+  defp json_value_type(value) when is_boolean(value), do: scalar("boolean")
+  defp json_value_type(value) when is_integer(value), do: scalar("integer")
+  defp json_value_type(value) when is_float(value), do: scalar("number")
+  defp json_value_type(value) when is_binary(value), do: scalar("string")
+
+  defp json_value_type(value) when is_list(value) do
+    {:ok,
+     object([
+       {"kind", "array"},
+       {"nullable", false},
+       {"items", object([{"kind", "any"}, {"nullable", true}])}
+     ])}
+  end
+
+  defp json_value_type(value) when is_map(value) and not is_struct(value),
+    do:
+      {:ok, object([{"kind", "object"}, {"nullable", false}, {"closed", false}, {"fields", []}])}
+
+  defp json_value_type(_value), do: {:error, :unsupported_contract}
 
   defp signature_field({name, {:optional, inner_type}}) when is_binary(name) do
     with {:ok, {:object, pairs}} <- type(inner_type) do

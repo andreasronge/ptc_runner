@@ -38,6 +38,7 @@ defmodule PtcRunner.Kernel.ConfinedFile do
           | :symlink_depth_exceeded
           | :not_found
           | :not_regular
+          | :unreadable
           | :too_large
           | :invalid_utf8
           | :changed_during_read
@@ -284,6 +285,7 @@ defmodule PtcRunner.Kernel.ConfinedFile do
   defp normalize(:enotdir), do: :not_found
   defp normalize(:eloop), do: :symlink_depth_exceeded
   defp normalize(:eisdir), do: :not_regular
+  defp normalize(reason) when reason in [:eacces, :eperm], do: :unreadable
 
   defp normalize(reason)
        when reason in [
@@ -292,6 +294,7 @@ defmodule PtcRunner.Kernel.ConfinedFile do
               :symlink_depth_exceeded,
               :not_found,
               :not_regular,
+              :unreadable,
               :too_large,
               :invalid_utf8,
               :changed_during_read

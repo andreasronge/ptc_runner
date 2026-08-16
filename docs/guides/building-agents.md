@@ -218,6 +218,48 @@ Concatenate each page's item `text` exactly, and pass `next_cursor` into the
 next call until it is nil. Do not collect an unbounded file into one evaluation;
 reduce pages into bounded state or resume in a later evaluation.
 
+## Compose several agents
+
+Named missions are PtcRunner's specialist-agent boundary. One trusted workflow
+can call the shipped loop more than once while selecting a different mission
+for each call:
+
+```clojure
+(defn run [input]
+  (let [research
+        (agent.core/run-outcome
+          "Find the relevant evidence."
+          {"mission" "researcher" "max_turns" 6})
+        review
+        (agent.core/run-outcome
+          "Review the evidence and decide."
+          {"mission" "reviewer" "max_turns" 6})]
+    (return {"research" research "review" review})))
+```
+
+The manifest owns the two mission environments and their different data,
+preludes, and tools. The runnable
+[`named-mission-reader-writer`](https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer)
+example uses this sequential shape for a reader and writer.
+
+Use `pcalls` when independent specialists should overlap provider calls:
+
+```clojure
+(return
+  (pcalls
+    #(agent.core/run-value task {"mission" "researcher" "max_turns" 6})
+    #(agent.core/run-value task {"mission" "critic" "max_turns" 6})))
+```
+
+Use `pmap` for a runtime-sized homogeneous set. Parallel loops share the run's
+bounded provider-task admission and one subordinate-evaluation lease: provider
+requests may overlap, while generated PTC-Lisp evaluations enter the mission
+runtime in FIFO order. Size `live_provider_tasks`,
+`subordinate_evaluations`, `evaluation_admission_timeout_ms`, and
+`parallel_timeout_ms` for the entire fan-out. A queue does not make an unsafe
+write retryable; keep effectful stages explicit and reconcile indeterminate
+mutations.
+
 ## Continue across turns
 
 An ordinary successful mission form commits definitions and continues:

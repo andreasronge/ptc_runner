@@ -7,6 +7,7 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.LLMReplayDiagnostic
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Env.Builtin
@@ -360,6 +361,23 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
       do: reason
 
   def sanitize_private_error(
+        {:llm_provider_failed, _message, %{failure_kind: "llm-provider-error"} = details}
+      ) do
+    case SafeMetadata.retain_llm_provider_failure_fields(details) do
+      retained when map_size(retained) == 2 ->
+        details =
+          retained
+          |> Map.put(:failure_kind, "llm-provider-error")
+          |> Map.merge(LLMReplayDiagnostic.retain_candidate_metadata(details))
+
+        {:llm_provider_failed, "LLM provider request failed", details}
+
+      %{} ->
+        {:private_prelude_error, "private prelude evaluation failed"}
+    end
+  end
+
+  def sanitize_private_error(
         {:result_contract_failed, message,
          %{
            agent_turns: turns,
@@ -505,7 +523,7 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     retained = LLMReplayDiagnostic.retain_parallel_failure_metadata(taxonomy)
 
     case retained do
-      retained when map_size(retained) in 1..2 ->
+      retained when map_size(retained) in 1..4 ->
         message = "fail called inside #{if(reason == :pmap_error, do: "pmap", else: "pcalls")}"
 
         case reason do

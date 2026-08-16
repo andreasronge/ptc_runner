@@ -124,6 +124,67 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert Keyword.get(entry.arguments.ordered_options, :eval) == "(+ 1 2)"
   end
 
+  @tag :tmp_dir
+  test "project-backed analysis derives artifact resources and preserves overrides", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project_path = Path.join(target, "ptc-project.json")
+
+    project =
+      project_path
+      |> File.read!()
+      |> Jason.decode!()
+      |> put_in(["artifacts", "inspection"], true)
+
+    File.write!(project_path, Jason.encode!(project))
+
+    assert {:ok, entry} =
+             CommandEntry.open_with_ref(
+               [
+                 "repl",
+                 "--project",
+                 project_path,
+                 "--profile",
+                 "private-run-analysis-v1",
+                 "--private-unattended",
+                 "--eval",
+                 "(analysis/runs {})"
+               ],
+               :mix,
+               "cmd-00000000000000000000000000"
+             )
+
+    assert Keyword.get_values(entry.arguments.ordered_options, :resource) == [
+             "traces=#{Path.join([target, ".ptc", "traces"])}",
+             "inspection=#{Path.join([target, ".ptc", "inspection"])}"
+           ]
+
+    explicit = Path.join(target, "captured-traces")
+
+    assert {:ok, overridden} =
+             CommandEntry.open_with_ref(
+               [
+                 "repl",
+                 "--project",
+                 project_path,
+                 "--profile",
+                 "run-analysis-v1",
+                 "--resource",
+                 "traces=#{explicit}",
+                 "--eval",
+                 "(analysis/runs {})"
+               ],
+               :mix,
+               "cmd-00000000000000000000000000"
+             )
+
+    assert Keyword.get_values(overridden.arguments.ordered_options, :resource) == [
+             "traces=#{explicit}"
+           ]
+  end
+
   test "the repl option terminator leaves project-looking script arguments positional" do
     assert {:ok, entry} =
              CommandEntry.open_with_ref(

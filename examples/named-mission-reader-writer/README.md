@@ -9,8 +9,9 @@ provider occurrences.
 ## Setup and execution
 
 The repository includes the built read-only filesystem MCP sample and the
-example includes a small write-only MCP server implemented with the same
-Elixir/OTP toolchain as PtcRunner. Export an OpenRouter key:
+repository includes a reusable [write-only MCP sample](../mcp/writer/README.md)
+implemented with the same Elixir/OTP toolchain as PtcRunner. Export an
+OpenRouter key:
 
 ```console
 export OPENROUTER_API_KEY=...

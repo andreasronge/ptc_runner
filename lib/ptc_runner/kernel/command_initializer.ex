@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
   @moduledoc """
   Bounded, no-replace publication of the stable application scaffold.
 
-  The complete three-file scaffold is rendered and prepared from memory before
+  The complete four-file scaffold is rendered and prepared from memory before
   target filesystem access. Files are assembled under one owner-only sibling
   directory. A platform no-replace rename is the commit point; failures before
   it remove only identity-verified known staging entries, while success never
@@ -68,12 +68,19 @@ defmodule PtcRunner.Kernel.CommandInitializer do
   }
   """
 
+  @gitignore """
+  .ptc/
+  .ptc-private-*
+  .ptc-private-result-*
+  """
+
   @documents %{
+    ".gitignore" => @gitignore,
     "main.clj" => @main_clj,
     "ptc.json" => @manifest,
     "ptc-project.json" => @project
   }
-  @created ["main.clj", "ptc.json", "ptc-project.json"]
+  @created [".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
   @staging_attempts 16
 
   @type identity ::

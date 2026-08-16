@@ -1848,7 +1848,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S121",
         "Clojure int coercion returns the tab code point for a character literal; PTC-Lisp currently raises."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/format-zero-padding-bug-001",
         "clojure.core",
         ["format"],
@@ -1856,7 +1856,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S65",
         "Clojure format honors width and zero-padding flags; PTC-Lisp currently ignores them."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/format-left-width-bug-001",
         "clojure.core",
         ["format"],
@@ -1864,7 +1864,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S65",
         "Clojure format honors left-aligned field width; PTC-Lisp currently ignores it."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/format-string-width-bug-001",
         "clojure.core",
         ["format"],
@@ -1872,7 +1872,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S65",
         "Clojure format honors right-aligned field width; PTC-Lisp currently ignores it."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/format-float-zero-padding-bug-001",
         "clojure.core",
         ["format"],
@@ -1896,7 +1896,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S65",
         "Clojure format supports the leading-space sign flag; PTC-Lisp currently rejects the format string."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/format-hex-zero-padding-bug-001",
         "clojure.core",
         ["format"],

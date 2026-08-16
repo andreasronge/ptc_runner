@@ -145,11 +145,11 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
-  test "an unreadable environment file renders the same requirement run and doctor do", %{
+  test "a missing environment file renders its concrete cause", %{
     tmp_dir: directory
   } do
-    # The REPL takes --env-file too, and rendered the bare reason atom while the
-    # other two commands named what the file has to be.
+    # The REPL takes --env-file too and preserves the same closed cause as run
+    # and doctor rather than collapsing it into the generic file constraint.
     manifest_path = Path.join(directory, "env.json")
     File.write!(Path.join(directory, "main.clj"), "(ns main) (defn run [input] (return input))")
 
@@ -183,7 +183,7 @@ defmodule PtcRunner.ReplFrontendTest do
       })
     )
 
-    assert_raise Mix.Error, ~r/must be readable UTF-8 under 1 MB/, fn ->
+    assert_raise Mix.Error, ~r/named environment file does not exist/, fn ->
       run_repl([
         "--manifest",
         manifest_path,

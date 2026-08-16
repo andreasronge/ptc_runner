@@ -3354,41 +3354,33 @@ already matches Clojure for `(= ##NaN ##NaN)` and `(not= ##NaN ##NaN)`, so
 treating repeated NaN arguments as duplicates is an isolated predicate
 inconsistency rather than a documented numeric-equality divergence.
 
-### GAP-S65: `format` ignores width and padding flags
+### GAP-S65: `format` lacks sign and alternate-form flags
 
 | Field | Value |
 |-------|-------|
-| **Priority** | P1 |
+| **Priority** | P2 |
 | **Status** | open |
-| **Source** | Manual conformance cases `core/format-zero-padding-bug-001`, `core/format-left-width-bug-001`, `core/format-string-width-bug-001`, `core/format-float-zero-padding-bug-001`, `core/format-plus-sign-bug-001`, `core/format-space-sign-bug-001`, `core/format-hex-zero-padding-bug-001`, `core/format-alternate-hex-bug-001`, `core/format-parentheses-negative-bug-001` |
+| **Source** | Manual conformance cases `core/format-plus-sign-bug-001`, `core/format-space-sign-bug-001`, `core/format-alternate-hex-bug-001`, `core/format-parentheses-negative-bug-001` |
 
 ```clojure
 ;; Clojure
-(format "%02d" 3)      ;=> "03"
-(format "%-4s!" "x")   ;=> "x   !"
-(format "%5s" "x")     ;=> "    x"
-(format "%05.2f" 3.1)  ;=> "03.10"
 (format "%+d" 3)       ;=> "+3"
 (format "% d" 3)       ;=> " 3"
-(format "%04x" 15)     ;=> "000f"
 (format "%#x" 15)      ;=> "0xf"
 (format "%(d" -3)      ;=> "(3)"
 
 ;; PTC-Lisp current behavior
-(format "%02d" 3)      ;=> "3"
-(format "%-4s!" "x")   ;=> "x!"
-(format "%5s" "x")     ;=> "x"
-(format "%05.2f" 3.1)  ;=> "3.10"
 (format "%+d" 3)       ;=> runtime_error
 (format "% d" 3)       ;=> runtime_error
-(format "%04x" 15)     ;=> "f"
 (format "%#x" 15)      ;=> runtime_error
 (format "%(d" -3)      ;=> runtime_error
 ```
 
 **Decision:** BUG. `format` is marked supported and already accepts Java-style
-format strings for normal finite values. Ignoring or rejecting field width,
-padding, and sign flags produces silent presentation/data-export mismatches.
+format strings for normal finite values. Field width, `-` alignment, `0`
+padding, and numeric precision are supported and covered by runtime tests.
+The remaining sign and alternate-form flags are rejected instead of silently
+changing output, but still differ from Java/Clojure formatting.
 
 ### GAP-S89: `format` rejects boolean and newline conversions
 

@@ -103,6 +103,21 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert RunState.replay_miss?(state, request_hash)
   end
 
+  test "provider completion authenticates LLM failure evidence only for llm-request" do
+    error = ProviderError.new(:payment_required, "private", retryable?: false)
+
+    {:ok, llm_state} = RunState.start(Limits.defaults())
+    assert :ok = RunState.reserve_capability(llm_state, :workflow, "llm-request")
+    assert :ok = RunState.finish_provider(llm_state, nil, error)
+    assert :ok = RunState.consume_llm_provider_failure(llm_state, :payment_required, false)
+    assert :error = RunState.consume_llm_provider_failure(llm_state, :payment_required, false)
+
+    {:ok, other_state} = RunState.start(Limits.defaults())
+    assert :ok = RunState.reserve_capability(other_state, :workflow, "other")
+    assert :ok = RunState.finish_provider(other_state, nil, error)
+    assert :error = RunState.consume_llm_provider_failure(other_state, :payment_required, false)
+  end
+
   test "a caller cannot hold two capability reservations at once" do
     {:ok, state} = RunState.start(Limits.defaults())
 
@@ -1929,6 +1944,59 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     refute Map.has_key?(details, :replay_request_hash)
     refute inspect(error) =~ forged_hash
+  end
+
+  test "workflow code cannot forge an LLM provider failure class" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "provider-class-forgery")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    source =
+      ~S|(fail {:kind :llm-provider-error :reason {:status :error :kind :provider-error :reason :payment-required :retryable? false}})|
+
+    assert {:error, %{reason: :explicit_failure, details: details}} = Kernel.run(source, config)
+    assert details == %{failure_kind: "llm-provider-error"}
+  end
+
+  test "parallel workflow code cannot forge an LLM provider failure class" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+
+    cases = [
+      {:pmap, :pmap_error,
+       ~S|(pmap (fn [_] (fail {:kind :llm-provider-error :reason {:status :error :kind :provider-error :reason :payment-required :retryable? false}})) [1])|},
+      {:pcalls, :pcalls_error,
+       ~S|(pcalls #(fail {:kind :llm-provider-error :reason {:status :error :kind :provider-error :reason :payment-required :retryable? false}}))|}
+    ]
+
+    Enum.each(cases, fn {name, reason, source} ->
+      {:ok, sink} = EventSink.start(:normal, limits, run_id: "provider-class-forgery-#{name}")
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          missions: %{"default" => mission},
+          input: %{},
+          limits: limits,
+          event_sink: sink
+        )
+
+      assert {:error, %{reason: ^reason, details: details}} = Kernel.run(source, config)
+      assert details.failure_kind == "llm-provider-error"
+      refute Map.has_key?(details, :llm_provider_failure)
+      refute Map.has_key?(details, :llm_provider_retryable?)
+    end)
   end
 
   test "explicit workflow failure exposes only bounded safe taxonomy" do

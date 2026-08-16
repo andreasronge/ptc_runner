@@ -24,6 +24,9 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     assert {:ok, %{"items" => [], "snapshot_hash" => "sha256:" <> _}} =
              RunAnalysis.query(analysis, :runs, %{})
+
+    assert {:error, :invalid_query} =
+             RunAnalysis.query(analysis, :runs, %{"view" => "bogus"})
   end
 
   @tag :tmp_dir

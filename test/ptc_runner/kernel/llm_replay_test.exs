@@ -602,7 +602,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
                  |> RunLifecycle.build(registry, trace_path: trace_path)
                  |> RunLifecycle.execute()
 
-        assert reason == if(parallel == :pmap, do: :pmap_error, else: :pcalls_error)
+        assert reason == :llm_provider_failed
 
         stopped =
           trace_path

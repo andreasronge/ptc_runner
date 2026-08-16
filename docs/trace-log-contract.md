@@ -403,6 +403,13 @@ Discovers runs in the granted source. Filters are limited to run/trace ID,
 status, bounded exact-match tags, workflow/agent name, workflow bundle hash,
 model/provider when present, timestamp range, limit, and cursor.
 
+The default `view` is `"summary"` and projects each item to `run_id`, `status`,
+`duration_ms`, `llm_calls`, `evaluations`, `terminal_reason`, `complete`, and
+`truncated`. Set `"view"` to `"full"` for the complete sanitized metadata
+record described above. Pagination and filtering are applied before this
+presentation projection, so the cursor and selected run set are identical in
+both views.
+
 Default ordering is deterministic: newest start timestamp first, with run ID as
 a stable tie-breaker.
 

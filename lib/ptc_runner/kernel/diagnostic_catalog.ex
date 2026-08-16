@@ -101,8 +101,16 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the private result recovery reservation failed"},
     {:local_preflight, :environment_unavailable, 4, false,
      "a required local environment is unavailable"},
-    {:local_preflight, :environment_file_unavailable, 4, false,
-     "the named environment file must be readable UTF-8 under 1 MB"},
+    {:local_preflight, :environment_file_not_found, 4, false,
+     "the named environment file does not exist"},
+    {:local_preflight, :environment_file_not_regular, 4, false,
+     "the named environment file is not a regular file"},
+    {:local_preflight, :environment_file_unreadable, 4, false,
+     "the named environment file cannot be read safely"},
+    {:local_preflight, :environment_file_too_large, 4, false,
+     "the named environment file exceeds the 1 MB limit"},
+    {:local_preflight, :environment_file_invalid_utf8, 4, false,
+     "the named environment file is not valid UTF-8"},
     {:local_preflight, :authorization_target_unknown, 4, false,
      "--authorize-mcp must name an installed provider the application selects"},
     {:local_preflight, :authorization_not_applicable, 4, false,
@@ -164,6 +172,20 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:provider_acquisition, :capability_requirement_missing, 4, false,
      "a component requires a capability that the selected providers did not supply"},
     {:execution, :workflow_failed, 5, false, "the workflow failed"},
+    {:execution, :llm_authentication_failed, 5, false,
+     "the LLM provider rejected authentication; check the installed credential"},
+    {:execution, :llm_payment_required, 5, false,
+     "the LLM provider rejected the request for billing or credit reasons"},
+    {:execution, :llm_rate_limited, 5, true, "the LLM provider rate limited the request"},
+    {:execution, :llm_model_not_found, 5, false,
+     "the LLM provider could not find the configured model"},
+    {:execution, :llm_request_invalid, 5, false,
+     "the LLM provider rejected the configured request"},
+    {:execution, :llm_access_denied, 5, false,
+     "the LLM provider denied access to the configured model"},
+    {:execution, :llm_timeout, 5, true, "the LLM provider request timed out"},
+    {:execution, :llm_provider_unavailable, 5, true, "the LLM provider is unavailable"},
+    {:execution, :llm_provider_failed, 5, false, "the LLM provider request failed"},
     {:execution, :mission_failed, 5, false, "a subordinate mission failed"},
     {:execution, :runtime_limit_exceeded, 6, false, "a runtime limit was exceeded"},
     {:execution, :run_timeout, 6, false, "the run duration limit was exceeded"},
@@ -416,7 +438,15 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   # The environment file is named by `--env-file` or by the project host block,
   # so it belongs to the invocation rather than to any one installed provider.
-  def subject_policy(:local_preflight, :environment_file_unavailable), do: :forbidden
+  def subject_policy(:local_preflight, code)
+      when code in [
+             :environment_file_not_found,
+             :environment_file_not_regular,
+             :environment_file_unreadable,
+             :environment_file_too_large,
+             :environment_file_invalid_utf8
+           ],
+      do: :forbidden
 
   def subject_policy(phase, code) do
     cond do
@@ -622,7 +652,11 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   # phase they can assert no activity rather than admitting either value.
   def provider_activity_policy(:local_preflight, code)
       when code in [
-             :environment_file_unavailable,
+             :environment_file_not_found,
+             :environment_file_not_regular,
+             :environment_file_unreadable,
+             :environment_file_too_large,
+             :environment_file_invalid_utf8,
              :authorization_target_unknown,
              :authorization_not_applicable
            ],

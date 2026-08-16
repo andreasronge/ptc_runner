@@ -657,10 +657,11 @@ if Code.ensure_loaded?(ReqLLM) do
       do: ProviderError.new(:unavailable, "LLM provider unavailable", retryable?: true)
 
     defp http_error_kind(401), do: :authentication_failed
+    defp http_error_kind(402), do: :payment_required
     defp http_error_kind(403), do: :denied
     defp http_error_kind(404), do: :not_found
     defp http_error_kind(408), do: :timeout
-    defp http_error_kind(429), do: :unavailable
+    defp http_error_kind(429), do: :rate_limited
     defp http_error_kind(status) when status in 400..499, do: :invalid_request
     defp http_error_kind(status) when status in 500..599, do: :unavailable
     defp http_error_kind(_status), do: :unavailable

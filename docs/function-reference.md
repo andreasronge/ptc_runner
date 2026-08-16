@@ -326,7 +326,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `ends-with?` | `(ends-with? s suffix)` | Check if string ends with suffix |
 | `extract` * | `(extract pattern s), (extract pattern s n)` | Extract capture group n (0 = full match) |
 | `extract-int` * | `(extract-int pattern s), (extract-int pattern s n), (extract-int pattern s n default)` | Extract group n, parse as int, return default on failure |
-| `format` * | `(format fmt-string & args)` | Java-style format string — DIV-21: renders nil as "" (not "null"), consistent with (str nil) → "". See docs/clojure-conformance-gaps.md. |
+| `format` * | `(format fmt-string & args)` | Java-style format string with bounded width, left alignment, zero padding, and numeric precision — DIV-21: renders nil as "" (not "null"), consistent with (str nil) → "". See docs/clojure-conformance-gaps.md. |
 | `includes?` | `(includes? s substring)` | Check if string contains substring |
 | `index-of` | `(index-of s value), (index-of s value from-index)` | Index of first occurrence from position |
 | `join` | `(join coll), (join separator coll)` | Join collection elements (no separator) |

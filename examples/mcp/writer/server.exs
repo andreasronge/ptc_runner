@@ -1,4 +1,4 @@
-defmodule NamedMissionWriterServer do
+defmodule PtcWriterSampleServer do
   @moduledoc false
 
   def main([root]) do
@@ -25,7 +25,7 @@ defmodule NamedMissionWriterServer do
       "capabilities" => %{"tools" => %{}},
       "_meta" => %{
         "io.modelcontextprotocol/serverInfo" => %{
-          "name" => "named-mission-writer",
+          "name" => "ptc-writer-sample",
           "version" => "1.0"
         }
       },
@@ -40,7 +40,7 @@ defmodule NamedMissionWriterServer do
       "tools" => [
         %{
           "name" => "write_text_file",
-          "description" => "Replace one UTF-8 file in the writer mission's private root.",
+          "description" => "Replace one UTF-8 file in the writer's confined root.",
           "inputSchema" => %{
             "type" => "object",
             "additionalProperties" => false,
@@ -124,4 +124,4 @@ defmodule NamedMissionWriterServer do
   end
 end
 
-NamedMissionWriterServer.main(System.argv())
+PtcWriterSampleServer.main(System.argv())

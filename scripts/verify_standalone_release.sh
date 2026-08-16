@@ -116,7 +116,7 @@ done
 
 "$command_bin" init "$fixture_root/initialized" > "$release_tmp_dir/init.stdout"
 test -f "$fixture_root/initialized/ptc.json"
-grep -qx 'created main.clj, ptc.json, ptc-project.json' "$release_tmp_dir/init.stdout"
+grep -qx 'created .gitignore, main.clj, ptc.json, ptc-project.json' "$release_tmp_dir/init.stdout"
 
 "$command_bin" validate "$application_root/ptc.json" > "$release_tmp_dir/validate.stdout"
 grep -q '"provider_activity":false' "$release_tmp_dir/validate.stdout"

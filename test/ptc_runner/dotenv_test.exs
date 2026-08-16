@@ -20,6 +20,29 @@ defmodule PtcRunner.DotenvTest do
   end
 
   describe "load_file/1" do
+    test "distinguishes common file failures", %{tmp_dir: dir} do
+      assert Dotenv.load_file(Path.join(dir, "missing.env")) ==
+               {:error, :environment_file_not_found}
+
+      directory = Path.join(dir, "directory.env")
+      File.mkdir!(directory)
+
+      assert Dotenv.load_file(directory) ==
+               {:error, :environment_file_not_regular}
+
+      invalid_utf8 = Path.join(dir, "invalid.env")
+      File.write!(invalid_utf8, <<255>>)
+
+      assert Dotenv.load_file(invalid_utf8) ==
+               {:error, :environment_file_invalid_utf8}
+
+      oversized = Path.join(dir, "large.env")
+      File.write!(oversized, String.duplicate("x", 1_000_001))
+
+      assert Dotenv.load_file(oversized) ==
+               {:error, :environment_file_too_large}
+    end
+
     test "parses KEY=VALUE pairs", %{tmp_dir: dir} do
       track_env(["PTC_DOTENV_TEST_A", "PTC_DOTENV_TEST_B"])
       path = Path.join(dir, ".env")

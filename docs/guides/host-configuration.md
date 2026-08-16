@@ -145,6 +145,26 @@ warning for that requester. Catalog metadata such as pricing, limits, token
 estimation, and capability detection may then be incomplete; the warning does
 not mean the provider request itself is known to fail.
 
+Model selectors are provider-qualified strings. These are the provider paths
+PtcRunner configures and exercises directly:
+
+| Prefix | Example selector | Credential binding normally backed by |
+| --- | --- | --- |
+| `openrouter:` | `openrouter:deepseek/deepseek-v4-flash` | `OPENROUTER_API_KEY` |
+| `anthropic:` | `anthropic:claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
+| `openai:` | `openai:gpt-5-mini` | `OPENAI_API_KEY` |
+| `google:` | `google:gemini-2.5-flash` | `GOOGLE_API_KEY` |
+| `groq:` | `groq:openai/gpt-oss-20b` | `GROQ_API_KEY` |
+| `amazon_bedrock:` | `amazon_bedrock:anthropic.claude-sonnet-4-5-20250929-v1:0` | AWS credentials |
+
+The examples are release-catalog examples, not promises that a provider still
+serves an alias. A requester emits `model_uncataloged` when its selector misses
+the bundled catalog; `mix ptc doctor PROJECT --connect --show-model-selectors`
+tests the selected provider and includes selectors that are safe to disclose.
+Direct Anthropic selectors, Anthropic models through OpenRouter, and Claude
+models on Bedrock support the adapter's prompt-cache policy when the
+installation sets `"cache": true`.
+
 The manifest selects only `deepseek`; it cannot change any field above. When
 the adapter attests that the resolved model is safe public identity, provider
 snapshots and model-grouped usage include it. Endpoint-bearing or otherwise
@@ -157,6 +177,20 @@ network-free example, candidate materialization, and component overrides.
 `doctor --connect` performs a real minimal completion for each selected live
 model and may incur provider cost. `--show-model-selectors` adds only safe
 selectors; endpoint-bearing `openai-compat:` selectors remain hidden.
+
+### Resolve local transport paths
+
+Stdio `cwd` and relative command arguments resolve from the host document, not
+from PtcRunner's source checkout and not from the shell's current directory.
+For an application in a separate repository, keep its MCP server bundle in
+that repository (for example `tools/files/server.js`) and use a host-relative
+path, or install the server executable at a stable absolute location. A
+cross-repository `../ptc_runner/examples/...` path is useful for local
+experimentation but does not make the application independently cloneable.
+
+The self-contained PtcRunner release includes the runtime and ERTS, not the
+repository's example MCP bundles. Copy or package any selected example server
+with the application, including its own runtime such as Node.js or Elixir.
 
 ### MCP servers
 

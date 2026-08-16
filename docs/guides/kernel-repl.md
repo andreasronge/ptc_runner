@@ -85,6 +85,16 @@ use the public session API described in
 Select the fixed public profile and its required resource:
 
 ```console
+mix ptc repl --project ptc-project.json \
+  --profile run-analysis-v1 \
+  -e '(analysis/runs {})'
+```
+
+`--project` derives `traces` from the configured artifact root. The equivalent
+explicit form is useful for a copied capture or a project without trace
+artifacts:
+
+```console
 mix ptc repl \
   --profile run-analysis-v1 \
   --resource traces=tmp/tutorial-traces
@@ -146,8 +156,13 @@ mix ptc repl \
   --resource traces=tmp/tutorial-traces \
   --resource inspection=tmp/tutorial-inspection \
   --session-trace-dir tmp/analysis-traces \
+  --load analysis.clj \
   --private-terminal
 ```
+
+`--load` evaluates one bounded local setup file, then opens the authorized
+interactive terminal with those definitions available. `--eval`, scripts, and
+stdin remain unattended input and require `--private-unattended` instead.
 
 The trace, inspection, and analysis-trace directories must be physically
 separate, including through ancestors and symlink aliases. Capture validates

@@ -27,15 +27,25 @@ defmodule PtcRunner.Lisp.Runtime.StringFormatTest do
       assert run!(~s|(format "%s has %d items" "Alice" 5)|) == "Alice has 5 items"
     end
 
-    test "ignores width and alignment hints" do
+    test "applies width, left alignment, and zero padding" do
       assert run!(~S[(format "in %6s | out %-8s | id %08d" "12" "34" 255)]) ==
-               "in 12 | out 34 | id 255"
+               "in     12 | out 34       | id 00000255"
     end
 
-    test "ignores width in multi-specifier trace templates" do
+    test "applies width in multi-specifier trace templates" do
       assert run!(
                ~S[(format "iter %s | in %6s | out %s | $%s | %s | finish=%s" "3" "100" "45" "0.0012" "gpt" "stop")]
-             ) == "iter 3 | in 100 | out 45 | $0.0012 | gpt | finish=stop"
+             ) == "iter 3 | in    100 | out 45 | $0.0012 | gpt | finish=stop"
+    end
+
+    test "matches the common aligned-table forms" do
+      assert run!(~S|(format "[%5s][%-8s][%3s]" "ab" "cd" 7)|) ==
+               "[   ab][cd      ][  7]"
+    end
+
+    test "pads finite floats after applying precision" do
+      assert run!(~S|(format "[%8.2f][%-8.1f][%08.2f]" 3.14159 3.14159 3.1)|) ==
+               "[    3.14][3.1     ][00003.10]"
     end
 
     test "%% literal percent" do

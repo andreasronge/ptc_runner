@@ -810,7 +810,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
       "models" => CommandOutcome.success(:models, @run_ref, %{"installations" => []}),
       "init" =>
         CommandOutcome.success(:init, @run_ref, %{
-          "created" => ["main.clj", "ptc.json", "ptc-project.json"]
+          "created" => [".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
         }),
       "help_root" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:root)),
       "help_run" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:run)),

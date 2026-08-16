@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
@@ -324,6 +325,95 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert is_map(outcome.envelope["execution"]["usage"])
     refute Jason.encode!(outcome.envelope) =~ "must-not-escape"
     assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "agent LLM failures publish a bounded provider class", %{tmp_dir: directory} do
+    keys = [:llm_adapter, :host_llm_test_owner, :host_llm_test_result]
+    previous = Map.new(keys, &{&1, Application.fetch_env(:ptc_runner, &1)})
+
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_llm_test_owner, self())
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
+      {:error, ProviderError.new(:payment_required, "PRIVATE PROVIDER MESSAGE")}
+    )
+
+    on_exit(fn ->
+      Enum.each(previous, fn
+        {key, {:ok, value}} -> Application.put_env(:ptc_runner, key, value)
+        {key, :error} -> Application.delete_env(:ptc_runner, key)
+      end)
+    end)
+
+    host_path =
+      write_host_config(directory, "billing-failure", %{
+        "credentials" => %{"key" => %{"literal" => "test-key"}},
+        "install" => %{
+          "model" => %{
+            "source" => "llm",
+            "installation_revision" => "model-v1",
+            "model" => "openrouter:test/model",
+            "credential" => "key"
+          }
+        }
+      })
+
+    manifest =
+      valid_manifest(%{
+        "workflow" => %{
+          "components" => [
+            %{"id" => "app", "path" => "main.clj", "dependencies" => ["agent.core"]},
+            %{"library" => "agent.core"}
+          ],
+          "entry" => "app/run"
+        },
+        "missions" => %{"default" => %{}},
+        "providers" => %{
+          "workflow" => [%{"name" => "model", "config" => %{}}],
+          "mission" => []
+        }
+      })
+
+    for {name, expression} <- [
+          {"direct", ~S|(agent.core/run "answer" {"max_turns" 1})|},
+          {"pmap", ~S|(pmap (fn [_] (agent.core/run "answer" {"max_turns" 1})) [1])|},
+          {"pcalls", ~S|(pcalls #(agent.core/run "answer" {"max_turns" 1}))|}
+        ] do
+      application =
+        write_application(directory, "billing-failure-#{name}", manifest, %{
+          "main.clj" => "(ns app) (defn run [_input] #{expression})"
+        })
+
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+      assert outcome.envelope["error"]["code"] == "llm_payment_required"
+      assert outcome.envelope["error"]["message"] =~ "billing or credit"
+      refute Jason.encode!(outcome.envelope) =~ "PRIVATE PROVIDER MESSAGE"
+      assert_schema_valid(outcome.envelope)
+    end
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
+      {:error, ProviderError.new(:invalid_result, "PRIVATE INVALID RESPONSE")}
+    )
+
+    invalid_response =
+      write_application(directory, "invalid-provider-response", manifest, %{
+        "main.clj" => ~S|(ns app) (defn run [_input] (agent.core/run "answer" {"max_turns" 1}))|
+      })
+
+    assert {:error, %CommandOutcome{} = invalid_outcome} =
+             CommandEngine.dispatch(["run", invalid_response, "--host-config", host_path])
+
+    assert invalid_outcome.envelope["error"]["code"] == "llm_provider_failed"
+    assert invalid_outcome.envelope["error"]["retryable"] == false
+    refute Jason.encode!(invalid_outcome.envelope) =~ "PRIVATE INVALID RESPONSE"
+    assert_schema_valid(invalid_outcome.envelope)
   end
 
   @tag :tmp_dir
@@ -692,7 +782,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "a named environment file that cannot be read is classified, not internal", %{
+  test "a missing named environment file reports the concrete cause", %{
     tmp_dir: directory
   } do
     # The file the operator names by hand is the likeliest first-run mistake, so
@@ -713,8 +803,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              ])
 
     assert outcome.envelope["error"]["phase"] == "local_preflight"
-    assert outcome.envelope["error"]["code"] == "environment_file_unavailable"
-    assert outcome.envelope["error"]["message"] =~ "environment file"
+    assert outcome.envelope["error"]["code"] == "environment_file_not_found"
+    assert outcome.envelope["error"]["message"] == "the named environment file does not exist"
     assert outcome.envelope["error"]["provider_activity"] == false
     assert outcome.envelope["execution"] == %{"state" => "not_started"}
     assert_schema_valid(outcome.envelope)
@@ -759,7 +849,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch(argv)
 
       assert outcome.envelope["error"]["phase"] == "local_preflight"
-      assert outcome.envelope["error"]["code"] == "environment_file_unavailable"
+      assert outcome.envelope["error"]["code"] == "environment_file_not_found"
       assert_schema_valid(outcome.envelope)
     end
   end
@@ -782,7 +872,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     # value. These three are decided before any provider runs, so a `true` must
     # be unconstructible rather than merely unused by their producers.
     for code <- [
-          :environment_file_unavailable,
+          :environment_file_not_found,
           :authorization_target_unknown,
           :authorization_not_applicable
         ] do
@@ -811,7 +901,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert :environment_unavailable in local_codes
   end
 
-  defp authorization_subject(:environment_file_unavailable), do: nil
+  defp authorization_subject(:environment_file_not_found), do: nil
 
   defp authorization_subject(_code) do
     {:ok, subject} = CommandSubject.provider("workspace", :local)

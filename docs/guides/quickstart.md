@@ -26,10 +26,11 @@ mix ptc run hello-ptc/ptc-project.json
 {}
 ```
 
-`init` creates a minimal PTC-Lisp function, its application manifest, and a
-project document that remembers local artifact and Viewer settings. The run
-needs no model, host document, credential, or network access and records its
-trace and command envelope under `hello-ptc/.ptc`.
+`init` creates a minimal PTC-Lisp function, its application manifest, a project
+document that remembers local artifact and Viewer settings, and a `.gitignore`
+covering both committed artifacts and private publication reservations. The
+run needs no model, host document, credential, or network access and records
+its trace and command envelope under `hello-ptc/.ptc`.
 
 ## 2. Supply a model credential
 

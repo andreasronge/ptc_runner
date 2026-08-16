@@ -114,7 +114,7 @@ describes that value rather than agent.core's default success envelope.
 - **Visibility:** `prompt`
 - **Effect:** `unknown`
 - **Contract:** `(input {task :string, agent {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}}) -> :any`
-- **Backing requirements:** `tool:kernel-eval`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
+- **Backing requirements:** `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
 
 ### `agent.core`
 
@@ -147,7 +147,7 @@ the model-authored value returns.
 - **Visibility:** `prompt`
 - **Effect:** `unknown`
 - **Contract:** `(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?, result_envelope :bool?}) -> :any`
-- **Backing requirements:** `tool:kernel-eval`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
+- **Backing requirements:** `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
 
 ##### `agent.core/run-outcome`
 
@@ -162,7 +162,7 @@ bounded subject-attributable failure.
 - **Visibility:** `prompt`
 - **Effect:** `unknown`
 - **Contract:** `(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any`
-- **Backing requirements:** `tool:kernel-eval`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
+- **Backing requirements:** `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
 
 ##### `agent.core/run-result-value`
 
@@ -177,7 +177,7 @@ manifest result contract before returning it to the calling workflow.
 - **Visibility:** `prompt`
 - **Effect:** `unknown`
 - **Contract:** `(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any`
-- **Backing requirements:** `tool:kernel-eval`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
+- **Backing requirements:** `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
 
 ##### `agent.core/run-value`
 
@@ -196,7 +196,7 @@ to record those attempts use `run-outcome`.
 - **Visibility:** `prompt`
 - **Effect:** `unknown`
 - **Contract:** `(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any`
-- **Backing requirements:** `tool:kernel-eval`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
+- **Backing requirements:** `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
 
 ## Agent loop policy
 

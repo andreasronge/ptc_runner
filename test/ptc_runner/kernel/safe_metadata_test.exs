@@ -51,4 +51,41 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
       refute SafeMetadata.annotation?("agent-step", %{"turn" => 0, "kind" => "tool-call"})
     end
   end
+
+  describe "LLM provider failure taxonomy" do
+    test "retains only a closed class from the nested provider envelope" do
+      failure = %{
+        kind: :llm_provider_error,
+        reason: %{
+          status: :error,
+          kind: :provider_error,
+          reason: :payment_required,
+          retryable?: false,
+          details: "PRIVATE PROVIDER MESSAGE"
+        }
+      }
+
+      assert SafeMetadata.llm_provider_failure(failure) ==
+               %{llm_provider_failure: :payment_required, llm_provider_retryable?: false}
+
+      refute inspect(SafeMetadata.llm_provider_failure(failure)) =~ "PRIVATE"
+    end
+
+    test "rejects lookalike and unknown nested values" do
+      assert SafeMetadata.llm_provider_failure(%{
+               kind: :other,
+               reason: %{reason: :authentication_failed, retryable?: false}
+             }) == %{}
+
+      assert SafeMetadata.llm_provider_failure(%{
+               kind: :llm_provider_error,
+               reason: %{reason: :private_provider_kind, retryable?: false}
+             }) == %{}
+
+      assert SafeMetadata.llm_provider_failure(%{
+               kind: :llm_provider_error,
+               reason: %{reason: :payment_required}
+             }) == %{}
+    end
+  end
 end

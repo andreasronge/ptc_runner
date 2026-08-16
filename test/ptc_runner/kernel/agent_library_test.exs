@@ -1001,7 +1001,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert second_prompt =~ "each continuation message state how many programs remain"
   end
 
-  test "default prompt keeps an empty Available API section" do
+  test "default prompt explains an empty Available API section" do
     response = %{
       content: nil,
       tool_calls: [
@@ -1018,7 +1018,43 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              )
 
     assert_receive {:agent_request, %{"system" => system}}
-    assert system =~ ~r/\nAvailable API\n\z/
+
+    assert system =~
+             ~r/\nAvailable API\n- No mission-specific data, functions, or tools are available\.\n\z/
+
+    assert system =~ "dir/apropos/doc discover mission prelude exports only"
+  end
+
+  test "default prompt advertises mission data names and types without values" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "done", name: "run_ptc_lisp", args: %{"program" => ~S|(return data/cash_usd)|}}
+      ]
+    }
+
+    {:ok, config} =
+      agent_config([response], [],
+        mission_data: %{
+          "cash_usd" => 1_250_000,
+          "active" => true,
+          "notes" => ["private value sentinel"]
+        }
+      )
+
+    assert {:ok, %{value: %{"ok" => true, "value" => 1_250_000}}} =
+             Kernel.run(~S|(agent.core/run "What is available?" {"max_turns" 1})|, config)
+
+    assert_receive {:agent_request, %{"system" => system}}
+    assert system =~ "Value: data/cash_usd"
+    assert system =~ "Type: :int"
+    assert system =~ "Value: data/active"
+    assert system =~ "Type: :bool"
+    assert system =~ "Value: data/notes"
+    assert system =~ "Type: [:any?]"
+    refute system =~ "1250000"
+    refute system =~ "private value sentinel"
+    refute system =~ "data/input"
   end
 
   test "the V2 inventory call form alone enables direct bare-capability use" do
@@ -1724,6 +1760,55 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert feedback =~ "provider_error"
     assert feedback =~ "not_found"
     refute feedback =~ "private provider detail"
+  end
+
+  test "agent.core retains a bounded LLM provider failure class directly and in parallel" do
+    cases = [
+      ~S|(agent.core/run "Try once" {"max_turns" 1})|,
+      ~S|(pmap (fn [_] (agent.core/run "Try once" {"max_turns" 1})) [1])|,
+      ~S|(pcalls #(agent.core/run "Try once" {"max_turns" 1}))|
+    ]
+
+    for source <- cases do
+      {:ok, config} =
+        agent_config([
+          {:error,
+           ProviderError.new(:authentication_failed, "PRIVATE PROVIDER MESSAGE",
+             retryable?: false
+           )}
+        ])
+
+      assert {:error,
+              %{
+                kind: :workflow_failed,
+                reason: :llm_provider_failed,
+                details: %{
+                  failure_kind: "llm-provider-error",
+                  llm_provider_failure: :authentication_failed,
+                  llm_provider_retryable?: false
+                }
+              }} = Kernel.run(source, config)
+    end
+  end
+
+  test "a handled provider failure cannot authenticate a later forged failure" do
+    {:ok, config} =
+      agent_config([
+        {:error,
+         ProviderError.new(:authentication_failed, "PRIVATE PROVIDER MESSAGE", retryable?: false)}
+      ])
+
+    source = ~S|
+    (do
+      (llm/request {"messages" []})
+      (fail {:kind :llm-provider-error
+             :reason {:status :error
+                      :kind :provider-error
+                      :reason :authentication-failed
+                      :retryable? false}}))|
+
+    assert {:error, %{reason: :explicit_failure, details: details}} = Kernel.run(source, config)
+    assert details == %{failure_kind: "llm-provider-error"}
   end
 
   test "agent.core receives a declared bound after rejecting capability arguments" do
@@ -2433,7 +2518,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
         provider_closers: [close_counter(self(), :provider_failure)]
       )
 
-    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+    assert {:error, %{kind: :workflow_failed, reason: :llm_provider_failed}} =
              Kernel.run(~S|(agent.core/run "Provider" {"max_turns" 1})|, provider_config)
 
     assert_receive {:provider_closed, :provider_failure}
@@ -2698,7 +2783,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   defp required_agent_tools do
     Map.new(
-      ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
+      ~w(kernel-check-source kernel-eval kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
          llm-request workflow-annotate),
       &{&1, %TrustedTool{function: fn _arguments -> %{status: :error} end}}
     )
@@ -2706,16 +2791,17 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   defp mission_environment(opts) do
     capabilities = Keyword.get(opts, :mission_capabilities, [])
+    data = Keyword.get(opts, :mission_data, %{})
 
     case Keyword.fetch(opts, :mission_source) do
       {:ok, source} ->
         with {:ok, component} <- Component.new(id: "test.mission", source: source, origin: "test"),
              {:ok, bundle} <- Kernel.compile_bundle([component]) do
-          MissionEnvironment.new(bundle: bundle, capabilities: capabilities)
+          MissionEnvironment.new(bundle: bundle, capabilities: capabilities, data: data)
         end
 
       :error ->
-        MissionEnvironment.new(capabilities: capabilities)
+        MissionEnvironment.new(capabilities: capabilities, data: data)
     end
   end
 end

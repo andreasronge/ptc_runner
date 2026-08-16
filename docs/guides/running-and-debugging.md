@@ -88,6 +88,13 @@ The command envelope reports the run reference and artifact class, not artifact
 paths. Output, trace, inspection, and envelope destinations must be distinct.
 All publications are no-replace and recheck their destination at commit time.
 
+Atomic publication may reserve owner-only sibling paths named
+`.ptc-private-*` or `.ptc-private-result-*`. They normally disappear at commit
+or cleanup, but an abruptly terminated process can leave one behind. Because a
+completed reservation can contain private prompts, responses, source, or a
+result, ignore both patterns as well as the configured artifact root. New
+projects created by `ptc init` include all three patterns in `.gitignore`.
+
 For runs that produce a validated terminal event batch, `execution.usage`
 includes `llm_usage` grouped by alias and installation revision,
 `llm_usage_by_model` grouped by an attested public resolved model, and
@@ -137,6 +144,23 @@ One-shot public diagnostics come from a closed catalog. They never render an
 arbitrary exception, rejected value, provider response, credential, or private
 payload. A provider subject appears as `provider/<alias>/<operation>` with its
 workflow or mission occurrence when known.
+
+Environment files fail before provider acquisition with a cause-specific code:
+`environment_file_not_found`, `environment_file_not_regular`,
+`environment_file_unreadable`, `environment_file_too_large`, or
+`environment_file_invalid_utf8`. The code identifies whether to create the
+named `--env-file`/project file, change its permissions, or repair its bytes;
+the public envelope still does not publish a host filesystem path.
+
+When an agent turns a provider failure into workflow failure, the command
+retains one bounded class when the adapter can prove it:
+`llm_authentication_failed`, `llm_payment_required`, `llm_rate_limited`,
+`llm_model_not_found`, `llm_request_invalid`, `llm_access_denied`,
+`llm_timeout`, `llm_provider_unavailable`, or the non-retryable fallback
+`llm_provider_failed`. No response body is retained.
+The failing model alias remains attributable through usage/provider evidence;
+run `ptc doctor PROJECT --connect` for a minimal provider check and use private
+inspection only when authorized detail is necessary.
 
 Component compile failures with a provable location print the logical component
 name and the envelope's half-open byte range, for example `at main.clj bytes
@@ -332,6 +356,28 @@ mix ptc repl \
 Public analysis supports `runs`, `open`, and `read`; the public `activity`
 collection contains canonical events. `open` advertises the private collections
 but they require a correlated inspection snapshot and private authority.
+`analysis/runs` defaults to a compact projection containing run ID, status,
+duration, LLM calls, evaluations, terminal reason, and completeness flags. Pass
+`{"view" "full"}` when selecting by the complete metadata record:
+
+```clojure
+(analysis/runs {"status" "error"})
+(analysis/runs {"status" "error" "view" "full"})
+```
+
+When a project already declares its artifact root, reuse it instead of
+repeating resource paths:
+
+```console
+mix ptc repl --project ptc-project.json \
+  --profile run-analysis-v1 \
+  -e '(analysis/runs {})'
+```
+
+The public profile derives `traces`; the private profile derives both `traces`
+and `inspection` when those artifact classes are enabled. An explicit
+`--resource NAME=DIR` overrides only that derived resource.
+
 The [TraceLog contract](../trace-log-contract.md) defines event schemas,
 sanitization, filtering, pagination, and source classes. The
 [Kernel REPL guide](kernel-repl.md) covers longer investigations.
