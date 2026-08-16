@@ -233,7 +233,13 @@ mix ptc transcript RUN_ID \
 The destination is reserved at owner-only mode before capture. Incomplete or
 ambiguous evidence fails without publication. The trace, inspection, and
 output directories must be pairwise physically separate: none may equal or
-contain another.
+contain another. A rejection names the two conflicting switches and how they
+overlap, without disclosing any path:
+
+```text
+directories for --traces and --inspection must be physically separate;
+--traces contains --inspection
+```
 
 ### Private analysis without a terminal
 
@@ -287,7 +293,20 @@ does not contain evaluated source, exact query payloads, private values, prints,
 or REPL history.
 
 The output directory cannot equal, contain, or be contained by a resource
-directory, including through physical aliases.
+directory or by the parent of `--output`/`--private-output`, including through
+physical aliases. A rejection names the first conflicting pair by the option or
+resource that supplied each directory, and the physical relationship between
+them:
+
+```text
+directories for --resource traces and --session-trace-dir must be physically
+separate; --resource traces contains --session-trace-dir
+```
+
+Two spellings that reach one directory through a symbolic link report that they
+`resolve to the same physical directory`. Without `--session-trace-dir` the
+conflicting role is `the auto-created session trace directory`. Diagnostics
+never disclose supplied paths, resolved paths, or symlink targets.
 
 ## Use JSON Lines in automation
 
@@ -314,6 +333,30 @@ Validation or setup can therefore emit only `command-error`; persistence
 failure follows earlier records without claiming `session-closed`. Records use
 schema version 1. Evaluation records contain the bounded mission result and no
 extra raw-source copy.
+
+A `command-error` rejecting a physical-separation conflict adds a
+`directory_conflict` object beside the existing `category` and `message`, so
+automation does not parse prose:
+
+```json
+{
+  "schema_version": 1,
+  "type": "command-error",
+  "category": "cli",
+  "message": "directories for --resource traces and --session-trace-dir must be physically separate; --resource traces contains --session-trace-dir",
+  "directory_conflict": {
+    "left_role": "resource.traces",
+    "right_role": "session_trace",
+    "relation": "left_contains_right"
+  }
+}
+```
+
+Roles are `resource.NAME`, `session_trace`, `session_trace_auto`, `output`, and
+`private_output`. `relation` is `same`, `left_contains_right`, or
+`right_contains_left`; `same` covers both an identical directory and distinct
+spellings that reach one directory through a symbolic link. The object carries
+no path.
 
 By default, one failed expression stops later ones. Continue requested
 expressions while preserving the final nonzero status with:
