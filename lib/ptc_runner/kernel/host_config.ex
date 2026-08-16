@@ -986,8 +986,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          insecure_loopback when is_boolean(insecure_loopback) <-
            Map.get(value, "allow_insecure_loopback", false),
          {:ok, auth} <- auth(Map.get(value, "auth", []), credentials),
-         {:ok, oauth} <-
-           oauth_authority(Map.get(value, "oauth"), endpoint, credentials),
+         {:ok, oauth} <- optional_oauth(value, endpoint, credentials),
          true <- auth == [] or is_nil(oauth),
          :ok <- installed_endpoint(endpoint, insecure_loopback, auth, oauth) do
       {:ok,
@@ -1017,10 +1016,15 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp installed_endpoint(endpoint, insecure_loopback, _auth, _oauth),
     do: MCPEndpoint.validate(endpoint, insecure_loopback)
 
-  defp oauth_authority(nil, _endpoint, _credentials), do: {:ok, nil}
-
-  defp oauth_authority(value, endpoint, credentials) do
-    Authority.from_host(value, endpoint, credentials |> Map.keys() |> MapSet.new())
+  # An explicit `"oauth": null` is a key the schema counts as present and
+  # refuses, so reading it as absent would accept a document the mirror rejects.
+  # A transport declares an authority or omits the key.
+  defp optional_oauth(value, endpoint, credentials) do
+    case Map.fetch(value, "oauth") do
+      :error -> {:ok, nil}
+      {:ok, nil} -> {:error, :invalid_oauth}
+      {:ok, oauth} -> Authority.from_host(oauth, endpoint, MapSet.new(Map.keys(credentials)))
+    end
   end
 
   defp environment_bindings(value, credentials)

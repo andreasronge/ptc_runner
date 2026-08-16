@@ -10,7 +10,6 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
   alias PtcRunner.Kernel.CommandAcquisition
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.HostConfig
-  alias PtcRunner.Kernel.MCPEndpoint
   alias PtcRunner.Kernel.MCPSource
 
   describe "endpoints refused at load time" do
@@ -209,17 +208,58 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
               ],
               do: "https://a.test/x" <> <<cp::utf8>> <> "y"
 
+      # The credential axis matters as much as the endpoint one, because the
+      # loopback allowance is defined in terms of it. These are the well-formed
+      # shapes; a malformed credential block is its own schema fault and is
+      # covered separately below.
+      credentials = [
+        %{},
+        %{"auth" => []},
+        %{"auth" => [%{"scheme" => "bearer", "binding" => "server_token"}]},
+        %{"oauth" => oauth_block()}
+      ]
+
+      # Stated in observable terms: in this corpus the only thing that can make
+      # the schema reject is the endpoint or its credential shape, so every
+      # rejection must arrive as the endpoint diagnostic. A document the schema
+      # refuses but the endpoint rule admits falls through to the generic
+      # `/install` schema fault instead, which is exactly the drift to catch.
       divergent =
         for endpoint <- endpoints,
             loopback <- [false, true],
-            MCPEndpoint.validate(endpoint, loopback) == :ok,
-            not match?(
-              {:ok, _validated},
-              JSV.validate(mirror_document(endpoint, loopback), root, cast: false)
-            ),
-            do: {endpoint, loopback}
+            credential <- credentials,
+            overrides = mirror_overrides(loopback, credential),
+            document = config(endpoint, overrides),
+            not match?({:ok, _validated}, JSV.validate(document, root, cast: false)),
+            not endpoint_diagnostic?(document),
+            do: {endpoint, overrides}
 
       assert divergent == []
+    end
+
+    @tag :tmp_dir
+    test "an explicit null oauth key is refused by decoder and schema alike", %{tmp_dir: dir} do
+      # JSON Schema counts a present key regardless of its value, so reading
+      # `"oauth": null` as "absent" would have let decoding admit a transport
+      # the schema refuses.
+      {:ok, root} = JSV.build(HostConfig.schema(), atoms: false, warnings: :silent)
+
+      for overrides <- [
+            %{"oauth" => nil},
+            %{"allow_insecure_loopback" => true, "oauth" => nil}
+          ] do
+        endpoint =
+          if overrides["allow_insecure_loopback"],
+            do: "http://127.0.0.1:8055",
+            else: "https://mcp.example.test/mcp"
+
+        document = config(endpoint, overrides)
+
+        assert {:error, :invalid_host_config} =
+                 dir |> write(document, unique_name()) |> HostConfig.load()
+
+        assert {:error, _details} = JSV.validate(document, root, cast: false)
+      end
     end
   end
 
@@ -344,9 +384,22 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
     }
   end
 
-  defp mirror_document(endpoint, loopback) do
-    overrides = if loopback, do: %{"allow_insecure_loopback" => true}, else: %{}
-    config(endpoint, overrides)
+  defp mirror_overrides(loopback, credential) do
+    if loopback,
+      do: Map.put(credential, "allow_insecure_loopback", true),
+      else: credential
+  end
+
+  defp endpoint_diagnostic?(document) do
+    dir = Path.join(System.tmp_dir!(), "ptc-mirror-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+
+    try do
+      path = write(dir, document, "host.json")
+      match?({:error, {:installation_endpoint_invalid, _name}}, HostConfig.load_command(path))
+    after
+      File.rm_rf!(dir)
+    end
   end
 
   defp mappings, do: %{"echo" => %{as: "workspace.echo", effect: :read}}
