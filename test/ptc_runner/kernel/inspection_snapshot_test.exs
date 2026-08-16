@@ -1236,11 +1236,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     [
       event(run_id, 1, "run-started", %{
         "missions" => %{"default" => %{}},
-        "workflow_prelude" => %{
-          "component_ids" => ["component-#{run_id}"],
-          "dependency_indices" => [],
-          "hash" => "prelude-hash"
-        }
+        "workflow_prelude" => PrivateInspectionFixture.prelude_projection("component-#{run_id}")
       }),
       event(run_id, 2, "capability-started", %{
         "capability_id" => "llm-#{run_id}",

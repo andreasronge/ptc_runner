@@ -41,8 +41,10 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     assert run_id == fixture.run_id
 
+    bundle_hash = PrivateInspectionFixture.prelude_projection("component-#{run_id}")["hash"]
+
     assert {:ok, %{"items" => [%{"run_id" => ^run_id}]}} =
-             RunAnalysis.query(analysis, :runs, %{"bundle" => "prelude-hash"})
+             RunAnalysis.query(analysis, :runs, %{"bundle" => bundle_hash})
 
     assert {:ok, %{"items" => []}} =
              RunAnalysis.query(analysis, :runs, %{"bundle" => "different-prelude"})
