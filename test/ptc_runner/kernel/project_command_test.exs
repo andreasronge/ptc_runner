@@ -198,7 +198,7 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
 
       assert outcome.envelope["error"]["code"] == "project_host_undeclared"
       assert outcome.envelope["error"]["phase"] == "arguments"
-      assert outcome.envelope["error"]["message"] =~ "--host-config"
+      assert outcome.envelope["error"]["message"] =~ "declares no host block"
     end
   end
 
@@ -210,6 +210,7 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     # the documented alternative in `ptc models --help` keeps working.
     target = Path.join(directory, "demo")
     assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
     host_path = Path.join(target, "ptc-host.json")
 
     File.write!(
@@ -231,6 +232,31 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
              CommandEngine.dispatch(["models", "--host-config", host_path])
 
     assert [%{"alias" => "model"}] = outcome.envelope["result"]["installations"]
+
+    # A project and a --host-config are documented alternatives, so combining
+    # them stays an argument fault rather than silently ignoring the project.
+    assert {:error, %CommandOutcome{} = combined} =
+             CommandEngine.dispatch(["models", project, "--host-config", host_path])
+
+    assert combined.envelope["error"]["code"] == "invalid_arguments"
+  end
+
+  @tag :tmp_dir
+  test "a real argument fault is not reported as the missing host", %{tmp_dir: directory} do
+    # The parser decides before the missing declaration is considered, so a
+    # switch fault still reports itself instead of being explained away by the
+    # project — which would send the reader to edit a file over a typo.
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+
+    for argv <- [
+          ["models", project, "--bogus"],
+          ["doctor", project, "--connect", "--bogus"]
+        ] do
+      assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch(argv)
+      assert outcome.envelope["error"]["code"] != "project_host_undeclared"
+    end
   end
 
   @tag :tmp_dir

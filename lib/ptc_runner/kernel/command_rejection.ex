@@ -10,7 +10,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
   alias PtcRunner.Kernel.CommandDeclaration
 
   @commands [:help, :version, :unknown | CommandDeclaration.commands()]
-  @codes [:invalid_command, :invalid_arguments, :conflicting_arguments, :project_host_undeclared]
+  @codes [:invalid_command, :invalid_arguments, :conflicting_arguments]
   @destination_keys [:trace_dir, :inspect, :output, :private_output]
   @enforce_keys [
     :command,
@@ -37,6 +37,25 @@ defmodule PtcRunner.Kernel.CommandRejection do
           destination: binary() | nil,
           conflicts: [binary()]
         }
+
+  @doc """
+  Builds the rejection for a project document that declares no host.
+
+  Restricted to the two commands that need one, so `generic/2` cannot mint a
+  command/code pair the envelope contract refuses and `CommandOutcome` would
+  raise on.
+  """
+  @spec undeclared_project_host(:models | :doctor) :: t()
+  def undeclared_project_host(command) when command in [:models, :doctor] do
+    %__MODULE__{
+      command: command,
+      code: :project_host_undeclared,
+      kind: :generic,
+      accepted: [],
+      destination: nil,
+      conflicts: []
+    }
+  end
 
   @spec generic(atom(), atom()) :: t()
   def generic(command, code) when command in @commands and code in @codes do
