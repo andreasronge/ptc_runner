@@ -69,6 +69,28 @@ defmodule PtcRunner.Kernel.FrozenBundleTest do
     assert Enum.at(metadata.dependency_indices, Map.fetch!(positions, "kernel")) == []
   end
 
+  test "identity refuses a malformed component set instead of raising" do
+    valid = %{id: "a", dependencies: [], source_hash: String.duplicate("0", 64)}
+
+    assert {:ok, _identity} = FrozenBundle.identity([valid])
+    assert {:error, :invalid_bundle} = FrozenBundle.identity(:not_a_list)
+    assert {:error, :invalid_bundle} = FrozenBundle.identity([%{dependencies: [], id: "a"}])
+    assert {:error, :invalid_bundle} = FrozenBundle.identity([valid, %{missing: :keys}])
+    assert {:error, :invalid_bundle} = FrozenBundle.identity([%{valid | id: :a}])
+    assert {:error, :invalid_bundle} = FrozenBundle.identity([%{valid | source_hash: nil}])
+    assert {:error, :invalid_bundle} = FrozenBundle.identity([%{valid | dependencies: [:b]}])
+  end
+
+  test "identity is stable under caller ordering and dependency repetition" do
+    a = %{id: "a", dependencies: ["z", "z", "m"], source_hash: String.duplicate("1", 64)}
+    m = %{id: "m", dependencies: [], source_hash: String.duplicate("2", 64)}
+    z = %{id: "z", dependencies: [], source_hash: String.duplicate("3", 64)}
+
+    assert {:ok, identity} = FrozenBundle.identity([a, m, z])
+    assert {:ok, ^identity} = FrozenBundle.identity([z, a, m])
+    assert {:ok, ^identity} = FrozenBundle.identity([%{a | dependencies: ["m", "z"]}, m, z])
+  end
+
   defp component!(id, source, dependencies \\ []) do
     {:ok, component} =
       Component.new(id: id, source: source, dependencies: dependencies)

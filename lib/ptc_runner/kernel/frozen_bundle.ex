@@ -116,8 +116,24 @@ defmodule PtcRunner.Kernel.FrozenBundle do
   from the caller.
   """
   def identity(components) when is_list(components) do
+    # Every entry is proven before any is sorted, so a caller that supplies a
+    # malformed set is refused rather than raising partway through framing.
+    if Enum.all?(components, &framable?/1),
+      do: components |> Enum.sort_by(& &1.id) |> framed_identity(),
+      else: {:error, :invalid_bundle}
+  end
+
+  def identity(_components), do: {:error, :invalid_bundle}
+
+  defp framable?(%{id: id, dependencies: dependencies, source_hash: source_hash}),
+    do:
+      is_binary(id) and is_binary(source_hash) and is_list(dependencies) and
+        Enum.all?(dependencies, &is_binary/1)
+
+  defp framable?(_component), do: false
+
+  defp framed_identity(components) do
     components
-    |> Enum.sort_by(& &1.id)
     |> Enum.reduce_while({:ok, []}, fn component, {:ok, records} ->
       case component_record(component) do
         {:ok, record} -> {:cont, {:ok, [record | records]}}
@@ -135,10 +151,7 @@ defmodule PtcRunner.Kernel.FrozenBundle do
     end
   end
 
-  def identity(_components), do: {:error, :invalid_bundle}
-
-  defp component_record(%{id: id, dependencies: dependencies, source_hash: source_hash})
-       when is_binary(id) and is_list(dependencies) and is_binary(source_hash) do
+  defp component_record(%{id: id, dependencies: dependencies, source_hash: source_hash}) do
     encoded =
       DeterministicJSON.encode(
         {:object,
@@ -163,8 +176,6 @@ defmodule PtcRunner.Kernel.FrozenBundle do
         {:error, :invalid_bundle}
     end
   end
-
-  defp component_record(_component), do: {:error, :invalid_bundle}
 
   @spec seal(t()) :: t()
   @doc "Attests a newly compiled bundle for later environment validation."

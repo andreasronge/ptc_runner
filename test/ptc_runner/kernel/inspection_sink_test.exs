@@ -1654,6 +1654,31 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
   end
 
+  # An artifact must not be publishable against a projection the canonical
+  # trace would itself refuse to load.
+  test "prelude correlation refuses a projection the trace log would reject" do
+    {:ok, bundle} = compiled_bundle()
+    records = prelude_records(effective_sources())
+    [%{"data" => %{"workflow_prelude" => projection}} = started] = [run_started_event(bundle)]
+
+    incomplete = [
+      %{},
+      Map.delete(projection, "component_ids"),
+      Map.delete(projection, "dependency_indices"),
+      Map.delete(projection, "hash"),
+      %{projection | "dependency_indices" => [[], [1]]},
+      %{projection | "component_ids" => ["base", "base"]}
+    ]
+
+    for candidate <- incomplete do
+      events = [put_in(started, ["data", "workflow_prelude"], candidate)]
+
+      assert {:error, :inspection_correlation_missing} =
+               InspectionArtifact.validate_correlations(records, events),
+             "expected #{inspect(candidate)} to fail closed"
+    end
+  end
+
   @tag :tmp_dir
   test "an overridden component proves its candidate source, not the manifest source", %{
     tmp_dir: dir

@@ -763,8 +763,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   # a caller-supplied event list has not, so the same rules are enforced before
   # the projection is trusted as a commitment.
   defp prelude_projection(projection) do
-    ids = map_value(projection, :component_ids) || []
-    indices = map_value(projection, :dependency_indices) || []
+    ids = map_value(projection, :component_ids)
+    indices = map_value(projection, :dependency_indices)
     hash = map_value(projection, :hash)
 
     valid? =
