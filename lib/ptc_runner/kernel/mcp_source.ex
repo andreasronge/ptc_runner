@@ -37,6 +37,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.JSONSchema
+  alias PtcRunner.Kernel.MCPEndpoint
   alias PtcRunner.Kernel.MCPHTTPAdapter
   alias PtcRunner.Kernel.MCPLauncherStaging
   alias PtcRunner.Kernel.MCPOAuth.Authority
@@ -79,8 +80,12 @@ defmodule PtcRunner.Kernel.MCPSource do
 
     * `:transport` - required `{type, options}` tuple. The type is
       `:streamable_http` or `:stdio`. Streamable HTTP requires a fixed HTTPS
-      `:endpoint`; loopback HTTP is accepted only when
-      `:allow_insecure_loopback` is `true` (default `false`), and userinfo and
+      `:endpoint`; plain-HTTP loopback is accepted only when
+      `:allow_insecure_loopback` is `true` (default `false`) and the host is the
+      literal `127.0.0.1` or `::1`. The name `localhost` is not a loopback
+      address for this rule, because it resolves wherever the resolver says.
+      The allowance both permits plain HTTP and requires it: setting it against
+      an HTTPS endpoint is refused rather than ignored. Userinfo and
       fragments are rejected. Its zero-argument `:headers` callback defaults
       to `fn -> [] end`, is evaluated once inside the provider-acquisition
       deadline, and is reused for the built provider. At most 32 valid headers
@@ -365,19 +370,8 @@ defmodule PtcRunner.Kernel.MCPSource do
        else: {:error, :invalid_transport}
   end
 
-  defp endpoint(endpoint, allow_loopback?) do
-    case URI.parse(endpoint) do
-      %URI{scheme: "https", host: host, userinfo: nil, fragment: nil} when is_binary(host) ->
-        :ok
-
-      %URI{scheme: "http", host: host, userinfo: nil, fragment: nil}
-      when allow_loopback? and host in ["127.0.0.1", "localhost", "::1"] ->
-        :ok
-
-      _uri ->
-        {:error, :invalid_endpoint}
-    end
-  end
+  defp endpoint(endpoint, allow_loopback?),
+    do: MCPEndpoint.validate(endpoint, allow_loopback?)
 
   defp oauth_resource_matches?(endpoint, resource, allow_insecure_loopback) do
     case Authority.resource(endpoint, allow_insecure_loopback: allow_insecure_loopback) do

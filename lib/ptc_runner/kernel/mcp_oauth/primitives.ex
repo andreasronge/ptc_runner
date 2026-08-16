@@ -8,6 +8,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.Primitives do
   pre-existing parameters before appending PtcRunner-owned form values.
   """
 
+  alias PtcRunner.Kernel.MCPEndpoint
+
   @authorization_parameters MapSet.new(~w(
     response_type response_mode client_id redirect_uri scope resource
     code_challenge code_challenge_method state request request_uri
@@ -160,11 +162,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Primitives do
          true <- safe_endpoint_characters?(endpoint),
          %URI{scheme: scheme, host: host, userinfo: nil, fragment: nil} <-
            URI.parse(endpoint),
-         true <- is_binary(host) and host != "",
-         true <-
-           scheme == "https" or
-             (allow_insecure_loopback and scheme == "http" and
-                host in ["127.0.0.1", "::1"]),
+         true <- MCPEndpoint.origin_allowed?(scheme, host, allow_insecure_loopback),
          true <- Keyword.keys(opts) -- [:allow_insecure_loopback] == [],
          {:ok, query} <- raw_query(endpoint),
          :ok <- validate_existing_query(query, owned) do
