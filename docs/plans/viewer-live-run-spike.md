@@ -220,13 +220,51 @@ Chrome tab; capture screenshots + a GIF of the dashboard updating. If the
 2-call tutorial is too brief to look at, the scratch manifest lives in docs/plans/viewer-live-run-demo/ with a pmap
 fan-out of LLM calls (exercises the worker dots + heap movement).
 
-## Refinement backlog (explicitly not in the spike)
+## Refinement round 1 (done)
 
-- `--viewer-url` CLI flag + project-config field instead of env var
-- Tests: reporter lifecycle, store fan-out, SSE framing, frame schema
+- **LiveStore lifecycle**: no longer a lazy singleton — started by
+  `PtcViewer.Server` and bound to it by monitor (any server exit stops the
+  store); router reads it from config and answers 503 when absent.
+- **Tests**: `live_store_test.exs` (frames, fan-out, eviction, owner-down,
+  launch gate), `live_router_test.exs` (frame POST/GET, disabled paths,
+  launch describe), root `live_status_test.exs` (a run succeeds unchanged
+  when the configured viewer is unreachable).
+- **Decision — no `--viewer-url` CLI flag yet**: run options flow through the
+  command declaration/parser/contract with generated schemas; plumbing a flag
+  cascades into `mix ptc.gen_docs` artifacts. The env var stays for the spike;
+  the flag is proper-PR work.
+
+## Launch a run from the Viewer (done)
+
+Fixed target, editable input: the launch target (manifest, extra CLI args,
+cwd, label) is configured by the operator at `PtcViewer.start(launch: %{...})`
+and never taken from the browser. The browser edits exactly one thing — the
+input object.
+
+- `PtcViewer.LiveLaunch` validates the spec, describes it (`GET
+  /api/live/launch` returns the manifest's current `input.value` to seed the
+  editor), and prepares the run command.
+- `POST /api/live/launch` writes the edited input **beside the manifest**
+  under a fixed name and passes it as `--input live-input.json` — learned the
+  hard way: `--input` is a *logical name resolved inside the manifest's
+  confined application directory*; an absolute path or any path outside it
+  fails with `application/reference_missing`. The file is removed when the
+  run exits.
+- The run is an ordinary `mix ptc run` child process pointed back at the
+  Viewer with `PTC_VIEWER_URL`, so Viewer-launched runs use the exact same
+  live channel as CLI-launched ones. `LiveStore` enforces single-flight; the
+  launch result (exit code + output tail) is captured from the monitor DOWN
+  reason and surfaced in the panel (verified for both the failure and the
+  success path in the browser).
+
+## Refinement backlog (still open)
+
+- `--viewer-url` CLI flag + project-config field (see decision above)
 - REPL / manifest-REPL / analysis-session reporter coverage
-- Frame authentication (share the `x-ptc-viewer-session` pattern)
+- Frame + launch authentication (share the `x-ptc-viewer-session` pattern)
+  before the Viewer ever binds beyond loopback
 - Provider-task in-flight count + admission queue depth accessors (#1444 table)
 - Heap sampling for pmap workers (spike samples the main sandbox only)
+- Multiple launch targets / project-config-driven target discovery
 - Docs + `mix precommit` clean-up, duplication gate, dialyzer
 - Delete this plan file before any final PR (repo rule)

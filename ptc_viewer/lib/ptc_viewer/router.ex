@@ -1,6 +1,7 @@
 defmodule PtcViewer.Router do
   use Plug.Router
 
+  alias PtcViewer.LiveLaunch
   alias PtcViewer.LiveStore
   alias PtcViewer.ReplError
   alias PtcViewer.ReplStore
@@ -118,34 +119,68 @@ defmodule PtcViewer.Router do
   end
 
   post "/api/live/runs/:run_id" do
-    with {:ok, body, conn} <- json_body(conn),
-         {:ok, _pid} <- LiveStore.ensure_started(),
-         :ok <- LiveStore.put_frame(run_id, body) do
+    with {:ok, store} <- live_store(conn),
+         {:ok, body, conn} <- json_body(conn),
+         :ok <- LiveStore.put_frame(store, run_id, body) do
       send_live_json(conn, 200, %{"status" => "ok"})
     else
+      {:error, :live_disabled} -> send_live_json(conn, 503, %{"error" => "live_disabled"})
       {:error, reason, conn} -> send_live_json(conn, 400, %{"error" => to_string(reason)})
       {:error, reason} -> send_live_json(conn, 400, %{"error" => to_string(reason)})
     end
   end
 
   get "/api/live/runs" do
-    {:ok, _pid} = LiveStore.ensure_started()
-    send_live_json(conn, 200, %{"runs" => LiveStore.snapshot()})
+    case live_store(conn) do
+      {:ok, store} -> send_live_json(conn, 200, %{"runs" => LiveStore.snapshot(store)})
+      {:error, :live_disabled} -> send_live_json(conn, 503, %{"error" => "live_disabled"})
+    end
   end
 
   get "/api/live/stream" do
-    {:ok, _pid} = LiveStore.ensure_started()
-    {:ok, snapshot} = LiveStore.subscribe(self())
+    case live_store(conn) do
+      {:ok, store} ->
+        {:ok, snapshot} = LiveStore.subscribe(store, self())
 
-    conn =
-      conn
-      |> put_resp_header("content-type", "text/event-stream")
-      |> put_resp_header("cache-control", "no-cache")
-      |> send_chunked(200)
+        conn =
+          conn
+          |> put_resp_header("content-type", "text/event-stream")
+          |> put_resp_header("cache-control", "no-cache")
+          |> send_chunked(200)
 
-    case send_live_frames(conn, snapshot) do
-      {:ok, conn} -> live_stream_loop(conn)
-      {:error, conn} -> conn
+        case send_live_frames(conn, snapshot) do
+          {:ok, conn} -> live_stream_loop(conn)
+          {:error, conn} -> conn
+        end
+
+      {:error, :live_disabled} ->
+        send_live_json(conn, 503, %{"error" => "live_disabled"})
+    end
+  end
+
+  get "/api/live/launch" do
+    with {:ok, store} <- live_store(conn),
+         {:ok, launch} <- live_launch(conn) do
+      send_live_json(conn, 200, LiveLaunch.describe(launch, LiveStore.launch_status(store)))
+    else
+      {:error, :live_disabled} -> send_live_json(conn, 503, %{"error" => "live_disabled"})
+      {:error, :launch_not_configured} -> send_live_json(conn, 200, %{"enabled" => false})
+    end
+  end
+
+  post "/api/live/launch" do
+    with {:ok, store} <- live_store(conn),
+         {:ok, launch} <- live_launch(conn),
+         {:ok, body, conn} <- json_body(conn),
+         {:ok, input} <- launch_input(body),
+         {:ok, run_fun} <- LiveLaunch.prepare(launch, input, live_port(conn)),
+         :ok <- LiveStore.begin_launch(store, run_fun) do
+      send_live_json(conn, 202, %{"status" => "launched"})
+    else
+      {:error, :live_disabled} -> send_live_json(conn, 503, %{"error" => "live_disabled"})
+      {:error, :launch_running} -> send_live_json(conn, 409, %{"error" => "launch_running"})
+      {:error, reason, conn} -> send_live_json(conn, 400, %{"error" => to_string(reason)})
+      {:error, reason} -> send_live_json(conn, 400, %{"error" => to_string(reason)})
     end
   end
 
@@ -181,6 +216,25 @@ defmodule PtcViewer.Router do
       _none -> {:error, :repl_not_configured}
     end
   end
+
+  defp live_store(conn) do
+    case Keyword.get(viewer_config(conn), :live_store) do
+      store when is_pid(store) -> {:ok, store}
+      _none -> {:error, :live_disabled}
+    end
+  end
+
+  defp live_launch(conn) do
+    case Keyword.get(viewer_config(conn), :live_launch) do
+      %{manifest: _manifest} = launch -> {:ok, launch}
+      _none -> {:error, :launch_not_configured}
+    end
+  end
+
+  defp live_port(conn), do: Keyword.get(viewer_config(conn), :live_port, 0)
+
+  defp launch_input(%{"input" => input}) when is_map(input), do: {:ok, input}
+  defp launch_input(_body), do: {:error, :invalid_input}
 
   defp send_live_json(conn, status, body) do
     conn

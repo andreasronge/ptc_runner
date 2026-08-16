@@ -15,11 +15,13 @@ export function createLiveController({ onLiveCount } = {}) {
   const runsEl = document.getElementById('live-runs');
   const emptyEl = document.getElementById('live-empty');
   const connEl = document.getElementById('live-connection');
+  const launchEl = document.getElementById('live-launch');
   const cards = new Map(); // run_id -> { frame, el, fields }
 
   let source = null;
 
   connect();
+  initLaunch(launchEl).catch(() => {});
 
   function connect() {
     source = new EventSource('/api/live/stream');
@@ -66,6 +68,118 @@ export function createLiveController({ onLiveCount } = {}) {
   }
 
   return { setActive };
+}
+
+/* ---------- launch panel (fixed target, editable input) ---------- */
+
+async function initLaunch(root) {
+  const response = await fetch('/api/live/launch');
+  if (!response.ok) return;
+  const spec = await response.json();
+  if (!spec.enabled) return;
+
+  root.hidden = false;
+  root.innerHTML = `
+    <div class="live-launch-card">
+      <div class="live-launch-head">
+        <span class="live-section-label">Launch a run</span>
+        <span class="live-launch-target" data-role="target"></span>
+      </div>
+      <label class="live-launch-label">Input object — the only thing the browser controls; passed to <code>mix ptc run --input</code></label>
+      <textarea class="live-launch-input" data-role="editor" spellcheck="false" rows="10"></textarea>
+      <div class="live-launch-foot">
+        <span class="live-launch-validity" data-role="validity"></span>
+        <button type="button" class="live-launch-run" data-role="run">▶ Run</button>
+      </div>
+      <div class="live-launch-status" data-role="status" hidden></div>
+    </div>
+  `;
+
+  const fields = {};
+  for (const node of root.querySelectorAll('[data-role]')) fields[node.dataset.role] = node;
+  fields.target.textContent = spec.label ? `${spec.label} · ${spec.manifest}` : spec.manifest;
+  fields.editor.value = JSON.stringify(spec.input ?? {}, null, 2);
+
+  const state = { running: spec.launch?.status === 'running', polling: null };
+
+  const validate = () => {
+    let parsed = null;
+    let error = null;
+    try {
+      parsed = JSON.parse(fields.editor.value);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        error = 'input must be a JSON object';
+        parsed = null;
+      }
+    } catch (e) {
+      error = e.message.split('\n')[0];
+    }
+    fields.validity.textContent = error || 'valid JSON';
+    fields.validity.dataset.state = error ? 'bad' : 'ok';
+    fields.run.disabled = Boolean(error) || state.running;
+    return parsed;
+  };
+
+  const setStatus = (status) => {
+    state.running = status?.status === 'running';
+    fields.run.disabled = state.running || fields.validity.dataset.state === 'bad';
+    fields.run.textContent = state.running ? 'Running…' : '▶ Run';
+    if (!status || status.status === 'idle') {
+      fields.status.hidden = true;
+      return;
+    }
+    fields.status.hidden = false;
+    fields.status.dataset.state = status.status;
+    if (status.status === 'running') {
+      fields.status.textContent = 'Run launched — its card appears below as frames arrive.';
+    } else if (status.status === 'ok') {
+      fields.status.textContent = 'Last launch completed (exit 0).';
+    } else {
+      fields.status.replaceChildren();
+      const line = document.createElement('div');
+      line.textContent = 'Last launch failed:';
+      const pre = document.createElement('pre');
+      pre.textContent = status.output_tail || '(no output captured)';
+      fields.status.append(line, pre);
+    }
+  };
+
+  const poll = async () => {
+    try {
+      const res = await fetch('/api/live/launch');
+      if (!res.ok) return;
+      const current = await res.json();
+      setStatus(current.launch);
+      if (current.launch?.status === 'running') {
+        state.polling = setTimeout(poll, 1500);
+      }
+    } catch {
+      state.polling = setTimeout(poll, 3000);
+    }
+  };
+
+  fields.editor.addEventListener('input', validate);
+  fields.run.addEventListener('click', async () => {
+    const parsed = validate();
+    if (!parsed || state.running) return;
+    setStatus({ status: 'running' });
+    const res = await fetch('/api/live/launch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ input: parsed }),
+    });
+    if (res.status !== 202) {
+      const body = await res.json().catch(() => ({}));
+      setStatus({ status: 'error', output_tail: `launch refused: ${body.error || res.status}` });
+      return;
+    }
+    clearTimeout(state.polling);
+    state.polling = setTimeout(poll, 1500);
+  });
+
+  validate();
+  setStatus(spec.launch);
+  if (state.running) state.polling = setTimeout(poll, 1500);
 }
 
 /* ---------- card construction ---------- */

@@ -34,8 +34,10 @@ defmodule PtcViewer.Server do
     private_traces = Keyword.get(opts, :private_traces, false) == true
     trace_source = Keyword.get(opts, :trace_source)
     inspection_source = Keyword.get(opts, :inspection_source)
+    launch = Keyword.get(opts, :launch)
 
-    if is_integer(port) and port in 0..65_535 and ip in @addresses do
+    if is_integer(port) and port in 0..65_535 and ip in @addresses and
+         PtcViewer.LiveLaunch.validate(launch) == :ok do
       params = %{
         port: port,
         ip: ip,
@@ -47,7 +49,8 @@ defmodule PtcViewer.Server do
         repl_config: repl_config,
         private_traces: private_traces,
         trace_source: trace_source,
-        inspection_source: inspection_source
+        inspection_source: inspection_source,
+        launch: launch
       }
 
       case start_resources(params) do
@@ -107,11 +110,16 @@ defmodule PtcViewer.Server do
   end
 
   defp start_bandit(params, inspection_store, connection, task_supervisor, repl_store) do
+    # Bound to this server by monitor: any server exit stops the store, so no
+    # cleanup threading is needed on the error paths below.
+    {:ok, live_store} = PtcViewer.LiveStore.start(self())
+
     config =
       router_config(
         params,
         inspection_store,
         repl_store,
+        live_store,
         self()
       )
 
@@ -238,7 +246,7 @@ defmodule PtcViewer.Server do
     )
   end
 
-  defp router_config(params, inspection_store, repl_store, server) do
+  defp router_config(params, inspection_store, repl_store, live_store, server) do
     [
       trace_dir: params.trace_dir,
       private_traces: params.private_traces,
@@ -248,6 +256,9 @@ defmodule PtcViewer.Server do
       inspection_adapter: params.inspection_adapter,
       repl_store: repl_store,
       repl_enabled: not is_nil(repl_store),
+      live_store: live_store,
+      live_launch: params.launch,
+      live_port: params.port,
       viewer_server: server
     ]
   end

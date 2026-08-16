@@ -2255,3 +2255,61 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   .live-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .live-meter { grid-template-columns: 90px 1fr 110px; }
 }
+
+/* --- launch panel (fixed target, editable input) --- */
+.live-launch { margin-bottom: 18px; }
+.live-launch-card {
+  background: var(--live-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+.live-launch-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 12px; margin-bottom: 10px; flex-wrap: wrap;
+}
+.live-launch-target {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px; color: var(--string);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%;
+}
+.live-launch-label {
+  display: block; font-size: 11px; color: var(--muted); margin-bottom: 6px;
+}
+.live-launch-label code { color: var(--fg); }
+.live-launch-input {
+  width: 100%; box-sizing: border-box; resize: vertical;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 12px;
+  font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
+  line-height: 1.5;
+}
+.live-launch-input:focus { outline: none; border-color: var(--accent); }
+.live-launch-foot {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 10px; gap: 12px;
+}
+.live-launch-validity { font-size: 11px; }
+.live-launch-validity[data-state="ok"] { color: var(--muted); }
+.live-launch-validity[data-state="bad"] { color: var(--error); }
+.live-launch-run {
+  background: var(--accent); color: #10151a;
+  border: none; border-radius: 6px;
+  padding: 7px 18px; font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: opacity 0.2s;
+}
+.live-launch-run:hover:not(:disabled) { opacity: 0.85; }
+.live-launch-run:disabled { opacity: 0.4; cursor: default; }
+.live-launch-status {
+  margin-top: 10px; font-size: 12px; border-radius: 6px;
+  padding: 8px 12px; background: var(--bg);
+}
+.live-launch-status[data-state="running"] { color: var(--warning); }
+.live-launch-status[data-state="ok"] { color: var(--success); }
+.live-launch-status[data-state="error"] { color: var(--error); }
+.live-launch-status pre {
+  margin: 6px 0 0; padding: 8px; overflow-x: auto;
+  background: var(--bg-light); border-radius: 4px;
+  color: var(--fg); font-size: 11px; white-space: pre-wrap;
+}
