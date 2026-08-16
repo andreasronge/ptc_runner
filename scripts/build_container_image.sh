@@ -123,12 +123,15 @@ test -n "$probe_run_ref"
 # machine is running. `127.0.0.1:` keeps the exposure on host loopback: that
 # prefix is the boundary once the container binds the wildcard, and its absence
 # is what would publish an unauthenticated trace browser to the network.
+#
+# This assigns `viewer_container` rather than printing it. A command
+# substitution would run it in a subshell, where appending to
+# `viewer_containers` is lost and the EXIT trap has nothing to clean up after a
+# mid-probe failure.
 start_viewer() {
-  local name
-  name="$(docker run --detach --volume "$probe_dir:/work" \
+  viewer_container="$(docker run --detach --volume "$probe_dir:/work" \
     --publish 127.0.0.1::4123 "$image_tag" viewer /work/app/ptc-project.json --port 4123 "$@")"
-  viewer_containers+=("$name")
-  printf '%s' "$name"
+  viewer_containers+=("$viewer_container")
 }
 
 # Waiting on the log line rather than on the port: a refused connection is the
@@ -151,7 +154,8 @@ await_viewer() {
   exit 1
 }
 
-published_viewer="$(start_viewer --listen 0.0.0.0)"
+start_viewer --listen 0.0.0.0
+published_viewer="$viewer_container"
 await_viewer "$published_viewer"
 published_endpoint="$(docker port "$published_viewer" 4123/tcp | head -1)"
 test -n "$published_endpoint"
@@ -162,14 +166,22 @@ grep -q "$probe_run_ref" "$probe_dir/viewer.json"
 
 # And the negative that justifies the flag: without it the Viewer binds the
 # container's own loopback, which a published port cannot forward to.
-loopback_viewer="$(start_viewer)"
+start_viewer
+loopback_viewer="$viewer_container"
 await_viewer "$loopback_viewer"
 loopback_endpoint="$(docker port "$loopback_viewer" 4123/tcp | head -1)"
 test -n "$loopback_endpoint"
 
-if curl --silent --fail --max-time 10 "http://$loopback_endpoint/api/kernel/runs" > /dev/null; then
-  echo 'a container Viewer without --listen was reachable through a published port' >&2
-  echo 'the loopback default is not holding' >&2
+# `--fail` is not the test: it also reports 4xx and 5xx as failures, so a
+# regression that exposed the Viewer but answered 404 would read as unreachable.
+# `%{http_code}` is `000` only when no HTTP response arrived at all, which is
+# the actual claim -- the published port does not reach a loopback bind.
+loopback_code="$(curl --silent --output /dev/null --max-time 10 \
+  --write-out '%{http_code}' "http://$loopback_endpoint/api/kernel/runs" || true)"
+
+if [ "$loopback_code" != "000" ]; then
+  echo 'a container Viewer without --listen answered through a published port' >&2
+  echo "the loopback default is not holding (HTTP $loopback_code)" >&2
   exit 1
 fi
 

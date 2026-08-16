@@ -9,9 +9,31 @@ release_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/ptc-runner-standalone-release.XXXX
 # failure between spawn and stop would otherwise leave it holding a port.
 viewer_pid=""
 
+# Never a bare `wait` after signalling: a shutdown regression is exactly what
+# this gate exists to catch, and an unbounded wait would turn it into a CI run
+# that hangs forever instead of failing. Returns 0 when the process left on its
+# own, 1 when it had to be killed.
+stop_viewer_process() {
+  local deadline=$((SECONDS + 30))
+
+  kill -TERM "$viewer_pid" 2> /dev/null || true
+
+  while kill -0 "$viewer_pid" 2> /dev/null && [ "$SECONDS" -lt "$deadline" ]; do
+    sleep 0.2
+  done
+
+  if kill -0 "$viewer_pid" 2> /dev/null; then
+    kill -KILL "$viewer_pid" 2> /dev/null || true
+    wait "$viewer_pid" 2> /dev/null || true
+    return 1
+  fi
+
+  return 0
+}
+
 cleanup() {
   if [ -n "$viewer_pid" ]; then
-    kill -TERM "$viewer_pid" 2> /dev/null || true
+    stop_viewer_process || true
     wait "$viewer_pid" 2> /dev/null || true
   fi
   rm -rf "$release_tmp_dir"
@@ -396,7 +418,12 @@ fi
 
 # `rel/overlays/bin/ptc` execs `bin/ptc_runner eval`, which execs the runtime,
 # so this signals the VM itself and OTP stops it through `init:stop/0`.
-kill -TERM "$viewer_pid"
+if ! stop_viewer_process; then
+  viewer_pid=""
+  echo 'the packaged viewer did not stop on SIGTERM within 30s' >&2
+  exit 1
+fi
+
 set +e
 wait "$viewer_pid"
 viewer_status=$?
