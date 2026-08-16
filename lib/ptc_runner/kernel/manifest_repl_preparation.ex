@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.ManifestReplPreparation do
     :catalog,
     :runtime_services,
     :environment_setup_required,
+    :environment_setup_aliases,
     :attestation
   ]
   defstruct @enforce_keys
@@ -22,19 +23,21 @@ defmodule PtcRunner.Kernel.ManifestReplPreparation do
           catalog: InstallationCatalog.t(),
           runtime_services: ProviderRuntimeServices.t(),
           environment_setup_required: boolean(),
+          environment_setup_aliases: [binary()],
           attestation: binary()
         }
 
   @doc false
-  @spec new(PreparedRun.t(), InstallationCatalog.t(), ProviderRuntimeServices.t(), boolean()) ::
+  @spec new(PreparedRun.t(), InstallationCatalog.t(), ProviderRuntimeServices.t(), [binary()]) ::
           {:ok, t()} | {:error, :invalid_manifest_repl_preparation}
-  def new(prepared_run, catalog, runtime_services, environment_setup_required)
-      when is_boolean(environment_setup_required) do
+  def new(prepared_run, catalog, runtime_services, environment_setup_aliases)
+      when is_list(environment_setup_aliases) do
     preparation = %__MODULE__{
       prepared_run: prepared_run,
       catalog: catalog,
       runtime_services: runtime_services,
-      environment_setup_required: environment_setup_required,
+      environment_setup_required: environment_setup_aliases != [],
+      environment_setup_aliases: environment_setup_aliases,
       attestation: <<>>
     }
 
@@ -49,7 +52,7 @@ defmodule PtcRunner.Kernel.ManifestReplPreparation do
     end
   end
 
-  def new(_prepared_run, _catalog, _runtime_services, _environment_setup_required),
+  def new(_prepared_run, _catalog, _runtime_services, _environment_setup_aliases),
     do: {:error, :invalid_manifest_repl_preparation}
 
   @doc false
@@ -76,11 +79,15 @@ defmodule PtcRunner.Kernel.ManifestReplPreparation do
       ProviderRuntimeServices.bound_to?(
         preparation.runtime_services,
         preparation.catalog.runtime_binding
-      ) and is_boolean(preparation.environment_setup_required)
+      ) and is_boolean(preparation.environment_setup_required) and
+      preparation.environment_setup_aliases ==
+        Enum.sort(Enum.uniq(preparation.environment_setup_aliases)) and
+      Enum.all?(preparation.environment_setup_aliases, &is_binary/1) and
+      preparation.environment_setup_required == (preparation.environment_setup_aliases != [])
   end
 
   defp payload(preparation),
     do:
       {preparation.prepared_run, preparation.catalog, preparation.runtime_services,
-       preparation.environment_setup_required}
+       preparation.environment_setup_required, preparation.environment_setup_aliases}
 end

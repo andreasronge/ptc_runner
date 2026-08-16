@@ -81,7 +81,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     capability_argument_bytes: "Encoded arguments crossing a capability boundary.",
     capability_result_bytes: "Encoded result crossing a capability boundary.",
     event_payload_bytes: "One canonical event payload.",
-    terminal_result_bytes: "Encoded terminal workflow result.",
+    terminal_result_bytes: "Encoded terminal workflow or mission-session result.",
     normal_event_count: "Canonical events retained under the normal policy.",
     normal_event_bytes: "Aggregate encoded canonical events retained under the normal policy.",
     provider_cleanup_timeout_ms: "Kernel-owned provider cleanup after execution.",

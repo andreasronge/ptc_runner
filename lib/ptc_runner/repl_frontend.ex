@@ -10,6 +10,8 @@ defmodule PtcRunner.ReplFrontend do
       ptc repl -
       ptc repl --manifest ptc.json
       ptc repl --manifest ptc.json --host-config ptc-host.json
+      ptc repl --project ptc-project.json --mission review
+      ptc repl --manifest ptc.json --host-config ptc-host.json --mission review
       ptc repl --manifest ptc.json --trace trace.jsonl
       ptc repl --profile run-analysis-v1 --resource traces=tmp/traces
       ptc repl --profile private-run-analysis-v1 \
@@ -29,6 +31,8 @@ defmodule PtcRunner.ReplFrontend do
     * `-l, --load` — evaluate a setup file before expressions or interaction;
     * `-m, --manifest` — reuse a strict Kernel manifest's workflow bundle,
       capabilities, limits, input, labels, and event policy;
+    * `--mission` — evaluate one manifest mission directly, with only its
+      components, data, direct capabilities, and provider dependency closure;
     * `--host-config` — manifest-only trusted provider installation document;
     * `-t, --trace` — append this session's canonical events to a JSONL file;
     * `--profile` — select a code-owned mission session profile;
@@ -61,7 +65,9 @@ defmodule PtcRunner.ReplFrontend do
   history in memory. Profile sessions and every non-terminal input path keep
   the plain reader, where `Ctrl+D` still ends input.
 
-  Direct and manifest sessions evaluate the workflow environment. Profile mode
+  Direct sessions and manifest sessions without `--mission` evaluate the
+  workflow environment. A manifest mission session evaluates a fresh serialized
+  mission continuation and exposes no workflow or model route. Profile mode
   evaluates one serialized mission continuation over the exact resources
   declared by its closed profile. Its analysis trace is atomically published
   outside captured private resources; without `--session-trace-dir`, the task
@@ -184,6 +190,12 @@ defmodule PtcRunner.ReplFrontend do
   end
 
   defp select_command(opts, arguments, evals, resources, format, terminal_attached?) do
+    with :ok <- validate_mission_command(opts) do
+      select_command_mode(opts, arguments, evals, resources, format, terminal_attached?)
+    end
+  end
+
+  defp select_command_mode(opts, arguments, evals, resources, format, terminal_attached?) do
     cond do
       opts[:describe_profile] ->
         validate_description(opts, arguments)
@@ -215,6 +227,22 @@ defmodule PtcRunner.ReplFrontend do
 
       true ->
         {:ok, :direct}
+    end
+  end
+
+  defp validate_mission_command(opts) do
+    cond do
+      opts[:mission] && opts[:profile] ->
+        {:error, "--mission cannot be combined with --profile"}
+
+      opts[:mission] && opts[:describe_profile] ->
+        {:error, "--mission cannot be combined with --describe-profile"}
+
+      opts[:mission] && !opts[:manifest] ->
+        {:error, "--mission requires --manifest"}
+
+      true ->
+        :ok
     end
   end
 
@@ -1206,6 +1234,7 @@ defmodule PtcRunner.ReplFrontend do
          {:ok, session} <-
            ManifestRepl.open(opts[:manifest], opts[:host_config],
              runtime: runtime,
+             mission: opts[:mission],
              trace_path: opts[:trace],
              private_terminal: Keyword.get(opts, :private_terminal, false),
              terminal_attached: Keyword.fetch!(opts, :terminal_attached),
@@ -1213,8 +1242,14 @@ defmodule PtcRunner.ReplFrontend do
            ) do
       run_workflow_session(session, opts, arguments)
     else
-      {:error, %{code: code}} -> fail(manifest_repl_error(code))
-      {:error, reason} -> fail("ptc repl setup failed: #{inspect(reason)}")
+      {:error, %{code: :unknown_mission, declared: declared}} ->
+        fail("unknown mission #{inspect(opts[:mission])}; declared: #{Enum.join(declared, ", ")}")
+
+      {:error, %{code: code}} ->
+        fail(manifest_repl_error(code))
+
+      {:error, reason} ->
+        fail("ptc repl setup failed: #{inspect(reason)}")
     end
   end
 
@@ -1346,7 +1381,27 @@ defmodule PtcRunner.ReplFrontend do
   # The line editor owns the banner: under the interactive reader it is the
   # reader's own slogan, which keeps it ahead of the first prompt instead of
   # racing it.
-  defp interactive(session, mode), do: LineEditor.run(mode, fn -> loop(session) end)
+  defp interactive(session, mode) do
+    banner = session_banner(ReplSession.mode_info(session))
+    LineEditor.run(mode, banner, fn -> loop(session) end)
+  end
+
+  defp session_banner(%{
+         kind: :mission,
+         mission: name,
+         component_ids: component_ids,
+         direct_provider_aliases: provider_aliases,
+         inventory_hash: hash
+       }) do
+    components = Enum.join(component_ids, ", ")
+    providers = if provider_aliases == [], do: "none", else: Enum.join(provider_aliases, ", ")
+
+    "PTC-Lisp mission REPL [#{name}; components: #{components}; providers: #{providers}; " <>
+      "inventory #{String.slice(hash, 0, 12)}; no workflow/model access] " <>
+      "(:quit to exit; :help for commands)"
+  end
+
+  defp session_banner(_mode), do: LineEditor.banner()
 
   defp loop(session) do
     case read_expression("ptc> ", "") do
@@ -1484,16 +1539,37 @@ defmodule PtcRunner.ReplFrontend do
     :ok
   end
 
-  defp handle_command("help", _session) do
-    info("""
-    Commands:
-      :doc <name>      Show core function documentation
-      :find <pattern>  Search core functions
-      :help            Show this help
-      :quit            Leave the REPL
+  defp handle_command("help", session) do
+    context =
+      case ReplSession.mode_info(session) do
+        %{kind: :mission} -> "  :context         Show the frozen mission model context\n"
+        _mode -> ""
+      end
 
-    Successful results and definitions persist. *1, *2, and *3 read recent results.
-    """)
+    info(
+      "Commands:\n" <>
+        "  :doc <name>      Show core function documentation\n" <>
+        "  :find <pattern>  Search core functions\n" <>
+        context <>
+        "  :help            Show this help\n" <>
+        "  :quit            Leave the REPL\n\n" <>
+        "Successful results and definitions persist. *1, *2, and *3 read recent results."
+    )
+  end
+
+  defp handle_command("context", session) do
+    case ReplSession.mission_context(session) do
+      {:ok, context} ->
+        info("Mission: #{context.mission}")
+        info("Model context SHA-256: #{context.model_context_hash}")
+        info(context.model_context)
+
+      {:error, :not_mission_session} ->
+        info(":context is available only in a mission REPL")
+
+      {:error, reason} ->
+        info("Unable to read mission context: #{reason}")
+    end
   end
 
   defp handle_command("doc " <> name, _session) do
@@ -1512,8 +1588,15 @@ defmodule PtcRunner.ReplFrontend do
     end)
   end
 
-  defp handle_command(_command, _session),
-    do: info("Unknown command. Available: :doc <name>, :find <pattern>, :help, :quit")
+  defp handle_command(_command, session) do
+    commands =
+      case ReplSession.mode_info(session) do
+        %{kind: :mission} -> ":doc <name>, :find <pattern>, :context, :help, :quit"
+        _mode -> ":doc <name>, :find <pattern>, :help, :quit"
+      end
+
+    info("Unknown command. Available: #{commands}")
+  end
 
   defp format_registry_doc(entry) do
     details =

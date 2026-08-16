@@ -27,6 +27,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LocalPreflight
+  alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
@@ -126,6 +127,24 @@ defmodule PtcRunner.Kernel.RunCoordinator do
     do: if(InstallationCatalog.valid?(catalog), do: :ok, else: internal_error())
 
   def local_checks(_prepared, _catalog, _services), do: internal_error()
+
+  @doc false
+  @spec local_checks(
+          PreparedRun.t(),
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t(),
+          MissionReplTarget.t()
+        ) :: :ok | {:error, CommandDiagnostic.t()}
+  def local_checks(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services,
+        %MissionReplTarget{} = target
+      ) do
+    LocalPreflight.run(prepared, catalog, services, local_deadline(prepared), target)
+  end
+
+  def local_checks(_prepared, _catalog, _services, _target), do: internal_error()
 
   @doc """
   Collects every attributable audited-local finding for default doctor.

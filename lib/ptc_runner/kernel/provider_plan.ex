@@ -13,10 +13,7 @@ defmodule PtcRunner.Kernel.ProviderPlan do
   def derive(request, workflow_bundle, mission_bundles, declarations) do
     with :ok <- validate_dependencies(declarations),
          :ok <- validate_workflow_llm_defaults(declarations),
-         effective_data_class <- effective_data_class(request, declarations),
-         :ok <- providers_accept(declarations, effective_data_class),
-         effective_flow <- effective_flow(request, effective_data_class),
-         effective_event_policy <- effective_event_policy(request, effective_flow),
+         {:ok, policy} <- derive_policy(request, declarations),
          providers <- provider_projection(declarations),
          {:ok, effective} <-
            EffectiveApplication.build(
@@ -24,13 +21,13 @@ defmodule PtcRunner.Kernel.ProviderPlan do
              workflow_bundle,
              mission_bundles,
              providers,
-             effective_event_policy
+             policy.effective_event_policy
            ) do
       {:ok,
        %{
-         effective_data_class: effective_data_class,
-         effective_flow: effective_flow,
-         effective_event_policy: effective_event_policy,
+         effective_data_class: policy.effective_data_class,
+         effective_flow: policy.effective_flow,
+         effective_event_policy: policy.effective_event_policy,
          effective_application_projection: effective.projection,
          effective_application_digest: effective.digest,
          post_selection_context:
@@ -39,10 +36,34 @@ defmodule PtcRunner.Kernel.ProviderPlan do
              workflow_bundle,
              mission_bundles,
              effective.digest,
-             effective_data_class,
-             effective_flow,
-             effective_event_policy
+             policy.effective_data_class,
+             policy.effective_flow,
+             policy.effective_event_policy
            )
+       }}
+    end
+  end
+
+  @doc false
+  @spec derive_policy(PtcRunner.Kernel.RunRequest.t(), [map()]) ::
+          {:ok,
+           %{
+             effective_data_class: :normal | :private_inspection,
+             effective_flow: :normal | :private,
+             effective_event_policy: :normal | :private
+           }}
+          | {:error, {:data_policy_denied, map()}}
+  def derive_policy(request, declarations) when is_list(declarations) do
+    effective_data_class = effective_data_class(request, declarations)
+
+    with :ok <- providers_accept(declarations, effective_data_class) do
+      effective_flow = effective_flow(request, effective_data_class)
+
+      {:ok,
+       %{
+         effective_data_class: effective_data_class,
+         effective_flow: effective_flow,
+         effective_event_policy: effective_event_policy(request, effective_flow)
        }}
     end
   end

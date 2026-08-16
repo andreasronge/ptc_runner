@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderRuntimeServices
 
@@ -45,7 +46,7 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
          true <- InstallationCatalog.valid?(catalog),
          true <- prepared.catalog_attestation == catalog.attestation,
          true <- ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding) do
-      requirements = requirements(prepared, catalog)
+      requirements = requirements(prepared.provider_declarations, catalog)
 
       case admit_requirements(
              requirements,
@@ -67,6 +68,36 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
   def admit(_prepared, _catalog, _services), do: {:error, internal_diagnostic()}
 
   @doc false
+  @spec admit(
+          PreparedRun.t(),
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t(),
+          MissionReplTarget.t()
+        ) :: :ok | {:error, CommandDiagnostic.t()}
+  def admit(prepared, catalog, services, %MissionReplTarget{} = target) do
+    with true <- PreparedRun.active_valid?(prepared),
+         true <- MissionReplTarget.valid_for?(target, prepared, catalog),
+         true <- ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding) do
+      requirements = requirements(target.declarations, catalog)
+
+      case admit_requirements(
+             requirements,
+             services.provider_application_mode,
+             catalog.installed_limits
+           ) do
+        :ok -> warm_requirements(requirements)
+        {:error, name, activity} -> {:error, unavailable_diagnostic(name, activity)}
+      end
+    else
+      _invalid -> {:error, internal_diagnostic()}
+    end
+  rescue
+    _exception -> {:error, internal_diagnostic()}
+  catch
+    _kind, _reason -> {:error, internal_diagnostic()}
+  end
+
+  @doc false
   @spec startup_attempted_after_admission?(
           PreparedRun.t(),
           InstallationCatalog.t(),
@@ -79,13 +110,27 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
       ) do
     PreparedRun.active_valid?(prepared) and InstallationCatalog.valid?(catalog) and
       prepared.catalog_attestation == catalog.attestation and
-      requirements(prepared, catalog) != []
+      requirements(prepared.provider_declarations, catalog) != []
   end
 
   def startup_attempted_after_admission?(_prepared, _catalog, _services), do: false
 
-  defp requirements(prepared, catalog) do
-    prepared.provider_declarations
+  @doc false
+  def startup_attempted_after_admission?(
+        prepared,
+        catalog,
+        %ProviderRuntimeServices{provider_application_mode: :command_vm},
+        %MissionReplTarget{} = target
+      ) do
+    PreparedRun.active_valid?(prepared) and
+      MissionReplTarget.valid_for?(target, prepared, catalog) and
+      requirements(target.declarations, catalog) != []
+  end
+
+  def startup_attempted_after_admission?(_prepared, _catalog, _services, _target), do: false
+
+  defp requirements(declarations, catalog) do
+    declarations
     |> Enum.reduce([], fn declaration, requirements ->
       implementation = Map.fetch!(catalog.implementations, declaration.name)
 

@@ -260,6 +260,12 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           aliases: [:m]
         },
         %{
+          key: :mission,
+          type: :string,
+          syntax: ["--mission MISSION"],
+          description: "open one manifest-declared mission environment"
+        },
+        %{
           key: :host_config,
           type: :string,
           syntax: ["--host-config HOST.json"],

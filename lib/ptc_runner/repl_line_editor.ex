@@ -45,9 +45,16 @@ defmodule PtcRunner.ReplLineEditor do
   """
   @spec run(mode(), (-> result)) :: result when result: term()
   def run(mode, fun) when mode in [:direct, :manifest] and is_function(fun, 0) do
+    run(mode, banner(), fun)
+  end
+
+  @doc false
+  @spec run(mode(), binary(), (-> result)) :: result when result: term()
+  def run(mode, banner, fun)
+      when mode in [:direct, :manifest] and is_binary(banner) and is_function(fun, 0) do
     if AnalysisTerminal.attached?() and reads_standard_io?(), do: install(mode)
 
-    IO.puts(banner())
+    IO.puts(banner)
 
     try do
       fun.()

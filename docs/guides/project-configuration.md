@@ -8,6 +8,7 @@ mix ptc run ptc-project.json
 mix ptc doctor ptc-project.json
 mix ptc doctor ptc-project.json --connect
 mix ptc repl --project ptc-project.json
+mix ptc repl --project ptc-project.json --mission review
 mix ptc viewer ptc-project.json
 ```
 
@@ -108,11 +109,15 @@ An explicit command value wins over the corresponding project default:
 mix ptc run ptc-project.json --host-config deployment/staging-host.json
 mix ptc run ptc-project.json --trace-dir tmp/one-off-traces
 mix ptc repl --project ptc-project.json --env-file deployment/staging.env
+mix ptc repl --project ptc-project.json --mission review
 ```
 
-Input and component-override switches remain invocation-only. A project
-environment file is loaded only when inert preparation proves that a selected
-provider uses an environment-backed credential. Provider-free runs, passive
+Mission selection, input, and component-override switches remain
+invocation-only. Mission names stay in the application manifest rather than
+being duplicated as project defaults. A project environment file is loaded
+only when inert preparation proves that a selected mission provider or its
+dependency uses an environment-backed credential. Unrelated providers do not
+cause environment-backed credentials to be read. Provider-free runs, passive
 doctor, Viewer, and file- or literal-backed credentials do not read it.
 
 Direct manifest invocation remains the low-level form for automation:

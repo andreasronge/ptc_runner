@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.ManifestRepl do
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.ManifestReplOpening
   alias PtcRunner.Kernel.ManifestReplPreparation
+  alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProviderActivity
@@ -24,9 +25,20 @@ defmodule PtcRunner.Kernel.ManifestRepl do
   alias PtcRunner.Kernel.TraceLog
 
   @input_modes [:interactive, :eval, :load, :script, :stdin, :jsonl]
-  @option_keys [:input_mode, :private_terminal, :runtime, :terminal_attached, :trace_path]
+  @option_keys [
+    :input_mode,
+    :mission,
+    :private_terminal,
+    :runtime,
+    :terminal_attached,
+    :trace_path
+  ]
 
-  @type failure :: %{code: atom(), provider_activity: boolean()}
+  @type failure :: %{
+          required(:code) => atom(),
+          required(:provider_activity) => boolean(),
+          optional(:declared) => [binary()]
+        }
 
   @doc """
   Opens one manifest-backed REPL session after phase-6 privacy authorization.
@@ -56,10 +68,11 @@ defmodule PtcRunner.Kernel.ManifestRepl do
 
   defp open_prepared(preparation, options) do
     result =
-      with {:ok, trace_path} <- authorize_phase_six(preparation, options),
-           :ok <- maybe_setup_environment(preparation, options.runtime),
+      with {:ok, target} <- target(preparation, options.mission),
+           {:ok, trace_path} <- authorize_phase_six(preparation, options, target),
+           :ok <- maybe_setup_environment(preparation, options.runtime, target),
            {:ok, authority} <- PublicationAuthority.new([]) do
-        open_authorized(preparation, authority, trace_path)
+        open_authorized(preparation, authority, trace_path, target)
       end
       |> project_open_result(preparation)
 
@@ -73,8 +86,8 @@ defmodule PtcRunner.Kernel.ManifestRepl do
       fail_and_close(preparation)
   end
 
-  defp open_authorized(preparation, authority, trace_path) do
-    case ManifestReplOpening.start(preparation, authority, trace_path, self()) do
+  defp open_authorized(preparation, authority, trace_path, target) do
+    case ManifestReplOpening.start(preparation, authority, trace_path, self(), target) do
       {:ok, opening} ->
         with {:ok, owner_pid, owner_token} <- ManifestReplOpening.await(opening),
              do: ReplSession.attach(owner_pid, owner_token)
@@ -95,17 +108,20 @@ defmodule PtcRunner.Kernel.ManifestRepl do
       private_terminal = Keyword.get(opts, :private_terminal, false)
       terminal_attached = Keyword.get(opts, :terminal_attached, AnalysisTerminal.attached?())
       trace_path = Keyword.get(opts, :trace_path)
+      mission = Keyword.get(opts, :mission)
 
       if CommandRuntime.valid?(runtime) and input_mode in @input_modes and
            is_boolean(private_terminal) and is_boolean(terminal_attached) and
-           (is_nil(trace_path) or is_binary(trace_path)) do
+           (is_nil(trace_path) or is_binary(trace_path)) and
+           (is_nil(mission) or (is_binary(mission) and mission != "")) do
         {:ok,
          %{
            runtime: runtime,
            input_mode: input_mode,
            private_terminal: private_terminal,
            terminal_attached: terminal_attached,
-           trace_path: trace_path
+           trace_path: trace_path,
+           mission: mission
          }}
       else
         {:error, :invalid_manifest_repl}
@@ -115,8 +131,13 @@ defmodule PtcRunner.Kernel.ManifestRepl do
     end
   end
 
-  defp authorize_phase_six(preparation, options) do
-    private? = preparation.prepared_run.effective_event_policy == :private
+  defp target(_preparation, nil), do: {:ok, :workflow}
+
+  defp target(preparation, mission_name),
+    do: MissionReplTarget.new(preparation.prepared_run, preparation.catalog, mission_name)
+
+  defp authorize_phase_six(preparation, options, target) do
+    private? = effective_event_policy(preparation, target) == :private
 
     with :ok <- authorize_terminal(private?, options),
          {:ok, trace_path} <- anchor_trace(options.trace_path),
@@ -124,6 +145,12 @@ defmodule PtcRunner.Kernel.ManifestRepl do
       {:ok, trace_path}
     end
   end
+
+  defp effective_event_policy(preparation, :workflow),
+    do: preparation.prepared_run.effective_event_policy
+
+  defp effective_event_policy(_preparation, %MissionReplTarget{} = target),
+    do: target.effective_event_policy
 
   defp authorize_terminal(true, %{private_terminal: false}),
     do: {:error, :private_terminal_required}
@@ -161,16 +188,29 @@ defmodule PtcRunner.Kernel.ManifestRepl do
     end
   end
 
-  defp maybe_setup_environment(%{environment_setup_required: true}, runtime),
+  defp maybe_setup_environment(%{environment_setup_required: true}, runtime, :workflow),
     do: CommandRuntime.setup_environment(runtime)
 
-  defp maybe_setup_environment(_preparation, _runtime), do: :ok
+  defp maybe_setup_environment(
+         %{environment_setup_aliases: aliases},
+         runtime,
+         %MissionReplTarget{} = target
+       ) do
+    if Enum.any?(target.aliases, &(&1 in aliases)),
+      do: CommandRuntime.setup_environment(runtime),
+      else: :ok
+  end
+
+  defp maybe_setup_environment(_preparation, _runtime, _target), do: :ok
 
   defp failure(%CommandDiagnostic{} = diagnostic, _activity),
     do: %{code: diagnostic.code, provider_activity: diagnostic.provider_activity}
 
   defp failure(reason, activity) when is_atom(reason),
     do: %{code: reason, provider_activity: activity == true}
+
+  defp failure({:unknown_mission, declared}, _activity),
+    do: %{code: :unknown_mission, declared: declared, provider_activity: false}
 
   defp failure(_reason, activity),
     do: %{code: :invalid_manifest_repl, provider_activity: activity == true}

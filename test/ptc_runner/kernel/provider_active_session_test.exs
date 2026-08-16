@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActiveSession
   alias PtcRunner.Kernel.ProviderActivity
@@ -42,6 +43,58 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert second_deadline >= first_deadline
     assert ProviderActivity.value(prepared.provider_activity) == true
 
+    close(session, prepared)
+  end
+
+  test "a mission target gives active validators its scoped policy context" do
+    parent = self()
+
+    selected_validator = fn _selection, context ->
+      send(
+        parent,
+        {:selected_policy, context.effective_data_class, context.effective_flow,
+         context.effective_event_policy}
+      )
+
+      :ok
+    end
+
+    unrelated_validator = fn _selection, _context ->
+      send(parent, :unrelated_validator)
+      :ok
+    end
+
+    assert {:ok, prepared, catalog, target} =
+             mission_target_fixture(selected_validator, unrelated_validator)
+
+    assert prepared.effective_data_class == :private_inspection
+    assert target.effective_data_class == :normal
+
+    assert {:ok, authority} = PublicationAuthority.new([])
+    assert {:ok, _sinks} = RunBuilder.open_prepared_sinks(prepared, authority, self(), target)
+
+    assert {:ok, session} =
+             ProviderActiveSession.open_consumed_setup(
+               prepared,
+               catalog,
+               services(),
+               self(),
+               fn _session -> :ok end,
+               target
+             )
+
+    assert {:ok, session} =
+             ProviderActiveSession.begin_owned_operation(
+               session,
+               prepared,
+               catalog,
+               services(),
+               :run,
+               target
+             )
+
+    assert_receive {:selected_policy, :normal, :normal, :normal}
+    refute_received :unrelated_validator
     close(session, prepared)
   end
 
@@ -1303,6 +1356,94 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
         nil,
         ["secret"]
       )
+
+  defp mission_target_fixture(selected_validator, unrelated_validator) do
+    limits = Limits.installed_defaults()
+    {:ok, rules} = rules()
+
+    descriptor = fn data_class, destinations ->
+      ProviderDescriptor.new(
+        source: :custom,
+        installation_revision: "mission-target-v1",
+        credential_names: [],
+        authorization_mode: :none,
+        data_class: data_class,
+        accepts_data: [:normal, :private_inspection],
+        requires: [],
+        provides: [],
+        destinations: destinations,
+        workflow_llm?: false,
+        connectivity_mode: :none,
+        probe_effect: nil,
+        selection_validation: :active,
+        selection_rules: rules,
+        authority_fingerprint: nil,
+        local_preflight: :none
+      )
+    end
+
+    {:ok, selected_descriptor} = descriptor.(:normal, [:mission])
+    {:ok, unrelated_descriptor} = descriptor.(:private_inspection, [:workflow])
+
+    implementation = fn validator ->
+      %{
+        builder: fn _selection, _context -> {:error, :inactive_provider} end,
+        selection_validator: validator
+      }
+    end
+
+    {:ok, catalog} =
+      InstallationCatalog.new(
+        %{
+          "selected" => %{
+            descriptor: selected_descriptor,
+            implementation: implementation.(selected_validator),
+            authority: nil
+          },
+          "unrelated" => %{
+            descriptor: unrelated_descriptor,
+            implementation: implementation.(unrelated_validator),
+            authority: nil
+          }
+        },
+        installed_limits: limits
+      )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "app", "path" => "main.clj"}],
+        "entry" => "app/run"
+      },
+      "missions" => %{
+        "review" => %{
+          "components" => [],
+          "data" => %{},
+          "providers" => ["selected"]
+        }
+      },
+      "input" => %{"value" => %{}},
+      "providers" => %{
+        "workflow" => [%{"name" => "unrelated", "config" => %{"mode" => "first"}}],
+        "mission" => [%{"name" => "selected", "config" => %{"mode" => "first"}}]
+      }
+    }
+
+    documents = %{
+      "ptc.json" => Jason.encode!(manifest),
+      "main.clj" => "(ns app) (defn run [input] (return input))"
+    }
+
+    with {:ok, request} <-
+           ApplicationPackage.request_memory("ptc.json", documents,
+             installed_limits: limits,
+             result_projection: :json
+           ),
+         {:ok, prepared} <- RunCoordinator.prepare(request, catalog),
+         {:ok, target} <- MissionReplTarget.new(prepared, catalog, "review") do
+      {:ok, prepared, catalog, target}
+    end
+  end
 
   defp fixture(
          callback,

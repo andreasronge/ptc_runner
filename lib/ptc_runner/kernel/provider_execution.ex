@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   alias PtcRunner.Kernel.MCPOAuth.Context, as: OAuthContext
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
+  alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderAcquisition
   alias PtcRunner.Kernel.ProviderActiveSession
@@ -133,7 +134,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       notifier,
       tracker,
       lifecycle_owner,
-      operation
+      {operation, :all}
     )
   end
 
@@ -175,12 +176,46 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       nil,
       tracker,
       lifecycle_owner,
-      :repl
+      {:repl, :all}
     )
   end
 
   def open_repl(_prepared, _authority, _opened_sinks, _execution, _tracker, _lifecycle_owner),
     do: {:error, :invalid_provider_execution}
+
+  @doc false
+  def open_repl(
+        %PreparedRun{} = prepared,
+        authority,
+        opened_sinks,
+        %__MODULE__{} = execution,
+        %MissionReplTarget{} = target,
+        tracker,
+        lifecycle_owner
+      )
+      when is_function(tracker, 3) and is_pid(lifecycle_owner) do
+    do_execute(
+      prepared,
+      {authority, nil},
+      opened_sinks,
+      execution,
+      nil,
+      tracker,
+      lifecycle_owner,
+      {:repl, target}
+    )
+  end
+
+  def open_repl(
+        _prepared,
+        _authority,
+        _opened_sinks,
+        _execution,
+        _target,
+        _tracker,
+        _lifecycle_owner
+      ),
+      do: {:error, :invalid_provider_execution}
 
   defp do_execute(
          prepared,
@@ -190,7 +225,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          notifier,
          tracker,
          lifecycle_owner,
-         operation
+         {operation, target} = scope
        ) do
     if operation != :repl,
       do: Process.put({__MODULE__, :publication_lease}, lease)
@@ -202,15 +237,10 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          true <- PublicationAuthority.authorized?(authority),
          true <- publication_valid?(authority, lease, operation),
          true <- bound_to_prepared?(execution, prepared),
-         :ok <- RunCoordinator.local_checks(prepared, execution.catalog, execution.services),
+         true <- valid_target?(target, prepared, execution.catalog),
+         :ok <- local_checks(prepared, execution, target),
          {:ok, session} <-
-           ProviderActiveSession.open_consumed_setup(
-             prepared,
-             execution.catalog,
-             execution.services,
-             lifecycle_owner,
-             fn session -> tracker.(:put, :session, session) end
-           ) do
+           open_consumed_setup(prepared, execution, lifecycle_owner, tracker, target) do
       execute_with_session(
         prepared,
         authority,
@@ -219,7 +249,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         notifier,
         tracker,
         session,
-        operation
+        scope
       )
     else
       false -> {:error, :invalid_provider_execution}
@@ -254,10 +284,10 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          notifier,
          tracker,
          session,
-         operation
+         {operation, target} = scope
        ) do
     result =
-      case unauthorized_oauth_alias(prepared, execution) do
+      case unauthorized_oauth_alias(prepared, execution, target) do
         nil ->
           execute_authorized(
             prepared,
@@ -267,14 +297,14 @@ defmodule PtcRunner.Kernel.ProviderExecution do
             notifier,
             tracker,
             session,
-            operation
+            scope
           )
 
         name ->
           {:error,
            authorization_required_diagnostic(
              name,
-             provider_application_activity?(prepared, execution)
+             provider_application_activity?(prepared, execution, target)
            )}
       end
 
@@ -328,7 +358,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          notifier,
          tracker,
          session,
-         operation
+         {_operation, _target} = scope
        ) do
     if execution.authorizations == [] do
       execute_ordinary(
@@ -338,7 +368,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         execution,
         tracker,
         session,
-        operation
+        scope
       )
     else
       execute_after_authorization(
@@ -349,7 +379,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         notifier,
         tracker,
         session,
-        operation
+        scope
       )
     end
   end
@@ -378,10 +408,10 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # this refusal did not fire. They are told apart by their subject, because
   # authorization is per alias while a mid-acquisition failure knows the exact
   # occurrence that hit it.
-  defp unauthorized_oauth_alias(prepared, execution) do
+  defp unauthorized_oauth_alias(prepared, execution, target) do
     authorized = MapSet.new(execution.authorizations)
 
-    Enum.find_value(prepared.provider_declarations, fn %{name: name} ->
+    Enum.find_value(declarations(prepared, target), fn %{name: name} ->
       if not MapSet.member?(authorized, name) and
            match?(%{authorization_mode: :oauth}, execution.catalog.descriptors[name]),
          do: name
@@ -402,22 +432,24 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
-  defp execute_ordinary(prepared, authority, opened_sinks, execution, tracker, session, operation) do
-    selected_names = selected_provider_names(prepared)
+  defp execute_ordinary(
+         prepared,
+         authority,
+         opened_sinks,
+         execution,
+         tracker,
+         session,
+         {operation, target} = scope
+       ) do
+    selected_names = selected_provider_names(prepared, target)
+    selected_declarations = declarations(prepared, target)
 
-    with {:ok, session} <-
-           ProviderActiveSession.begin_owned_operation(
-             session,
-             prepared,
-             execution.catalog,
-             execution.services,
-             provider_operation(operation)
-           ),
+    with {:ok, session} <- begin_owned_operation(session, prepared, execution, operation, target),
          {:ok, authorities} <- oauth_authorities(execution, selected_names),
          deadline <-
            oauth_operation_deadline(
              ProviderSession.run_deadline(session),
-             prepared.provider_declarations,
+             selected_declarations,
              authorities,
              System.monotonic_time(:millisecond)
            ) do
@@ -428,9 +460,17 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         authorities,
         deadline,
         tracker,
-        {operation, precredential_activity?(prepared, execution)},
+        {operation, precredential_activity?(prepared, execution, target)},
         fn registry ->
-          complete(prepared, authority, opened_sinks, registry, session, execution, operation)
+          complete(
+            prepared,
+            authority,
+            opened_sinks,
+            registry,
+            session,
+            execution,
+            scope
+          )
         end
       )
     end
@@ -444,14 +484,15 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          notifier,
          tracker,
          session,
-         operation
+         {operation, target} = scope
        ) do
-    selected_names = selected_provider_names(prepared)
+    selected_names = selected_provider_names(prepared, target)
+    selected_declarations = declarations(prepared, target)
 
     with {:ok, authorities} <- oauth_authorities(execution, selected_names),
          deadline when not is_nil(deadline) <-
            oauth_setup_deadline(
-             prepared.provider_declarations,
+             selected_declarations,
              authorities,
              selected_names,
              System.monotonic_time(:millisecond)
@@ -463,13 +504,14 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         authorities,
         deadline,
         tracker,
-        {{:authorization, selected_names}, provider_application_activity?(prepared, execution)},
+        {{:authorization, selected_names},
+         provider_application_activity?(prepared, execution, target)},
         fn registry, context ->
           with :ok <-
                  authorize_installations(
                    context,
                    registry,
-                   prepared.provider_declarations,
+                   selected_declarations,
                    authorities,
                    execution.authorizations,
                    notifier,
@@ -478,13 +520,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
                  )
                  |> authorization_result(selected_names, execution.catalog),
                {:ok, session} <-
-                 ProviderActiveSession.begin_owned_operation(
-                   session,
-                   prepared,
-                   execution.catalog,
-                   execution.services,
-                   provider_operation(operation)
-                 ) do
+                 begin_owned_operation(session, prepared, execution, operation, target) do
             resolve_credentials_and_complete(
               prepared,
               authority,
@@ -492,7 +528,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
               registry,
               session,
               execution,
-              operation,
+              scope,
               true
             )
           end
@@ -518,18 +554,26 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # actually attempted provider-facing work. The lifecycle marker alone is not
   # evidence: inert application rejection and ordinary credential lookup both
   # occur after it.
-  defp complete(prepared, authority, opened_sinks, registry, session, execution, operation),
-    do:
-      resolve_credentials_and_complete(
-        prepared,
-        authority,
-        opened_sinks,
-        registry,
-        session,
-        execution,
-        operation,
-        precredential_activity?(prepared, execution)
-      )
+  defp complete(
+         prepared,
+         authority,
+         opened_sinks,
+         registry,
+         session,
+         execution,
+         {_operation, target} = scope
+       ),
+       do:
+         resolve_credentials_and_complete(
+           prepared,
+           authority,
+           opened_sinks,
+           registry,
+           session,
+           execution,
+           scope,
+           precredential_activity?(prepared, execution, target)
+         )
 
   defp resolve_credentials_and_complete(
          prepared,
@@ -538,16 +582,17 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          registry,
          session,
          execution,
-         operation,
+         {_operation, target} = scope,
          provider_activity
        ) do
     with {:ok, credentials} <-
-           ProviderCredentials.resolve(
+           resolve_credentials(
              prepared,
-             execution.catalog,
+             execution,
              registry,
              session,
-             provider_activity
+             provider_activity,
+             target
            ) do
       complete(
         prepared,
@@ -556,15 +601,15 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         registry,
         session,
         execution,
-        operation,
+        scope,
         credentials
       )
     end
   end
 
-  defp precredential_activity?(prepared, execution) do
-    provider_application_activity?(prepared, execution) or
-      Enum.any?(prepared.provider_declarations, fn declaration ->
+  defp precredential_activity?(prepared, execution, target) do
+    provider_application_activity?(prepared, execution, target) or
+      Enum.any?(declarations(prepared, target), fn declaration ->
         descriptor = Map.fetch!(execution.catalog.descriptors, declaration.name)
 
         declaration.validation_state == :active_required or
@@ -572,12 +617,21 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       end)
   end
 
-  defp provider_application_activity?(prepared, execution),
+  defp provider_application_activity?(prepared, execution, :all),
     do:
       ProviderApplicationGate.startup_attempted_after_admission?(
         prepared,
         execution.catalog,
         execution.services
+      )
+
+  defp provider_application_activity?(prepared, execution, %MissionReplTarget{} = target),
+    do:
+      ProviderApplicationGate.startup_attempted_after_admission?(
+        prepared,
+        execution.catalog,
+        execution.services,
+        target
       )
 
   # Every step above this one is shared by a run and connectivity: the
@@ -591,30 +645,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          registry,
          session,
          execution,
-         operation,
-         credentials
-       )
-       when operation == :run,
-       do:
-         build_and_complete(
-           prepared,
-           authority,
-           opened_sinks,
-           registry,
-           session,
-           execution.catalog,
-           operation,
-           credentials
-         )
-
-  defp complete(
-         prepared,
-         authority,
-         opened_sinks,
-         registry,
-         session,
-         execution,
-         :repl,
+         {:run, _target} = scope,
          credentials
        ),
        do:
@@ -625,7 +656,29 @@ defmodule PtcRunner.Kernel.ProviderExecution do
            registry,
            session,
            execution.catalog,
-           :repl,
+           scope,
+           credentials
+         )
+
+  defp complete(
+         prepared,
+         authority,
+         opened_sinks,
+         registry,
+         session,
+         execution,
+         {:repl, _target} = scope,
+         credentials
+       ),
+       do:
+         build_and_complete(
+           prepared,
+           authority,
+           opened_sinks,
+           registry,
+           session,
+           execution.catalog,
+           scope,
            credentials
          )
 
@@ -640,7 +693,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          registry,
          session,
          execution,
-         :connect,
+         {:connect, _target},
          credentials
        ),
        do: complete_connectivity(prepared, execution, registry, session, credentials)
@@ -652,18 +705,19 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          registry,
          session,
          catalog,
-         operation,
+         {operation, target},
          credentials
        ) do
     with {:ok, built} <-
-           RunBuilder.build_active_owned(
+           build_owned(
              prepared,
              catalog,
              registry,
              session,
              authority,
              opened_sinks,
-             credentials
+             credentials,
+             target
            ) do
       case operation do
         :run ->
@@ -741,7 +795,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
              credentials
            ),
          activity_before_probe =
-           precredential_activity?(prepared, execution) or
+           precredential_activity?(prepared, execution, :all) or
              Enum.any?(entries, &(&1.mode == :acquisition)),
          {:ok, provider_activity} <-
            ConnectivityProbe.run(
@@ -1337,8 +1391,147 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end)
   end
 
-  defp selected_provider_names(prepared),
-    do: prepared.provider_declarations |> Enum.map(& &1.name) |> Enum.uniq()
+  defp valid_target?(:all, _prepared, _catalog), do: true
+
+  defp valid_target?(%MissionReplTarget{} = target, prepared, catalog),
+    do: MissionReplTarget.valid_for?(target, prepared, catalog)
+
+  defp local_checks(prepared, execution, :all),
+    do: RunCoordinator.local_checks(prepared, execution.catalog, execution.services)
+
+  defp local_checks(prepared, execution, %MissionReplTarget{} = target),
+    do: RunCoordinator.local_checks(prepared, execution.catalog, execution.services, target)
+
+  defp open_consumed_setup(prepared, execution, lifecycle_owner, tracker, :all),
+    do:
+      ProviderActiveSession.open_consumed_setup(
+        prepared,
+        execution.catalog,
+        execution.services,
+        lifecycle_owner,
+        fn session -> tracker.(:put, :session, session) end
+      )
+
+  defp open_consumed_setup(
+         prepared,
+         execution,
+         lifecycle_owner,
+         tracker,
+         %MissionReplTarget{} = target
+       ),
+       do:
+         ProviderActiveSession.open_consumed_setup(
+           prepared,
+           execution.catalog,
+           execution.services,
+           lifecycle_owner,
+           fn session -> tracker.(:put, :session, session) end,
+           target
+         )
+
+  defp begin_owned_operation(session, prepared, execution, operation, :all),
+    do:
+      ProviderActiveSession.begin_owned_operation(
+        session,
+        prepared,
+        execution.catalog,
+        execution.services,
+        provider_operation(operation)
+      )
+
+  defp begin_owned_operation(
+         session,
+         prepared,
+         execution,
+         operation,
+         %MissionReplTarget{} = target
+       ),
+       do:
+         ProviderActiveSession.begin_owned_operation(
+           session,
+           prepared,
+           execution.catalog,
+           execution.services,
+           provider_operation(operation),
+           target
+         )
+
+  defp resolve_credentials(prepared, execution, registry, session, provider_activity, :all),
+    do:
+      ProviderCredentials.resolve(
+        prepared,
+        execution.catalog,
+        registry,
+        session,
+        provider_activity
+      )
+
+  defp resolve_credentials(
+         prepared,
+         execution,
+         registry,
+         session,
+         provider_activity,
+         %MissionReplTarget{} = target
+       ),
+       do:
+         ProviderCredentials.resolve(
+           prepared,
+           execution.catalog,
+           registry,
+           session,
+           provider_activity,
+           target
+         )
+
+  defp build_owned(
+         prepared,
+         catalog,
+         registry,
+         session,
+         authority,
+         opened_sinks,
+         credentials,
+         :all
+       ),
+       do:
+         RunBuilder.build_active_owned(
+           prepared,
+           catalog,
+           registry,
+           session,
+           authority,
+           opened_sinks,
+           credentials
+         )
+
+  defp build_owned(
+         prepared,
+         catalog,
+         registry,
+         session,
+         authority,
+         opened_sinks,
+         credentials,
+         %MissionReplTarget{} = target
+       ),
+       do:
+         RunBuilder.build_mission_repl_active_owned(
+           prepared,
+           catalog,
+           registry,
+           session,
+           authority,
+           opened_sinks,
+           credentials,
+           target
+         )
+
+  defp declarations(prepared, :all), do: prepared.provider_declarations
+  defp declarations(_prepared, %MissionReplTarget{} = target), do: target.declarations
+
+  defp selected_provider_names(prepared, target),
+    do: prepared |> declarations(target) |> Enum.map(& &1.name) |> Enum.uniq()
 
   defp valid_fields?(execution) do
     InstallationCatalog.valid?(execution.catalog) and
