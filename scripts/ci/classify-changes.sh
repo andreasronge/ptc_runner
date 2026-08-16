@@ -76,6 +76,10 @@ while IFS= read -r path || [ -n "$path" ]; do
       ;;
 
     ptc_viewer/*)
+      # The Viewer ships inside the standalone release, and the core release
+      # gate starts it and serves a trace through it, so a Viewer change can
+      # break `core` and not only its own suite.
+      core=true
       viewer=true
       ;;
 

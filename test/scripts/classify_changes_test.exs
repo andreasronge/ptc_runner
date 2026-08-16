@@ -27,8 +27,12 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
     assert classify(["ptc_runner_launcher/c_src/launcher.c"]) ==
              all_false() |> Map.put("launcher", "true")
 
+    # The Viewer ships in the standalone release, so its own gate is not the
+    # only one a change to it can break.
     assert classify(["ptc_viewer/lib/ptc_viewer.ex"]) ==
-             all_false() |> Map.put("viewer", "true")
+             all_false()
+             |> Map.put("core", "true")
+             |> Map.put("viewer", "true")
 
     assert classify(["lib/ptc_runner/lisp/eval.ex"]) ==
              all_false()

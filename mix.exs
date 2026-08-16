@@ -128,11 +128,10 @@ defmodule PtcRunner.MixProject do
       {:earmark_parser, "~> 1.4.44", only: [:dev, :test], runtime: false},
       {:req_llm, "~> 1.19", optional: true, runtime: false},
       launcher_dep(),
-      {:ptc_viewer, path: "ptc_viewer", only: [:test, :dev]},
       {:usage_rules, "~> 1.2", only: :dev, runtime: false},
       {:recon, "~> 2.5", only: [:dev, :test], runtime: false},
       {:benchee, "~> 1.3", only: [:dev, :test], runtime: false}
-    ]
+    ] ++ viewer_dep()
   end
 
   # Keep published and ordinary development builds on Hex while allowing an
@@ -175,6 +174,35 @@ defmodule PtcRunner.MixProject do
   defp local_launcher_checkout?(launcher_path) do
     File.regular?(Path.join(launcher_path, "release_config.exs")) and
       (Mix.env() in [:dev, :test] or Enum.any?(System.argv(), &(&1 == "release")))
+  end
+
+  # The Viewer ships inside the assembled release and the container image, and
+  # is absent from the Hex package. The activation rule is the launcher's --
+  # development, tests, and a release built from this checkout -- because
+  # `mix hex.build` must never see a path dependency and the Dockerfile's
+  # single `mix do deps.get --only prod + release ...` must.
+  #
+  # Unlike the launcher, the inactive branch declares nothing at all rather
+  # than an optional Hex requirement. The launcher is published to Hex; this
+  # companion is not, and a requirement naming a package absent from the
+  # registry would fail the next `mix hex.publish`. Declaring nothing is also
+  # what is true: a Hex-only install has no Viewer, which is exactly what
+  # `PtcRunner.Kernel.DoctorEnvironment` already reports.
+  #
+  # `runtime: false` is load-bearing. `bandit`, `plug`, and `plug_crypto` all
+  # declare application modules, so an ordinary runtime dependency would enter
+  # `ptc_runner.app` and every command's `ensure_all_started(:ptc_runner)`
+  # would start three supervision trees that only `ptc viewer` needs.
+  # `PtcViewer.start/1` starts its own applications instead.
+  defp viewer_dep do
+    viewer_path = Path.expand("ptc_viewer", __DIR__)
+
+    if File.regular?(Path.join(viewer_path, "mix.exs")) and
+         (Mix.env() in [:dev, :test] or Enum.any?(System.argv(), &(&1 == "release"))) do
+      [{:ptc_viewer, path: "ptc_viewer", runtime: false}]
+    else
+      []
+    end
   end
 
   defp aliases do
@@ -257,7 +285,7 @@ defmodule PtcRunner.MixProject do
   defp ptc_prepare_task([]), do: "compile"
 
   defp ptc_prepare_task([command | _rest])
-       when command in ["help", "version", "--version", "repl"],
+       when command in ["help", "version", "--version", "repl", "viewer"],
        do: "compile"
 
   defp ptc_prepare_task(_args), do: "app.config"
@@ -266,7 +294,10 @@ defmodule PtcRunner.MixProject do
     [
       ptc_runner: [
         include_erts: true,
-        applications: [req_llm: :load],
+        # Both are `runtime: false`, so they are named here to travel with the
+        # release at all. `:load` keeps them out of the boot start phase; the
+        # provider activity boundary and `ptc viewer` start them explicitly.
+        applications: [req_llm: :load, ptc_viewer: :load],
         overlays: ["rel/overlays"]
       ]
     ]

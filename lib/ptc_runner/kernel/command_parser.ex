@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.CommandParser do
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandRejection
+  alias PtcRunner.Kernel.ViewerBinding
 
   @type frontend :: CommandDeclaration.frontend()
 
@@ -286,8 +287,37 @@ defmodule PtcRunner.Kernel.CommandParser do
     end
   end
 
+  defp validate_command(:viewer, [project], options, ordered, frontend_options, frontend) do
+    if allowed?(:viewer, options, frontend) and valid_nonempty_string?(project) and
+         viewer_port_valid?(options) and viewer_listen_valid?(options) do
+      arguments(:viewer,
+        application: project,
+        options: options,
+        ordered_options: ordered,
+        frontend_options: frontend_options,
+        frontend: frontend
+      )
+    else
+      reject(:viewer, :invalid_arguments)
+    end
+  end
+
   defp validate_command(command, _positional, _options, _ordered, _frontend_options, _frontend),
     do: reject(command, :invalid_arguments)
+
+  defp viewer_port_valid?(options) do
+    case Map.fetch(options, :port) do
+      :error -> true
+      {:ok, port} -> ViewerBinding.port(port) != :error
+    end
+  end
+
+  defp viewer_listen_valid?(options) do
+    case Map.fetch(options, :listen) do
+      :error -> true
+      {:ok, listen} -> ViewerBinding.address(listen) != :error
+    end
+  end
 
   defp validate_help_alias(command, [], [help: true], frontend), do: help(command, frontend)
 

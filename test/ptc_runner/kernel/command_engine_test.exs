@@ -117,7 +117,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         get_in(branch, ["properties", "topic", "const"])
       end)
 
-    assert topics == ~w(doctor init models repl root run run transcript validate)
+    assert topics == ~w(doctor init models repl root run run transcript validate viewer)
 
     run_options =
       help_branch
@@ -2349,6 +2349,55 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert {:error, rejection} = CommandParser.parse(argv)
       assert rejection.command == :repl
       assert rejection.code == :invalid_arguments
+    end
+  end
+
+  test "viewer accepts one project and the closed listener vocabulary" do
+    assert {:ok, arguments} = CommandParser.parse(["viewer", "ptc-project.json"])
+    assert arguments.command == :viewer
+    assert arguments.application == "ptc-project.json"
+    assert arguments.options == %{}
+
+    for {argv, options} <- [
+          {["viewer", "p.json", "--listen", "127.0.0.1"], %{listen: "127.0.0.1"}},
+          {["viewer", "p.json", "--listen", "0.0.0.0"], %{listen: "0.0.0.0"}},
+          {["viewer", "p.json", "--port", "0"], %{port: "0"}},
+          {["viewer", "p.json", "--port", "65535"], %{port: "65535"}},
+          {["viewer", "p.json", "--port", "4123", "--listen", "0.0.0.0"],
+           %{port: "4123", listen: "0.0.0.0"}}
+        ] do
+      assert {:ok, arguments} = CommandParser.parse(argv)
+      assert arguments.options == options
+    end
+  end
+
+  test "viewer rejects every listener value outside its closed vocabulary" do
+    for value <- ["", "::", "::1", "localhost", "10.0.0.1", "0.0.0.1", "127.0.0.2", "0"] do
+      assert {:error, rejection} = CommandParser.parse(["viewer", "p.json", "--listen", value])
+      assert rejection.command == :viewer
+      assert rejection.code == :invalid_arguments
+    end
+  end
+
+  test "viewer rejects a port outside the representable range" do
+    for value <- ["", "-1", "65536", "abc", "1.5", "4123 ", " 4123", "0x10"] do
+      assert {:error, rejection} = CommandParser.parse(["viewer", "p.json", "--port", value])
+      assert rejection.command == :viewer
+      assert rejection.code == :invalid_arguments
+    end
+  end
+
+  test "viewer takes exactly one project and publishes nothing" do
+    for argv <- [
+          ["viewer"],
+          ["viewer", "a.json", "b.json"],
+          ["viewer", "p.json", "--envelope", "envelope.json"],
+          ["viewer", "p.json", "--host-config", "host.json"],
+          ["viewer", "p.json", "--output", "value.json"],
+          ["viewer", "p.json", "--trace-dir", "traces"]
+        ] do
+      assert {:error, rejection} = CommandParser.parse(argv)
+      assert rejection.command == :viewer
     end
   end
 

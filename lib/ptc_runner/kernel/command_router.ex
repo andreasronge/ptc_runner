@@ -1,11 +1,14 @@
 defmodule PtcRunner.Kernel.CommandRouter do
   @moduledoc false
 
+  alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandFrontend
   alias PtcRunner.Kernel.CommandPresentation
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.CommandRuntime
+
+  @frontend_commands CommandDeclaration.frontend_commands()
 
   @type bootstrap :: CommandFrontend.bootstrap()
   @type one_shot_runner :: (PtcRunner.Kernel.CommandArguments.t(), CommandRuntime.t() ->
@@ -18,14 +21,14 @@ defmodule PtcRunner.Kernel.CommandRouter do
              is_function(repl_runner, 2) do
     case CommandEntry.open(argv, frontend) do
       {:error, %CommandEntry{rejection: %{command: command}} = entry}
-      when command in [:repl, :transcript] ->
+      when command in @frontend_commands ->
         presentation(nil, "", CommandRenderer.rejection(entry.run_ref, entry.rejection), 2)
 
       {:error, %CommandEntry{} = entry} ->
         CommandFrontend.present_entry(entry, bootstrap)
 
       {:ok, %CommandEntry{arguments: %{command: command}} = entry}
-      when command in [:repl, :transcript] ->
+      when command in @frontend_commands ->
         run_one_shot(entry, bootstrap, repl_runner)
 
       {:ok, %CommandEntry{} = entry} ->

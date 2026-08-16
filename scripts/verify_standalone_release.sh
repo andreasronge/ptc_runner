@@ -4,7 +4,16 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 release_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/ptc-runner-standalone-release.XXXXXX")"
 
+# The Viewer check runs a long-lived command in the background. Reaping it
+# belongs in the trap rather than beside the assertions, because any `set -e`
+# failure between spawn and stop would otherwise leave it holding a port.
+viewer_pid=""
+
 cleanup() {
+  if [ -n "$viewer_pid" ]; then
+    kill -TERM "$viewer_pid" 2> /dev/null || true
+    wait "$viewer_pid" 2> /dev/null || true
+  fi
   rm -rf "$release_tmp_dir"
 }
 trap cleanup EXIT
@@ -99,6 +108,7 @@ else
   test "$(find "$release_root" -maxdepth 1 -type d -name 'erts-*' | wc -l)" -eq 1
 fi
 find "$release_root/lib" -maxdepth 1 -type d -name 'req_llm-*' -print -quit | grep -q .
+find "$release_root/lib" -maxdepth 1 -type d -name 'ptc_viewer-*' -print -quit | grep -q .
 "$release_root/bin/ptc_runner" eval '
   true = PtcRunner.Kernel.SemanticRevision.runtime_dependency_artifacts_verified?()
 '
@@ -109,7 +119,7 @@ grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' "$release_tmp_dir/version.stdout"
 "$command_bin" help > "$release_tmp_dir/help.stdout"
 grep -q '^Usage:$' "$release_tmp_dir/help.stdout"
 grep -Fqx '  --help    — show root help' "$release_tmp_dir/help.stdout"
-for command in init validate run doctor models repl; do
+for command in init validate run doctor models repl viewer; do
   grep -q "ptc $command" "$release_tmp_dir/help.stdout"
   "$command_bin" help "$command" > "$release_tmp_dir/help-$command.stdout"
 done
@@ -294,3 +304,127 @@ if grep -q 'provider_application_unavailable' "$release_tmp_dir/provider.stderr"
   echo 'assembled release did not admit its command-owned optional provider application' >&2
   exit 1
 fi
+
+# The Viewer ships inside the release, so the gate proves the packaged command
+# actually serves rather than only that its application directory is present.
+# `--port 0` asks the operating system for a free port: a fixed one collides
+# with whatever already holds it on a shared machine. Redirecting stdout also
+# exercises the browser-open gate, because the `init` project sets
+# `"open": true` and there is no terminal here.
+project_root_fixture="$fixture_root/initialized"
+"$command_bin" run "$project_root_fixture/ptc-project.json" > "$release_tmp_dir/viewer-run.stdout"
+
+viewer_trace="$(find "$project_root_fixture/.ptc/traces" -maxdepth 1 -type f -name 'cmd-*.jsonl' -print -quit)"
+test -n "$viewer_trace"
+viewer_run_ref="$(basename "$viewer_trace" .jsonl)"
+
+viewer_log="$release_tmp_dir/viewer.stdout"
+"$command_bin" viewer "$project_root_fixture/ptc-project.json" --port 0 \
+  < /dev/null \
+  > "$viewer_log" \
+  2> "$release_tmp_dir/viewer.stderr" &
+viewer_pid=$!
+
+viewer_port=""
+viewer_deadline=$((SECONDS + 60))
+while [ "$SECONDS" -lt "$viewer_deadline" ]; do
+  viewer_port="$(sed -n 's|^PTC Viewer listening on http://127\.0\.0\.1:\([0-9]\{1,5\}\)$|\1|p' "$viewer_log")"
+  [ -n "$viewer_port" ] && break
+  kill -0 "$viewer_pid" 2> /dev/null || break
+  sleep 0.2
+done
+
+if [ -z "$viewer_port" ]; then
+  echo 'the packaged viewer never reported a bound port' >&2
+  cat "$release_tmp_dir/viewer.stderr" >&2
+  exit 1
+fi
+
+# No `curl` here on purpose: the Docker verify stage installs only `expect` and
+# `diffutils`, and a probe that installs its own tooling can pass for an image
+# that would fail in a user's hands. The release carries a runtime that can
+# open a socket, so it makes its own request.
+"$release_root/bin/ptc_runner" eval '
+  [port, run_ref] = System.argv()
+  port = String.to_integer(port)
+  deadline = System.monotonic_time(:millisecond) + 30_000
+
+  connect = fn connect ->
+    options = [:binary, active: false, packet: :raw]
+
+    case :gen_tcp.connect(~c"127.0.0.1", port, options, 1_000) do
+      {:ok, socket} ->
+        socket
+
+      {:error, reason} ->
+        if System.monotonic_time(:millisecond) < deadline do
+          Process.sleep(100)
+          connect.(connect)
+        else
+          raise "the packaged viewer never accepted a connection: #{inspect(reason)}"
+        end
+    end
+  end
+
+  socket = connect.(connect)
+
+  :ok =
+    :gen_tcp.send(
+      socket,
+      "GET /api/kernel/runs HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nConnection: close\r\n\r\n"
+    )
+
+  read = fn read, acc ->
+    case :gen_tcp.recv(socket, 0, 10_000) do
+      {:ok, bytes} -> read.(read, acc <> bytes)
+      {:error, :closed} -> acc
+      {:error, reason} -> raise "the packaged viewer response failed: #{inspect(reason)}"
+    end
+  end
+
+  response = read.(read, "")
+  :ok = :gen_tcp.close(socket)
+
+  unless String.starts_with?(response, "HTTP/1.1 200 ") do
+    raise "the packaged viewer did not answer 200: #{String.slice(response, 0, 120)}"
+  end
+
+  unless String.contains?(response, run_ref) do
+    raise "the packaged viewer did not list the run it was pointed at"
+  end
+' "$viewer_port" "$viewer_run_ref"
+
+# `rel/overlays/bin/ptc` execs `bin/ptc_runner eval`, which execs the runtime,
+# so this signals the VM itself and OTP stops it through `init:stop/0`.
+kill -TERM "$viewer_pid"
+set +e
+wait "$viewer_pid"
+viewer_status=$?
+set -e
+viewer_pid=""
+test "$viewer_status" -eq 0
+
+"$release_root/bin/ptc_runner" eval '
+  [port] = System.argv()
+  port = String.to_integer(port)
+  deadline = System.monotonic_time(:millisecond) + 10_000
+
+  refused = fn refused ->
+    case :gen_tcp.connect(~c"127.0.0.1", port, [active: false], 1_000) do
+      {:error, _reason} ->
+        :ok
+
+      {:ok, socket} ->
+        :ok = :gen_tcp.close(socket)
+
+        if System.monotonic_time(:millisecond) < deadline do
+          Process.sleep(100)
+          refused.(refused)
+        else
+          raise "the stopped viewer still holds its port"
+        end
+    end
+  end
+
+  refused.(refused)
+' "$viewer_port"

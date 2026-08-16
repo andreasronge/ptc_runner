@@ -144,7 +144,7 @@ earlier one.
 Open the local Viewer:
 
 ```console
-mix ptc.viewer examples/kernel-tutorial/01-orders.ptc-project.json
+mix ptc viewer examples/kernel-tutorial/01-orders.ptc-project.json
 ```
 
 Or query one frozen trace-directory capture through the public analysis

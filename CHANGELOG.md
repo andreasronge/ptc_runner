@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- `ptc viewer PROJECT.json` opens the canonical trace Viewer from both the
+  `mix ptc` and standalone frontends, replacing the development-only
+  `mix ptc.viewer` task. The Viewer now ships inside the assembled release and
+  the container image, so a packaged install can browse the traces it records;
+  the published Hex package still does not carry it, and the command reports
+  the companion as unavailable there.
+- The command binds `127.0.0.1` and accepts `--listen 0.0.0.0` as the only
+  other address, warning when it is used: the Viewer is unauthenticated and can
+  display private inspection records. Inside a container that wildcard is what
+  a published port can reach, and `docker run -p 127.0.0.1:PORT:PORT` is what
+  keeps host exposure on loopback. `--port` overrides the project's port.
+
 ### Fixed
 
 - Raised capability callbacks now retain their bounded exception class,

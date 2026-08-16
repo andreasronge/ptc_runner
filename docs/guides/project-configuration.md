@@ -8,7 +8,7 @@ mix ptc run ptc-project.json
 mix ptc doctor ptc-project.json
 mix ptc doctor ptc-project.json --connect
 mix ptc repl --project ptc-project.json
-mix ptc.viewer ptc-project.json
+mix ptc viewer ptc-project.json
 ```
 
 `mix ptc init DIRECTORY` generates this file alongside `ptc.json` and
@@ -21,7 +21,7 @@ credential-free run and its Viewer need only the same JSON path:
 
 ```console
 mix ptc run examples/kernel-tutorial/01-orders.ptc-project.json
-mix ptc.viewer examples/kernel-tutorial/01-orders.ptc-project.json
+mix ptc viewer examples/kernel-tutorial/01-orders.ptc-project.json
 ```
 
 The provider-backed examples additionally reference the shared host document
@@ -126,13 +126,18 @@ mix ptc run ptc.json \
 
 ## Viewer
 
-`mix ptc.viewer ptc-project.json` is a source-checkout development command. It
-uses the project's trace root, port, browser-opening preference, REPL setting,
-and private-data authorization. Trace and correlated inspection directories
-are captured before the loopback listener starts; HTTP requests select only a
-run ID and never a filesystem path. Browser opening is a bounded convenience:
+`ptc viewer ptc-project.json` uses the project's trace root, port,
+browser-opening preference, REPL setting, and private-data authorization. Trace
+and correlated inspection directories are captured before the listener starts;
+HTTP requests select only a run ID and never a filesystem path. Browser opening
+is a bounded convenience, and additionally requires an attached terminal:
 missing or failing platform openers do not stop Viewer.
 
-The project-aware Mix task is development-only and is not included in the
-published runtime package. Embedding hosts can use the standalone API described
-in [Embedding PtcRunner in Elixir](embedding-in-elixir.md).
+The listener binds `127.0.0.1`. The project document deliberately cannot change
+that: exposure is an invocation-time decision made with `--listen 0.0.0.0`,
+where it stays visible in the command line rather than stored in a file. See
+[Running and debugging](running-and-debugging.md#expose-it-deliberately-or-not-at-all).
+
+The Viewer ships in the standalone release and the container image, and is
+absent from the published Hex package. Embedding hosts can use the standalone
+API described in [Embedding PtcRunner in Elixir](embedding-in-elixir.md).

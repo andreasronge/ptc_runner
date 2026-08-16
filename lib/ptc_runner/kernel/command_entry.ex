@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
   """
 
   alias PtcRunner.Kernel.CommandArguments
+  alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandDestination
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRunRef
@@ -19,6 +20,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
   alias PtcRunner.Kernel.PublicationAuthority
 
   @fallback_run_ref "cmd-00000000000000000000000000"
+  @frontend_commands CommandDeclaration.frontend_commands()
   @enforce_keys [:run_ref, :frontend, :arguments, :rejection, :envelope_path, :destinations]
   defstruct @enforce_keys
 
@@ -102,7 +104,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
          {destinations, failures},
          frontend
        )
-       when command in [:repl, :transcript] do
+       when command in @frontend_commands do
     keys = one_shot_destination_keys(command)
 
     case Enum.find(keys, &(&1 in failures)) do
@@ -126,6 +128,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
 
   defp one_shot_destination_keys(:transcript), do: [:private_output]
   defp one_shot_destination_keys(:repl), do: [:output, :private_output]
+  defp one_shot_destination_keys(:viewer), do: []
 
   defp replace_ordered_destinations(ordered, destinations) do
     Enum.reduce(destinations, ordered, fn {key, path}, options ->

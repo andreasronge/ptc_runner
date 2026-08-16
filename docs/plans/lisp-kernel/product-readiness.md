@@ -18,7 +18,7 @@ expertise.
 | --- | --- | --- | --- |
 | P1 | Model protocol | Host-installed LLMs freeze bounded sampling options, but structured-output schema, reasoning controls, an explicit provider timeout, and enforceable token or cost ceilings remain outside the public configuration surface. | Deployments cannot yet express richer model contracts or complete operational budgets. |
 | P1 | Trace operation | A malformed, duplicate, or oversized trace can make a directory source fail as a whole, and trace persistence remains post-run. | One damaged file can hide healthy runs and a crash can lose buffered events. |
-| P1 | Distribution | The assembled standalone release is verified locally, but macOS artifacts and multi-architecture container images are not published. The Viewer remains a development path dependency. | Installation and deployment still require local release assembly or a source checkout. |
+| P1 | Distribution | The assembled standalone release is verified locally and now carries the Viewer, but macOS artifacts and multi-architecture container images are not published. | Installation and deployment still require local release assembly or a source checkout. |
 | P1 | End-to-end evidence | Packaged-install, private-sink/loss, real multi-page Viewer, and complete shell-driven application journeys remain absent. | Large-artifact, packaging, and cross-command regressions can escape normal gates. |
 | P2 | Viewer pagination | Cursor APIs, accumulation, and partial labeling have focused tests, but no valid run above 100 events has been exercised through repeated browser pagination. | Ordering, duplication, or final-cursor defects can remain despite API coverage. |
 | P2 | Source diagnostics | Parser, compiler, and runtime failures do not consistently retain precise source spans across every boundary. | Larger bundles take longer to repair. |
@@ -92,9 +92,11 @@ prerequisite for the local CLI; those controls belong to a deployment threat
 model that needs them. Document supported OTP versions, configuration,
 upgrades, trace storage, and complete removal.
 
-Package the Viewer as a production artifact rather than depending on the
-sibling project through development-only wiring. Add operational health checks
-for the packaged runtime and its optional launcher.
+The Viewer is packaged as a production artifact: `ptc viewer PROJECT.json`
+ships in the assembled release and the container image, and the packaged
+command is verified serving a trace by the standalone release gate. Remaining
+here: operational health checks for the packaged runtime and its optional
+launcher.
 
 A service frontend may add job submission, cancellation, concurrency control,
 tenant isolation, and durable results only when deployments require it; it is

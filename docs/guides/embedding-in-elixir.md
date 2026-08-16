@@ -175,12 +175,15 @@ exit. If trace persistence or provider cleanup fails after finalization, the
 error includes the frozen terminal events so the host can preserve evidence.
 See `PtcRunner.Kernel.ReplSession` for exact return shapes and failure modes.
 
-## Start the development Viewer
+## Start the Viewer
 
-The project-aware `mix ptc.viewer` task is development-only. An embedding host
-can instead start the Viewer directly with `PtcViewer.start/1`, supplying its
-trace and optional inspection roots plus the same private-data decision it
-would make for the task.
+`ptc viewer PROJECT.json` covers the project-document case in both frontends.
+An embedding host that has no project document can instead start the Viewer
+directly with `PtcViewer.start/1`, supplying its trace and optional inspection
+roots, the same private-data decision the command would make, and optionally
+`:ip` to choose between the loopback default and `{0, 0, 0, 0}`. `PtcViewer` is
+present in the standalone release and absent from the published Hex package, so
+probe it with `Code.ensure_loaded?/1` before calling it.
 
 ## Keep policy in PTC-Lisp
 

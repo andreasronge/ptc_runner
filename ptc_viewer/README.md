@@ -15,15 +15,24 @@ validation, run derivation, filtering, and pagination remain owned by
 From the PtcRunner root:
 
 ```bash
-mix ptc.viewer ptc-project.json
+mix ptc viewer ptc-project.json
 ```
 
-The root development task reads the explicitly named operator-owned project
+The root `viewer` command reads the explicitly named operator-owned project
 configuration, captures its trace and authorized inspection directories,
-starts a loopback server, and optionally opens the browser. Port, opening,
-REPL, and private-data choices live in the project file. The old independent
-Viewer path-switch grammar has been removed; see the root
+starts the server, and optionally opens the browser. Port, opening, REPL, and
+private-data choices live in the project file. The old independent Viewer
+path-switch grammar has been removed; see the root
 [project configuration guide](../docs/guides/project-configuration.md).
+
+The server binds `127.0.0.1` unless the caller supplies `ip: {0, 0, 0, 0}` —
+`--listen 0.0.0.0` on the command. There is no authentication, so the wildcard
+serves whatever trace and inspection data the instance was granted to every
+host that can reach the port.
+
+This project is a companion of the root `ptc_runner` project rather than a
+separately published package. It ships inside the standalone release and the
+container image; the published Hex package does not carry it.
 
 The REPL evaluates PTC-Lisp against an immutable capture of the selected trace
 directory. The server fixes the `run-analysis-v1` profile: normal bounded

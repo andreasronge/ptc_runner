@@ -152,8 +152,9 @@ network, model, or nested-evaluation authority.
 
 When you need the exact prompt and the exact generated code, that is a separate
 opt-in artifact written with owner-only permissions, kept out of normal trace
-discovery, and never joined into ordinary query results. There is also a local
-read-only viewer for browsing runs.
+discovery, and never joined into ordinary query results. `ptc viewer
+PROJECT.json` opens a local, loopback-bound, read-only web UI for browsing
+those runs.
 
 ## Evaluate a change
 
@@ -206,7 +207,7 @@ Read these in order. Each one owns its topic and links onward.
 6. [Host configuration](docs/guides/host-configuration.md) — install provider
    aliases, credentials, data classes, and outer policy.
 7. [Running and debugging](docs/guides/running-and-debugging.md) — the
-   commands, results, traces, private inspection, and development Viewer.
+   commands, results, traces, private inspection, and the Viewer.
 8. [Debug a failed run](docs/guides/debugging-a-failed-run.md) — navigate one
    immutable failed capture from another PTC run, through typed evidence links.
 9. [Evaluate changes with replay](docs/guides/evaluating-with-replay.md) — hold
