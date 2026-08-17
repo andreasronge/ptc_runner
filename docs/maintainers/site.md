@@ -1,0 +1,96 @@
+# ptc-runner.dev
+
+> **Audience:** whoever owns the domain and the GitHub repository settings.
+
+`ptc-runner.dev` exists to serve one thing the runtime already depends on: the
+JSON Schemas whose `$id` values are compiled into `lib/ptc_runner/kernel/` and
+written into every example project file. Everything else on the site is static
+introduction.
+
+| Piece | Where |
+| --- | --- |
+| Page content | `site/` |
+| Published schemas | `priv/schemas/ptc-*.schema.json`, copied at build time |
+| Assembly and verification | `scripts/build_site.sh` |
+| Deployment | `.github/workflows/pages.yml` |
+
+## The invariant
+
+Four schemas declare an absolute `$id` under this origin:
+
+```
+https://ptc-runner.dev/schemas/ptc-project-config.schema.json
+https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json
+https://ptc-runner.dev/schemas/ptc-host-config.schema.json
+https://ptc-runner.dev/schemas/ptc-command-envelope-v2.schema.json
+```
+
+Those paths are a shipped contract. Every `*.ptc-project.json` under
+`examples/` names one in `$schema`, so an editor resolves it while a user is
+authoring, and the reference documentation quotes them. They cannot move.
+
+`mix ptc.gen_docs` owns the schema bytes and `mix precommit` fails on a stale
+one, so the site never regenerates a schema — it copies the file the repository
+already proved current. That is why `site/` contains no schema copy of its own:
+a second copy would drift silently, and the first symptom would be a user's
+editor validating against a document the runtime rejects.
+
+`scripts/build_site.sh` enforces the rest. It refuses to publish when a
+schema's declared `$id` does not match the URL it is being served from, and
+when a hand-written link in `site/` names a file that is not published.
+
+## Local preview
+
+```console
+scripts/build_site.sh
+python3 -m http.server -d _site 8000
+```
+
+The pages use absolute links (`/schemas/...`), which resolve correctly under
+that server and under Pages, but not through `file://`.
+
+## One-time setup
+
+1. **Register the domain.** As of 2026-08-17 `ptc-runner.dev` is unregistered:
+   it has no NS records and RDAP returns 404. Until it is registered, every
+   `$schema` URL in the examples resolves to nothing.
+
+2. **Enable Pages.** Repository *Settings → Pages → Source: GitHub Actions*.
+   The workflow deploys through `actions/deploy-pages`, so no `gh-pages`
+   branch and no `/docs` folder mode is involved — `docs/` in this repository
+   stays maintainer documentation.
+
+3. **Point DNS at GitHub.** For the apex domain, four A and four AAAA records:
+
+   ```
+   A     @    185.199.108.153
+   A     @    185.199.109.153
+   A     @    185.199.110.153
+   A     @    185.199.111.153
+   AAAA  @    2606:50c0:8000::153
+   AAAA  @    2606:50c0:8001::153
+   AAAA  @    2606:50c0:8002::153
+   AAAA  @    2606:50c0:8003::153
+   CNAME www  andreasronge.github.io.
+   ```
+
+4. **Set the custom domain** to `ptc-runner.dev` in *Settings → Pages*, then
+   enable **Enforce HTTPS** once the certificate is issued. `.dev` is an
+   HSTS-preloaded TLD, so plain HTTP is not a fallback — the site is
+   unreachable in browsers until the certificate exists. GitHub provisions it
+   automatically a few minutes after DNS resolves.
+
+   `site/CNAME` is published with the site so the custom domain survives a
+   redeploy; without it, a deployment resets the domain setting.
+
+## Why GitHub Pages
+
+The schemas need to be fetchable by editors and by browser-based validators.
+GitHub Pages serves `.json` as `application/json; charset=utf-8` with
+`access-control-allow-origin: *`, with no configuration — the two properties
+that would otherwise justify a host allowing custom response headers. It is
+free for this public repository and requires no account beyond the one that
+owns the code.
+
+Reach for a different host when the site needs redirects, cache-control
+tuning, or per-path headers. None of that is required to serve a schema.

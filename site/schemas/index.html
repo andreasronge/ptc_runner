@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PtcRunner JSON Schemas</title>
+<meta name="description" content="Stable $id URLs for the PtcRunner project, application, host, and command-envelope JSON Schemas.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<style>
+  :root {
+    --bg: #fbfaf8; --border: #e3ded6; --text: #1c1a17;
+    --muted: #6b6459; --accent: #9a4a1e; --code-bg: #f4f1ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16150f; --border: #33302a; --text: #ece7dd;
+      --muted: #9d9484; --accent: #e08a55; --code-bg: #24211b;
+    }
+  }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.6 ui-sans-serif, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  .wrap { max-width: 44rem; margin: 0 auto; padding: 3.5rem 1.25rem 5rem; }
+  h1 { font-size: 1.9rem; margin: 0 0 .5rem; letter-spacing: -.02em; font-weight: 650; }
+  p { color: var(--muted); margin: 0 0 1.5rem; }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--code-bg); border: 1px solid var(--border);
+    padding: .08em .35em; border-radius: 3px; font-size: .875em;
+  }
+  ul { list-style: none; padding: 0; margin: 0 0 2rem; }
+  li { padding: .7rem 0; border-bottom: 1px solid var(--border); }
+  li a {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .9rem;
+  }
+  .back { font-size: .9rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>JSON Schemas</h1>
+  <p>Stable <code>$id</code> URLs referenced by PtcRunner documents and by the runtime itself.
+  Each file is published verbatim from <code>priv/schemas/</code> in the repository. See the
+  <a href="/#json-schemas">schema overview</a> for what each one governs.</p>
+
+  <ul>
+    <li><a href="/schemas/ptc-project-config.schema.json">ptc-project-config.schema.json</a></li>
+    <li><a href="/schemas/ptc-application-manifest.schema.json">ptc-application-manifest.schema.json</a></li>
+    <li><a href="/schemas/ptc-host-config.schema.json">ptc-host-config.schema.json</a></li>
+    <li><a href="/schemas/ptc-command-envelope-v2.schema.json">ptc-command-envelope-v2.schema.json</a></li>
+  </ul>
+
+  <p class="back"><a href="/">&larr; PtcRunner</a></p>
+</div>
+</body>
+</html>
