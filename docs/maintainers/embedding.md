@@ -76,7 +76,9 @@ repeated calls without recompilation. Acquire the package with
 Both input and result contracts are required. The default `effects: :read_only`
 policy refuses any local public export that is not provably `:read`. A call
 supplies only the input value; the frozen policy includes the input authority
-class. The public result is `PtcRunner.Kernel.CommandOutcome`.
+class. The public result is `PtcRunner.Kernel.CommandOutcome`. Frozen
+`inspection_capture: true` is bound onto each call's publication authority
+so the Kernel opens an inspection sink.
 
 This slice is provider-free. Applications that declare providers are refused
 until `PtcRunner.Kernel.HostRuntime` exists.

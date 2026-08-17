@@ -8,7 +8,9 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   `application_content_digest` / `effective_application_digest` pair. A call
   supplies only the input value. That value is excluded from the effective
   digest, so the digest captured at compile time describes every run made
-  from the template.
+  from the template. When the frozen policy enables inspection capture, each
+  call authorizes inspection on its publication authority so the Kernel
+  opens an inspection sink.
 
   This slice is provider-free. Applications that declare workflow or mission
   providers are refused until host runtime admission exists. With the default
@@ -35,6 +37,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.CommandApplicationDiagnostic
   alias PtcRunner.Kernel.CommandDestination
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandOutcome
@@ -184,10 +187,23 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   def call(_template, _input), do: {:error, :invalid_serving_template}
 
   defp execute_call(template, input) do
-    with {:ok, run_ref} <- CommandRunRef.generate(),
-         {:ok, execution_input} <-
-           ExecutionInput.new(input, template.input_authority, template.package.contracts.input),
-         {:ok, request} <- RunRequest.new(template.package, execution_input, template.policy),
+    with {:ok, run_ref} <- CommandRunRef.generate() do
+      case ExecutionInput.new(
+             input,
+             template.input_authority,
+             template.package.contracts.input
+           ) do
+        {:ok, execution_input} ->
+          execute_authorized_call(template, execution_input, run_ref)
+
+        {:error, reason} ->
+          {:error, input_rejection(run_ref, reason)}
+      end
+    end
+  end
+
+  defp execute_authorized_call(template, execution_input, run_ref) do
+    with {:ok, request} <- RunRequest.new(template.package, execution_input, template.policy),
          {:ok, derived} <-
            ProviderPlan.derive(
              request,
@@ -196,7 +212,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
              []
            ),
          true <- derived.effective_application_digest == template.effective_application_digest,
-         {:ok, authority} <- PublicationAuthority.new([]) do
+         {:ok, authority, inspect_parent} <- publication_authority(template, run_ref) do
       try do
         case prepare_call(template, request, derived) do
           {:ok, prepared} ->
@@ -207,22 +223,52 @@ defmodule PtcRunner.Kernel.ServingTemplate do
         end
       after
         PublicationAuthority.close(authority)
+        if inspect_parent, do: _ = File.rm_rf(inspect_parent)
       end
     else
       false ->
         {:error, :invalid_serving_template}
-
-      {:error, {:input_contract_failed, _classification}} ->
-        call_contract_error()
-
-      {:error, :invalid_input} ->
-        call_contract_error()
 
       {:error, %CommandOutcome{} = outcome} ->
         {:error, outcome}
 
       {:error, _reason} = error ->
         error
+    end
+  end
+
+  defp publication_authority(template, run_ref) do
+    if template.policy.inspection_capture do
+      authorize_inspection(template, run_ref)
+    else
+      with {:ok, authority} <- PublicationAuthority.new([]) do
+        {:ok, authority, nil}
+      end
+    end
+  end
+
+  defp authorize_inspection(template, run_ref) do
+    parent = Path.join(System.tmp_dir!(), "ptc-serving-" <> run_ref)
+    path = Path.join(parent, "run.inspection.jsonl")
+
+    case File.mkdir_p(parent) do
+      :ok ->
+        case PublicationAuthority.authorize(
+               run_ref,
+               [inspect: path],
+               template.effective_event_policy,
+               template.effective_data_class
+             ) do
+          {:ok, authority} ->
+            {:ok, authority, parent}
+
+          {:error, _reason} = error ->
+            _ = File.rm_rf(parent)
+            error
+        end
+
+      {:error, _reason} ->
+        {:error, :invalid_publication_authority}
     end
   end
 
@@ -242,7 +288,12 @@ defmodule PtcRunner.Kernel.ServingTemplate do
 
   defp dispatch(prepared, authority, run_ref, effective_event_policy) do
     result_class = if effective_event_policy == :private, do: :private, else: :normal
-    artifact_state = CommandDestination.requested_artifact_state(%{})
+
+    artifact_state =
+      authority
+      |> PublicationAuthority.destination_options()
+      |> Map.new()
+      |> CommandDestination.requested_artifact_state()
 
     case RunCoordinator.execute(prepared, authority) do
       {:ok, outcome} ->
@@ -260,18 +311,8 @@ defmodule PtcRunner.Kernel.ServingTemplate do
     end
   end
 
-  defp call_contract_error do
-    with {:ok, run_ref} <- CommandRunRef.generate() do
-      {:error, command_error(run_ref, :input_contract_failed)}
-    end
-  end
-
-  defp command_error(run_ref, :input_contract_failed) do
-    CommandOutcome.error(
-      :run,
-      run_ref,
-      CommandDiagnostic.new!(:application, :input_contract_failed)
-    )
+  defp input_rejection(run_ref, reason) do
+    CommandOutcome.error(:run, run_ref, CommandApplicationDiagnostic.project(:run, reason))
   end
 
   defp command_error(run_ref, _reason) do
@@ -347,7 +388,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   defp require_contracts(_package), do: {:error, :serving_contracts_required}
 
   defp require_read_only(package, workflow_bundle, mission_bundles) do
-    namespaces = local_namespaces(package)
+    namespaces = local_namespaces(package, workflow_bundle, mission_bundles)
 
     with {:ok, entry} <- Prelude.fetch_export(workflow_bundle.prelude, package.entry),
          true <- entry.effect == :read,
@@ -366,7 +407,22 @@ defmodule PtcRunner.Kernel.ServingTemplate do
     end)
   end
 
-  defp local_namespaces(package) do
+  defp local_namespaces(package, workflow_bundle, mission_bundles) do
+    local_ids = MapSet.new(local_component_ids(package))
+
+    [workflow_bundle | Enum.reject(Map.values(mission_bundles), &is_nil/1)]
+    |> Enum.flat_map(& &1.components)
+    |> Enum.flat_map(fn component ->
+      if MapSet.member?(local_ids, component.id) do
+        List.wrap(Map.get(component, :namespaces, []))
+      else
+        []
+      end
+    end)
+    |> MapSet.new()
+  end
+
+  defp local_component_ids(package) do
     workflow = for {id, :local} <- package.workflow_component_kinds, do: id
 
     mission =
@@ -374,7 +430,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
           {id, :local} <- mission.kinds,
           do: id
 
-    MapSet.new(workflow ++ mission)
+    workflow ++ mission
   end
 
   defp payload(template) do
