@@ -631,7 +631,7 @@ defmodule PtcRunner.Kernel.ReplSession do
     timeout_ms = min(limits.evaluation_timeout_ms, RunState.remaining_ms(session.state))
     deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
 
-    Lisp.run_native(source,
+    Lisp.run_owned(source,
       caller: :repl,
       context: session.config.input,
       memory: memory,
@@ -647,8 +647,7 @@ defmodule PtcRunner.Kernel.ReplSession do
       max_program_bytes: limits.subordinate_source_bytes,
       max_tool_call_result_bytes: limits.capability_result_bytes,
       preserve_runtime_callables: true,
-      filter_context: false,
-      link: true
+      filter_context: false
     )
   end
 

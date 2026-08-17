@@ -54,7 +54,7 @@ defmodule PtcRunner.Kernel.SourceCheck do
     compile_timeout_ms = Keyword.get(opts, :compile_timeout, timeout_ms)
 
     compile_result =
-      Lisp.check_native(source,
+      Lisp.check_owned(source,
         memory: memory,
         tools:
           Evaluation.mission_tools(
@@ -75,8 +75,7 @@ defmodule PtcRunner.Kernel.SourceCheck do
         max_program_bytes: limits.subordinate_source_bytes,
         filter_context: false,
         caller: :kernel,
-        preserve_runtime_callables: true,
-        link: true
+        preserve_runtime_callables: true
       )
 
     :ok = after_compile(Keyword.get(opts, :after_compile))

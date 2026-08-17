@@ -84,9 +84,9 @@ Root project; small; independent value.
   promptly (extend the documented gap at
   `run_coordinator_execution_test.exs` caller-death coverage; monitors, no
   `Process.sleep`).
-- Add `link: true` to the `Lisp.run_native/2` call in
-  `Runner.execute_workflow/4`, mirroring the watchdog-monitored evaluation
-  paths.
+- Kernel-owned Lisp runs go through `Lisp.run_owned/2` /
+  `Lisp.check_owned/2`, which force Sandbox `link: true` (a watchdog, not
+  a BEAM link). Direct `run_native/2` stays unlinked.
 - Verify the owner's existing kill-and-drain contract
   (`ExecutionSessionOwner` monitors its caller) now reaches the sandbox on
   both caller-death and deadline paths; provider drain remains bounded.
