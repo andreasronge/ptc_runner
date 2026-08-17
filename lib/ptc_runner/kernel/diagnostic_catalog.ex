@@ -167,6 +167,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the installed endpoint did not complete a TLS handshake"},
     {:provider_acquisition, :provider_protocol_error, 4, false,
      "the selected provider returned an invalid acquisition response"},
+    {:provider_acquisition, :provider_protocol_version_unsupported, 4, false,
+     "the installed endpoint does not support MCP protocol 2026-07-28"},
     {:provider_acquisition, :provider_tool_missing, 4, false,
      "the installed endpoint does not expose a declared tool"},
     {:provider_acquisition, :provider_policy_changed, 4, false,

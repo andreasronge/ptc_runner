@@ -19,6 +19,27 @@ They are source examples, not release payloads. A separately cloned project
 should vendor the chosen bundle or install an equivalent server at a stable
 location; the PtcRunner release does not add Node.js or copy these examples.
 
+## Protocol compatibility
+
+PtcRunner implements the final MCP `2026-07-28` profile. Acquisition starts
+with `server/discover`; it does not retry the legacy `initialize` handshake or
+downgrade to an older protocol revision. A server must advertise `2026-07-28`
+in `supportedVersions` and implement the tools surface from that profile.
+
+An incompatible but responsive endpoint fails with
+`provider_protocol_version_unsupported`. This diagnosis is intentionally
+closed: it publishes the required PtcRunner-owned revision, but not the remote
+error message, response data, endpoint, process stderr, or launch arguments.
+Upgrade or replace the MCP server rather than adding a fallback handshake.
+
+As of 2026-08-17, the official
+`@modelcontextprotocol/server-filesystem@2026.7.10` package negotiates
+`2025-11-25` through `initialize` and answers `server/discover` with JSON-RPC
+`-32601 Method not found`. It is therefore not compatible with this PtcRunner
+profile, despite starting and serving legacy clients normally. The checked-in
+filesystem example listed above implements the required profile and is the
+deterministic baseline for this guide.
+
 ## Run the checked-in file agent
 
 The tutorial server is a committed JavaScript bundle. It requires Node.js 22 or
