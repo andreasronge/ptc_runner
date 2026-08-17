@@ -220,6 +220,61 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
              )
   end
 
+  test "classifies only discovery's standard unsupported-profile errors specially" do
+    for code <- [-32_601, -32_022] do
+      response = %{
+        "error" => %{
+          "code" => code,
+          "message" => "PRIVATE_REMOTE_MESSAGE",
+          "data" => %{"secret" => "PRIVATE_REMOTE_DATA"}
+        }
+      }
+
+      assert {:error, :mcp_protocol_version_unsupported} =
+               MCPProtocol.outcome(response, "server/discover")
+
+      assert {:error, :mcp_remote_error} = MCPProtocol.outcome(response, "tools/list")
+    end
+
+    assert {:error, :mcp_remote_error} =
+             MCPProtocol.outcome(
+               %{"error" => %{"code" => -32_603, "message" => "Method not found"}},
+               "server/discover"
+             )
+
+    assert {:error, :mcp_protocol_error} =
+             MCPProtocol.outcome(
+               %{
+                 "error" => %{
+                   "code" => -32_601,
+                   "message" => "Method not found",
+                   "unexpected" => true
+                 }
+               },
+               "server/discover"
+             )
+  end
+
+  test "distinguishes a valid unsupported discovery profile from malformed discovery data" do
+    valid = %{
+      "supportedVersions" => ["2025-11-25"],
+      "capabilities" => %{"tools" => %{}}
+    }
+
+    assert {:error, :mcp_protocol_version_unsupported} =
+             MCPProtocol.discover_result(valid, "2026-07-28")
+
+    for malformed <- [
+          Map.put(valid, "capabilities", []),
+          put_in(valid, ["capabilities", "tools"], []),
+          Map.put(valid, "supportedVersions", ["2025-11-25", 42]),
+          Map.put(valid, "supportedVersions", [])
+        ] do
+      assert {:error, :mcp_protocol_error} =
+               MCPProtocol.discover_result(malformed, "2026-07-28")
+    end
+  end
+
   test "classifies input-required outcomes by method, structure, and client policy" do
     state_only = %{
       "resultType" => "input_required",

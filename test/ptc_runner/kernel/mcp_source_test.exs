@@ -1855,19 +1855,58 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
-  test "rejects unsupported protocol errors without initialization fallback", %{tmp_dir: dir} do
-    parent = self()
-    legacy = fixture(parent, unsupported_protocol?: true)
-    on_exit(legacy.close)
+  test "classifies only the exact HTTP unsupported-profile status/code pairs", %{tmp_dir: dir} do
+    for {status, code, expected} <- [
+          {200, -32_601, :mcp_protocol_version_unsupported},
+          {200, -32_022, :mcp_protocol_version_unsupported},
+          {200, -32_603, :mcp_remote_error},
+          {400, -32_022, :mcp_protocol_version_unsupported},
+          {404, -32_601, :mcp_protocol_version_unsupported},
+          {400, -32_601, :mcp_protocol_error},
+          {404, -32_022, :mcp_protocol_error},
+          {400, -32_603, :mcp_protocol_error},
+          {404, -32_603, :mcp_protocol_error}
+        ] do
+      parent = self()
+      legacy = fixture(parent, discover_rpc_error: {status, code})
+      on_exit(legacy.close)
+
+      assert {:error, ^expected} =
+               dir
+               |> manifest(["remote.structured"])
+               |> directory_request(registry(legacy.endpoint))
+               |> RunLifecycle.build()
+
+      assert_receive {:mcp_request, "server/discover", _headers}
+      refute_receive {:mcp_request, "initialize", _headers}
+      refute_receive {:mcp_request, "tools/list", _headers}
+    end
+
+    mismatch = fixture(self(), supported_versions: ["2025-11-25"])
+    on_exit(mismatch.close)
+
+    assert {:error, :mcp_protocol_version_unsupported} =
+             dir
+             |> manifest(["remote.structured"])
+             |> directory_request(registry(mismatch.endpoint))
+             |> RunLifecycle.build()
+
+    assert_receive {:mcp_request, "server/discover", _headers}
+    refute_receive {:mcp_request, "tools/list", _headers}
+
+    deceptive =
+      fixture(self(),
+        discover_rpc_error: {400, -32_603},
+        discover_rpc_message: "-32601 Method not found: UnsupportedProtocolVersion"
+      )
+
+    on_exit(deceptive.close)
 
     assert {:error, :mcp_protocol_error} =
              dir
              |> manifest(["remote.structured"])
-             |> directory_request(registry(legacy.endpoint))
+             |> directory_request(registry(deceptive.endpoint))
              |> RunLifecycle.build()
-
-    assert_receive {:mcp_request, "server/discover", _headers}
-    refute_receive {:mcp_request, "initialize", _headers}
   end
 
   @tag :tmp_dir
@@ -2777,8 +2816,12 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       status = opts[:http_error_status] ->
         {status, [{"content-type", "text/plain"}], String.duplicate("x", 1_100_000)}
 
-      opts[:unsupported_protocol?] ->
-        rpc_error(id, -32_600, "UnsupportedProtocolVersion", status: 400)
+      match?({_status, _code}, opts[:discover_rpc_error]) ->
+        {status, code} = Keyword.fetch!(opts, :discover_rpc_error)
+
+        rpc_error(id, code, Keyword.get(opts, :discover_rpc_message, "PRIVATE_REMOTE_MESSAGE"),
+          status: status
+        )
 
       opts[:discover_error?] ->
         rpc_error(id, -32_603, "discovery rejected")

@@ -38,6 +38,8 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   #   * `:provider_protocol_error` — the provider answered and the answer was
   #     unusable: an invalid catalog or tool schema, a response past its ceiling,
   #     or a preparation/preflight/build that failed normalization.
+  #   * `:provider_protocol_version_unsupported` — discovery definitively showed
+  #     that the installed endpoint does not implement the pinned MCP profile.
   #   * `:provider_tool_missing` — the provider returned a valid tool catalog,
   #     but it did not contain one tool named by the sealed host declaration.
   #   * `:provider_policy_changed` — the preparation contradicted the sealed
@@ -161,6 +163,9 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
 
   def diagnostic(reason, occurrence) when reason in @unavailable_reasons,
     do: acquisition_diagnostic(:provider_unavailable, occurrence)
+
+  def diagnostic(:mcp_protocol_version_unsupported, occurrence),
+    do: acquisition_diagnostic(:provider_protocol_version_unsupported, occurrence)
 
   def diagnostic(:mcp_mapped_tool_missing, occurrence),
     do: acquisition_diagnostic(:provider_tool_missing, occurrence)

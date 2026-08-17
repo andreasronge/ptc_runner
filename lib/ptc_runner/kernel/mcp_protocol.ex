@@ -73,6 +73,7 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   @rfc3339_datetime ~r/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\z/i
   @max_schema_depth 16
   @input_required_methods ~w(tools/call prompts/get resources/read)
+  @unsupported_protocol_version_codes [-32_601, -32_022]
   # A maximum-depth schema in tools/list occupies four envelope containers,
   # `2 * depth - 1` schema containers, and `depth` const/enum instance
   # containers: 4 + 31 + 16 = 51 at the configured limits.
@@ -293,6 +294,7 @@ defmodule PtcRunner.Kernel.MCPProtocol do
              :mcp_capability_negotiation_error
              | :mcp_input_required_refused
              | :mcp_protocol_error
+             | :mcp_protocol_version_unsupported
              | :mcp_remote_error
              | :mcp_unsupported_result}
   def outcome(body, method) when is_map(body) and is_binary(method) do
@@ -301,9 +303,7 @@ defmodule PtcRunner.Kernel.MCPProtocol do
         classify_result(result, method)
 
       {:error, {:ok, error}} when is_map(error) ->
-        if valid_rpc_error?(error),
-          do: {:error, :mcp_remote_error},
-          else: {:error, :mcp_protocol_error}
+        classify_rpc_error(error, method)
 
       _invalid ->
         {:error, :mcp_protocol_error}
@@ -312,17 +312,30 @@ defmodule PtcRunner.Kernel.MCPProtocol do
 
   def outcome(_body, _method), do: {:error, :mcp_protocol_error}
 
-  @spec discover_result(map(), binary()) :: {:ok, map()} | {:error, :mcp_protocol_error}
+  @doc false
+  @spec unsupported_protocol_version_error?(map(), binary(), integer()) :: boolean()
+  def unsupported_protocol_version_error?(body, "server/discover", expected_code)
+      when is_map(body) and expected_code in @unsupported_protocol_version_codes do
+    case {Map.fetch(body, "result"), Map.fetch(body, "error")} do
+      {:error, {:ok, %{"code" => ^expected_code} = error}} -> valid_rpc_error?(error)
+      _other -> false
+    end
+  end
+
+  def unsupported_protocol_version_error?(_body, _method, _expected_code), do: false
+
+  @spec discover_result(map(), binary()) ::
+          {:ok, map()} | {:error, :mcp_protocol_error | :mcp_protocol_version_unsupported}
   def discover_result(result, protocol) when is_map(result) and is_binary(protocol) do
     with versions when is_list(versions) and length(versions) in 1..32 <-
            result["supportedVersions"],
-         true <-
-           Enum.all?(versions, &(is_binary(&1) and byte_size(&1) in 1..64)) and
-             protocol in versions,
+         true <- Enum.all?(versions, &(is_binary(&1) and byte_size(&1) in 1..64)),
          capabilities when is_map(capabilities) and not is_struct(capabilities) <-
            result["capabilities"],
          tools when is_map(tools) and not is_struct(tools) <- capabilities["tools"] do
-      {:ok, %{capabilities: capabilities, server_info: server_info(result)}}
+      if protocol in versions,
+        do: {:ok, %{capabilities: capabilities, server_info: server_info(result)}},
+        else: {:error, :mcp_protocol_version_unsupported}
     else
       _reason -> {:error, :mcp_protocol_error}
     end
@@ -534,6 +547,19 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   end
 
   defp valid_rpc_error?(_error), do: false
+
+  defp classify_rpc_error(error, method) do
+    cond do
+      not valid_rpc_error?(error) ->
+        {:error, :mcp_protocol_error}
+
+      method == "server/discover" and error["code"] in @unsupported_protocol_version_codes ->
+        {:error, :mcp_protocol_version_unsupported}
+
+      true ->
+        {:error, :mcp_remote_error}
+    end
+  end
 
   defp continue_or_finish(nil, %{tools: tools}), do: {:done, tools}
   defp continue_or_finish(next, state), do: {:continue, next, state}

@@ -276,6 +276,51 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "run publishes an unsupported MCP profile without remote details and closes stdio", %{
+    tmp_dir: directory
+  } do
+    marker = Path.join(directory, "unsupported-run-methods")
+
+    host_path =
+      write_host_config(
+        directory,
+        "unsupported-run",
+        connect_host_config(marker, "unsupported-protocol")
+      )
+
+    application =
+      doctor_application(directory, "run-unsupported-profile",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: %{"evaluation_timeout_ms" => 5_000}
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    encoded = Jason.encode!(outcome.envelope)
+    assert outcome.exit_status == 4
+    assert outcome.envelope["error"]["code"] == "provider_protocol_version_unsupported"
+    assert outcome.envelope["error"]["message"] =~ "2026-07-28"
+    assert outcome.envelope["error"]["retryable"] == false
+    refute encoded =~ "PRIVATE_REMOTE_MESSAGE"
+    refute encoded =~ "PRIVATE_REMOTE_DATA"
+    refute encoded =~ "PRIVATE_STDERR_DETAIL"
+    refute encoded =~ "PRIVATE_LAUNCH_ARGUMENT"
+
+    assert {:stderr, rendered} = CommandRenderer.render(outcome)
+    assert rendered =~ "provider_protocol_version_unsupported"
+    refute rendered =~ "PRIVATE_REMOTE_MESSAGE"
+    refute rendered =~ "PRIVATE_REMOTE_DATA"
+    refute rendered =~ "PRIVATE_STDERR_DETAIL"
+    refute rendered =~ "PRIVATE_LAUNCH_ARGUMENT"
+
+    assert File.read!(marker) =~ "server/discover"
+    refute File.read!(marker) =~ "tools/list"
+    assert File.read!(marker) =~ "session-closed"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
   test "shared dispatch keeps audited-local rejection before execution and provider activity", %{
     tmp_dir: directory
   } do
@@ -1748,6 +1793,63 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              )
 
     assert File.read!(marker) =~ "tools/list"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "doctor --connect reports an unsupported MCP profile and closes stdio", %{
+    tmp_dir: directory
+  } do
+    marker = Path.join(directory, "unsupported-doctor-methods")
+
+    host_path =
+      write_host_config(
+        directory,
+        "unsupported-doctor",
+        connect_host_config(marker, "unsupported-protocol")
+      )
+
+    application =
+      doctor_application(directory, "doctor-unsupported-profile",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: %{"evaluation_timeout_ms" => 5_000}
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.envelope["error"]["code"] == "provider_protocol_version_unsupported"
+    assert outcome.exit_status == 4
+    assert outcome.envelope["error"]["retryable"] == false
+
+    assert %{"status" => "fail", "code" => "provider_protocol_version_unsupported"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/workspace/connectivity")
+             )
+
+    encoded = Jason.encode!(outcome.envelope)
+    refute encoded =~ "PRIVATE_REMOTE_MESSAGE"
+    refute encoded =~ "PRIVATE_REMOTE_DATA"
+    refute encoded =~ "PRIVATE_STDERR_DETAIL"
+    refute encoded =~ "PRIVATE_LAUNCH_ARGUMENT"
+
+    assert {:stdout, rendered} = CommandRenderer.render(outcome)
+    assert rendered =~ "provider_protocol_version_unsupported"
+    refute rendered =~ "PRIVATE_REMOTE_MESSAGE"
+    refute rendered =~ "PRIVATE_REMOTE_DATA"
+    refute rendered =~ "PRIVATE_STDERR_DETAIL"
+    refute rendered =~ "PRIVATE_LAUNCH_ARGUMENT"
+
+    assert File.read!(marker) =~ "server/discover"
+    refute File.read!(marker) =~ "tools/list"
+    assert File.read!(marker) =~ "session-closed"
     assert_schema_valid(outcome.envelope)
   end
 
@@ -6705,7 +6807,12 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   # `connectivity_mode: :acquisition`, which is what lets a connect at this
   # boundary settle two rows that default doctor cannot settle at all. `marker`
   # records the JSON-RPC methods the server actually served.
-  defp connect_host_config(marker) do
+  defp connect_host_config(marker, mode \\ nil) do
+    args =
+      if is_nil(mode),
+        do: [@stdio_fixture, marker],
+        else: [@stdio_fixture, marker, mode, "PRIVATE_LAUNCH_ARGUMENT"]
+
     %{
       "install" => %{
         "workspace" => %{
@@ -6715,7 +6822,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
             "type" => "stdio",
             "command" => System.find_executable("sh"),
             "cwd" => @stdio_root,
-            "args" => [@stdio_fixture, marker],
+            "args" => args,
             "start_timeout_ms" => 5_000
           },
           "tools" => %{
