@@ -3,8 +3,12 @@
 **Status:** future, trigger-gated; written 2026-07-31, narrowed after review
 the same day. Mode M0 and scope tier 2 (HTTP, single shared authority) were
 activated on 2026-08-17 and sliced into pull requests by
-[`../mcp-gateway-m0.md`](../mcp-gateway-m0.md) (issue #1465); everything
-else remains unapproved. This plan assumes the
+[`../mcp-gateway-m0.md`](../mcp-gateway-m0.md) (issue #1465), with two
+recorded amendments: the static M0 configuration may hold several entries
+(each still exactly one application exposed as one tool), and pooled
+provider services are staged — boot performs a validation acquisition and
+every call revalidates digests, while pooled retention keeps its own
+trigger. Everything else remains unapproved. This plan assumes the
 completed [stable CLI contract](../lisp-kernel/stable-cli-contract.md): the
 transport-neutral `ApplicationPackage`/`ExecutionInput`/`ExecutionPolicy`/
 `RunRequest` seam, the memory acquisition adapter, the
