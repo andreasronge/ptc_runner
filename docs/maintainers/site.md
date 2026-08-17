@@ -37,7 +37,21 @@ editor validating against a document the runtime rejects.
 
 `scripts/build_site.sh` enforces the rest. It refuses to publish when a
 schema's declared `$id` does not match the URL it is being served from, and
-when a hand-written link in `site/` names a file that is not published.
+when a hand-written reference in `site/` names a file that is not published.
+References are extracted by parsing the HTML, not by matching a pattern: a
+regex over `href="..."` silently ignores `href = '...'` and uppercase tags,
+which leaves a guard that appears to run while checking nothing.
+
+The script deletes its output directory, so it will only delete one it created
+itself — proven by the `.build-site-artifact` marker it leaves behind. An
+existing directory without that marker is refused, and you remove it by hand if
+it really is the intended output. This is deliberately a positive test: asking
+git whether the target holds tracked files looks equivalent but has two
+destructive false negatives, since a case-insensitive filesystem hides
+`SITE` from `git ls-files` while still resolving it to `site/`, and any path
+outside the repository makes git exit 128 with empty output — indistinguishable
+from "nothing tracked here", which made a repository *ancestor* look safest of
+all.
 
 ## The authority diagram
 

@@ -37,32 +37,46 @@ command -v python3 > /dev/null || {
 
 # The output directory is deleted, so a mistyped argument is destructive:
 # `build_site.sh site` would erase the pages this script exists to publish.
-# Resolve the path first -- the directory may not exist yet, so resolve its
-# parent and re-attach the basename -- then refuse any target that git tracks
-# content under. That covers the repository root, `site/`, `priv/`, and every
-# other source directory, while leaving `_site` and scratch paths alone.
+#
+# The rule is that this script only ever deletes a directory it created
+# itself, proven by the marker file it leaves behind. Anything else that
+# already exists is refused, so the guard fails closed on every input it does
+# not positively recognise.
+#
+# Asking git whether the target holds tracked files is *not* sufficient, and
+# was the first attempt here. Two false negatives sink it: this filesystem is
+# case-insensitive, so `SITE` deletes tracked `site/` while `git ls-files`
+# reports nothing for that spelling; and for any path outside the repository
+# git exits 128 with empty output, which reads identically to "nothing tracked
+# here" -- so a repository *ancestor* looked safest of all.
+marker=".build-site-artifact"
+
 case "$output_dir" in
   '' | '/') echo "refusing to build into '$output_dir'" >&2; exit 64 ;;
 esac
 
-output_parent="$(cd "$(dirname "$output_dir")" 2> /dev/null && pwd)" || {
+output_parent="$(cd "$(dirname "$output_dir")" 2> /dev/null && pwd -P)" || {
   echo "parent directory of '$output_dir' does not exist" >&2
   exit 64
 }
 output_dir="$output_parent/$(basename "$output_dir")"
 
-if [ -n "$(git -C "$project_root" ls-files -- "$output_dir" 2> /dev/null)" ]; then
-  echo "refusing to delete '$output_dir': it contains version-controlled files" >&2
-  exit 64
-fi
+if [ -e "$output_dir" ]; then
+  [ -d "$output_dir" ] || {
+    echo "'$output_dir' exists and is not a directory" >&2
+    exit 64
+  }
 
-if [ -e "$output_dir" ] && [ ! -d "$output_dir" ]; then
-  echo "'$output_dir' exists and is not a directory" >&2
-  exit 64
+  [ -f "$output_dir/$marker" ] || {
+    echo "refusing to delete '$output_dir': it was not created by this script" >&2
+    echo "Remove it by hand if that is really the intended output directory." >&2
+    exit 64
+  }
 fi
 
 rm -rf -- "$output_dir"
 mkdir -p "$output_dir/schemas"
+: > "$output_dir/$marker"
 
 cp -R "$project_root/site/." "$output_dir/"
 
@@ -117,19 +131,14 @@ done
 # and attributes wrapped across lines -- all valid HTML that a later edit could
 # introduce, and every one of them a reference this guard would then wave
 # through while still appearing to check it.
-missing=0
-while read -r referenced; do
-  case "$referenced" in
-    */ | '') target="$output_dir/${referenced}index.html" ;;
-    *) target="$output_dir/$referenced" ;;
-  esac
-
-  [ -f "$target" ] || {
-    echo "site references /$referenced, which is not published" >&2
-    missing=$((missing + 1))
-  }
-done < <(python3 - "$project_root/site" <<'EXTRACT'
+#
+# The extractor's output is captured before the loop rather than piped into it.
+# Through a process substitution its exit status is invisible, so an unreadable
+# or non-UTF-8 page would print an error, yield no references, and leave the
+# loop reporting zero dangling links -- publishing unvalidated.
+references="$(python3 - "$project_root/site" <<'EXTRACT'
 import pathlib
+import posixpath
 import sys
 from html.parser import HTMLParser
 
@@ -157,12 +166,40 @@ for page in sorted(root.rglob("*.html")):
     references |= parser.found
 
 for reference in sorted(references):
-    if reference.startswith("/"):
-        # Site-root-relative. Strip the fragment and query the server ignores
-        # when resolving it to a file, then the leading slash.
-        print(reference.split("#", 1)[0].split("?", 1)[0][1:])
+    if not reference.startswith("/"):
+        continue
+
+    # Site-root-relative. Drop the fragment and query the server ignores when
+    # resolving it to a file, then collapse dot segments the way a browser
+    # does before it asks for the path: `/../README.md` is requested as
+    # `/README.md`, so checking the literal string would test a file outside
+    # the artifact and pass on something the server will 404.
+    path = reference.split("#", 1)[0].split("?", 1)[0]
+    directory = path.endswith("/")
+    path = posixpath.normpath(path)
+
+    if directory and not path.endswith("/"):
+        path += "/"
+
+    print(path[1:])
 EXTRACT
-)
+)" || {
+  echo 'failed to extract references from the site pages' >&2
+  exit 65
+}
+
+missing=0
+while read -r referenced; do
+  case "$referenced" in
+    */ | '') target="$output_dir/${referenced}index.html" ;;
+    *) target="$output_dir/$referenced" ;;
+  esac
+
+  [ -f "$target" ] || {
+    echo "site references /$referenced, which is not published" >&2
+    missing=$((missing + 1))
+  }
+done <<< "$references"
 
 [ "$missing" -eq 0 ] || exit 65
 
