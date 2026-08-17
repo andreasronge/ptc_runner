@@ -2,6 +2,7 @@ defmodule PtcViewer.Router do
   use Plug.Router
 
   alias PtcViewer.LiveLaunch
+  alias PtcViewer.LiveProject
   alias PtcViewer.LiveStore
   alias PtcViewer.ReplError
   alias PtcViewer.ReplStore
@@ -168,6 +169,13 @@ defmodule PtcViewer.Router do
     end
   end
 
+  get "/api/live/project" do
+    case live_store(conn) do
+      {:ok, _store} -> send_live_json(conn, 200, LiveProject.describe(live_project(conn)))
+      {:error, :live_disabled} -> send_live_json(conn, 503, %{"error" => "live_disabled"})
+    end
+  end
+
   get "/api/live/launch" do
     with {:ok, store} <- live_store(conn),
          {:ok, launch} <- live_launch(conn) do
@@ -240,6 +248,8 @@ defmodule PtcViewer.Router do
       _none -> {:error, :launch_not_configured}
     end
   end
+
+  defp live_project(conn), do: Keyword.get(viewer_config(conn), :live_project)
 
   defp live_port(conn), do: Keyword.get(viewer_config(conn), :live_port, 0)
 

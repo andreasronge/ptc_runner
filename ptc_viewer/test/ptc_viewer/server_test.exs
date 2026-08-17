@@ -34,6 +34,18 @@ defmodule PtcViewer.ServerTest do
              PtcViewer.start(port: 0, repl_adapter: String, repl_config: %{}, open: false)
   end
 
+  test "an unusable project adapter fails startup closed" do
+    assert {:error, :invalid_viewer_config} =
+             PtcViewer.start(port: 0, project_adapter: "docs/ptc.json", open: false)
+
+    assert {:error, :invalid_viewer_config} =
+             PtcViewer.start(port: 0, project_adapter: fn _argument -> %{} end, open: false)
+
+    # A module is accepted only when it actually exports describe/0.
+    assert {:error, :invalid_viewer_config} =
+             PtcViewer.start(port: 0, project_adapter: String, open: false)
+  end
+
   test "a pre-pinned inspection source is retained without invoking path pinning" do
     source = {:inspection_snapshot, make_ref()}
 

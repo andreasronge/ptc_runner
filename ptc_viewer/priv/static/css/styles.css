@@ -2282,6 +2282,100 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
 }
 
 /* --- launch panel (fixed target, editable input) --- */
+/* --- project details --- */
+.live-project { margin-bottom: 14px; }
+.live-project-strip {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  font-size: 12px; color: var(--muted);
+}
+.live-project-name { color: var(--fg); font-weight: 600; }
+.live-project-path, .live-project-entry {
+  font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
+}
+.live-project-path::before, .live-project-entry::before { content: "· "; }
+.live-project-disclose, .live-project-toggle {
+  background: none; border: 1px solid var(--border); border-radius: 5px;
+  color: var(--muted); font-size: 11px; padding: 2px 9px; cursor: pointer;
+}
+.live-project-disclose:hover, .live-project-toggle:hover {
+  color: var(--fg); border-color: var(--muted);
+}
+
+.live-project-panel {
+  margin-top: 10px; padding: 12px 16px;
+  background: var(--live-surface);
+  border: 1px solid var(--border); border-radius: 10px;
+}
+.live-project-section + .live-project-section { border-top: 1px solid var(--border); }
+.live-project-head {
+  display: flex; align-items: baseline; gap: 12px; width: 100%;
+  background: none; border: none; padding: 9px 0; cursor: pointer; text-align: left;
+}
+.live-project-count { font-size: 11px; color: var(--muted); }
+.live-project-body { padding: 0 0 10px 2px; }
+.live-project-sub {
+  font-size: 10px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.08em; margin: 8px 0 4px;
+}
+.live-project-line { font-size: 12px; color: var(--fg); }
+
+.live-env + .live-env { margin-top: 2px; }
+.live-env-head {
+  display: flex; align-items: baseline; gap: 10px; width: 100%;
+  background: none; border: none; padding: 5px 0; cursor: pointer; text-align: left;
+}
+.live-env-name { font-size: 12px; color: var(--fg); }
+.live-env-kind {
+  font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;
+}
+.live-env-counts { font-size: 11px; color: var(--muted); margin-left: auto; }
+.live-env-body { padding-left: 12px; border-left: 1px solid var(--border); }
+
+.live-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.live-tool {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px;
+  font-size: 11px; color: var(--fg);
+}
+.live-tool-effect {
+  font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--live-cap);
+}
+
+.live-limit-rows { display: flex; flex-direction: column; gap: 2px; }
+.live-limit {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 12px;
+  font-size: 11px; font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.live-limit-name { color: var(--fg); }
+.live-limit-value { color: var(--live-eval); }
+.live-limit-default { color: var(--muted); }
+
+.live-components { display: flex; flex-wrap: wrap; gap: 6px; }
+.live-component {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: 1px solid var(--border); border-radius: 5px;
+  padding: 3px 9px; cursor: pointer;
+  font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px; color: var(--fg);
+}
+.live-component:hover { border-color: var(--muted); }
+.live-component-tag { font-size: 9px; color: var(--muted); text-transform: uppercase; }
+
+.live-project-source { margin-top: 10px; border-top: 1px solid var(--border); }
+.live-project-source-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 8px 0 4px; font-size: 11px; color: var(--muted);
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+}
+.live-project-source pre {
+  margin: 0; max-height: 320px; overflow: auto;
+  background: var(--bg-light); border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 12px;
+  font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
+  color: var(--fg); white-space: pre;
+}
+
 .live-launch { margin-bottom: 18px; }
 .live-launch-card {
   background: var(--live-surface);

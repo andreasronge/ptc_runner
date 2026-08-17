@@ -72,6 +72,61 @@ defmodule PtcViewer.LiveRouterTest do
     assert (conn(:get, "/api/live/launch") |> call_router(opts)).status == 503
   end
 
+  test "project endpoint serves the adapter payload", %{opts: opts} do
+    adapter = fn -> %{"name" => "demo", "environments" => [%{"name" => "workflow"}]} end
+
+    get_conn =
+      conn(:get, "/api/live/project")
+      |> call_router(Keyword.put(opts, :live_project, adapter))
+
+    assert get_conn.status == 200
+
+    assert %{"enabled" => true, "name" => "demo", "environments" => [%{"name" => "workflow"}]} =
+             Jason.decode!(get_conn.resp_body)
+  end
+
+  test "project endpoint accepts an {:ok, project} adapter result", %{opts: opts} do
+    adapter = fn -> {:ok, %{"name" => "demo"}} end
+
+    get_conn =
+      conn(:get, "/api/live/project")
+      |> call_router(Keyword.put(opts, :live_project, adapter))
+
+    assert %{"enabled" => true, "name" => "demo"} = Jason.decode!(get_conn.resp_body)
+  end
+
+  test "project endpoint reports disabled without an adapter", %{opts: opts} do
+    get_conn = conn(:get, "/api/live/project") |> call_router(opts)
+
+    assert get_conn.status == 200
+    assert Jason.decode!(get_conn.resp_body) == %{"enabled" => false}
+  end
+
+  test "a failing adapter degrades to disabled instead of 500", %{opts: opts} do
+    adapter = fn -> raise "manifest vanished" end
+
+    get_conn =
+      conn(:get, "/api/live/project")
+      |> call_router(Keyword.put(opts, :live_project, adapter))
+
+    assert get_conn.status == 200
+    assert Jason.decode!(get_conn.resp_body) == %{"enabled" => false}
+  end
+
+  test "an adapter returning a non-map degrades to disabled", %{opts: opts} do
+    get_conn =
+      conn(:get, "/api/live/project")
+      |> call_router(Keyword.put(opts, :live_project, fn -> :nope end))
+
+    assert Jason.decode!(get_conn.resp_body) == %{"enabled" => false}
+  end
+
+  test "project endpoint answers 503 when no store is configured", %{tmp_dir: trace_dir} do
+    opts = [trace_dir: trace_dir, kernel_trace_adapter: nil]
+
+    assert (conn(:get, "/api/live/project") |> call_router(opts)).status == 503
+  end
+
   test "launch endpoint reports disabled without a configured target", %{opts: opts} do
     get_conn = conn(:get, "/api/live/launch") |> call_router(opts)
 

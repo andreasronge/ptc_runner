@@ -35,9 +35,11 @@ defmodule PtcViewer.Server do
     trace_source = Keyword.get(opts, :trace_source)
     inspection_source = Keyword.get(opts, :inspection_source)
     launch = Keyword.get(opts, :launch)
+    project_adapter = Keyword.get(opts, :project_adapter)
 
     if is_integer(port) and port in 0..65_535 and ip in @addresses and
-         PtcViewer.LiveLaunch.validate(launch) == :ok do
+         PtcViewer.LiveLaunch.validate(launch) == :ok and
+         PtcViewer.LiveProject.validate(project_adapter) == :ok do
       params = %{
         port: port,
         ip: ip,
@@ -50,7 +52,8 @@ defmodule PtcViewer.Server do
         private_traces: private_traces,
         trace_source: trace_source,
         inspection_source: inspection_source,
-        launch: launch
+        launch: launch,
+        project_adapter: project_adapter
       }
 
       case start_resources(params) do
@@ -258,6 +261,7 @@ defmodule PtcViewer.Server do
       repl_enabled: not is_nil(repl_store),
       live_store: live_store,
       live_launch: params.launch,
+      live_project: params.project_adapter,
       live_port: params.port,
       viewer_server: server
     ]

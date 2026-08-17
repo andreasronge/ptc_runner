@@ -18,6 +18,7 @@ export function createLiveController({ onLiveCount } = {}) {
   const emptyEl = document.getElementById('live-empty');
   const connEl = document.getElementById('live-connection');
   const launchEl = document.getElementById('live-launch');
+  const projectEl = document.getElementById('live-project');
   const cards = new Map(); // run_id -> { frame, el, fields, ended, collapsed }
 
   let source = null;
@@ -28,6 +29,7 @@ export function createLiveController({ onLiveCount } = {}) {
   connect();
   clearEndedEl.addEventListener('click', () => clearEnded());
   initLaunch(launchEl).catch(() => {});
+  initProject(projectEl).catch(() => {});
 
   function connect() {
     source = new EventSource('/api/live/stream');
@@ -233,6 +235,252 @@ async function initLaunch(root) {
   validate();
   setStatus(spec.launch);
   if (state.running) state.polling = setTimeout(poll, 1500);
+}
+
+/* ---------- project details (host-injected, opaque) ---------- */
+
+// The payload comes from a host adapter the Viewer does not interpret, so
+// every field is treated as possibly absent. Source text is inserted as
+// textContent — never innerHTML — because it is arbitrary program text.
+async function initProject(root) {
+  const response = await fetch('/api/live/project');
+  if (!response.ok) return;
+  const project = await response.json();
+  if (!project.enabled) return;
+
+  root.hidden = false;
+  root.innerHTML = `
+    <div class="live-project-strip">
+      <span class="live-project-name" data-role="name"></span>
+      <span class="live-project-path" data-role="manifest"></span>
+      <span class="live-project-entry" data-role="entry"></span>
+      <button type="button" class="live-project-disclose" data-role="disclose" aria-expanded="false">Details ▸</button>
+    </div>
+    <div class="live-project-panel" data-role="panel" hidden>
+      <section class="live-project-section">
+        <button type="button" class="live-project-head" data-role="env-head" aria-expanded="false">
+          <span class="live-section-label">Environments</span>
+          <span class="live-project-count" data-role="env-count"></span>
+        </button>
+        <div class="live-project-body" data-role="env-body" hidden></div>
+      </section>
+      <section class="live-project-section">
+        <button type="button" class="live-project-head" data-role="limit-head" aria-expanded="false">
+          <span class="live-section-label">Limits</span>
+          <span class="live-project-count" data-role="limit-count"></span>
+        </button>
+        <div class="live-project-body" data-role="limit-body" hidden></div>
+      </section>
+      <section class="live-project-section">
+        <button type="button" class="live-project-head" data-role="comp-head" aria-expanded="false">
+          <span class="live-section-label">Components &amp; preludes</span>
+          <span class="live-project-count" data-role="comp-count"></span>
+        </button>
+        <div class="live-project-body" data-role="comp-body" hidden></div>
+      </section>
+      <div class="live-project-source" data-role="source" hidden>
+        <div class="live-project-source-head">
+          <span data-role="source-title"></span>
+          <button type="button" class="live-card-close" data-role="source-close" aria-label="Close source">✕</button>
+        </div>
+        <pre data-role="source-body"></pre>
+      </div>
+    </div>
+  `;
+
+  const f = {};
+  for (const node of root.querySelectorAll('[data-role]')) f[node.dataset.role] = node;
+
+  f.name.textContent = project.name || '(unnamed project)';
+  f.manifest.textContent = project.manifest || '';
+  f.entry.textContent = project.entry || '';
+
+  const environments = Array.isArray(project.environments) ? project.environments : [];
+  const limits = Array.isArray(project.limits) ? project.limits : [];
+  const components = uniqueComponents(environments);
+
+  const showSource = component => {
+    f.source.hidden = false;
+    f['source-title'].textContent = [component.id, component.path].filter(Boolean).join(' · ');
+    f['source-body'].textContent = component.source || '(source unavailable)';
+  };
+
+  f['env-count'].textContent = plural(environments.length, 'environment');
+  f['comp-count'].textContent = plural(components.length, 'component');
+  const narrowed = limits.filter(limit => limit.effective !== limit.default);
+  f['limit-count'].textContent = narrowed.length
+    ? `${narrowed.length} differ from defaults`
+    : 'all at defaults';
+
+  renderEnvironments(f['env-body'], environments, showSource);
+  renderLimits(f['limit-body'], limits, narrowed);
+  f['comp-body'].replaceChildren(componentList(components, showSource));
+
+  f.disclose.addEventListener('click', () => {
+    const open = f.panel.hidden;
+    f.panel.hidden = !open;
+    f.disclose.setAttribute('aria-expanded', String(open));
+    f.disclose.textContent = open ? 'Details ▾' : 'Details ▸';
+  });
+
+  f['source-close'].addEventListener('click', () => {
+    f.source.hidden = true;
+  });
+
+  for (const [head, body] of [
+    [f['env-head'], f['env-body']],
+    [f['limit-head'], f['limit-body']],
+    [f['comp-head'], f['comp-body']],
+  ]) {
+    head.addEventListener('click', () => toggleSection(head, body));
+  }
+}
+
+function toggleSection(head, body) {
+  const open = body.hidden;
+  body.hidden = !open;
+  head.setAttribute('aria-expanded', String(open));
+}
+
+function renderEnvironments(container, environments, showSource) {
+  container.replaceChildren(
+    ...environments.map(environment => {
+      const row = el('div', 'live-env');
+      const head = el('button', 'live-env-head');
+      head.type = 'button';
+      head.setAttribute('aria-expanded', 'false');
+
+      const counts = [
+        plural(countOf(environment.components), 'component'),
+        plural(countOf(environment.providers), 'provider'),
+      ];
+      if (countOf(environment.tools)) counts.push(plural(countOf(environment.tools), 'tool'));
+
+      head.append(
+        el('span', 'live-env-name', environment.name || '(unnamed)'),
+        el('span', 'live-env-kind', environment.kind || ''),
+        el('span', 'live-env-counts', counts.join(' · ')),
+      );
+
+      const body = el('div', 'live-env-body');
+      body.hidden = true;
+
+      if (countOf(environment.tools)) {
+        const tools = el('div', 'live-tools');
+        for (const tool of environment.tools) {
+          const chip = el('span', 'live-tool');
+          chip.append(el('span', 'live-tool-name', tool.name || '(unnamed tool)'));
+          if (tool.effect) chip.append(el('span', 'live-tool-effect', tool.effect));
+          tools.append(chip);
+        }
+        body.append(el('div', 'live-project-sub', 'Tools'), tools);
+      }
+
+      if (countOf(environment.providers)) {
+        const names = environment.providers
+          .map(provider => (provider.source ? `${provider.name} (${provider.source})` : provider.name))
+          .join(', ');
+        body.append(el('div', 'live-project-sub', 'Providers'), el('div', 'live-project-line', names));
+      }
+
+      if (countOf(environment.components)) {
+        body.append(
+          el('div', 'live-project-sub', 'Components'),
+          componentList(environment.components, showSource),
+        );
+      }
+
+      head.addEventListener('click', () => toggleSection(head, body));
+      row.append(head, body);
+      return row;
+    }),
+  );
+}
+
+// Deltas lead; the complete catalog stays one click away so the panel never
+// implies the manifest set only these rows.
+function renderLimits(container, limits, narrowed) {
+  const deltas = el('div', 'live-limit-rows');
+  deltas.replaceChildren(...narrowed.map(limitRow));
+
+  const all = el('div', 'live-limit-rows');
+  all.hidden = true;
+  all.replaceChildren(...limits.map(limitRow));
+
+  const toggle = el('button', 'live-project-toggle', 'show all');
+  toggle.type = 'button';
+  toggle.addEventListener('click', () => {
+    all.hidden = !all.hidden;
+    toggle.textContent = all.hidden ? 'show all' : 'show deltas only';
+    deltas.hidden = !all.hidden;
+  });
+
+  container.replaceChildren(
+    narrowed.length ? deltas : el('div', 'live-project-line', 'Every limit is at its default.'),
+    toggle,
+    all,
+  );
+}
+
+function limitRow(limit) {
+  const row = el('div', 'live-limit');
+  row.append(
+    el('span', 'live-limit-name', limit.name),
+    el('span', 'live-limit-value', fmtLimit(limit.effective, limit.unit)),
+    el(
+      'span',
+      'live-limit-default',
+      limit.effective === limit.default ? '' : `default ${fmtLimit(limit.default, limit.unit)}`,
+    ),
+  );
+  return row;
+}
+
+function componentList(components, showSource) {
+  const list = el('div', 'live-components');
+  for (const component of components) {
+    const button = el('button', 'live-component');
+    button.type = 'button';
+    button.append(el('span', 'live-component-id', component.id || '(unnamed)'));
+    if (component.library) button.append(el('span', 'live-component-tag', 'shipped'));
+    button.addEventListener('click', () => showSource(component));
+    list.append(button);
+  }
+  return list;
+}
+
+export function uniqueComponents(environments) {
+  const seen = new Map();
+  for (const environment of environments) {
+    for (const component of environment.components || []) {
+      if (component && !seen.has(component.id)) seen.set(component.id, component);
+    }
+  }
+  return [...seen.values()];
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function countOf(value) {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+export function plural(count, noun) {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+export function fmtLimit(value, unit) {
+  if (typeof value !== 'number') return '–';
+  const grouped = String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  if (unit === 'milliseconds') return `${grouped} ms`;
+  if (unit === 'bytes') return `${grouped} B`;
+  if (unit === 'heap_words') return `${grouped} words`;
+  return grouped;
 }
 
 /* ---------- card construction ---------- */
