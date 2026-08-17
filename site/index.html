@@ -47,9 +47,11 @@ executes it and records what happened.</p>
   left.</figcaption>
 </figure>
 
-<p>Inside those two environments, the agent loop itself is ordinary PTC-Lisp. It is a library you
-select, not behaviour baked into the runtime, so you can replace it with a domain-specific loop of
-your own — and doing so grants no new authority.</p>
+<p>Inside those two environments, the agent loop itself is ordinary PTC-Lisp (a small, bounded
+subset of Clojure — see the
+<a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/ptc-lisp-specification.md">language
+specification</a>). It is a library you select, not behaviour baked into the runtime, so you can
+replace it with a domain-specific loop of your own — and doing so grants no new authority.</p>
 
 <figure class="diagram">
   <img src="/loop-is-a-library.webp" width="1672" height="941"
@@ -99,6 +101,9 @@ open in the viewer. The same <code>ptc run</code> drives agentic projects.</p>
 <ul class="links">
   <li><a href="https://github.com/andreasronge/ptc_runner">GitHub repository</a>
     — <span class="desc">source, guides, and runnable examples</span></li>
+  <li><a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/ptc-lisp-specification.md">PTC-Lisp
+    language specification</a>
+    — <span class="desc">the bounded Clojure subset the model writes in</span></li>
   <li><a href="https://hex.pm/packages/ptc_runner">Hex package</a>
     — <span class="desc"><code>ptc_runner</code></span></li>
   <li><a href="https://hexdocs.pm/ptc_runner/">HexDocs</a>
