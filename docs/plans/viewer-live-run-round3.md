@@ -203,12 +203,100 @@ this file instead of shipping half of it.
 
 ## Acceptance checklist
 
-- [ ] Rebased on origin/main; compile + existing live tests green
-- [ ] ✕ removes a run (client + server); reload does not resurrect it
-- [ ] Ended runs collapse; newest ended stays expanded; "clear ended" works
-- [ ] `GET /api/live/project` serves the adapter payload; `enabled: false`
+- [x] Rebased on origin/main; compile + existing live tests green
+- [x] ✕ removes a run (client + server); reload does not resurrect it
+- [x] Ended runs collapse; newest ended stays expanded; "clear ended" works
+- [x] `GET /api/live/project` serves the adapter payload; `enabled: false`
       without an adapter; adapter errors never 500
-- [ ] Project strip + Details panel render; limits show deltas first;
-      component source is escaped text
-- [ ] New/updated tests pass in both projects; no `Process.sleep`
-- [ ] Plan files updated; branch pushed with `--force-with-lease`
+- [x] Project strip + Details panel render; limits show deltas first;
+      component source is escaped text — *rendering itself is unverified;
+      this environment has no browser*
+- [x] New/updated tests pass in both projects; no `Process.sleep`
+- [x] Plan files updated; branch pushed with `--force-with-lease`
+
+## Round 3 outcome (what actually landed)
+
+All three phases shipped. Three commits on
+`feat/issue-1444-viewer-live-run`, rebased onto `origin/main` at
+`08690dbc` (PR #1445 and #1446 both merged).
+
+**Rebase** — one conflict, in `ptc_viewer/lib/ptc_viewer/server.ex`: main's
+`ip in @addresses` check landed in the same `init/1` guard as this branch's
+launch validation. Both conditions kept.
+`priv/semantic_build_projection.json` never conflicted.
+
+**A1 — run lifecycle.** `LiveStore.delete_run/2` +
+`DELETE /api/live/runs/:run_id` (404 unknown, 503 without a store). Deleting
+a *running* run is allowed: it reappears on its next frame, which is the
+honest behaviour for a self-contained frame stream, and it is tested.
+Collapse is a `collapsed` class on `live-card` that hides everything but the
+head row; the head already carried badge, label, elapsed and run id, so the
+"summary row" is that row plus one `live-card-summary` span for the tool-call
+count — no duplicated ✕/chevron controls, still update-in-place.
+
+Also fixed here: `test/repl_ui.mjs` asserted a two-tab cycle
+(`runs → repl`) that rounds 1–2 broke when they added the Live tab. It had
+been failing on this branch since then.
+
+**A2 — project details.** `PtcRunner.Kernel.ViewerProjectAdapter.describe/2`
+on the host side; `PtcViewer.LiveProject` + `GET /api/live/project` on the
+viewer side, which accepts both a bare map and `{:ok, map}` so the usual
+wiring is one line:
+
+```elixir
+PtcViewer.start(
+  port: 4123,
+  open: false,
+  project_adapter: fn ->
+    PtcRunner.Kernel.ViewerProjectAdapter.describe(
+      "docs/plans/viewer-live-run-demo/ptc.json",
+      host_config: "examples/kernel-tutorial/ptc-host.json"
+    )
+  end
+)
+```
+
+Sourcing notes for whoever hardens this later:
+
+- Shipped preludes carry their source in `Library.component/1`'s
+  `%Component{}` — no priv-dir file reading was needed after all.
+- Missions have no `entry` in the manifest schema (keys are `components`,
+  `data`, `providers`), and a mission's `providers` is a list of *names*
+  selecting from `providers.mission`, not provider objects. The adapter
+  filters the pool by name and falls back to the whole pool.
+- Limits are emitted for every catalog row with `effective`, `default`, and
+  `unit`; `unit` was added beyond the brief because the panel cannot format
+  ms vs bytes vs heap words without it. The demo manifest *widens* three
+  limits rather than narrowing them, so the UI says "N differ from defaults".
+- Tool effects come only from host-config `install.<provider>.tools.*`
+  (`as` + `effect`). Without a host config the panel shows providers and an
+  empty tool list rather than a guess.
+
+**B — mission chips.** Shipped, because #1445 was merged and A was green.
+`mix ptc repl` does **not** accept the `run` argument set (no `--trace-dir`;
+it has `--trace FILE` and `--session-trace-dir`), so reusing the launch
+spec's `:args` for a mission would produce an invalid command. Mission
+sessions therefore read a separate, explicitly configured `:repl_args`. If
+the operator omits it, a mission needing providers fails with the CLI's own
+error in the output tail — visible and honest, rather than silently guessed.
+
+Mission names chosen in the browser reach an argument vector, so they are
+matched against the manifest schema's `^[a-z][a-z0-9._-]{0,127}$` before
+use. The expression is passed as one `System.cmd` argv element (no shell),
+but it *is* arbitrary evaluation in the mission sandbox triggered from the
+browser — the existing backlog item "frame + launch authentication before
+the Viewer ever binds beyond loopback" now covers this too, and matters more.
+
+**Not verified here** (no credentials, no browser): every rendered layout,
+the collapse transition, chip switching, and any actual mission evaluation.
+The JS is covered only by module-level syntax loading plus node tests of the
+pure projections (`fmtLimit`, `plural`, `uniqueComponents`, `missionNames`)
+in `ptc_viewer/test/live_ui.mjs`. The DOM-heavy paths — collapse state
+machine, delete, chip selection — have no test; a `FakeElement` stub like
+`repl_ui.mjs` uses would be the way to cover them.
+
+**Toolchain note.** The scheduled cloud container ships no BEAM at all.
+Erlang/OTP 29.0.3 (`builds.hex.pm/builds/otp/ubuntu-24.04`) and Elixir
+1.20.2-otp-29 were installed to match CI exactly; Ubuntu's packaged Elixir
+is 1.14 and its OTP 25 is too old for the `jsv` dependency
+(`:maps.iterator/2`).

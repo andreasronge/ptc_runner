@@ -257,15 +257,38 @@ input object.
   reason and surfaced in the panel (verified for both the failure and the
   success path in the browser).
 
+## Round 3 (done)
+
+Run lifecycle, project details, and mission launching — specified in
+[viewer-live-run-round3.md](viewer-live-run-round3.md), which also records
+what landed and what stayed unverified.
+
+- **Run lifecycle**: `DELETE /api/live/runs/:run_id` + `LiveStore.delete_run/2`;
+  a ✕ per card, ended runs collapsed to their head row with only the newest
+  ended one expanded, and a "clear ended" control.
+- **Project details**: host-injected `project_adapter` →
+  `GET /api/live/project`, built host-side by
+  `PtcRunner.Kernel.ViewerProjectAdapter`. Environments, components with
+  source, providers, host-declared tool effects, and every catalog limit with
+  effective vs default.
+- **Mission sessions**: chips on the launch card run
+  `mix ptc repl --mission NAME -e EXPR` through the same single-flight gate,
+  using a separately configured `:repl_args` because the repl command does not
+  accept the `run` argument set.
+
 ## Refinement backlog (still open)
 
-Round 3 (run lifecycle, project details panel, missions) is specified in
-[viewer-live-run-round3.md](viewer-live-run-round3.md).
-
 - `--viewer-url` CLI flag + project-config field (see decision above)
-- REPL / manifest-REPL / analysis-session reporter coverage
+- REPL / manifest-REPL / analysis-session reporter coverage — mission
+  launches now exist in the UI but report no frames, so their only result
+  surface is the exit code and output tail
+- Browser-level tests for the DOM-heavy live paths (collapse, delete, chip
+  selection); today only the pure projections are covered, in
+  `ptc_viewer/test/live_ui.mjs`
 - Frame + launch authentication (share the `x-ptc-viewer-session` pattern)
-  before the Viewer ever binds beyond loopback
+  before the Viewer ever binds beyond loopback — now also covers mission
+  launches, where the browser supplies an expression evaluated in the mission
+  sandbox
 - Provider-task in-flight count + admission queue depth accessors (#1444 table)
 - Heap sampling for pmap workers (spike samples the main sandbox only)
 - Multiple launch targets / project-config-driven target discovery
