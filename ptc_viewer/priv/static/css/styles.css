@@ -1878,6 +1878,17 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   border-radius: 7px;
   background: rgba(86, 156, 214, 0.07);
 }
+.repl-authority-badge {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 2px 7px;
+  border: 1px solid rgba(86, 156, 214, 0.55);
+  border-radius: 999px;
+  color: #9cdcfe;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
 .repl-provenance code { color: #9cdcfe; }
 .repl-session-strip {
   display: flex;
