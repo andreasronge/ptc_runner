@@ -231,7 +231,7 @@ defmodule PtcRunner.Kernel.MCPOAuthRemoteE2ETest do
     assert stats["code_exchange"] == starting_stats["code_exchange"] + 1
     assert stats["refresh"] > starting_stats["refresh"]
     assert stats["mcp_calls"] > starting_stats["mcp_calls"]
-    assert stats["directed"] == starting_stats["directed"] + 1
+    assert stats["directed"] == 1
     assert stats["fallback"] > starting_stats["fallback"]
   end
 
