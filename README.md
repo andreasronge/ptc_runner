@@ -32,7 +32,7 @@ ptc run hello-ptc/ptc-project.json
 ```
 
 ```json
-{}
+{"greeting":"hello world"}
 ```
 
 This verifies the executable and creates a structured trace without contacting
