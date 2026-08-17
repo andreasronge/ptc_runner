@@ -34,6 +34,7 @@ defmodule PtcRunner.Kernel.ProviderError do
     :authentication_failed,
     :payment_required,
     :rate_limited,
+    :tool_calling_unsupported,
     :timeout,
     :transport_error
   ]
@@ -59,6 +60,7 @@ defmodule PtcRunner.Kernel.ProviderError do
           | :authentication_failed
           | :payment_required
           | :rate_limited
+          | :tool_calling_unsupported
           | :timeout
           | :transport_error
   @type mutation_state :: :indeterminate

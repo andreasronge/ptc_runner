@@ -196,7 +196,8 @@ defmodule PtcRunner.LLM do
          {stream_fn, clean_req} = Map.pop(req, :stream)
          final_req = if merged_opts == %{}, do: clean_req, else: Map.merge(clean_req, merged_opts)
 
-         if stream_fn && function_exported?(prepared.adapter, :stream, 2) do
+         if stream_fn && not tool_request?(final_req) &&
+              function_exported?(prepared.adapter, :stream, 2) do
            case prepared.adapter.stream(prepared.target, final_req) do
              {:ok, stream} ->
                consume_stream(stream, stream_fn)
@@ -246,6 +247,9 @@ defmodule PtcRunner.LLM do
   end
 
   defp warn_catalog_status(%PreparedModel{}), do: :ok
+
+  defp tool_request?(%{tools: tools}) when is_list(tools), do: tools != []
+  defp tool_request?(_request), do: false
 
   defp consume_stream(stream, on_chunk) do
     {content, tokens} =

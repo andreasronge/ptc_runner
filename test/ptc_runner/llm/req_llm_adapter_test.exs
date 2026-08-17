@@ -68,6 +68,20 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
   end
 
   describe "call/2" do
+    test "keeps a local adapter tool limitation distinct from model rejection" do
+      assert {:error,
+              %ProviderError{
+                kind: :invalid_request,
+                details: "LLM adapter route does not support tool calling",
+                retryable?: false
+              }} =
+               ReqLLMAdapter.call("ollama:model", %{
+                 system: "test",
+                 messages: [],
+                 tools: [%{"type" => "function"}]
+               })
+    end
+
     test "classifies a permanent ReqLLM HTTP failure and retains its provider message" do
       provider_message = "Grok 4 Fast is deprecated. xAI recommends switching to Grok 4.3"
 
@@ -82,6 +96,37 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
       assert details =~ "HTTP 404"
       assert details =~ provider_message
       refute details =~ "private prompt sentinel"
+    end
+
+    test "classifies OpenRouter's tool-bearing 404 as unsupported tool calling" do
+      provider_message = "No endpoints found that support tool use. Try disabling f."
+
+      plug = fn conn ->
+        conn
+        |> Plug.Conn.put_status(404)
+        |> Req.Test.json(%{"error" => %{"message" => provider_message, "code" => 404}})
+      end
+
+      request =
+        Map.put(request(plug), :tools, [
+          %{
+            "type" => "function",
+            "function" => %{
+              "name" => "f",
+              "description" => "fixture",
+              "parameters" => %{"type" => "object", "properties" => %{}}
+            }
+          }
+        ])
+
+      assert {:error,
+              %ProviderError{
+                kind: :tool_calling_unsupported,
+                details: details,
+                retryable?: false
+              }} = ReqLLMAdapter.call(@openrouter_model, request)
+
+      assert details =~ provider_message
     end
 
     test "derives retryability from the HTTP status when ReqLLM does not classify it" do

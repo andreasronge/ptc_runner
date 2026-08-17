@@ -438,6 +438,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   defp llm_failure_code(:authentication_failed, false), do: :llm_authentication_failed
   defp llm_failure_code(:payment_required, false), do: :llm_payment_required
   defp llm_failure_code(:rate_limited, true), do: :llm_rate_limited
+  defp llm_failure_code(:tool_calling_unsupported, false), do: :llm_tool_calling_unsupported
   defp llm_failure_code(:not_found, false), do: :llm_model_not_found
   defp llm_failure_code(:invalid_request, false), do: :llm_request_invalid
   defp llm_failure_code(:denied, false), do: :llm_access_denied

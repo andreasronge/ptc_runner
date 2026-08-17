@@ -165,7 +165,8 @@ the public envelope still does not publish a host filesystem path.
 When an agent turns a provider failure into workflow failure, the command
 retains one bounded class when the adapter can prove it:
 `llm_authentication_failed`, `llm_payment_required`, `llm_rate_limited`,
-`llm_model_not_found`, `llm_request_invalid`, `llm_access_denied`,
+`llm_model_not_found`, `llm_tool_calling_unsupported`, `llm_request_invalid`,
+`llm_access_denied`,
 `llm_timeout`, `llm_provider_unavailable`, or the non-retryable fallback
 `llm_provider_failed`. No response body is retained.
 The failing model alias remains attributable through usage/provider evidence;
@@ -209,9 +210,13 @@ result value. Build the runtime-included release with:
 
 ```console
 mix deps.get
-MIX_ENV=prod mix release ptc_runner
+MIX_ENV=prod mix release ptc_runner --overwrite
 _build/prod/rel/ptc_runner/bin/ptc --version
 ```
+
+Keep `--overwrite` when repeating this command. Without it, Mix prompts for an
+existing release tree and a non-interactive invocation can decline the rebuild
+while still exiting successfully, leaving a stale binary in place.
 
 The release includes ERTS. Like `mix ptc`, it reads only a dotenv file named by
 `--env-file`; without that flag, credentials come from the inherited process

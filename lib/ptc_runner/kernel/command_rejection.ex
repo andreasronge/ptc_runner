@@ -3,8 +3,8 @@ defmodule PtcRunner.Kernel.CommandRejection do
   Closed phase-1 parser rejection.
 
   Unknown switches are deliberately not retained. The value may carry only a
-  declaration-owned accepted list. Destination failures and collisions retain only
-  declaration-owned switch names, never caller-owned paths.
+  declaration-owned accepted list. Missing-value, destination, and collision
+  failures retain only declaration-owned switch names, never caller-owned paths.
   """
 
   alias PtcRunner.Kernel.CommandDeclaration
@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
     :code,
     :kind,
     :accepted,
+    :option,
     :destination,
     :conflicts
   ]
@@ -28,12 +29,15 @@ defmodule PtcRunner.Kernel.CommandRejection do
           kind:
             :generic
             | :unknown_switch
+            | :missing_switch_value
+            | :positional_arity
             | :invalid_destination
             | :destination_collision
             | :private_output_recovery_collision
             | :init_destination_collision
             | :project_host_undeclared,
           accepted: [binary()],
+          option: binary() | nil,
           destination: binary() | nil,
           conflicts: [binary()]
         }
@@ -52,6 +56,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
       code: :project_host_undeclared,
       kind: :generic,
       accepted: [],
+      option: nil,
       destination: nil,
       conflicts: []
     }
@@ -64,6 +69,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
       code: code,
       kind: :generic,
       accepted: [],
+      option: nil,
       destination: nil,
       conflicts: []
     }
@@ -76,6 +82,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
       code: :invalid_arguments,
       kind: :unknown_switch,
       accepted: accepted_switches(command, frontend),
+      option: nil,
       destination: nil,
       conflicts: []
     }
@@ -85,6 +92,43 @@ defmodule PtcRunner.Kernel.CommandRejection do
 
   defp accepted_switches(command, frontend),
     do: CommandDeclaration.accepted_switches(command, frontend)
+
+  @spec missing_switch_value(
+          CommandDeclaration.command(),
+          binary(),
+          CommandDeclaration.frontend()
+        ) ::
+          t()
+  def missing_switch_value(command, switch, frontend) do
+    option = CommandDeclaration.canonical_switch(command, frontend, switch)
+
+    if is_binary(option) do
+      %__MODULE__{
+        command: command,
+        code: :invalid_arguments,
+        kind: :missing_switch_value,
+        accepted: [],
+        option: option,
+        destination: nil,
+        conflicts: []
+      }
+    else
+      generic(command, :invalid_arguments)
+    end
+  end
+
+  @spec positional_arity(CommandDeclaration.command()) :: t()
+  def positional_arity(command) do
+    %__MODULE__{
+      command: command,
+      code: :invalid_arguments,
+      kind: :positional_arity,
+      accepted: [],
+      option: nil,
+      destination: nil,
+      conflicts: []
+    }
+  end
 
   @spec invalid_destination(
           CommandDeclaration.command(),
@@ -100,6 +144,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
       code: :invalid_arguments,
       kind: :invalid_destination,
       accepted: [],
+      option: nil,
       destination: CommandDeclaration.option_switch!(command, frontend, destination),
       conflicts: []
     }
@@ -122,6 +167,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
       code: :conflicting_arguments,
       kind: :destination_collision,
       accepted: [],
+      option: nil,
       destination: nil,
       conflicts: [first, second]
     }
@@ -134,6 +180,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
       code: :conflicting_arguments,
       kind: :private_output_recovery_collision,
       accepted: [],
+      option: nil,
       destination: nil,
       conflicts: [CommandDeclaration.option_switch!(:run, frontend, :private_output)]
     }
@@ -146,6 +193,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
       code: :conflicting_arguments,
       kind: :init_destination_collision,
       accepted: [],
+      option: nil,
       destination: nil,
       conflicts: [CommandDeclaration.option_switch!(:init, frontend, :envelope)]
     }

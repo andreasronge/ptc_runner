@@ -414,6 +414,25 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert invalid_outcome.envelope["error"]["retryable"] == false
     refute Jason.encode!(invalid_outcome.envelope) =~ "PRIVATE INVALID RESPONSE"
     assert_schema_valid(invalid_outcome.envelope)
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
+      {:error, ProviderError.new(:tool_calling_unsupported, "PRIVATE TOOL CAPABILITY RESPONSE")}
+    )
+
+    tool_unsupported =
+      write_application(directory, "tool-calling-unsupported", manifest, %{
+        "main.clj" => ~S|(ns app) (defn run [_input] (agent.core/run "answer" {"max_turns" 1}))|
+      })
+
+    assert {:error, %CommandOutcome{} = unsupported_outcome} =
+             CommandEngine.dispatch(["run", tool_unsupported, "--host-config", host_path])
+
+    assert unsupported_outcome.envelope["error"]["code"] == "llm_tool_calling_unsupported"
+    assert unsupported_outcome.envelope["error"]["message"] =~ "does not support tool calling"
+    refute Jason.encode!(unsupported_outcome.envelope) =~ "PRIVATE TOOL CAPABILITY RESPONSE"
+    assert_schema_valid(unsupported_outcome.envelope)
   end
 
   @tag :tmp_dir
@@ -1679,6 +1698,57 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     refute File.exists?(marker)
     assert_schema_valid(outcome.envelope)
     assert CommandContract.valid_success_result?(:doctor, outcome.envelope["result"])
+  end
+
+  @tag :tmp_dir
+  test "doctor --connect distinguishes a declared MCP tool missing from the server", %{
+    tmp_dir: directory
+  } do
+    marker = Path.join(directory, "missing-tool-methods")
+
+    missing_tool_host =
+      marker
+      |> connect_host_config()
+      |> put_in(
+        ["install", "workspace", "tools"],
+        %{
+          "structuredMissing" => %{
+            "as" => "workspace.structured",
+            "effect" => "write",
+            "model_visible" => true
+          }
+        }
+      )
+
+    host_path = write_host_config(directory, "missing-tool", missing_tool_host)
+
+    application =
+      doctor_application(directory, "selects-missing-tool",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: %{"evaluation_timeout_ms" => 5_000}
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.envelope["error"]["phase"] == "provider_acquisition"
+    assert outcome.envelope["error"]["code"] == "provider_tool_missing"
+    assert outcome.envelope["error"]["message"] =~ "does not expose a declared tool"
+
+    assert %{"status" => "fail", "code" => "provider_tool_missing"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/workspace/connectivity")
+             )
+
+    assert File.read!(marker) =~ "tools/list"
+    assert_schema_valid(outcome.envelope)
   end
 
   @tag :tmp_dir

@@ -29,6 +29,7 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
     {:provider_acquisition_failed, :provider_acquisition, :provider_unavailable, :acquisition},
     {:mcp_protocol_error, :provider_acquisition, :provider_protocol_error, :acquisition},
     {:mcp_invalid_catalog, :provider_acquisition, :provider_protocol_error, :acquisition},
+    {:mcp_mapped_tool_missing, :provider_acquisition, :provider_tool_missing, :acquisition},
     {:mcp_invalid_tool_schema, :provider_acquisition, :provider_protocol_error, :acquisition},
     {:mcp_response_exceeded, :provider_acquisition, :provider_protocol_error, :acquisition},
     {:mcp_catalog_exceeded, :provider_acquisition, :provider_protocol_error, :acquisition},

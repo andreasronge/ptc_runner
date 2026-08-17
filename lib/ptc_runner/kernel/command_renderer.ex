@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   its validated opaque request hash.
   """
 
+  alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRunRef
@@ -194,6 +195,12 @@ defmodule PtcRunner.Kernel.CommandRenderer do
 
   defp rejection_suffix(%CommandRejection{kind: :unknown_switch, accepted: accepted}),
     do: "; unknown switch; accepted: " <> Enum.join(accepted, ", ")
+
+  defp rejection_suffix(%CommandRejection{kind: :missing_switch_value, option: option}),
+    do: "; #{option} requires a value"
+
+  defp rejection_suffix(%CommandRejection{kind: :positional_arity, command: command}),
+    do: "; usage: " <> Enum.join(CommandDeclaration.usage(command), " | ")
 
   defp rejection_suffix(%CommandRejection{
          kind: :invalid_destination,

@@ -29,7 +29,7 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   #
   # ## How a reason is placed
   #
-  # The catalog offers three occurrence-attributed acquisition codes, so the
+  # The catalog offers occurrence-attributed acquisition codes, so the
   # grouping follows one rule rather than a judgement per atom:
   #
   #   * `:provider_unavailable` — the provider could not be reached or started.
@@ -38,6 +38,8 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   #   * `:provider_protocol_error` — the provider answered and the answer was
   #     unusable: an invalid catalog or tool schema, a response past its ceiling,
   #     or a preparation/preflight/build that failed normalization.
+  #   * `:provider_tool_missing` — the provider returned a valid tool catalog,
+  #     but it did not contain one tool named by the sealed host declaration.
   #   * `:provider_policy_changed` — the preparation contradicted the sealed
   #     declaration that authorised it.
   #
@@ -102,7 +104,6 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
     :mcp_capability_negotiation_error,
     :mcp_invalid_catalog,
     :mcp_invalid_tool_schema,
-    :mcp_mapped_tool_missing,
     :mcp_unsupported_result,
     :mcp_response_exceeded,
     :mcp_catalog_exceeded,
@@ -160,6 +161,9 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
 
   def diagnostic(reason, occurrence) when reason in @unavailable_reasons,
     do: acquisition_diagnostic(:provider_unavailable, occurrence)
+
+  def diagnostic(:mcp_mapped_tool_missing, occurrence),
+    do: acquisition_diagnostic(:provider_tool_missing, occurrence)
 
   def diagnostic(reason, occurrence) when reason in @protocol_reasons,
     do: acquisition_diagnostic(:provider_protocol_error, occurrence)

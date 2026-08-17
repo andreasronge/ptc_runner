@@ -262,6 +262,22 @@ defmodule PtcRunner.LLMTest do
       assert collected == ["hello ", "world"]
     end
 
+    test "tool-bearing requests use call/2 even when a stream callback is present" do
+      {:ok, callback} = PtcRunner.LLM.callback("ollama:test-model")
+      stream_called = :atomics.new(1, [])
+
+      assert {:ok, response} =
+               callback.(%{
+                 system: "tools",
+                 messages: [],
+                 tools: [%{"type" => "function"}],
+                 stream: fn _chunk -> :atomics.put(stream_called, 1, 1) end
+               })
+
+      assert response.content == "mock response for: tools"
+      assert :atomics.get(stream_called, 1) == 0
+    end
+
     test "falls back to call/2 when adapter has no stream/2" do
       defmodule NoStreamAdapter2 do
         @behaviour PtcRunner.LLM
