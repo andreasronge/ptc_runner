@@ -22,6 +22,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   @progress_stages ~w(started planning executing validating completed failed)
   @agent_action_kinds ~w(tool-call protocol-error provider-error)
   @failure_kinds ~w(
+    invalid-agent-config
     invalid-input
     invalid-prompt
     invalid-transcript

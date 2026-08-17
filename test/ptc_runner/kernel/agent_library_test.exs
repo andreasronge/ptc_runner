@@ -1183,7 +1183,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert system =~ ~S|\u2029|
   end
 
-  test "agent.core bounds out-of-range public limit configuration" do
+  test "agent.core rejects out-of-range bounded options before any provider request" do
     response = %{
       content: nil,
       tool_calls: [
@@ -1191,13 +1191,105 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       ]
     }
 
-    {:ok, config} = agent_config([response])
+    out_of_range = [
+      {"max_turns", 0},
+      {"max_turns", 129},
+      {"max_program_chars", 0},
+      {"max_program_chars", 1_000_001},
+      {"max_observation_chars", 0},
+      {"max_observation_chars", 65_537},
+      {"max_transcript_chars", 0},
+      {"max_transcript_chars", 1_000_001}
+    ]
 
-    assert {:ok, %{value: %{"ok" => true, "value" => 42}}} =
-             Kernel.run(
-               ~S|(agent.core/run "Compute" {"max_turns" 129 "max_program_chars" -1})|,
-               config
-             )
+    for {option, value} <- out_of_range do
+      {:ok, config} = agent_config([response])
+
+      assert {:error,
+              %{
+                kind: :workflow_failed,
+                reason: :explicit_failure,
+                details: %{failure_kind: "invalid-agent-config"},
+                usage: usage
+              }} =
+               Kernel.run(
+                 ~s|(agent.core/run "Compute" {"#{option}" #{value}})|,
+                 config
+               )
+
+      assert usage.subordinate_evaluations == 0
+      refute_receive {:agent_request, _request}
+    end
+  end
+
+  test "agent.core accepts bounded options at their documented range endpoints" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "call-1", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+      ]
+    }
+
+    accepted = [
+      ~S|{"max_turns" 128 "max_program_chars" 1000000 "max_observation_chars" 65536 "max_transcript_chars" 1000000}|,
+      ~S|{"max_turns" 1}|,
+      ~S|{"max_turns" nil "max_program_chars" nil "max_observation_chars" nil "max_transcript_chars" nil}|,
+      ~S|{}|
+    ]
+
+    for cfg <- accepted do
+      {:ok, config} = agent_config([response])
+
+      assert {:ok, %{value: %{"ok" => true, "value" => 42}}} =
+               Kernel.run(~s|(agent.core/run "Compute" #{cfg})|, config)
+    end
+  end
+
+  test "every agent entry rejects an out-of-range bounded option consistently" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "call-1", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+      ]
+    }
+
+    core_entries = [
+      ~S|(agent.core/run "Compute" {"max_turns" 0})|,
+      ~S|(return (agent.core/run-value "Compute" {"max_turns" 0}))|,
+      ~S|(return (agent.core/run-outcome "Compute" {"max_turns" 0}))|,
+      ~S|(return (agent.core/run-result-value "Compute" {"max_turns" 0}))|
+    ]
+
+    for source <- core_entries do
+      {:ok, config} = agent_config([response])
+
+      assert {:error,
+              %{
+                kind: :workflow_failed,
+                reason: :explicit_failure,
+                details: %{failure_kind: "invalid-agent-config"}
+              }} = Kernel.run(source, config)
+
+      refute_receive {:agent_request, _request}
+    end
+
+    input = %{
+      "input" => %{
+        "task" => "Compute",
+        "agent" => %{"max_turns" => 0}
+      }
+    }
+
+    {:ok, config} = agent_config([response], [], agent_main: true, input: input)
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :explicit_failure,
+              details: %{failure_kind: "invalid-agent-config"}
+            }} = Kernel.run("(agent.main/run data/input)", config)
+
+    refute_receive {:agent_request, _request}
   end
 
   test "agent.core rejects a consolidation threshold outside the effective turn budget" do
@@ -1268,27 +1360,6 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert tool_message["role"] == "tool"
     assert tool_message["content"] =~ "Preview truncated"
     assert tool_message["content"] |> success_feedback_body() |> String.length() <= 65_536
-
-    {:ok, fallback_config} =
-      agent_config(responses, [],
-        prompt_source: tiny_prompt_source(),
-        mission_capabilities: [large_observation]
-      )
-
-    assert {:ok, _result} =
-             Kernel.run(
-               ~S|(agent.core/run "Inspect" {"max_turns" 2 "max_observation_chars" 65537 "max_transcript_chars" 1000000})|,
-               fallback_config
-             )
-
-    assert_receive {:agent_request, _first_request}
-    assert_receive {:agent_request, fallback_request}
-
-    assert fallback_request["messages"]
-           |> List.last()
-           |> Map.fetch!("content")
-           |> success_feedback_body()
-           |> String.length() <= 2_048
   end
 
   test "agent receives a bounded shape preview while full successful data remains in history" do

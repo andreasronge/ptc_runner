@@ -127,11 +127,14 @@ it does not add task-specific prompt policy.
 | `consolidate_at_turns_remaining` | omitted | integer, 1–effective `max_turns` | Adds generic consolidation guidance at and below this remaining-turn count. |
 | `result_envelope` | `true` | boolean | Changes only `agent.core/run`; `false` returns the raw value. |
 
-For the four `max_*` options, an out-of-range integer falls back to the
-documented default. Signature validation rejects wrong value types before the
-loop starts. `consolidate_at_turns_remaining` is different: an out-of-range
-value fails with `invalid-agent-config/invalid-consolidation-threshold` before
-a provider request.
+For the four `max_*` options, an omitted or `nil` value selects the documented
+default, and an out-of-range integer fails with
+`invalid-agent-config/option-out-of-range` before any provider request or
+mission evaluation; the failure value names the option and its accepted
+inclusive range. Signature validation rejects wrong value types before the
+loop starts. `consolidate_at_turns_remaining` fails the same way with
+`invalid-agent-config/invalid-consolidation-threshold` when set outside `1` to
+the effective `max_turns`.
 
 Omitted or `nil` `mission` selects `default`. An empty, non-string, or unknown
 mission fails; the loop never falls back to a different environment.

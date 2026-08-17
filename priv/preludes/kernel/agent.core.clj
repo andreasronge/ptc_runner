@@ -12,10 +12,20 @@
       next-state
       (fail (result/error :invalid-prompt :invalid-transition)))))
 
-(defn- positive-int-or [value default maximum]
-  (if (and (integer? value) (pos? value) (<= value maximum))
-    value
-    default))
+;; An explicitly out-of-range option is a caller mistake, not an omission:
+;; silently substituting the default would make an invalid value
+;; indistinguishable from leaving the option out and could spend more work
+;; than the caller requested.
+(defn- bounded-option [cfg option default maximum]
+  (let [value (get cfg option)]
+    (if (nil? value)
+      default
+      (if (and (integer? value) (pos? value) (<= value maximum))
+        value
+        (fail (assoc (result/error :invalid-agent-config :option-out-of-range)
+                     :option option
+                     :min 1
+                     :max maximum))))))
 
 (defn- completed-event [type turn max-turns]
   {:type type
@@ -119,14 +129,14 @@
   generated-program error without misclassifying provider failure as subject
   behavior."
   [task cfg validate-result?]
-  (let [max-turns (positive-int-or (get cfg "max_turns") 4 128)
+  (let [max-turns (bounded-option cfg "max_turns" 4 128)
         consolidate-at-turns-remaining
         (consolidation-threshold
           (get cfg "consolidate_at_turns_remaining")
           max-turns)
-        max-program-chars (positive-int-or (get cfg "max_program_chars") 64000 1000000)
-        max-observation-chars (positive-int-or (get cfg "max_observation_chars") 2048 65536)
-        max-transcript-chars (positive-int-or (get cfg "max_transcript_chars") 262144 1000000)
+        max-program-chars (bounded-option cfg "max_program_chars" 64000 1000000)
+        max-observation-chars (bounded-option cfg "max_observation_chars" 2048 65536)
+        max-transcript-chars (bounded-option cfg "max_transcript_chars" 262144 1000000)
         effective-cfg (assoc cfg
                              "max_turns" max-turns
                              "max_program_chars" max-program-chars
