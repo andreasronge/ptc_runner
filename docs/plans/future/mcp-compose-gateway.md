@@ -90,7 +90,9 @@ and executes one ordinary bounded Kernel run: own heap, own deadline,
 canonical trace, closed diagnostics mapped to MCP tool errors.
 
 No boot Lisp program, no multiple exports, no dynamic surface, no
-notifications. Read-only compound tools only: the configuration refuses an
+server-initiated notifications (inbound `notifications/cancelled` from the
+client is transport hygiene, not surface). Read-only compound tools only:
+the configuration refuses an
 application whose grant includes a write-effect tool. Write-bearing compound
 tools are deferred behind an explicit trigger because multiple upstream
 writes are not transactional; they require idempotency, partial-effect
@@ -178,7 +180,11 @@ stay warm across calls, while every run remains individually bounded and
 individually traced. Defining the ownership, cleanup, and drift-recheck
 contract for pooled provider services relative to the execution-scoped
 services of the CLI plan is the largest genuinely new engineering item in
-this plan.
+this plan. The 2026-08-17 activation stages this: compilation is once
+(the serving template), while provider services remain per-call — boot
+performs a validation acquisition and every call revalidates digests —
+until pooled retention's own trigger fires
+([`../mcp-gateway-m0.md`](../mcp-gateway-m0.md), deviation 2).
 
 ### Admission control and cancellation
 

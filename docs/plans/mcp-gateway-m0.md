@@ -96,35 +96,51 @@ for normally completing runs.
 Root project; the largest PR; split into 2a (template + outcome, no
 providers) and 2b (host runtime + admission) if review size demands.
 
-- `PtcRunner.Kernel.ServingTemplate` — a **new immutable struct**:
-  compiled bundle, validated entry, compiled input **and** result contracts
-  (both required for serving), captured `application_content_digest` and
-  `effective_application_digest`, and — decisively — the **frozen
-  execution policy**: result projection, event policy, inspection capture,
-  and limits are fixed at template compile time. A call supplies only the
-  input value, which the effective digest deliberately excludes, so the
-  digest captured at compile time describes every run made from the
-  template. With `effects: :read_only` the compile **fails closed**: any
-  effect not provably `:read` — including unknown or unclassifiable
-  effects — refuses the template.
+- `PtcRunner.Kernel.ServingTemplate` — a **new immutable struct** caching
+  everything reusable about an application: the compiled workflow **and
+  mission** bundles, validated entry, compiled input **and** result
+  contracts (both required for serving), the validated provider
+  declarations/plan bound to the installation catalog, and the captured
+  `application_content_digest` and `effective_application_digest`. Per-call
+  construction reuses all of it and creates only genuinely per-run state —
+  the provider-activity owner, selection contexts, sinks, and deadline —
+  with **no recompilation and no provider reselection**; defining that
+  reconstruction (what today lives inside single-use `PreparedRun`) is the
+  heart of this PR. Decisively, the template carries the **frozen execution
+  policy**: result projection, event policy, inspection capture, limits,
+  **and the input authority class** (`:normal`/`:private`) are fixed at
+  template compile time and stamped onto every `ExecutionInput`. A call
+  supplies only the input value, which the effective digest deliberately
+  excludes, so the digest captured at compile time describes every run made
+  from the template. With `effects: :read_only` the compile **fails
+  closed**: any effect not provably `:read` — including unknown or
+  unclassifiable effects — refuses the template.
 - **Package-only acquisition seam.** Today acquisition couples package
   construction to input selection. `ServingTemplate.compile` needs a
-  documented package-only path (acquire the package, discard or skip the
-  manifest's input selection); defining it is part of this PR, not assumed.
+  documented package-only path that **skips input acquisition entirely** —
+  not one that selects and discards, which can still fail on the manifest's
+  input before compilation. Defining it is part of this PR, not assumed.
 - `PtcRunner.Kernel.HostRuntime` — a supervised, **registered singleton
   per VM** owning what is VM-global: provider-application lifecycle
   (`:req_llm`/`:llm_db` started once, dotenv disabled) and pool geometry.
   Startup fails closed when `:req_llm` is already running with conflicting
-  configuration; stopping the runtime never stops applications it did not
-  start. `call(runtime, template, input, opts)` builds a fresh
-  `ExecutionInput` and per-run sinks, executes one ordinary bounded Kernel
-  run under the template's frozen policy, and releases everything on any
-  exit. Provider acquisition is per-call (deviation 2 above).
+  configuration. Applications the runtime starts are **VM-lifetime**: it
+  never stops them (its own restart re-verifies configuration and adopts
+  them), and it never stops applications it did not start — so a runtime
+  crash or supervisor restart cannot yank a dependency from under another
+  embedder or an in-flight run. `call(runtime, template, input, opts)`
+  builds a fresh `ExecutionInput` and per-run sinks, executes one ordinary
+  bounded Kernel run under the template's frozen policy, and releases
+  everything on any exit. Provider acquisition is per-call (deviation 2
+  above).
 - **Aggregate provider admission sits at provider-task dispatch, not at
   call admission.** A run uses zero to `live_provider_tasks` workers
   dynamically, so bounding whole calls cannot bound aggregate tasks. The
   runtime owns a counting semaphore checked where provider tasks are
-  dispatched; saturation yields a closed diagnostic, not a pool timeout.
+  dispatched; acquisition is **non-blocking** (saturation yields a closed
+  diagnostic, not a pool timeout or a queue), and release is
+  **exactly-once across every exit path** — normal completion, provider
+  failure, task crash, deadline, caller death, and owner termination.
   Per-call in-flight limits remain the gateway's separate layer (PR 3).
 - The public run outcome DTO is promoted at the
   `ExecutionOutcome` → `CommandOutcome` conversion seam; the `@doc false`
@@ -137,8 +153,9 @@ Acceptance: concurrent `HostRuntime.call`s against a **local HTTP stub
 provider endpoint** (exercising the real ReqLLM/Finch path — replay
 providers never touch the pool and prove nothing about #1290) complete
 without starvation under sized pools; dispatch-level admission enforces the
-aggregate ceiling with a closed diagnostic; existing CLI behavior is
-unchanged.
+aggregate ceiling with a closed diagnostic **and provably recovers full
+capacity after cancellation and after a crashed provider task**, not merely
+rejects at saturation; existing CLI behavior is unchanged.
 
 ## PR 3 — `ptc_gateway/` sibling application: stdio M0
 
@@ -148,12 +165,27 @@ command declaration, and precommit/CI wiring.
 
 - Static gateway configuration document: a `tools` map from tool name to
   application source (directory or memory), approved description, and
-  expected digests, plus the host document reference and admission limits.
+  **named expected digests** — `application_content_digest`,
+  `effective_application_digest`, and one expected snapshot digest per
+  provider installation the application selects — plus the host document
+  reference and admission limits. These exact fields are what boot and
+  call-time revalidation compare, key by key.
   Boot compiles every entry into a `ServingTemplate` and performs one
-  **validation acquisition** per template; startup **refuses** on digest
-  mismatch, missing contracts, or non-read effects. Call-time acquisition
-  revalidates digests, so boot-to-call upstream drift refuses the call
-  rather than serving a surface the digests no longer describe.
+  **bounded validation acquisition** per template; startup **refuses** on
+  digest mismatch, missing contracts, or non-read effects. Validation
+  acquisitions carry full failure semantics: a digest mismatch closes the
+  acquired resources before refusing, a cleanup failure itself refuses
+  startup, and a failure on entry N closes the acquisitions of entries
+  1..N-1 before the process exits. Call-time acquisition revalidates the
+  same digests, so boot-to-call upstream drift refuses the call rather than
+  serving a surface the digests no longer describe.
+- **Explicit stdio ownership topology.** Supervision alone does not tie a
+  call to its transport: a dynamically supervised call process outlives the
+  connection. Each request owner **monitors the stdio connection process**;
+  connection death (client exit, closed pipes) kills every request owner it
+  spawned, which kills the runs via PR 1. The topology — connection process
+  → request owners → runs — is documented in the gateway, mirroring what
+  PR 4 defines for HTTP.
 - Server-side protocol module: `2026-07-28` framing for
   `server/discover` → `tools/list` → `tools/call` plus inbound
   `notifications/cancelled`. `MCPProtocol` stays the client-side validator;
@@ -172,10 +204,13 @@ command declaration, and precommit/CI wiring.
   queue. Each call runs in its own supervised process so transport
   disconnect kills the request owner and, via PR 1, the run.
 - Conformance in tests is **two-layered** because the in-repo client shares
-  ancestry with the server: golden wire fixtures (literal request/response
-  JSON checked byte-for-byte) are the independent layer, and driving the
-  gateway with ptc_runner's own `MCPSource` over stdio is the integration
-  layer. Shared-helper defects cannot hide from the fixtures.
+  ancestry with the server: hand-authored wire fixtures are the independent
+  layer, and driving the gateway with ptc_runner's own `MCPSource` over
+  stdio is the integration layer. Envelope fixtures compare **decoded
+  values** (JSON object order is not semantic); separate raw framing tests
+  assert the byte layout only where bytes matter (message framing,
+  content-length, newline discipline). Shared-helper defects cannot hide
+  from fixtures authored without the helpers.
 - Release: ship in the standalone release as `ptc serve` following the
   Viewer precedent (probe with `apply/3` so an absent module survives
   Elixir 1.20 compilation; do not prove release content by reading
@@ -195,22 +230,38 @@ container packaging, CI classification, and documentation; scoping it
 "gateway-only" would be false.
 
 - Streamable HTTP per the `2026-07-28` transport specification: POST with
-  JSON and SSE responses; strict origin/host validation.
+  JSON and SSE responses.
+- **Origin/host validation is specified, not gestured at:** an absent
+  `Origin` header is allowed (non-browser SDK clients send none); a present
+  `Origin` must exactly match the configured allowlist or the request is
+  rejected — private-network origins get no implicit trust. The `Host`
+  header must exactly match a configured serve name (scheme/host/port), so
+  DNS-rebinding and host-header variants are rejected. Forwarded headers
+  (`X-Forwarded-*`, `Forwarded`) are **ignored** in this tier — proxy
+  deployment means the operator terminates TLS and authenticates the hop;
+  the gateway trusts only its own socket.
 - **Disconnect detection is a design item, not an assertion.** A
   synchronous Plug handler may not observe client closure until it writes.
   The PR must choose and document the mechanism — SSE-first responses so
   closure is observable mid-call, or a transport-level socket monitor —
-  define the ownership topology from connection process to request owner
-  to run, and state the behavior for plain-JSON responses (where no stream
-  exists during execution, cancellation arrives only via
-  `notifications/cancelled`).
+  and define the ownership topology from connection process to request
+  owner to run. For plain-JSON responses, `notifications/cancelled` is
+  **unsupported**: the sessionless shared-authority model gives a later
+  POST no collision-proof identity to correlate against (two clients may
+  reuse the same JSON-RPC request id), so a JSON-mode call runs to
+  completion or deadline, and clients wanting mid-call cancellation use
+  SSE mode. This restriction is documented in the served capability
+  surface.
 - **Bearer authentication with an explicit hardening checklist:**
   file-sourced token (`env` secrets are VM-global and excluded); defined
-  token size/encoding and trailing-newline handling; empty or
-  world-readable token files refuse startup; symlinks resolved and
-  re-validated; constant-time comparison; documented rotation (reload or
-  restart); tokens never logged; an explicit decision whether `/health`
-  and `/ready` are authenticated (default: `/health` open, `/ready`
+  token size/encoding and trailing-newline handling; the token file must
+  be a regular file owned by the serving user with **no group and no
+  other permissions**, reached through ancestors not writable by others
+  (the `PrivateDirectory` discipline), symlinks resolved and re-validated
+  — anything else refuses startup, empty files included; comparison uses
+  a constant-time primitive; documented rotation (reload or restart);
+  tokens never logged; an explicit decision whether `/health` and
+  `/ready` are authenticated (default: `/health` open, `/ready`
   authenticated, revisit with the operator).
 - `/health` and `/ready` endpoints; readiness covers compiled templates and
   provider-application state.
@@ -223,9 +274,10 @@ container packaging, CI classification, and documentation; scoping it
   release), and wired into CI alongside the PR 3 fixtures.
 
 Acceptance: the stdio M0 journeys pass unchanged over HTTP; an
-unauthenticated request is rejected in constant time; closing the response
-stream mid-call frees the run; the container image passes the release
-verification gate.
+unauthenticated request is rejected, with the secret comparison asserted to
+use a constant-time primitive (whole-request constant time is not a
+testable property); closing the response stream mid-call frees the run; the
+container image passes the release verification gate.
 
 ## Deferred, separately triggered
 
