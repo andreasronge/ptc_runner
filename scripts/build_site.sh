@@ -68,16 +68,23 @@ for schema in "${schemas[@]}"; do
   published=$((published + 1))
 done
 
-# The site's own pages are the only place a schema URL is written by hand.
-# Catch a link that no longer names a published file before it ships.
+# Every root-relative reference the pages write by hand -- schema URLs, the
+# stylesheet, images. A dangling one is invisible until a reader hits it, so it
+# fails the build instead. A reference ending in `/` is served by the index
+# document inside that directory.
 missing=0
 while read -r referenced; do
-  [ -f "$output_dir/$referenced" ] || {
-    echo "site links /$referenced, which is not published" >&2
+  case "$referenced" in
+    */ | '') target="$output_dir/${referenced}index.html" ;;
+    *) target="$output_dir/$referenced" ;;
+  esac
+
+  [ -f "$target" ] || {
+    echo "site references /$referenced, which is not published" >&2
     missing=$((missing + 1))
   }
-done < <(grep -rhoE 'href="/schemas/[a-z0-9.-]+\.json"' "$project_root/site" |
-  sed -E 's|href="/||; s|"$||' | sort -u)
+done < <(grep -rhoE '(href|src)="/[^"#]*"' "$project_root/site" |
+  sed -E 's|^(href\|src)="/||; s|"$||' | sort -u)
 
 [ "$missing" -eq 0 ] || exit 65
 

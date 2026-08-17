@@ -1,0 +1,134 @@
+:root {
+  --bg: #fbfaf8;
+  --panel: #ffffff;
+  --border: #e3ded6;
+  --text: #1c1a17;
+  --muted: #6b6459;
+  --accent: #9a4a1e;
+  --accent-soft: #f5ece5;
+  --code-bg: #f4f1ec;
+  --shadow: 0 1px 2px rgba(28, 26, 23, .05);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #16150f;
+    --panel: #1e1c17;
+    --border: #33302a;
+    --text: #ece7dd;
+    --muted: #9d9484;
+    --accent: #e08a55;
+    --accent-soft: #2a231c;
+    --code-bg: #24211b;
+    --shadow: none;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.6 ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 46rem; margin: 0 auto; padding: 3.5rem 1.25rem 5rem; }
+code, pre, .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+
+header { margin-bottom: 2.5rem; }
+
+h1 {
+  font-size: 2.6rem; line-height: 1.1; margin: 0 0 .5rem;
+  letter-spacing: -.02em; font-weight: 650;
+}
+
+.kicker {
+  margin: 0; color: var(--muted); font-size: .95rem;
+  text-transform: uppercase; letter-spacing: .08em;
+}
+
+.crumb { margin: 0 0 .75rem; font-size: .9rem; }
+
+.lead { font-size: 1.2rem; line-height: 1.5; margin: 1.75rem 0 1.75rem; }
+
+h2 {
+  font-size: 1.05rem; text-transform: uppercase; letter-spacing: .09em;
+  color: var(--muted); font-weight: 600;
+  margin: 3rem 0 1rem; padding-bottom: .5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+h3 { font-size: 1rem; margin: 0 0 .3rem; font-weight: 620; }
+p { margin: 0 0 1rem; }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
+
+.note {
+  background: var(--accent-soft); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  padding: .9rem 1.1rem; border-radius: 4px; margin: 1.5rem 0;
+  font-size: .95rem;
+}
+.note strong { font-weight: 640; }
+.note p:last-child { margin-bottom: 0; }
+
+pre {
+  background: var(--code-bg); border: 1px solid var(--border);
+  padding: 1rem; border-radius: 6px; overflow-x: auto;
+  font-size: .875rem; line-height: 1.55; margin: 0 0 1rem;
+}
+
+p code, li code, td code, .schema code {
+  background: var(--code-bg); border: 1px solid var(--border);
+  padding: .08em .35em; border-radius: 3px; font-size: .875em;
+}
+
+.schema {
+  border: 1px solid var(--border); background: var(--panel);
+  border-radius: 6px; padding: 1rem 1.15rem; margin-bottom: .85rem;
+  box-shadow: var(--shadow);
+}
+.schema h3 a { text-decoration: none; }
+.schema h3 a:hover { text-decoration: underline; }
+.schema .role {
+  display: inline-block; font-size: .72rem; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--muted); border: 1px solid var(--border);
+  border-radius: 999px; padding: .1rem .55rem; margin-bottom: .55rem;
+}
+.schema p { margin: 0; font-size: .93rem; color: var(--muted); }
+.schema .url {
+  display: block; margin-top: .5rem; font-size: .8rem;
+  color: var(--muted); word-break: break-all;
+}
+
+ul.links { list-style: none; padding: 0; margin: 0; }
+ul.links li { padding: .55rem 0; border-bottom: 1px solid var(--border); font-size: .95rem; }
+ul.links li:last-child { border-bottom: 0; }
+ul.links .desc { color: var(--muted); }
+
+.callout {
+  display: block; border: 1px solid var(--border); background: var(--panel);
+  border-radius: 6px; padding: 1.1rem 1.25rem; box-shadow: var(--shadow);
+  text-decoration: none; color: var(--text);
+}
+.callout:hover { border-color: var(--accent); }
+.callout strong { display: block; color: var(--accent); font-size: 1.05rem; margin-bottom: .3rem; }
+.callout span { color: var(--muted); font-size: .93rem; }
+
+.muted-note { font-size: .9rem; color: var(--muted); }
+
+figure.diagram { margin: 2.25rem 0; }
+figure.diagram img {
+  display: block; width: 100%; height: auto;
+  border: 1px solid var(--border); border-radius: 6px; background: #fbfaf8;
+}
+figure.diagram figcaption {
+  margin-top: .7rem; font-size: .88rem; line-height: 1.5; color: var(--muted);
+}
+
+footer {
+  margin-top: 4rem; padding-top: 1.25rem; border-top: 1px solid var(--border);
+  color: var(--muted); font-size: .85rem;
+}

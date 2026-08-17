@@ -39,6 +39,54 @@ editor validating against a document the runtime rejects.
 schema's declared `$id` does not match the URL it is being served from, and
 when a hand-written link in `site/` names a file that is not published.
 
+## The authority diagram
+
+`site/authority-narrows.webp` is image-model output, not a hand-drawn asset, so
+the prompt below is its source. Keep them together: without it the diagram can
+only be replaced, never amended.
+
+> A clean flat vector technical diagram, editorial infographic style, on a warm
+> off-white background (#FBFAF8). Composition: a centered vertical funnel of
+> three stages, each visibly narrower than the one above it, with generous white
+> space and wide margins. Title, top left, large bold dark ink: "Authority only
+> narrows". Stage 1 (widest, full width): a rounded rectangle with a thin
+> deep-navy outline. Bold label "OPERATOR". Below it in monospace:
+> "ptc-host.json". Below that, smaller warm grey: "credentials · endpoints ·
+> outer ceilings". A short downward rust-orange arrow to stage 2, with small
+> italic text beside it: "selects from, never adds to". Stage 2 (about 75%
+> width): same rounded rectangle style. Bold label "AUTHOR". Monospace:
+> "ptc.json". Smaller warm grey: "aliases · missions · limits". A second
+> downward rust-orange arrow, with small italic text beside it: "splits, never
+> merges". Stage 3 (about 55% width): two rounded rectangles side by side,
+> separated by one thick vertical rust-orange line. Left box: bold "WORKFLOW",
+> then "trusted policy", then "holds the model". Right box: bold "MISSION", then
+> "model-written program", then "holds the tools". Style: flat 2D vector,
+> technical documentation aesthetic, thin 2px strokes, no gradients, no 3D, no
+> drop shadows, no glow. Palette strictly deep navy (#1F3A5F), rust orange
+> (#9A4A1E), warm grey (#6B6459) on warm off-white. Crisp geometric shapes,
+> precise alignment, correctly spelled text. 16:9 aspect ratio.
+
+The generated PNG was 1672x941 and 969 KB. What ships is
+`cwebp -q 92 <original>.png -o site/authority-narrows.webp` — 83 KB, verified
+free of ringing on the smallest text at 2x. Re-encode from an original rather
+than from the WebP if the diagram is ever regenerated.
+
+Two things to check on any replacement, because both are load-bearing rather
+than cosmetic:
+
+- **Every label must be spelled exactly.** The filenames `ptc-host.json` and
+  `ptc.json` are the whole point; a dropped hyphen is wrong on a page about
+  exact documents.
+- **The two bottom boxes may share the width of the box above them.** That is
+  not a failed funnel. The author selects both `providers.workflow` and
+  `providers.mission`, so the split divides that authority into two disjoint
+  halves, each narrower than what was selected. A strict funnel would wrongly
+  imply the two environments draw from one shrinking pool.
+
+The image carries a light background in both themes. A dark-mode variant would
+need a second render with the background at `#16150F` and text at `#ECE7DD`,
+served through `<picture>` with `prefers-color-scheme`.
+
 ## Local preview
 
 ```console
