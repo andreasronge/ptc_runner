@@ -5,6 +5,7 @@ import { createAnalyzeButton, createReplController, nextTabName, readViewerConfi
 import { createRunCatalog } from './run-catalog.js';
 import { createLiveController, liveTokenFromSearch } from './live.js';
 import { commitCurrentLoad } from './current-load.js';
+import { displayRunName, formatRunUsage, searchableRunFields } from './run-display.js';
 import { truncate } from './utils.js';
 
 function formatDate(isoString) {
@@ -22,6 +23,7 @@ const state = {
   analyzeActions: new Set(),
   runs: [],
   page: null,
+  project: null,
   catalogGeneration: 0,
   routeGeneration: 0,
   query: '',
@@ -100,8 +102,8 @@ function renderRunPicker() {
 function matchesQuery(run, query) {
   if (!query) return true;
   const needle = query.toLowerCase();
-  return [run.run_id, run.name, run.status, run.trace_id, run.workflow_prelude?.hash]
-    .some(field => typeof field === 'string' && field.toLowerCase().includes(needle));
+  return searchableRunFields(run, state.project)
+    .some(field => field.toLowerCase().includes(needle));
 }
 
 function RunPicker() {
@@ -114,6 +116,7 @@ function RunPicker() {
   // the list. That control is the only "back to runs" affordance, replacing
   // the tab-plus-breadcrumb pair that used to sit two labels apart.
   if (selected) {
+    const displayName = displayRunName(selected, state.project);
     return html`
       <div class="file-picker-bar">
         <button type="button" class="btn secondary file-picker-back" onClick=${() => selectRun(null)}>
@@ -123,7 +126,10 @@ function RunPicker() {
           <span class=${`trace-kind badge-${selected.status === 'ok' ? 'agent' : 'error'}`}>
             ${selected.status || 'incomplete'}
           </span>
-          <strong>${selected.run_id}</strong>
+          <span class="file-picker-current-name">
+            <strong>${displayName}</strong>
+            ${displayName !== selected.run_id && html`<small>${selected.run_id}</small>`}
+          </span>
         </span>
       </div>
     `;
@@ -149,20 +155,27 @@ function RunPicker() {
 }
 
 function RunRow({ run }) {
-  // The run ID identifies the run; the bundle hash identifies the workflow and
-  // is shared by every run of it, so it is a secondary fact rather than the
-  // row's headline.
+  const displayName = displayRunName(run, state.project);
+  const usage = formatRunUsage(run.llm_usage_total);
+
   return html`
     <button type="button" class="file-picker-item" onClick=${() => selectRun(run.run_id)}>
       <span class="file-picker-main">
         <span class=${`trace-kind badge-${run.status === 'ok' ? 'agent' : 'error'}`}>
           ${run.status || 'incomplete'}
         </span>
-        <span class="filename">${run.run_id}</span>
+        <span class="file-picker-identity">
+          <span class="filename">${displayName}</span>
+          ${displayName !== run.run_id && html`<span class="file-picker-run-id">${run.run_id}</span>`}
+        </span>
       </span>
       <span class="file-meta">
         ${run.start_timestamp && html`<span class="modified">${formatDate(run.start_timestamp)}</span>`}
         <span class="size">${run.evaluations ?? 0} evaluations</span>
+        ${usage.map(value => html`<span class="file-picker-usage">${value}</span>`)}
+        ${Object.entries(run.tags || {}).map(([key, value]) => html`
+          <span class="file-picker-tag">${key}: ${value}</span>
+        `)}
         <span class="file-picker-query" title=${run.workflow_prelude?.hash || ''}>
           ${shortenHash(run.workflow_prelude?.hash)}
         </span>
@@ -333,6 +346,7 @@ function renderRun(data, { fresh = false, routeGeneration = state.routeGeneratio
 
   const container = document.getElementById('view-container');
   renderKernelTranscript(container, data, {
+    title: displayRunName(metadata, state.project),
     onLoadMore: async button => {
       button.disabled = true;
       button.textContent = 'Loading…';
@@ -462,6 +476,11 @@ if (config.live_enabled) {
   state.live = createLiveController({
     mutationNonce: config.live_mutation_nonce,
     liveToken,
+    onProject: project => {
+      state.project = project;
+      renderRunPicker();
+      if (state.currentRun) renderRun(state.currentRun);
+    },
     onInspectRun: runId => {
       void runCatalog.refresh();
       selectRun(runId);

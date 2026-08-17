@@ -88,7 +88,7 @@ function KernelTranscript({
 
   return html`
     <section class="kernel-transcript">
-      <${Hero} metadata=${metadata} transcript=${transcript}
+      <${Hero} metadata=${metadata} transcript=${transcript} title=${options.title}
                eventCount=${events.length} truncatedPage=${partial} />
       <${Provenance} />
       <${Reference} metadata=${metadata} transcript=${transcript}
@@ -104,16 +104,16 @@ function KernelTranscript({
 
 // --- Identity and summary -------------------------------------------------
 
-function Hero({ metadata, transcript, eventCount, truncatedPage }) {
+function Hero({ metadata, transcript, title: displayTitle, eventCount, truncatedPage }) {
   const status = metadata.status || (metadata.complete ? 'complete' : 'incomplete');
   const bundle = metadata.workflow_prelude?.hash;
-  // The run ID is the identity a reader recognises and can act on; the bundle
-  // hash identifies the workflow, and two runs of one workflow share it. It
-  // stays available as a secondary fact rather than as the heading.
-  const title = metadata.run_id || metadata.name || 'Kernel run';
+  // A host-supplied display label can replace the cryptic run ID as the title;
+  // the canonical ID remains a fact readers can copy and act on.
+  const title = displayTitle || metadata.run_id || metadata.name || 'Kernel run';
   // Sanitized traces carry hashed model/provider identities; they are shown
   // abbreviated with the full value on hover, like every other digest here.
   const facts = [
+    ['Run ID', title !== metadata.run_id ? metadata.run_id : null],
     ['Trace', metadata.trace_id],
     ['Duration', duration(metadata.duration_ms)],
     ['Model', abbreviate(metadata.model), metadata.model],

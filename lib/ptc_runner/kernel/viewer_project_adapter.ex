@@ -23,6 +23,7 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.SafeMetadata
 
   @type environment :: %{
           name: binary(),
@@ -34,6 +35,7 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
 
   @type project :: %{
           name: binary(),
+          name_fingerprint: binary() | nil,
           manifest: binary(),
           entry: binary(),
           input: map(),
@@ -64,10 +66,12 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
     case Manifest.load(manifest_path, host.limits) do
       {:ok, manifest} ->
         document = manifest.document
+        label_name = get_in(document, ["labels", "name"])
 
         {:ok,
          %{
            name: Keyword.get(opts, :name) || display_name(document, manifest_path),
+           name_fingerprint: if(label_name, do: SafeMetadata.fingerprint(label_name)),
            manifest: manifest_path,
            entry: manifest.entry,
            input: manifest.input,

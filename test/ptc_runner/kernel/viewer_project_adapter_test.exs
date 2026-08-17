@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapterTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.ViewerProjectAdapter
 
   @demo_manifest "examples/viewer-live-dashboard/ptc.json"
@@ -14,6 +15,7 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapterTest do
 
     test "reports its label, entry, and the path as configured", %{project: project} do
       assert project.name == "live-dashboard-demo"
+      assert project.name_fingerprint == SafeMetadata.fingerprint("live-dashboard-demo")
       assert project.manifest == @demo_manifest
       assert project.entry == "demo.live/run"
       assert %{"topics" => topics} = project.input

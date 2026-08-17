@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
   @max_terminal_events 65_536
   @max_rows 128
   @max_result_bytes 1_000_000
+  @total_keys ~w(input output total_cost)
   @event_keys ~w(schema_version run_id trace_id sequence timestamp type data)
   @event_type ~r/\A[a-z][a-z0-9-]{0,127}\z/
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
@@ -48,6 +49,38 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
       "llm_usage_by_model" => rows(model_counters),
       "unattributed_model_calls" => unattributed
     }
+  end
+
+  @spec totals([map()]) :: map()
+  def totals(events) when is_list(events) do
+    terminal? = Enum.any?(events, &(field(&1, "type") == "run-stopped"))
+    dropped? = Enum.any?(events, &(field(&1, "type") == "events-dropped"))
+
+    if not terminal? or dropped? do
+      %{}
+    else
+      successful =
+        Enum.filter(events, fn event ->
+          llm_usage_event?(event) and stringify(field(event, "data", "status")) == "ok"
+        end)
+
+      Map.new(@total_keys, fn key -> {key, complete_total(successful, key)} end)
+      |> Map.reject(fn {_key, value} -> is_nil(value) end)
+    end
+  end
+
+  defp complete_total([], _key), do: nil
+
+  defp complete_total(events, key) do
+    Enum.reduce_while(events, 0, fn event, total ->
+      with usage when is_map(usage) <- field(event, "data", "usage"),
+           {:ok, normalized} <- LLMUsage.normalize(usage),
+           {:ok, value} <- Map.fetch(normalized, key) do
+        {:cont, total + value}
+      else
+        _missing_or_invalid -> {:halt, nil}
+      end
+    end)
   end
 
   defp reduce(events, model_lookup) do

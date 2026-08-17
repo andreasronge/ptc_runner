@@ -1124,6 +1124,37 @@ defmodule PtcRunner.Kernel.TraceLogTest do
              TraceLog.query_loaded(events, "models", :counters, %{}, 100, :sanitized)
   end
 
+  test "run summaries expose complete per-run LLM usage totals" do
+    events = [
+      decoded_event("usage-total", 1, "run-started"),
+      decoded_event("usage-total", 2, "capability-stopped", %{
+        "environment" => "workflow",
+        "name" => "llm-request",
+        "alias" => "writer",
+        "installation_revision" => "stable-v1",
+        "status" => "ok",
+        "usage" => %{"input" => 120, "output" => 30, "total_cost" => 0.0042}
+      }),
+      decoded_event("usage-total", 3, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert {:ok, %{"items" => [run]}} =
+             TraceLog.query_loaded(
+               events,
+               "usage-total",
+               :list_runs,
+               %{},
+               100_000,
+               :sanitized
+             )
+
+    assert run["llm_usage_total"] == %{
+             "input" => 120,
+             "output" => 30,
+             "total_cost" => 0.0042
+           }
+  end
+
   test "invalid or ambiguous LLM snapshots make calls unattributed without failing counters" do
     valid = TestHelpers.llm_snapshot("writer", "stable-v1", "openrouter:vendor/model-a")
     tampered = put_in(valid, ["acquisition", "resolved_model"], "openrouter:vendor/model-b")
