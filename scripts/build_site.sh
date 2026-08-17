@@ -30,19 +30,45 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 output_dir="${1:-$project_root/_site}"
 site_origin="https://ptc-runner.dev"
 
-command -v jq > /dev/null || {
-  echo 'jq is required to verify schema identity' >&2
+command -v python3 > /dev/null || {
+  echo 'python3 is required to verify schema identity and page references' >&2
   exit 69
 }
 
-rm -rf "$output_dir"
+# The output directory is deleted, so a mistyped argument is destructive:
+# `build_site.sh site` would erase the pages this script exists to publish.
+# Resolve the path first -- the directory may not exist yet, so resolve its
+# parent and re-attach the basename -- then refuse any target that git tracks
+# content under. That covers the repository root, `site/`, `priv/`, and every
+# other source directory, while leaving `_site` and scratch paths alone.
+case "$output_dir" in
+  '' | '/') echo "refusing to build into '$output_dir'" >&2; exit 64 ;;
+esac
+
+output_parent="$(cd "$(dirname "$output_dir")" 2> /dev/null && pwd)" || {
+  echo "parent directory of '$output_dir' does not exist" >&2
+  exit 64
+}
+output_dir="$output_parent/$(basename "$output_dir")"
+
+if [ -n "$(git -C "$project_root" ls-files -- "$output_dir" 2> /dev/null)" ]; then
+  echo "refusing to delete '$output_dir': it contains version-controlled files" >&2
+  exit 64
+fi
+
+if [ -e "$output_dir" ] && [ ! -d "$output_dir" ]; then
+  echo "'$output_dir' exists and is not a directory" >&2
+  exit 64
+fi
+
+rm -rf -- "$output_dir"
 mkdir -p "$output_dir/schemas"
 
 cp -R "$project_root/site/." "$output_dir/"
 
 # Without `nullglob` an unmatched pattern survives as a literal filename, and
-# the loop below would report a missing schema as a jq parse failure instead of
-# reaching the count check.
+# the loop below would report a missing schema as a JSON decode failure instead
+# of reaching the count check.
 shopt -s nullglob
 schemas=("$project_root"/priv/schemas/ptc-*.schema.json)
 shopt -u nullglob
@@ -56,7 +82,20 @@ published=0
 for schema in "${schemas[@]}"; do
   name="$(basename "$schema")"
   expected="$site_origin/schemas/$name"
-  declared="$(jq -r '."$id" // empty' "$schema")"
+  # `$id` below is the JSON Schema key, not a shell variable, so the single
+  # quotes that stop the shell touching it are deliberate.
+  # shellcheck disable=SC2016
+  declared="$(python3 -c '
+import json, sys
+
+try:
+    document = json.load(open(sys.argv[1]))
+except ValueError as error:
+    sys.stderr.write("%s: not valid JSON (%s)\n" % (sys.argv[1], error))
+    sys.exit(65)
+
+print(document.get("$id", ""))
+' "$schema")"
 
   if [ "$declared" != "$expected" ]; then
     echo "$name declares \$id '${declared:-<none>}' but publishes to '$expected'" >&2
@@ -72,6 +111,12 @@ done
 # stylesheet, images. A dangling one is invisible until a reader hits it, so it
 # fails the build instead. A reference ending in `/` is served by the index
 # document inside that directory.
+#
+# Extraction is a real HTML parse rather than a regex. A pattern matching only
+# `href="..."` silently ignores `href = "..."`, single quotes, uppercase tags,
+# and attributes wrapped across lines -- all valid HTML that a later edit could
+# introduce, and every one of them a reference this guard would then wave
+# through while still appearing to check it.
 missing=0
 while read -r referenced; do
   case "$referenced" in
@@ -83,8 +128,41 @@ while read -r referenced; do
     echo "site references /$referenced, which is not published" >&2
     missing=$((missing + 1))
   }
-done < <(grep -rhoE '(href|src)="/[^"#]*"' "$project_root/site" |
-  sed -E 's|^(href\|src)="/||; s|"$||' | sort -u)
+done < <(python3 - "$project_root/site" <<'EXTRACT'
+import pathlib
+import sys
+from html.parser import HTMLParser
+
+
+class References(HTMLParser):
+    """Collects every href and src value in a document."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.found = set()
+
+    def handle_starttag(self, tag, attrs):
+        for name, value in attrs:
+            if name in ("href", "src") and value:
+                self.found.add(value)
+
+
+root = pathlib.Path(sys.argv[1])
+references = set()
+
+for page in sorted(root.rglob("*.html")):
+    parser = References()
+    parser.feed(page.read_text(encoding="utf-8"))
+    parser.close()
+    references |= parser.found
+
+for reference in sorted(references):
+    if reference.startswith("/"):
+        # Site-root-relative. Strip the fragment and query the server ignores
+        # when resolving it to a file, then the leading slash.
+        print(reference.split("#", 1)[0].split("?", 1)[0][1:])
+EXTRACT
+)
 
 [ "$missing" -eq 0 ] || exit 65
 
