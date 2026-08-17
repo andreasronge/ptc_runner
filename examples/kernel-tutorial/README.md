@@ -27,7 +27,7 @@ mix ptc run examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
 They require `OPENROUTER_API_KEY` and use the trusted `deepseek` model alias.
-Follow the [Quickstart credential step](../../docs/guides/quickstart.md#2-supply-a-model-credential)
+Follow the [model-authored Quickstart](../../docs/guides/quickstart.md#run-a-model-authored-program)
 once before running them. Example 03 also requires Node.js 22 or newer; its
 server bundle is committed, so no `npm install` or build is needed.
 

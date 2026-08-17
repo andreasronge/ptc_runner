@@ -21,6 +21,10 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
 
     assert classify(["docs/guides/quickstart.md"]) ==
              all_false()
+             |> Map.put("docs", "true")
+
+    assert classify(["docs/maintainers/development-setup.md"]) ==
+             all_false()
              |> Map.put("core", "true")
              |> Map.put("docs", "true")
 
@@ -53,8 +57,11 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
   end
 
   test "non-canonical executable-guide entries conservatively select every scope" do
-    for entry <- ["  docs/guides/quickstart.md  ", "./docs/guides/quickstart.md"] do
-      assert classify(["docs/guides/quickstart.md"], registry: entry <> "\n") ==
+    for entry <- [
+          "  docs/maintainers/development-setup.md  ",
+          "./docs/maintainers/development-setup.md"
+        ] do
+      assert classify(["docs/maintainers/development-setup.md"], registry: entry <> "\n") ==
                Map.new(all_false(), fn {scope, _value} -> {scope, "true"} end)
     end
   end

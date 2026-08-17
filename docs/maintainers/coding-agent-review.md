@@ -1,7 +1,8 @@
 # Coding agent review workflow
 
-**Audience: people changing PtcRunner itself.** It describes how this
-repository reviews its own changes.
+> **Audience:** people and coding agents changing PtcRunner itself.
+
+This guide describes how this repository reviews its own changes.
 
 Use this workflow when a change requires independent Codex review. Review
 complements design, tests, Dialyzer, and repository gates; it does not replace

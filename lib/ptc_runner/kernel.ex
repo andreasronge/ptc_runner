@@ -12,7 +12,7 @@ defmodule PtcRunner.Kernel do
   state.
 
   For the construction flow, ownership model, and internal module map, see the
-  [Kernel maintainer guide](kernel-maintainer.html).
+  [Kernel maintainer guide](kernel.html).
   """
 
   alias PtcRunner.Kernel.BundleCompiler

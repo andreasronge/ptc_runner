@@ -1,7 +1,9 @@
 # Duplication gate
 
-**Audience: people changing PtcRunner itself.** This gate runs over this
-repository's own source; it is not part of the runtime an application uses.
+> **Audience:** people changing PtcRunner itself.
+
+This gate runs over this repository's own source; it is not part of the runtime
+an application uses.
 
 `mix precommit` and CI run `scripts/duplication_gate.sh check`. It compares an
 [ExDNA](https://github.com/elixir-vibe/ex_dna) report with

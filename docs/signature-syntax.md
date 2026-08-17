@@ -1,556 +1,190 @@
-# Signature Syntax
+# Signature reference
 
-Signatures define the contract between agents and tools - what inputs they accept and what outputs they produce.
+> **Audience:** application and PTC-Lisp authors declaring compact input and
+> output contracts for components and model-visible tools.
 
-## Overview
+Signatures tell a model what a function accepts and returns, and let PtcRunner
+validate both sides of the call. They are compact enough to include in model
+context while remaining readable in application source.
 
-```elixir
-signature: "(query :string, limit :int) -> {count :int, items [{id :int}]}"
+## Shape
+
+An input-and-output signature uses an arrow:
+
+```text
+(query :string, limit :int) -> {count :int, items [{id :int}]}
 ```
 
-Signatures are:
-- **Token-efficient** - Compact syntax optimized for LLM prompts
-- **Human-readable** - Intuitive arrow notation for function contracts
-- **Validated at runtime** - Inputs and outputs are checked against the signature
+Output-only signatures omit the empty input list:
 
----
-
-## Basic Structure
-
-```
-(inputs) -> output
+```text
+{name :string, price :float}
 ```
 
-Or for output-only signatures (common for top-level agents):
+This is equivalent to:
 
-```
-output
-```
-
-These are equivalent:
-```elixir
-signature: "() -> {name :string, price :float}"
-signature: "{name :string, price :float}"
+```text
+() -> {name :string, price :float}
 ```
 
----
+## Primitive types
 
-## Primitive Types
+| Type | Accepts |
+| --- | --- |
+| `:string` | UTF-8 strings |
+| `:int` | integers |
+| `:float` | finite floating-point values and integers |
+| `:bool` | `true` or `false` |
+| `:keyword` | PTC-Lisp keywords |
+| `:datetime` | a runtime datetime value supplied by the runtime or host |
+| `:map` | a map with unrestricted string-like keys and values |
+| `:any` | any public PTC-Lisp value |
 
-| Type | Description | Example Values |
-|------|-------------|----------------|
-| `:string` | UTF-8 string | `"hello"`, `""` |
-| `:int` | Integer | `42`, `-1`, `0` |
-| `:float` | Floating point | `3.14`, `-0.5` |
-| `:bool` | Boolean | `true`, `false` |
-| `:keyword` | Keyword/atom | `:pending`, `:active` |
-| `:datetime` | UTC `%DateTime{}` (RFC 3339 / ISO 8601 with offset) | `~U[2026-05-03 09:14:00Z]` |
-| `:any` | Any value | Matches everything |
+There are no `:list`, `:array`, `:tuple`, or `:object` primitive names. Use a
+collection or typed map instead.
 
-### `:datetime` in detail
+## Collections and maps
 
-`:datetime` is a real semantic type, not a prettier `:string`. The wire form is
-ISO 8601 with offset (the LLM emits `"2026-05-03T09:14:00Z"`), but the value
-your code receives is an Elixir `%DateTime{}` struct in UTC.
+A vector containing one type describes a list:
 
-| LLM emits | Result |
-|-----------|--------|
-| `"2026-05-03T09:14:00Z"` | `~U[2026-05-03 09:14:00Z]` (UTC) |
-| `"2026-05-03T11:14:00+02:00"` | Shifted to `~U[2026-05-03 09:14:00Z]` with a "non-UTC offset" warning |
-| `"2026-05-03T09:14:00"` (no offset) | Validation error — naive strings are ambiguous and rejected at the type boundary |
-
-The JSON Schema sent to the LLM provider is a plain `{"type": "string"}` —
-the `format: "date-time"` keyword is omitted because OpenAI's strict-mode
-structured output rejects unsupported keywords and would 400 the request.
-Local coercion validates the ISO 8601 + offset shape, so an invalid date
-never reaches the caller. The prompt-side example value
-(`"2026-05-03T09:14:00Z"`) covers the LLM-guidance role.
-
-**When to pick `:string` vs `:datetime`:**
-- `:datetime` if your code does anything with the value (compare, diff, format,
-  store in a typed column).
-- `:string` if you only display or pass through. Cheaper to validate, no zone
-  semantics to worry about.
-
-### Invalid Type Names (Common Mistakes)
-
-These guessed type names **do not exist**:
-
-| Guessed | What to Use Instead |
-|---------|---------------------|
-| `:list` | `[:type]` - e.g., `[:int]`, `[:string]`, `[:any]` |
-| `:array` | `[:type]` - same as above |
-| `:tuple` | No direct equivalent - use `{field :type}` maps with named fields |
-| `:object` | `{field :type}` or `:map` |
-
-> **Note:** PTC-Lisp signatures don't have true tuples (ordered, position-based). Use maps with named fields instead, which provide better self-documentation and validation.
-
-Example fix:
-```elixir
-# WRONG - :list is not a valid type
-signature: "(items :list) -> :bool"
-
-# CORRECT - use [:type] syntax
-signature: "(items [:any]) -> :bool"
-signature: "(items [:string]) -> :bool"
+```text
+[:int]
+[:string]
+[{id :int, name :string}]
 ```
 
----
+A map describes required named fields:
 
-## Collection Types
-
-### Lists
-
-```
-[:int]                         ; List of integers
-[:string]                      ; List of strings
-[:map]                         ; List of maps
-[{id :int, name :string}]      ; List of typed maps
-```
-
-### Maps with Typed Fields
-
-```
+```text
 {id :int, name :string}
-{customer {id :int, name :string}}    ; Nested
-:map                                   ; Any map (dynamic keys)
+{customer {id :int, name :string}}
 ```
 
----
+Use `:map` only when the keys cannot be declared in advance. Typed maps give
+models better guidance and produce more precise validation feedback.
 
-## Optional Fields
+## Optional values
 
-Use `?` suffix for optional (nullable) fields:
+Append `?` to allow `nil`. For a typed map field, the suffix also permits the
+field to be absent:
 
-```
+```text
 {id :int, email :string?}
+(cursor :string?) -> {items [:any], next_cursor :string?}
 ```
 
-The field can be `nil` or omitted entirely.
+## Named parameters
 
----
+Inputs are comma-separated named parameters:
 
-## Named Parameters
-
-Input parameters have names that become available in the signature:
-
-```elixir
-signature: "(user {id :int, name :string}, limit :int) -> [{order_id :int}]"
+```text
+(user {id :int, name :string}, limit :int) -> [{order_id :int}]
 ```
 
-Multiple parameters are comma-separated. The names `user` and `limit`:
-- Document what each parameter represents
-- Are validated against template placeholders in prompts
-- Appear in tool schemas shown to LLMs
+Names document the call, appear in model-visible schemas, and can be referenced
+by prompt templates. A duplicate or malformed name is rejected when the
+component contract is compiled.
 
----
+## Field naming
 
-## Naming Convention: Underscores in Signatures
+Signatures use underscore-separated public field names because tool arguments
+and results cross a JSON-shaped boundary:
 
-**Signatures use underscores** (Elixir/JSON convention):
-
-```elixir
-signature: "(user_id :int) -> {order_count :int, is_active :bool}"
+```text
+(user_id :int) -> {order_count :int, is_active :bool}
 ```
 
-**PTC-Lisp code uses hyphens** (Clojure convention):
+PTC-Lisp code may use idiomatic hyphenated keywords:
 
 ```clojure
 (return {:order-count 5 :is-active true})
 ```
 
-At the tool boundary, `KeyNormalizer` automatically converts hyphens to underscores:
+At the public boundary, `:order-count` corresponds to `"order_count"`.
+Normalization applies recursively to typed tool arguments and results. Prefer
+one spelling within a map; do not rely on collisions between already-normalized
+keys.
 
-| PTC-Lisp (LLM writes) | Elixir receives | Signature field |
-|-----------------------|-----------------|-----------------|
-| `:order-count` | `"order_count"` | `order_count` |
-| `:is-active` | `"is_active"` | `is_active` |
-| `:user-id` | `"user_id"` | `user_id` |
+## Validation
 
-This allows LLMs to write idiomatic Clojure-style code while Elixir tools receive idiomatic underscore-style keys.
+Inputs are validated before the function or capability runs. Outputs are
+validated before the value crosses its declared boundary. A failure returns a
+bounded structured evaluation error that identifies the contract path without
+calling the rejected capability again.
 
-**Why this matters:**
-- LLMs trained on Clojure naturally produce hyphenated keywords
-- Elixir/JSON conventions use underscores
-- Signatures define the Elixir-side contract, so they use underscores
-- The conversion is automatic and transparent
+Validation is strict except for these admitted representations:
 
----
+- an integer satisfies `:float` without changing its value;
+- JSON-shaped string keys may match declared public fields;
+- missing or `nil` values satisfy an optional type.
 
-## Examples
+A numeric string does not satisfy `:int` or `:float`. A timestamp without an
+offset does not satisfy `:datetime`, and neither does an ISO 8601 string: the
+value must already be the runtime's datetime value. Signature maps validate
+their declared fields and allow additional fields. A closed map created from a
+JSON Schema with `additionalProperties: false` rejects unknown fields instead.
 
-### Simple Output
+## Tool contracts
 
-```elixir
-signature: "{answer :int}"
-# LLM must return: {:answer 42}
-```
+Model-visible functions should use named inputs and bounded outputs:
 
-### Multiple Fields
-
-```elixir
-signature: "{name :string, price :float, in_stock :bool}"
-# LLM must return: {:name "Widget" :price 99.99 :in_stock true}
-```
-
-### List Output
-
-```elixir
-signature: "[{id :int, title :string}]"
-# LLM must return: [{:id 1 :title "First"} {:id 2 :title "Second"}]
-```
-
-### With Inputs
-
-```elixir
-signature: "(user_id :int) -> {name :string, orders [:map]}"
-# Called as: (tool/agent {:user_id 123})
-# Returns: {:name "Alice" :orders [...]}
-```
-
-### Complex Nested
-
-```elixir
-signature: """
-(query :string, options {limit :int?, sort :string?}) ->
-{results [{id :int, score :float, metadata :map}], total :int}
-"""
-```
-
-### Underscore Fields
-
-```elixir
-signature: "{summary :string, _raw_data [:map]}"
-# The underscore is part of the field name. It does not hide the value.
-```
-
----
-
-## Validation Behavior
-
-### Input Validation
-
-When a tool is called, inputs are validated against signature parameters:
-
-```elixir
-# Signature: (id :int, name :string) -> :bool
-# Tool call: (tool/check {:id "42" :name "Alice"})
-
-# Behavior:
-# 1. Coerce "42" -> 42 (string to int, with warning)
-# 2. Validate "Alice" is string
-# 3. Proceed with call
-```
-
-### Output Validation
-
-When `return` is called, data is validated against the return type:
-
-```elixir
-# Signature: () -> {count :int, items [:string]}
-# Return: (return {:count 5 :items ["a" "b"]})
-
-# Behavior:
-# 1. Validate count is int
-# 2. Validate items is list of strings
-# 3. Mission succeeds
-
-# If validation fails, error is fed back to LLM for self-correction
-```
-
-### Coercion Rules
-
-Lenient coercion for inputs (LLMs sometimes quote numbers):
-
-| From | To | Behavior |
-|------|----|----------|
-| `"42"` | `:int` | `42` (with warning) |
-| `"3.14"` | `:float` | `3.14` (with warning) |
-| `"true"` | `:bool` | `true` (with warning) |
-| `42` | `:float` | `42.0` (silent) |
-
-Output validation is **strict** - no coercion applied.
-
-## Error Messages
-
-Validation errors include paths for precise debugging:
-
-```
-Tool validation errors:
-- results.0.customer.id: expected int, got string
-- results.2.amount: expected float, got nil
-
-Tool validation warnings:
-- limit: coerced string "10" to integer
-```
-
-Errors are fed back to the LLM for self-correction.
-
----
-
-## String Keys at Tool Boundary
-
-**Important:** When tools receive arguments from LLM-generated code, all map keys are **strings**, not atoms. This matches JSON conventions and prevents atom memory leaks.
-
-```elixir
-# WRONG - pattern matching on atom keys will NOT work
-def search(%{query: query, limit: limit}) do
-  # ...
-end
-
-# CORRECT - use string keys
-def search(%{"query" => query, "limit" => limit}) do
-  # ...
-end
-```
-
-### Why String Keys?
-
-1. **JSON compatibility** - JSON only has string keys; atom keys don't survive serialization
-2. **Memory safety** - LLM-generated atoms could exhaust the atom table
-3. **Consistency** - Same convention as Phoenix params from HTTP requests
-
-### Nested Maps
-
-String keys apply **recursively** to all nested maps:
-
-```elixir
-# Given signature: (user {profile {name :string}}) -> :bool
-
-# Tool receives this structure:
-%{
-  "user" => %{
-    "profile" => %{
-      "name" => "Alice"
-    }
-  }
+```text
+(path :string, cursor :string?) -> {
+  items [:string],
+  next_cursor :string?,
+  snapshot_hash :string
 }
-
-# NOT this:
-%{user: %{profile: %{name: "Alice"}}}  # WRONG - atoms
 ```
 
-### Key Normalization
-
-Hyphens in keys are automatically converted to underscores at the boundary:
-
-```elixir
-# LLM sends: {:user-name "Alice" :created-at "2024-01-01"}
-# Tool receives: %{"user_name" => "Alice", "created_at" => "2024-01-01"}
-```
-
-This allows idiomatic Lisp (kebab-case) while providing idiomatic Elixir (snake_case).
-
----
-
-## Type Mapping from @spec
-
-When auto-extracting from Elixir specs:
-
-| Elixir Type | Maps To |
-|-------------|---------|
-| `String.t()` | `:string` |
-| `integer()` | `:int` |
-| `float()` | `:float` |
-| `boolean()` | `:bool` |
-| `atom()` | `:keyword` |
-| `map()` | `:map` |
-| `list(t)` | `[:t]` |
-| `%{key: type}` | `{:key :type}` |
-
-Types that require explicit signatures:
-- `pid()`, `reference()` - No JSON equivalent
-- Complex unions - most `a | b` unions fall back to `:any` (though `{:ok, t} | {:error, term}` and `t | nil` are auto-mapped)
-- Custom `@type` definitions
-
----
-
-## Template Placeholders
-
-Every `{{placeholder}}` in a prompt must match a signature input:
-
-```elixir
-prompt: "Find emails for {{user.name}} about {{topic}}"
-signature: "(user {name :string}, topic :string) -> {count :int}"
-```
-
-Validation happens at registration time, not runtime.
-
-| Placeholder | Valid? | Notes |
-|-------------|--------|-------|
-| `{{name}}` | Yes | Simple variable |
-| `{{user.name}}` | Yes | Nested access |
-| `{{user.address.city}}` | Yes | Deep nesting allowed |
-| `{{user-name}}` | Yes | Hyphens allowed in names |
-| `{{user_name}}` | Yes | Underscores allowed |
-| `{{123}}` | No | Names must start with letter |
-| `{{}}` | No | Empty placeholder invalid |
-| `{{ name }}` | Yes | Whitespace trimmed |
-
----
-
-## Calling Tools from PTC-Lisp
-
-Tool calls in PTC-Lisp **always use named arguments** — never positional. The signature parameters become the keys in a map literal:
+The corresponding PTC-Lisp wrapper can call a granted capability and return
+only the declared shape:
 
 ```clojure
-;; Signature: (query :string, limit :int) -> [{id :int}]
-
-;; CORRECT — map literal with named keys
-(tool/search {:query "budget" :limit 10})
-
-;; CORRECT — keyword-style (equivalent, no braces)
-(tool/search :query "budget" :limit 10)
-
-;; WRONG — positional arguments
-(tool/search "budget" 10)
+(defn read-page
+  {:signature "(path :string, cursor :string?) -> :any"}
+  [path cursor]
+  (tool/workspace.read
+    (if cursor {"path" path "cursor" cursor} {"path" path})))
 ```
 
-This is a common LLM mistake, especially with **single-parameter tools**:
+A signature documents and validates a capability; it does not grant one. The
+operator must still install the tool and the application must select it for the
+mission.
 
-```clojure
-;; Signature: (url :string) -> {text :string}
+## Prompt schemas
 
-;; CORRECT
-(tool/fetch_page {:url "https://example.com"})
+PtcRunner projects signatures into the model-visible tool schema. The schema
+contains the parameter names, nested collection and map shapes, required and
+optional fields, and descriptions supplied by the component. Runtime validation
+remains authoritative even when a provider performs its own structured-output
+validation.
 
-;; WRONG — passing the string directly
-(tool/fetch_page "https://example.com")
+Keep contracts small enough that a model can act on the feedback:
+
+- page large collections instead of returning an unbounded list;
+- use explicit nested fields instead of `:any` where the shape is stable;
+- describe units and bounds in the function documentation; and
+- return an opaque cursor rather than exposing provider state.
+
+## Grammar summary
+
+```text
+signature     = output | "(" [parameters] ")" "->" output
+parameters    = parameter {"," parameter}
+parameter     = name type
+type          = primitive ["?"] | list ["?"] | map ["?"]
+primitive     = ":string" | ":int" | ":float" | ":bool"
+              | ":keyword" | ":datetime" | ":map" | ":any"
+list          = "[" type "]"
+map           = "{" [field {"," field}] "}"
+field         = name type
 ```
 
-**No-argument tools** are called with an empty map or no arguments:
+Nesting is bounded by the signature parser and the runtime's public-value
+limits. Empty typed maps and lists are valid. Future-looking enum, union, or
+refinement syntax is not part of the current grammar.
 
-```clojure
-;; Signature: () -> {count :int}
-(tool/get_count {})
-(tool/get_count)
-```
-
-### Why Named Arguments?
-
-- **Self-documenting** — `{:query "budget" :limit 10}` is clearer than `"budget" 10`
-- **Order-independent** — Parameters can appear in any order
-- **Extensible** — Adding optional parameters doesn't break existing calls
-- **JSON-compatible** — Maps serialize naturally to JSON objects at the tool boundary
-
----
-
-## Schema Generation for Prompts
-
-Tool schemas are rendered in the LLM prompt using signature syntax:
-
-```
-## Tools you can call
-
-search(query :string, limit :int) -> [{id :int, title :string}]
-  Search for items matching query.
-
-get_user(id :int) -> {name :string, email :string?}
-  Fetch user by ID. Email may be null.
-```
-
----
-
-## Syntax Summary
-
-```
-Primitives:
-  :string :int :float :bool :keyword :any
-
-Lists:
-  [:int]                          # list of integers
-  [:string]                       # list of strings
-  [{id :int, name :string}]       # list of maps
-
-Maps:
-  {id :int, name :string}         # map with required fields
-  :map                            # any map (dynamic keys)
-
-Optional (? suffix):
-  {id :int, email :string?}       # email is optional
-
-Nested:
-  {user {id :int, address {city :string, zip :string}}}
-
-Full signature:
-  (param1 :type, param2 :type) -> output_type
-
-Shorthand (no inputs):
-  {count :int}                    # same as () -> {count :int}
-```
-
----
-
-## Edge Cases
-
-### Valid Edge Cases
-
-| Signature | Valid? | Meaning |
-|-----------|--------|---------|
-| `":any"` | Yes | Any output, no validation |
-| `"() -> :any"` | Yes | Same as above |
-| `"{}"` | Yes | Empty map (must be a map, but no required fields) |
-| `"[]"` | No | Invalid - list of what? Use `[:any]` |
-| `"[:any]"` | Yes | List of anything |
-| `"[{}]"` | Yes | List of empty maps |
-| `""` | No | Invalid - empty string is not a valid signature |
-
-### Nesting Depth
-
-There is no hard limit on nesting depth, but deeply nested types should be avoided for readability:
-
-```
-# Valid but not recommended
-{user {profile {settings {theme {colors {primary :string}}}}}}
-
-# Prefer flatter structures or use :map for deep nesting
-{user {profile :map}}
-```
-
-### Type Coercion in Nested Structures
-
-Coercion applies recursively to nested types:
-
-```elixir
-# Signature: [{id :int, name :string}]
-# Input: [%{"id" => "42", "name" => "Alice"}]
-# Result: [%{"id" => 42, "name" => "Alice"}] (with coercion warning for id)
-```
-
----
-
-## Future Considerations
-
-### Enums (v2+)
-
-If enum types are needed, extend the shorthand syntax:
-
-```
-(status :enum[pending active closed]) -> {ok :bool}
-```
-
-### Union Types (v2+)
-
-If union types are needed:
-
-```
-(value :string|:int) -> {result :any}
-```
-
-### Refinements (v2+)
-
-If value constraints are needed:
-
-```
-(page :int[>0], limit :int[1..100]) -> [{id :int}]
-```
-
-These extensions should be added only when genuine use cases emerge.
-
----
-
-## See Also
-
-- [PTC-Lisp specification](ptc-lisp-specification.md)
-- [Function reference](function-reference.md)
-- `PtcRunner.Lisp.Signature`
+See [Components and preludes](reference/component-contracts.md) for where
+contracts live, the [PTC-Lisp specification](ptc-lisp-specification.md) for
+public component semantics, and the [function reference](function-reference.md)
+for the shipped callable surface.

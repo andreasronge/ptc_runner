@@ -1,275 +1,226 @@
 # PtcRunner
 
-PtcRunner lets an LLM write a small program to solve a task, then runs that
-program with only the tools you allow.
+**Build AI agents that are bounded in what they can do, easy to change,
+observable in operation, and designed to improve from evidence.**
 
-This pattern is often called **code mode**: instead of relaying one tool call at
-a time through the model, the model writes code that calls several tools,
-transforms their results, branches, and loops. That cuts round trips and keeps
-intermediate data out of the context window. The usual catch is that you are now
-executing model-written code.
+Today, agents usually choose between two extremes. They either call tools one
+at a time, paying a model round trip and adding context for every step, or use a
+full coding environment and an external sandbox for more complex work.
+PtcRunner provides the missing middle: it lets a model write a small, bounded
+program that calls several approved tools, processes their results, and returns
+only what matters.
 
-PtcRunner's answer is that the code is written in a language that cannot do
-anything dangerous in the first place.
+You normally do not write that program. You provide the task, model, approved
+tools, data, limits, and agent components. The model writes the mission program;
+PtcRunner executes it and records what happened.
 
 > PtcRunner is a 0.x project under active development. Breaking changes are
 > expected.
 
 ## Try it
 
-From the repository root:
+The public one-command installer and published container image are not available
+yet. The command interface is stable enough to try today through a locally built
+standalone executable or the verified local container. See
+[Availability](#availability) before choosing a route.
+
+Once `ptc` is installed, create and run a credential-free project:
 
 ```console
-mix deps.get
-mix ptc init hello-ptc
-mix ptc run hello-ptc/ptc-project.json
+ptc init hello-ptc
+ptc run hello-ptc/ptc-project.json
 ```
 
 ```json
 {}
 ```
 
-The generated project is provider-free: it runs immediately, records a trace,
-and remembers its Viewer settings. See
-[Project configuration](docs/guides/project-configuration.md) for the
-single-file workflow, or [Quickstart](docs/guides/quickstart.md) to get a model
-writing the program.
+This verifies the executable and creates a structured trace without contacting
+a model. The same `ptc run` command drives agentic projects.
 
-## Why it is safe
+### Run a model-authored program
 
-Most code-mode implementations generate Python or JavaScript and put a container
-or microVM around it, because those languages can do anything and the sandbox
-has to take it all back. PtcRunner inverts that: the boundary is the language
-and the capability grant, and a container is optional defense in depth rather
-than the thing holding the line.
+The repository includes a self-contained agent example that needs one model
+credential but no Python, JavaScript, or separate sandbox:
 
-```mermaid
-flowchart TB
-  op["Operator host document<br/>installs providers, credentials, ceilings"]
-  mf["Project manifest<br/>selects installed names and narrows limits<br/>cannot grant authority"]
-
-  subgraph WF["Workflow environment — trusted"]
-    wp["chooses the task, model, and retry policy"]
-  end
-
-  subgraph MS["Mission environment — confined"]
-    mp["runs model-authored PTC-Lisp<br/>task tools only — no model, no re-entry"]
-  end
-
-  op ==>|grants| WF
-  op ==>|grants| MS
-  mf -.->|selects| WF
-  mf -.->|selects| MS
-  WF -->|prompt| model(["LLM"])
-  model -->|"PTC-Lisp program (untrusted)"| MS
+```console
+git clone --depth 1 https://github.com/andreasronge/ptc_runner.git
+cd ptc_runner
+cp .env.example examples/kernel-tutorial/.env
+chmod 600 examples/kernel-tutorial/.env
 ```
 
-Authority flows one way: the operator grants it, the project may only select
-and narrow it, and generated code runs in the environment that was given the
-least. The mission returns a bounded value to the workflow, which decides
-whether to continue.
+Add your `OPENROUTER_API_KEY` to that exact `.env` file, then run:
 
-- **The language has no escape hatches.** PTC-Lisp is a small, eager subset of
-  Clojure. There is no `eval`, no macros, no host interop, no lazy or infinite
-  sequences, and no ambient filesystem, network, or process access. Generated
-  code cannot reach anything that was not handed to it.
-- **Model-written code runs with less authority than the code that called it.**
-  A run has two environments. The trusted *workflow* may call a model; the
-  *mission* that executes generated code gets only the narrow task tools the
-  host installed and the manifest selected. Mission code cannot call the model
-  capability and cannot re-enter the evaluation boundary.
-- **Applications cannot grant themselves authority.** A project's JSON manifest
-  selects installed provider names and may narrow them. It cannot name an
-  executable, endpoint, credential, or host callback, or raise a ceiling. Only
-  the separate operator-owned host document installs those.
-- **External tools arrive through exactly one door.** MCP is the only way to
-  give a project a tool — there is no plugin API and no code to register. The
-  runtime pins the final `2026-07-28` protocol, speaks it over stdio or
-  streamable HTTP, and maps each upstream tool to a public name and read/write
-  effect the operator chooses. A manifest selecting a write-bearing
-  installation must explicitly allow its chosen tools; it supplies no
-  connection details and no credentials. Streamable HTTP supports
-  credential-free, static-authentication, and explicit principal-scoped OAuth
-  installations; authorization completes before a run and never causes an
-  automatic tool-call replay.
-- **Every run is bounded, and enforced rather than requested.** Deadlines, heap,
-  tool-call counts, result sizes, and event budgets are held by the runtime.
-  The BEAM gives each evaluation its own heap and monitors, so a limit breach
-  kills the evaluation and cleans up its resources instead of being politely
-  asked to stop.
+```console
+ptc run examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
+```
 
-Because isolation is a BEAM process rather than an OS process, it is cheap
-enough to do for every evaluation.
+```json
+{"ok":true,"value":42}
+```
 
-Treat the workflow bundle and manifest as your application code. Treat
-model-generated source, tool output, and file content as untrusted data.
+The example gives the shipped agent loop a task. The model writes and evaluates
+a bounded program over two turns, then returns the final value. You do not need
+to read or edit the generated program to use the agent.
 
-## How it works
+If you prefer Docker, the repository can build and verify the current local
+image before running the same project:
+
+```console
+./scripts/build_container_image.sh ptc:dev
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  --env HOME=/tmp \
+  --volume "$PWD:/work" \
+  ptc:dev \
+  run /work/examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
+```
+
+Matching the container process to the host user lets it read the owner-only
+credential file and write project artifacts without making either world-readable.
+The image is local development scaffolding, not a published distribution image.
+
+## The agentic workflow
 
 ```text
-task
-  -> workflow: choose the prompt and retry policy
-  -> model: write one PTC-Lisp program
-  -> mission: run it with the allowed task tools
-  -> result, usage, and trace
+task + data + approved tools + limits
+                  |
+                  v
+       model writes a small program
+                  |
+                  v
+  PtcRunner executes it with only those capabilities
+                  |
+                  v
+          result + structured trace
 ```
 
-A project is some PTC-Lisp files plus a small JSON manifest naming the entry
-function, input, providers, and limits. The runtime owns credentials, tool
-implementations, timeouts, memory limits, and cleanup.
+This approach is often called programmatic tool use or **code mode**. A mission
+program can call several tools, filter or join their results, branch, and loop
+inside one bounded evaluation. Intermediate data stays out of the model context
+unless the program deliberately returns it.
 
-Three JSON documents keep those responsibilities separate:
+Internally, model-authored programs use PTC-Lisp, a small purpose-built language
+for bounded data processing and tool calling. Application authors normally
+select the shipped agent components and configure them; writing PTC-Lisp is an
+advanced customization option, not an onboarding requirement.
 
-| File | Owner | Purpose |
-| --- | --- | --- |
-| `ptc.json` | Application author or model | Workflow, components, input, provider selections, and narrower limits |
-| `ptc-host.json` | Operator | Installed providers, credential references, commands, endpoints, and outer limits |
-| `ptc-project.json` | Operator or project checkout | Stable paths, local artifact policy, and Viewer preferences |
+## Constrain
 
-A failed program is useful rather than fatal: definitions from successful turns
-stay available, failed attempts roll back cleanly, and the model gets a bounded
-correction message instead of a stack trace.
+Generated mission code has no ambient access to the filesystem, network,
+processes, a shell, package installation, or a general-purpose host language.
+It can create an external effect only through a capability that the operator
+installed and the application selected for that mission.
 
-## Swap the agent loop
+That distinction is important: if you explicitly grant a filesystem or network
+tool, the tool can perform its declared effect. The mission still receives no
+broader access than the granted interface.
 
-The shipped loop is ordinary PTC-Lisp rather than fixed runtime behavior. After
-the first model run, [Building agents](docs/guides/building-agents.md) shows how
-to use it, separate workflow and mission authority, and replace prompt policy
-without changing the trusted host.
+The runtime enforces deadlines, memory, tool-call counts, result sizes, and
+event budgets. Application configuration may select installed capabilities and
+narrow their limits, but cannot add credentials, endpoints, commands, or raise
+an operator ceiling.
 
-## See what happened
+Containers remain useful for deployment and defense in depth. PtcRunner does
+not depend on a container to make an unrestricted language safe; the language,
+capability grant, and enforced limits form the primary boundary.
 
-Every run emits structured events: outcomes, errors, tool use, evaluations,
-limits, and resource use. They deliberately contain no prompts, model responses,
-tool payloads, or generated source.
+## Compose
 
-Analyzing them is itself a bounded run. The shipped `analysis` prelude exposes
-three navigation operations—`runs`, `open`, and `read`—over one frozen evidence
-capture. `read` pages the public `activity` collection or, with explicit private
-authority, collections such as reconstructed turns, model exchanges, generated
-source, and execution errors. Neither analysis profile gains filesystem,
-network, model, or nested-evaluation authority.
+The shipped agent loop is a useful default library, not behavior hard-coded
+into the runtime. Most applications configure that loop. When the application
+needs something different, you can replace:
 
-When you need the exact prompt and the exact generated code, that is a separate
-opt-in artifact written with owner-only permissions, kept out of normal trace
-discovery, and never joined into ordinary query results. `ptc viewer
-PROJECT.json` opens a local, loopback-bound, read-only web UI for browsing
-those runs.
+- system, task, and correction prompts;
+- retry, continuation, and completion policy;
+- model and tool selection;
+- mission data and execution limits;
+- sequential, parallel, or specialist composition; or
+- the complete agent loop.
 
-## Evaluate a change
+The Kernel continues to enforce capability and resource boundaries while the
+agent layer evolves. This separation makes PtcRunner a meta-harness: teams can
+change the framework around a model without rebuilding the trusted execution
+boundary.
 
-Two pieces make it possible to test a change to agent behavior instead of
-guessing:
+See [Building agents](docs/guides/building-agents.md) for the shipped loop and
+[Components and preludes](docs/guides/components-and-preludes.md) for deeper
+customization.
 
-- **Candidate components.** A trusted host step can compile one already-selected
-  component from replacement source, verifying both the hash of the candidate
-  and the hash of the base it was derived from before anything reaches the
-  compiler. A manifest cannot request one and a generated program cannot observe
-  one.
-- **A frozen model.** A replay provider serves recorded responses keyed by a
-  hash of the provider-neutral request, so a behavioural difference between a
-  baseline run and a candidate run is attributable to the candidate rather than
-  to model drift. It is selected by the same manifest grammar as a live model,
-  so nothing about the application changes between them.
+## Observe
 
-Promotion stays an explicit human decision today; turning trace evidence into
-promoted preludes automatically is future work. The important property holds
-either way: a candidate can change how existing tools are used, but cannot grant
-itself new tools or credentials.
+Every run produces a canonical structured trace containing outcomes, errors,
+tool activity, evaluations, enforced limits, and resource usage. Prompts, model
+responses, generated source, and tool payloads are sensitive, so they are kept
+out of the public trace. They can be retained separately through explicit
+private inspection.
+
+Open a project's runs in the local read-only Viewer:
+
+```console
+ptc viewer PROJECT.json
+```
+
+PtcRunner can also analyze its own immutable run evidence through a bounded
+analysis profile. The analysis receives a frozen evidence capture rather than
+ambient access to the artifact directory:
+
+```console
+ptc repl --project PROJECT.json --profile run-analysis-v1
+```
+
+See [Running and debugging](docs/guides/running-and-debugging.md) for the normal
+run-to-trace workflow and [Debug a failed run](docs/guides/debugging-a-failed-run.md)
+for evidence-guided diagnosis.
+
+## Improve
+
+Reliable improvement needs evidence, not anecdotes. PtcRunner can:
+
+- analyze successful and failed runs with the same bounded execution model;
+- replay recorded model responses so model drift is not confused with a prompt
+  or framework change;
+- evaluate a hash-checked candidate prelude without installing it; and
+- compare results, traces, usage, and limit behavior before promotion.
+
+Together these are the foundation for controlled self-improvement loops. A
+workflow can use prior runs to propose better prompts, policies, or preludes,
+then evaluate them against frozen evidence. Promotion remains an explicit
+decision rather than an automatic mutation of the running system.
+
+Start with [Evaluate changes with replay](docs/guides/evaluating-with-replay.md).
 
 ## Availability
 
-The product runs from a source checkout with Elixir and Mix or as a locally
-built runtime-included release. The release does not need Erlang or Elixir on
-the target machine.
-
-| Installation | Status | Interface |
+| Route | Status | Command |
 | --- | --- | --- |
-| Source checkout with Mix | Available | `mix ptc run`, `mix ptc repl` |
-| Hex dependency for Elixir applications | Next 0.x release | Mix tasks and `PtcRunner.Kernel` |
-| Local runtime-included release | Available from source | `_build/prod/rel/ptc_runner/bin/ptc` |
-| Signed packages and container images | Planned | The same `ptc` command and runtime contract |
+| [Standalone executable](docs/installation/standalone.md) | Buildable and verified locally | `ptc` |
+| [Local container](docs/installation/docker.md) | Buildable and verified locally | `docker run ... ptc:dev` |
+| Public one-command installer | Planned | `ptc` |
+| Published container image | Planned | `docker run ...` |
 
-## Guides
+The runtime-included standalone executable does not require a separate language
+runtime on the target machine. The local container is built and tested by
+`scripts/build_container_image.sh`; it is deliberately not presented as a
+published image.
 
-Read these in order. Each one owns its topic and links onward.
+## Documentation
 
-1. [Quickstart](docs/guides/quickstart.md) — the shortest path from a clone to a
-   live model writing and running a program.
-2. [Getting started](docs/guides/getting-started.md) — inspect the generated
-   files, run a data workflow, and read its result, trace, and REPL state.
-3. [Building agents](docs/guides/building-agents.md) — start with the shipped
-   loop, then separate workflow and mission authority and replace prompt policy.
-4. [Connecting tools with MCP](docs/guides/connecting-tools-with-mcp.md) — map
-   external tools into narrow model-visible capabilities.
-5. [Manifests and capabilities](docs/guides/manifests-and-capabilities.md) —
-   assemble components, data, providers, limits, contracts, and event policy.
-6. [Host configuration](docs/guides/host-configuration.md) — install provider
-   aliases, credentials, data classes, and outer policy.
-7. [Running and debugging](docs/guides/running-and-debugging.md) — the
-   commands, results, traces, private inspection, and the Viewer.
-8. [Debug a failed run](docs/guides/debugging-a-failed-run.md) — navigate one
-   immutable failed capture from another PTC run, through typed evidence links.
-9. [Evaluate changes with replay](docs/guides/evaluating-with-replay.md) — hold
-   model responses fixed while testing candidate component source.
-
-### Going further
-
-- [Kernel REPL](docs/guides/kernel-repl.md) — complete interactive session
-  modes, JSON Lines output, and private inspection analysis.
-- [Components and preludes](docs/guides/components-and-preludes.md) —
-  namespaces, dependencies, exports, signatures, and tool requirements for
-  reusable PTC-Lisp libraries.
-- [Agent library reference](docs/agent-library-reference.md) — exact entry
-  functions, options, turn protocol, feedback, and retry rules for the shipped
-  `agent.core` and `agent.main` libraries.
-- [Embedding in Elixir](docs/guides/embedding-in-elixir.md) — drive the same
-  Kernel directly from a host application instead of the command line.
-
-### Examples
-
-Runnable projects live under
-[`examples/kernel-tutorial/`](https://github.com/andreasronge/ptc_runner/tree/main/examples/kernel-tutorial),
-[`examples/kernel-inspection-lab/`](https://github.com/andreasronge/ptc_runner/tree/main/examples/kernel-inspection-lab),
-and
-[`examples/named-mission-reader-writer/`](https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer).
-
-### Reference
-
-[PTC-Lisp specification](docs/ptc-lisp-specification.md),
-[function reference](docs/function-reference.md),
-[shipped prelude reference](docs/prelude-reference.md),
-[signature syntax](docs/signature-syntax.md),
-[Kernel limits](docs/kernel-limits-reference.md),
-[TraceLog contract](docs/trace-log-contract.md), and the
-[conformance report](docs/conformance/index.md).
-
-### Maintainers
-
-For changing PtcRunner rather than using it:
-[Kernel maintainer guide](docs/guides/kernel-maintainer.md),
-[coding agent review workflow](docs/guides/coding-agent-review-workflow.md),
-[duplication gate](docs/guides/duplication-gate.md), and
-[documentation guidelines](docs/guides/documentation-guidelines.md).
-
-## Development
-
-```console
-mise install
-mix deps.get
-(cd ptc_viewer && mix deps.get)
-(cd ptc_runner_launcher && mix deps.get)
-mix precommit
-git push
-```
-
-Install hooks once per clone with `./scripts/install-hooks.sh`; linked
-worktrees share them. The tracked pre-push hook runs the complete push gate,
-using the same repository-owned scripts as GitHub Actions, and validates
-documentation before longer stages. Run `mix prepush` directly only to diagnose
-its static and Dialyzer scripts or when hooks are unavailable. The core test
-script sets `CI=1` while retaining the project's scheduler-count ExUnit
-concurrency, so property and load-sensitive failures remain visible locally.
+- [Installation](docs/installation/standalone.md) — current standalone, Docker,
+  and source routes with their exact availability.
+- [Quickstart](docs/guides/quickstart.md) — configure a model and run the first
+  model-authored program.
+- [Building agents](docs/guides/building-agents.md) — configure or replace the
+  shipped agent loop.
+- [Connecting tools with MCP](docs/guides/connecting-tools-with-mcp.md) — grant
+  narrowly mapped external tools.
+- [Running and debugging](docs/guides/running-and-debugging.md) — inspect
+  results, traces, diagnostics, and private evidence.
+- [PTC-Lisp specification](docs/ptc-lisp-specification.md) — optional language
+  reference for custom components and model-generated programs.
+- [Maintainer setup](https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/development-setup.md)
+  — change the runtime itself and run its repository gates.
 
 ## License
 

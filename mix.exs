@@ -97,13 +97,15 @@ defmodule PtcRunner.MixProject do
   defp elixirc_paths(:dev), do: ["lib", "dev"]
   defp elixirc_paths(_), do: ["lib"]
 
-  # Generated dependency rules in AGENTS.md. Link bulky rules rather than
-  # inlining them so the repo's own instructions stay readable.
+  # Generated dependency rules in AGENTS.md. Inline the short instructions
+  # that tell agents how to consult dependency documentation, but link the
+  # bulky language and runtime rules so the repository instructions stay
+  # readable.
   defp usage_rules do
     [
       file: "AGENTS.md",
       usage_rules: [
-        {:usage_rules, link: :markdown, sub_rules: []},
+        {:usage_rules, sub_rules: []},
         {"usage_rules:elixir", link: :markdown, main: false},
         {"usage_rules:otp", link: :markdown, main: false}
       ]
@@ -345,7 +347,7 @@ defmodule PtcRunner.MixProject do
   defp docs do
     [
       main: "readme",
-      assets: %{"docs/guides/assets" => "assets"},
+      assets: %{"docs/maintainers/assets" => "assets"},
       before_closing_body_tag: &before_closing_body_tag/1,
       groups_for_modules: [
         Kernel: [
@@ -445,19 +447,33 @@ defmodule PtcRunner.MixProject do
           "docs/guides/evaluating-with-replay.md",
           "docs/guides/kernel-repl.md",
           "docs/guides/components-and-preludes.md",
-          "docs/guides/embedding-in-elixir.md",
-          "docs/guides/coding-agent-review-workflow.md",
-          "docs/guides/duplication-gate.md",
-          "docs/guides/documentation-guidelines.md",
-          "docs/guides/kernel-maintainer.md"
+          "docs/guides/using-models.md",
+          "docs/installation/standalone.md",
+          "docs/installation/docker.md",
+          "docs/installation/source.md",
+          "docs/reference/application-manifest.md",
+          "docs/reference/host-installation.md",
+          "docs/reference/project-files.md",
+          "docs/reference/component-contracts.md",
+          "docs/reference/mcp.md",
+          "docs/reference/cli.md",
+          "docs/reference/repl.md",
+          "docs/reference/debug-navigation.md",
+          "docs/maintainers/embedding.md",
+          "docs/maintainers/coding-agent-review.md",
+          "docs/maintainers/duplication-gate.md",
+          "docs/maintainers/documentation.md",
+          "docs/maintainers/signature-integration.md",
+          "docs/maintainers/kernel.md"
         ] ++ Path.wildcard("docs/conformance/*-audit.md"),
       groups_for_extras: [
         Maintainers:
-          ~r/docs\/guides\/(coding-agent-review-workflow|documentation-guidelines|duplication-gate|kernel-maintainer)\.md/,
+          ~r/docs\/maintainers\/(coding-agent-review|documentation|duplication-gate|embedding|kernel|signature-integration)\.md/,
+        Installation: ~r/docs\/installation\/.+\.md/,
         Contracts: ~r/docs\/trace-log-contract\.md/,
         Guides: ~r/docs\/guides\/.+\.md/,
         Reference:
-          ~r/docs\/(agent-library|ptc-lisp|clojure|function-reference|java-|kernel-limits|prelude-|signature-).+\.md/,
+          ~r/docs\/(?:reference\/.+|(?:agent-library|ptc-lisp|clojure|function-reference|java-|kernel-limits|prelude-|signature-).+)\.md/,
         Conformance: ~r/docs\/conformance\/.+\.md/
       ]
     ]
@@ -466,7 +482,7 @@ defmodule PtcRunner.MixProject do
   defp package do
     [
       files:
-        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay examples/mcp/filesystem examples/mcp/writer examples/debug-a-failed-run .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
+        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay examples/mcp/filesystem examples/mcp/writer examples/debug-a-failed-run .formatter.exs mix.exs README.md usage-rules.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",

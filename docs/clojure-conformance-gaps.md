@@ -1080,7 +1080,7 @@ keyword lookup can return a string-keyed value, which can mask a data-shape
 mismatch at a map boundary — guard explicitly when exact-key semantics matter.
 This value model takes precedence over Clojure-compat where they conflict.
 When a map contains both a keyword key and its string alias, flexible lookup
-still prefers the exact key. Public Elixir projection preserves both entries
+still prefers the exact key. Public host projection preserves both entries
 with inert collision wrappers rather than choosing one during externalization;
 JSON-facing Kernel boundaries reject the ambiguity with
 `:public_projection_collision`.
@@ -2719,7 +2719,7 @@ intentional silent dedupe of
 [DIV-06](#div-06-silent-deduplication-of-computed-duplicate-keys-in-mapset-literals).
 Keyword/string flex-collisions from
 [DIV-47](#div-47-flexible-keywordstring-key-access-keynormalizer) remain
-distinct runtime keys and are preserved by public Elixir projection.
+distinct runtime keys and are preserved by public host projection.
 The map-literal evaluator was also changed to keep the **last** colliding value
 (was first) for collisions that surface at map *construction* — i.e. distinct
 forms that evaluate to the same key, like `{:a 1 (keyword "a") 9} ;=> {:a 9}` —
@@ -2727,7 +2727,7 @@ so `{}`, `hash-map`, and `array-map` all agree with Clojure there.
 
 Keyword/string *flex*-collisions
 ([DIV-47](#div-47-flexible-keywordstring-key-access-keynormalizer)) are a
-separate case: the keys stay distinct at construction and in public Elixir
+separate case: the keys stay distinct at construction and in public host
 results. If both keys share one display or JSON representation, inert wrappers
 preserve both entries for direct observation and strict Kernel boundaries
 reject the ambiguous collection. The read-time form check and the
@@ -4384,7 +4384,7 @@ Clojure, yielding the partial final group rather than raising.
 ```
 
 **Decision:** BUG. These are Clojure-named helpers on normal finite data.
-PTC-Lisp appears to pass negative counts into Elixir slicing behavior, which
+PTC-Lisp appears to pass negative counts into host slicing behavior, which
 returns plausible but wrong slices instead of Clojure's boundary results.
 
 ### GAP-S33: `apply` rejects nil or string final argument sequences

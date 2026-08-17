@@ -1,5 +1,7 @@
 # PTC-Lisp Conformance Review Program
 
+> **Audience:** maintainers planning and reviewing PTC-Lisp conformance work.
+
 This is the standing, hand-edited methodology and backlog for the repeatable
 PTC-Lisp Clojure-conformance review. It defines how we classify behavioral
 differences, the order in which we work through namespaces, and the future
@@ -8,12 +10,12 @@ probe phases that are not yet built.
 This document is **not** a findings log and **not** a coverage report. Those
 live elsewhere and must not be duplicated here:
 
-- **Findings sink** — [`docs/clojure-conformance-gaps.md`](../clojure-conformance-gaps.md)
+- **Findings sink** — [`docs/clojure-conformance-gaps.md`](../../clojure-conformance-gaps.md)
   holds every canonical `GAP-*` (bug) and `DIV-*` (intentional divergence)
   record, with Clojure behavior, PTC behavior, rationale, and linked test ids.
-- **Classification log** — [`docs/conformance-classification-log.md`](../conformance-classification-log.md)
+- **Classification log** — [`docs/maintainers/conformance/classification-log.md`](classification-log.md)
   records classification decisions as they are made.
-- **Coverage dashboard** — [`docs/conformance/index.md`](./index.md) is the
+- **Coverage dashboard** — [`docs/conformance/index.md`](../../conformance/index.md) is the
   per-namespace coverage dashboard. It is **auto-generated** by
   `mix ptc.gen_docs`; never hand-edit it. The same applies to every
   `docs/conformance/*-audit.md` file.

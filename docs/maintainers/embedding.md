@@ -1,5 +1,8 @@
 # Embedding PtcRunner in Elixir
 
+> **Audience:** package integrators and PtcRunner maintainers working with the
+> host API or source-checkout tooling.
+
 Use the Elixir API when an application needs custom providers, an HTTP or job
 frontend, application-owned configuration, or integration with an existing
 supervision tree. PTC-Lisp authors can normally use manifests and `mix ptc`
@@ -145,7 +148,7 @@ deployment data.
 by the bounded names a manifest may select. Register a builder only when the
 built-in host installation sources cannot express the authority; ordinary
 models, MCP servers, snapshots, traces, inspection sources, and replay belong
-in [Host configuration](host-configuration.md).
+in [Host configuration](../guides/host-configuration.md).
 
 Builders receive a path-free application digest, target environment, owner,
 effective limits, and installed ceilings. They return bounded capabilities,
@@ -191,12 +194,36 @@ Embedding should not move prompts, model-turn logic, retries, delegation, or
 task orchestration into Elixir. Keep those policies in PTC-Lisp unless the code
 establishes native authority or enforces the sandbox boundary.
 
+## Materialize candidate source
+
+The standalone executable can evaluate a candidate descriptor but does not
+create one. In a source checkout, materialize model-authored source with:
+
+```console
+mix ptc.materialize ptc.json \
+  --workflow \
+  --component my.helper \
+  --out private/candidate \
+  --source authored.clj \
+  --origin-run-id run-2026-08-03-0001
+```
+
+Select exactly one target with `--workflow` or `--target-mission NAME`.
+Candidate source comes from `--source`, or from one string selected with
+`--from-result PATH --result-pointer POINTER`. The new directory and both files
+are owner-only and never replace an existing path.
+
+The task re-acquires the candidate through its descriptor, verifies compilation
+and prompt-visible contracts, and compares reachable effects with the base.
+Effect widening requires `--accept-widened-effect`. The task creates evidence;
+it never installs the candidate or acquires a provider.
+
 ## Next steps
 
-- [Manifests and capabilities](manifests-and-capabilities.md) defines the
+- [Manifests and capabilities](../guides/manifests-and-capabilities.md) defines the
   strict manifest contract used by `RunBuilder`.
-- [Host configuration](host-configuration.md) defines provider installations.
-- [Running and debugging](running-and-debugging.md) covers trace and inspection
+- [Host configuration](../guides/host-configuration.md) defines provider installations.
+- [Running and debugging](../guides/running-and-debugging.md) covers trace and inspection
   artifacts.
-- [Kernel maintainer](kernel-maintainer.md) maps ownership, lifecycle, and
+- [Kernel maintainer](kernel.md) maps ownership, lifecycle, and
   extension points. Exact API contracts live with the public modules.

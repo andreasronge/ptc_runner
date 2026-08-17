@@ -148,7 +148,7 @@ back.
 Agent options do not raise Kernel limits. Source size, subordinate evaluations,
 provider calls, memory, results, events, parallel work, and the run deadline
 remain bounded independently. See
-[Manifests and capabilities](guides/manifests-and-capabilities.md#narrow-installed-limits).
+[Application-manifest reference](reference/application-manifest.md#narrow-installed-limits).
 
 ## Turn and transcript protocol
 

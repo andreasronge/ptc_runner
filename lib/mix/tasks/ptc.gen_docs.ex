@@ -193,11 +193,11 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     | --- | --- | --- | ---: | ---: | --- |
     #{installed_rows}
 
-    ## Related guides
+    ## Related documentation
 
-    - [Manifests and capabilities](guides/manifests-and-capabilities.md#narrow-installed-limits) explains application narrowing.
-    - [Host configuration](guides/host-configuration.md#set-installed-ceilings) explains outer installed policy.
-    - [Building agents](guides/building-agents.md#configure-the-loop) distinguishes agent-loop options from Kernel limits.
+    - [Application-manifest reference](reference/application-manifest.md#narrow-installed-limits) explains application narrowing.
+    - [Host-configuration reference](reference/host-installation.md#set-installed-ceilings) explains outer installed policy.
+    - [Building agents](guides/building-agents.md) distinguishes agent-loop options from Kernel limits.
     """
 
     write_or_check!(@limit_reference_path, content, check?)
