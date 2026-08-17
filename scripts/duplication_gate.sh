@@ -6,7 +6,7 @@
 #   scripts/duplication_gate.sh check   # CI / mix precommit
 #   scripts/duplication_gate.sh bless   # record the current set as accepted
 #
-# See docs/guides/duplication-gate.md for when to bless versus suppress.
+# See docs/maintainers/duplication-gate.md for when to bless versus suppress.
 
 set -euo pipefail
 

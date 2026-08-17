@@ -1,5 +1,8 @@
 # Conformance Fix Classification Log
 
+> **Audience:** maintainers classifying and implementing PTC-Lisp conformance
+> work.
+
 Per-GAP classification notes, written **before coding** each gap (see the
 workflow in the agent goal / `docs/clojure-conformance-gaps.md`). One entry per
 gap, in the prescribed format:

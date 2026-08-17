@@ -158,7 +158,7 @@ demonstrated demand and is tracked in the
 - [Stable CLI and application-source contract](stable-cli-contract.md) —
   implementation plan for the machine protocol, validation order, commands,
   and filesystem-independent application packages.
-- [Kernel maintainer guide](../../guides/kernel-maintainer.md) — implemented
+- [Kernel maintainer guide](../../maintainers/kernel.md) — implemented
   authority, lifecycle, ownership, and code map.
 - [Manifests and capabilities](../../guides/manifests-and-capabilities.md) —
   current host installation, manifest, classification, and contract behavior.

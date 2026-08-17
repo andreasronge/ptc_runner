@@ -1,5 +1,8 @@
 # Releasing `ptc_runner`
 
+> **Audience:** maintainers publishing the source package and standalone
+> releases.
+
 Root releases use `v*` tags and publish the single `ptc_runner` Hex package.
 
 From a clean branch merged to `main`, update the version in `mix.exs` and add a

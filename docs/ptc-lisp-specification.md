@@ -398,7 +398,7 @@ Key-value associations:
   its name string before either native or JSON result handling. The Kernel
   rejects projection collisions rather than silently choosing between a
   keyword and string with the same name. Native projection can retain other
-  non-JSON values; JSON projection rejects them. `mix ptc run` always selects
+  non-JSON values; JSON projection rejects them. `ptc run` always selects
   JSON projection, whether or not it publishes a result artifact.
 - **Tool-call arguments:** keys are recursively normalized to strings (e.g.
   `1` → `"1"`, `[:a :b]` → its inspected form). A projection collision or an
@@ -1578,7 +1578,7 @@ Keyword accessors (`(:status m)`, `(get m :status)`, `(get-in m [:a :b])`) and t
 - As a final fallback, hyphens in the key name are normalized to underscores and retried (so `:turn-summaries` matches a `:turn_summaries` or `"turn_summaries"` key)
 
 ```clojure
-;; Atom keys (preferred Elixir style)
+;; Atom keys (host-map style)
 (filter (fn [u] (= (:status u) "active")) users)
 
 ;; Works with string-keyed data from JSON APIs
@@ -3079,7 +3079,7 @@ results
 Programs evaluated through `PtcRunner.Lisp.run/2` return captured `println`
 output in the result's `prints` list:
 
-```elixir
+```text
 # Result of Lisp.run(...)
 {:ok, %PtcRunner.Lisp.Result{
   return: [...],
@@ -3132,7 +3132,7 @@ Native execution and continuation memory retain validated wrappers:
 - Date stores one signed Java long epoch-millisecond value.
 
 The runtime str function emits Java-compatible canonical text. Diagnostic
-formatting uses inert class-labelled forms rather than exposing Elixir struct
+formatting uses inert class-labelled forms rather than exposing host struct
 fields. Public and Kernel results recursively project the wrappers to strings:
 ISO local date, Java Instant text, Java Duration text, and a UTC instant derived
 from exact Date milliseconds.
@@ -3373,13 +3373,13 @@ Invoke registered tools using the `tool/` namespace:
 ```
 
 **Tool boundary contract:**
-- PTC-Lisp keywords (`:foo`) become **string keys** at the Elixir boundary
+- PTC-Lisp keywords (`:foo`) become **string keys** at the host boundary
 - Tools always receive string-keyed maps: `%{"key" => value}`
 - This matches JSON conventions and prevents atom memory leaks
 - Tool authors pattern match on string keys: `def run(%{"query" => q}, _ctx)`
 
 **Tool behavior:**
-- Tools are Elixir functions registered by the host
+- Tools are registered host callbacks
 - Tools may have side effects (external API calls, database queries)
 - Tool errors propagate as execution errors
 - Tool calls are logged for auditing
@@ -3908,7 +3908,7 @@ and complete in any order, while their result vectors retain input order.
 `{:error, %PtcRunner.Lisp.Result{}}` on failure. The public failure is in the
 result's `fail` field:
 
-```elixir
+```text
 {:error,
  %PtcRunner.Lisp.Result{
    return: nil,
@@ -3957,7 +3957,7 @@ identify the phase as `:setup`; evaluation-phase failures identify `:eval`.
 | `:unsupported_pattern` | Unsupported destructuring/binding pattern |
 | `:unsupported_method` | Unknown Java-interop method |
 | `:invalid_keyword` | A supplied or returned keyword wrapper is malformed or its name is outside the reader's keyword grammar |
-| `:invalid_lisp_list` | A supplied public value contains an improper Elixir list, which cannot represent a PTC-Lisp vector |
+| `:invalid_lisp_list` | A supplied public value contains an improper host list, which cannot represent a PTC-Lisp vector |
 | `:invalid_symbol_ref` | A supplied or returned symbol-reference wrapper is malformed or its name is outside the reader's symbol grammar |
 | `:symbol_ref_collision` | Distinct public/native symbol-reference values collapse to the same map key or set member |
 | `:timeout` | Setup or execution time exceeded (`fail.details.phase` identifies the phase) |
@@ -4250,7 +4250,7 @@ commit.
 
 Direct callers supply the environment through `PtcRunner.Lisp.run/2` options:
 
-```elixir
+```text
 PtcRunner.Lisp.run(source,
   memory: %{high_paid: employees, query_count: 5},
   turn_history: [previous_result],
@@ -4540,7 +4540,7 @@ ceiling.
 `PtcRunner.Lisp.run/2` returns bounded evaluation diagnostics in
 `PtcRunner.Lisp.Result`:
 
-```elixir
+```text
 %PtcRunner.Lisp.Result{
   return: value,
   fail: nil,
@@ -4585,7 +4585,7 @@ On limit violation:
 Failures retain a machine-readable reason, bounded message, and structured
 details:
 
-```elixir
+```text
 {:error,
  %PtcRunner.Lisp.Result{
    return: nil,
@@ -4690,7 +4690,7 @@ For examples that cannot be automatically validated, use these markers:
 
 ### Running Validation
 
-```elixir
+```text
 # Validate all examples
 {:ok, results} = PtcRunner.Lisp.SpecValidator.validate_spec()
 

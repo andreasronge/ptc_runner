@@ -1,9 +1,13 @@
 # Kernel maintainer guide
 
-**Audience: people changing PtcRunner itself.** Application authors should use
-the [Quickstart](quickstart.md), [manifest guide](manifests-and-capabilities.md),
-[host configuration](host-configuration.md), [agent guide](building-agents.md),
-and [Kernel REPL guide](kernel-repl.md).
+> **Audience:** people changing PtcRunner itself.
+
+Application authors should use
+the [Quickstart](../guides/quickstart.md),
+[manifest guide](../guides/manifests-and-capabilities.md),
+[host configuration](../guides/host-configuration.md),
+[agent guide](../guides/building-agents.md), and
+[Kernel REPL guide](../guides/kernel-repl.md).
 
 This guide is an architectural map. Exact fields, return values, limits, state
 transitions, and error atoms belong in the owning `PtcRunner.Kernel.*` or
@@ -209,7 +213,7 @@ filtering.
 Components may call public exports in their direct declared dependencies.
 Evaluated source can call every public export in the resolved bundle, including
 `:discoverable` exports omitted from prompts. Review every new dependency edge
-as a callable-surface change. [Components and preludes](components-and-preludes.md)
+as a callable-surface change. [Components and preludes](../guides/components-and-preludes.md)
 has the author-facing rules.
 
 `MissionInventory` owns the deterministic structured and prompt-facing mission
@@ -309,7 +313,7 @@ event model.
 The catalog has no implicit providers. CLI commands receive aliases from the
 strict host document; embedding code constructs an explicit catalog. Exact
 installation fields and source types belong in
-[Host configuration](host-configuration.md).
+[Host configuration](../guides/host-configuration.md).
 
 `ProviderDescriptor` and `SelectionRules` own inert declarations.
 `ProviderRegistry`, `ProviderActiveSession`, `ProviderAcquisition`, and

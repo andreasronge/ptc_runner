@@ -51,9 +51,9 @@ defmodule PtcRunner.GitHooks.PrePushTest do
   end
 
   @tag :slow
-  test "annotated quickstart changes run documentation and core gates" do
+  test "annotated maintainer example changes run documentation and core gates" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
-      git_repo_with_change("docs/guides/quickstart.md")
+      git_repo_with_change("docs/maintainers/development-setup.md")
 
     {output, status} = run_hook(repo, path)
 
@@ -67,7 +67,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
   @tag :slow
   test "removing the final annotation still runs documentation and core gates" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
-      git_repo_with_guide_marker_removed("docs/guides/quickstart.md")
+      git_repo_with_guide_marker_removed("docs/maintainers/development-setup.md")
 
     {output, status} = run_hook(repo, path)
 
@@ -78,9 +78,9 @@ defmodule PtcRunner.GitHooks.PrePushTest do
   end
 
   @tag :slow
-  test "deleting a registered guide still runs documentation and core gates" do
+  test "deleting a registered page still runs documentation and core gates" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
-      git_repo_with_deleted_file("docs/guides/quickstart.md")
+      git_repo_with_deleted_file("docs/maintainers/development-setup.md")
 
     {output, status} = run_hook(repo, path)
 
@@ -94,8 +94,8 @@ defmodule PtcRunner.GitHooks.PrePushTest do
   test "non-canonical executable-guide entries fail safe to every gate" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_changes(
-        ["docs/guides/quickstart.md"],
-        registry: "./docs/guides/quickstart.md\n"
+        ["docs/maintainers/development-setup.md"],
+        registry: "./docs/maintainers/development-setup.md\n"
       )
 
     {output, status} = run_hook(repo, path)
@@ -431,7 +431,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     File.write!(full_path, contents)
   end
 
-  defp fixture_contents("docs/guides/quickstart.md", state),
+  defp fixture_contents("docs/maintainers/development-setup.md", state),
     do: "<!-- ptc-guide-e2e: id=fixture -->\n#{state}\n"
 
   defp fixture_contents(_path, state), do: "#{state}\n"

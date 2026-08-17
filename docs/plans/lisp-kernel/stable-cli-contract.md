@@ -5,7 +5,7 @@ standalone REPL, envelope publication, human rendering, and package verification
 are complete. This plan retains only distribution work that has not landed.
 
 Implemented architecture belongs in the
-[Kernel maintainer guide](../../guides/kernel-maintainer.md), current behavior in
+[Kernel maintainer guide](../../maintainers/kernel.md), current behavior in
 [Running and debugging](../../guides/running-and-debugging.md), and the machine
 contract in
 [`ptc-command-envelope-v2.schema.json`](../../../priv/schemas/ptc-command-envelope-v2.schema.json).
@@ -121,7 +121,7 @@ Publication of that image requires its own increment, which must first fix
 what "publish" means for it: registry and image name, tag and immutable-digest
 scheme, the base image pinned by digest, the relationship between build and
 runtime architecture, and how provenance is attached and verified — the same
-questions `docs/RELEASING.md` already answers for launcher assets.
+questions `docs/maintainers/releasing.md` already answers for launcher assets.
 
 Remaining after this increment: macOS x86_64, both Linux architectures as
 published images, the launcher companion inside the image, and the

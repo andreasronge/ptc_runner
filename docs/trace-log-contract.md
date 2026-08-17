@@ -2,7 +2,7 @@
 
 **Status:** implemented retained product contract, including the local 0.x
 inspection increment. Complements the
-[Kernel maintainer guide](guides/kernel-maintainer.md) and
+[Kernel maintainer guide](maintainers/kernel.md) and
 `PtcRunner.Kernel.TraceLog` module documentation.
 
 ## Purpose and boundary
@@ -28,7 +28,7 @@ workflow execution. Consumers do not invent competing event representations.
 
 PtcRunner keeps four observability concerns separate:
 
-- Elixir `Logger`, backed by OTP `:logger`, reports sparse operational
+- the host logger, reports sparse operational
   diagnostics such as unexpected host failures and degraded optional services.
 - `:telemetry` reports low-cardinality measurements for embedders and host
   monitoring. It is not an event store or an authorization boundary.
@@ -187,7 +187,7 @@ in the same owner process that holds its continuation and quotas, under a
 separate token. The active mutating session trace is never queryable from that
 session. The Viewer publishes into its host-configured input directory, so a
 later refreshed Viewer session captures the directory again and can query its
-predecessor. A terminal `mix ptc repl` session instead publishes into a
+predecessor. A terminal `ptc repl` session instead publishes into a
 physically separate host-selected or private temporary directory and never
 mutates its captured input tree. The builder binds the accepted output
 directory's filesystem identity into `SessionTrace`; atomic publication

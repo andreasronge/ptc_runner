@@ -1,3 +1,1 @@
-docs/guides/quickstart.md
-docs/guides/getting-started.md
-docs/guides/evaluating-with-replay.md
+docs/maintainers/development-setup.md

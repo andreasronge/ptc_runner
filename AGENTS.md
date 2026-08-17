@@ -6,8 +6,8 @@ file, so Claude Code and Codex read the same rules. Edit only this file.
 PtcRunner is a BEAM-native Elixir runtime for Programmatic Tool Calling (PTC):
 hosts compile immutable PTC-Lisp bundles, assemble explicit workflow and
 mission environments, and execute them through a bounded owner-based Kernel.
-Key docs: Kernel architecture in `docs/guides/kernel-maintainer.md`,
-documentation guidance in `docs/guides/documentation-guidelines.md`, language
+Key docs: Kernel architecture in `docs/maintainers/kernel.md`,
+documentation guidance in `docs/maintainers/documentation.md`, language
 reference in `docs/ptc-lisp-specification.md`, and built-ins in
 `docs/function-reference.md`.
 
@@ -15,7 +15,7 @@ To debug the runtime itself (not a manifest under it) — query canonical
 traces or private inspection records (model exchanges, generated source,
 capability payloads) non-interactively — use `mix ptc repl --profile
 private-run-analysis-v1 --private-unattended`. See ["Private analysis without a
-terminal"](docs/guides/kernel-repl.md#private-analysis-without-a-terminal).
+terminal"](docs/reference/repl.md#private-analysis-without-a-terminal).
 
 ## Working Style
 
@@ -28,14 +28,14 @@ missing without evidence from the source files. When you find a problem, fix
 the code and the docs together.
 
 When independent Codex review is required, follow the focused
-[coding-agent review workflow](docs/guides/coding-agent-review-workflow.md); do
+[coding-agent review workflow](docs/maintainers/coding-agent-review.md); do
 not cold-review byte-identical trees more than once.
 
 Do not copy a helper into a second module to avoid an import. For the root
 project, `mix precommit` fails on duplication that is not already in
 `.duplication-baseline.json`; extract the shared logic, or suppress it with a
 reason when the repetition is deliberate. See the
-[duplication gate](docs/guides/duplication-gate.md).
+[duplication gate](docs/maintainers/duplication-gate.md).
 
 Code documentation must not link to `docs/plans/`; plans are disposable. Move
 durable contracts into module docs, guides, or retained specifications first.
@@ -91,7 +91,7 @@ how it was verified.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`).
   Optional MCP tests skip unless their endpoint, binary, and token
   prerequisites are configured as described in the
-  [development setup guide](docs/development-setup.md). The comparatively
+  [development setup guide](docs/maintainers/development-setup.md). The comparatively
   expensive live tutorial probes use `:scheduled_e2e` instead and run only in
   scheduled or manually dispatched Integration workflows.
 - `mix nightly` — the `:nightly` tests, excluded from `mix test` by default.
@@ -123,7 +123,7 @@ a rebuildable cache. Run it before creating a new one.
 
 Setting up a fresh clone or worktree — toolchain, dependencies, git hooks,
 Dialyzer PLT, and the local MCP E2E server — is covered once in the
-[development setup guide](docs/development-setup.md). Two rules from it
+[development setup guide](docs/maintainers/development-setup.md). Two rules from it
 that bite mid-task: never regenerate `priv/semantic_build_projection.json` on a
 feature branch, and never hand-merge its hashes.
 
@@ -190,7 +190,50 @@ must be generic and not overlap existing domains unless asked.
 ## usage_rules usage
 _A config-driven dev tool for Elixir projects to manage AGENTS.md files and agent skills from dependencies_
 
-[usage_rules usage rules](deps/usage_rules/usage-rules.md)
+## Using Usage Rules
+
+Many packages have usage rules, which you should *thoroughly* consult before taking any
+action. These usage rules contain guidelines and rules *directly from the package authors*.
+They are your best source of knowledge for making decisions.
+
+## Modules & functions in the current app and dependencies
+
+When looking for docs for modules & functions that are dependencies of the current project,
+or for Elixir itself, use `mix usage_rules.docs`
+
+```
+# Search a whole module
+mix usage_rules.docs Enum
+
+# Search a specific function
+mix usage_rules.docs Enum.zip
+
+# Search a specific function & arity
+mix usage_rules.docs Enum.zip/1
+```
+
+
+## Searching Documentation
+
+You should also consult the documentation of any tools you are using, early and often. The best
+way to accomplish this is to use the `usage_rules.search_docs` mix task. Once you have
+found what you are looking for, use the links in the search results to get more detail. For example:
+
+```
+# Search docs for all packages in the current application, including Elixir
+mix usage_rules.search_docs Enum.zip
+
+# Search docs for specific packages
+mix usage_rules.search_docs Req.get -p req
+
+# Search docs for multi-word queries
+mix usage_rules.search_docs "making requests" -p req
+
+# Search only in titles (useful for finding specific functions/modules)
+mix usage_rules.search_docs "Enum.zip" --query-by title
+```
+
+
 <!-- usage_rules-end -->
 <!-- usage_rules:elixir-start -->
 ## usage_rules:elixir usage

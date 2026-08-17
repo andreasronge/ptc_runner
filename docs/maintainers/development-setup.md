@@ -1,5 +1,8 @@
 # Development setup
 
+> **Audience:** people and coding agents preparing a source checkout to change
+> PtcRunner itself.
+
 One-time and per-worktree setup for working on PtcRunner itself. Day-to-day
 rules live in `AGENTS.md`; this guide holds the parts you run once and then
 forget.
@@ -141,7 +144,7 @@ go -C test/support/mcp_go_stateless build \
 
 This server speaks plain HTTP, so a host document reaching it needs
 `"allow_insecure_loopback": true` on the transport. See
-[reaching a local server over plain HTTP](guides/connecting-tools-with-mcp.md#reach-a-local-server-over-plain-http)
+[reaching a local server over plain HTTP](../reference/mcp.md#reach-a-local-server-over-plain-http)
 for the rule and a `doctor --connect` baseline.
 
 The credential-free interoperability test runs as a dedicated PR check and can
@@ -179,6 +182,38 @@ pull requests. Run those probes directly with:
 mix test test/quickstart_guide_test.exs \
   test/ptc_runner/kernel/tutorial_examples_e2e_test.exs \
   --include scheduled_e2e
+```
+
+The quickstart's model-backed project is also an executable documentation
+probe. It uses the source-checkout frontend while exercising the same project
+document and command behavior shown to executable users:
+
+These source-checkout probes are the maintainer equivalents of the standalone
+`ptc` commands in the end-user guides:
+
+<!-- ptc-guide-e2e: id=getting-started-orders project=examples/kernel-tutorial/01-orders.ptc-project.json -->
+```console
+mix ptc run examples/kernel-tutorial/01-orders.ptc-project.json
+```
+```json
+{"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}
+```
+
+<!-- ptc-guide-e2e: id=replay-frozen-answer -->
+```console
+mix ptc run examples/llm-replay/ptc.json \
+  --host-config examples/llm-replay/ptc-host.json
+```
+```json
+{"content":"Frozen answer"}
+```
+
+<!-- ptc-guide-e2e: id=quickstart-live-agent project=examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json requires=OPENROUTER_API_KEY assert=two-turn-agent -->
+```console
+mix ptc run examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
+```
+```json
+{"ok":true,"value":42}
 ```
 
 Missing MCP prerequisites are reported as skips, so a checkout configured only

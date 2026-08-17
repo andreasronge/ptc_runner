@@ -50,8 +50,8 @@ These operational timeouts belong only to the host document. A manifest cannot d
 | `provider_cleanup_timeout_ms` | Kernel-owned provider cleanup after execution. | milliseconds | 5,000 | 100–30,000 | yes |
 | `selection_validation_timeout_ms` | Active validation of selected provider declarations. | milliseconds | 5,000 | 100–30,000 | yes |
 
-## Related guides
+## Related documentation
 
-- [Manifests and capabilities](guides/manifests-and-capabilities.md#narrow-installed-limits) explains application narrowing.
-- [Host configuration](guides/host-configuration.md#set-installed-ceilings) explains outer installed policy.
-- [Building agents](guides/building-agents.md#configure-the-loop) distinguishes agent-loop options from Kernel limits.
+- [Application-manifest reference](reference/application-manifest.md#narrow-installed-limits) explains application narrowing.
+- [Host-configuration reference](reference/host-installation.md#set-installed-ceilings) explains outer installed policy.
+- [Building agents](guides/building-agents.md) distinguishes agent-loop options from Kernel limits.

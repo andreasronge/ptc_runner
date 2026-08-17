@@ -1,6 +1,8 @@
 # Documentation guidelines
 
-**Audience: people changing PtcRunner itself.** Use this guide when writing
+> **Audience:** people changing PtcRunner itself.
+
+Use this guide when writing
 module documentation, guides, specifications, and plans in this repository.
 `AGENTS.md` remains the canonical repository instruction file.
 
@@ -8,11 +10,17 @@ module documentation, guides, specifications, and plans in this repository.
 
 - **Module documentation** describes the implemented public API: purpose,
   arguments, return values, errors, ownership, lifecycle, and examples.
-- **Guides** explain implemented architecture and user or maintainer workflows.
-- **Reference pages** inventory exhaustive implemented fields, options, exports,
-  tables, or configuration. Use one when those details would interrupt a
-  guide. The [agent library reference](../agent-library-reference.md) is an
-  example.
+- **Installation pages** describe one supported distribution route, its
+  prerequisites, verification, and platform-specific security properties.
+- **Guides** are short end-user workflows that accomplish one outcome. They
+  show one useful path and link to reference pages for exhaustive detail.
+- **Reference pages** inventory exhaustive implemented fields, commands,
+  options, exports, tables, schemas, or configuration. Use one when those
+  details would interrupt a guide. The
+  [agent library reference](../agent-library-reference.md) is an example.
+- **Maintainer pages** explain repository architecture, implementation APIs,
+  local gates, conformance work, and release procedures. They live only under
+  `docs/maintainers/`.
 - **Specifications** define normative language or runtime behavior.
 - **Plans** describe unimplemented direction, tradeoffs, non-goals, triggers,
   and acceptance gates. Always label planned behavior as planned.
@@ -21,9 +29,11 @@ A reference describes the complete current surface; a specification defines
 what conforming implementations must do. A page is not normative merely
 because it is exhaustive.
 
-`mix.exs` defines the pages published by ExDoc. It includes user guides and
-maintainer architecture/gate guides. Checkout-only instructions, including
-`docs/development-setup.md` and `docs/RELEASING.md`, stay outside `extras`.
+`mix.exs` defines the pages published by ExDoc. It includes installation pages,
+user guides, retained references, and selected maintainer architecture/gate
+guides. Checkout-only instructions, including
+`docs/maintainers/development-setup.md` and
+`docs/maintainers/releasing.md`, stay outside `extras`.
 Published pages may name those paths as text, but must not create links that
 would dangle on HexDocs.
 
@@ -32,6 +42,17 @@ guide and into the owning module docs or a retained reference page. Do not copy
 field tables, limits, or state machines between layers. Do not present
 speculative APIs as current behavior. Git history already records removed 0.x
 designs.
+
+Public prose in `README.md`, `docs/guides/`, and `docs/reference/` describes
+the executable, JSON documents, PTC-Lisp boundary, capabilities, limits, and
+artifacts without explaining behavior through the implementation language.
+Implementation-language guidance belongs in installation pages when a source
+build requires it, API/module documentation, the package `usage-rules.md`, or
+`docs/maintainers/`.
+
+Every hand-written installation page, guide, reference, and maintainer page
+starts with a visible audience statement. Generated references instead name
+their owning catalog or schema and warn against direct edits.
 
 Code documentation must not link to `docs/plans/` or other disposable planning
 records. Before implementation lands, move durable contracts into owning module
@@ -85,7 +106,7 @@ Markdown uses the file macro:
 ```elixir
 defmodule PtcRunner.DocumentationGuidelinesTest do
   use ExUnit.Case, async: true
-  doctest_file("docs/guides/documentation-guidelines.md")
+  doctest_file("docs/maintainers/documentation.md")
 end
 ```
 
@@ -124,7 +145,7 @@ evaluations, and the committed continuation in the command envelope. Keep
 setup, cleanup, secrets, and nondeterministic assertions in the test harness;
 the visible block must remain useful when pasted by a reader. Because routing
 comes from the registry rather than current file contents, removing the final
-annotation or deleting a registered guide still runs both documentation and
+annotation or deleting a registered page still runs both documentation and
 core test gates.
 
 Add `project=path/to/ptc-project.json` when the visible command runs a shipped
