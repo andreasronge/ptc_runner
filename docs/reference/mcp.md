@@ -43,6 +43,26 @@ profile, despite starting and serving legacy clients normally. The checked-in
 filesystem example listed above implements the required profile and is the
 deterministic baseline for this reference.
 
+A cold `npx` launch can spend more than the manifest's default one-second
+evaluation budget before that protocol response arrives. To reproduce the
+compatibility diagnosis, give both the application operation and the stdio
+startup enough time:
+
+```json
+{"limits": {"evaluation_timeout_ms": 20000}}
+```
+
+In `ptc-host.json`, inside the stdio transport:
+
+```json
+{"start_timeout_ms": 15000}
+```
+
+The application limit is the outer budget. Raising only
+`start_timeout_ms` cannot widen it; if the outer budget expires first, the
+closed result is `provider_unavailable` because PtcRunner never received the
+response needed to prove a protocol mismatch.
+
 ## Run the checked-in file agent
 
 The tutorial server is a committed JavaScript bundle. It requires Node.js 22 or
@@ -182,9 +202,11 @@ Streamable HTTP names a remote endpoint and optional static authentication:
 
 The endpoint must be `https`, with one narrow exception for local development
 described below. It is checked when the document loads, not when the server is
-contacted, so a malformed or plain-`http` endpoint fails `ptc validate` and
-plain `ptc doctor` as `installation_endpoint_invalid` naming the
-installation — before anything is dialled.
+contacted, so a malformed endpoint fails as `installation_endpoint_invalid`.
+The rejected plain-HTTP and loopback-allowance combinations use clause-specific
+codes that state whether the allowance, a literal loopback address, removal of
+the allowance, or HTTPS for configured credentials is required. Every form
+names the installation before anything is dialled.
 
 When direct endpoint acquisition does dial the server, `ptc run` and
 `ptc doctor --connect` distinguish three closed connection failures:
@@ -353,9 +375,6 @@ $ ptc run ptc.json --host-config ptc-host.json
  "value":{"text":["The current time in New York City is 2026-08-16T07:07:52-04:00"]}}
 ```
 
-When a real remote installation will not connect, diff its host document
-against this one.
-
 That is the baseline to diff a real host document against when a remote
 installation will not connect.
 
@@ -364,6 +383,58 @@ installation will not connect.
 OAuth replaces static `auth` with host-owned policy that pins the resource,
 issuer, client, scope ceiling, refresh policy, loopback authority, and permitted
 network origins. The application and server cannot widen them.
+
+This is a complete pre-registered installation. Replace the endpoint, issuer,
+resource, client ID, scopes, and tool mapping with values issued for your
+server:
+
+```json
+{
+  "install": {
+    "workspace": {
+      "source": "mcp",
+      "installation_revision": "workspace-oauth-v1",
+      "transport": {
+        "type": "streamable_http",
+        "endpoint": "https://mcp.example.com/mcp",
+        "oauth": {
+          "installation_id": "workspace-oauth",
+          "issuer": "https://auth.example.com",
+          "resource": "https://mcp.example.com/mcp",
+          "scope_ceiling": ["tools.read", "offline_access"],
+          "default_scopes": ["tools.read"],
+          "refresh_access": "when_supported",
+          "network": {
+            "additional_origins": [],
+            "private_network_origins": []
+          },
+          "client": {
+            "registration": "pre_registered",
+            "client_id": "ptc-workspace",
+            "token_endpoint_auth_method": "none",
+            "grant_types": ["authorization_code", "refresh_token"],
+            "loopback_redirect": {
+              "host": "127.0.0.1",
+              "path": "/callback"
+            }
+          }
+        }
+      },
+      "ceilings": {"timeout_ms": 30000},
+      "tools": {
+        "cityTime": {"as": "workspace.city_time", "effect": "read"}
+      }
+    }
+  }
+}
+```
+
+OAuth MCP endpoints must use `https`. The plaintext-loopback allowance is
+credential-free and cannot be combined with an `oauth` block. PtcRunner also
+does not accept a custom CA path in the host document: use a certificate trusted
+by the runtime's operating-system trust store. The repository E2E harness is a
+test-only exception; it loads an ephemeral CA directly into the test VM before
+exercising this exact host-document and command path.
 
 Interactive authorization is currently available only from a source checkout:
 

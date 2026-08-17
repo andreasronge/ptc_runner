@@ -72,6 +72,7 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
 
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
 
   # `:mcp_remote_error` is an answered case — a JSON-RPC error at discovery — and
   # sits here rather than with the protocol reasons because a refused discovery
@@ -167,8 +168,12 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   def diagnostic(:mcp_protocol_version_unsupported, occurrence),
     do: acquisition_diagnostic(:provider_protocol_version_unsupported, occurrence)
 
-  def diagnostic(:mcp_mapped_tool_missing, occurrence),
-    do: acquisition_diagnostic(:provider_tool_missing, occurrence)
+  def diagnostic({:mcp_mapped_tool_missing, name}, occurrence) do
+    case MCPAcquisitionDiagnostic.missing_tool_message(name) do
+      {:ok, message} -> acquisition_diagnostic(:provider_tool_missing, occurrence, message)
+      :error -> internal_diagnostic()
+    end
+  end
 
   def diagnostic(reason, occurrence) when reason in @protocol_reasons,
     do: acquisition_diagnostic(:provider_protocol_error, occurrence)
@@ -209,15 +214,17 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
 
   def diagnostic(_reason, _occurrence), do: internal_diagnostic()
 
-  defp acquisition_diagnostic(code, occurrence),
-    do: subject_diagnostic(:provider_acquisition, code, :acquisition, occurrence)
+  defp acquisition_diagnostic(code, occurrence, message \\ nil),
+    do: subject_diagnostic(:provider_acquisition, code, :acquisition, occurrence, message)
 
-  defp subject_diagnostic(phase, code, operation, occurrence) do
+  defp subject_diagnostic(phase, code, operation, occurrence, message \\ nil) do
     site = %{destination: occurrence.destination, index: occurrence.index}
 
     case CommandSubject.provider(occurrence.provider, operation, site) do
       {:ok, subject} ->
-        CommandDiagnostic.new!(phase, code, subject: subject, provider_activity: true)
+        opts = [subject: subject, provider_activity: true]
+        opts = if is_binary(message), do: Keyword.put(opts, :message, message), else: opts
+        CommandDiagnostic.new!(phase, code, opts)
 
       {:error, _reason} ->
         internal_diagnostic()

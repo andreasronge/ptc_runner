@@ -1784,7 +1784,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert outcome.envelope["error"]["phase"] == "provider_acquisition"
     assert outcome.envelope["error"]["code"] == "provider_tool_missing"
-    assert outcome.envelope["error"]["message"] =~ "does not expose a declared tool"
+
+    assert outcome.envelope["error"]["message"] ==
+             ~s(the installed endpoint does not expose declared tool "structuredMissing")
 
     assert %{"status" => "fail", "code" => "provider_tool_missing"} =
              Enum.find(
@@ -1793,6 +1795,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              )
 
     assert File.read!(marker) =~ "tools/list"
+    refute outcome.envelope["error"]["message"] =~ "it exposes"
     assert_schema_valid(outcome.envelope)
   end
 

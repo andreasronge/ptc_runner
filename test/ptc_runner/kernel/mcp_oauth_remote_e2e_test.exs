@@ -8,17 +8,22 @@ defmodule PtcRunner.Kernel.MCPOAuthRemoteE2ETest do
   The deterministic credential-free Go harness serves discovery,
   authorization, S256-bound code exchange, short-lived tokens, rotating
   refresh tokens, and the protected independently maintained MCP protocol
-  implementation over a real literal-loopback HTTP boundary.
+  implementation over a real literal-loopback HTTPS boundary.
   """
 
   @moduletag :e2e
   @moduletag timeout: 120_000
 
-  unless System.get_env("PTC_TEST_MCP_OAUTH") == "1" do
-    @moduletag skip: "requires the OAuth-enabled Go MCP harness"
+  unless System.get_env("PTC_TEST_MCP_OAUTH") == "1" and
+           System.get_env("PTC_TEST_MCP_TLS") == "1" do
+    @moduletag skip: "requires the OAuth- and TLS-enabled Go MCP harness"
   end
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.CommandEngine
+  alias PtcRunner.Kernel.CommandEntry
+  alias PtcRunner.Kernel.CommandOutcome
+  alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
@@ -35,8 +40,52 @@ defmodule PtcRunner.Kernel.MCPOAuthRemoteE2ETest do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
 
+  setup_all do
+    ca_file = System.fetch_env!("PTC_TEST_MCP_CA_FILE")
+    assert :ok = :public_key.cacerts_load(String.to_charlist(ca_file))
+    on_exit(fn -> :public_key.cacerts_clear() end)
+    :ok
+  end
+
+  @tag :tmp_dir
+  test "a host document authorizes and runs through the Mix command boundary", %{tmp_dir: dir} do
+    endpoint = System.fetch_env!("PTC_TEST_MCP_2026_ENDPOINT")
+    assert URI.parse(endpoint).scheme == "https"
+
+    {application, host} = write_command_fixture(dir, endpoint)
+    parent = self()
+
+    assert {:ok, runtime} =
+             CommandRuntime.new(
+               provider_application_mode: :host_owned,
+               authorization_targets: ["workspace"],
+               authorization_notifier: &visit_remote_authorization(parent, &1)
+             )
+
+    assert {:ok, entry} =
+             CommandEntry.open(
+               ["run", application, "--host-config", host, "--authorize-mcp", "workspace"],
+               :mix
+             )
+
+    assert {:ok, %CommandOutcome{} = outcome, nil} =
+             CommandEngine.dispatch_frontend_entry(entry, runtime)
+
+    assert outcome.envelope["status"] == "ok"
+    assert outcome.envelope["execution"]["outcome"] == "ok"
+    assert_receive {:authorization_notice, authorization_url}, 5_000
+    assert URI.parse(authorization_url).scheme == "https"
+
+    assert %{"outcome" => "returned", "value" => value} =
+             outcome.envelope["result"]["value"]
+
+    assert %{"status" => "ok", "value" => %{"text" => [entry | _]}} = value
+    assert is_binary(entry) and entry != ""
+  end
+
   test "an explicitly authorized bearer crosses the real MCP protocol boundary" do
     endpoint = System.fetch_env!("PTC_TEST_MCP_2026_ENDPOINT")
+    starting_stats = oauth_stats(endpoint)
     authority = authority(endpoint)
 
     {:ok, memory} = Memory.start(owner: self())
@@ -112,9 +161,7 @@ defmodule PtcRunner.Kernel.MCPOAuthRemoteE2ETest do
 
     builder =
       MCPSource.builder(
-        transport:
-          {:streamable_http,
-           endpoint: endpoint, authorization: manager, allow_insecure_loopback: true},
+        transport: {:streamable_http, endpoint: endpoint, authorization: manager},
         tools: %{"cityTime" => %{as: "time.city", effect: :read}},
         timeout_ms: 30_000,
         max_result_bytes: 500_000
@@ -179,20 +226,13 @@ defmodule PtcRunner.Kernel.MCPOAuthRemoteE2ETest do
     assert String.to_integer(rotated_generation) > 1
     assert :ok = TokenManager.release(manager, issued.admission, deadline_ms)
 
-    assert {:ok, %{status: 200, body: stats_body}} =
-             MCPHTTPAdapter.request(
-               method: :get,
-               url: endpoint <> "/oauth/stats",
-               timeout_ms: 5_000
-             )
-
-    stats = Jason.decode!(stats_body)
-    assert stats["authorization"] == 1
-    assert stats["code_exchange"] == 1
-    assert stats["refresh"] > 0
-    assert stats["mcp_calls"] > 0
+    stats = oauth_stats(endpoint)
+    assert stats["authorization"] == starting_stats["authorization"] + 1
+    assert stats["code_exchange"] == starting_stats["code_exchange"] + 1
+    assert stats["refresh"] > starting_stats["refresh"]
+    assert stats["mcp_calls"] > starting_stats["mcp_calls"]
     assert stats["directed"] == 1
-    assert stats["fallback"] > 0
+    assert stats["fallback"] > starting_stats["fallback"]
   end
 
   defp authority(endpoint) do
@@ -223,9 +263,143 @@ defmodule PtcRunner.Kernel.MCPOAuthRemoteE2ETest do
         },
         endpoint,
         MapSet.new(),
-        allow_insecure_loopback: true
+        allow_insecure_loopback: false
       )
 
     authority
+  end
+
+  defp oauth_stats(endpoint) do
+    assert {:ok, %{status: 200, body: body}} =
+             MCPHTTPAdapter.request(
+               method: :get,
+               url: endpoint <> "/oauth/stats",
+               timeout_ms: 5_000
+             )
+
+    Jason.decode!(body)
+  end
+
+  defp write_command_fixture(dir, endpoint) do
+    host = Path.join(dir, "ptc-host.json")
+    application = Path.join(dir, "ptc.json")
+
+    File.write!(
+      host,
+      Jason.encode!(%{
+        "install" => %{
+          "workspace" => %{
+            "source" => "mcp",
+            "installation_revision" => "workspace-oauth-v1",
+            "transport" => %{
+              "type" => "streamable_http",
+              "endpoint" => endpoint,
+              "oauth" => oauth_host_block(endpoint)
+            },
+            "ceilings" => %{"timeout_ms" => 30_000},
+            "tools" => %{
+              "cityTime" => %{"as" => "workspace.city_time", "effect" => "read"}
+            }
+          }
+        }
+      })
+    )
+
+    File.write!(
+      application,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [
+            %{"id" => "main", "path" => "main.clj", "dependencies" => ["kernel"]},
+            %{"library" => "kernel"}
+          ],
+          "entry" => "main/run"
+        },
+        "input" => %{"value" => %{"city" => "nyc"}},
+        "limits" => %{"evaluation_timeout_ms" => 30_000},
+        "providers" => %{
+          "mission" => [
+            %{"name" => "workspace", "config" => %{"allow" => ["workspace.city_time"]}}
+          ]
+        },
+        "missions" => %{
+          "default" => %{
+            "components" => [%{"id" => "clock", "path" => "clock.clj"}],
+            "providers" => ["workspace"]
+          }
+        }
+      })
+    )
+
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main "OAuth command E2E workflow." {:visibility :prompt})
+(defn run [input]
+  (return (kernel/eval-source "default"
+            (str "(clock/city-time \"" (get input "city") "\")"))))|
+    )
+
+    File.write!(
+      Path.join(dir, "clock.clj"),
+      ~S|(ns clock "OAuth command E2E mission." {:visibility :prompt})
+(defn city-time [city]
+  (return (tool/workspace.city_time {"city" city})))|
+    )
+
+    {application, host}
+  end
+
+  defp oauth_host_block(endpoint) do
+    uri = URI.parse(endpoint)
+    origin = "#{uri.scheme}://#{uri.host}:#{uri.port}"
+
+    %{
+      "installation_id" => "workspace-oauth",
+      "issuer" => endpoint <> "/oauth",
+      "resource" => endpoint,
+      "scope_ceiling" => ["read", "offline_access"],
+      "default_scopes" => ["read"],
+      "refresh_access" => "when_supported",
+      "network" => %{"private_network_origins" => [origin]},
+      "client" => %{
+        "registration" => "pre_registered",
+        "client_id" => "ptc-oauth-e2e",
+        "token_endpoint_auth_method" => "none",
+        "grant_types" => ["authorization_code", "refresh_token"],
+        "loopback_redirect" => %{"host" => "127.0.0.1", "path" => "/callback"}
+      }
+    }
+  end
+
+  defp visit_remote_authorization(parent, url) do
+    with {:ok, %{status: 302} = response} <-
+           MCPHTTPAdapter.request(method: :get, url: url, timeout_ms: 5_000),
+         [callback] <- MCPHTTPAdapter.get_header(response, "location") do
+      send(parent, {:authorization_notice, url})
+
+      spawn(fn -> get_loopback_callback(callback) end)
+
+      :ok
+    else
+      failure -> raise "authorization fixture failed: #{inspect(failure)}"
+    end
+  end
+
+  defp get_loopback_callback(url) do
+    uri = URI.parse(url)
+    path = uri.path <> "?" <> uri.query
+
+    {:ok, socket} =
+      :gen_tcp.connect(String.to_charlist(uri.host), uri.port, [:binary, active: false], 5_000)
+
+    :ok =
+      :gen_tcp.send(
+        socket,
+        "GET #{path} HTTP/1.1\r\nHost: #{uri.host}:#{uri.port}\r\nConnection: close\r\n\r\n"
+      )
+
+    _response = :gen_tcp.recv(socket, 0, 5_000)
+    :gen_tcp.close(socket)
   end
 end

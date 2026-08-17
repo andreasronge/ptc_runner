@@ -167,8 +167,8 @@ defmodule PtcRunner.Kernel.MCPSource do
   `{:error, :invalid_mcp_selection}`. MCP sources are mission-only; direct
   registry assembly rejects a workflow destination before credentials,
   transport acquisition, discovery, or RPC. Assembly returns
-  `{:ok, %{capabilities: list, snapshot: map, close: zero_arity_function}}` or a
-  stable atom error: `:mcp_authentication_failed`, `:mcp_timeout`,
+  `{:ok, %{capabilities: list, snapshot: map, close: zero_arity_function}}` or
+  one of these closed error reasons: `:mcp_authentication_failed`, `:mcp_timeout`,
   `:mcp_transport_error`, `:mcp_endpoint_connection_refused`,
   `:mcp_endpoint_name_unresolved`, `:mcp_endpoint_tls_failed`,
   `:mcp_protocol_error`, `:mcp_protocol_version_unsupported`, `:mcp_remote_error`,
@@ -176,7 +176,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   `:mcp_invalid_tool_schema`, `:mcp_capability_negotiation_error`,
   `:mcp_authorization_required`,
   `:mcp_input_required_refused`, `:mcp_unsupported_result`,
-  `:mcp_mapped_tool_missing`, or `:mcp_invalid_snapshot_identity`.
+  `{:mcp_mapped_tool_missing, declared_name}`, or `:mcp_invalid_snapshot_identity`.
 
   ## Frozen result and snapshot contracts
 
@@ -908,8 +908,8 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp capability(_request, _upstream, _mapping, nil, _selected),
-    do: {:error, :mcp_mapped_tool_missing}
+  defp capability(_request, upstream, _mapping, nil, _selected),
+    do: {:error, {:mcp_mapped_tool_missing, upstream}}
 
   defp capability(transport, upstream, mapping, tool, selected) do
     case MCPProtocol.selected_tool(tool) do
