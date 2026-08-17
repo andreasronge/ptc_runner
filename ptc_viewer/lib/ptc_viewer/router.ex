@@ -11,6 +11,7 @@ defmodule PtcViewer.Router do
   @id_pattern ~r/\A[A-Za-z0-9_-]{43}\z/
   @repl_paths ["/api/repl", "/api/repl/evaluations", "/api/repl/templates", "/api/repl/reset"]
   @body_limit 70_000
+  @live_launch_body_limit 2_000_010
 
   plug(Plug.Static,
     at: "/",
@@ -232,7 +233,7 @@ defmodule PtcViewer.Router do
     with :ok <- valid_live_browser_mutation(conn),
          {:ok, store} <- live_store(conn),
          {:ok, launch} <- live_launch(conn),
-         {:ok, body, conn} <- json_body(conn),
+         {:ok, body, conn} <- json_body(conn, @live_launch_body_limit),
          {:ok, run_fun} <- prepare_launch(launch, body, store),
          :ok <- LiveStore.begin_launch(store, run_fun) do
       send_live_json(conn, 202, %{"status" => "launched"})
@@ -332,8 +333,9 @@ defmodule PtcViewer.Router do
 
   defp valid_live_browser_mutation(conn) do
     nonce = Keyword.get(viewer_config(conn), :live_mutation_nonce)
+    token_digest = Keyword.get(viewer_config(conn), :live_token_digest)
 
-    if LiveSecurity.browser_mutation?(conn, nonce),
+    if LiveSecurity.browser_mutation?(conn, nonce, token_digest),
       do: :ok,
       else: {:error, :forbidden_request}
   end
@@ -452,9 +454,9 @@ defmodule PtcViewer.Router do
     end
   end
 
-  defp json_body(conn) do
+  defp json_body(conn, limit \\ @body_limit) do
     with :ok <- json_content_type(conn),
-         {:ok, raw, conn} <- read_limited_body(conn),
+         {:ok, raw, conn} <- read_limited_body(conn, limit),
          {:ok, body} when is_map(body) <- Jason.decode(raw) do
       {:ok, body, conn}
     else
@@ -465,16 +467,16 @@ defmodule PtcViewer.Router do
   end
 
   defp bodyless(conn) do
-    case read_limited_body(conn) do
+    case read_limited_body(conn, @body_limit) do
       {:ok, "", conn} -> {:ok, conn}
       {:ok, _body, conn} -> {:error, :delete_body_not_allowed, conn}
       {:error, :body_too_large, conn} -> {:error, :body_too_large, conn}
     end
   end
 
-  defp read_limited_body(conn) do
-    case read_body(conn, length: @body_limit, read_length: @body_limit + 1) do
-      {:ok, body, conn} when byte_size(body) <= @body_limit -> {:ok, body, conn}
+  defp read_limited_body(conn, limit) do
+    case read_body(conn, length: limit, read_length: limit + 1) do
+      {:ok, body, conn} when byte_size(body) <= limit -> {:ok, body, conn}
       {:more, _body, conn} -> {:error, :body_too_large, conn}
       {:error, _reason} -> {:error, :invalid_json, conn}
     end
@@ -580,7 +582,11 @@ defmodule PtcViewer.Router do
       {:ok, content} ->
         repl_enabled = Keyword.get(viewer_config(conn), :repl_enabled, false)
         live_nonce = Keyword.get(viewer_config(conn), :live_mutation_nonce)
-        live_enabled = LiveSecurity.browser_request?(conn) and is_binary(live_nonce)
+        live_token_digest = Keyword.get(viewer_config(conn), :live_token_digest)
+
+        live_enabled =
+          is_binary(live_nonce) and
+            LiveSecurity.browser_control_request?(conn, live_token_digest)
 
         config =
           if repl_enabled do

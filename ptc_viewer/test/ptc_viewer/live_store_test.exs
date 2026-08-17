@@ -44,9 +44,47 @@ defmodule PtcViewer.LiveStoreTest do
     :ok = LiveStore.put_frame(store, "run-live", %{"seq" => 0, "phase" => "running"})
 
     run_ids = store |> LiveStore.snapshot() |> Enum.map(& &1["run_id"])
-    assert length(run_ids) == 12
-    refute "run-1" in run_ids
+    assert length(run_ids) == 13
+    assert "run-1" in run_ids
     assert "run-live" in run_ids
+
+    :ok = LiveStore.put_frame(store, "run-13", %{"seq" => 0, "phase" => "ok"})
+    retained = store |> LiveStore.snapshot() |> Enum.map(& &1["run_id"])
+    refute "run-1" in retained
+    assert "run-live" in retained
+    assert "run-13" in retained
+  end
+
+  test "thirteen active runs remain retained and the first terminal frame is not discarded", %{
+    store: store
+  } do
+    for index <- 1..13 do
+      :ok = LiveStore.put_frame(store, "run-#{index}", %{"seq" => 0, "phase" => "running"})
+    end
+
+    assert length(LiveStore.snapshot(store)) == 13
+
+    :ok = LiveStore.put_frame(store, "run-1", %{"seq" => 1, "phase" => "ok"})
+    frames = LiveStore.snapshot(store)
+    assert length(frames) == 13
+    assert %{"phase" => "ok"} = Enum.find(frames, &(&1["run_id"] == "run-1"))
+  end
+
+  test "orphaned active cards are bounded while an incoming terminal frame is retained", %{
+    store: store
+  } do
+    for index <- 1..65 do
+      :ok = LiveStore.put_frame(store, "run-#{index}", %{"seq" => 0, "phase" => "running"})
+    end
+
+    active = LiveStore.snapshot(store)
+    assert length(active) == 64
+    refute Enum.any?(active, &(&1["run_id"] == "run-1"))
+
+    :ok = LiveStore.put_frame(store, "run-1", %{"seq" => 1, "phase" => "ok"})
+    retained = LiveStore.snapshot(store)
+    assert length(retained) == 64
+    assert %{"phase" => "ok"} = Enum.find(retained, &(&1["run_id"] == "run-1"))
   end
 
   test "delete_run forgets a run and reports an unknown one", %{store: store} do

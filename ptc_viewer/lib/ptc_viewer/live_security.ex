@@ -20,12 +20,18 @@ defmodule PtcViewer.LiveSecurity do
 
   def browser_request?(conn), do: conn.host in @local_hosts
 
-  def browser_mutation?(conn, nonce) when is_binary(nonce) do
-    browser_request?(conn) and valid_origin?(conn) and
+  def browser_control_request?(conn, token_digest) do
+    browser_request?(conn) and
+      (loopback?(conn.remote_ip) or query_token?(conn, token_digest))
+  end
+
+  def browser_mutation?(conn, nonce, token_digest) when is_binary(nonce) do
+    browser_request?(conn) and authenticated_browser_peer?(conn, token_digest) and
+      valid_origin?(conn) and
       secure_equal(exact_header(conn, "x-ptc-viewer-live-nonce"), nonce)
   end
 
-  def browser_mutation?(_conn, _nonce), do: false
+  def browser_mutation?(_conn, _nonce, _token_digest), do: false
 
   def reporter_request?(conn, nil), do: loopback?(conn.remote_ip)
 
@@ -35,6 +41,28 @@ defmodule PtcViewer.LiveSecurity do
       _missing_or_invalid -> false
     end
   end
+
+  defp authenticated_browser_peer?(conn, token_digest),
+    do: loopback?(conn.remote_ip) or reporter_request?(conn, token_digest)
+
+  defp query_token?(conn, token_digest) when is_binary(token_digest) do
+    tokens =
+      conn.query_string
+      |> URI.query_decoder()
+      |> Enum.flat_map(fn
+        {"live_token", token} -> [token]
+        _other -> []
+      end)
+
+    case tokens do
+      [token] -> secure_equal(:crypto.hash(:sha256, token), token_digest)
+      _missing_or_ambiguous -> false
+    end
+  rescue
+    _invalid_query -> false
+  end
+
+  defp query_token?(_conn, _token_digest), do: false
 
   defp valid_origin?(conn) do
     with origin when is_binary(origin) <- exact_header(conn, "origin"),

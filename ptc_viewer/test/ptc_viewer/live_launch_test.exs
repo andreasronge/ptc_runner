@@ -17,6 +17,7 @@ defmodule PtcViewer.LiveLaunchTest do
   describe "validate/1" do
     test "accepts a fixed manifest and host adapter", %{spec: spec} do
       assert :ok = LiveLaunch.validate(spec)
+      assert :ok = LiveLaunch.validate(Map.put(spec, :input, %{"from" => "host"}))
     end
 
     test "rejects a missing or malformed adapter", %{spec: spec} do
@@ -24,6 +25,9 @@ defmodule PtcViewer.LiveLaunchTest do
 
       assert {:error, :invalid_launch_config} =
                LiveLaunch.validate(Map.put(spec, :adapter, fn _request -> :ok end))
+
+      assert {:error, :invalid_launch_config} =
+               LiveLaunch.validate(Map.put(spec, :input, "not-an-object"))
     end
   end
 
@@ -102,6 +106,38 @@ defmodule PtcViewer.LiveLaunchTest do
 
       assert {:error, :invalid_mission} =
                LiveLaunch.prepare_mission(spec, "review", "   ", store)
+    end
+
+    test "retains a byte-bounded valid UTF-8 output tail", %{spec: spec, store: store} do
+      output = String.duplicate("€", 667)
+      adapter = fn _request, _report -> {0, output} end
+
+      assert {:ok, run} =
+               LiveLaunch.prepare_mission(
+                 Map.put(spec, :adapter, adapter),
+                 "review",
+                 "(+ 40 2)",
+                 store
+               )
+
+      assert {0, tail} = run.()
+      assert String.valid?(tail)
+      assert byte_size(tail) <= 2_000
+      assert String.ends_with?(output, tail)
+    end
+
+    test "rejects invalid UTF-8 adapter output", %{spec: spec, store: store} do
+      adapter = fn _request, _report -> {0, <<255>>} end
+
+      assert {:ok, run} =
+               LiveLaunch.prepare_mission(
+                 Map.put(spec, :adapter, adapter),
+                 "review",
+                 "(+ 40 2)",
+                 store
+               )
+
+      assert {1, "viewer launch failed: invalid adapter result"} = run.()
     end
   end
 end

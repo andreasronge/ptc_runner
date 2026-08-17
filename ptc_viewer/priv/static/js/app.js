@@ -3,7 +3,7 @@ import { renderKernelTranscript } from './kernel-transcript.js';
 import { renderSemanticConversation } from './semantic-conversation.js';
 import { createAnalyzeButton, createReplController, nextTabName, readViewerConfig } from './repl.js';
 import { createRunCatalog } from './run-catalog.js';
-import { createLiveController } from './live.js';
+import { createLiveController, liveTokenFromSearch } from './live.js';
 import { commitCurrentLoad } from './current-load.js';
 import { truncate } from './utils.js';
 
@@ -429,13 +429,23 @@ function setupTabs() {
     const current = event.target.id === 'runs-tab' ? 'runs'
       : event.target.id === 'repl-tab' ? 'repl'
         : state.activeTab;
-    const next = nextTabName(current, event.key);
+    const enabledTabs = ['runs', 'repl', 'live']
+      .filter(name => !document.getElementById(`${name}-tab`).hidden);
+    const next = nextTabName(current, event.key, enabledTabs);
     navigateToTab(next);
     activateTab(next, { focus: true });
   });
 }
 
 const config = readViewerConfig();
+const liveToken = liveTokenFromSearch(location.search);
+
+if (liveToken) {
+  const url = new URL(location.href);
+  url.searchParams.delete('live_token');
+  history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
 setupTabs();
 if (config.repl_enabled) {
   state.repl = createReplController({
@@ -451,6 +461,7 @@ if (config.repl_enabled) {
 if (config.live_enabled) {
   state.live = createLiveController({
     mutationNonce: config.live_mutation_nonce,
+    liveToken,
     onInspectRun: runId => {
       void runCatalog.refresh();
       selectRun(runId);

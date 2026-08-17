@@ -84,8 +84,8 @@ export function createAnalyzeButton(label, kind, runId, requestTemplate, documen
   return button;
 }
 
-export function nextTabName(current, key) {
-  const tabs = ['runs', 'repl', 'live'];
+export function nextTabName(current, key, tabs = ['runs', 'repl', 'live']) {
+  if (!Array.isArray(tabs) || tabs.length === 0) return current;
   if (key === 'Home') return tabs[0];
   if (key === 'End') return tabs.at(-1);
   const index = Math.max(tabs.indexOf(current), 0);

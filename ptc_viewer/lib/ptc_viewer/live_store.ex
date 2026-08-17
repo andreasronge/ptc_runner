@@ -19,7 +19,8 @@ defmodule PtcViewer.LiveStore do
 
   use GenServer
 
-  @max_runs 12
+  @max_ended_runs 12
+  @max_runs 64
 
   @spec start(pid()) :: {:ok, pid()} | {:error, term()}
   def start(owner \\ self()) when is_pid(owner) do
@@ -82,6 +83,7 @@ defmodule PtcViewer.LiveStore do
      %{
        owner_ref: owner_ref,
        runs: %{},
+       next_sequence: 0,
        subscribers: %{},
        launch: nil,
        launch_result: nil
@@ -91,18 +93,21 @@ defmodule PtcViewer.LiveStore do
   @impl GenServer
   def handle_call({:put, run_id, frame}, _from, state) do
     frame = Map.put(frame, "run_id", run_id)
+    existing = Map.get(state.runs, run_id)
+    first_seen = if existing, do: existing.first_seen, else: state.next_sequence
+    next_sequence = if existing, do: state.next_sequence, else: state.next_sequence + 1
 
     case Jason.encode(frame) do
       {:ok, json} ->
         entry = %{
           frame: frame,
           json: json,
-          first_seen: Map.get(state.runs, run_id, %{})[:first_seen] || now_ms()
+          first_seen: first_seen
         }
 
-        runs = state.runs |> Map.put(run_id, entry) |> evict()
+        runs = state.runs |> Map.put(run_id, entry) |> evict(run_id)
         Enum.each(state.subscribers, fn {_ref, pid} -> send(pid, {:live_frame, json}) end)
-        {:reply, :ok, %{state | runs: runs}}
+        {:reply, :ok, %{state | runs: runs, next_sequence: next_sequence}}
 
       {:error, _reason} ->
         {:reply, {:error, :invalid_frame}, state}
@@ -185,20 +190,29 @@ defmodule PtcViewer.LiveStore do
     |> Enum.sort_by(& &1.first_seen)
   end
 
-  defp evict(runs) when map_size(runs) <= @max_runs, do: runs
-
-  defp evict(runs) do
-    # Drop the oldest ended run first; never evict a run that is still live.
-    {ended, live} =
+  defp evict(runs, protected_run_id) do
+    # Keep the incoming frame so a first terminal update cannot evict itself.
+    # Ended cards have the tighter cap; the total cap also bounds orphaned
+    # "running" cards whose owners disappeared before publishing a final frame.
+    ended =
       runs
       |> Enum.sort_by(fn {_id, entry} -> entry.first_seen end)
-      |> Enum.split_with(fn {_id, entry} -> entry.frame["phase"] != "running" end)
+      |> Enum.filter(fn {_id, entry} -> entry.frame["phase"] != "running" end)
 
-    case ended do
-      [{oldest_id, _entry} | _rest] -> Map.delete(runs, oldest_id)
-      [] -> Map.delete(runs, elem(hd(live), 0))
+    runs = maybe_drop(runs, ended, @max_ended_runs, protected_run_id)
+    maybe_drop(runs, ordered_entries(runs), @max_runs, protected_run_id)
+  end
+
+  defp maybe_drop(runs, entries, cap, protected_run_id) do
+    if length(entries) > cap do
+      {oldest_id, _entry} =
+        Enum.find(entries, fn {run_id, _entry} -> run_id != protected_run_id end)
+
+      Map.delete(runs, oldest_id)
+    else
+      runs
     end
   end
 
-  defp now_ms, do: System.monotonic_time(:millisecond)
+  defp ordered_entries(runs), do: Enum.sort_by(runs, fn {_id, entry} -> entry.first_seen end)
 end

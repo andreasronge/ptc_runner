@@ -14,6 +14,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
   # sit far below the ceiling.
 
   use GenServer
+  use PtcRunner.Kernel.OwnerStatusRedaction
 
   require Logger
 
@@ -36,12 +37,23 @@ defmodule PtcRunner.LiveStatus.Reporter do
 
   @spec start(term(), struct(), struct()) :: {:ok, pid()} | {:error, term()}
   def start(target, config, run_state) when is_binary(target) do
-    GenServer.start(__MODULE__, %{target: target, config: config, run_state: run_state})
+    GenServer.start(__MODULE__, %{
+      target: target,
+      config: config,
+      run_state: run_state,
+      owner: self()
+    })
   end
 
   def start(target, config, run_state) do
     if Target.valid?(target),
-      do: GenServer.start(__MODULE__, %{target: target, config: config, run_state: run_state}),
+      do:
+        GenServer.start(__MODULE__, %{
+          target: target,
+          config: config,
+          run_state: run_state,
+          owner: self()
+        }),
       else: {:error, :invalid_live_status_target}
   end
 
@@ -80,6 +92,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
   @impl GenServer
   def init(args) do
     handler_id = {__MODULE__, self()}
+    owner_ref = Process.monitor(args.owner)
 
     :telemetry.attach_many(
       handler_id,
@@ -91,9 +104,10 @@ defmodule PtcRunner.LiveStatus.Reporter do
     state = %{
       target: normalize_target(args.target),
       run_state: args.run_state,
-      config: args.config,
+      limits: limits_frame(args.config.limits),
       run_id: run_id(args.config),
       label: label(args.config, args.target),
+      owner_ref: owner_ref,
       handler_id: handler_id,
       started_ms: System.monotonic_time(:millisecond),
       seq: 0,
@@ -136,6 +150,9 @@ defmodule PtcRunner.LiveStatus.Reporter do
 
   def handle_info({:live_telemetry, event, measurements, metadata}, state),
     do: {:noreply, apply_telemetry(state, event, measurements, metadata)}
+
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{owner_ref: ref} = state),
+    do: {:stop, :normal, state}
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{sandbox: %{pid: pid}} = state),
     do: {:noreply, %{state | sandbox: nil}}
@@ -246,7 +263,8 @@ defmodule PtcRunner.LiveStatus.Reporter do
     do: Target.report(target, run_id, frame)
 
   defp request(viewer_url, run_id, frame, viewer_token) when is_binary(viewer_url) do
-    url = viewer_url <> "/api/live/runs/" <> run_id
+    encoded_run_id = URI.encode(run_id, &URI.char_unreserved?/1)
+    url = viewer_url <> "/api/live/runs/" <> encoded_run_id
 
     case Req.post(url,
            json: frame,
@@ -278,8 +296,6 @@ defmodule PtcRunner.LiveStatus.Reporter do
   defp format_reason(reason), do: inspect(reason)
 
   defp frame(state, usage) do
-    limits = state.config.limits
-
     %{
       run_id: state.run_id,
       label: state.label,
@@ -288,18 +304,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
       outcome_reason: state.outcome_reason,
       elapsed_ms: elapsed_ms(state),
       remaining_ms: usage && Map.get(usage, :remaining_ms),
-      limits: %{
-        run_duration_ms: limits.run_duration_ms,
-        workflow_timeout_ms: limits.workflow_timeout_ms,
-        parallel_timeout_ms: limits.parallel_timeout_ms,
-        subordinate_evaluations: limits.subordinate_evaluations,
-        workflow_capability_calls: limits.workflow_capability_calls,
-        workflow_capability_calls_per_name: limits.workflow_capability_calls_per_name,
-        mission_capability_calls: limits.mission_capability_calls,
-        evaluation_memory_bytes: limits.evaluation_memory_bytes,
-        evaluation_history_bytes: limits.evaluation_history_bytes,
-        live_provider_tasks: limits.live_provider_tasks
-      },
+      limits: state.limits,
       usage:
         usage &&
           Map.take(usage, [
@@ -340,6 +345,21 @@ defmodule PtcRunner.LiveStatus.Reporter do
     RunState.usage(run_state)
   catch
     :exit, _reason -> nil
+  end
+
+  defp limits_frame(limits) do
+    Map.take(limits, [
+      :run_duration_ms,
+      :workflow_timeout_ms,
+      :parallel_timeout_ms,
+      :subordinate_evaluations,
+      :workflow_capability_calls,
+      :workflow_capability_calls_per_name,
+      :mission_capability_calls,
+      :evaluation_memory_bytes,
+      :evaluation_history_bytes,
+      :live_provider_tasks
+    ])
   end
 
   defp elapsed_ms(state), do: System.monotonic_time(:millisecond) - state.started_ms

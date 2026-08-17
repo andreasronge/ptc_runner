@@ -107,6 +107,11 @@ assert.equal(nextTabName('repl', 'ArrowRight'), 'live');
 assert.equal(nextTabName('live', 'ArrowRight'), 'runs');
 assert.equal(nextTabName('repl', 'Home'), 'runs');
 assert.equal(nextTabName('runs', 'End'), 'live');
+assert.equal(nextTabName('runs', 'ArrowRight', ['runs', 'live']), 'live');
+assert.equal(nextTabName('live', 'ArrowLeft', ['runs', 'live']), 'runs');
+assert.equal(nextTabName('runs', 'ArrowRight', ['runs', 'repl']), 'repl');
+assert.equal(nextTabName('repl', 'ArrowRight', ['runs', 'repl']), 'runs');
+assert.equal(nextTabName('runs', 'ArrowRight', []), 'runs');
 
 const fakeDialog = { returnValue: 'confirm', opened: false, showModal() { this.opened = true; } };
 openResetDialog(fakeDialog);

@@ -11,7 +11,17 @@
 
 const WORD_BYTES = 8;
 
-export function createLiveController({ onInspectRun, onLiveCount, mutationNonce } = {}) {
+export function liveTokenFromSearch(search) {
+  const value = new URLSearchParams(search).get('live_token');
+  return value || null;
+}
+
+export function launchPollDelay(responseOk, launch) {
+  if (!responseOk) return 3000;
+  return launch?.status === 'running' ? 1500 : null;
+}
+
+export function createLiveController({ onInspectRun, onLiveCount, mutationNonce, liveToken } = {}) {
   const runsEl = document.getElementById('live-runs');
   const runsHeadEl = document.getElementById('live-runs-head');
   const clearEndedEl = document.getElementById('live-clear-ended');
@@ -38,7 +48,7 @@ export function createLiveController({ onInspectRun, onLiveCount, mutationNonce 
   loadProject()
     .then(project => {
       initProject(projectEl, project);
-      return initLaunch(launchEl, project, mutationNonce);
+      return initLaunch(launchEl, project, mutationNonce, liveToken);
     })
     .catch(() => {});
 
@@ -120,7 +130,7 @@ export function createLiveController({ onInspectRun, onLiveCount, mutationNonce 
     refreshChrome();
     fetch(`/api/live/runs/${encodeURIComponent(runId)}`, {
       method: 'DELETE',
-      headers: { 'x-ptc-viewer-live-nonce': mutationNonce },
+      headers: mutationHeaders(mutationNonce, liveToken),
     }).catch(() => {});
   }
 
@@ -137,7 +147,7 @@ export function createLiveController({ onInspectRun, onLiveCount, mutationNonce 
     try {
       const response = await fetch(`/api/live/runs/${encodeURIComponent(runId)}/inspect`, {
         method: 'POST',
-        headers: { 'x-ptc-viewer-live-nonce': mutationNonce },
+        headers: mutationHeaders(mutationNonce, liveToken),
       });
       if (!response.ok) throw new Error('result unavailable');
       link.textContent = 'View result';
@@ -167,9 +177,15 @@ export function createLiveController({ onInspectRun, onLiveCount, mutationNonce 
   return { setActive };
 }
 
+function mutationHeaders(mutationNonce, liveToken, extra = {}) {
+  const headers = { ...extra, 'x-ptc-viewer-live-nonce': mutationNonce };
+  if (liveToken) headers.authorization = `Bearer ${liveToken}`;
+  return headers;
+}
+
 /* ---------- launch panel (fixed target, editable input) ---------- */
 
-async function initLaunch(root, project, mutationNonce) {
+async function initLaunch(root, project, mutationNonce, liveToken) {
   const response = await fetch('/api/live/launch');
   if (!response.ok) return;
   const spec = await response.json();
@@ -271,14 +287,16 @@ async function initLaunch(root, project, mutationNonce) {
   const poll = async () => {
     try {
       const res = await fetch('/api/live/launch');
-      if (!res.ok) return;
+      if (!res.ok) {
+        state.polling = setTimeout(poll, launchPollDelay(false, null));
+        return;
+      }
       const current = await res.json();
       setStatus(current.launch);
-      if (current.launch?.status === 'running') {
-        state.polling = setTimeout(poll, 1500);
-      }
+      const delay = launchPollDelay(true, current.launch);
+      if (delay != null) state.polling = setTimeout(poll, delay);
     } catch {
-      state.polling = setTimeout(poll, 3000);
+      state.polling = setTimeout(poll, launchPollDelay(false, null));
     }
   };
 
@@ -291,21 +309,31 @@ async function initLaunch(root, project, mutationNonce) {
     const body = state.mission
       ? { mission: state.mission, expression: parsed }
       : { input: parsed };
-    const res = await fetch('/api/live/launch', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-ptc-viewer-live-nonce': mutationNonce,
-      },
-      body: JSON.stringify(body),
-    });
-    if (res.status !== 202) {
-      const body = await res.json().catch(() => ({}));
-      setStatus({ status: 'error', output_tail: `launch refused: ${body.error || res.status}` });
+    try {
+      const res = await fetch('/api/live/launch', {
+        method: 'POST',
+        headers: mutationHeaders(mutationNonce, liveToken, { 'content-type': 'application/json' }),
+        body: JSON.stringify(body),
+      });
+      if (res.status !== 202) {
+        const responseBody = await res.json().catch(() => ({}));
+        setStatus({
+          status: 'error',
+          output_tail: `launch refused: ${responseBody.error || res.status}`,
+        });
+        return;
+      }
+    } catch {
+      setStatus({
+        status: 'error',
+        output_tail: 'launch request failed; checking whether the run started…',
+      });
+      clearTimeout(state.polling);
+      state.polling = setTimeout(poll, launchPollDelay(false, null));
       return;
     }
     clearTimeout(state.polling);
-    state.polling = setTimeout(poll, 1500);
+    state.polling = setTimeout(poll, launchPollDelay(true, { status: 'running' }));
   });
 
   validate();
@@ -712,7 +740,9 @@ function updateCard(card, frame) {
 export function failurePresentation(frame) {
   if (frame?.phase !== 'error' || !frame.outcome_reason) return null;
   const reason = String(frame.outcome_reason).replace(/^:/, '');
-  return reason.includes('_timeout_ms limit ')
+  const limitExceeded = ['parallel_timeout_ms', 'workflow_timeout_ms', 'run_duration_ms']
+    .some(name => reason.startsWith(`${name} limit `));
+  return limitExceeded
     ? `Limit exceeded: ${reason}`
     : `Failure reason: ${reason}`;
 }

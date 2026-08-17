@@ -22,7 +22,8 @@ defmodule PtcViewer.LiveLaunch do
           required(:adapter) => (request(), (binary(), map() -> term()) ->
                                    {non_neg_integer(), binary()}),
           optional(:cwd) => binary(),
-          optional(:label) => binary()
+          optional(:label) => binary(),
+          optional(:input) => map()
         }
 
   @doc "Validates an operator-supplied launch spec at Viewer startup."
@@ -32,10 +33,12 @@ defmodule PtcViewer.LiveLaunch do
   def validate(%{manifest: manifest, adapter: adapter} = spec) when is_binary(manifest) do
     cwd = Map.get(spec, :cwd, File.cwd!())
     label = Map.get(spec, :label)
+    input = Map.get(spec, :input, %{})
 
     valid? =
       is_function(adapter, 2) and is_binary(cwd) and File.dir?(cwd) and
-        (is_nil(label) or is_binary(label)) and File.regular?(manifest_path(spec))
+        (is_nil(label) or is_binary(label)) and is_map(input) and
+        File.regular?(manifest_path(spec))
 
     if valid?, do: :ok, else: {:error, :invalid_launch_config}
   end
@@ -164,16 +167,22 @@ defmodule PtcViewer.LiveLaunch do
   defp invoke_adapter(spec, request, store) do
     case spec.adapter.(request, frame_sink(store)) do
       {code, output} when is_integer(code) and code >= 0 and is_binary(output) ->
-        {code, output_tail(output)}
+        if String.valid?(output) do
+          {code, output_tail(output)}
+        else
+          invalid_adapter_result()
+        end
 
       _invalid ->
-        {1, "viewer launch failed: invalid adapter result"}
+        invalid_adapter_result()
     end
   rescue
     exception -> {1, "viewer launch failed: " <> Exception.message(exception)}
   catch
     _kind, reason -> {1, "viewer launch failed: " <> inspect(reason)}
   end
+
+  defp invalid_adapter_result, do: {1, "viewer launch failed: invalid adapter result"}
 
   defp frame_sink(store) do
     fn run_id, frame ->
@@ -188,6 +197,13 @@ defmodule PtcViewer.LiveLaunch do
   end
 
   defp manifest_input(spec) do
+    case Map.fetch(spec, :input) do
+      {:ok, input} when is_map(input) -> input
+      _missing_or_invalid -> inline_manifest_input(spec)
+    end
+  end
+
+  defp inline_manifest_input(spec) do
     with {:ok, raw} <- File.read(manifest_path(spec)),
          {:ok, %{"input" => %{"value" => value}}} when is_map(value) <- Jason.decode(raw) do
       value
@@ -203,6 +219,19 @@ defmodule PtcViewer.LiveLaunch do
 
   defp output_tail(output) when byte_size(output) <= @output_tail_bytes, do: output
 
-  defp output_tail(output),
-    do: binary_part(output, byte_size(output) - @output_tail_bytes, @output_tail_bytes)
+  defp output_tail(output) do
+    output
+    |> binary_part(byte_size(output) - @output_tail_bytes, @output_tail_bytes)
+    |> valid_suffix()
+    |> :binary.copy()
+  end
+
+  defp valid_suffix(value) do
+    if String.valid?(value) do
+      value
+    else
+      <<_invalid_prefix_byte, rest::binary>> = value
+      valid_suffix(rest)
+    end
+  end
 end

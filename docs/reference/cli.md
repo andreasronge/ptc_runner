@@ -483,16 +483,28 @@ Live browser reads require a page opened at `localhost`, `127.0.0.1`, or
 `::1`; mutations additionally require the page's same-origin nonce. A reporter
 connecting from a non-loopback address must send the configured token through
 `PTC_VIEWER_TOKEN`. Generate a new value for each Viewer process, for example
-with `openssl rand -base64 32`.
+with `openssl rand -hex 32`.
+
+When a host-published port makes the browser's network peer non-loopback, open
+the Live tab once with the same token:
+
+```text
+http://localhost:4123/?live_token=THE_TOKEN#/live
+```
+
+The page removes the query parameter after bootstrapping and sends the token
+as a bearer credential on launch, delete, and **View result** requests.
 
 For Docker, keep the Viewer bound to `0.0.0.0` *inside* the container and keep
 the published host port on loopback. Viewer-started runs report directly inside
 the container process. A separately started run in the same container can
-report over container loopback. A run on the host or in another container must
-set both `PTC_VIEWER_URL=http://127.0.0.1:4123` and the matching
-`PTC_VIEWER_TOKEN`. This protects live ingestion and browser mutations; it does
-not turn the trace browser into an authenticated remote service, so
-`-p 4123:4123` remains unsafe.
+report over container loopback. A host-side run can use
+`PTC_VIEWER_URL=http://127.0.0.1:4123`; another container must instead use the
+Viewer container's service name on a shared Docker network (for example,
+`PTC_VIEWER_URL=http://viewer:4123`) or an explicitly configured host-gateway
+address. Both must set the matching `PTC_VIEWER_TOKEN`. This protects live
+ingestion and browser mutations; it does not turn the trace browser into an
+authenticated remote service, so `-p 4123:4123` remains unsafe.
 
 ## Test a workflow
 

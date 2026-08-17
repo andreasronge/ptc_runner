@@ -346,6 +346,7 @@ defmodule PtcRunner.ViewerFrontend do
 
   defp launch_spec(project, frontend, env_file) do
     label = workflow_label(project)
+    input = workflow_input(project)
 
     config = %{
       project: project.path,
@@ -358,8 +359,16 @@ defmodule PtcRunner.ViewerFrontend do
       manifest: project.application,
       cwd: project.directory,
       label: label,
+      input: input,
       adapter: fn request, report -> ViewerLaunchAdapter.launch(config, request, report) end
     }
+  end
+
+  defp workflow_input(project) do
+    case describe_project(project) do
+      {:ok, %{input: input}} when is_map(input) -> input
+      _unavailable -> %{}
+    end
   end
 
   defp workflow_label(project) do

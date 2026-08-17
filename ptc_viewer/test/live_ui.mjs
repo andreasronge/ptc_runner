@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import {
   fmtLimit,
   failurePresentation,
+  launchPollDelay,
   launchStatusPresentation,
+  liveTokenFromSearch,
   missionNames,
   plural,
   runRoute,
@@ -69,6 +71,14 @@ assert.deepEqual(launchStatusPresentation({ status: 'ok', output_tail: '{"sum" 6
   output: '{"sum" 6}'
 });
 assert.equal(launchStatusPresentation({ status: 'error' }).output, '(no output captured)');
+assert.equal(launchPollDelay(true, { status: 'running' }), 1500);
+assert.equal(launchPollDelay(false, null), 3000);
+assert.equal(launchPollDelay(true, { status: 'ok' }), null);
+
+assert.equal(liveTokenFromSearch('?live_token=container-secret&x=1'), 'container-secret');
+assert.equal(liveTokenFromSearch('?live_token=token%2Bwith%2Bplus'), 'token+with+plus');
+assert.equal(liveTokenFromSearch('?x=1'), null);
+assert.equal(liveTokenFromSearch('?live_token='), null);
 
 assert.equal(runRoute('cmd-abc/def'), '#/run/cmd-abc%2Fdef');
 
@@ -78,6 +88,13 @@ assert.equal(
     outcome_reason: 'parallel_timeout_ms limit 60000 ms was exceeded during execution'
   }),
   'Limit exceeded: parallel_timeout_ms limit 60000 ms was exceeded during execution'
+);
+assert.equal(
+  failurePresentation({
+    phase: 'error',
+    outcome_reason: 'run_duration_ms limit 60000 ms was exceeded during execution'
+  }),
+  'Limit exceeded: run_duration_ms limit 60000 ms was exceeded during execution'
 );
 assert.equal(failurePresentation({ phase: 'ok', outcome_reason: null }), null);
 

@@ -632,7 +632,7 @@ defmodule PtcRunner.Kernel.Runner do
   defp live_terminal_reason(
          {:error, %Error{details: %{limit: limit, limit_ms: limit_ms, phase: phase}} = error}
        ) do
-    case RuntimeLimitDiagnostic.timeout_message(limit, limit_ms, phase) do
+    case RuntimeLimitDiagnostic.live_timeout_message(limit, limit_ms, phase) do
       {:ok, message} -> message
       :error -> error.reason
     end
@@ -820,10 +820,12 @@ defmodule PtcRunner.Kernel.Runner do
             do: :workflow_timeout_ms,
             else: :run_duration_ms
 
+        limit_ms = Map.fetch!(limits, limit)
+
         %{
           message: "#{limit} expired during a parallel operation",
           limit: limit,
-          limit_ms: timeout_ms,
+          limit_ms: limit_ms,
           phase: :execution
         }
 
@@ -833,12 +835,14 @@ defmodule PtcRunner.Kernel.Runner do
             do: :workflow_timeout_ms,
             else: :run_duration_ms
 
+        limit_ms = Map.fetch!(limits, limit)
+
         phase = if reason == :compile_timeout, do: :compilation, else: :execution
 
         %{
           message: "#{limit} exceeded during #{phase} after #{timeout_ms}ms",
           limit: limit,
-          limit_ms: timeout_ms,
+          limit_ms: limit_ms,
           phase: phase
         }
     end

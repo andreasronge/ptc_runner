@@ -7,6 +7,7 @@ defmodule PtcViewer.LiveRouterTest do
   @moduletag :tmp_dir
   @live_nonce "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
   @live_token "container-reporter-token-with-at-least-32-bytes"
+  @live_launch_body_limit 2_000_010
 
   setup %{tmp_dir: trace_dir} do
     {:ok, store} = LiveStore.start(self())
@@ -65,6 +66,63 @@ defmodule PtcViewer.LiveRouterTest do
 
     assert delete.status == 403
     assert [%{"run_id" => "run-abc"}] = LiveStore.snapshot(store)
+  end
+
+  test "spoofed local authority cannot enable or mutate live controls without the bearer token",
+       %{
+         opts: opts,
+         store: store
+       } do
+    :ok = LiveStore.put_frame(store, "run-abc", %{"seq" => 0, "phase" => "ok"})
+    opts = Keyword.put(opts, :live_token_digest, PtcViewer.LiveSecurity.token_digest(@live_token))
+
+    spoofed_entry =
+      conn(:get, "http://localhost/")
+      |> Map.put(:remote_ip, {172, 18, 0, 4})
+      |> call_router(opts)
+
+    refute entry_config(spoofed_entry)["live_enabled"]
+
+    refused =
+      conn(:delete, "http://localhost/api/live/runs/run-abc")
+      |> Map.put(:remote_ip, {172, 18, 0, 4})
+      |> Plug.Conn.put_req_header("origin", "http://localhost")
+      |> Plug.Conn.put_req_header("x-ptc-viewer-live-nonce", @live_nonce)
+      |> call_router(opts)
+
+    assert refused.status == 403
+    assert [%{"run_id" => "run-abc"}] = LiveStore.snapshot(store)
+
+    authenticated_entry =
+      conn(:get, "http://localhost/?live_token=#{@live_token}")
+      |> Map.put(:remote_ip, {172, 18, 0, 4})
+      |> call_router(opts)
+
+    assert entry_config(authenticated_entry)["live_enabled"]
+
+    accepted =
+      conn(:delete, "http://localhost/api/live/runs/run-abc")
+      |> Map.put(:remote_ip, {172, 18, 0, 4})
+      |> Plug.Conn.put_req_header("origin", "http://localhost")
+      |> Plug.Conn.put_req_header("authorization", "Bearer " <> @live_token)
+      |> Plug.Conn.put_req_header("x-ptc-viewer-live-nonce", @live_nonce)
+      |> call_router(opts)
+
+    assert accepted.status == 200
+  end
+
+  test "a percent-encoded token containing plus signs enables remote browser controls", %{
+    opts: opts
+  } do
+    token = "token+with+plus+signs+and-at-least-32-bytes"
+    opts = Keyword.put(opts, :live_token_digest, PtcViewer.LiveSecurity.token_digest(token))
+
+    entry =
+      conn(:get, "http://localhost/?live_token=#{URI.encode_www_form(token)}")
+      |> Map.put(:remote_ip, {172, 18, 0, 4})
+      |> call_router(opts)
+
+    assert entry_config(entry)["live_enabled"]
   end
 
   test "browser live mutations require same-origin authority and the page nonce", %{
@@ -294,6 +352,40 @@ defmodule PtcViewer.LiveRouterTest do
     assert post_conn.status == 202
   end
 
+  test "launch accepts the canonical 2 MB input boundary and rejects the next byte", %{
+    opts: opts,
+    tmp_dir: tmp_dir
+  } do
+    File.write!(Path.join(tmp_dir, "demo.json"), "{}")
+    test_process = self()
+
+    opts =
+      Keyword.put(opts, :live_launch, %{
+        manifest: "demo.json",
+        cwd: tmp_dir,
+        adapter: fn request, _report ->
+          send(test_process, {:large_launch, request})
+          {0, "ok"}
+        end
+      })
+
+    accepted =
+      browser_mutation(:post, "/api/live/launch", launch_body(@live_launch_body_limit))
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> call_router(opts)
+
+    assert accepted.status == 202
+    assert_receive {:large_launch, {:workflow, %{input: _name}}}, 2_000
+
+    rejected =
+      browser_mutation(:post, "/api/live/launch", launch_body(@live_launch_body_limit + 1))
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> call_router(opts)
+
+    assert rejected.status == 400
+    assert Jason.decode!(rejected.resp_body) == %{"error" => "body_too_large"}
+  end
+
   test "a mission body takes the mission path, not the input path", %{opts: opts, tmp_dir: dir} do
     File.write!(Path.join(dir, "demo.json"), "{}")
     test_process = self()
@@ -340,6 +432,12 @@ defmodule PtcViewer.LiveRouterTest do
     |> browser_conn(path, body)
     |> Plug.Conn.put_req_header("origin", "http://localhost")
     |> Plug.Conn.put_req_header("x-ptc-viewer-live-nonce", @live_nonce)
+  end
+
+  defp launch_body(size) do
+    prefix = ~s({"input":{"payload":")
+    suffix = ~s("}})
+    prefix <> String.duplicate("x", size - byte_size(prefix) - byte_size(suffix)) <> suffix
   end
 
   defp entry_config(conn) do

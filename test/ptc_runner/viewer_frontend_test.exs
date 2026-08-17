@@ -48,6 +48,30 @@ defmodule PtcRunner.ViewerFrontendTest do
   end
 
   @tag :tmp_dir
+  test "Live launch materializes a manifest-relative input file", %{tmp_dir: directory} do
+    project_path = viewer_project(directory)
+    manifest_path = Path.join(directory, "demo/ptc.json")
+    input = %{"source" => "file", "items" => [1, 2, 3]}
+    File.write!(Path.join(directory, "demo/live-input.json"), Jason.encode!(input))
+
+    manifest = Jason.decode!(File.read!(manifest_path))
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(Map.put(manifest, "input", %{"path" => "live-input.json"}))
+    )
+
+    assert {:ok, viewer, address, port} = ViewerFrontend.start(project_path)
+    on_exit(fn -> if Process.alive?(viewer), do: PtcViewer.stop(viewer) end)
+
+    assert {:ok, %{status: 200, body: launch}} =
+             Req.get("http://#{:inet.ntoa(address)}:#{port}/api/live/launch")
+
+    assert launch["input"] == input
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
+  @tag :tmp_dir
   test "inspection-capture failure releases the already captured trace", %{tmp_dir: directory} do
     project_path = viewer_project(directory)
     parent = self()

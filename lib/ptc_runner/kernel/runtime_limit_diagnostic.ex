@@ -47,6 +47,21 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @spec timeout_message(term(), term(), term()) :: {:ok, binary()} | :error
   def timeout_message(limit, limit_ms, phase)
       when limit in @timeout_limits and phase in @timeout_phases do
+    build_timeout_message(limit, limit_ms, phase)
+  end
+
+  def timeout_message(_limit, _limit_ms, _phase), do: :error
+
+  @doc false
+  @spec live_timeout_message(term(), term(), term()) :: {:ok, binary()} | :error
+  def live_timeout_message(limit, limit_ms, phase)
+      when limit in [:run_duration_ms | @timeout_limits] and phase in @timeout_phases do
+    build_timeout_message(limit, limit_ms, phase)
+  end
+
+  def live_timeout_message(_limit, _limit_ms, _phase), do: :error
+
+  defp build_timeout_message(limit, limit_ms, phase) do
     with {:ok, row} <- LimitCatalog.fetch(limit),
          true <- LimitCatalog.valid_value?(row, limit_ms) do
       {:ok, "#{limit} limit #{limit_ms} ms was exceeded during #{phase}"}
@@ -54,8 +69,6 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
       _invalid -> :error
     end
   end
-
-  def timeout_message(_limit, _limit_ms, _phase), do: :error
 
   @doc false
   @spec valid_message?(term()) :: boolean()

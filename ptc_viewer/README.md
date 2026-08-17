@@ -160,9 +160,15 @@ supply a zero-arity `:project_adapter`. The optional one-arity
 `:live_trace_refresh` callback atomically refreshes the host-owned snapshot
 before an ended card opens its canonical Runs detail. A random `:live_token`
 of at least 32 bytes authenticates non-loopback HTTP reporters through
-`PTC_VIEWER_TOKEN`.
-Inside Docker, bind `{0, 0, 0, 0}` but publish with
-`-p 127.0.0.1:4123:4123`. The token protects external live reporters and
+`PTC_VIEWER_TOKEN` and remote browser controls through the initial URL:
+
+```text
+http://localhost:4123/?live_token=THE_TOKEN#/live
+```
+
+The browser removes `live_token` from the visible URL after bootstrapping and
+sends it as a bearer token on mutations. Inside Docker, bind `{0, 0, 0, 0}` but
+publish with `-p 127.0.0.1:4123:4123`. The token protects live ingestion and
 mutations, not the trace browser as a whole.
 
 ## HTTP API

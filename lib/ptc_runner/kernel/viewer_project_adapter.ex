@@ -12,16 +12,17 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
 
       project_adapter: fn -> ViewerProjectAdapter.describe("app/ptc.json") end
 
-  This is a display projection, not a compilation step. It parses the manifest
-  JSON directly instead of building a bundle, so it can still describe a
-  project that would fail to compile, and it never guesses: a tool effect is
-  reported only where the host configuration states one, and a component
-  source only where the file or shipped library is readable.
+  This is a display projection, not a compilation step. It uses the canonical
+  manifest and host loaders, so component sources keep the same confinement,
+  size, UTF-8, and effective-limit contract as the run the Viewer launches. It
+  can still describe a project that fails later compilation, and it never
+  guesses a tool effect that the host did not install.
   """
 
-  alias PtcRunner.Kernel.Library
+  alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.Manifest
 
   @type environment :: %{
           name: binary(),
@@ -35,6 +36,7 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
           name: binary(),
           manifest: binary(),
           entry: binary() | nil,
+          input: map(),
           environments: [environment()],
           limits: [map()]
         }
@@ -57,22 +59,27 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
   @spec describe(binary(), keyword()) ::
           {:ok, project()} | {:error, :invalid_manifest | File.posix()}
   def describe(manifest_path, opts \\ []) when is_binary(manifest_path) do
-    with {:ok, raw} <- File.read(manifest_path),
-         {:ok, manifest} when is_map(manifest) <- Jason.decode(raw),
-         {:ok, limits} <- limit_rows(manifest) do
-      install = install_entries(Keyword.get(opts, :host_config))
+    host = host_context(Keyword.get(opts, :host_config))
 
-      {:ok,
-       %{
-         name: Keyword.get(opts, :name) || display_name(manifest, manifest_path),
-         manifest: manifest_path,
-         entry: get_in(manifest, ["workflow", "entry"]),
-         environments: environments(manifest, Path.dirname(manifest_path), install),
-         limits: limits
-       }}
-    else
-      {:error, reason} when is_atom(reason) -> {:error, reason}
-      _invalid -> {:error, :invalid_manifest}
+    case Manifest.load(manifest_path, host.limits) do
+      {:ok, manifest} ->
+        document = manifest.document
+
+        {:ok,
+         %{
+           name: Keyword.get(opts, :name) || display_name(document, manifest_path),
+           manifest: manifest_path,
+           entry: manifest.entry,
+           input: manifest.input,
+           environments: environments(manifest, host.install),
+           limits: limit_rows(manifest.limits)
+         }}
+
+      {:error, :not_found} ->
+        {:error, :enoent}
+
+      {:error, _reason} ->
+        {:error, :invalid_manifest}
     end
   end
 
@@ -82,56 +89,52 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
 
   # --- environments -------------------------------------------------------
 
-  defp environments(manifest, dir, install) do
-    providers = Map.get(manifest, "providers", %{})
-    workflow_pool = list(Map.get(providers, "workflow"))
-    mission_pool = list(Map.get(providers, "mission"))
-
+  defp environments(%Manifest{} = manifest, install) do
     workflow =
       environment(
         "workflow",
         "workflow",
-        Map.get(manifest, "workflow", %{}),
-        workflow_pool,
-        dir,
+        get_in(manifest.document, ["workflow", "components"]),
+        manifest.workflow_components,
+        manifest.workflow_component_kinds,
+        manifest.providers.workflow,
         install
       )
 
     missions =
-      manifest
-      |> Map.get("missions", %{})
-      |> then(&if is_map(&1), do: &1, else: %{})
+      manifest.missions
       |> Enum.sort_by(fn {name, _spec} -> name end)
-      |> Enum.map(fn {name, spec} ->
-        environment(name, "mission", spec, mission_providers(spec, mission_pool), dir, install)
+      |> Enum.map(fn {name, mission} ->
+        providers =
+          Enum.map(mission.provider_occurrences, &Enum.fetch!(manifest.providers.mission, &1))
+
+        environment(
+          name,
+          "mission",
+          get_in(manifest.document, ["missions", name, "components"]),
+          mission.components,
+          mission.kinds,
+          providers,
+          install
+        )
       end)
 
     [workflow | missions]
   end
 
-  # A mission selects from the manifest's declared mission providers by name;
-  # without a selection it sees the whole pool.
-  defp mission_providers(spec, pool) do
-    case Map.get(spec, "providers") do
-      names when is_list(names) -> Enum.filter(pool, &(&1["name"] in names))
-      _unselected -> pool
-    end
-  end
-
-  defp environment(name, kind, spec, providers, dir, install) do
-    spec = if is_map(spec), do: spec, else: %{}
-
+  defp environment(name, kind, declarations, components, kinds, providers, install) do
     %{
       name: name,
       kind: kind,
-      components: spec |> Map.get("components") |> list() |> Enum.map(&component(&1, dir)),
+      components: project_components(declarations, components, kinds),
       providers: Enum.map(providers, &provider(&1, install)),
       tools: tools(providers, install)
     }
   end
 
   defp provider(%{"name" => name}, install) do
-    %{name: name, source: get_in(install, [name, "source"])}
+    source = install |> Map.get(name, %{}) |> Map.get(:source)
+    %{name: name, source: source && to_string(source)}
   end
 
   defp provider(_declaration, _install), do: %{name: nil, source: nil}
@@ -139,89 +142,67 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
   defp tools(providers, install) do
     providers
     |> Enum.flat_map(fn
-      %{"name" => name} -> install |> get_in([name, "tools"]) |> map() |> Map.values()
+      %{"name" => name} -> install |> Map.get(name, %{}) |> Map.get(:tools, %{}) |> Map.values()
       _declaration -> []
     end)
-    |> Enum.map(&%{name: Map.get(&1, "as"), effect: Map.get(&1, "effect")})
+    |> Enum.map(&%{name: Map.get(&1, :as), effect: &1 |> Map.get(:effect) |> to_string()})
     |> Enum.sort_by(&(&1.name || ""))
   end
 
   # --- components ---------------------------------------------------------
 
-  defp component(%{"library" => name}, _dir) when is_binary(name) do
-    case Library.component(name) do
-      {:ok, component} ->
-        %{id: name, library: true, path: component.origin, source: component.source}
+  defp project_components(declarations, components, kinds) do
+    by_id = Map.new(components, &{&1.id, &1})
 
-      {:error, _reason} ->
-        %{id: name, library: true, path: nil, source: nil}
-    end
+    declarations
+    |> list()
+    |> Enum.map(fn declaration ->
+      id = Map.get(declaration, "id") || Map.get(declaration, "library")
+      component(Map.get(by_id, id), Map.get(kinds, id))
+    end)
   end
 
-  defp component(%{"id" => id, "path" => path}, dir) when is_binary(id) and is_binary(path) do
-    %{id: id, library: false, path: path, source: read_source(Path.join(dir, path))}
-  end
+  defp component(component, kind) when is_struct(component),
+    do: %{
+      id: component.id,
+      library: kind == :library,
+      path: component.origin,
+      source: component.source
+    }
 
-  defp component(_declaration, _dir),
+  defp component(_component, _kind),
     do: %{id: nil, library: false, path: nil, source: nil}
-
-  defp read_source(path) do
-    case File.read(path) do
-      {:ok, source} -> source
-      {:error, _reason} -> nil
-    end
-  end
 
   # --- limits -------------------------------------------------------------
 
   # Every catalog row is reported, so the panel can show the full table and
   # still lead with the rows a manifest actually moved.
-  defp limit_rows(manifest) do
-    with {:ok, overrides} <- limit_overrides(Map.get(manifest, "limits", %{})),
-         {:ok, effective} <- Limits.new(overrides) do
-      defaults = Limits.defaults()
+  defp limit_rows(effective) do
+    defaults = Limits.defaults()
 
-      {:ok,
-       Enum.map(LimitCatalog.rows(), fn row ->
-         %{
-           name: row.name,
-           unit: row.unit,
-           effective: Map.fetch!(effective, row.field),
-           default: Map.fetch!(defaults, row.field)
-         }
-       end)}
-    end
-  end
-
-  defp limit_overrides(declared) when is_map(declared) do
-    Enum.reduce_while(declared, {:ok, %{}}, fn {name, value}, {:ok, acc} ->
-      case Limits.name(name) do
-        {:ok, field} -> {:cont, {:ok, Map.put(acc, field, value)}}
-        :error -> {:halt, {:error, :invalid_manifest}}
-      end
+    Enum.map(LimitCatalog.rows(), fn row ->
+      %{
+        name: row.name,
+        unit: row.unit,
+        effective: Map.fetch!(effective, row.field),
+        default: Map.fetch!(defaults, row.field)
+      }
     end)
   end
 
-  defp limit_overrides(_declared), do: {:error, :invalid_manifest}
-
   # --- host configuration -------------------------------------------------
 
-  defp install_entries(nil), do: %{}
+  defp host_context(nil), do: %{limits: Limits.installed_defaults(), install: %{}}
 
-  defp install_entries(path) when is_binary(path) do
-    with {:ok, raw} <- File.read(path),
-         {:ok, %{"install" => install}} when is_map(install) <- Jason.decode(raw) do
-      install
-    else
-      _unavailable -> %{}
+  defp host_context(path) when is_binary(path) do
+    case HostConfig.load(path) do
+      {:ok, host} -> %{limits: host.limits, install: host.install}
+      {:error, _reason} -> host_context(nil)
     end
   end
 
-  defp install_entries(_path), do: %{}
+  defp host_context(_path), do: host_context(nil)
 
   defp list(value) when is_list(value), do: value
   defp list(_value), do: []
-
-  defp map(value) when is_map(value), do: value
-  defp map(_value), do: %{}
 end

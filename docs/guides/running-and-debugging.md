@@ -42,6 +42,11 @@ The Viewer binds to loopback by default and has no authentication. Do not expose
 it to a network, especially when a project grants access to private inspection
 records.
 
+In Docker, publish the port on host loopback, bind the Viewer to the container
+wildcard, and set `PTC_VIEWER_TOKEN`. Open
+`http://localhost:4123/?live_token=THE_TOKEN#/live` to authorize the Live
+controls; the token does not authenticate the Runs trace browser.
+
 For automation, request a command envelope instead of parsing human-readable
 diagnostics:
 
