@@ -194,7 +194,12 @@ gateway enforces a bounded in-flight call limit with explicit rejection —
 no hidden unbounded queue. Client disconnect or cancellation must reach the
 run owner, which already kills and drains attached provider work before
 connector cleanup; the gateway wires transport lifecycle to that existing
-contract.
+contract. The cancellation *signal* is transport-qualified by the
+activation: `notifications/cancelled` is honored on stdio only, HTTP SSE
+cancellation is response-stream closure, and HTTP plain-JSON calls run to
+completion or deadline — a sessionless shared-authority endpoint has no
+collision-proof identity to correlate a later cancellation POST against
+([`../mcp-gateway-m0.md`](../mcp-gateway-m0.md)).
 
 ### Contracts, schemas, and attestation
 

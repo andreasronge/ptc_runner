@@ -136,11 +136,21 @@ providers) and 2b (host runtime + admission) if review size demands.
 - **Aggregate provider admission sits at provider-task dispatch, not at
   call admission.** A run uses zero to `live_provider_tasks` workers
   dynamically, so bounding whole calls cannot bound aggregate tasks. The
-  runtime owns a counting semaphore checked where provider tasks are
-  dispatched; acquisition is **non-blocking** (saturation yields a closed
-  diagnostic, not a pool timeout or a queue), and release is
-  **exactly-once across every exit path** — normal completion, provider
-  failure, task crash, deadline, caller death, and owner termination.
+  counting semaphore is checked where provider tasks are dispatched;
+  acquisition is **non-blocking** (saturation yields a closed diagnostic,
+  not a pool timeout or a queue), and release is **exactly-once across
+  every exit path** — normal completion, provider failure, task crash,
+  deadline, caller death, and owner termination — enforced by the
+  semaphore owner **monitoring each leaseholder**. That owner is a
+  dedicated VM-lifetime process supervised **above** `HostRuntime`, so a
+  runtime crash or restart neither resets capacity while old leaseholders
+  still run nor strands their leases: monitors release them as they exit.
+- **Pool geometry and the admission ceiling are one invariant, not two
+  settings.** `HostRuntime` startup validates that the aggregate admission
+  ceiling does not exceed the configured Finch capacity
+  (`count × size`) of any provider endpoint's pool, and refuses a
+  configuration that admits more concurrent ReqLLM tasks than connections
+  exist to carry — otherwise the runtime can legally recreate #1290.
   Per-call in-flight limits remain the gateway's separate layer (PR 3).
 - The public run outcome DTO is promoted at the
   `ExecutionOutcome` → `CommandOutcome` conversion seam; the `@doc false`
@@ -167,7 +177,10 @@ command declaration, and precommit/CI wiring.
   application source (directory or memory), approved description, and
   **named expected digests** — `application_content_digest`,
   `effective_application_digest`, and one expected snapshot digest per
-  provider installation the application selects — plus the host document
+  provider **occurrence**, keyed by provider name, destination, and
+  selection index (the same alias can be selected per destination with
+  different configuration, yielding different snapshots; keying by
+  installation alone would be ambiguous) — plus the host document
   reference and admission limits. These exact fields are what boot and
   call-time revalidation compare, key by key.
   Boot compiles every entry into a `ServingTemplate` and performs one
@@ -235,23 +248,28 @@ container packaging, CI classification, and documentation; scoping it
   `Origin` header is allowed (non-browser SDK clients send none); a present
   `Origin` must exactly match the configured allowlist or the request is
   rejected — private-network origins get no implicit trust. The `Host`
-  header must exactly match a configured serve name (scheme/host/port), so
-  DNS-rebinding and host-header variants are rejected. Forwarded headers
+  header carries `host[:port]`, never a scheme: it must match the
+  configured authority's canonical host and effective port, rejecting
+  DNS-rebinding and host-header variants; the scheme is validated
+  separately by the listener/TLS configuration. Forwarded headers
   (`X-Forwarded-*`, `Forwarded`) are **ignored** in this tier — proxy
   deployment means the operator terminates TLS and authenticates the hop;
   the gateway trusts only its own socket.
 - **Disconnect detection is a design item, not an assertion.** A
   synchronous Plug handler may not observe client closure until it writes.
-  The PR must choose and document the mechanism — SSE-first responses so
-  closure is observable mid-call, or a transport-level socket monitor —
-  and define the ownership topology from connection process to request
-  owner to run. For plain-JSON responses, `notifications/cancelled` is
-  **unsupported**: the sessionless shared-authority model gives a later
-  POST no collision-proof identity to correlate against (two clients may
-  reuse the same JSON-RPC request id), so a JSON-mode call runs to
-  completion or deadline, and clients wanting mid-call cancellation use
-  SSE mode. This restriction is documented in the served capability
-  surface.
+  The PR must choose and document the mechanism, knowing that SSE-first
+  alone is insufficient — headers followed by silence detects nothing —
+  so the SSE option requires **bounded heartbeat/comment writes with
+  cancellation on the first failed write**, and the alternative is a
+  proven transport-level socket monitor. Either way the PR defines the
+  ownership topology from connection process to request owner to run.
+  `notifications/cancelled` is honored on **stdio only**. Over HTTP it is
+  **unsupported in both response modes**: the sessionless shared-authority
+  model gives a later POST no collision-proof identity to correlate
+  against (two clients may reuse the same JSON-RPC request id). HTTP
+  cancellation is stream closure in SSE mode; a plain-JSON call runs to
+  completion or deadline. These restrictions are documented in the served
+  capability surface.
 - **Bearer authentication with an explicit hardening checklist:**
   file-sourced token (`env` secrets are VM-global and excluded); defined
   token size/encoding and trailing-newline handling; the token file must
