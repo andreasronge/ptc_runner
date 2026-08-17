@@ -21,7 +21,7 @@ defmodule PtcGateway.Server do
 
   @spec stop(pid()) :: :ok
   def stop(pid) when is_pid(pid) do
-    Process.exit(pid, :shutdown)
+    if Process.alive?(pid), do: Supervisor.stop(pid, :shutdown)
     :ok
   end
 
@@ -33,22 +33,32 @@ defmodule PtcGateway.Server do
       {Admission, ceiling: Keyword.fetch!(opts, :max_in_flight)}
     ]
 
-    Supervisor.init(children, strategy: :rest_for_one)
+    Supervisor.init(children, strategy: :rest_for_one, auto_shutdown: :any_significant)
   end
 
   defp start_tree(opts) do
     with {:ok, pid} <- Supervisor.start_link(__MODULE__, opts) do
       true = Process.unlink(pid)
 
-      with {:ok, admission} <- admission_pid(pid),
-           {:ok, _connection} <-
-             Supervisor.start_child(pid, connection_spec(opts, admission)) do
-        {:ok, pid}
-      else
-        {:error, {:already_started, _pid}} -> {:error, :gateway_start_failed}
-        {:error, {:shutdown, _reason}} -> {:error, :invalid_gateway_config}
-        {:error, _reason} -> {:error, :invalid_gateway_config}
+      case start_connection(pid, opts) do
+        {:ok, _connection} ->
+          {:ok, pid}
+
+        {:error, reason} ->
+          stop(pid)
+          {:error, reason}
       end
+    else
+      {:error, {:already_started, _pid}} -> {:error, :gateway_start_failed}
+      {:error, {:shutdown, _reason}} -> {:error, :invalid_gateway_config}
+      {:error, _reason} -> {:error, :invalid_gateway_config}
+    end
+  end
+
+  defp start_connection(pid, opts) do
+    with {:ok, admission} <- admission_pid(pid),
+         {:ok, connection} <- Supervisor.start_child(pid, connection_spec(opts, admission)) do
+      {:ok, connection}
     else
       {:error, {:already_started, _pid}} -> {:error, :gateway_start_failed}
       {:error, {:shutdown, _reason}} -> {:error, :invalid_gateway_config}
@@ -78,7 +88,8 @@ defmodule PtcGateway.Server do
              write: Keyword.get(opts, :write)
            ]
          ]},
-      restart: :temporary
+      restart: :temporary,
+      significant: true
     }
   end
 end

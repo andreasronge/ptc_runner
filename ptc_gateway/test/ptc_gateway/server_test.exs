@@ -125,6 +125,94 @@ defmodule PtcGateway.ServerTest do
     assert_receive {:DOWN, ^ref, :process, ^owner, _reason}, 1_000
   end
 
+  test "client EOF stops the gateway" do
+    {:ok, pipe} = Pipe.start_link()
+    {:ok, gateway} = start_gateway(pipe, max_in_flight: 1)
+    ref = Process.monitor(gateway)
+    Pipe.close(pipe)
+    assert_receive {:DOWN, ^ref, :process, ^gateway, _reason}, 1_000
+  end
+
+  test "failed connection start does not leak the supervisor" do
+    assert {:error, :invalid_gateway_config} =
+             PtcGateway.start(
+               tools: [
+                 %{
+                   name: "bad",
+                   description: "bad",
+                   input_schema: %{},
+                   output_schema: %{},
+                   meta: %{},
+                   call: :not_a_fun
+                 }
+               ],
+               max_in_flight: 1,
+               read: fn -> :eof end,
+               write: fn _frame -> :ok end
+             )
+
+    refute Enum.any?(Process.list(), &owned_gateway_supervisor?/1)
+  end
+
+  @tag :capture_log
+  test "reader crash stops the gateway" do
+    parent = self()
+    {:ok, pipe} = Pipe.start_link()
+
+    {:ok, gateway} =
+      start_gateway(pipe,
+        max_in_flight: 1,
+        read: fn ->
+          send(parent, {:reader, self()})
+
+          receive do
+            :crash -> raise "boom"
+          end
+        end
+      )
+
+    assert_receive {:reader, reader}, 1_000
+    ref = Process.monitor(gateway)
+    send(reader, :crash)
+    assert_receive {:DOWN, ^ref, :process, ^gateway, _reason}, 1_000
+  end
+
+  test "duplicate in-flight JSON-RPC ids are rejected" do
+    {:ok, pipe} = Pipe.start_link()
+    blocker = self()
+
+    slow = fn arguments ->
+      send(blocker, {:blocked, self()})
+
+      receive do
+        :continue -> {:ok, %{"answer" => arguments["n"]}}
+      end
+    end
+
+    {:ok, gateway} = start_gateway(pipe, max_in_flight: 2, echo_call: slow)
+    Pipe.push(pipe, request(1, "tools/call", %{"name" => "echo", "arguments" => %{"n" => 1}}))
+    assert_receive {:blocked, owner}, 1_000
+
+    Pipe.push(pipe, request(1, "tools/call", %{"name" => "echo", "arguments" => %{"n" => 2}}))
+    [frame] = Pipe.await_frames(pipe, 1)
+    duplicate = decode(frame)
+    assert duplicate["id"] == 1
+    assert duplicate["error"]["code"] == -32_600
+    assert duplicate["error"]["message"] == "invalid request"
+
+    send(owner, :continue)
+    frames = Pipe.await_frames(pipe, 2)
+
+    success =
+      frames
+      |> Enum.map(&decode/1)
+      |> Enum.find(&(&1["id"] == 1 and Map.has_key?(&1, "result")))
+
+    assert success["result"]["structuredContent"] == %{"answer" => 1}
+
+    PtcGateway.stop(gateway)
+  end
+
   defp start_gateway(pipe, opts) do
     echo_call =
       Keyword.get(opts, :echo_call, fn arguments -> {:ok, %{"answer" => arguments["n"]}} end)
@@ -155,9 +243,20 @@ defmodule PtcGateway.ServerTest do
     PtcGateway.start(
       tools: tools,
       max_in_flight: Keyword.fetch!(opts, :max_in_flight),
-      read: fn -> Pipe.read(pipe) end,
-      write: fn frame -> Pipe.write(pipe, frame) end
+      read: Keyword.get(opts, :read, fn -> Pipe.read(pipe) end),
+      write: Keyword.get(opts, :write, fn frame -> Pipe.write(pipe, frame) end)
     )
+  end
+
+  defp owned_gateway_supervisor?(pid) do
+    case Process.info(pid, :dictionary) do
+      {:dictionary, dict} ->
+        Keyword.get(dict, :"$initial_call") == {PtcGateway.Server, :init, 1} and
+          self() in Keyword.get(dict, :"$ancestors", [])
+
+      _other ->
+        false
+    end
   end
 
   defp request(id, method, params) do

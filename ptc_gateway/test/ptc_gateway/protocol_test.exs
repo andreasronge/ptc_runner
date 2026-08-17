@@ -25,6 +25,9 @@ defmodule PtcGateway.ProtocolTest do
 
     assert {:error, :parse} = Protocol.decode_line("{not json")
     assert {:error, :invalid_request} = Protocol.decode_line("[]")
+
+    oversized = :binary.copy("x", Protocol.max_frame_bytes() + 1)
+    assert {:error, :parse} = Protocol.decode_line(oversized)
   end
 
   test "discover and tools/list envelopes match decoded fixture values" do

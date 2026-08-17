@@ -20,7 +20,9 @@ defmodule PtcGateway.MixProject do
 
   defp deps do
     [
-      {:jason, "~> 1.4"}
+      {:jason, "~> 1.4"},
+      {:plug, "~> 1.16"},
+      {:bandit, "~> 1.6"}
     ]
   end
 

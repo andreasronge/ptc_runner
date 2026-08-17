@@ -2,15 +2,17 @@ defmodule PtcGateway do
   @moduledoc """
   Stdio MCP gateway that serves compiled applications as tools.
 
-  `start/1` binds one stdio connection, advertises the supplied tool catalog,
-  and runs each `tools/call` in its own request owner. The owner monitors the
+  `start/1` binds one stdio connection. `PtcGateway.HTTP.Router` is the
+  streamable HTTP front door; Bandit/Plug stay in this companion. Each
+  `tools/call` runs in its own request owner. The owner monitors the
   connection process; connection death kills every in-flight call. In-flight
   admission is non-blocking: saturation is a closed rejection, not a queue.
 
-  The pinned protocol is MCP `2026-07-28` over newline-delimited JSON. HTTP
-  `Content-Length` framing is rejected. This companion does not compile
-  applications; the host passes already-compiled tool descriptors and a call
-  function per tool.
+  The pinned protocol is MCP `2026-07-28`. Stdio uses newline-delimited JSON
+  and rejects HTTP `Content-Length` framing. HTTP POST `/mcp` uses JSON
+  bodies; `notifications/cancelled` is stdio-only. This companion does not
+  compile applications; the host passes already-compiled tool descriptors and
+  a call function per tool.
   """
 
   alias PtcGateway.Server

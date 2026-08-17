@@ -21,6 +21,9 @@ defmodule PtcGateway.Protocol do
   @spec protocol_version() :: binary()
   def protocol_version, do: @protocol
 
+  @spec max_frame_bytes() :: pos_integer()
+  def max_frame_bytes, do: @max_frame_bytes
+
   @spec decode_line(binary()) :: {:ok, inbound()} | {:error, Errors.kind()}
   def decode_line(line) when is_binary(line) do
     cond do

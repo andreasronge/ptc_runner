@@ -38,6 +38,10 @@ defmodule PtcGateway.Connection do
     {:noreply, drop_owner(state, owner, id)}
   end
 
+  def handle_info({:EXIT, pid, _reason}, %{reader: pid} = state) do
+    {:stop, :normal, state}
+  end
+
   def handle_info({:EXIT, pid, reason}, state) do
     {:noreply, owner_exit(state, pid, reason)}
   end
@@ -129,6 +133,10 @@ defmodule PtcGateway.Connection do
         write_frame(state, Protocol.encode_rpc_error(id, :unknown_tool))
         state
 
+      Map.has_key?(state.owners, id) ->
+        write_frame(state, Protocol.encode_rpc_error(id, :invalid_request))
+        state
+
       true ->
         admit_call(state, id, Map.fetch!(state.tools, name), arguments)
     end
@@ -208,10 +216,40 @@ defmodule PtcGateway.Connection do
   defp write_frame(state, frame), do: state.write.(frame)
 
   defp stdio_read do
-    case IO.read(:stdio, :line) do
-      :eof -> :eof
-      {:error, _reason} -> :eof
-      line when is_binary(line) -> {:ok, String.trim_trailing(line, "\n")}
+    collect_line(0, [])
+  end
+
+  defp collect_line(size, acc) do
+    if size > Protocol.max_frame_bytes() do
+      discard_rest_of_line()
+      {:ok, :oversized}
+    else
+      read_next_byte(size, acc)
+    end
+  end
+
+  defp read_next_byte(size, acc) do
+    case IO.binread(:stdio, 1) do
+      :eof ->
+        if acc == [], do: :eof, else: {:ok, IO.iodata_to_binary(Enum.reverse(acc))}
+
+      {:error, _reason} ->
+        :eof
+
+      "\n" ->
+        {:ok, IO.iodata_to_binary(Enum.reverse(acc))}
+
+      <<byte>> ->
+        collect_line(size + 1, [byte | acc])
+    end
+  end
+
+  defp discard_rest_of_line do
+    case IO.binread(:stdio, 1) do
+      :eof -> :ok
+      {:error, _reason} -> :ok
+      "\n" -> :ok
+      _byte -> discard_rest_of_line()
     end
   end
 

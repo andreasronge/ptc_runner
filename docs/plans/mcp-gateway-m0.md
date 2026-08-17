@@ -276,6 +276,10 @@ without the in-repo client.
 
 ## PR 4 — streamable HTTP, single shared authority
 
+**4 status (this branch):** in progress — Bandit/Plug live only in `ptc_gateway/`,
+JSON POST reuses the PR 3 protocol and admission owners, stdio `ptc serve`
+unchanged.
+
 Centered on `ptc_gateway/` — Bandit/Plug enter there and stay out of the
 root application — but this PR also touches root release assembly,
 container packaging, CI classification, and documentation; scoping it
