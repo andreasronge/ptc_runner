@@ -2,7 +2,10 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Introspection
+  alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler
+  alias PtcRunner.Lisp.Prelude.Export
 
   @source """
   (ns alpha "Alpha helpers." {:visibility :prompt})
@@ -79,7 +82,7 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
 
   describe "apropos" do
     test "matches on ref", %{prelude: prelude} do
-      assert eval!(~S|(apropos "hidden")|, prelude).return == ["beta/hidden"]
+      assert "beta/hidden" in eval!(~S|(apropos "hidden")|, prelude).return
     end
 
     test "matches on docstring", %{prelude: prelude} do
@@ -101,7 +104,21 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
     end
 
     test "never returns private helpers", %{prelude: prelude} do
-      assert eval!(~S|(apropos "helper")|, prelude).return == []
+      refute "alpha/helper" in eval!(~S|(apropos "helper")|, prelude).return
+    end
+
+    test "merges registry and visible prelude matches into sorted unique names", %{
+      prelude: prelude
+    } do
+      assert eval!(~S|(apropos "map")|, prelude).return ==
+               eval!(~S|(apropos "map")|, prelude).return |> Enum.uniq() |> Enum.sort()
+
+      assert "map" in eval!(~S|(apropos "map")|, prelude).return
+      assert "alpha/greet" in eval!(~S|(apropos "greets")|, prelude).return
+
+      assert "Duration/between" in eval!(~S|(apropos "java.time.Duration/between")|, prelude).return
+
+      assert eval!(~S|(apropos "[invalid")|, prelude).return == []
     end
   end
 
@@ -247,18 +264,33 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       assert String.starts_with?(printed, "alpha/greet\n")
       assert printed =~ "12/"
     end
+
+    test "falls back to registry documentation and applies the same print budget", %{
+      prelude: prelude
+    } do
+      result = eval!(~S|(doc "map")|, prelude, max_print_length: 20)
+
+      assert result.return == nil
+      assert [printed] = result.prints
+      assert String.starts_with?(printed, "(map f coll)")
+      assert printed =~ "20/"
+    end
   end
 
   describe "no attached prelude" do
-    test "listing forms are empty and lookups miss", %{prelude: _} do
+    test "prelude listings are empty while doc and apropos still expose built-ins", %{prelude: _} do
       {:ok, result} = Lisp.run(~S|[(dir) (dir "alpha") (apropos "greet")]|)
       assert result.return == [[], [], []]
+
+      {:ok, apropos} = Lisp.run(~S|(apropos "sort")|)
+      assert "sort" in apropos.return
 
       {:ok, meta} = Lisp.run(~S|(export-meta "alpha/greet")|)
       assert meta.return == nil
 
-      {:ok, doc} = Lisp.run(~S|(doc "alpha/greet")|)
-      assert doc.prints == [~s(No documentation found for "alpha/greet".)]
+      {:ok, doc} = Lisp.run(~S|(doc "map")|)
+      assert [printed] = doc.prints
+      assert printed =~ "(map f coll)"
     end
   end
 
@@ -279,10 +311,11 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                ["beta/collect", "beta/hidden"]
              ]
 
-      assert eval!(~S|(map apropos ["hidden" "shout"])|, prelude).return == [
-               ["beta/hidden"],
-               ["alpha/shout"]
-             ]
+      [hidden_matches, shout_matches] =
+        eval!(~S|(map apropos ["hidden" "shout"])|, prelude).return
+
+      assert "beta/hidden" in hidden_matches
+      assert shout_matches == ["alpha/shout"]
     end
 
     test "map over doc captures every print in order", %{prelude: prelude} do
@@ -437,6 +470,53 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                [~s(No documentation found for "alpha/shout".)]
     end
 
+    test "a hidden qualified alias does not suppress a callable registry name", %{prelude: _} do
+      {:ok, collision} =
+        Compiler.compile("""
+        (ns core "Collision." {:visibility :prompt})
+        (defn map "Attached map." [f xs] xs)
+        """)
+
+      mask = [prelude_export_mask: %{"core" => MapSet.new()}]
+
+      assert "map" in eval!(~S|(apropos "map")|, collision, mask).return
+
+      assert eval!(~S|(doc "core/map")|, collision, mask).prints ==
+               [~s(No documentation found for "core/map".)]
+
+      assert eval!(~S|(doc "map")|, collision, mask).prints |> hd() =~ "(map f coll)"
+
+      strict = [
+        strict_transitive_calls: true,
+        direct_namespaces: [],
+        transitive_namespace_requirers: %{"core" => ["alpha"]}
+      ]
+
+      assert "map" in eval!(~S|(apropos "map")|, collision, strict).return
+
+      assert eval!(~S|(doc "core/map")|, collision, strict).prints ==
+               [~s(No documentation found for "core/map".)]
+    end
+
+    test "a hidden exact ref suppresses its registry collision" do
+      prelude = %Prelude{
+        namespaces: ["Duration"],
+        exports: [
+          %Export{
+            ref: "Duration/between",
+            namespace: "Duration",
+            symbol: "between",
+            arity: 2,
+            visibility: :prompt
+          }
+        ],
+        private_env: %{},
+        source_hash: "synthetic-collision"
+      }
+
+      refute "Duration/between" in Introspection.apropos(prelude, "between", fn _ -> false end)
+    end
+
     test "a namespace absent from the mask stays unrestricted", %{prelude: prelude} do
       # The mask is an overlay, not an allowlist.
       mask = [prelude_export_mask: %{"alpha" => MapSet.new(["alpha/greet"])}]
@@ -453,7 +533,7 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
 
       assert eval!("(dir)", prelude, strict).return == ["alpha"]
       assert eval!(~S|(dir "beta")|, prelude, strict).return == []
-      assert eval!(~S|(apropos "hidden")|, prelude, strict).return == []
+      refute "beta/hidden" in eval!(~S|(apropos "hidden")|, prelude, strict).return
 
       # ...and the hidden namespace is genuinely uncallable, so discovery and
       # callability agree rather than merely both being restricted.

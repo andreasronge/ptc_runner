@@ -1063,7 +1063,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert system =~
              ~r/\nAvailable API\n- No mission-specific data, functions, or tools are available\.\n\z/
 
-    assert system =~ "dir/apropos/doc discover mission prelude exports only"
+    assert system =~
+             "Use (apropos \"term\") to search visible mission prelude exports plus fixed built-ins"
+
+    assert system =~ "None enumerate data references or direct tool capabilities"
   end
 
   test "default prompt advertises mission data names and types without values" do

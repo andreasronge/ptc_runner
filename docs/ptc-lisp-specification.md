@@ -3538,18 +3538,20 @@ hyphen-to-underscore normalization, as must object keys nested in input
 `const`/`enum` values; the host rejects incompatible schemas rather than
 publishing an exact call that runtime validation cannot accept.
 
-### 9.9 Prelude Introspection
+### 9.9 Introspection
 
-Four builtins read the attached prelude's public exports. They answer
+Four builtins provide one language-level discovery interface. They answer
 identically in the REPL, in generated workflow or mission source, and inside a
-prelude export reading another prelude's documentation.
+prelude export reading another prelude's documentation. `dir` and
+`export-meta` describe the attached prelude API; `apropos` and `doc` also cover
+fixed built-ins and the bounded Java surface.
 
 | Form | Result |
 |------|--------|
 | `(dir)` | Sorted vector of namespace names holding public exports |
 | `(dir "ns")` | Sorted vector of export refs in `ns` |
-| `(apropos "term")` | Sorted vector of export refs matching `term` |
-| `(doc "ns/name")` | Prints documentation, returns `nil` |
+| `(apropos "term")` | Sorted vector of matching prelude refs and canonical fixed-function names |
+| `(doc "name")` | Prints prelude or fixed-function documentation, returns `nil` |
 | `(export-meta "ns/name")` | Metadata map, or `nil` when unknown |
 
 References are strings, not symbols:
@@ -3568,8 +3570,9 @@ The last line is the point of these being ordinary function values rather than
 special forms: they compose in any position a function is accepted.
 
 `doc` prints and returns `nil` so documentation is charged to the print budget
-rather than the result channel; a program that needs the same information as
-data calls `export-meta`.
+rather than the result channel. For an attached prelude export, a program that
+needs the same information as data calls `export-meta`; registry metadata is
+reader-facing documentation only.
 
 `export-meta` reports the full calling contract: `:ref`, `:namespace`,
 `:symbol`, `:kind`, `:call`, `:doc`, `:visibility`, `:effect`, plus
@@ -3588,21 +3591,34 @@ reported as `:write` when its chain declares `:write` and `:unknown` otherwise.
 It is never reported as `:read`, so no answer here presents an unresolved effect
 as safe.
 
-Scope is the attached prelude only. These forms do not search `clojure.core`,
-the Java interop surface, or host capabilities; built-in functions are
-documented in this specification and in `docs/function-reference.md`, and
-granted capabilities appear in the mission inventory.
+`apropos` performs a case-insensitive literal substring search. For attached
+prelude exports it searches refs and docstrings. For the fixed registry it
+searches canonical names, signatures, descriptions, notes, divergences, and
+sections; aliases present in signatures, including fully qualified Java names,
+remain searchable, while results use canonical names. Results are sorted and
+deduplicated.
+
+`doc` resolves an exact attached prelude export before consulting the fixed
+registry. Visibility is applied after that occupancy check, so a hidden
+attached export cannot reveal registry documentation through the same
+spelling. `apropos` similarly suppresses a colliding registry name when its
+attached export is hidden. This preserves the invariant that attached API
+discovery never advertises something the running program cannot call.
+
+None of the forms enumerate `data/...` values or `tool/...` capabilities;
+those appear in the mission inventory. `dir` and `export-meta` remain attached
+prelude-only because their namespace and structured export records have no
+lossless equivalent for fixed registry entries.
 
 Both `:prompt` and `:discoverable` exports are visible, which is how a
 `:discoverable` export is found at all. Private `defn-` helpers have no export
 record and never appear, and a namespace holding only private helpers is absent
 from `(dir)`.
 
-Results are filtered to what the running program may actually call, so an
-export these forms return is an export it can invoke. A miss — unknown ref,
-malformed ref, or no attached prelude — is not a failure: `export-meta` returns
-`nil`, `doc` prints a not-found line, and the listing forms return `[]`. A blank
-`apropos` query returns `[]` rather than every export.
+Attached prelude results are filtered to what the running program may actually
+call. A miss is not a failure: `export-meta` returns `nil`, `doc` prints a
+not-found line, and `dir` returns `[]`. A blank `apropos` query returns `[]`
+rather than every fixed and attached function.
 
 `export-meta` is not `clojure.core/meta`, which takes an object rather than a
 reference string and is not implemented.
