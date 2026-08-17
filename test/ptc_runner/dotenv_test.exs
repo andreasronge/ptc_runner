@@ -100,4 +100,49 @@ defmodule PtcRunner.DotenvTest do
       assert System.get_env("PTC_DOTENV_TEST_EXISTING") == "original"
     end
   end
+
+  describe "with_file_scope/2" do
+    test "restores declared values so a changed file is used by the next launch", %{tmp_dir: dir} do
+      key = "PTC_DOTENV_SCOPED_ROTATION"
+      track_env([key])
+      System.delete_env(key)
+      path = Path.join(dir, ".env")
+
+      File.write!(path, "#{key}=first\n")
+
+      assert "first" =
+               Dotenv.with_file_scope(path, fn ->
+                 assert :ok = Dotenv.load_file(path)
+                 System.get_env(key)
+               end)
+
+      assert System.get_env(key) == nil
+
+      File.write!(path, "#{key}=second\n")
+
+      assert "second" =
+               Dotenv.with_file_scope(path, fn ->
+                 assert :ok = Dotenv.load_file(path)
+                 System.get_env(key)
+               end)
+
+      assert System.get_env(key) == nil
+    end
+
+    test "preserves a value inherited before the launch", %{tmp_dir: dir} do
+      key = "PTC_DOTENV_SCOPED_EXISTING"
+      track_env([key])
+      System.put_env(key, "inherited")
+      path = Path.join(dir, ".env")
+      File.write!(path, "#{key}=from-file\n")
+
+      assert "inherited" =
+               Dotenv.with_file_scope(path, fn ->
+                 assert :ok = Dotenv.load_file(path)
+                 System.get_env(key)
+               end)
+
+      assert System.get_env(key) == "inherited"
+    end
+  end
 end

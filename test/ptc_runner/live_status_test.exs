@@ -66,6 +66,84 @@ defmodule PtcRunner.LiveStatusTest do
     assert_receive {:DOWN, ^reporter_ref, :process, ^reporter, _reason}, 2_000
   end
 
+  test "a blocked target cannot delay run completion and its worker is terminated" do
+    test_process = self()
+
+    {:ok, target} =
+      Target.new(fn _run_id, frame ->
+        send(test_process, {:blocked_delivery, self(), frame.phase})
+
+        receive do
+          :never -> :ok
+        end
+      end)
+
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "blocked-live-target")
+    {:ok, config} = run_config(limits, sink, %{})
+    {:ok, run_state} = RunState.start(limits)
+    {:ok, reporter} = Reporter.start(target, config, run_state)
+
+    assert_receive {:blocked_delivery, delivery, "running"}, 1_000
+    delivery_ref = Process.monitor(delivery)
+
+    started = System.monotonic_time(:millisecond)
+    assert :ok = Reporter.complete(reporter, :ok, nil)
+    assert System.monotonic_time(:millisecond) - started < 500
+    assert :ok = Reporter.stop(reporter)
+
+    assert_receive {:DOWN, ^delivery_ref, :process, ^delivery, :killed}, 2_000
+    reporter_ref = Process.monitor(reporter)
+    assert_receive {:DOWN, ^reporter_ref, :process, ^reporter, :normal}, 2_000
+    assert :ok = RunState.stop(run_state)
+  end
+
+  test "an exiting execution owner does not cancel its terminal frame" do
+    test_process = self()
+
+    {:ok, target} =
+      Target.new(fn _run_id, frame ->
+        send(test_process, {:owner_delivery, self(), frame.phase})
+
+        if frame.phase != "running" do
+          receive do
+            :release_terminal -> send(test_process, {:terminal_delivered, frame.phase})
+          end
+        end
+
+        :ok
+      end)
+
+    owner =
+      spawn(fn ->
+        {:ok, limits} = Limits.new()
+        {:ok, sink} = EventSink.start(:normal, limits, run_id: "owner-terminal-frame")
+        {:ok, config} = run_config(limits, sink, %{})
+        {:ok, run_state} = RunState.start(limits)
+        {:ok, reporter} = Reporter.start(target, config, run_state)
+        send(test_process, {:owner_reporter, reporter, run_state})
+
+        receive do
+          :complete -> Reporter.complete(reporter, :ok, nil)
+        end
+      end)
+
+    owner_ref = Process.monitor(owner)
+    assert_receive {:owner_reporter, reporter, run_state}
+    assert_receive {:owner_delivery, _running_delivery, "running"}
+    send(owner, :complete)
+
+    assert_receive {:owner_delivery, terminal_delivery, "ok"}
+    assert_receive {:DOWN, ^owner_ref, :process, ^owner, :normal}
+    assert Process.alive?(reporter)
+
+    reporter_ref = Process.monitor(reporter)
+    send(terminal_delivery, :release_terminal)
+    assert_receive {:terminal_delivered, "ok"}
+    assert_receive {:DOWN, ^reporter_ref, :process, ^reporter, :normal}
+    refute Process.alive?(run_state.pid)
+  end
+
   test "OTP status redacts private input and the HTTP bearer token" do
     token = "PRIVATE_VIEWER_BEARER_TOKEN_1234567890"
     previous = System.get_env("PTC_VIEWER_TOKEN")

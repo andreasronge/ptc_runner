@@ -38,9 +38,9 @@ When the Live tab launches provider-backed work, pass an exact dotenv file
 with `--env-file FILE` or declare `host.env_file` in the project. The Viewer
 does not search implicitly for `.env`.
 
-The Viewer binds to loopback by default and has no authentication. Do not expose
-it to a network, especially when a project grants access to private inspection
-records.
+The Viewer binds to loopback by default, where Live controls need no token.
+Do not expose it to a network without setting `PTC_VIEWER_TOKEN`, especially
+when a project grants access to private inspection records.
 
 In Docker, publish the port on host loopback, bind the Viewer to the container
 wildcard, and set `PTC_VIEWER_TOKEN`. Open

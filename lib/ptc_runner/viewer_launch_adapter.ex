@@ -1,6 +1,7 @@
 defmodule PtcRunner.ViewerLaunchAdapter do
   @moduledoc false
 
+  alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandPresentation
   alias PtcRunner.LiveStatus.Target
   alias PtcRunner.MixCommandAdapter
@@ -25,7 +26,9 @@ defmodule PtcRunner.ViewerLaunchAdapter do
          {:ok, argv} <- attach_env_file(argv, config),
          {:ok, target} <- Target.new(report, label: launch_label(config, request)),
          {%CommandPresentation{} = presentation, captured} <-
-           capture_output(fn -> execute(frontend, argv, target) end) do
+           execute_scoped(config, fn ->
+             capture_output(fn -> execute(frontend, argv, target) end)
+           end) do
       output = presentation_output(presentation, captured)
       {presentation.exit_status, output}
     else
@@ -55,6 +58,11 @@ defmodule PtcRunner.ViewerLaunchAdapter do
   defp attach_env_file(argv, %{env_file: nil}), do: {:ok, argv}
   defp attach_env_file(argv, config) when not is_map_key(config, :env_file), do: {:ok, argv}
   defp attach_env_file(_argv, _config), do: {:error, :invalid_launch_request}
+
+  defp execute_scoped(%{env_file: env_file}, fun) when is_binary(env_file),
+    do: Dotenv.with_file_scope(env_file, fun)
+
+  defp execute_scoped(_config, fun), do: fun.()
 
   defp launch_label(%{workflow_label: label}, {:workflow, _request})
        when is_binary(label) and byte_size(label) in 1..256,

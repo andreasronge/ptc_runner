@@ -111,6 +111,43 @@ defmodule PtcViewer.LiveRouterTest do
     assert accepted.status == 200
   end
 
+  test "spoofed local authority cannot read live data without the bearer token", %{
+    opts: opts,
+    store: store
+  } do
+    :ok = LiveStore.put_frame(store, "run-secret", %{"seq" => 0, "phase" => "running"})
+
+    opts =
+      opts
+      |> Keyword.put(:live_token_digest, PtcViewer.LiveSecurity.token_digest(@live_token))
+      |> Keyword.put(:live_project, fn -> %{"name" => "secret-project"} end)
+
+    refused =
+      conn(:get, "http://localhost/api/live/project")
+      |> Map.put(:remote_ip, {172, 18, 0, 4})
+      |> call_router(opts)
+
+    assert refused.status == 403
+    refute refused.resp_body =~ "secret-project"
+
+    authenticated =
+      conn(:get, "http://localhost/api/live/runs")
+      |> Map.put(:remote_ip, {172, 18, 0, 4})
+      |> Plug.Conn.put_req_header("authorization", "Bearer " <> @live_token)
+      |> call_router(opts)
+
+    assert authenticated.status == 200
+    assert authenticated.resp_body =~ "run-secret"
+
+    query_authenticated =
+      conn(:get, "http://localhost/api/live/runs?live_token=#{@live_token}")
+      |> Map.put(:remote_ip, {172, 18, 0, 4})
+      |> call_router(opts)
+
+    assert query_authenticated.status == 200
+    assert query_authenticated.resp_body =~ "run-secret"
+  end
+
   test "a percent-encoded token containing plus signs enables remote browser controls", %{
     opts: opts
   } do

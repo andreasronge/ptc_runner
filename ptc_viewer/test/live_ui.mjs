@@ -4,6 +4,7 @@ import {
   failurePresentation,
   launchPollDelay,
   launchStatusPresentation,
+  liveReadPath,
   liveTokenFromSearch,
   missionNames,
   plural,
@@ -79,6 +80,11 @@ assert.equal(liveTokenFromSearch('?live_token=container-secret&x=1'), 'container
 assert.equal(liveTokenFromSearch('?live_token=token%2Bwith%2Bplus'), 'token+with+plus');
 assert.equal(liveTokenFromSearch('?x=1'), null);
 assert.equal(liveTokenFromSearch('?live_token='), null);
+assert.equal(liveReadPath('/api/live/stream', null), '/api/live/stream');
+assert.equal(
+  liveReadPath('/api/live/stream', 'token+with/slash'),
+  '/api/live/stream?live_token=token%2Bwith%2Fslash'
+);
 
 assert.equal(runRoute('cmd-abc/def'), '#/run/cmd-abc%2Fdef');
 

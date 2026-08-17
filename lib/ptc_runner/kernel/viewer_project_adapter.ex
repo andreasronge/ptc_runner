@@ -35,7 +35,7 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
   @type project :: %{
           name: binary(),
           manifest: binary(),
-          entry: binary() | nil,
+          entry: binary(),
           input: map(),
           environments: [environment()],
           limits: [map()]

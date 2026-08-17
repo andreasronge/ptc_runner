@@ -22,7 +22,8 @@ defmodule PtcViewer.LiveSecurity do
 
   def browser_control_request?(conn, token_digest) do
     browser_request?(conn) and
-      (loopback?(conn.remote_ip) or query_token?(conn, token_digest))
+      (loopback?(conn.remote_ip) or reporter_request?(conn, token_digest) or
+         query_token?(conn, token_digest))
   end
 
   def browser_mutation?(conn, nonce, token_digest) when is_binary(nonce) do

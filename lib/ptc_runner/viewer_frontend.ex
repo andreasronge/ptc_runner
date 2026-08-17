@@ -347,11 +347,12 @@ defmodule PtcRunner.ViewerFrontend do
   defp launch_spec(project, frontend, env_file) do
     label = workflow_label(project)
     input = workflow_input(project)
+    effective_env_file = env_file || project.env_file
 
     config = %{
       project: project.path,
       frontend: frontend,
-      env_file: env_file,
+      env_file: effective_env_file,
       workflow_label: label
     }
 
@@ -374,7 +375,7 @@ defmodule PtcRunner.ViewerFrontend do
   defp workflow_label(project) do
     case describe_project(project) do
       {:ok, %{name: name, entry: entry}} when is_binary(name) ->
-        [name, entry || "workflow"]
+        [name, entry]
         |> Enum.join(" · ")
         |> String.slice(0, 256)
 

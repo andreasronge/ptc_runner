@@ -492,8 +492,9 @@ the Live tab once with the same token:
 http://localhost:4123/?live_token=THE_TOKEN#/live
 ```
 
-The page removes the query parameter after bootstrapping and sends the token
-as a bearer credential on launch, delete, and **View result** requests.
+The page removes the query parameter after bootstrapping and authenticates all
+Live API reads and mutations with the token. The SSE stream carries it in its
+own encoded query because the browser EventSource API cannot set headers.
 
 For Docker, keep the Viewer bound to `0.0.0.0` *inside* the container and keep
 the published host port on loopback. Viewer-started runs report directly inside

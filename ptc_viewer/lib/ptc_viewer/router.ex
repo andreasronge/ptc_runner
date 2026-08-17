@@ -326,9 +326,12 @@ defmodule PtcViewer.Router do
   end
 
   defp valid_live_browser_request(conn) do
-    if LiveSecurity.browser_request?(conn),
-      do: :ok,
-      else: {:error, :forbidden_request}
+    if LiveSecurity.browser_control_request?(
+         conn,
+         Keyword.get(viewer_config(conn), :live_token_digest)
+       ),
+       do: :ok,
+       else: {:error, :forbidden_request}
   end
 
   defp valid_live_browser_mutation(conn) do

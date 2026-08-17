@@ -24,6 +24,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
   alias PtcRunner.LiveStatus.Target
 
   @tick_ms 300
+  @delivery_timeout_ms 1_250
   @activity_limit 40
   @heap_samples_limit 100
   @telemetry_events [
@@ -59,14 +60,15 @@ defmodule PtcRunner.LiveStatus.Reporter do
 
   @spec complete(pid(), atom(), term()) :: :ok
   def complete(pid, phase, reason) do
-    GenServer.call(pid, {:complete, phase, reason}, 5_000)
+    GenServer.call(pid, {:complete, phase, reason}, 1_000)
   catch
     :exit, _reason -> :ok
   end
 
   @spec stop(pid()) :: :ok
   def stop(pid) do
-    GenServer.stop(pid, :normal, 1_000)
+    GenServer.cast(pid, :stop)
+    :ok
   catch
     :exit, _reason -> :ok
   end
@@ -122,7 +124,10 @@ defmodule PtcRunner.LiveStatus.Reporter do
       activity: [],
       last_usage: nil,
       post_failed?: false,
-      viewer_token: viewer_token(args.target)
+      viewer_token: viewer_token(args.target),
+      delivery: nil,
+      pending_delivery: nil,
+      stopping?: false
     }
 
     Process.send_after(self(), :tick, 0)
@@ -138,21 +143,56 @@ defmodule PtcRunner.LiveStatus.Reporter do
     }
 
     state = state |> sample_heap() |> post_frame()
-    {:reply, :ok, state}
+    {:reply, :ok, %{state | stopping?: true}}
   end
 
   @impl GenServer
-  def handle_info(:tick, state) do
+  def handle_cast(:stop, %{delivery: nil} = state), do: {:stop, :normal, state}
+
+  def handle_cast(:stop, state), do: {:noreply, %{state | stopping?: true}}
+
+  @impl GenServer
+  def handle_info(:tick, %{phase: "running", stopping?: false} = state) do
     state = state |> sample_heap() |> post_frame()
     Process.send_after(self(), :tick, @tick_ms)
     {:noreply, state}
   end
 
+  def handle_info(:tick, state), do: {:noreply, state}
+
+  def handle_info({:delivery_result, ref, result}, %{delivery: %{ref: ref}} = state) do
+    Process.demonitor(state.delivery.monitor_ref, [:flush])
+    cancel_delivery_timer(state.delivery.timer_ref)
+    finish_delivery(%{state | delivery: nil}, result)
+  end
+
+  def handle_info({:delivery_timeout, ref}, %{delivery: %{ref: ref, pid: pid}} = state) do
+    Process.exit(pid, :kill)
+    Process.demonitor(state.delivery.monitor_ref, [:flush])
+    finish_delivery(%{state | delivery: nil}, :error)
+  end
+
+  def handle_info({:delivery_timeout, _ref}, state), do: {:noreply, state}
+
   def handle_info({:live_telemetry, event, measurements, metadata}, state),
     do: {:noreply, apply_telemetry(state, event, measurements, metadata)}
 
+  def handle_info(
+        {:DOWN, ref, :process, _pid, _reason},
+        %{owner_ref: ref, delivery: nil} = state
+      ),
+      do: {:stop, :normal, state}
+
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{owner_ref: ref} = state),
-    do: {:stop, :normal, state}
+    do: {:noreply, %{state | stopping?: true}}
+
+  def handle_info(
+        {:DOWN, monitor_ref, :process, _pid, _reason},
+        %{delivery: %{monitor_ref: monitor_ref}} = state
+      ) do
+    cancel_delivery_timer(state.delivery.timer_ref)
+    finish_delivery(%{state | delivery: nil}, :error)
+  end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{sandbox: %{pid: pid}} = state),
     do: {:noreply, %{state | sandbox: nil}}
@@ -162,6 +202,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
   @impl GenServer
   def terminate(_reason, state) do
     :telemetry.detach(state.handler_id)
+    if state.delivery, do: Process.exit(state.delivery.pid, :kill)
     :ok
   end
 
@@ -246,17 +287,60 @@ defmodule PtcRunner.LiveStatus.Reporter do
     frame = frame(state, usage)
     state = %{state | seq: state.seq + 1, last_usage: usage}
 
-    case request(state.target, state.run_id, frame, state.viewer_token) do
-      :ok ->
-        state
+    queue_delivery(state, frame)
+  end
 
-      :error ->
-        unless state.post_failed? do
-          Logger.warning("live status: configured Viewer target is unreachable")
-        end
+  defp queue_delivery(%{delivery: nil} = state, frame), do: start_delivery(state, frame)
+  defp queue_delivery(state, frame), do: %{state | pending_delivery: frame}
 
-        %{state | post_failed?: true}
+  defp start_delivery(state, frame) do
+    parent = self()
+    ref = make_ref()
+
+    pid =
+      spawn(fn ->
+        result = request(state.target, state.run_id, frame, state.viewer_token)
+        send(parent, {:delivery_result, ref, result})
+      end)
+
+    monitor_ref = Process.monitor(pid)
+    timer_ref = Process.send_after(self(), {:delivery_timeout, ref}, @delivery_timeout_ms)
+
+    %{
+      state
+      | delivery: %{pid: pid, ref: ref, monitor_ref: monitor_ref, timer_ref: timer_ref},
+        pending_delivery: nil
+    }
+  end
+
+  defp finish_delivery(state, result) do
+    state = record_delivery_result(state, result)
+
+    case state.pending_delivery do
+      frame when is_map(frame) ->
+        {:noreply, start_delivery(state, frame)}
+
+      nil when state.stopping? ->
+        {:stop, :normal, state}
+
+      nil ->
+        {:noreply, state}
     end
+  end
+
+  defp record_delivery_result(state, :ok), do: state
+
+  defp record_delivery_result(state, :error) do
+    unless state.post_failed? do
+      Logger.warning("live status: configured Viewer target is unreachable")
+    end
+
+    %{state | post_failed?: true}
+  end
+
+  defp cancel_delivery_timer(timer_ref) do
+    _ = Process.cancel_timer(timer_ref, async: true, info: false)
+    :ok
   end
 
   defp request(%Target{} = target, run_id, frame, _viewer_token),

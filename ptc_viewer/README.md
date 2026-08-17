@@ -167,9 +167,10 @@ http://localhost:4123/?live_token=THE_TOKEN#/live
 ```
 
 The browser removes `live_token` from the visible URL after bootstrapping and
-sends it as a bearer token on mutations. Inside Docker, bind `{0, 0, 0, 0}` but
-publish with `-p 127.0.0.1:4123:4123`. The token protects live ingestion and
-mutations, not the trace browser as a whole.
+uses it for every Live read and mutation. The SSE request carries the encoded
+token in its own query because EventSource cannot set headers. Inside Docker,
+bind `{0, 0, 0, 0}` but publish with `-p 127.0.0.1:4123:4123`. The token protects
+live ingestion and controls, not the trace browser as a whole.
 
 ## HTTP API
 

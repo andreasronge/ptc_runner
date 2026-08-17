@@ -16,6 +16,12 @@ export function liveTokenFromSearch(search) {
   return value || null;
 }
 
+export function liveReadPath(path, liveToken) {
+  if (!liveToken) return path;
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}live_token=${encodeURIComponent(liveToken)}`;
+}
+
 export function launchPollDelay(responseOk, launch) {
   if (!responseOk) return 3000;
   return launch?.status === 'running' ? 1500 : null;
@@ -45,7 +51,7 @@ export function createLiveController({ onInspectRun, onLiveCount, mutationNonce,
   clearEndedEl.addEventListener('click', () => clearEnded());
   // One project fetch feeds both panels: the details disclosure and the
   // launch card's environment chips.
-  loadProject()
+  loadProject(liveToken)
     .then(project => {
       initProject(projectEl, project);
       return initLaunch(launchEl, project, mutationNonce, liveToken);
@@ -53,7 +59,7 @@ export function createLiveController({ onInspectRun, onLiveCount, mutationNonce,
     .catch(() => {});
 
   function connect() {
-    source = new EventSource('/api/live/stream');
+    source = new EventSource(liveReadPath('/api/live/stream', liveToken));
     source.onopen = () => setConnection('live', 'Streaming');
     source.onerror = () => setConnection('down', 'Reconnecting…');
     source.onmessage = event => {
@@ -183,10 +189,14 @@ function mutationHeaders(mutationNonce, liveToken, extra = {}) {
   return headers;
 }
 
+function readHeaders(liveToken) {
+  return liveToken ? { authorization: `Bearer ${liveToken}` } : {};
+}
+
 /* ---------- launch panel (fixed target, editable input) ---------- */
 
 async function initLaunch(root, project, mutationNonce, liveToken) {
-  const response = await fetch('/api/live/launch');
+  const response = await fetch('/api/live/launch', { headers: readHeaders(liveToken) });
   if (!response.ok) return;
   const spec = await response.json();
   if (!spec.enabled) return;
@@ -286,7 +296,7 @@ async function initLaunch(root, project, mutationNonce, liveToken) {
 
   const poll = async () => {
     try {
-      const res = await fetch('/api/live/launch');
+      const res = await fetch('/api/live/launch', { headers: readHeaders(liveToken) });
       if (!res.ok) {
         state.polling = setTimeout(poll, launchPollDelay(false, null));
         return;
@@ -401,9 +411,9 @@ export function missionNames(project) {
 // The payload comes from a host adapter the Viewer does not interpret, so
 // every field is treated as possibly absent. Source text is inserted as
 // textContent — never innerHTML — because it is arbitrary program text.
-async function loadProject() {
+async function loadProject(liveToken) {
   try {
-    const response = await fetch('/api/live/project');
+    const response = await fetch('/api/live/project', { headers: readHeaders(liveToken) });
     if (!response.ok) return null;
     const project = await response.json();
     return project?.enabled ? project : null;

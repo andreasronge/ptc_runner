@@ -11,6 +11,7 @@ defmodule PtcRunner.ViewerFrontendTest do
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.Kernel.ViewerBinding
   alias PtcRunner.ViewerFrontend
+  import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
 
   @tag :tmp_dir
   test "starts from the project document with pre-pinned trace authority", %{tmp_dir: directory} do
@@ -68,6 +69,67 @@ defmodule PtcRunner.ViewerFrontendTest do
              Req.get("http://#{:inet.ntoa(address)}:#{port}/api/live/launch")
 
     assert launch["input"] == input
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
+  @tag :tmp_dir
+  test "project environment values are restored between Live launches", %{tmp_dir: directory} do
+    project_path = viewer_project(directory)
+    project = Jason.decode!(File.read!(project_path))
+    project_directory = Path.dirname(project_path)
+    host_path = Path.join(project_directory, "ptc-host.json")
+    env_path = Path.join(project_directory, "viewer.env")
+    environment_name = "PTC_VIEWER_SCOPED_PROJECT_ENV"
+    previous = System.get_env(environment_name)
+
+    on_exit(fn ->
+      if previous,
+        do: System.put_env(environment_name, previous),
+        else: System.delete_env(environment_name)
+    end)
+
+    System.delete_env(environment_name)
+
+    File.write!(
+      host_path,
+      Jason.encode!(%{
+        "credentials" => %{"unused" => %{"env" => "PTC_VIEWER_UNUSED_CREDENTIAL"}},
+        "install" => %{
+          "unused" => %{
+            "source" => "llm",
+            "installation_revision" => "viewer-test-v1",
+            "model" => "openrouter:deepseek/deepseek-v4-flash",
+            "credential" => "unused",
+            "cache" => false
+          }
+        }
+      })
+    )
+
+    project =
+      Map.put(project, "host", %{
+        "path" => Path.basename(host_path),
+        "env_file" => %{"path" => Path.basename(env_path)}
+      })
+
+    File.write!(project_path, Jason.encode!(project))
+    File.write!(env_path, "#{environment_name}=first\n")
+
+    assert {:ok, viewer, address, port} = ViewerFrontend.start(project_path)
+    on_exit(fn -> if Process.alive?(viewer), do: PtcViewer.stop(viewer) end)
+
+    base_url = "http://#{:inet.ntoa(address)}:#{port}"
+    nonce = live_nonce(base_url)
+
+    launch_workflow(base_url, nonce, %{"launch" => 1})
+    assert_launch_finished(base_url)
+    assert System.get_env(environment_name) == nil
+
+    File.write!(env_path, "#{environment_name}=second\n")
+    launch_workflow(base_url, nonce, %{"launch" => 2})
+    assert_launch_finished(base_url)
+    assert System.get_env(environment_name) == nil
+
     assert :ok = PtcViewer.stop(viewer)
   end
 
@@ -230,6 +292,44 @@ defmodule PtcRunner.ViewerFrontendTest do
 
   defp announce(address, port) do
     ViewerFrontend.announce(address, port, :stdio)
+  end
+
+  defp live_nonce(base_url) do
+    assert {:ok, %{status: 200, body: body}} = Req.get(base_url <> "/")
+
+    [encoded] =
+      Regex.run(~r/<meta name="ptc-viewer-config" content="([^"]+)">/, body,
+        capture: :all_but_first
+      )
+
+    encoded
+    |> Base.url_decode64!(padding: false)
+    |> Jason.decode!()
+    |> Map.fetch!("live_mutation_nonce")
+  end
+
+  defp launch_workflow(base_url, nonce, input) do
+    assert {:ok, %{status: 202}} =
+             Req.post(base_url <> "/api/live/launch",
+               json: %{"input" => input},
+               headers: [
+                 {"origin", base_url},
+                 {"x-ptc-viewer-live-nonce", nonce}
+               ]
+             )
+  end
+
+  defp assert_launch_finished(base_url) do
+    assert_eventually(fn ->
+      case Req.get(base_url <> "/api/live/launch") do
+        {:ok, %{status: 200, body: %{"launch" => %{"status" => status}}}}
+        when status in ["ok", "error"] ->
+          true
+
+        _other ->
+          false
+      end
+    end)
   end
 
   defp viewer_project(directory, viewer_overrides \\ %{}) do
