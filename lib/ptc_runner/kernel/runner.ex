@@ -212,7 +212,12 @@ defmodule PtcRunner.Kernel.Runner do
       max_parallel_workers: config.limits.live_provider_tasks,
       max_program_bytes: config.limits.entry_source_bytes,
       filter_context: false,
-      caller: :kernel
+      caller: :kernel,
+      # Watchdog-monitors the sandbox from this process (`Sandbox` `link:
+      # true` is not a BEAM link). Session-worker death asynchronously
+      # kills the sandbox; owner drain awaits only the worker. Timeout still
+      # uses Sandbox's cleanup_worker, which awaits the sandbox DOWN.
+      link: true
     ]
 
     case Lisp.run_native(entry_source, opts) do

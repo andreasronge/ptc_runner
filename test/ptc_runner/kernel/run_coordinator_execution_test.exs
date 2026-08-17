@@ -469,19 +469,17 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     # completion, and could lose even outside full-suite load (reproduced
     # failing >50% of runs combined with just 3 other test files).
     #
-    # `repeats: 1` (~6s) is deliberately the smallest useful margin rather
-    # than something larger: `Runner.execute_workflow/4` calls
-    # `Lisp.run_native/2` without `link: true`, so `Process.exit(worker_pid,
-    # :kill)` below (via the ExecutionSessionOwner abort path) does not
-    # itself terminate the underlying sandbox process -- it only monitors
-    # it. On any test failure before that point, this loop's sandbox keeps
-    # running, unlinked, until its own deadline. That is a real gap
-    # (arguably the workflow path should link like `repl_session.ex` does),
-    # but fixing it is a production change beyond what a flaky-test fix
-    # warrants -- keeping this loop short bounds the cost of the gap
-    # instead. 6s still dwarfs any plausible harness-setup delay between
-    # here and the `Process.alive?` check below, so a real regression is a
-    # far likelier explanation for a failure than hardware variance.
+    # `repeats: 1` (~6s) is the smallest useful margin: 6s still dwarfs any
+    # plausible harness-setup delay between here and the `Process.alive?`
+    # check below, so a real regression is a far likelier explanation for a
+    # failure than hardware variance. `Sandbox` `link: true` is a watchdog,
+    # not a BEAM link: owner abort kills the session worker, and the
+    # watchdog then asynchronously `Process.exit/2`s the sandbox. The
+    # caller `on_exit` below only helps while that owner is still alive to
+    # observe caller death. The per-sandbox `on_exit` killer is the leak
+    # net if the owner is already gone. The sandbox must go down with
+    # reason `:killed` -- a `:normal` exit would mean the loop finished on
+    # its own and this test lost the race.
     #
     # `evaluation_timeout_ms` does not apply here: that governs subordinate
     # mission evaluations, not this top-level workflow call, which uses
@@ -510,8 +508,8 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     # Registered immediately, before any assertion below can fail: caller
     # death is exactly this test's own mechanism for aborting the run, so
     # this is a safe no-op on the pass path (caller is already dead by
-    # then) and, on any earlier failure, stops the ~6s CPU-heavy loop
-    # instead of leaving it running unlinked until its own deadline.
+    # then). It only reaches the sandbox while the owner is still alive to
+    # observe it; the per-sandbox `on_exit` below is the leak net.
     on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
 
     caller_ref = Process.monitor(caller)
@@ -525,6 +523,18 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     assert {:ok, ^owner_pid} = InspectionSink.owner(inspection_sink)
     assert_eventually(fn -> run_started?(event_sink) end)
 
+    assert [sandbox_pid] =
+             assert_eventually(fn ->
+               case eval_sandbox_pids(state.worker_pid) do
+                 [] -> false
+                 pids -> pids
+               end
+             end)
+
+    on_exit(fn ->
+      if Process.alive?(sandbox_pid), do: Process.exit(sandbox_pid, :kill)
+    end)
+
     release_patterns = [
       {EventSink, :finalize_and_events, 2},
       {EventSink, :stop, 1},
@@ -535,7 +545,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     Enum.each(release_patterns, &assert(:erlang.trace_pattern(&1, true, [:local]) == 1))
 
     # Registered immediately: this is a VM-global trace pattern, so ANY
-    # later failure in this test -- including the five `Process.monitor/1`
+    # later failure in this test -- including the `Process.monitor/1`
     # calls right below, before the `try` -- must not leave it enabled and
     # contaminating every later test in the suite. `on_exit` always runs,
     # unlike the `try/after` below which only protects its own block.
@@ -548,6 +558,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     event_sink_ref = Process.monitor(event_sink.pid)
     inspection_sink_ref = Process.monitor(inspection_sink.pid)
     activity_ref = Process.monitor(prepared.provider_activity.owner)
+    sandbox_ref = Process.monitor(sandbox_pid)
 
     try do
       # `owner_pid` is running a loop built to take ~6s to reach its
@@ -575,6 +586,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
 
       assert is_map(stopped.usage)
       assert_receive {:DOWN, ^worker_ref, :process, _worker, :killed}, 5_000
+      assert_receive {:DOWN, ^sandbox_ref, :process, ^sandbox_pid, :killed}, 5_000
       assert_receive {:DOWN, ^inspection_sink_ref, :process, _pid, :normal}, 5_000
       assert_receive {:DOWN, ^event_sink_ref, :process, _pid, :normal}, 5_000
       assert_receive {:DOWN, ^activity_ref, :process, _pid, :normal}, 5_000
@@ -889,6 +901,36 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   end
 
   defp run_started?(sink), do: Enum.any?(EventSink.events(sink), &(&1.type == "run-started"))
+
+  # The session worker spawn-monitors the Lisp sandbox (compile, then eval).
+  # Compile of this fixture is cheap and exits `:normal`; the eval sandbox
+  # is the 1_000-iteration loop. Requiring a reductions floor distinguishes
+  # them without a sleep: one `(reduce + 0 (range 20000))` iteration already
+  # clears it, while compile does not. Spawn-order tracing (as in
+  # `repl_session_test.exs`) needs to attach before `Lisp.run_native/2`; this
+  # test attaches after the session worker already exists.
+  @eval_sandbox_reductions 100_000
+
+  defp eval_sandbox_pids(worker_pid) do
+    Enum.filter(live_monitored_pids(worker_pid), &eval_sandbox?/1)
+  end
+
+  defp eval_sandbox?(pid) do
+    match?(
+      {:reductions, count} when count > @eval_sandbox_reductions,
+      Process.info(pid, :reductions)
+    )
+  end
+
+  defp live_monitored_pids(worker_pid) do
+    case Process.info(worker_pid, :monitors) do
+      {:monitors, monitors} ->
+        for {:process, pid} <- monitors, is_pid(pid) and Process.alive?(pid), do: pid
+
+      nil ->
+        []
+    end
+  end
 
   defp stop_trace(pid) do
     :erlang.trace(pid, false, [:call])

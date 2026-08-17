@@ -54,10 +54,10 @@ Verified against `main` (2026-08-17):
   one-way consumption). The serving template must be a **new** immutable
   type; nothing existing can be reused across calls.
 - `Runner.execute_workflow/4` starts the workflow sandbox without
-  `link: true` (`runner.ex:202-217`; contrast the linked evaluation paths),
-  so a dead caller releases resources while the workflow keeps a scheduler
-  until its deadline. Documented in
-  `run_coordinator_execution_test.exs:461-482`.
+  `link: true` (`runner.ex:202-217`; contrast the watchdog-monitored
+  evaluation paths), so a dead caller releases resources while the workflow
+  keeps a scheduler until its deadline. Documented in
+  `run_coordinator_execution_test.exs` caller-death coverage.
 - All runs share one `ReqLLM.Finch` pool with default geometry
   `count: 8, size: 1`; the sizing fix applies only in `:command_vm` mode,
   whose gate refuses a run when the required provider application is
@@ -76,14 +76,17 @@ Verified against `main` (2026-08-17):
 
 ## PR 1 — cancellation: link the workflow sandbox
 
+**Status:** implemented in this worktree; not yet submitted.
+
 Root project; small; independent value.
 
 - Failing test first: caller death mid-workflow must terminate the sandbox
   promptly (extend the documented gap at
-  `run_coordinator_execution_test.exs:461-482`; monitors, no
+  `run_coordinator_execution_test.exs` caller-death coverage; monitors, no
   `Process.sleep`).
 - Add `link: true` to the `Lisp.run_native/2` call in
-  `Runner.execute_workflow/4`, mirroring the linked evaluation paths.
+  `Runner.execute_workflow/4`, mirroring the watchdog-monitored evaluation
+  paths.
 - Verify the owner's existing kill-and-drain contract
   (`ExecutionSessionOwner` monitors its caller) now reaches the sandbox on
   both caller-death and deadline paths; provider drain remains bounded.

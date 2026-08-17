@@ -145,10 +145,15 @@ defmodule PtcRunner.TestSupport.TestHelpers do
   overhead by a wide margin — the duration is calibrated, not guaranteed, so
   the margin is what separates a real regression from hardware variance.
 
-  Prefer a shorter body on paths that do not pass `link: true` to
-  `PtcRunner.Sandbox` (notably `Runner.execute_workflow/4`): there, killing the
-  caller does not tear the sandbox process down, so an early test failure
-  leaves this loop running unlinked until its own deadline.
+  Prefer a shorter body when a failure path might leave the sandbox running.
+  `Sandbox` `link: true` does not create a BEAM link: a watchdog monitors the
+  process that called `Sandbox.execute/3` (the session worker on Kernel
+  paths) and asynchronously kills the sandbox. Killing some other caller —
+  including the test process, or the session caller once the owner is already
+  dead — does not trigger that watchdog. The per-sandbox `on_exit` killer is
+  the leak net. Unlinked `Sandbox` calls still need the shorter body, because
+  an early test failure would otherwise leave this loop running until its own
+  deadline.
   """
   def long_running_body(repeats \\ 1) when is_integer(repeats) and repeats >= 1 do
     work =
