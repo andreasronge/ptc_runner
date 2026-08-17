@@ -149,11 +149,17 @@ providers) and 2b (host runtime + admission) if review size demands.
   dedicated VM-lifetime process supervised **above** `HostRuntime` with
   `restart: :temporary` — deliberately **fail-stop**: restarting it would
   recreate the capacity-reset bug one level higher, since its monitors and
-  lease state die with it. If the owner exits, admission **fails closed**
-  (every dispatch refuses with a closed diagnostic) and readiness reports
-  unhealthy until the VM restarts; a runtime crash or restart beneath a
-  living owner neither resets capacity while old leaseholders still run
-  nor strands their leases, because monitors release them as they exit.
+  lease state die with it. `:temporary` alone is not the guarantee — a
+  restarted *parent* supervisor would start the child anew with empty
+  lease state while old leaseholders survive — so on owner death a
+  **VM-persistent tombstone** (a `:persistent_term` written exactly once)
+  marks admission dead, owner startup refuses while the tombstone exists,
+  every dispatch refuses with a closed diagnostic, and readiness reports
+  unhealthy until the VM restarts. The test matrix covers owner death
+  followed by subtree/application restart. A runtime crash or restart
+  beneath a living owner neither resets capacity while old leaseholders
+  still run nor strands their leases, because monitors release them as
+  they exit.
 - **Pool geometry and the admission ceiling are one invariant, not two
   settings.** `HostRuntime` startup validates that the aggregate admission
   ceiling does not exceed the configured Finch capacity
