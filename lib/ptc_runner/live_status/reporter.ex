@@ -1,7 +1,7 @@
 defmodule PtcRunner.LiveStatus.Reporter do
   @moduledoc false
 
-  # Per-run live status reporter (issue #1444 spike).
+  # Per-run live status reporter.
   #
   # Owns a poll timer and a set of telemetry subscriptions; every tick it
   # assembles one frame from public run state and POSTs it to the Viewer.
@@ -20,6 +20,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Lisp.Eval.ParallelBudget
+  alias PtcRunner.LiveStatus.Target
 
   @tick_ms 300
   @activity_limit 40
@@ -33,9 +34,15 @@ defmodule PtcRunner.LiveStatus.Reporter do
     [:ptc_runner, :lisp, :execute, :stop]
   ]
 
-  @spec start(binary(), struct(), struct()) :: {:ok, pid()} | {:error, term()}
-  def start(viewer_url, config, run_state) when is_binary(viewer_url) do
-    GenServer.start(__MODULE__, %{viewer_url: viewer_url, config: config, run_state: run_state})
+  @spec start(term(), struct(), struct()) :: {:ok, pid()} | {:error, term()}
+  def start(target, config, run_state) when is_binary(target) do
+    GenServer.start(__MODULE__, %{target: target, config: config, run_state: run_state})
+  end
+
+  def start(target, config, run_state) do
+    if Target.valid?(target),
+      do: GenServer.start(__MODULE__, %{target: target, config: config, run_state: run_state}),
+      else: {:error, :invalid_live_status_target}
   end
 
   @spec complete(pid(), atom(), term()) :: :ok
@@ -54,7 +61,19 @@ defmodule PtcRunner.LiveStatus.Reporter do
 
   @doc false
   def handle_telemetry(event, measurements, metadata, reporter) do
-    send(reporter, {:live_telemetry, event, measurements, metadata})
+    case reporter do
+      {reporter_pid, live_run} when is_pid(reporter_pid) and is_pid(live_run) ->
+        if Map.get(metadata, :live_run) == live_run do
+          send(
+            reporter_pid,
+            {:live_telemetry, event, measurements, Map.delete(metadata, :live_run)}
+          )
+        end
+
+      _invalid ->
+        :ok
+    end
+
     :ok
   end
 
@@ -66,15 +85,15 @@ defmodule PtcRunner.LiveStatus.Reporter do
       handler_id,
       @telemetry_events,
       &__MODULE__.handle_telemetry/4,
-      self()
+      {self(), args.run_state.pid}
     )
 
     state = %{
-      viewer_url: String.trim_trailing(args.viewer_url, "/"),
+      target: normalize_target(args.target),
       run_state: args.run_state,
       config: args.config,
       run_id: run_id(args.config),
-      label: label(args.config),
+      label: label(args.config, args.target),
       handler_id: handler_id,
       started_ms: System.monotonic_time(:millisecond),
       seq: 0,
@@ -88,7 +107,8 @@ defmodule PtcRunner.LiveStatus.Reporter do
       budget: nil,
       activity: [],
       last_usage: nil,
-      post_failed?: false
+      post_failed?: false,
+      viewer_token: viewer_token(args.target)
     }
 
     Process.send_after(self(), :tick, 0)
@@ -100,7 +120,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
     state = %{
       state
       | phase: to_string(phase),
-        outcome_reason: reason && inspect(reason)
+        outcome_reason: format_reason(reason)
     }
 
     state = state |> sample_heap() |> post_frame()
@@ -209,22 +229,28 @@ defmodule PtcRunner.LiveStatus.Reporter do
     frame = frame(state, usage)
     state = %{state | seq: state.seq + 1, last_usage: usage}
 
-    case request(state.viewer_url <> "/api/live/runs/" <> state.run_id, frame) do
+    case request(state.target, state.run_id, frame, state.viewer_token) do
       :ok ->
         state
 
       :error ->
         unless state.post_failed? do
-          Logger.warning("live status: viewer at #{state.viewer_url} is unreachable")
+          Logger.warning("live status: configured Viewer target is unreachable")
         end
 
         %{state | post_failed?: true}
     end
   end
 
-  defp request(url, frame) do
+  defp request(%Target{} = target, run_id, frame, _viewer_token),
+    do: Target.report(target, run_id, frame)
+
+  defp request(viewer_url, run_id, frame, viewer_token) when is_binary(viewer_url) do
+    url = viewer_url <> "/api/live/runs/" <> run_id
+
     case Req.post(url,
            json: frame,
+           headers: authorization_headers(viewer_token),
            retry: false,
            connect_options: [timeout: 500],
            receive_timeout: 1_000
@@ -235,6 +261,21 @@ defmodule PtcRunner.LiveStatus.Reporter do
   rescue
     _exception -> :error
   end
+
+  defp authorization_headers(token) when is_binary(token),
+    do: [{"authorization", "Bearer " <> token}]
+
+  defp authorization_headers(_token), do: []
+
+  defp normalize_target(%Target{} = target), do: target
+  defp normalize_target(viewer_url), do: String.trim_trailing(viewer_url, "/")
+
+  defp viewer_token(%Target{}), do: nil
+  defp viewer_token(_viewer_url), do: System.get_env("PTC_VIEWER_TOKEN")
+
+  defp format_reason(nil), do: nil
+  defp format_reason(reason) when is_binary(reason), do: reason
+  defp format_reason(reason), do: inspect(reason)
 
   defp frame(state, usage) do
     limits = state.config.limits
@@ -249,6 +290,8 @@ defmodule PtcRunner.LiveStatus.Reporter do
       remaining_ms: usage && Map.get(usage, :remaining_ms),
       limits: %{
         run_duration_ms: limits.run_duration_ms,
+        workflow_timeout_ms: limits.workflow_timeout_ms,
+        parallel_timeout_ms: limits.parallel_timeout_ms,
         subordinate_evaluations: limits.subordinate_evaluations,
         workflow_capability_calls: limits.workflow_capability_calls,
         workflow_capability_calls_per_name: limits.workflow_capability_calls_per_name,
@@ -308,12 +351,15 @@ defmodule PtcRunner.LiveStatus.Reporter do
     end
   end
 
-  defp label(config) do
-    case System.get_env("PTC_VIEWER_LABEL") do
+  defp label(config, target) do
+    case target_label(target) do
       name when is_binary(name) and name != "" -> name
       _absent -> config_label(config)
     end
   end
+
+  defp target_label(%Target{} = target), do: Target.label(target)
+  defp target_label(_viewer_url), do: System.get_env("PTC_VIEWER_LABEL")
 
   defp config_label(config) do
     case config.labels do

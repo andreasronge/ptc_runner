@@ -19,6 +19,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.LiveStatus
+  alias PtcRunner.LiveStatus.Target
 
   @enforce_keys [:pid, :token]
   defstruct @enforce_keys
@@ -33,7 +35,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
              | :invalid_publication_authority
              | :provider_session_required}
   def start(prepared, authority, caller),
-    do: start(prepared, authority, caller, nil, nil, :run)
+    do: start(prepared, authority, caller, nil, nil, :run, nil)
 
   @doc false
   @spec start(
@@ -50,17 +52,43 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
              | :invalid_publication_authority
              | :provider_session_required
              | :invalid_provider_execution}
-  def start(prepared, authority, caller, provider_execution, notifier, operation \\ :run)
+  def start(prepared, authority, caller, provider_execution, notifier, operation \\ :run),
+    do: start(prepared, authority, caller, provider_execution, notifier, operation, nil)
 
-  def start(prepared, authority, caller, provider_execution, notifier, operation)
+  @doc false
+  @spec start(
+          PreparedRun.t(),
+          PublicationAuthority.t(),
+          pid(),
+          ProviderExecution.t() | nil,
+          (binary() -> term()) | nil,
+          :run | :connect,
+          Target.t() | nil
+        ) ::
+          {:ok, t()}
+          | {:error,
+             :invalid_prepared_run
+             | :invalid_publication_authority
+             | :provider_session_required
+             | :invalid_provider_execution}
+  def start(prepared, authority, caller, provider_execution, notifier, operation, live_status)
       when is_pid(caller) and operation in [:run, :connect] do
-    with :ok <- admissible(prepared, authority, provider_execution, notifier, operation),
+    with :ok <-
+           admissible(
+             prepared,
+             authority,
+             provider_execution,
+             notifier,
+             operation,
+             live_status
+           ),
          {:ok, lease} <- PublicationAuthority.claim(authority) do
       token = make_ref()
 
       case GenServer.start(
              __MODULE__,
-             {prepared, authority, caller, token, lease, provider_execution, notifier, operation}
+             {prepared, authority, caller, token, lease, provider_execution, notifier, operation,
+              live_status}
            ) do
         {:ok, pid} ->
           {:ok, %__MODULE__{pid: pid, token: token}}
@@ -72,13 +100,24 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     end
   end
 
-  def start(_prepared, _authority, _caller, _provider_execution, _notifier, _operation),
-    do: {:error, :invalid_prepared_run}
+  def start(
+        _prepared,
+        _authority,
+        _caller,
+        _provider_execution,
+        _notifier,
+        _operation,
+        _live_status
+      ),
+      do: {:error, :invalid_prepared_run}
 
   # Every refusal here is decided before `init/1` consumes the prepared run, so
   # a rejected start leaves that preparation reusable.
-  defp admissible(prepared, authority, provider_execution, notifier, operation) do
+  defp admissible(prepared, authority, provider_execution, notifier, operation, live_status) do
     cond do
+      not live_status?(live_status) ->
+        {:error, :invalid_prepared_run}
+
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
 
@@ -127,6 +166,10 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   defp provider_free_admissible(_provider_execution, _operation),
     do: {:error, :invalid_provider_execution}
 
+  defp live_status?(nil), do: true
+  defp live_status?(%Target{} = target), do: Target.valid?(target)
+  defp live_status?(_target), do: false
+
   # Each operation completes with its own evidence: a run with a sealed
   # execution outcome and connectivity with the sealed per-occurrence result.
   @doc false
@@ -146,7 +189,10 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   def pid(%__MODULE__{pid: pid}), do: pid
 
   @impl GenServer
-  def init({prepared, authority, caller, token, lease, provider_execution, notifier, operation}) do
+  def init(
+        {prepared, authority, caller, token, lease, provider_execution, notifier, operation,
+         live_status}
+      ) do
     caller_ref = Process.monitor(caller)
 
     initial = %{
@@ -168,6 +214,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       waiter: nil,
       result: nil,
       handoff_waiting?: false,
+      live_status: live_status,
       held_resources: ExecutionSessionResources.new([:prepared, :authority])
     }
 
@@ -351,7 +398,11 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
         {worker_pid, worker_ref} =
           spawn_monitor(fn ->
-            execution_result = complete_operation(built, operation)
+            execution_result =
+              LiveStatus.with_target(initial.live_status, fn ->
+                complete_operation(built, operation)
+              end)
+
             send(owner, {token, :execution_result, self(), execution_result})
           end)
 
@@ -423,16 +474,18 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
             end
 
             execution_result =
-              ProviderExecution.execute(
-                initial.prepared,
-                {authority, initial.lease},
-                opened_sinks,
-                provider_execution,
-                notifier,
-                tracker,
-                owner,
-                operation
-              )
+              LiveStatus.with_target(initial.live_status, fn ->
+                ProviderExecution.execute(
+                  initial.prepared,
+                  {authority, initial.lease},
+                  opened_sinks,
+                  provider_execution,
+                  notifier,
+                  tracker,
+                  owner,
+                  operation
+                )
+              end)
 
             send(owner, {token, :execution_result, self(), execution_result})
         end

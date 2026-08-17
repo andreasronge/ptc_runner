@@ -1,4 +1,4 @@
-// Live run dashboard (#1444 spike).
+// Live run dashboard.
 //
 // Consumes the SSE stream at /api/live/stream. Every frame is self-contained,
 // so rendering is idempotent: cards are created once per run and their fields
@@ -11,7 +11,7 @@
 
 const WORD_BYTES = 8;
 
-export function createLiveController({ onLiveCount } = {}) {
+export function createLiveController({ onInspectRun, onLiveCount, mutationNonce } = {}) {
   const runsEl = document.getElementById('live-runs');
   const runsHeadEl = document.getElementById('live-runs-head');
   const clearEndedEl = document.getElementById('live-clear-ended');
@@ -20,6 +20,11 @@ export function createLiveController({ onLiveCount } = {}) {
   const launchEl = document.getElementById('live-launch');
   const projectEl = document.getElementById('live-project');
   const cards = new Map(); // run_id -> { frame, el, fields, ended, collapsed }
+
+  const commandEl = emptyEl.querySelector('.live-empty-cmd');
+  if (commandEl) {
+    commandEl.textContent = `PTC_VIEWER_URL=${location.origin} mix ptc run manifest.json ...`;
+  }
 
   let source = null;
   // Only the most recently ended run stays expanded; the one before it folds
@@ -33,7 +38,7 @@ export function createLiveController({ onLiveCount } = {}) {
   loadProject()
     .then(project => {
       initProject(projectEl, project);
-      return initLaunch(launchEl, project);
+      return initLaunch(launchEl, project, mutationNonce);
     })
     .catch(() => {});
 
@@ -63,6 +68,10 @@ export function createLiveController({ onLiveCount } = {}) {
       card = createCard(frame.run_id);
       card.fields.close.addEventListener('click', () => removeRun(frame.run_id));
       card.fields.toggle.addEventListener('click', () => setCollapsed(card, !card.collapsed));
+      card.fields.inspect.addEventListener('click', event => {
+        event.preventDefault();
+        void inspectRun(card, frame.run_id);
+      });
       cards.set(frame.run_id, card);
       runsEl.prepend(card.el);
     }
@@ -78,6 +87,7 @@ export function createLiveController({ onLiveCount } = {}) {
   function trackLifecycle(card, frame) {
     const wasEnded = card.ended;
     card.ended = frame.phase !== 'running';
+    card.fields.inspect.hidden = !card.ended;
 
     if (card.ended && !wasEnded) {
       const previous = newestEndedId && newestEndedId !== frame.run_id && cards.get(newestEndedId);
@@ -108,11 +118,37 @@ export function createLiveController({ onLiveCount } = {}) {
     cards.delete(runId);
     if (newestEndedId === runId) newestEndedId = null;
     refreshChrome();
-    fetch(`/api/live/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' }).catch(() => {});
+    fetch(`/api/live/runs/${encodeURIComponent(runId)}`, {
+      method: 'DELETE',
+      headers: { 'x-ptc-viewer-live-nonce': mutationNonce },
+    }).catch(() => {});
   }
 
   function clearEnded() {
     for (const [runId, card] of [...cards]) if (card.ended) removeRun(runId);
+  }
+
+  async function inspectRun(card, runId) {
+    const link = card.fields.inspect;
+    if (!card.ended || link.dataset.loading === 'true') return;
+    link.dataset.loading = 'true';
+    link.textContent = 'Opening…';
+
+    try {
+      const response = await fetch(`/api/live/runs/${encodeURIComponent(runId)}/inspect`, {
+        method: 'POST',
+        headers: { 'x-ptc-viewer-live-nonce': mutationNonce },
+      });
+      if (!response.ok) throw new Error('result unavailable');
+      link.textContent = 'View result';
+      link.title = '';
+      delete link.dataset.loading;
+      onInspectRun?.(runId);
+    } catch {
+      link.textContent = 'Retry result';
+      link.title = 'The canonical run result is not available yet';
+      delete link.dataset.loading;
+    }
   }
 
   function refreshChrome() {
@@ -133,7 +169,7 @@ export function createLiveController({ onLiveCount } = {}) {
 
 /* ---------- launch panel (fixed target, editable input) ---------- */
 
-async function initLaunch(root, project) {
+async function initLaunch(root, project, mutationNonce) {
   const response = await fetch('/api/live/launch');
   if (!response.ok) return;
   const spec = await response.json();
@@ -147,9 +183,9 @@ async function initLaunch(root, project) {
         <span class="live-launch-target" data-role="target"></span>
       </div>
       <div class="live-launch-envs" data-role="envs" hidden></div>
-      <label class="live-launch-label" data-role="input-label">Input object — the only thing the browser controls; passed to <code>mix ptc run --input</code></label>
+      <label class="live-launch-label" data-role="input-label">Input object — the only thing the browser controls; passed to the project's run input</label>
       <textarea class="live-launch-input" data-role="editor" spellcheck="false" rows="10"></textarea>
-      <label class="live-launch-label" data-role="expr-label" hidden>Expression — evaluated once in this mission session (<code>mix ptc repl --mission</code>); no live frames yet, the result is the output tail below</label>
+      <label class="live-launch-label" data-role="expr-label" hidden>Expression — evaluated once in this mission session; no live frames yet, the result is the output tail below</label>
       <input type="text" class="live-launch-expr" data-role="expr" spellcheck="false" placeholder="(dir)" hidden />
       <div class="live-launch-foot">
         <span class="live-launch-validity" data-role="validity"></span>
@@ -211,25 +247,23 @@ async function initLaunch(root, project) {
   const setStatus = (status) => {
     state.running = status?.status === 'running';
     fields.run.disabled = state.running || fields.validity.dataset.state === 'bad';
+    for (const chip of fields.envs.querySelectorAll('button')) chip.disabled = state.running;
     fields.run.textContent = state.running ? 'Running…' : '▶ Run';
     if (!status || status.status === 'idle') {
       fields.status.hidden = true;
       return;
     }
     fields.status.hidden = false;
-    fields.status.dataset.state = status.status;
-    if (status.status === 'running') {
-      fields.status.textContent = state.mission
-        ? `Mission ${state.mission} evaluating — mission sessions do not report frames; the result appears here.`
-        : 'Run launched — its card appears below as frames arrive.';
-    } else if (status.status === 'ok') {
-      fields.status.textContent = 'Last launch completed (exit 0).';
+    const presentation = launchStatusPresentation(status, state.mission);
+    fields.status.dataset.state = presentation.state;
+    if (!presentation.output) {
+      fields.status.textContent = presentation.line;
     } else {
       fields.status.replaceChildren();
       const line = document.createElement('div');
-      line.textContent = 'Last launch failed:';
+      line.textContent = presentation.line;
       const pre = document.createElement('pre');
-      pre.textContent = status.output_tail || '(no output captured)';
+      pre.textContent = presentation.output;
       fields.status.append(line, pre);
     }
   };
@@ -259,7 +293,10 @@ async function initLaunch(root, project) {
       : { input: parsed };
     const res = await fetch('/api/live/launch', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        'x-ptc-viewer-live-nonce': mutationNonce,
+      },
       body: JSON.stringify(body),
     });
     if (res.status !== 202) {
@@ -274,6 +311,30 @@ async function initLaunch(root, project) {
   validate();
   setStatus(spec.launch);
   if (state.running) state.polling = setTimeout(poll, 1500);
+}
+
+export function launchStatusPresentation(status, mission = null) {
+  if (status?.status === 'running') {
+    return {
+      state: 'running',
+      line: mission
+        ? `Mission ${mission} evaluating — mission sessions do not report frames; the result appears here.`
+        : 'Run launched — its card appears below as frames arrive.',
+      output: null,
+    };
+  }
+  if (status?.status === 'ok') {
+    return {
+      state: 'ok',
+      line: 'Last launch completed (exit 0):',
+      output: status.output_tail || '(no output captured)',
+    };
+  }
+  return {
+    state: 'error',
+    line: 'Last launch failed:',
+    output: status?.output_tail || '(no output captured)',
+  };
 }
 
 // Chips appear only when the project actually declares missions; a
@@ -577,9 +638,12 @@ function createCard(runId) {
         <span class="live-card-summary" data-role="summary" hidden></span>
         <span class="live-run-id" data-role="run-id"></span>
         <span class="live-elapsed" data-role="elapsed"></span>
+        <a class="live-card-inspect" data-role="inspect" hidden>View result</a>
         <button type="button" class="live-card-close" data-role="close" aria-label="Close run" title="Close run">✕</button>
       </div>
     </header>
+
+    <div class="live-failure" data-role="failure" role="status" hidden></div>
 
     <div class="live-kpis">
       <div class="live-kpi"><span class="live-kpi-value" data-role="kpi-calls">–</span><span class="live-kpi-label">tool calls</span></div>
@@ -612,7 +676,12 @@ function createCard(runId) {
   const fields = {};
   for (const node of el.querySelectorAll('[data-role]')) fields[node.dataset.role] = node;
   fields['run-id'].textContent = runId;
+  fields.inspect.href = runRoute(runId);
   return { frame: null, el, fields, ended: false, collapsed: false };
+}
+
+export function runRoute(runId) {
+  return `#/run/${encodeURIComponent(runId)}`;
 }
 
 /* ---------- per-frame update ---------- */
@@ -626,6 +695,7 @@ function updateCard(card, frame) {
   f.elapsed.textContent = fmtClock(frame.elapsed_ms);
 
   updateBadge(card, frame);
+  updateFailure(f.failure, frame);
 
   const calls = totalCalls(usage.capability_calls);
   f['kpi-calls'].textContent = String(calls);
@@ -637,6 +707,20 @@ function updateCard(card, frame) {
   renderMeters(f.meters, frame, usage, limits, calls);
   renderHeap(f, frame.heap);
   renderActivity(f.activity, frame.activity || []);
+}
+
+export function failurePresentation(frame) {
+  if (frame?.phase !== 'error' || !frame.outcome_reason) return null;
+  const reason = String(frame.outcome_reason).replace(/^:/, '');
+  return reason.includes('_timeout_ms limit ')
+    ? `Limit exceeded: ${reason}`
+    : `Failure reason: ${reason}`;
+}
+
+function updateFailure(element, frame) {
+  const presentation = failurePresentation(frame);
+  element.hidden = presentation == null;
+  element.textContent = presentation || '';
 }
 
 function updateBadge(card, frame) {

@@ -161,7 +161,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   def transfer_owner(_snapshot, _owner), do: {:error, :invalid_snapshot}
 
-  @spec stop(t()) :: :ok
+  @spec stop(term()) :: :ok
   def stop(%__MODULE__{} = snapshot) do
     case call(snapshot, :stop) do
       :ok -> :ok

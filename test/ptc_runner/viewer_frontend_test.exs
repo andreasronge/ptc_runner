@@ -25,6 +25,29 @@ defmodule PtcRunner.ViewerFrontendTest do
   end
 
   @tag :tmp_dir
+  test "project command configures Live project details and its fixed launch target", %{
+    tmp_dir: directory
+  } do
+    project_path = viewer_project(directory)
+
+    assert {:ok, viewer, address, port} = ViewerFrontend.start(project_path)
+    on_exit(fn -> if Process.alive?(viewer), do: PtcViewer.stop(viewer) end)
+
+    base_url = "http://#{:inet.ntoa(address)}:#{port}"
+
+    assert {:ok, %{status: 200, body: project}} = Req.get(base_url <> "/api/live/project")
+    assert project["enabled"] == true
+    assert project["manifest"] == Path.join(directory, "demo/ptc.json")
+
+    assert {:ok, %{status: 200, body: launch}} = Req.get(base_url <> "/api/live/launch")
+    assert launch["enabled"] == true
+    assert launch["manifest"] == Path.join(directory, "demo/ptc.json")
+    assert launch["label"] == "ptc.json · main/run"
+
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
+  @tag :tmp_dir
   test "inspection-capture failure releases the already captured trace", %{tmp_dir: directory} do
     project_path = viewer_project(directory)
     parent = self()
@@ -141,6 +164,25 @@ defmodule PtcRunner.ViewerFrontendTest do
 
     assert {:ok, viewer, _address, _port} = ViewerFrontend.start(project_path)
     on_exit(fn -> if Process.alive?(viewer), do: PtcViewer.stop(viewer) end)
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
+  @tag :tmp_dir
+  test "passes the process live reporter token into the Viewer", %{tmp_dir: directory} do
+    previous = System.get_env("PTC_VIEWER_TOKEN")
+    project_path = viewer_project(directory)
+
+    on_exit(fn ->
+      if previous,
+        do: System.put_env("PTC_VIEWER_TOKEN", previous),
+        else: System.delete_env("PTC_VIEWER_TOKEN")
+    end)
+
+    System.put_env("PTC_VIEWER_TOKEN", "too-short")
+    assert {:error, :invalid_viewer_config} = ViewerFrontend.start(project_path)
+
+    System.put_env("PTC_VIEWER_TOKEN", String.duplicate("x", 32))
+    assert {:ok, viewer, _address, _port} = ViewerFrontend.start(project_path)
     assert :ok = PtcViewer.stop(viewer)
   end
 

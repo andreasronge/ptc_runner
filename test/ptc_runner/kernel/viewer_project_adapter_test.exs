@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapterTest do
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.ViewerProjectAdapter
 
-  @demo_manifest "docs/plans/viewer-live-run-demo/ptc.json"
+  @demo_manifest "examples/viewer-live-dashboard/ptc.json"
 
   describe "the shipped demo manifest" do
     setup do
@@ -21,9 +21,10 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapterTest do
     test "describes the workflow environment with sources for both components", %{
       project: project
     } do
-      assert [workflow] = project.environments
+      [workflow | missions] = project.environments
       assert workflow.name == "workflow"
       assert workflow.kind == "workflow"
+      assert Enum.map(missions, & &1.name) == ["greet", "stats"]
 
       assert [%{id: "llm", library: true}, %{id: "demo.live", library: false}] =
                workflow.components
@@ -40,7 +41,8 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapterTest do
     test "names the provider but claims no tools without a host configuration", %{
       project: project
     } do
-      assert [%{providers: [%{name: "deepseek", source: nil}], tools: []}] = project.environments
+      [workflow | _missions] = project.environments
+      assert %{providers: [%{name: "deepseek", source: nil}], tools: []} = workflow
     end
 
     test "emits every catalog limit, with the manifest's overrides as effective", %{

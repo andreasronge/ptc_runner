@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { fmtLimit, missionNames, plural, uniqueComponents } from '../priv/static/js/live.js';
+import {
+  fmtLimit,
+  failurePresentation,
+  launchStatusPresentation,
+  missionNames,
+  plural,
+  runRoute,
+  uniqueComponents
+} from '../priv/static/js/live.js';
 
 // Limits arrive as raw catalog rows; the panel is responsible for making them
 // readable without inventing units it was not given.
@@ -54,5 +62,23 @@ assert.deepEqual(missionNames({ environments: [{ name: 'workflow', kind: 'workfl
 assert.deepEqual(missionNames({ environments: [{ kind: 'mission' }] }), []);
 assert.deepEqual(missionNames({}), []);
 assert.deepEqual(missionNames(null), []);
+
+assert.deepEqual(launchStatusPresentation({ status: 'ok', output_tail: '{"sum" 6}' }), {
+  state: 'ok',
+  line: 'Last launch completed (exit 0):',
+  output: '{"sum" 6}'
+});
+assert.equal(launchStatusPresentation({ status: 'error' }).output, '(no output captured)');
+
+assert.equal(runRoute('cmd-abc/def'), '#/run/cmd-abc%2Fdef');
+
+assert.equal(
+  failurePresentation({
+    phase: 'error',
+    outcome_reason: 'parallel_timeout_ms limit 60000 ms was exceeded during execution'
+  }),
+  'Limit exceeded: parallel_timeout_ms limit 60000 ms was exceeded during execution'
+);
+assert.equal(failurePresentation({ phase: 'ok', outcome_reason: null }), null);
 
 process.stdout.write('ok');

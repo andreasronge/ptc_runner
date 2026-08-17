@@ -5,14 +5,98 @@ defmodule PtcViewer.LiveRouterTest do
   alias PtcViewer.LiveStore
 
   @moduletag :tmp_dir
+  @live_nonce "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  @live_token "container-reporter-token-with-at-least-32-bytes"
 
   setup %{tmp_dir: trace_dir} do
     {:ok, store} = LiveStore.start(self())
 
     %{
       store: store,
-      opts: [trace_dir: trace_dir, kernel_trace_adapter: nil, live_store: store, live_port: 0]
+      opts: [
+        trace_dir: trace_dir,
+        kernel_trace_adapter: nil,
+        live_store: store,
+        live_mutation_nonce: @live_nonce
+      ]
     }
+  end
+
+  test "a non-loopback reporter must authenticate with the configured bearer token", %{
+    opts: opts
+  } do
+    opts = Keyword.put(opts, :live_token_digest, PtcViewer.LiveSecurity.token_digest(@live_token))
+    frame = Jason.encode!(%{"seq" => 0, "phase" => "running"})
+
+    unauthenticated =
+      conn(:post, "http://viewer.internal/api/live/runs/run-remote", frame)
+      |> Map.put(:remote_ip, {172, 18, 0, 4})
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> call_router(opts)
+
+    assert unauthenticated.status == 403
+
+    authenticated =
+      conn(:post, "http://viewer.internal/api/live/runs/run-remote", frame)
+      |> Map.put(:remote_ip, {172, 18, 0, 4})
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Plug.Conn.put_req_header("authorization", "Bearer " <> @live_token)
+      |> call_router(opts)
+
+    assert authenticated.status == 200
+  end
+
+  test "browser live reads and mutations reject non-local authorities", %{
+    opts: opts,
+    store: store
+  } do
+    :ok = LiveStore.put_frame(store, "run-abc", %{"seq" => 0, "phase" => "ok"})
+
+    project_opts = Keyword.put(opts, :live_project, fn -> %{"name" => "secret-source"} end)
+
+    assert (conn(:get, "http://evil.example/api/live/project")
+            |> call_router(project_opts)).status == 403
+
+    delete =
+      conn(:delete, "http://evil.example/api/live/runs/run-abc")
+      |> Plug.Conn.put_req_header("origin", "http://evil.example")
+      |> Plug.Conn.put_req_header("x-ptc-viewer-live-nonce", @live_nonce)
+      |> call_router(opts)
+
+    assert delete.status == 403
+    assert [%{"run_id" => "run-abc"}] = LiveStore.snapshot(store)
+  end
+
+  test "browser live mutations require same-origin authority and the page nonce", %{
+    opts: opts,
+    store: store
+  } do
+    :ok = LiveStore.put_frame(store, "run-abc", %{"seq" => 0, "phase" => "ok"})
+
+    missing_nonce =
+      conn(:delete, "http://localhost/api/live/runs/run-abc")
+      |> Plug.Conn.put_req_header("origin", "http://localhost")
+      |> call_router(opts)
+
+    assert missing_nonce.status == 403
+
+    accepted =
+      conn(:delete, "http://localhost/api/live/runs/run-abc")
+      |> Plug.Conn.put_req_header("origin", "http://localhost")
+      |> Plug.Conn.put_req_header("x-ptc-viewer-live-nonce", @live_nonce)
+      |> call_router(opts)
+
+    assert accepted.status == 200
+  end
+
+  test "entry config exposes live controls only on a local authority", %{opts: opts} do
+    local = browser_conn(:get, "/") |> call_router(opts) |> entry_config()
+    assert local["live_enabled"]
+    assert local["live_mutation_nonce"] == @live_nonce
+
+    remote = conn(:get, "http://viewer.internal/") |> call_router(opts) |> entry_config()
+    refute remote["live_enabled"]
+    refute Map.has_key?(remote, "live_mutation_nonce")
   end
 
   test "frames posted by a run are exposed to the snapshot endpoint", %{opts: opts} do
@@ -25,7 +109,7 @@ defmodule PtcViewer.LiveRouterTest do
 
     assert post_conn.status == 200
 
-    get_conn = conn(:get, "/api/live/runs") |> call_router(opts)
+    get_conn = browser_conn(:get, "/api/live/runs") |> call_router(opts)
     assert get_conn.status == 200
 
     assert %{"runs" => [%{"run_id" => "run-abc", "phase" => "running"}]} =
@@ -35,25 +119,55 @@ defmodule PtcViewer.LiveRouterTest do
   test "deleting a run removes it from the snapshot", %{opts: opts, store: store} do
     :ok = LiveStore.put_frame(store, "run-abc", %{"seq" => 0, "phase" => "ok"})
 
-    delete_conn = conn(:delete, "/api/live/runs/run-abc") |> call_router(opts)
+    delete_conn = browser_mutation(:delete, "/api/live/runs/run-abc") |> call_router(opts)
     assert delete_conn.status == 200
     assert Jason.decode!(delete_conn.resp_body) == %{"status" => "ok"}
 
-    get_conn = conn(:get, "/api/live/runs") |> call_router(opts)
+    get_conn = browser_conn(:get, "/api/live/runs") |> call_router(opts)
     assert %{"runs" => []} = Jason.decode!(get_conn.resp_body)
   end
 
   test "deleting an unknown run answers 404 JSON", %{opts: opts} do
-    delete_conn = conn(:delete, "/api/live/runs/nope") |> call_router(opts)
+    delete_conn = browser_mutation(:delete, "/api/live/runs/nope") |> call_router(opts)
 
     assert delete_conn.status == 404
     assert Jason.decode!(delete_conn.resp_body) == %{"error" => "unknown_run"}
   end
 
-  test "deleting a run answers 503 when no store is configured", %{tmp_dir: trace_dir} do
-    opts = [trace_dir: trace_dir, kernel_trace_adapter: nil]
+  test "inspecting an ended run refreshes the host snapshot before navigation", %{opts: opts} do
+    test = self()
 
-    assert (conn(:delete, "/api/live/runs/run-abc") |> call_router(opts)).status == 503
+    opts =
+      Keyword.put(opts, :live_trace_refresh, fn run_id ->
+        send(test, {:refresh_trace, run_id})
+        :ok
+      end)
+
+    conn = browser_mutation(:post, "/api/live/runs/run-abc/inspect") |> call_router(opts)
+
+    assert conn.status == 200
+    assert Jason.decode!(conn.resp_body) == %{"status" => "ok"}
+    assert_receive {:refresh_trace, "run-abc"}
+  end
+
+  test "inspect reports a run that is not yet in canonical traces", %{opts: opts} do
+    opts = Keyword.put(opts, :live_trace_refresh, fn _run_id -> {:error, :not_found} end)
+
+    conn = browser_mutation(:post, "/api/live/runs/run-abc/inspect") |> call_router(opts)
+
+    assert conn.status == 404
+    assert Jason.decode!(conn.resp_body) == %{"error" => "run_not_found"}
+  end
+
+  test "deleting a run answers 503 when no store is configured", %{tmp_dir: trace_dir} do
+    opts = [
+      trace_dir: trace_dir,
+      kernel_trace_adapter: nil,
+      live_mutation_nonce: @live_nonce
+    ]
+
+    assert (browser_mutation(:delete, "/api/live/runs/run-abc") |> call_router(opts)).status ==
+             503
   end
 
   test "rejects a non-JSON frame body", %{opts: opts} do
@@ -68,15 +182,15 @@ defmodule PtcViewer.LiveRouterTest do
   test "live endpoints answer 503 when no store is configured", %{tmp_dir: trace_dir} do
     opts = [trace_dir: trace_dir, kernel_trace_adapter: nil]
 
-    assert (conn(:get, "/api/live/runs") |> call_router(opts)).status == 503
-    assert (conn(:get, "/api/live/launch") |> call_router(opts)).status == 503
+    assert (browser_conn(:get, "/api/live/runs") |> call_router(opts)).status == 503
+    assert (browser_conn(:get, "/api/live/launch") |> call_router(opts)).status == 503
   end
 
   test "project endpoint serves the adapter payload", %{opts: opts} do
     adapter = fn -> %{"name" => "demo", "environments" => [%{"name" => "workflow"}]} end
 
     get_conn =
-      conn(:get, "/api/live/project")
+      browser_conn(:get, "/api/live/project")
       |> call_router(Keyword.put(opts, :live_project, adapter))
 
     assert get_conn.status == 200
@@ -89,14 +203,14 @@ defmodule PtcViewer.LiveRouterTest do
     adapter = fn -> {:ok, %{"name" => "demo"}} end
 
     get_conn =
-      conn(:get, "/api/live/project")
+      browser_conn(:get, "/api/live/project")
       |> call_router(Keyword.put(opts, :live_project, adapter))
 
     assert %{"enabled" => true, "name" => "demo"} = Jason.decode!(get_conn.resp_body)
   end
 
   test "project endpoint reports disabled without an adapter", %{opts: opts} do
-    get_conn = conn(:get, "/api/live/project") |> call_router(opts)
+    get_conn = browser_conn(:get, "/api/live/project") |> call_router(opts)
 
     assert get_conn.status == 200
     assert Jason.decode!(get_conn.resp_body) == %{"enabled" => false}
@@ -106,7 +220,7 @@ defmodule PtcViewer.LiveRouterTest do
     adapter = fn -> raise "manifest vanished" end
 
     get_conn =
-      conn(:get, "/api/live/project")
+      browser_conn(:get, "/api/live/project")
       |> call_router(Keyword.put(opts, :live_project, adapter))
 
     assert get_conn.status == 200
@@ -115,7 +229,7 @@ defmodule PtcViewer.LiveRouterTest do
 
   test "an adapter returning a non-map degrades to disabled", %{opts: opts} do
     get_conn =
-      conn(:get, "/api/live/project")
+      browser_conn(:get, "/api/live/project")
       |> call_router(Keyword.put(opts, :live_project, fn -> :nope end))
 
     assert Jason.decode!(get_conn.resp_body) == %{"enabled" => false}
@@ -124,11 +238,11 @@ defmodule PtcViewer.LiveRouterTest do
   test "project endpoint answers 503 when no store is configured", %{tmp_dir: trace_dir} do
     opts = [trace_dir: trace_dir, kernel_trace_adapter: nil]
 
-    assert (conn(:get, "/api/live/project") |> call_router(opts)).status == 503
+    assert (browser_conn(:get, "/api/live/project") |> call_router(opts)).status == 503
   end
 
   test "launch endpoint reports disabled without a configured target", %{opts: opts} do
-    get_conn = conn(:get, "/api/live/launch") |> call_router(opts)
+    get_conn = browser_conn(:get, "/api/live/launch") |> call_router(opts)
 
     assert get_conn.status == 200
     assert Jason.decode!(get_conn.resp_body) == %{"enabled" => false}
@@ -153,10 +267,11 @@ defmodule PtcViewer.LiveRouterTest do
       Keyword.put(opts, :live_launch, %{
         manifest: "demo.json",
         cwd: tmp_dir,
-        label: "demo"
+        label: "demo",
+        adapter: fn _request, _report -> {0, "ok"} end
       })
 
-    get_conn = conn(:get, "/api/live/launch") |> call_router(opts)
+    get_conn = browser_conn(:get, "/api/live/launch") |> call_router(opts)
     assert get_conn.status == 200
 
     assert %{
@@ -167,24 +282,32 @@ defmodule PtcViewer.LiveRouterTest do
              "launch" => %{"status" => "idle"}
            } = Jason.decode!(get_conn.resp_body)
 
-    # POST with port 0 (tests) is refused as not configured rather than
-    # spawning a run whose reporter could never reach back.
     post_conn =
-      conn(:post, "/api/live/launch", Jason.encode!(%{"input" => %{"topics" => ["x"]}}))
+      browser_mutation(
+        :post,
+        "/api/live/launch",
+        Jason.encode!(%{"input" => %{"topics" => ["x"]}})
+      )
       |> Plug.Conn.put_req_header("content-type", "application/json")
       |> call_router(opts)
 
-    assert post_conn.status == 400
+    assert post_conn.status == 202
   end
 
   test "a mission body takes the mission path, not the input path", %{opts: opts, tmp_dir: dir} do
     File.write!(Path.join(dir, "demo.json"), "{}")
-    opts = Keyword.put(opts, :live_launch, %{manifest: "demo.json", cwd: dir})
+    test_process = self()
 
-    # Port 0 stops the launch before anything spawns; the distinct reason is
-    # what proves the mission branch ran instead of input validation.
+    adapter = fn request, _report ->
+      send(test_process, {:launch_request, request})
+      {0, "ok"}
+    end
+
+    opts =
+      Keyword.put(opts, :live_launch, %{manifest: "demo.json", cwd: dir, adapter: adapter})
+
     post_conn =
-      conn(
+      browser_mutation(
         :post,
         "/api/live/launch",
         Jason.encode!(%{"mission" => "review", "expression" => "(dir)"})
@@ -192,11 +315,15 @@ defmodule PtcViewer.LiveRouterTest do
       |> Plug.Conn.put_req_header("content-type", "application/json")
       |> call_router(opts)
 
-    assert post_conn.status == 400
-    assert Jason.decode!(post_conn.resp_body) == %{"error" => "launch_not_configured"}
+    assert post_conn.status == 202
+    assert_receive {:launch_request, {:mission, %{name: "review", expression: "(dir)"}}}
 
     without_expression =
-      conn(:post, "/api/live/launch", Jason.encode!(%{"mission" => "review"}))
+      browser_mutation(
+        :post,
+        "/api/live/launch",
+        Jason.encode!(%{"mission" => "review"})
+      )
       |> Plug.Conn.put_req_header("content-type", "application/json")
       |> call_router(opts)
 
@@ -204,4 +331,25 @@ defmodule PtcViewer.LiveRouterTest do
   end
 
   defp call_router(conn, opts), do: PtcViewer.Router.call(conn, PtcViewer.Router.init(opts))
+
+  defp browser_conn(method, path, body \\ nil),
+    do: conn(method, "http://localhost" <> path, body)
+
+  defp browser_mutation(method, path, body \\ nil) do
+    method
+    |> browser_conn(path, body)
+    |> Plug.Conn.put_req_header("origin", "http://localhost")
+    |> Plug.Conn.put_req_header("x-ptc-viewer-live-nonce", @live_nonce)
+  end
+
+  defp entry_config(conn) do
+    [encoded] =
+      Regex.run(~r/<meta name="ptc-viewer-config" content="([^"]+)">/, conn.resp_body,
+        capture: :all_but_first
+      )
+
+    encoded
+    |> Base.url_decode64!(padding: false)
+    |> Jason.decode!()
+  end
 end

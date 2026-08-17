@@ -388,24 +388,29 @@ fi
     end
   end
 
-  socket = connect.(connect)
-
-  :ok =
-    :gen_tcp.send(
-      socket,
-      "GET /api/kernel/runs HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nConnection: close\r\n\r\n"
-    )
-
-  read = fn read, acc ->
+  read = fn read, socket, acc ->
     case :gen_tcp.recv(socket, 0, 10_000) do
-      {:ok, bytes} -> read.(read, acc <> bytes)
+      {:ok, bytes} -> read.(read, socket, acc <> bytes)
       {:error, :closed} -> acc
       {:error, reason} -> raise "the packaged viewer response failed: #{inspect(reason)}"
     end
   end
 
-  response = read.(read, "")
-  :ok = :gen_tcp.close(socket)
+  request = fn path ->
+    socket = connect.(connect)
+
+    :ok =
+      :gen_tcp.send(
+        socket,
+        "GET #{path} HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nConnection: close\r\n\r\n"
+      )
+
+    response = read.(read, socket, "")
+    :ok = :gen_tcp.close(socket)
+    response
+  end
+
+  response = request.("/api/kernel/runs")
 
   unless String.starts_with?(response, "HTTP/1.1 200 ") do
     raise "the packaged viewer did not answer 200: #{String.slice(response, 0, 120)}"
@@ -413,6 +418,13 @@ fi
 
   unless String.contains?(response, run_ref) do
     raise "the packaged viewer did not list the run it was pointed at"
+  end
+
+  launch_response = request.("/api/live/launch")
+
+  unless String.starts_with?(launch_response, "HTTP/1.1 200 ") and
+           String.contains?(launch_response, ~s("enabled":true)) do
+    raise "the packaged project viewer did not enable its fixed launch target"
   end
 ' "$viewer_port" "$viewer_run_ref"
 

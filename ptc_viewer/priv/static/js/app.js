@@ -203,7 +203,7 @@ const runCatalog = createRunCatalog({
 function currentRoute() {
   const hash = location.hash.replace(/^#\/?/, '');
   if (hash === 'repl') return { tab: 'repl', runId: null };
-  if (hash === 'live') return { tab: 'live', runId: null };
+  if (hash === 'live' && state.live) return { tab: 'live', runId: null };
   const match = hash.match(/^run\/(.+)$/);
   if (match) return { tab: 'runs', runId: decodeURIComponent(match[1]) };
   return { tab: 'runs', runId: null };
@@ -448,11 +448,20 @@ if (config.repl_enabled) {
 } else {
   document.getElementById('repl-tab').hidden = true;
 }
-state.live = createLiveController({
-  onLiveCount: count => {
-    document.getElementById('live-tab').classList.toggle('has-live', count > 0);
-  }
-});
+if (config.live_enabled) {
+  state.live = createLiveController({
+    mutationNonce: config.live_mutation_nonce,
+    onInspectRun: runId => {
+      void runCatalog.refresh();
+      selectRun(runId);
+    },
+    onLiveCount: count => {
+      document.getElementById('live-tab').classList.toggle('has-live', count > 0);
+    }
+  });
+} else {
+  document.getElementById('live-tab').hidden = true;
+}
 
 window.addEventListener('hashchange', () => void applyRoute());
 

@@ -1069,7 +1069,7 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{phase: :execution, code: :runtime_limit_exceeded} = row,
          %{"properties" => %{"kind" => %{"const" => "runtime"}}}
        ),
-       do: RuntimeLimitDiagnostic.subordinate_evaluations_message_schema(row.message)
+       do: RuntimeLimitDiagnostic.runtime_message_schema(row.message)
 
   defp diagnostic_message_schema(
          %{phase: :result_cleanup, code: :result_contract_failed} = row,

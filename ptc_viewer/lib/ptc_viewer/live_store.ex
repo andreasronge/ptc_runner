@@ -70,7 +70,7 @@ defmodule PtcViewer.LiveStore do
   def begin_launch(store, fun) when is_function(fun, 0),
     do: GenServer.call(store, {:begin_launch, fun})
 
-  @doc ~S(One of `%{status: "idle" | "running" | "ok" | "error"}`, with `output_tail` on error.)
+  @doc ~S(One of `%{status: "idle" | "running" | "ok" | "error"}`, with bounded `output_tail` after completion.)
   @spec launch_status(pid()) :: map()
   def launch_status(store), do: GenServer.call(store, :launch_status)
 
@@ -140,7 +140,7 @@ defmodule PtcViewer.LiveStore do
     status =
       cond do
         state.launch != nil -> %{status: "running"}
-        match?({:ok, _code}, state.launch_result) -> %{status: "ok"}
+        match?({:ok, _tail}, state.launch_result) -> launch_success(state.launch_result)
         match?({:error, _tail}, state.launch_result) -> launch_error(state.launch_result)
         true -> %{status: "idle"}
       end
@@ -155,7 +155,7 @@ defmodule PtcViewer.LiveStore do
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{launch: %{ref: ref}} = state) do
     result =
       case reason do
-        {:launch_result, {0, _output}} -> {:ok, 0}
+        {:launch_result, {0, output}} -> {:ok, output}
         {:launch_result, {code, output}} -> {:error, "exit #{code}: #{output}"}
         other -> {:error, "launcher crashed: #{inspect(other)}"}
       end
@@ -168,6 +168,15 @@ defmodule PtcViewer.LiveStore do
 
   def handle_info(_message, state), do: {:noreply, state}
 
+  @impl GenServer
+  def terminate(_reason, %{launch: %{pid: pid}}) do
+    Process.exit(pid, :shutdown)
+    :ok
+  end
+
+  def terminate(_reason, _state), do: :ok
+
+  defp launch_success({:ok, tail}), do: %{status: "ok", output_tail: tail}
   defp launch_error({:error, tail}), do: %{status: "error", output_tail: tail}
 
   defp ordered(runs) do

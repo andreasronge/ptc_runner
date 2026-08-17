@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.ResultIdentity
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.StrictJSON
@@ -111,33 +112,47 @@ defmodule PtcRunner.Kernel.Runner do
   defp run_claimed(entry_source, config, state) do
     reporter = PtcRunner.LiveStatus.maybe_start(config, state)
 
-    execution =
-      try do
-        result = run_workflow(entry_source, config, state)
-        result = apply_terminal_failure(result, state)
-        _ = PtcRunner.LiveStatus.complete(reporter, outcome(result), terminal_reason(result))
-        {:ok, result}
-      catch
-        kind, reason ->
-          {:raised, kind, reason, __STACKTRACE__}
-      after
-        close_run_state(state)
-        PtcRunner.LiveStatus.stop(reporter)
+    try do
+      execution =
+        try do
+          result = run_workflow(entry_source, config, state)
+          {:ok, apply_terminal_failure(result, state)}
+        catch
+          kind, reason ->
+            {:raised, kind, reason, __STACKTRACE__}
+        after
+          close_run_state(state)
+        end
+
+      usage = run_state_usage(state)
+      cleanup = RunConfig.close_provider_session(config)
+
+      case execution do
+        {:ok, result} ->
+          result = apply_provider_cleanup_failure(result, cleanup, usage)
+          {final_result, _events} = finalized = finalize_result(result, usage, config.event_sink)
+
+          _ =
+            PtcRunner.LiveStatus.complete(
+              reporter,
+              outcome(final_result),
+              live_terminal_reason(final_result)
+            )
+
+          finalized
+
+        # An unexpected internal exception keeps its original reason and stack
+        # trace. A cleanup failure must not replace a programming defect with a
+        # tidier diagnostic.
+        {:raised, kind, reason, stacktrace} ->
+          :erlang.raise(kind, reason, stacktrace)
       end
-
-    usage = run_state_usage(state)
-    cleanup = RunConfig.close_provider_session(config)
-
-    case execution do
-      {:ok, result} ->
-        result = apply_provider_cleanup_failure(result, cleanup, usage)
-        finalize_result(result, usage, config.event_sink)
-
-      # An unexpected internal exception keeps its original reason and stack
-      # trace. A cleanup failure must not replace a programming defect with a
-      # tidier diagnostic.
-      {:raised, kind, reason, stacktrace} ->
-        :erlang.raise(kind, reason, stacktrace)
+    catch
+      kind, reason ->
+        _ = PtcRunner.LiveStatus.complete(reporter, :error, :internal_error)
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    after
+      PtcRunner.LiveStatus.stop(reporter)
     end
   end
 
@@ -216,7 +231,8 @@ defmodule PtcRunner.Kernel.Runner do
       max_parallel_workers: config.limits.live_provider_tasks,
       max_program_bytes: config.limits.entry_source_bytes,
       filter_context: false,
-      caller: :kernel
+      caller: :kernel,
+      telemetry_run: state.pid
     ]
 
     case Lisp.run_native(entry_source, opts) do
@@ -611,6 +627,19 @@ defmodule PtcRunner.Kernel.Runner do
   defp terminal_reason({:ok, _result}), do: nil
   defp terminal_reason({:error, %Error{reason: reason}}), do: reason
 
+  defp live_terminal_reason({:ok, _result}), do: nil
+
+  defp live_terminal_reason(
+         {:error, %Error{details: %{limit: limit, limit_ms: limit_ms, phase: phase}} = error}
+       ) do
+    case RuntimeLimitDiagnostic.timeout_message(limit, limit_ms, phase) do
+      {:ok, message} -> message
+      :error -> error.reason
+    end
+  end
+
+  defp live_terminal_reason({:error, %Error{reason: reason}}), do: reason
+
   defp maybe_put_result_hash(stopped_data, {:ok, %Result{value: value}}) do
     case ResultIdentity.hash(value) do
       {:ok, result_hash} -> Map.put(stopped_data, :result_hash, result_hash)
@@ -750,9 +779,15 @@ defmodule PtcRunner.Kernel.Runner do
   defp maybe_emit_workflow_limit(
          state,
          sink,
-         {:error, %Error{kind: :limit_exceeded, reason: reason}}
+         {:error, %Error{kind: :limit_exceeded, reason: reason, details: details}}
        ),
-       do: Events.emit(state, sink, "limit-exceeded", %{reason: reason})
+       do:
+         Events.emit(
+           state,
+           sink,
+           "limit-exceeded",
+           Map.merge(%{reason: reason}, Map.take(details, [:limit, :limit_ms, :phase]))
+         )
 
   defp maybe_emit_workflow_limit(_state, _sink, _result), do: :ok
 

@@ -4,6 +4,7 @@ defmodule PtcViewer.Server do
   use GenServer
 
   alias PtcViewer.InspectionStore
+  alias PtcViewer.LiveSecurity
   alias PtcViewer.ReplConnection
   alias PtcViewer.ReplStore
 
@@ -36,10 +37,15 @@ defmodule PtcViewer.Server do
     inspection_source = Keyword.get(opts, :inspection_source)
     launch = Keyword.get(opts, :launch)
     project_adapter = Keyword.get(opts, :project_adapter)
+    live_trace_refresh = Keyword.get(opts, :live_trace_refresh)
+    live_token = Keyword.get(opts, :live_token)
+    live_mutation_nonce = LiveSecurity.nonce()
 
     if is_integer(port) and port in 0..65_535 and ip in @addresses and
          PtcViewer.LiveLaunch.validate(launch) == :ok and
-         PtcViewer.LiveProject.validate(project_adapter) == :ok do
+         PtcViewer.LiveProject.validate(project_adapter) == :ok and
+         valid_trace_refresh?(live_trace_refresh) and
+         LiveSecurity.validate_token(live_token) == :ok do
       params = %{
         port: port,
         ip: ip,
@@ -53,7 +59,10 @@ defmodule PtcViewer.Server do
         trace_source: trace_source,
         inspection_source: inspection_source,
         launch: launch,
-        project_adapter: project_adapter
+        project_adapter: project_adapter,
+        live_trace_refresh: live_trace_refresh,
+        live_token: live_token,
+        live_mutation_nonce: live_mutation_nonce
       }
 
       case start_resources(params) do
@@ -262,7 +271,9 @@ defmodule PtcViewer.Server do
       live_store: live_store,
       live_launch: params.launch,
       live_project: params.project_adapter,
-      live_port: params.port,
+      live_trace_refresh: params.live_trace_refresh,
+      live_token_digest: LiveSecurity.token_digest(params.live_token),
+      live_mutation_nonce: params.live_mutation_nonce,
       viewer_server: server
     ]
   end
@@ -271,6 +282,9 @@ defmodule PtcViewer.Server do
     do: {:private_directory, trace_dir}
 
   defp trace_source(%{trace_dir: trace_dir}), do: {:directory, trace_dir}
+
+  defp valid_trace_refresh?(nil), do: true
+  defp valid_trace_refresh?(callback), do: is_function(callback, 1)
 
   defp pin_inspection_source(%{inspection_source: source}) when not is_nil(source),
     do: InspectionStore.start(source)

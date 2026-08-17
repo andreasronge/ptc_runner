@@ -19,6 +19,7 @@ Run `ptc help COMMAND` for the exact switches accepted by an installed version.
 | `ptc transcript RUN_ID ...` | Publish one correlated private model transcript |
 | `ptc repl` | Open a direct, manifest-backed, or analysis session |
 | `ptc viewer PROJECT.json` | Browse a project's captured traces in a local web UI |
+| `ptc viewer PROJECT.json --env-file FILE` | Use one exact dotenv file for Viewer-started workflows and missions |
 
 Help is generated from the same declarations as the strict parser, so use
 `ptc help COMMAND` as the canonical command and option reference.
@@ -379,7 +380,7 @@ provider and follows typed evidence links with the shipped `debug.nav` prelude.
 ## Browse traces in the Viewer
 
 ```console
-ptc viewer ptc-project.json
+ptc viewer ptc-project.json --env-file .env
 ```
 
 The project document supplies the trace root and optional inspection root, plus
@@ -389,6 +390,14 @@ immutable capture. `--port` overrides the project's port; `0` asks the
 operating system for a free one. The command runs in the foreground until
 `Ctrl+C`, and opens a browser only when the project asks for it *and* a
 terminal is attached.
+
+The Viewer does not search the invocation directory or its parents for a
+`.env` file. Environment-backed provider credentials come from the inherited
+process environment, the project's `host.env_file`, or an explicit
+`--env-file FILE`. The command-line file is resolved when the Viewer starts
+and overrides the project's environment-file reference for every workflow or
+mission launched from its Live tab. It is read only when the selected provider
+actually requires an environment credential.
 
 The Viewer ships inside the standalone release and the container image. It is
 not part of the published Hex package, where `ptc doctor` reports it as an
@@ -427,6 +436,63 @@ bind. Writing `-p 4123:4123` instead publishes an unauthenticated trace browser
 to every host that can reach the machine. The command cannot enforce that
 prefix; the operator must write it. The user mapping preserves access to the
 mounted project's owner-only artifacts; do not run this form from a root shell.
+
+### Watch and launch live runs
+
+A Kernel run reports to the Live tab when `PTC_VIEWER_URL` names the Viewer:
+
+```console
+PTC_VIEWER_URL=http://127.0.0.1:4123 ptc run ptc.json
+```
+
+The reporter is best-effort and does not alter the run result. Frames are
+correlated to their owning run, and the terminal frame is published only after
+provider cleanup and canonical event finalization establish the actual
+outcome. A timeout failure names the binding limit and configured duration in
+both the launch diagnostic and the ended Live card; for example,
+`parallel_timeout_ms limit 60000 ms was exceeded during execution`. Mission
+sessions currently show their bounded command-output tail in the launch panel
+instead of streaming frames.
+
+An ended workflow card offers **View result**. That action captures a fresh,
+internally consistent trace snapshot, confirms that the canonical run exists,
+and then opens its detail view in the Runs tab. The Viewer therefore does not
+need to be restarted after a run it launched.
+
+The ordinary project command also configures the Live project details and one
+fixed launch target from that same project document. The browser may edit
+workflow input or choose one declared mission, but it cannot choose a project,
+manifest, working directory, or command:
+
+```console
+ptc viewer ptc-project.json --env-file .env
+```
+
+Viewer-launched workflow cards use the manifest label and workflow entry as
+their human-facing title, while retaining the `cmd-...` value as the stable run
+identifier.
+
+The command is already a long-running PtcRunner host, so Viewer-started work
+runs inside that BEAM instance under the ordinary execution-session owner. A
+host-injected adapter receives a semantic workflow or mission request and a
+direct live-frame sink; no `mix` or `ptc` child process is started. The adapter
+dispatches the named project through the same command engine, so its host,
+environment, and artifact defaults remain authoritative.
+
+Live browser reads require a page opened at `localhost`, `127.0.0.1`, or
+`::1`; mutations additionally require the page's same-origin nonce. A reporter
+connecting from a non-loopback address must send the configured token through
+`PTC_VIEWER_TOKEN`. Generate a new value for each Viewer process, for example
+with `openssl rand -base64 32`.
+
+For Docker, keep the Viewer bound to `0.0.0.0` *inside* the container and keep
+the published host port on loopback. Viewer-started runs report directly inside
+the container process. A separately started run in the same container can
+report over container loopback. A run on the host or in another container must
+set both `PTC_VIEWER_URL=http://127.0.0.1:4123` and the matching
+`PTC_VIEWER_TOKEN`. This protects live ingestion and browser mutations; it does
+not turn the trace browser into an authenticated remote service, so
+`-p 4123:4123` remains unsafe.
 
 ## Test a workflow
 

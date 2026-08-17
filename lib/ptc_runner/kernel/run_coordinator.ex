@@ -37,6 +37,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
+  alias PtcRunner.LiveStatus.Target
 
   @mission_compile_timeout_ms 5_000
   @mission_bundles_bytes 4_000_000
@@ -185,11 +186,23 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              | :invalid_publication_authority
              | :provider_session_required
              | term()}
-  def execute(%PreparedRun{} = prepared, authority), do: open_free(prepared, authority, :run)
-
+  def execute(%PreparedRun{} = prepared, authority), do: execute(prepared, authority, nil)
   def execute(_prepared, _authority), do: {:error, :invalid_prepared_run}
 
-  defp open_free(prepared, authority, operation) do
+  @doc false
+  @spec execute(PreparedRun.t(), PublicationAuthority.t(), Target.t() | nil) ::
+          {:ok, ExecutionOutcome.t()}
+          | {:error,
+             :invalid_prepared_run
+             | :invalid_publication_authority
+             | :provider_session_required
+             | term()}
+  def execute(%PreparedRun{} = prepared, authority, live_status),
+    do: open_free(prepared, authority, :run, live_status)
+
+  def execute(_prepared, _authority, _live_status), do: {:error, :invalid_prepared_run}
+
+  defp open_free(prepared, authority, operation, live_status) do
     cond do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
@@ -202,7 +215,15 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
       true ->
         with {:ok, owner} <-
-               ExecutionSessionOwner.start(prepared, authority, self(), nil, nil, operation),
+               ExecutionSessionOwner.start(
+                 prepared,
+                 authority,
+                 self(),
+                 nil,
+                 nil,
+                 operation,
+                 live_status
+               ),
              do: ExecutionSessionOwner.await(owner)
     end
   end
@@ -222,9 +243,30 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              | term()}
   def execute(%PreparedRun{} = prepared, authority, provider_execution, notifier)
       when is_nil(notifier) or is_function(notifier, 1),
-      do: open_active(prepared, authority, provider_execution, notifier, :run)
+      do: execute(prepared, authority, provider_execution, notifier, nil)
 
   def execute(_prepared, _authority, _provider_execution, _notifier),
+    do: {:error, :invalid_prepared_run}
+
+  @doc false
+  @spec execute(
+          PreparedRun.t(),
+          PublicationAuthority.t(),
+          ProviderExecution.t(),
+          (binary() -> term()) | nil,
+          Target.t() | nil
+        ) ::
+          {:ok, ExecutionOutcome.t()}
+          | {:error,
+             :invalid_prepared_run
+             | :invalid_publication_authority
+             | :invalid_provider_execution
+             | term()}
+  def execute(%PreparedRun{} = prepared, authority, provider_execution, notifier, live_status)
+      when is_nil(notifier) or is_function(notifier, 1),
+      do: open_active(prepared, authority, provider_execution, notifier, :run, live_status)
+
+  def execute(_prepared, _authority, _provider_execution, _notifier, _live_status),
     do: {:error, :invalid_prepared_run}
 
   # Internal only, like its `execute/4` neighbour.
@@ -247,12 +289,12 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              | :invalid_provider_execution
              | term()}
   def connect(%PreparedRun{} = prepared, authority, provider_execution),
-    do: open_active(prepared, authority, provider_execution, nil, :connect)
+    do: open_active(prepared, authority, provider_execution, nil, :connect, nil)
 
   def connect(_prepared, _authority, _provider_execution),
     do: {:error, :invalid_prepared_run}
 
-  defp open_active(prepared, authority, provider_execution, notifier, operation) do
+  defp open_active(prepared, authority, provider_execution, notifier, operation, live_status) do
     cond do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
@@ -274,7 +316,8 @@ defmodule PtcRunner.Kernel.RunCoordinator do
                  self(),
                  provider_execution,
                  notifier,
-                 operation
+                 operation,
+                 live_status
                ),
              do: ExecutionSessionOwner.await(owner)
     end

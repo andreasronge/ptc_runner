@@ -15,15 +15,27 @@ validation, run derivation, filtering, and pagination remain owned by
 From the PtcRunner root:
 
 ```bash
-mix ptc viewer ptc-project.json
+mix ptc viewer ptc-project.json --env-file .env
 ```
+
+That command also derives the Live tab's fixed launch target and project
+details from the named project. A Viewer-started workflow runs inside the same
+long-lived PtcRunner BEAM instance under the ordinary execution-session owner,
+preserving the project's host, environment, and artifact defaults without
+starting a `mix` or `ptc` child process. No programmatic `PtcViewer.start/1`
+call is needed for the normal project workflow.
+
+`--env-file FILE` is optional and applies to every workflow or mission launched
+from the Live tab. Without it, credentials come from the inherited process
+environment or the project's `host.env_file`; the Viewer does not implicitly
+search for `.env`.
 
 The root `viewer` command reads the explicitly named operator-owned project
 configuration, captures its trace and authorized inspection directories,
 starts the server, and optionally opens the browser. Port, opening, REPL, and
 private-data choices live in the project file. The old independent Viewer
 path-switch grammar has been removed; see the root
-[project configuration guide](../docs/guides/project-configuration.md).
+[project-configuration reference](../docs/reference/project-files.md).
 
 The server binds `127.0.0.1` unless the caller supplies `ip: {0, 0, 0, 0}` —
 `--listen 0.0.0.0` on the command. There is no authentication, so the wildcard
@@ -139,6 +151,20 @@ Standalone hosts may additionally supply a module implementing
 `PtcViewer.ReplAdapter` plus opaque `:repl_config`; omitting it preserves the
 Runs-only UI.
 
+The Live tab accepts best-effort Kernel frames either through the fixed
+launch adapter's direct two-argument sink or from an external run naming
+`PTC_VIEWER_URL`. Browser controls are enabled only when the page uses a local
+authority. A host supplies `:launch` as a fixed manifest plus a two-arity
+adapter receiving the semantic request and direct frame sink, and may also
+supply a zero-arity `:project_adapter`. The optional one-arity
+`:live_trace_refresh` callback atomically refreshes the host-owned snapshot
+before an ended card opens its canonical Runs detail. A random `:live_token`
+of at least 32 bytes authenticates non-loopback HTTP reporters through
+`PTC_VIEWER_TOKEN`.
+Inside Docker, bind `{0, 0, 0, 0}` but publish with
+`-p 127.0.0.1:4123:4123`. The token protects external live reporters and
+mutations, not the trace browser as a whole.
+
 ## HTTP API
 
 | Endpoint | Shared Kernel operation |
@@ -154,6 +180,14 @@ Runs-only UI.
 | `POST /api/repl/templates` | Format an inert `analysis/open` or `analysis/read` editor template |
 | `POST /api/repl/reset` | Persist the current session and capture a replacement |
 | `DELETE /api/repl` | Close and persist the current analysis session |
+| `POST /api/live/runs/:run_id` | Accept a correlated self-contained live frame |
+| `GET /api/live/runs` | Snapshot retained live runs |
+| `GET /api/live/stream` | Stream frames as server-sent events |
+| `DELETE /api/live/runs/:run_id` | Forget one retained run |
+| `POST /api/live/runs/:run_id/inspect` | Refresh the pinned host snapshot for a completed run |
+| `GET /api/live/project` | Describe host-injected project details |
+| `GET /api/live/launch` | Describe the fixed launch target and current status |
+| `POST /api/live/launch` | Launch the fixed workflow or one declared mission |
 
 Query parameters are passed to `Kernel.TraceLog`; `limit` is decoded as an
 integer and `tags` as a JSON object. The routes preserve not-found, invalid
@@ -162,7 +196,10 @@ query, unavailable-adapter, and adapter-failure classifications.
 ## Architecture
 
 The root-owned adapter constructs immutable Kernel snapshots from the
-configured sources. The Viewer owns only HTTP argument decoding and rendering;
+configured sources. An explicit completed-run handoff replaces the trace and,
+when configured, correlated inspection snapshots as one serialized operation;
+individual queries still use one pinned generation. The Viewer owns only HTTP
+argument decoding and rendering;
 it does not duplicate trace validation, run derivation, conversation joins, or
 ambiguity policy. Adapter configuration is passed through the Bandit/Plug
 instance rather than global application environment. No browser route reads an

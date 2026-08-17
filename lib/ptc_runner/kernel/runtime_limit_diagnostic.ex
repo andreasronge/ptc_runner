@@ -18,6 +18,13 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @agent_maximum_message_bytes byte_size(@agent_prefix) + @agent_maximum_digits +
                                  byte_size(@agent_suffix)
 
+  @timeout_limits [:parallel_timeout_ms, :workflow_timeout_ms]
+  @timeout_phases [:compilation, :execution]
+  @timeout_value_pattern @subordinate_limit_pattern
+  @timeout_maximum_message_bytes byte_size("workflow_timeout_ms limit ") +
+                                   @subordinate_maximum_digits +
+                                   byte_size(" ms was exceeded during compilation")
+
   @doc false
   @spec subordinate_evaluations_message(term()) :: {:ok, binary()} | :error
   def subordinate_evaluations_message(limit) do
@@ -37,9 +44,24 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   def agent_turns_message(_limit), do: :error
 
   @doc false
+  @spec timeout_message(term(), term(), term()) :: {:ok, binary()} | :error
+  def timeout_message(limit, limit_ms, phase)
+      when limit in @timeout_limits and phase in @timeout_phases do
+    with {:ok, row} <- LimitCatalog.fetch(limit),
+         true <- LimitCatalog.valid_value?(row, limit_ms) do
+      {:ok, "#{limit} limit #{limit_ms} ms was exceeded during #{phase}"}
+    else
+      _invalid -> :error
+    end
+  end
+
+  def timeout_message(_limit, _limit_ms, _phase), do: :error
+
+  @doc false
   @spec valid_message?(term()) :: boolean()
   def valid_message?(message) when is_binary(message) do
-    subordinate_evaluations_message?(message) or agent_turns_message?(message)
+    subordinate_evaluations_message?(message) or agent_turns_message?(message) or
+      timeout_message?(message)
   end
 
   def valid_message?(_message), do: false
@@ -73,15 +95,36 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   def subordinate_evaluations_message?(_message), do: false
 
   @doc false
+  @spec timeout_message?(term()) :: boolean()
+  def timeout_message?(message) when is_binary(message) do
+    Enum.any?(@timeout_limits, fn limit ->
+      Enum.any?(@timeout_phases, fn phase ->
+        valid_exact_timeout_message?(message, limit, phase)
+      end)
+    end)
+  end
+
+  def timeout_message?(_message), do: false
+
+  @doc false
   @spec message_schema(binary()) :: map()
   def message_schema(fallback) when is_binary(fallback) do
-    message_schema(fallback, [subordinate_message_branch(), agent_message_branch()])
+    message_schema(fallback, [
+      subordinate_message_branch(),
+      agent_message_branch()
+      | timeout_message_branches()
+    ])
   end
 
   @doc false
   @spec subordinate_evaluations_message_schema(binary()) :: map()
   def subordinate_evaluations_message_schema(fallback) when is_binary(fallback),
     do: message_schema(fallback, [subordinate_message_branch()])
+
+  @doc false
+  @spec runtime_message_schema(binary()) :: map()
+  def runtime_message_schema(fallback) when is_binary(fallback),
+    do: message_schema(fallback, [subordinate_message_branch() | timeout_message_branches()])
 
   @doc false
   @spec agent_turns_message_schema(binary()) :: map()
@@ -112,6 +155,32 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
       "pattern" =>
         "^agent turn limit #{@agent_limit_pattern} was exceeded; raise max_turns for this agent.core/run call, or reduce the work per turn$(?![\\s\\S])"
     }
+  end
+
+  defp timeout_message_branches do
+    for limit <- @timeout_limits,
+        phase <- @timeout_phases do
+      %{
+        "type" => "string",
+        "minLength" => 1,
+        "maxLength" => @timeout_maximum_message_bytes,
+        "pattern" =>
+          "^#{limit} limit #{@timeout_value_pattern} ms was exceeded during #{phase}$(?![\\s\\S])"
+      }
+    end
+  end
+
+  defp valid_exact_timeout_message?(message, limit, phase) do
+    prefix = "#{limit} limit "
+    suffix = " ms was exceeded during #{phase}"
+
+    valid_exact_message?(
+      message,
+      prefix,
+      suffix,
+      @subordinate_maximum_digits,
+      &timeout_message(limit, &1, phase)
+    )
   end
 
   defp valid_exact_message?(message, prefix, suffix, maximum_digits, builder) do

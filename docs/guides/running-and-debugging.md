@@ -34,6 +34,10 @@ Browse completed runs locally:
 ptc viewer ptc-project.json
 ```
 
+When the Live tab launches provider-backed work, pass an exact dotenv file
+with `--env-file FILE` or declare `host.env_file` in the project. The Viewer
+does not search implicitly for `.env`.
+
 The Viewer binds to loopback by default and has no authentication. Do not expose
 it to a network, especially when a project grants access to private inspection
 records.

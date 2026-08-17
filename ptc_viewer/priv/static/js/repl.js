@@ -20,7 +20,7 @@ const STOPPED_RETRY_ERRORS = new Map([
 
 export function readViewerConfig(documentRef = document) {
   const meta = documentRef.querySelector('meta[name="ptc-viewer-config"]');
-  if (!meta) return { repl_enabled: false };
+  if (!meta) return { repl_enabled: false, live_enabled: false };
 
   try {
     const encoded = meta.content.replace(/-/g, '+').replace(/_/g, '/');
@@ -28,9 +28,9 @@ export function readViewerConfig(documentRef = document) {
     const config = JSON.parse(atob(padded));
     return config && typeof config.repl_enabled === 'boolean'
       ? config
-      : { repl_enabled: false };
+      : { repl_enabled: false, live_enabled: false };
   } catch {
-    return { repl_enabled: false };
+    return { repl_enabled: false, live_enabled: false };
   }
 }
 

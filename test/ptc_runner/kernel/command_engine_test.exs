@@ -692,6 +692,81 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
+  test "workflow timeout diagnostics name the binding limit and duration" do
+    usage = %{
+      remaining_ms: 60_000,
+      capability_calls: %{workflow: %{}, mission: %{}},
+      subordinate_evaluations: 0,
+      evaluations_by_mission: %{},
+      protocol_errors: 0,
+      evaluation_memory_bytes: 0,
+      evaluation_history_bytes: 0,
+      evaluation_continuation_bytes: 0,
+      events_dropped: %{}
+    }
+
+    evidence = %{
+      result:
+        {:error,
+         %Error{
+           kind: :limit_exceeded,
+           reason: :timeout,
+           details: %{
+             limit: :parallel_timeout_ms,
+             limit_ms: 60_000,
+             phase: :execution
+           },
+           usage: usage
+         }}
+    }
+
+    settlement =
+      {:error,
+       %{
+         result_class: :normal,
+         artifact_state: %{
+           "trace" => "not_requested",
+           "inspection" => "not_requested",
+           "result" => "not_requested"
+         },
+         error: nil,
+         secondary_errors: []
+       }}
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandRunOutcome.project(
+               evidence,
+               settlement,
+               CommandRunRef.encode(@zero_entropy),
+               true
+             )
+
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+
+    assert outcome.envelope["error"]["message"] ==
+             "parallel_timeout_ms limit 60000 ms was exceeded during execution"
+
+    assert_schema_valid(outcome.envelope)
+
+    runtime_source = CommandSource.fixed(:runtime)
+
+    for invalid_message <- [
+          "parallel_timeout_ms limit 0 ms was exceeded during execution",
+          "parallel_timeout_ms limit 060000 ms was exceeded during execution",
+          "run_duration_ms limit 60000 ms was exceeded during execution",
+          "parallel_timeout_ms limit 60000 ms was exceeded during execution; private"
+        ] do
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+                 message: invalid_message,
+                 source: runtime_source,
+                 provider_activity: true
+               )
+
+      assert_schema_invalid(put_in(outcome.envelope, ["error", "message"], invalid_message))
+    end
+  end
+
   test "application-authored turn-limit fields cannot claim an agent runtime limit" do
     usage = %{
       remaining_ms: 0,
@@ -2426,7 +2501,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
             "host.json",
             "--env-file",
             env_file
-          ]
+          ],
+          ["viewer", "ptc-project.json", "--env-file", env_file]
         ] do
       assert {:ok, entry} = CommandEntry.open(argv, frontend)
       assert entry.arguments.frontend_options == [env_file: env_file]

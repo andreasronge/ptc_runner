@@ -2,81 +2,106 @@ defmodule PtcViewer.LiveLaunchTest do
   use ExUnit.Case, async: true
 
   alias PtcViewer.LiveLaunch
+  alias PtcViewer.LiveStore
 
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp_dir} do
     File.write!(Path.join(tmp_dir, "ptc.json"), "{}")
-    %{spec: %{manifest: "ptc.json", cwd: tmp_dir}}
+    {:ok, store} = LiveStore.start(self())
+
+    adapter = fn _request, _report -> {0, "ok"} end
+    %{spec: %{manifest: "ptc.json", cwd: tmp_dir, adapter: adapter}, store: store}
   end
 
   describe "validate/1" do
-    test "accepts a spec carrying separate repl arguments", %{spec: spec} do
-      assert :ok = LiveLaunch.validate(Map.put(spec, :repl_args, ["--host-config", "host.json"]))
+    test "accepts a fixed manifest and host adapter", %{spec: spec} do
+      assert :ok = LiveLaunch.validate(spec)
     end
 
-    test "rejects repl arguments that are not a list of strings", %{spec: spec} do
-      assert {:error, :invalid_launch_config} =
-               LiveLaunch.validate(Map.put(spec, :repl_args, ["--host-config", :host]))
+    test "rejects a missing or malformed adapter", %{spec: spec} do
+      assert {:error, :invalid_launch_config} = LiveLaunch.validate(Map.delete(spec, :adapter))
 
       assert {:error, :invalid_launch_config} =
-               LiveLaunch.validate(Map.put(spec, :repl_args, "--host-config"))
+               LiveLaunch.validate(Map.put(spec, :adapter, fn _request -> :ok end))
     end
   end
 
-  describe "mission_command/3" do
-    test "invokes the mission through the repl command", %{spec: spec} do
-      assert LiveLaunch.mission_command(spec, "review", "(dir)") ==
-               ["ptc", "repl", "--manifest", "ptc.json", "--mission", "review", "-e", "(dir)"]
+  describe "prepare/3" do
+    test "is side-effect free until the single-flight gate invokes it", %{
+      spec: spec,
+      store: store
+    } do
+      existing = Path.join(spec.cwd, "live-input.json")
+      File.write!(existing, "operator-owned")
+
+      assert {:ok, run} = LiveLaunch.prepare(spec, %{"value" => 42}, store)
+      assert is_function(run, 0)
+      assert File.read!(existing) == "operator-owned"
+      assert Enum.sort(File.ls!(spec.cwd)) == ["live-input.json", "ptc.json"]
     end
 
-    test "inserts the operator's repl arguments, never the run arguments", %{spec: spec} do
-      spec =
-        spec
-        |> Map.put(:args, ["--trace-dir", "traces"])
-        |> Map.put(:repl_args, ["--host-config", "host.json"])
+    test "invokes the adapter in-process and streams frames directly", %{
+      spec: spec,
+      store: store
+    } do
+      test_process = self()
 
-      command = LiveLaunch.mission_command(spec, "review", "(dir)")
+      adapter = fn request, report ->
+        send(test_process, {:request, request})
+        :ok = report.("run-direct", %{phase: "running", seq: 0})
+        {0, "completed"}
+      end
 
-      assert command == [
-               "ptc",
-               "repl",
-               "--manifest",
-               "ptc.json",
-               "--host-config",
-               "host.json",
-               "--mission",
-               "review",
-               "-e",
-               "(dir)"
-             ]
+      assert {:ok, run} =
+               LiveLaunch.prepare(Map.put(spec, :adapter, adapter), %{"value" => 42}, store)
 
-      refute "--trace-dir" in command
+      assert {0, "completed"} = run.()
+      assert_receive {:request, {:workflow, %{input: input_name}}}
+      assert String.starts_with?(input_name, "ptc-viewer-input-")
+      refute File.exists?(Path.join(spec.cwd, input_name))
+
+      assert [%{"phase" => "running", "run_id" => "run-direct", "seq" => 0}] =
+               LiveStore.snapshot(store)
+    end
+
+    test "temporary input names satisfy the application logical-name grammar" do
+      names = Enum.map(1..100, fn _index -> LiveLaunch.temporary_input_name() end)
+
+      assert Enum.uniq(names) == names
+      assert Enum.all?(names, &Regex.match?(~r/\A[a-z0-9][a-z0-9._-]{0,127}\z/, &1))
     end
   end
 
   describe "prepare_mission/4" do
-    test "prepares a run function without invoking it", %{spec: spec} do
-      assert {:ok, run} = LiveLaunch.prepare_mission(spec, "review", "(dir)", 4123)
-      assert is_function(run, 0)
-    end
+    test "sends a semantic mission request to the same adapter", %{spec: spec, store: store} do
+      test_process = self()
 
-    test "refuses a mission name that is not a manifest mission name", %{spec: spec} do
-      for name <- ["--host-config", "Review", "", "a b", "../escape"] do
-        assert {:error, :invalid_mission} = LiveLaunch.prepare_mission(spec, name, "(dir)", 4123)
+      adapter = fn request, _report ->
+        send(test_process, {:request, request})
+        {0, "42"}
       end
 
-      assert {:error, :invalid_mission} = LiveLaunch.prepare_mission(spec, :review, "(dir)", 4123)
+      assert {:ok, run} =
+               LiveLaunch.prepare_mission(
+                 Map.put(spec, :adapter, adapter),
+                 "review",
+                 "(+ 40 2)",
+                 store
+               )
+
+      assert {0, "42"} = run.()
+      assert_receive {:request, {:mission, %{name: "review", expression: "(+ 40 2)"}}}
     end
 
-    test "refuses a blank expression", %{spec: spec} do
-      assert {:error, :invalid_mission} = LiveLaunch.prepare_mission(spec, "review", "   ", 4123)
-      assert {:error, :invalid_mission} = LiveLaunch.prepare_mission(spec, "review", nil, 4123)
-    end
+    test "refuses invalid mission names and blank expressions", %{spec: spec, store: store} do
+      for name <- ["--host-config", "Review", "", "a b", "../escape"] do
+        assert {:error, :invalid_mission} =
+                 LiveLaunch.prepare_mission(spec, name, "(dir)", store)
+      end
 
-    test "refuses to launch when no usable viewer port is known", %{spec: spec} do
-      assert {:error, :launch_not_configured} =
-               LiveLaunch.prepare_mission(spec, "review", "(dir)", 0)
+      assert {:error, :invalid_mission} =
+               LiveLaunch.prepare_mission(spec, "review", "   ", store)
     end
   end
 end

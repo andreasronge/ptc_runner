@@ -319,7 +319,12 @@ defmodule PtcRunner.Kernel.Dispatcher do
     :telemetry.execute(
       [:ptc_runner, :capability, :start],
       %{system_time: System.system_time()},
-      %{name: public_name, environment: environment, capability_id: capability_id}
+      %{
+        name: public_name,
+        environment: environment,
+        capability_id: capability_id,
+        live_run: state.pid
+      }
     )
 
     case Events.emit(state, event_sink, "capability-started", data) do
@@ -418,7 +423,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
             name: public_name,
             environment: environment,
             capability_id: capability_id,
-            status: result.status
+            status: result.status,
+            live_run: state.pid
           }
         )
 

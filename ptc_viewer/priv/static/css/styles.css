@@ -2060,7 +2060,7 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
 }
 .kt-msg-reasoning .kt-msg-content { white-space: pre-wrap; }
 
-/* === Live tab (#1444 spike) === */
+/* === Live tab === */
 :root {
   --live-eval: #2f86d2;      /* categorical: evaluation (validated vs #1e1e1e) */
   --live-cap: #c97b2e;       /* categorical: capability/tool call */
@@ -2154,8 +2154,27 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   color: var(--muted); font-size: 12px; line-height: 1;
 }
 .live-card-toggle:hover, .live-card-close:hover { color: var(--fg); }
-.live-card-toggle[hidden], .live-card-summary[hidden] { display: none; }
+.live-card-toggle[hidden], .live-card-summary[hidden], .live-card-inspect[hidden] { display: none; }
 .live-card-summary { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.live-card-inspect {
+  color: var(--accent); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-weight: 600;
+  text-decoration: none; white-space: nowrap;
+}
+.live-card-inspect:hover { text-decoration: underline; }
+
+.live-failure {
+  margin: 0 0 14px;
+  padding: 9px 11px;
+  border: 1px solid rgba(244, 71, 71, 0.35);
+  border-radius: 6px;
+  color: var(--error);
+  background: rgba(244, 71, 71, 0.08);
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.live-failure[hidden] { display: none; }
 
 .live-badge {
   display: inline-flex; align-items: center; gap: 6px;

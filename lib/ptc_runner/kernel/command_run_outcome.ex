@@ -317,6 +317,25 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
        ),
        do: diagnostic(:execution, :run_timeout, provider_activity)
 
+  defp failure_diagnostic(
+         %Error{
+           kind: :limit_exceeded,
+           details: %{limit: limit, limit_ms: limit_ms, phase: phase}
+         },
+         provider_activity
+       ) do
+    case RuntimeLimitDiagnostic.timeout_message(limit, limit_ms, phase) do
+      {:ok, message} ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity,
+          message: message,
+          source: CommandSource.fixed(:runtime)
+        )
+
+      :error ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
+    end
+  end
+
   defp failure_diagnostic(%Error{kind: :limit_exceeded}, provider_activity),
     do: diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
 

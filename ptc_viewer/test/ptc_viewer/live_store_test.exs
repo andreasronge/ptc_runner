@@ -113,7 +113,20 @@ defmodule PtcViewer.LiveStoreTest do
     send(launch_pid, :release)
     assert_receive {:DOWN, ^launch_ref, :process, ^launch_pid, {:launch_result, {0, "done"}}}
 
-    assert eventually(fn -> LiveStore.launch_status(store) == %{status: "ok"} end)
+    assert eventually(fn ->
+             LiveStore.launch_status(store) == %{status: "ok", output_tail: "done"}
+           end)
+  end
+
+  test "successful launches retain their bounded result surface", %{store: store} do
+    :ok = LiveStore.begin_launch(store, fn -> {0, ~s({"answer":42})} end)
+
+    assert eventually(fn ->
+             LiveStore.launch_status(store) == %{
+               status: "ok",
+               output_tail: ~s({"answer":42})
+             }
+           end)
   end
 
   test "launch failure surfaces the output tail", %{store: store} do
@@ -125,6 +138,24 @@ defmodule PtcViewer.LiveStoreTest do
                LiveStore.launch_status(store)
              )
            end)
+  end
+
+  test "stopping the Viewer store cancels its in-process launch", %{store: store} do
+    test_process = self()
+
+    :ok =
+      LiveStore.begin_launch(store, fn ->
+        send(test_process, {:launch_started, self()})
+
+        receive do
+          :never -> {0, "unexpected"}
+        end
+      end)
+
+    assert_receive {:launch_started, launch}
+    launch_ref = Process.monitor(launch)
+    assert :ok = LiveStore.stop(store)
+    assert_receive {:DOWN, ^launch_ref, :process, ^launch, :shutdown}
   end
 
   # Bounded convergence poll for state that settles on a monitor DOWN whose

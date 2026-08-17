@@ -117,8 +117,14 @@ const config = { repl_enabled: true, page_bootstrap_nonce: 'nonce' };
 const encoded = Buffer.from(JSON.stringify(config)).toString('base64url');
 const fakeDocument = { querySelector: () => ({ content: encoded }) };
 assert.deepEqual(readViewerConfig(fakeDocument), config);
-assert.deepEqual(readViewerConfig({ querySelector: () => null }), { repl_enabled: false });
-assert.deepEqual(readViewerConfig({ querySelector: () => ({ content: 'not-json' }) }), { repl_enabled: false });
+assert.deepEqual(readViewerConfig({ querySelector: () => null }), {
+  repl_enabled: false,
+  live_enabled: false
+});
+assert.deepEqual(readViewerConfig({ querySelector: () => ({ content: 'not-json' }) }), {
+  repl_enabled: false,
+  live_enabled: false
+});
 
 const ids = [
   'repl-status', 'repl-lifecycle', 'repl-captured-at', 'repl-run-count',
