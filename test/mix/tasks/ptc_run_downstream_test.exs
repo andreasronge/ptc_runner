@@ -44,18 +44,36 @@ defmodule Mix.Tasks.Ptc.RunDownstreamTest do
 
     assert build_status == 0, build_output
 
+    # Keep stderr out of the decoded output: provider preflight warns there
+    # (e.g. model_uncataloged for the fake host config below) without
+    # dirtying the stdout envelope. System.cmd cannot capture the streams
+    # separately, so route stderr through a file.
+    stderr_path = Path.join(dir, "ptc_run_stderr.log")
+
     {output, status} =
       System.cmd(
-        System.find_executable("mix"),
-        ["ptc", "run", manifest_path, "--host-config", host_path],
+        System.find_executable("sh"),
+        [
+          "-c",
+          ~S(exec mix ptc run "$1" --host-config "$2" 2>"$3"),
+          "sh",
+          manifest_path,
+          host_path,
+          stderr_path
+        ],
         cd: dir,
-        env: env,
-        stderr_to_stdout: true
+        env: env
       )
 
-    assert status == 0, output
+    stderr = File.read!(stderr_path)
+
+    assert status == 0, output <> stderr
 
     assert Jason.decode!(output) == %{}
+
+    # Tolerate exactly the deliberate preflight warning and nothing else,
+    # whether or not the configured model is in the shipped ReqLLM catalog.
+    assert stderr == "" or stderr =~ ~r/\Awarning: model_uncataloged: [^\n]+\n+\z/, stderr
   end
 
   defp write_consumer_project(dir) do
