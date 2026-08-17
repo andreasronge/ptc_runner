@@ -332,6 +332,18 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
        ),
        do: diagnostic(:execution, :run_timeout, provider_activity)
 
+  defp failure_diagnostic(
+         %Error{kind: :limit_exceeded, reason: :provider_admission_saturated},
+         provider_activity
+       ),
+       do: diagnostic(:execution, :provider_admission_saturated, provider_activity)
+
+  defp failure_diagnostic(
+         %Error{kind: :limit_exceeded, reason: :provider_admission_unavailable},
+         provider_activity
+       ),
+       do: diagnostic(:execution, :provider_admission_unavailable, provider_activity)
+
   defp failure_diagnostic(%Error{kind: :limit_exceeded}, provider_activity),
     do: diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
 

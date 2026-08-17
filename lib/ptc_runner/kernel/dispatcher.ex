@@ -40,6 +40,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.LLMUsage
+  alias PtcRunner.Kernel.ProviderAdmission
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RoutedCapability
   alias PtcRunner.Kernel.RunState
@@ -165,7 +166,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
            ),
          invocation = put_mission_name(invocation, environment, mission_name),
          :ok <- RunState.reserve_capability(state, environment, name, evaluation_lease) do
-      invoke_with_events(
+      dispatch_reserved(
         state,
         name,
         invocation,
@@ -259,6 +260,24 @@ defmodule PtcRunner.Kernel.Dispatcher do
       {:error, :live_task_limit} ->
         limit_error(state, event_sink, :live_provider_tasks, environment, mission_name)
 
+      {:error, :provider_admission_saturated} ->
+        limit_error(
+          state,
+          event_sink,
+          :provider_admission_saturated,
+          environment,
+          mission_name
+        )
+
+      {:error, :provider_admission_unavailable} ->
+        limit_error(
+          state,
+          event_sink,
+          :provider_admission_unavailable,
+          environment,
+          mission_name
+        )
+
       {:error, :reservation_held} ->
         limit_error(state, event_sink, :reservation_held, environment, mission_name)
 
@@ -293,6 +312,68 @@ defmodule PtcRunner.Kernel.Dispatcher do
       reason: :stale_evaluation,
       retryable?: false
     }
+  end
+
+  defp dispatch_reserved(
+         state,
+         public_name,
+         invocation,
+         timeout_ms,
+         environment,
+         event_sink,
+         inspection_sink
+       ) do
+    case ProviderAdmission.checkout(self()) do
+      :not_required ->
+        invoke_with_events(
+          state,
+          public_name,
+          invocation,
+          timeout_ms,
+          environment,
+          event_sink,
+          inspection_sink
+        )
+
+      :ok ->
+        try do
+          invoke_with_events(
+            state,
+            public_name,
+            invocation,
+            timeout_ms,
+            environment,
+            event_sink,
+            inspection_sink
+          )
+        after
+          ProviderAdmission.checkin(self())
+        end
+
+      {:error, :saturated} ->
+        refuse_admission(
+          state,
+          event_sink,
+          :provider_admission_saturated,
+          environment,
+          invocation.event_attributes[:mission_name]
+        )
+
+      {:error, :poisoned} ->
+        refuse_admission(
+          state,
+          event_sink,
+          :provider_admission_unavailable,
+          environment,
+          invocation.event_attributes[:mission_name]
+        )
+    end
+  end
+
+  defp refuse_admission(state, event_sink, reason, environment, mission_name) do
+    RunState.release_provider_slot(state)
+    _ = RunState.fail(state, :limit_exceeded, reason)
+    limit_error(state, event_sink, reason, environment, mission_name)
   end
 
   defp invoke_with_events(

@@ -99,10 +99,14 @@ for normally completing runs.
 Root project; the largest PR; split into 2a (template + outcome, no
 providers) and 2b (host runtime + admission) if review size demands.
 
-**2a status (this branch):** package-only `ApplicationPackage.package_memory/3`
-and `package_directory/2`; `PtcRunner.Kernel.ServingTemplate` compile/call for
-provider-free apps; `CommandRunOutcome` promoted as the public outcome seam.
-HostRuntime, aggregate admission, and provider-backed serving remain 2b.
+**2a status (this branch):** landed — package-only acquisition, provider-free
+`ServingTemplate` compile/call, inspection capture bound to the publication
+authority, read-only namespaces from compiled metadata, and preserved input
+rejection diagnostics.
+
+**2b status (this branch):** landed — `PtcRunner.Kernel.HostRuntime` singleton,
+dispatch-level aggregate admission with a fail-stop owner, and
+provider-backed `HostRuntime.call/3`.
 
 - `PtcRunner.Kernel.ServingTemplate` — a **new immutable struct** caching
   everything reusable about an application: the compiled workflow **and

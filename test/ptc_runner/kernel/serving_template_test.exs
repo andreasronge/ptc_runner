@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.RunCoordinator
@@ -96,12 +97,14 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
     assert envelope["artifact_state"]["inspection"] in ["written", "not_written"]
   end
 
-  test "refuses provider-backed applications until host runtime exists" do
+  test "compiles provider-backed packages and requires HostRuntime for calls" do
     documents =
       serving_documents(providers: %{"workflow" => [%{"name" => "selected"}], "mission" => []})
 
     assert {:ok, package} = ApplicationPackage.package_memory("app.json", documents)
-    assert {:error, :providers_not_supported} = ServingTemplate.compile(package)
+
+    assert {:error, %CommandDiagnostic{code: :provider_unknown}} =
+             ServingTemplate.compile(package)
   end
 
   test "call preserves input-contract classification and invalid_input separately" do

@@ -64,6 +64,7 @@ modules:
 - `PtcRunner.Kernel.RunConfig`
 - `PtcRunner.Kernel`
 - `PtcRunner.Kernel.ServingTemplate`
+- `PtcRunner.Kernel.HostRuntime`
 - `PtcRunner.Kernel.CommandOutcome`
 - `PtcRunner.Kernel.CommandRunOutcome`
 
@@ -80,12 +81,22 @@ class. The public result is `PtcRunner.Kernel.CommandOutcome`. Frozen
 `inspection_capture: true` is bound onto each call's publication authority
 so the Kernel opens an inspection sink.
 
-This slice is provider-free. Applications that declare providers are refused
-until `PtcRunner.Kernel.HostRuntime` exists.
+`PtcRunner.Kernel.HostRuntime` is the supervised per-VM singleton for
+provider-backed serving. It starts `:req_llm` / `:llm_db` once (dotenv
+disabled), validates that the aggregate admission ceiling does not exceed
+Finch pool capacity, and executes `call/3` under the template's frozen
+policy. Provider-task admission is checked at dispatch, not at call
+admission; saturation and a dead admission owner yield closed diagnostics.
+`ServingTemplate.call/2` remains provider-free and refuses a template that
+selected providers.
+
+This slice still acquires providers per call. Pooled retention of provider
+services is a later trigger.
 
 ```elixir
 alias PtcRunner.Kernel.ApplicationPackage
 alias PtcRunner.Kernel.CommandOutcome
+alias PtcRunner.Kernel.HostRuntime
 alias PtcRunner.Kernel.ServingTemplate
 
 documents = %{
@@ -97,7 +108,8 @@ documents = %{
 
 {:ok, package} = ApplicationPackage.package_memory("app.json", documents)
 {:ok, template} = ServingTemplate.compile(package)
-{:ok, outcome} = ServingTemplate.call(template, %{"n" => 21})
+{:ok, _pid} = HostRuntime.start_link()
+{:ok, outcome} = HostRuntime.call(HostRuntime, template, %{"n" => 21})
 CommandOutcome.to_map(outcome)
 ```
 
