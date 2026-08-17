@@ -124,7 +124,11 @@ providers) and 2b (host runtime + admission) if review size demands.
   per VM** owning what is VM-global: provider-application lifecycle
   (`:req_llm`/`:llm_db` started once, dotenv disabled) and pool geometry.
   Startup fails closed when `:req_llm` is already running with conflicting
-  configuration. Applications the runtime starts are **VM-lifetime**: it
+  configuration, and **validates everything reversible first** — pool
+  geometry, the admission-ceiling invariant, credentials configuration —
+  before starting any VM-lifetime application, so a refused startup never
+  leaves `:req_llm`/`:llm_db` running as a side effect of the failure.
+  Applications the runtime starts are **VM-lifetime**: it
   never stops them (its own restart re-verifies configuration and adopts
   them), and it never stops applications it did not start — so a runtime
   crash or supervisor restart cannot yank a dependency from under another
@@ -142,9 +146,14 @@ providers) and 2b (host runtime + admission) if review size demands.
   every exit path** — normal completion, provider failure, task crash,
   deadline, caller death, and owner termination — enforced by the
   semaphore owner **monitoring each leaseholder**. That owner is a
-  dedicated VM-lifetime process supervised **above** `HostRuntime`, so a
-  runtime crash or restart neither resets capacity while old leaseholders
-  still run nor strands their leases: monitors release them as they exit.
+  dedicated VM-lifetime process supervised **above** `HostRuntime` with
+  `restart: :temporary` — deliberately **fail-stop**: restarting it would
+  recreate the capacity-reset bug one level higher, since its monitors and
+  lease state die with it. If the owner exits, admission **fails closed**
+  (every dispatch refuses with a closed diagnostic) and readiness reports
+  unhealthy until the VM restarts; a runtime crash or restart beneath a
+  living owner neither resets capacity while old leaseholders still run
+  nor strands their leases, because monitors release them as they exit.
 - **Pool geometry and the admission ceiling are one invariant, not two
   settings.** `HostRuntime` startup validates that the aggregate admission
   ceiling does not exceed the configured Finch capacity
@@ -221,9 +230,11 @@ command declaration, and precommit/CI wiring.
   layer, and driving the gateway with ptc_runner's own `MCPSource` over
   stdio is the integration layer. Envelope fixtures compare **decoded
   values** (JSON object order is not semantic); separate raw framing tests
-  assert the byte layout only where bytes matter (message framing,
-  content-length, newline discipline). Shared-helper defects cannot hide
-  from fixtures authored without the helpers.
+  assert the byte layout only where bytes matter — for the pinned stdio
+  transport that is **newline-delimited JSON**: one document per line, no
+  HTTP-style `Content-Length` headers (the tests assert their absence).
+  Shared-helper defects cannot hide from fixtures authored without the
+  helpers.
 - Release: ship in the standalone release as `ptc serve` following the
   Viewer precedent (probe with `apply/3` so an absent module survives
   Elixir 1.20 compilation; do not prove release content by reading
@@ -281,8 +292,9 @@ container packaging, CI classification, and documentation; scoping it
   tokens never logged; an explicit decision whether `/health` and
   `/ready` are authenticated (default: `/health` open, `/ready`
   authenticated, revisit with the operator).
-- `/health` and `/ready` endpoints; readiness covers compiled templates and
-  provider-application state.
+- `/health` and `/ready` endpoints; readiness covers compiled templates,
+  provider-application state, and admission-owner health (a dead semaphore
+  owner reports unready).
 - Container packaging: artifact-free operation as the default image; the
   artifact-enabled variant documents its platform needs. Loopback binding
   by default; private-network binding is an explicit operator choice.
