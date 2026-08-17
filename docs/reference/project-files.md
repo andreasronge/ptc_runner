@@ -84,7 +84,11 @@ absolute paths and `..` traversal are rejected. The generated schema is
 
 Inspection requires traces because private records must correlate with a
 canonical run. `viewer.private` is a separate explicit local grant: creating a
-private artifact does not automatically expose it to Viewer.
+private artifact does not automatically expose it to Viewer. `viewer.repl`
+independently enables the browser REPL, including when `viewer.private` is
+`true`. REPL evaluations remain fixed to the public `run-analysis-v1` profile
+and its immutable normal-trace snapshot; they cannot query the private evidence
+displayed elsewhere in the Viewer.
 
 ## Artifact layout
 
@@ -143,6 +147,10 @@ and correlated inspection directories are captured before the listener starts;
 HTTP requests select only a run ID and never a filesystem path. Browser opening
 is a bounded convenience, and additionally requires an attached terminal:
 missing or failing platform openers do not stop Viewer.
+
+The REPL and private-data settings are orthogonal. Enabling both presents the
+public-trace REPL alongside the private evidence panels without adding private
+inspection authority to the evaluation session.
 
 Viewer-started workflows and missions use the project's `host.env_file` when
 one is declared. `ptc viewer ptc-project.json --env-file FILE` supplies an

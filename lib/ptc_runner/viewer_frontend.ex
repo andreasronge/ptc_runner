@@ -339,8 +339,8 @@ defmodule PtcRunner.ViewerFrontend do
       live_trace_refresh: fn run_id -> ViewerSnapshotStore.refresh(snapshots, run_id) end,
       launch: launch_spec(project, callbacks.frontend, callbacks.env_file),
       project_adapter: fn -> describe_project(project) end,
-      repl_adapter: repl_adapter(project, private?),
-      repl_config: repl_config(project, private?)
+      repl_adapter: repl_adapter(project),
+      repl_config: repl_config(project)
     ]
   end
 
@@ -389,15 +389,15 @@ defmodule PtcRunner.ViewerFrontend do
     ViewerProjectAdapter.describe(project.application, opts)
   end
 
-  defp repl_adapter(%{viewer: %{repl: true}}, false),
+  defp repl_adapter(%{viewer: %{repl: true}}),
     do: PtcRunner.Kernel.ViewerReplAdapter
 
-  defp repl_adapter(_project, _private?), do: nil
+  defp repl_adapter(_project), do: nil
 
-  defp repl_config(%{viewer: %{repl: true}, artifact_root: root}, false),
+  defp repl_config(%{viewer: %{repl: true}, artifact_root: root}),
     do: %{trace_dir: Path.join(root, "traces"), profile_id: "run-analysis-v1"}
 
-  defp repl_config(_project, _private?), do: %{}
+  defp repl_config(_project), do: %{}
 
   defp valid_env_file?(nil), do: true
 

@@ -26,6 +26,34 @@ defmodule PtcRunner.ViewerFrontendTest do
   end
 
   @tag :tmp_dir
+  test "the private-data grant and public analysis REPL can be enabled together", %{
+    tmp_dir: directory
+  } do
+    project_path = viewer_project(directory, %{"private" => true, "repl" => true})
+
+    assert {:ok, viewer, address, port} = ViewerFrontend.start(project_path)
+    on_exit(fn -> if Process.alive?(viewer), do: PtcViewer.stop(viewer) end)
+
+    origin = "http://#{:inet.ntoa(address)}:#{port}"
+    page_config = viewer_page_config(origin)
+
+    assert page_config["repl_enabled"] == true
+
+    bootstrap =
+      Req.get!(origin <> "/api/repl",
+        headers: [
+          {"sec-fetch-site", "same-origin"},
+          {"x-ptc-viewer-page-nonce", page_config["page_bootstrap_nonce"]}
+        ]
+      )
+
+    assert bootstrap.status == 200
+    assert bootstrap.body["session"]["profile_id"] == "run-analysis-v1"
+    assert bootstrap.body["session"]["namespaces"] == ["analysis", "cap"]
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
+  @tag :tmp_dir
   test "project command configures Live project details and its fixed launch target", %{
     tmp_dir: directory
   } do
@@ -295,6 +323,12 @@ defmodule PtcRunner.ViewerFrontendTest do
   end
 
   defp live_nonce(base_url) do
+    base_url
+    |> viewer_page_config()
+    |> Map.fetch!("live_mutation_nonce")
+  end
+
+  defp viewer_page_config(base_url) do
     assert {:ok, %{status: 200, body: body}} = Req.get(base_url <> "/")
 
     [encoded] =
@@ -305,7 +339,6 @@ defmodule PtcRunner.ViewerFrontendTest do
     encoded
     |> Base.url_decode64!(padding: false)
     |> Jason.decode!()
-    |> Map.fetch!("live_mutation_nonce")
   end
 
   defp launch_workflow(base_url, nonce, input) do
