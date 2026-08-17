@@ -151,16 +151,13 @@ defmodule PtcRunner.Lisp.RegistryTest do
       assert Registry.doc("nonexistent") == nil
     end
 
-    test "find_doc/1 searches by name" do
-      results = Registry.find_doc("sort")
+    test "apropos/1 searches canonical names and descriptions literally" do
+      results = Registry.apropos("sort")
       names = Enum.map(results, & &1.name)
       assert "sort" in names
       assert "sort-by" in names
-    end
-
-    test "find_doc/1 searches by description" do
-      results = Registry.find_doc("predicate")
-      assert results != []
+      assert Registry.apropos("predicate") != []
+      assert Registry.apropos("[invalid") == []
     end
 
     test "builtins_by_category/1 returns atoms" do
@@ -182,10 +179,15 @@ defmodule PtcRunner.Lisp.RegistryTest do
       assert walk_builtins == [:postwalk, :prewalk, :walk]
     end
 
-    test "find_doc/1 handles invalid regex gracefully" do
-      # Should fall back to substring match, not crash
-      results = Registry.find_doc("[invalid")
-      assert is_list(results)
+    test "apropos/1 searches signatures, notes, divergences, and fully-qualified aliases" do
+      assert Enum.any?(
+               Registry.apropos("java.time.Duration/between"),
+               &(&1.name == "Duration/between")
+             )
+
+      assert Enum.any?(Registry.apropos("arbitrary precision"), &is_binary(&1.notes))
+      assert Enum.any?(Registry.apropos("Clojure"), &is_binary(&1.divergences))
+      assert Registry.apropos("   ") == []
     end
   end
 

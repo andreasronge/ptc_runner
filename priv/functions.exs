@@ -2848,7 +2848,8 @@
     },
     %{
       name: "apropos",
-      description: "Searches the attached prelude's public exports, returning matching refs.",
+      description:
+        "Searches visible prelude exports and fixed function documentation, returning names.",
       binding: :special,
       category: :core,
       dispatch: :env,
@@ -2858,16 +2859,18 @@
       ptc_extension?: true,
       examples: [],
       notes:
-        "Case-insensitive substring match over each export's ref and docstring; an export " <>
-          "without a docstring is matched on its ref alone. A blank query returns an empty " <>
-          "vector rather than every export.",
+        "Case-insensitive literal substring match over prelude refs/docstrings and fixed " <>
+          "canonical names, signatures, descriptions, notes, divergences, and sections. " <>
+          "Qualified Java aliases in signatures are searchable; fixed results use canonical " <>
+          "names. Results are sorted and deduplicated. A blank query returns an empty vector.",
       see_also: ["dir", "doc", "export-meta"],
       clojure_var: nil,
       divergences: nil
     },
     %{
       name: "doc",
-      description: "Prints documentation for a public prelude export and returns `nil`.",
+      description:
+        "Prints documentation for a visible prelude export or fixed function and returns `nil`.",
       binding: :special,
       category: :core,
       dispatch: :env,
@@ -2878,8 +2881,10 @@
       examples: [],
       notes:
         "Prints rather than returns, so documentation is charged to the print budget instead " <>
-          "of the result channel and is subject to print truncation. Use `export-meta` for the " <>
-          "same information as data. A miss prints a not-found line and still returns `nil`.",
+          "of the result channel and is subject to print truncation. Exact attached exports " <>
+          "resolve before fixed registry entries; a hidden collision does not fall through. " <>
+          "Use `export-meta` for attached export information as data. A miss prints a " <>
+          "not-found line and still returns `nil`.",
       see_also: ["apropos", "dir", "export-meta"],
       clojure_var: nil,
       divergences: nil

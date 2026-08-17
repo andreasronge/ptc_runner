@@ -212,10 +212,11 @@ documentation are rendered when available.
 
 Top-level mission `data` keys are rendered as `data/<name>` values with their
 bounded structural types, but never their values. The inventory is the complete
-prompt-visible mission surface. `dir`, `apropos`, `doc`, and `export-meta`
-discover prompt-visible prelude exports only; they do not enumerate fixed
-built-ins, data values, or direct tool capabilities. When the inventory is
-empty, the prompt says so explicitly instead of leaving a blank heading.
+prompt-visible mission surface. `dir` and `export-meta` inspect visible
+attached prelude exports. `apropos` and `doc` cover those exports plus fixed
+built-ins and the bounded Java surface. None enumerate data values or direct
+tool capabilities. When the inventory is empty, the prompt says so explicitly
+instead of leaving a blank heading.
 The generic examples do not name `data/input`; an agent sees that reference
 only when the selected mission actually grants an `input` data key.
 
