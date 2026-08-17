@@ -1,7 +1,10 @@
 # Inbound MCP gateway: serving governed compound tools
 
 **Status:** future, trigger-gated; written 2026-07-31, narrowed after review
-the same day. No approved implementation work. This plan assumes the
+the same day. Mode M0 and scope tier 2 (HTTP, single shared authority) were
+activated on 2026-08-17 and sliced into pull requests by
+[`../mcp-gateway-m0.md`](../mcp-gateway-m0.md) (issue #1465); everything
+else remains unapproved. This plan assumes the
 completed [stable CLI contract](../lisp-kernel/stable-cli-contract.md): the
 transport-neutral `ApplicationPackage`/`ExecutionInput`/`ExecutionPolicy`/
 `RunRequest` seam, the memory acquisition adapter, the

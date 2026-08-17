@@ -21,6 +21,15 @@ belongs in guides or retained specifications.
 - [`lisp-kernel/real-flow-e2e-hardening.md`](lisp-kernel/real-flow-e2e-hardening.md)
   tracks the unfinished private-sink, overflow, real-pagination, and
   cache-usage journeys.
+## Active gateway work
+
+- [`mcp-gateway-m0.md`](mcp-gateway-m0.md) slices the activated M0 and
+  single-shared-authority HTTP scope of the inbound MCP gateway into four
+  pull requests: sandbox cancellation linking, the public hosting facade
+  (serving template, host runtime, public outcome), the `ptc_gateway/`
+  stdio server, and streamable HTTP with bearer authentication
+  ([#1465](https://github.com/andreasronge/ptc_runner/issues/1465)).
+
 ## Future, trigger-gated
 
 - [`future/incident-evidence-compiler.md`](future/incident-evidence-compiler.md)
