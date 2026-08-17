@@ -129,6 +129,54 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
     end
   end
 
+  test "run totals publish only metrics reported by every successful call" do
+    complete = [
+      llm_stopped_event(1, %{"input" => 3, "output" => 2, "total_cost" => 0.25}),
+      llm_stopped_event(2, %{"input" => 5, "output" => 4, "total_cost" => 0.5}),
+      event(3, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert LLMUsageSummary.totals(complete) == %{
+             "input" => 8,
+             "output" => 6,
+             "total_cost" => 0.75
+           }
+
+    partially_reported = [
+      llm_stopped_event(1, %{"input" => 3, "output" => 2, "total_cost" => 0.25}),
+      llm_stopped_event(2, %{"input" => 5}),
+      event(3, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert LLMUsageSummary.totals(partially_reported) == %{"input" => 8}
+  end
+
+  test "run totals are unavailable when usage or trace events are missing" do
+    missing_usage =
+      event(1, "capability-stopped", %{
+        "environment" => "workflow",
+        "name" => "llm-request",
+        "alias" => "writer",
+        "installation_revision" => "stable-v1",
+        "status" => "ok"
+      })
+
+    assert LLMUsageSummary.totals([
+             missing_usage,
+             event(2, "run-stopped", %{"outcome" => "ok"})
+           ]) == %{}
+
+    assert LLMUsageSummary.totals([llm_stopped_event(1, %{"input" => 3})]) == %{}
+
+    dropped = [
+      llm_stopped_event(1, %{"input" => 3, "output" => 2, "total_cost" => 0.25}),
+      event(2, "events-dropped", %{"counts" => %{"capability-stopped" => 1}}),
+      event(3, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert LLMUsageSummary.totals(dropped) == %{}
+  end
+
   defp event(sequence, type, data) do
     %{
       "schema_version" => 2,

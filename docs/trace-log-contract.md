@@ -339,6 +339,9 @@ sufficient to select a run without loading its activity:
 - total and subordinate-evaluation counts;
 - workflow and mission capability-call counts;
 - LLM-call summary derived from named `llm-request` events when applicable;
+- full-run `llm_usage_total` input, output, and provider-reported cost values,
+  with each field omitted unless every successful LLM call reports that field
+  and the canonical trace retained every event;
 - error count and duration summary;
 - one-way fingerprints of caller-supplied name/model/provider labels, plus
   finite canonical tag keys and enumerated values;

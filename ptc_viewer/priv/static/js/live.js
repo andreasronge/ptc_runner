@@ -27,7 +27,7 @@ export function launchPollDelay(responseOk, launch) {
   return launch?.status === 'running' ? 1500 : null;
 }
 
-export function createLiveController({ onInspectRun, onLiveCount, mutationNonce, liveToken } = {}) {
+export function createLiveController({ onInspectRun, onLiveCount, onProject, mutationNonce, liveToken } = {}) {
   const runsEl = document.getElementById('live-runs');
   const runsHeadEl = document.getElementById('live-runs-head');
   const clearEndedEl = document.getElementById('live-clear-ended');
@@ -53,6 +53,7 @@ export function createLiveController({ onInspectRun, onLiveCount, mutationNonce,
   // launch card's environment chips.
   loadProject(liveToken)
     .then(project => {
+      onProject?.(project);
       initProject(projectEl, project);
       return initLaunch(launchEl, project, mutationNonce, liveToken);
     })
