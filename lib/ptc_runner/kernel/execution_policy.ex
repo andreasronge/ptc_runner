@@ -56,7 +56,7 @@ defmodule PtcRunner.Kernel.ExecutionPolicy do
 
   def new(_opts), do: {:error, :invalid_execution_policy}
 
-  @spec from_package(%{events: map()}, keyword()) ::
+  @spec from_package(map(), keyword()) ::
           {:ok, t()} | {:error, :invalid_execution_policy | :event_identity_conflict}
   @doc """
   Seals one policy from application event ownership and compile-time options.
@@ -65,15 +65,21 @@ defmodule PtcRunner.Kernel.ExecutionPolicy do
   `:event_identity` fixes both IDs and is rejected when the application
   already owns either identity. `:result_projection` defaults to `:native`.
   """
-  def from_package(%{events: events}, opts) when is_list(opts) do
-    with {:ok, run_id, trace_id} <- event_identity(events, opts) do
+  def from_package(package, opts) when is_map(package) and is_list(opts) do
+    events = Map.get(package, :events, %{})
+
+    with true <- is_map(events),
+         {:ok, run_id, trace_id} <- event_identity(events, opts) do
       new(
-        event_policy: events.policy,
+        event_policy: Map.get(events, :policy, :normal),
         run_id: run_id,
         trace_id: trace_id,
         inspection_capture: Keyword.get(opts, :inspection_capture, false),
         result_projection: Keyword.get(opts, :result_projection, :native)
       )
+    else
+      false -> {:error, :invalid_execution_policy}
+      {:error, _reason} = error -> error
     end
   end
 
@@ -103,16 +109,17 @@ defmodule PtcRunner.Kernel.ExecutionPolicy do
 
   defp optional_id?(_value), do: false
 
-  defp event_identity(events, opts) do
+  defp event_identity(events, opts) when is_map(events) do
     case Keyword.fetch(opts, :event_identity) do
       :error ->
-        {:ok, events.run_id, events.trace_id}
+        {:ok, Map.get(events, :run_id), Map.get(events, :trace_id)}
 
-      {:ok, identity} when is_nil(events.run_id) and is_nil(events.trace_id) ->
-        {:ok, identity, identity}
-
-      {:ok, _identity} ->
-        {:error, :event_identity_conflict}
+      {:ok, identity} ->
+        if is_nil(Map.get(events, :run_id)) and is_nil(Map.get(events, :trace_id)) do
+          {:ok, identity, identity}
+        else
+          {:error, :event_identity_conflict}
+        end
     end
   end
 

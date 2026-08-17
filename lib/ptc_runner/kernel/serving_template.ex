@@ -280,9 +280,6 @@ defmodule PtcRunner.Kernel.ServingTemplate do
       false ->
         {:error, :invalid_serving_template}
 
-      {:error, %CommandOutcome{} = outcome} ->
-        {:error, outcome}
-
       {:error, _reason} = error ->
         error
     end

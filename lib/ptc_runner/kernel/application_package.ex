@@ -290,9 +290,10 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
            {:ok, effective, identities} <- apply_override(manifest, override),
            {:ok, accounting} <- ApplicationSource.finish(source),
            {:ok, package} <- build(effective, identities, accounting) do
-        case input_mode do
-          :select -> {:ok, package, selected}
-          :skip -> {:ok, package}
+        case {input_mode, selected} do
+          {:select, %ExecutionInput{} = input} -> {:ok, package, input}
+          {:skip, :skipped} -> {:ok, package}
+          _other -> {:error, :invalid_application_package}
         end
       else
         false -> {:error, :invalid_installed_limits}

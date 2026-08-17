@@ -165,8 +165,6 @@ defmodule PtcRunner.Kernel.GatewayToken do
     end
   end
 
-  defp unwrap(_bytes), do: {:error, :invalid_gateway_token}
-
   defp strip_trailing_newline(bytes) do
     cond do
       String.ends_with?(bytes, "\r\n") -> binary_part(bytes, 0, byte_size(bytes) - 2)
