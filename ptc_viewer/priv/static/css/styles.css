@@ -2376,6 +2376,23 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   color: var(--fg); white-space: pre;
 }
 
+/* --- launch environment chips --- */
+.live-launch-envs { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.live-env-chip {
+  background: none; border: 1px solid var(--border); border-radius: 999px;
+  padding: 3px 12px; cursor: pointer; font-size: 11px; color: var(--muted);
+}
+.live-env-chip:hover { color: var(--fg); border-color: var(--muted); }
+.live-env-chip[aria-pressed="true"] {
+  color: var(--live-eval); border-color: var(--live-eval);
+  background: rgba(47, 134, 210, 0.12);
+}
+.live-launch-expr {
+  width: 100%; box-sizing: border-box; margin-top: 4px; padding: 8px 10px;
+  background: var(--bg-light); border: 1px solid var(--border); border-radius: 6px;
+  font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; color: var(--fg);
+}
+
 .live-launch { margin-bottom: 18px; }
 .live-launch-card {
   background: var(--live-surface);

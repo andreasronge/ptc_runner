@@ -177,5 +177,31 @@ defmodule PtcViewer.LiveRouterTest do
     assert post_conn.status == 400
   end
 
+  test "a mission body takes the mission path, not the input path", %{opts: opts, tmp_dir: dir} do
+    File.write!(Path.join(dir, "demo.json"), "{}")
+    opts = Keyword.put(opts, :live_launch, %{manifest: "demo.json", cwd: dir})
+
+    # Port 0 stops the launch before anything spawns; the distinct reason is
+    # what proves the mission branch ran instead of input validation.
+    post_conn =
+      conn(
+        :post,
+        "/api/live/launch",
+        Jason.encode!(%{"mission" => "review", "expression" => "(dir)"})
+      )
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> call_router(opts)
+
+    assert post_conn.status == 400
+    assert Jason.decode!(post_conn.resp_body) == %{"error" => "launch_not_configured"}
+
+    without_expression =
+      conn(:post, "/api/live/launch", Jason.encode!(%{"mission" => "review"}))
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> call_router(opts)
+
+    assert Jason.decode!(without_expression.resp_body) == %{"error" => "invalid_input"}
+  end
+
   defp call_router(conn, opts), do: PtcViewer.Router.call(conn, PtcViewer.Router.init(opts))
 end

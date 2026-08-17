@@ -28,8 +28,14 @@ export function createLiveController({ onLiveCount } = {}) {
 
   connect();
   clearEndedEl.addEventListener('click', () => clearEnded());
-  initLaunch(launchEl).catch(() => {});
-  initProject(projectEl).catch(() => {});
+  // One project fetch feeds both panels: the details disclosure and the
+  // launch card's environment chips.
+  loadProject()
+    .then(project => {
+      initProject(projectEl, project);
+      return initLaunch(launchEl, project);
+    })
+    .catch(() => {});
 
   function connect() {
     source = new EventSource('/api/live/stream');
@@ -127,7 +133,7 @@ export function createLiveController({ onLiveCount } = {}) {
 
 /* ---------- launch panel (fixed target, editable input) ---------- */
 
-async function initLaunch(root) {
+async function initLaunch(root, project) {
   const response = await fetch('/api/live/launch');
   if (!response.ok) return;
   const spec = await response.json();
@@ -140,8 +146,11 @@ async function initLaunch(root) {
         <span class="live-section-label">Launch a run</span>
         <span class="live-launch-target" data-role="target"></span>
       </div>
-      <label class="live-launch-label">Input object — the only thing the browser controls; passed to <code>mix ptc run --input</code></label>
+      <div class="live-launch-envs" data-role="envs" hidden></div>
+      <label class="live-launch-label" data-role="input-label">Input object — the only thing the browser controls; passed to <code>mix ptc run --input</code></label>
       <textarea class="live-launch-input" data-role="editor" spellcheck="false" rows="10"></textarea>
+      <label class="live-launch-label" data-role="expr-label" hidden>Expression — evaluated once in this mission session (<code>mix ptc repl --mission</code>); no live frames yet, the result is the output tail below</label>
+      <input type="text" class="live-launch-expr" data-role="expr" spellcheck="false" placeholder="(dir)" hidden />
       <div class="live-launch-foot">
         <span class="live-launch-validity" data-role="validity"></span>
         <button type="button" class="live-launch-run" data-role="run">▶ Run</button>
@@ -155,9 +164,19 @@ async function initLaunch(root) {
   fields.target.textContent = spec.label ? `${spec.label} · ${spec.manifest}` : spec.manifest;
   fields.editor.value = JSON.stringify(spec.input ?? {}, null, 2);
 
-  const state = { running: spec.launch?.status === 'running', polling: null };
+  // `mission: null` is the workflow, which is the only environment that
+  // produces live frames today.
+  const state = { running: spec.launch?.status === 'running', polling: null, mission: null };
 
   const validate = () => {
+    if (state.mission) {
+      const expression = fields.expr.value.trim();
+      fields.validity.textContent = expression ? `mission ${state.mission}` : 'expression required';
+      fields.validity.dataset.state = expression ? 'ok' : 'bad';
+      fields.run.disabled = !expression || state.running;
+      return expression || null;
+    }
+
     let parsed = null;
     let error = null;
     try {
@@ -175,6 +194,20 @@ async function initLaunch(root) {
     return parsed;
   };
 
+  const selectEnvironment = (mission, chips) => {
+    state.mission = mission;
+    for (const chip of chips) {
+      chip.setAttribute('aria-pressed', String((chip.dataset.mission || null) === mission));
+    }
+    fields['input-label'].hidden = Boolean(mission);
+    fields.editor.hidden = Boolean(mission);
+    fields['expr-label'].hidden = !mission;
+    fields.expr.hidden = !mission;
+    validate();
+  };
+
+  renderEnvironmentChips(fields.envs, project, selectEnvironment);
+
   const setStatus = (status) => {
     state.running = status?.status === 'running';
     fields.run.disabled = state.running || fields.validity.dataset.state === 'bad';
@@ -186,7 +219,9 @@ async function initLaunch(root) {
     fields.status.hidden = false;
     fields.status.dataset.state = status.status;
     if (status.status === 'running') {
-      fields.status.textContent = 'Run launched — its card appears below as frames arrive.';
+      fields.status.textContent = state.mission
+        ? `Mission ${state.mission} evaluating — mission sessions do not report frames; the result appears here.`
+        : 'Run launched — its card appears below as frames arrive.';
     } else if (status.status === 'ok') {
       fields.status.textContent = 'Last launch completed (exit 0).';
     } else {
@@ -214,14 +249,18 @@ async function initLaunch(root) {
   };
 
   fields.editor.addEventListener('input', validate);
+  fields.expr.addEventListener('input', validate);
   fields.run.addEventListener('click', async () => {
     const parsed = validate();
     if (!parsed || state.running) return;
     setStatus({ status: 'running' });
+    const body = state.mission
+      ? { mission: state.mission, expression: parsed }
+      : { input: parsed };
     const res = await fetch('/api/live/launch', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ input: parsed }),
+      body: JSON.stringify(body),
     });
     if (res.status !== 202) {
       const body = await res.json().catch(() => ({}));
@@ -237,16 +276,55 @@ async function initLaunch(root) {
   if (state.running) state.polling = setTimeout(poll, 1500);
 }
 
+// Chips appear only when the project actually declares missions; a
+// workflow-only project keeps the panel exactly as it was.
+function renderEnvironmentChips(container, project, select) {
+  const missions = missionNames(project);
+  if (!missions.length) return;
+
+  const chips = [];
+  for (const name of [null, ...missions]) {
+    const chip = el('button', 'live-env-chip', name || 'workflow');
+    chip.type = 'button';
+    if (name) chip.dataset.mission = name;
+    chip.setAttribute('aria-pressed', String(name === null));
+    chips.push(chip);
+  }
+
+  for (const chip of chips) {
+    chip.addEventListener('click', () => select(chip.dataset.mission || null, chips));
+  }
+
+  container.hidden = false;
+  container.replaceChildren(...chips);
+}
+
+export function missionNames(project) {
+  if (!project || !Array.isArray(project.environments)) return [];
+  return project.environments
+    .filter(environment => environment && environment.kind === 'mission')
+    .map(environment => environment.name)
+    .filter(name => typeof name === 'string' && name !== '');
+}
+
 /* ---------- project details (host-injected, opaque) ---------- */
 
 // The payload comes from a host adapter the Viewer does not interpret, so
 // every field is treated as possibly absent. Source text is inserted as
 // textContent — never innerHTML — because it is arbitrary program text.
-async function initProject(root) {
-  const response = await fetch('/api/live/project');
-  if (!response.ok) return;
-  const project = await response.json();
-  if (!project.enabled) return;
+async function loadProject() {
+  try {
+    const response = await fetch('/api/live/project');
+    if (!response.ok) return null;
+    const project = await response.json();
+    return project?.enabled ? project : null;
+  } catch {
+    return null;
+  }
+}
+
+function initProject(root, project) {
+  if (!project) return;
 
   root.hidden = false;
   root.innerHTML = `

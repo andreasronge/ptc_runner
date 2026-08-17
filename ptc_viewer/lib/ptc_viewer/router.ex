@@ -190,8 +190,7 @@ defmodule PtcViewer.Router do
     with {:ok, store} <- live_store(conn),
          {:ok, launch} <- live_launch(conn),
          {:ok, body, conn} <- json_body(conn),
-         {:ok, input} <- launch_input(body),
-         {:ok, run_fun} <- LiveLaunch.prepare(launch, input, live_port(conn)),
+         {:ok, run_fun} <- prepare_launch(launch, body, live_port(conn)),
          :ok <- LiveStore.begin_launch(store, run_fun) do
       send_live_json(conn, 202, %{"status" => "launched"})
     else
@@ -252,6 +251,15 @@ defmodule PtcViewer.Router do
   defp live_project(conn), do: Keyword.get(viewer_config(conn), :live_project)
 
   defp live_port(conn), do: Keyword.get(viewer_config(conn), :live_port, 0)
+
+  # The browser picks one of two shapes: an edited input object for a workflow
+  # run, or a mission plus the expression to evaluate in it.
+  defp prepare_launch(launch, %{"mission" => mission, "expression" => expression}, port),
+    do: LiveLaunch.prepare_mission(launch, mission, expression, port)
+
+  defp prepare_launch(launch, body, port) do
+    with {:ok, input} <- launch_input(body), do: LiveLaunch.prepare(launch, input, port)
+  end
 
   defp launch_input(%{"input" => input}) when is_map(input), do: {:ok, input}
   defp launch_input(_body), do: {:error, :invalid_input}

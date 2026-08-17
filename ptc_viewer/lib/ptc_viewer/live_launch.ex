@@ -13,9 +13,14 @@ defmodule PtcViewer.LiveLaunch do
 
   @output_tail_bytes 2_000
 
+  # Manifest mission names, per the application manifest schema. Browser-chosen
+  # values reach an argument vector, so the name is matched, never trusted.
+  @mission_name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
+
   @type spec :: %{
           required(:manifest) => binary(),
           optional(:args) => [binary()],
+          optional(:repl_args) => [binary()],
           optional(:cwd) => binary(),
           optional(:label) => binary()
         }
@@ -25,12 +30,12 @@ defmodule PtcViewer.LiveLaunch do
   def validate(nil), do: :ok
 
   def validate(%{manifest: manifest} = spec) when is_binary(manifest) do
-    args = Map.get(spec, :args, [])
     cwd = Map.get(spec, :cwd, File.cwd!())
     label = Map.get(spec, :label)
 
     valid? =
-      is_list(args) and Enum.all?(args, &is_binary/1) and
+      arguments?(Map.get(spec, :args, [])) and
+        arguments?(Map.get(spec, :repl_args, [])) and
         is_binary(cwd) and File.dir?(cwd) and
         (is_nil(label) or is_binary(label)) and
         File.regular?(manifest_path(spec))
@@ -88,6 +93,54 @@ defmodule PtcViewer.LiveLaunch do
   end
 
   def prepare(_spec, _input, _port), do: {:error, :invalid_input}
+
+  @doc """
+  Builds the run function for a one-shot session in one manifest mission.
+
+  Mission sessions run through `mix ptc repl --mission`, which does not accept
+  the `run` argument set, so they use the separately configured `:repl_args`
+  rather than reusing `:args`. They also do not execute through `Runner`, so
+  no live frames arrive: the exit code and output tail are the whole result
+  surface until reporter coverage reaches REPL sessions.
+  """
+  @spec prepare_mission(spec(), binary(), binary(), integer()) ::
+          {:ok, (-> {integer(), binary()})} | {:error, :launch_not_configured | :invalid_mission}
+  def prepare_mission(_spec, _mission, _expression, port) when not is_integer(port) or port <= 0,
+    do: {:error, :launch_not_configured}
+
+  def prepare_mission(spec, mission, expression, port) when is_map(spec) do
+    if valid_mission?(mission) and valid_expression?(expression) do
+      cwd = Map.get(spec, :cwd, File.cwd!())
+      args = mission_command(spec, mission, expression)
+      env = [{"PTC_VIEWER_URL", "http://127.0.0.1:#{port}"}]
+
+      {:ok,
+       fn ->
+         {output, code} = System.cmd("mix", args, cd: cwd, env: env, stderr_to_stdout: true)
+         {code, output_tail(output)}
+       end}
+    else
+      {:error, :invalid_mission}
+    end
+  end
+
+  def prepare_mission(_spec, _mission, _expression, _port), do: {:error, :invalid_mission}
+
+  @doc "The argument vector a mission session runs, exposed for inspection."
+  @spec mission_command(spec(), binary(), binary()) :: [binary()]
+  def mission_command(spec, mission, expression) do
+    ["ptc", "repl", "--manifest", spec.manifest] ++
+      Map.get(spec, :repl_args, []) ++
+      ["--mission", mission, "-e", expression]
+  end
+
+  defp arguments?(args), do: is_list(args) and Enum.all?(args, &is_binary/1)
+
+  defp valid_mission?(mission),
+    do: is_binary(mission) and Regex.match?(@mission_name, mission)
+
+  defp valid_expression?(expression),
+    do: is_binary(expression) and String.trim(expression) != ""
 
   # `--input` is a logical name resolved inside the manifest's confined
   # application directory, so the edited input is written beside the manifest

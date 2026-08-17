@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { fmtLimit, plural, uniqueComponents } from '../priv/static/js/live.js';
+import { fmtLimit, missionNames, plural, uniqueComponents } from '../priv/static/js/live.js';
 
 // Limits arrive as raw catalog rows; the panel is responsible for making them
 // readable without inventing units it was not given.
@@ -36,5 +36,23 @@ assert.deepEqual(
 
 assert.deepEqual(uniqueComponents([]), []);
 assert.deepEqual(uniqueComponents([{ name: 'empty', components: [] }]), []);
+
+// Launch chips exist only for missions; the workflow chip is added by the
+// panel itself, and a workflow-only project must produce no chips at all.
+assert.deepEqual(
+  missionNames({
+    environments: [
+      { name: 'workflow', kind: 'workflow' },
+      { name: 'review', kind: 'mission' },
+      { name: 'triage', kind: 'mission' }
+    ]
+  }),
+  ['review', 'triage']
+);
+
+assert.deepEqual(missionNames({ environments: [{ name: 'workflow', kind: 'workflow' }] }), []);
+assert.deepEqual(missionNames({ environments: [{ kind: 'mission' }] }), []);
+assert.deepEqual(missionNames({}), []);
+assert.deepEqual(missionNames(null), []);
 
 process.stdout.write('ok');
