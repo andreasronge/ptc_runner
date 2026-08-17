@@ -11,7 +11,9 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   runtime ceiling, a bounded agent turn ceiling, or an opaque replay request
   hash. Compile messages require component-source provenance; a missing
   capability message is rebuilt from the frozen bundle's sorted tool
-  requirements. Kernel runtime and replay messages require fixed runtime
+  requirements. A missing MCP tool message may retain only the validated,
+  declaration-owned upstream name and carries no provider catalog payload.
+  Kernel runtime and replay messages require fixed runtime
   provenance. An agent turn-limit message has no source because `max_turns`
   belongs to one `agent.core` call rather than a host or manifest document.
   Every other message is the catalog literal.
@@ -343,6 +345,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   defp valid_message_source?(
          _message,
          %{phase: :provider_acquisition, code: :capability_requirement_missing},
+         nil
+       ),
+       do: true
+
+  defp valid_message_source?(
+         _message,
+         %{phase: :provider_acquisition, code: :provider_tool_missing},
          nil
        ),
        do: true

@@ -98,7 +98,7 @@ jobs:
             fi
             bash test/support/mcp_go_stateless/with_server.sh \
               mix test "${e2e_includes[@]}" --trace
-            PTC_TEST_MCP_OAUTH=1 \
+            PTC_TEST_MCP_OAUTH=1 PTC_TEST_MCP_TLS=1 \
               bash test/support/mcp_go_stateless/with_server.sh \
                 mix test test/ptc_runner/kernel/mcp_oauth_remote_e2e_test.exs \
                   --include e2e --trace

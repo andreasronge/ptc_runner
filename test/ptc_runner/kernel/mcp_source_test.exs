@@ -1347,7 +1347,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     on_exit(fixture.close)
     registry = registry(fixture.endpoint)
 
-    assert {:error, :mcp_mapped_tool_missing} =
+    assert {:error, {:mcp_mapped_tool_missing, "structured"}} =
              dir
              |> manifest(["remote.structured"])
              |> directory_request(registry)

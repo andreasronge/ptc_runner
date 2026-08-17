@@ -82,28 +82,68 @@ defmodule PtcRunner.Kernel.MCPEndpoint do
   carry the allowance.
   """
   @spec validate(term(), boolean()) :: :ok | {:error, :invalid_endpoint}
-  def validate(endpoint, allow_insecure_loopback)
+  def validate(endpoint, allow_insecure_loopback) do
+    case diagnose(endpoint, allow_insecure_loopback) do
+      :ok -> :ok
+      {:error, _reason} -> {:error, :invalid_endpoint}
+    end
+  end
+
+  @doc false
+  @spec diagnose(term(), term()) ::
+          :ok
+          | {:error,
+             :invalid_endpoint
+             | :https_required
+             | :insecure_loopback_required
+             | :literal_loopback_required
+             | :insecure_loopback_forbidden}
+  def diagnose(endpoint, allow_insecure_loopback)
       when is_binary(endpoint) and is_boolean(allow_insecure_loopback) do
     if safe_characters?(endpoint),
-      do: validate_origin(endpoint, allow_insecure_loopback),
+      do: diagnose_origin(endpoint, allow_insecure_loopback),
       else: {:error, :invalid_endpoint}
   end
 
-  def validate(_endpoint, _allow_insecure_loopback), do: {:error, :invalid_endpoint}
+  def diagnose(_endpoint, _allow_insecure_loopback), do: {:error, :invalid_endpoint}
 
-  defp validate_origin(endpoint, allow_insecure_loopback) do
+  defp diagnose_origin(endpoint, allow_insecure_loopback) do
     case URI.parse(endpoint) do
       %URI{scheme: scheme, host: host, userinfo: nil, fragment: nil} = uri ->
-        if origin_allowed?(scheme, host, allow_insecure_loopback) and
-             allow_insecure_loopback == (scheme == "http") and
-             written_plainly?(endpoint, uri),
-           do: :ok,
-           else: {:error, :invalid_endpoint}
+        diagnose_written_origin(endpoint, uri, scheme, host, allow_insecure_loopback)
 
       _uri ->
         {:error, :invalid_endpoint}
     end
   end
+
+  defp diagnose_written_origin(endpoint, uri, scheme, host, allow_insecure_loopback) do
+    if written_plainly?(endpoint, uri) do
+      diagnose_origin_policy(scheme, host, allow_insecure_loopback)
+    else
+      {:error, :invalid_endpoint}
+    end
+  end
+
+  defp diagnose_origin_policy("https", _host, true),
+    do: {:error, :insecure_loopback_forbidden}
+
+  defp diagnose_origin_policy("https", host, false) when is_binary(host) and host != "",
+    do: :ok
+
+  defp diagnose_origin_policy("http", _host, false),
+    do: {:error, :insecure_loopback_required}
+
+  defp diagnose_origin_policy("http", host, true) do
+    if loopback_host?(host), do: :ok, else: {:error, :literal_loopback_required}
+  end
+
+  defp diagnose_origin_policy(scheme, _host, _allow_insecure_loopback)
+       when is_binary(scheme),
+       do: {:error, :https_required}
+
+  defp diagnose_origin_policy(_scheme, _host, _allow_insecure_loopback),
+    do: {:error, :invalid_endpoint}
 
   # `URI.parse/1` is forgiving in two ways an installed endpoint must not be. It
   # answers with the scheme's default port when it cannot read the one it was

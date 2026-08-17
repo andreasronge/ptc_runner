@@ -265,6 +265,35 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
 
   describe "the command path names the installation" do
     @tag :tmp_dir
+    test "endpoint diagnostics identify the rejected admissibility clause", %{tmp_dir: dir} do
+      cases = [
+        {"http://127.0.0.1:8055", %{}, :installation_endpoint_insecure_loopback_required,
+         "a plain-http MCP endpoint requires allow_insecure_loopback"},
+        {"http://localhost:8055", %{"allow_insecure_loopback" => true},
+         :installation_endpoint_literal_loopback_required,
+         "allow_insecure_loopback requires a literal 127.0.0.1 or [::1] address"},
+        {"https://mcp.example.test/mcp", %{"allow_insecure_loopback" => true},
+         :installation_endpoint_insecure_loopback_forbidden,
+         "allow_insecure_loopback is not permitted on an https endpoint; remove it"},
+        {"http://127.0.0.1:8055", %{"allow_insecure_loopback" => true, "oauth" => oauth_block()},
+         :installation_endpoint_credentials_require_https,
+         "configured MCP credentials require an https endpoint"}
+      ]
+
+      for {endpoint, overrides, expected_code, expected_message} <- cases do
+        path = write(dir, config(endpoint, overrides), unique_name())
+
+        assert {:error, %CommandDiagnostic{} = diagnostic} = CommandAcquisition.catalog(path)
+        assert diagnostic.phase == :host
+        assert diagnostic.code == expected_code
+        assert diagnostic.message == expected_message
+        assert diagnostic.subject.name == "workspace"
+        assert diagnostic.path == nil
+        assert diagnostic.source == nil
+      end
+    end
+
+    @tag :tmp_dir
     test "a refused endpoint is a host diagnostic naming its alias", %{tmp_dir: dir} do
       path = write(dir, config("not-a-url"))
 
@@ -348,7 +377,7 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
 
     assert {:error, :invalid_host_config} = HostConfig.load(path)
 
-    assert {:error, {:installation_endpoint_invalid, "workspace"}} =
+    assert {:error, {:installation_endpoint_invalid, "workspace", _reason}} =
              HostConfig.load_command(path)
   end
 
@@ -396,7 +425,11 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
 
     try do
       path = write(dir, document, "host.json")
-      match?({:error, {:installation_endpoint_invalid, _name}}, HostConfig.load_command(path))
+
+      match?(
+        {:error, {:installation_endpoint_invalid, _name, _reason}},
+        HostConfig.load_command(path)
+      )
     after
       File.rm_rf!(dir)
     end

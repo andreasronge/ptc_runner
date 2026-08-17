@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
 
   alias PtcRunner.Kernel.AcquisitionReason
   alias PtcRunner.Kernel.CommandContract
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
 
   @occurrence %{provider: "selected", destination: :workflow, index: 3}
@@ -29,7 +30,8 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
     {:provider_acquisition_failed, :provider_acquisition, :provider_unavailable, :acquisition},
     {:mcp_protocol_error, :provider_acquisition, :provider_protocol_error, :acquisition},
     {:mcp_invalid_catalog, :provider_acquisition, :provider_protocol_error, :acquisition},
-    {:mcp_mapped_tool_missing, :provider_acquisition, :provider_tool_missing, :acquisition},
+    {{:mcp_mapped_tool_missing, "structuredMissing"}, :provider_acquisition,
+     :provider_tool_missing, :acquisition},
     {:mcp_invalid_tool_schema, :provider_acquisition, :provider_protocol_error, :acquisition},
     {:mcp_response_exceeded, :provider_acquisition, :provider_protocol_error, :acquisition},
     {:mcp_catalog_exceeded, :provider_acquisition, :provider_protocol_error, :acquisition},
@@ -62,7 +64,7 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
       diagnostic = AcquisitionReason.diagnostic(reason, @occurrence)
 
       assert {diagnostic.phase, diagnostic.code} == {phase, code},
-             "#{reason} produced #{diagnostic.phase}/#{diagnostic.code}"
+             "#{inspect(reason)} produced #{diagnostic.phase}/#{diagnostic.code}"
 
       assert diagnostic.subject.name == "selected"
       assert diagnostic.subject.operation == operation
@@ -88,15 +90,68 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
     end
   end
 
+  test "a missing mapped tool retains only its validated declaration-owned name" do
+    diagnostic =
+      AcquisitionReason.diagnostic({:mcp_mapped_tool_missing, "structuredMissing"}, @occurrence)
+
+    assert diagnostic.message ==
+             ~s(the installed endpoint does not expose declared tool "structuredMissing")
+
+    assert diagnostic.source == nil
+    assert diagnostic.path == nil
+
+    assert AcquisitionReason.diagnostic(
+             {:mcp_mapped_tool_missing, "invalid tool name"},
+             @occurrence
+           ).code == :internal_error
+  end
+
+  test "a maximum Unicode tool name remains renderable and the schema rejects invalid names" do
+    name = String.duplicate("😀", 128)
+    diagnostic = AcquisitionReason.diagnostic({:mcp_mapped_tool_missing, name}, @occurrence)
+    rendered = CommandDiagnostic.to_map(diagnostic)
+
+    assert diagnostic.code == :provider_tool_missing
+
+    assert diagnostic.message ==
+             "the installed endpoint does not expose declared tool " <> Jason.encode!(name)
+
+    assert {:ok, root} =
+             JSV.build(
+               CommandContract.catalog_diagnostic_schema(),
+               atoms: false,
+               warnings: :silent
+             )
+
+    assert {:ok, _validated} = JSV.validate(rendered, root, cast: false)
+
+    for encoded <- [Jason.encode!("invalid tool name"), ~S("\u0061")] do
+      invalid =
+        Map.put(
+          rendered,
+          "message",
+          "the installed endpoint does not expose declared tool " <> encoded
+        )
+
+      refute DiagnosticCatalog.valid_message?(
+               :provider_acquisition,
+               :provider_tool_missing,
+               invalid["message"]
+             )
+
+      assert {:error, _details} = JSV.validate(invalid, root, cast: false)
+    end
+  end
+
   test "every pair the table can emit is admissible where it can surface" do
     # Acquisition runs for a run and acquisition-mode `doctor --connect`. A pair the
     # contract refuses would be unrenderable at exactly the moment it matters.
     for {reason, phase, code, _operation} <- @expected do
       assert CommandContract.diagnostic_allowed?(:run, phase, code),
-             "#{reason} -> #{phase}/#{code} is not admissible for a run"
+             "#{inspect(reason)} -> #{phase}/#{code} is not admissible for a run"
 
       assert CommandContract.diagnostic_allowed?({:doctor, :connect}, phase, code),
-             "#{reason} -> #{phase}/#{code} is not admissible for connect"
+             "#{inspect(reason)} -> #{phase}/#{code} is not admissible for connect"
     end
   end
 
@@ -106,10 +161,10 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
     # translation would report less than it knows.
     for {reason, phase, code, operation} <- @expected do
       refute DiagnosticCatalog.subject_occurrence_policy(phase, code, operation) == :forbidden,
-             "#{reason} -> #{phase}/#{code} forbids the occurrence it is given"
+             "#{inspect(reason)} -> #{phase}/#{code} forbids the occurrence it is given"
 
       assert operation in DiagnosticCatalog.subject_operations(phase, code),
-             "#{reason} -> #{phase}/#{code} does not admit a #{operation} subject"
+             "#{inspect(reason)} -> #{phase}/#{code} does not admit a #{operation} subject"
     end
   end
 

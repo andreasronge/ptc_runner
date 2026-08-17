@@ -10,8 +10,17 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.LLMReplayDiagnostic
+  alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
+
+  @endpoint_codes [
+    :installation_endpoint_invalid,
+    :installation_endpoint_insecure_loopback_required,
+    :installation_endpoint_literal_loopback_required,
+    :installation_endpoint_insecure_loopback_forbidden,
+    :installation_endpoint_credentials_require_https
+  ]
 
   @rows [
     {:arguments, :invalid_command, 2, false, "use one of the supported commands"},
@@ -28,6 +37,14 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "an installed provider is missing its behavior revision"},
     {:host, :installation_endpoint_invalid, 3, false,
      "an installed MCP endpoint is not admissible; streamable_http requires an https URL, or allow_insecure_loopback with a credential-free plain-http loopback address"},
+    {:host, :installation_endpoint_insecure_loopback_required, 3, false,
+     "a plain-http MCP endpoint requires allow_insecure_loopback"},
+    {:host, :installation_endpoint_literal_loopback_required, 3, false,
+     "allow_insecure_loopback requires a literal 127.0.0.1 or [::1] address"},
+    {:host, :installation_endpoint_insecure_loopback_forbidden, 3, false,
+     "allow_insecure_loopback is not permitted on an https endpoint; remove it"},
+    {:host, :installation_endpoint_credentials_require_https, 3, false,
+     "configured MCP credentials require an https endpoint"},
     {:application, :application_unavailable, 3, false, "the application is unavailable"},
     {:application, :application_not_found, 3, false, "the application manifest does not exist"},
     {:application, :invalid_json, 3, false, "an application document is not valid JSON"},
@@ -309,6 +326,13 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :application, code: :contract_invalid, message: fallback}),
     do: ContractSchemaDiagnostic.message_schema(fallback)
 
+  def message_schema(%{
+        phase: :provider_acquisition,
+        code: :provider_tool_missing,
+        message: fallback
+      }),
+      do: MCPAcquisitionDiagnostic.missing_tool_message_schema(fallback)
+
   def message_schema(%{code: code, message: fallback}),
     do: CompileDiagnostic.message_schema(code, fallback)
 
@@ -323,6 +347,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:application, :contract_invalid, message),
     do: ContractSchemaDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:provider_acquisition, :provider_tool_missing, message),
+    do: MCPAcquisitionDiagnostic.valid_missing_tool_message?(message)
 
   defp valid_dynamic_message?(_phase, code, message),
     do: CompileDiagnostic.valid_message?(code, message)
@@ -429,7 +456,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   @spec subject_policy(phase(), atom()) :: :required | :optional | :forbidden
   def subject_policy(:host, :installation_revision_missing), do: :required
-  def subject_policy(:host, :installation_endpoint_invalid), do: :required
+  def subject_policy(:host, code) when code in @endpoint_codes, do: :required
 
   # A missing bundle requirement describes the capability surface assembled
   # from all providers granted to an environment. No single occurrence is the
@@ -473,7 +500,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   @spec subject_operations(phase(), atom()) :: [atom()]
   def subject_operations(:host, :installation_revision_missing), do: [:declaration]
-  def subject_operations(:host, :installation_endpoint_invalid), do: [:declaration]
+  def subject_operations(:host, code) when code in @endpoint_codes, do: [:declaration]
   def subject_operations(:provider_declaration, :provider_unknown), do: [:declaration]
 
   def subject_operations(:provider_declaration, code)
@@ -581,7 +608,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   @spec source_kinds(phase(), atom()) :: [atom()]
   def source_kinds(:host, :installation_revision_missing), do: []
-  def source_kinds(:host, :installation_endpoint_invalid), do: []
+  def source_kinds(:host, code) when code in @endpoint_codes, do: []
   def source_kinds(:host, _code), do: [:host]
 
   def source_kinds(:application, code)

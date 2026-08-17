@@ -259,7 +259,7 @@ defmodule PtcRunner.Kernel.HostConfig do
              :host_unavailable
              | :host_invalid
              | {:installation_revision_missing, binary()}
-             | {:installation_endpoint_invalid, binary()}
+             | {:installation_endpoint_invalid, binary(), atom()}
              | {:host_schema_invalid, [PtcRunner.Kernel.CommandPath.segment()]}
              | {:installed_limit_invalid, [PtcRunner.Kernel.CommandPath.segment()]}}
   def load_command(path) when is_binary(path) do
@@ -302,10 +302,12 @@ defmodule PtcRunner.Kernel.HostConfig do
       {:error, {code, _detail}} = error
       when code in [
              :installation_revision_missing,
-             :installation_endpoint_invalid,
              :host_schema_invalid,
              :installed_limit_invalid
            ] ->
+        error
+
+      {:error, {:installation_endpoint_invalid, _name, _reason}} = error ->
         error
 
       {:error, _reason} ->
@@ -419,18 +421,23 @@ defmodule PtcRunner.Kernel.HostConfig do
     installations
     |> Map.keys()
     |> Enum.sort()
-    |> Enum.find(fn name ->
-      valid_name?(name) and inadmissible_endpoint?(Map.get(installations, name))
+    |> Enum.find_value(fn name ->
+      if valid_name?(name) do
+        case endpoint_rejection(Map.get(installations, name)) do
+          {:error, reason} -> {name, reason}
+          :ok -> nil
+        end
+      end
     end)
     |> case do
       nil -> :ok
-      name -> {:error, {:installation_endpoint_invalid, name}}
+      {name, reason} -> {:error, {:installation_endpoint_invalid, name, reason}}
     end
   end
 
   defp require_admissible_endpoints(_value), do: :ok
 
-  defp inadmissible_endpoint?(%{
+  defp endpoint_rejection(%{
          "source" => "mcp",
          "transport" => %{"type" => "streamable_http"} = transport
        })
@@ -440,11 +447,12 @@ defmodule PtcRunner.Kernel.HostConfig do
     auth = Map.get(transport, "auth", [])
     oauth = Map.get(transport, "oauth")
 
-    is_binary(endpoint) and is_boolean(insecure_loopback) and is_list(auth) and
-      installed_endpoint(endpoint, insecure_loopback, auth, oauth) != :ok
+    if is_binary(endpoint) and is_boolean(insecure_loopback) and is_list(auth),
+      do: installed_endpoint(endpoint, insecure_loopback, auth, oauth),
+      else: :ok
   end
 
-  defp inadmissible_endpoint?(_installation), do: false
+  defp endpoint_rejection(_installation), do: :ok
 
   defp schema_result(:ok, _segments), do: :ok
 
@@ -1010,11 +1018,15 @@ defmodule PtcRunner.Kernel.HostConfig do
   # authority must never cross a plaintext socket. That is a guarantee about
   # configured host credentials and nothing more — tool arguments and results
   # travelling over a loopback socket are still plaintext.
-  defp installed_endpoint(_endpoint, true, auth, oauth) when auth != [] or not is_nil(oauth),
-    do: {:error, :invalid_endpoint}
+  defp installed_endpoint(endpoint, insecure_loopback, auth, oauth)
+       when auth != [] or not is_nil(oauth) do
+    if String.starts_with?(endpoint, "http://"),
+      do: {:error, :credentials_require_https},
+      else: MCPEndpoint.diagnose(endpoint, insecure_loopback)
+  end
 
   defp installed_endpoint(endpoint, insecure_loopback, _auth, _oauth),
-    do: MCPEndpoint.validate(endpoint, insecure_loopback)
+    do: MCPEndpoint.diagnose(endpoint, insecure_loopback)
 
   # An explicit `"oauth": null` is a key the schema counts as present and
   # refuses, so reading it as absent would accept a document the mirror rejects.

@@ -100,9 +100,11 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
         {:ok, subject} = CommandSubject.provider(name, :declaration)
         {:error, CommandDiagnostic.new!(:host, :installation_revision_missing, subject: subject)}
 
-      {:error, {:installation_endpoint_invalid, name}} ->
+      {:error, {:installation_endpoint_invalid, name, reason}} ->
         {:ok, subject} = CommandSubject.provider(name, :declaration)
-        {:error, CommandDiagnostic.new!(:host, :installation_endpoint_invalid, subject: subject)}
+
+        {:error,
+         CommandDiagnostic.new!(:host, endpoint_diagnostic_code(reason), subject: subject)}
 
       {:error, {:host_schema_invalid, segments}} ->
         {:error, host_path_diagnostic(:host_schema_invalid, segments)}
@@ -113,6 +115,20 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   end
 
   def catalog(_source), do: {:error, diagnostic(:host, :host_unavailable)}
+
+  defp endpoint_diagnostic_code(:insecure_loopback_required),
+    do: :installation_endpoint_insecure_loopback_required
+
+  defp endpoint_diagnostic_code(:literal_loopback_required),
+    do: :installation_endpoint_literal_loopback_required
+
+  defp endpoint_diagnostic_code(:insecure_loopback_forbidden),
+    do: :installation_endpoint_insecure_loopback_forbidden
+
+  defp endpoint_diagnostic_code(:credentials_require_https),
+    do: :installation_endpoint_credentials_require_https
+
+  defp endpoint_diagnostic_code(_reason), do: :installation_endpoint_invalid
 
   @spec with_catalog(binary() | nil, (HostConfig.t() | nil, InstallationCatalog.t() -> term())) ::
           term()
