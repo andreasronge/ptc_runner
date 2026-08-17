@@ -59,9 +59,10 @@ defmodule PtcRunner.Kernel.ParallelTimeoutLimitTest do
   end
 
   test "a narrowed parallel_timeout_ms fails a parked pcalls at the configured deadline" do
+    {:ok, config} = park_config(10_000, parallel_timeout_ms: 200)
     started = System.monotonic_time(:millisecond)
 
-    assert {:error, error} = run_park_workflow(10_000, parallel_timeout_ms: 200)
+    assert {:error, error} = Kernel.run(~S[(return (pcalls #(tool/park {})))], config)
 
     elapsed = System.monotonic_time(:millisecond) - started
     assert error.kind == :limit_exceeded
@@ -69,6 +70,10 @@ defmodule PtcRunner.Kernel.ParallelTimeoutLimitTest do
 
     assert error.details[:limit] == :parallel_timeout_ms,
            "the failure must name the limit that fired, got #{inspect(error.details)}"
+
+    assert %{data: %{reason: :timeout, limit: :parallel_timeout_ms, limit_ms: 200}} =
+             EventSink.events(config.event_sink)
+             |> Enum.find(&(&1.type == "limit-exceeded"))
 
     assert elapsed < 5_000,
            "the narrowed deadline must fire well before the old 5s floor, took #{elapsed}ms"

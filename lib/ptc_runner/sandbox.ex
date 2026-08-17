@@ -206,7 +206,8 @@ defmodule PtcRunner.Sandbox do
       setup_max_heap: setup_max_heap,
       start_time: start_time,
       reply_alias: reply_alias,
-      failure_snapshot: failure_snapshot
+      failure_snapshot: failure_snapshot,
+      telemetry_run: Keyword.get(opts, :telemetry_run)
     }
 
     try do
@@ -242,7 +243,7 @@ defmodule PtcRunner.Sandbox do
               # environment setup. Measure them after a forced GC and re-arm
               # the heap flag at baseline + budget so the program is not
               # charged for either.
-              baseline_words = rebaseline(execution.max_heap)
+              baseline_words = rebaseline(execution.max_heap, execution.telemetry_run)
               send_baseline(execution.reply_alias, baseline_words, failure_snapshot)
 
               start_reductions = process_reductions()
@@ -454,7 +455,7 @@ defmodule PtcRunner.Sandbox do
   # Measure the post-copy baseline and re-arm the heap flag at
   # baseline + budget. `max_heap: 0` means "limit disabled" (BEAM treats
   # flag size 0 as no limit) — measure for metrics but leave the flag alone.
-  defp rebaseline(max_heap) do
+  defp rebaseline(max_heap, telemetry_run) do
     :erlang.garbage_collect()
     baseline = measure_baseline_words()
 
@@ -467,8 +468,19 @@ defmodule PtcRunner.Sandbox do
       })
     end
 
+    :telemetry.execute(
+      [:ptc_runner, :sandbox, :armed],
+      %{baseline_words: baseline, ceiling_words: baseline + max_heap},
+      maybe_put_live_run(%{pid: self(), max_heap: max_heap}, telemetry_run)
+    )
+
     baseline
   end
+
+  defp maybe_put_live_run(metadata, live_run) when is_pid(live_run),
+    do: Map.put(metadata, :live_run, live_run)
+
+  defp maybe_put_live_run(metadata, _live_run), do: metadata
 
   # total_heap_size (words) + referenced refc binary bytes converted to
   # words — approximating what `max_heap_size` with

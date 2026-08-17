@@ -34,9 +34,18 @@ Browse completed runs locally:
 ptc viewer ptc-project.json
 ```
 
-The Viewer binds to loopback by default and has no authentication. Do not expose
-it to a network, especially when a project grants access to private inspection
-records.
+When the Live tab launches provider-backed work, pass an exact dotenv file
+with `--env-file FILE` or declare `host.env_file` in the project. The Viewer
+does not search implicitly for `.env`.
+
+The Viewer binds to loopback by default, where Live controls need no token.
+Do not expose it to a network without setting `PTC_VIEWER_TOKEN`, especially
+when a project grants access to private inspection records.
+
+In Docker, publish the port on host loopback, bind the Viewer to the container
+wildcard, and set `PTC_VIEWER_TOKEN`. Open
+`http://localhost:4123/?live_token=THE_TOKEN#/live` to authorize the Live
+controls; the token does not authenticate the Runs trace browser.
 
 For automation, request a command envelope instead of parsing human-readable
 diagnostics:

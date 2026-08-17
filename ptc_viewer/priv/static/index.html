@@ -14,6 +14,9 @@
               aria-selected="true" aria-controls="runs-panel">Runs</button>
       <button id="repl-tab" class="primary-tab" type="button" role="tab"
               aria-selected="false" aria-controls="repl-panel" tabindex="-1">REPL</button>
+      <button id="live-tab" class="primary-tab live-tab" type="button" role="tab"
+              aria-selected="false" aria-controls="live-panel" tabindex="-1">
+        <span class="live-tab-dot" aria-hidden="true"></span>Live</button>
     </div>
     <nav id="breadcrumb" class="breadcrumb"></nav>
   </header>
@@ -22,6 +25,23 @@
     <section id="runs-panel" role="tabpanel" aria-labelledby="runs-tab">
       <div id="file-picker" class="file-picker"></div>
       <div id="view-container"></div>
+    </section>
+
+    <section id="live-panel" class="live-panel" role="tabpanel" aria-labelledby="live-tab" hidden>
+      <div id="live-connection" class="live-connection" role="status" aria-live="polite"></div>
+      <div id="live-project" class="live-project" hidden></div>
+      <div id="live-launch" class="live-launch" hidden></div>
+      <div id="live-runs-head" class="live-runs-head" hidden>
+        <span class="live-section-label">Runs</span>
+        <button id="live-clear-ended" class="live-clear-ended" type="button">clear ended</button>
+      </div>
+      <div id="live-runs" class="live-runs"></div>
+      <div id="live-empty" class="live-empty">
+        <p class="live-empty-title">No live runs</p>
+        <p>Attach a run by pointing it at this Viewer:</p>
+        <pre class="live-empty-cmd">PTC_VIEWER_URL=&lt;this Viewer&gt; mix ptc run manifest.json ...</pre>
+        <p class="live-empty-hint">Frames stream in while the run executes; the canonical trace still lands in the Runs tab when it completes.</p>
+      </div>
     </section>
 
     <section id="repl-panel" class="repl-panel" role="tabpanel" aria-labelledby="repl-tab" hidden>

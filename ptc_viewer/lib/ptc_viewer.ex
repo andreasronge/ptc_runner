@@ -1,11 +1,15 @@
 defmodule PtcViewer do
   @moduledoc """
-  Local web UI for browsing canonical PTC traces and, when explicitly enabled
-  by the host, running one bounded run-analysis REPL profile.
+  Local web UI for browsing canonical PTC traces, watching live Kernel runs,
+  and, when explicitly enabled by the host, running one bounded run-analysis
+  REPL profile or launching a fixed manifest target.
 
-  There is no authentication. It binds loopback unless the host names the
-  wildcard address, and every caller that does is choosing to publish whatever
-  trace and inspection data the instance was granted.
+  The trace browser has no authentication. It binds loopback unless the host
+  names the wildcard address, and every caller that does is choosing to publish
+  whatever trace and inspection data the instance was granted. Live browser
+  controls are available only when the page is opened through a local authority
+  (`localhost`, `127.0.0.1`, or `::1`); non-loopback reporters require the
+  separately configured `:live_token`.
   """
 
   alias PtcViewer.ReplAdapter
@@ -16,11 +20,29 @@ defmodule PtcViewer do
 
   `:ip` selects the bind address from a closed pair: `{127, 0, 0, 1}`, the
   default, and `{0, 0, 0, 0}`, which serves this unauthenticated browser to
-  every host that can reach the port. Any other value fails startup.
+  every host that can reach the port. Any other value fails startup. In a
+  container, bind the wildcard internally but publish only on host loopback:
+
+      docker run -p 127.0.0.1:4123:4123 ... --listen 0.0.0.0
 
   In addition to the read-only trace and inspection options, a host may provide
   `:repl_adapter` and opaque `:repl_config`. Supplying an invalid or failed REPL
   adapter fails startup; omission preserves the Runs-only Viewer.
+
+  Live options are:
+
+  - `:launch` — a fixed `%{manifest: path, adapter: fun}` target with optional
+    `:cwd` and `:label`. The two-arity host function receives a semantic launch
+    request plus a direct live-frame sink. Browser data never chooses the
+    adapter or manifest.
+  - `:project_adapter` — a zero-arity function or module returning the project
+    details displayed above the launch panel.
+  - `:live_trace_refresh` — a one-arity host callback returning `:ok` or
+    `{:error, reason}`. It atomically refreshes the pinned trace source and
+    confirms the requested completed run exists.
+  - `:live_token` — at least 32 bytes. External reporters send the same value in
+    `PTC_VIEWER_TOKEN`; in-process host adapters use the direct sink instead.
+    Without a token, only loopback reporter connections are accepted.
 
   The Viewer's own applications are started here rather than left to the host,
   because `ptc_runner` carries this companion as a load-only release

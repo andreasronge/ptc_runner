@@ -227,8 +227,8 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
         runtime.authorization_targets
       )
 
-  defp execute_run(preparation, authority, nil, _runtime),
-    do: RunCoordinator.execute(preparation.prepared_run, authority)
+  defp execute_run(preparation, authority, nil, runtime),
+    do: RunCoordinator.execute(preparation.prepared_run, authority, runtime.live_status)
 
   defp execute_run(preparation, authority, execution, runtime),
     do:
@@ -236,7 +236,8 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
         preparation.prepared_run,
         authority,
         execution,
-        runtime.authorization_notifier
+        runtime.authorization_notifier,
+        runtime.live_status
       )
 
   defp operation_failure(

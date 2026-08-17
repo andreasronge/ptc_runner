@@ -481,6 +481,8 @@ defmodule PtcRunner.Lisp do
       signature_supplied?: signature_supplied?
     }
 
+    metadata = maybe_put_live_run(metadata, Keyword.get(opts, :telemetry_run))
+
     started_at = System.monotonic_time()
 
     :telemetry.execute(
@@ -792,7 +794,8 @@ defmodule PtcRunner.Lisp do
       transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
       prelude_export_mask: Keyword.get(opts, :prelude_export_mask),
       prelude_filtered_exports: Keyword.get(opts, :prelude_filtered_exports, []),
-      link: Keyword.get(opts, :link, false)
+      link: Keyword.get(opts, :link, false),
+      telemetry_run: Keyword.get(opts, :telemetry_run)
     }
   end
 
@@ -1142,7 +1145,8 @@ defmodule PtcRunner.Lisp do
         max_heap: opts.max_heap,
         prepare_context: &internalize_public_input(&1, :memory),
         eval_fn: fn _ast, prepared_memory -> {:ok, prepared_memory, %{}} end,
-        link: Map.get(opts, :link, false)
+        link: Map.get(opts, :link, false),
+        telemetry_run: Map.get(opts, :telemetry_run)
       ]
       |> put_setup_max_heap(opts.setup_max_heap)
 
@@ -1205,6 +1209,12 @@ defmodule PtcRunner.Lisp do
     context = PtcRunner.Lisp.Context.new(ctx, memory, normalized_tools, turn_history)
 
     parallel_budget = ParallelBudget.new(max_parallel_workers)
+
+    :telemetry.execute(
+      [:ptc_runner, :parallel, :budget],
+      %{capacity: max_parallel_workers},
+      maybe_put_live_run(%{budget: parallel_budget}, Map.get(opts, :telemetry_run))
+    )
 
     eval_opts =
       [
@@ -1272,7 +1282,8 @@ defmodule PtcRunner.Lisp do
             filter_context?
           ),
         eval_fn: eval_fn,
-        link: Map.get(opts, :link, false)
+        link: Map.get(opts, :link, false),
+        telemetry_run: Map.get(opts, :telemetry_run)
       ]
       |> put_failure_snapshot(turn_history_mode)
       |> put_setup_max_heap(setup_max_heap)
@@ -1281,6 +1292,11 @@ defmodule PtcRunner.Lisp do
     |> PtcRunner.Sandbox.execute(context, sandbox_opts)
     |> handle_execute_result(opts)
   end
+
+  defp maybe_put_live_run(metadata, live_run) when is_pid(live_run),
+    do: Map.put(metadata, :live_run, live_run)
+
+  defp maybe_put_live_run(metadata, _live_run), do: metadata
 
   defp unexpected_eval_error(:error, exception, _stacktrace) when is_exception(exception),
     do: {:runtime_error, Exception.message(exception)}

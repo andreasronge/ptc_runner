@@ -32,7 +32,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         "ptc init DIRECTORY",
         "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE",
         "ptc repl [OPTIONS] [SCRIPT|-]",
-        "ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS]",
+        "ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]",
         "ptc --version"
       ],
       options: [
@@ -356,7 +356,9 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
       ]
     },
     viewer: %{
-      usage: ["ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS]"],
+      usage: [
+        "ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]"
+      ],
       options: [
         %{
           key: :port,
@@ -370,6 +372,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--listen 127.0.0.1|0.0.0.0"],
           description: "bind address; 0.0.0.0 exposes the Viewer beyond this host"
         },
+        @env_file_option,
         @help_option
       ]
     }

@@ -23,6 +23,8 @@ The project document keeps three responsibilities separate:
 Paths resolve from the project document rather than from the caller's current
 directory, so the same command works from another directory. Command-line
 overrides remain invocation choices and do not rewrite the project.
+`ptc viewer PROJECT.json --env-file FILE` overrides `host.env_file` for work
+launched from the Live tab; no `.env` path is discovered implicitly.
 
 Commit the project and application configuration when they contain no secrets.
 Keep credential values and private run artifacts outside version control. New

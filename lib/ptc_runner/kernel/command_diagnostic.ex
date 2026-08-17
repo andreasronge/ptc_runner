@@ -361,7 +361,9 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %{phase: :execution, code: :runtime_limit_exceeded},
          %CommandSource{kind: :runtime}
        ),
-       do: RuntimeLimitDiagnostic.subordinate_evaluations_message?(message)
+       do:
+         RuntimeLimitDiagnostic.subordinate_evaluations_message?(message) or
+           RuntimeLimitDiagnostic.timeout_message?(message)
 
   defp valid_message_source?(
          message,

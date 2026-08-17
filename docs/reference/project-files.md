@@ -113,6 +113,7 @@ ptc run ptc-project.json --host-config deployment/staging-host.json
 ptc run ptc-project.json --trace-dir tmp/one-off-traces
 ptc repl --project ptc-project.json --env-file deployment/staging.env
 ptc repl --project ptc-project.json --mission review
+ptc viewer ptc-project.json --env-file deployment/staging.env
 ```
 
 Mission selection, input, and component-override switches remain
@@ -121,7 +122,9 @@ being duplicated as project defaults. A project environment file is loaded
 only when inert preparation proves that a selected mission provider or its
 dependency uses an environment-backed credential. Unrelated providers do not
 cause environment-backed credentials to be read. Provider-free runs, passive
-doctor, Viewer, and file- or literal-backed credentials do not read it.
+doctor, Viewer startup, and file- or literal-backed credentials do not read it.
+Viewer-started workflows and missions read the selected file lazily through
+their ordinary command preparation.
 
 Direct manifest invocation remains the low-level form for automation:
 
@@ -140,6 +143,12 @@ and correlated inspection directories are captured before the listener starts;
 HTTP requests select only a run ID and never a filesystem path. Browser opening
 is a bounded convenience, and additionally requires an attached terminal:
 missing or failing platform openers do not stop Viewer.
+
+Viewer-started workflows and missions use the project's `host.env_file` when
+one is declared. `ptc viewer ptc-project.json --env-file FILE` supplies an
+invocation-time override instead. PtcRunner never searches implicitly for
+`.env`; without either form, credentials must already be present in the Viewer
+process environment or use another trusted host binding.
 
 The listener binds `127.0.0.1`. The project document deliberately cannot change
 that: exposure is an invocation-time decision made with `--listen 0.0.0.0`,

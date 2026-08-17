@@ -34,6 +34,33 @@ defmodule PtcViewer.ServerTest do
              PtcViewer.start(port: 0, repl_adapter: String, repl_config: %{}, open: false)
   end
 
+  test "an unusable project adapter fails startup closed" do
+    assert {:error, :invalid_viewer_config} =
+             PtcViewer.start(port: 0, project_adapter: "docs/ptc.json", open: false)
+
+    assert {:error, :invalid_viewer_config} =
+             PtcViewer.start(port: 0, project_adapter: fn _argument -> %{} end, open: false)
+
+    # A module is accepted only when it actually exports describe/0.
+    assert {:error, :invalid_viewer_config} =
+             PtcViewer.start(port: 0, project_adapter: String, open: false)
+  end
+
+  test "a live reporter token must have enough entropy" do
+    assert {:error, :invalid_viewer_config} =
+             PtcViewer.start(port: 0, live_token: "too-short", open: false)
+
+    assert {:ok, viewer} =
+             PtcViewer.start(port: 0, live_token: String.duplicate("x", 32), open: false)
+
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
+  test "a live trace refresh callback must accept one run id" do
+    assert {:error, :invalid_viewer_config} =
+             PtcViewer.start(port: 0, live_trace_refresh: fn -> :ok end, open: false)
+  end
+
   test "a pre-pinned inspection source is retained without invoking path pinning" do
     source = {:inspection_snapshot, make_ref()}
 
