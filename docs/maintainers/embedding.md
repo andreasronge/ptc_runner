@@ -63,6 +63,41 @@ modules:
 - `PtcRunner.Kernel.EventSink`
 - `PtcRunner.Kernel.RunConfig`
 - `PtcRunner.Kernel`
+- `PtcRunner.Kernel.ServingTemplate`
+- `PtcRunner.Kernel.CommandOutcome`
+- `PtcRunner.Kernel.CommandRunOutcome`
+
+## Serve one compiled application
+
+`PtcRunner.Kernel.ServingTemplate` compiles an application once and executes
+repeated calls without recompilation. Acquire the package with
+`PtcRunner.Kernel.ApplicationPackage.package_memory/3` or
+`package_directory/2` so a missing manifest input cannot fail compilation.
+Both input and result contracts are required. The default `effects: :read_only`
+policy refuses any local public export that is not provably `:read`. A call
+supplies only the input value; the frozen policy includes the input authority
+class. The public result is `PtcRunner.Kernel.CommandOutcome`.
+
+This slice is provider-free. Applications that declare providers are refused
+until `PtcRunner.Kernel.HostRuntime` exists.
+
+```elixir
+alias PtcRunner.Kernel.ApplicationPackage
+alias PtcRunner.Kernel.CommandOutcome
+alias PtcRunner.Kernel.ServingTemplate
+
+documents = %{
+  "app.json" => File.read!("app.json"),
+  "workflow.clj" => File.read!("workflow.clj"),
+  "input.schema.json" => File.read!("input.schema.json"),
+  "result.schema.json" => File.read!("result.schema.json")
+}
+
+{:ok, package} = ApplicationPackage.package_memory("app.json", documents)
+{:ok, template} = ServingTemplate.compile(package)
+{:ok, outcome} = ServingTemplate.call(template, %{"n" => 21})
+CommandOutcome.to_map(outcome)
+```
 
 ## Resolve shipped libraries
 

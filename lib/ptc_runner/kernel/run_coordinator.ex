@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   remains a separate caller operation.
   """
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.BundleCompiler
   alias PtcRunner.Kernel.CommandDiagnostic
@@ -25,6 +26,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionSessionOwner
+  alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LocalPreflight
   alias PtcRunner.Kernel.MissionReplTarget
@@ -47,16 +49,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
     with true <- RunRequest.valid?(request),
          true <- InstallationCatalog.valid?(catalog),
          true <- catalog.installed_limits == request.package.installed_limits,
-         compile_deadline = System.monotonic_time(:millisecond) + @mission_compile_timeout_ms,
-         {:ok, workflow_bundle} <-
-           compile_required(request.package.workflow_components, compile_deadline),
-         {:ok, mission_bundles} <-
-           compile_named_missions(
-             request.package.missions,
-             compile_deadline,
-             external_size(workflow_bundle)
-           ),
-         :ok <- validate_entry(workflow_bundle, request.package.entry),
+         {:ok, workflow_bundle, mission_bundles} <- compile_application(request.package),
          {:ok, declarations} <-
            prepare_providers(request, workflow_bundle, mission_bundles, catalog),
          {:ok, derived} <-
@@ -397,7 +390,29 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   defp span_opts(_span, _bytes), do: []
 
   @doc false
-  @spec validate_entry(PtcRunner.Kernel.FrozenBundle.t(), binary()) ::
+  @spec compile_application(ApplicationPackage.t()) ::
+          {:ok, FrozenBundle.t(), %{binary() => FrozenBundle.t() | nil}}
+          | {:error, CommandDiagnostic.t()}
+  def compile_application(%ApplicationPackage{} = package) do
+    compile_deadline = System.monotonic_time(:millisecond) + @mission_compile_timeout_ms
+
+    with {:ok, workflow_bundle} <-
+           compile_required(package.workflow_components, compile_deadline),
+         {:ok, mission_bundles} <-
+           compile_named_missions(
+             package.missions,
+             compile_deadline,
+             external_size(workflow_bundle)
+           ),
+         :ok <- validate_entry(workflow_bundle, package.entry) do
+      {:ok, workflow_bundle, mission_bundles}
+    end
+  end
+
+  def compile_application(_package), do: {:error, diagnostic(:internal, :internal_error)}
+
+  @doc false
+  @spec validate_entry(FrozenBundle.t(), binary()) ::
           :ok | {:error, CommandDiagnostic.t()}
   def validate_entry(workflow_bundle, entry) do
     if PreparedRun.entry_callable?(workflow_bundle, entry),

@@ -1,23 +1,58 @@
 defmodule PtcRunner.Kernel.ProviderPlan do
   @moduledoc false
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.EffectiveApplication
   alias PtcRunner.Kernel.ProviderDescriptor
+  alias PtcRunner.Kernel.RunRequest
+
+  @identity_keys [
+    :event_policy,
+    :input_authority,
+    :inspection_capture,
+    :package,
+    :result_projection
+  ]
 
   @spec derive(
-          PtcRunner.Kernel.RunRequest.t(),
+          RunRequest.t(),
           PtcRunner.Kernel.FrozenBundle.t(),
           %{binary() => PtcRunner.Kernel.FrozenBundle.t() | nil},
           [map()]
         ) :: {:ok, map()} | {:error, {:dependency_invalid | :data_policy_denied, map() | nil}}
-  def derive(request, workflow_bundle, mission_bundles, declarations) do
-    with :ok <- validate_dependencies(declarations),
+  def derive(%RunRequest{} = request, workflow_bundle, mission_bundles, declarations) do
+    derive_identity(identity(request), workflow_bundle, mission_bundles, declarations)
+  end
+
+  @doc false
+  @spec identity(RunRequest.t()) :: map()
+  def identity(%RunRequest{} = request) do
+    %{
+      package: request.package,
+      input_authority: request.input.authority,
+      inspection_capture: request.policy.inspection_capture,
+      result_projection: request.policy.result_projection,
+      event_policy: request.policy.event_policy
+    }
+  end
+
+  @doc false
+  @spec derive_identity(
+          map(),
+          PtcRunner.Kernel.FrozenBundle.t(),
+          %{binary() => PtcRunner.Kernel.FrozenBundle.t() | nil},
+          [map()]
+        ) :: {:ok, map()} | {:error, {:dependency_invalid | :data_policy_denied, map() | nil}}
+  def derive_identity(identity, workflow_bundle, mission_bundles, declarations)
+      when is_map(identity) and is_list(declarations) do
+    with true <- identity_valid?(identity),
+         :ok <- validate_dependencies(declarations),
          :ok <- validate_workflow_llm_defaults(declarations),
-         {:ok, policy} <- derive_policy(request, declarations),
+         {:ok, policy} <- derive_policy(identity, declarations),
          providers <- provider_projection(declarations),
          {:ok, effective} <-
-           EffectiveApplication.build(
-             request,
+           EffectiveApplication.build_identity(
+             effective_identity(identity),
              workflow_bundle,
              mission_bundles,
              providers,
@@ -32,7 +67,7 @@ defmodule PtcRunner.Kernel.ProviderPlan do
          effective_application_digest: effective.digest,
          post_selection_context:
            post_selection_context(
-             request,
+             identity,
              workflow_bundle,
              mission_bundles,
              effective.digest,
@@ -41,11 +76,17 @@ defmodule PtcRunner.Kernel.ProviderPlan do
              policy.effective_event_policy
            )
        }}
+    else
+      false -> {:error, {:dependency_invalid, nil}}
+      {:error, _reason} = error -> error
     end
   end
 
+  def derive_identity(_identity, _workflow_bundle, _mission_bundles, _declarations),
+    do: {:error, {:dependency_invalid, nil}}
+
   @doc false
-  @spec derive_policy(PtcRunner.Kernel.RunRequest.t(), [map()]) ::
+  @spec derive_policy(map() | RunRequest.t(), [map()]) ::
           {:ok,
            %{
              effective_data_class: :normal | :private_inspection,
@@ -53,17 +94,20 @@ defmodule PtcRunner.Kernel.ProviderPlan do
              effective_event_policy: :normal | :private
            }}
           | {:error, {:data_policy_denied, map()}}
-  def derive_policy(request, declarations) when is_list(declarations) do
-    effective_data_class = effective_data_class(request, declarations)
+  def derive_policy(%RunRequest{} = request, declarations) when is_list(declarations),
+    do: derive_policy(identity(request), declarations)
+
+  def derive_policy(identity, declarations) when is_map(identity) and is_list(declarations) do
+    effective_data_class = effective_data_class(identity, declarations)
 
     with :ok <- providers_accept(declarations, effective_data_class) do
-      effective_flow = effective_flow(request, effective_data_class)
+      effective_flow = effective_flow(identity, effective_data_class)
 
       {:ok,
        %{
          effective_data_class: effective_data_class,
          effective_flow: effective_flow,
-         effective_event_policy: effective_event_policy(request, effective_flow)
+         effective_event_policy: effective_event_policy(identity, effective_flow)
        }}
     end
   end
@@ -99,8 +143,22 @@ defmodule PtcRunner.Kernel.ProviderPlan do
       else: {:error, {:dependency_invalid, List.first(workflow_llms)}}
   end
 
-  defp effective_data_class(request, declarations) do
-    input_class = if request.input.authority == :private, do: :private_inspection, else: :normal
+  defp identity_valid?(identity) when is_map(identity) do
+    Enum.sort(Map.keys(identity)) == @identity_keys and
+      ApplicationPackage.valid?(identity.package) and
+      identity.input_authority in [:normal, :private] and
+      is_boolean(identity.inspection_capture) and
+      identity.result_projection in [:native, :json] and
+      identity.event_policy in [:normal, :private] and
+      identity.event_policy == identity.package.events.policy
+  end
+
+  defp effective_identity(identity) do
+    Map.take(identity, [:package, :input_authority, :inspection_capture, :result_projection])
+  end
+
+  defp effective_data_class(identity, declarations) do
+    input_class = if identity.input_authority == :private, do: :private_inspection, else: :normal
 
     Enum.reduce(declarations, input_class, fn declaration, current ->
       strictest_data_class(current, declaration.descriptor.data_class)
@@ -129,20 +187,20 @@ defmodule PtcRunner.Kernel.ProviderPlan do
     end)
   end
 
-  defp effective_flow(request, effective_data_class) do
-    if request.input.authority == :private or effective_data_class == :private_inspection,
+  defp effective_flow(identity, effective_data_class) do
+    if identity.input_authority == :private or effective_data_class == :private_inspection,
       do: :private,
       else: :normal
   end
 
-  defp effective_event_policy(request, effective_flow) do
-    if request.policy.event_policy == :private or effective_flow == :private,
+  defp effective_event_policy(identity, effective_flow) do
+    if identity.event_policy == :private or effective_flow == :private,
       do: :private,
       else: :normal
   end
 
   defp post_selection_context(
-         request,
+         identity,
          workflow_bundle,
          mission_bundles,
          effective_digest,
@@ -151,14 +209,14 @@ defmodule PtcRunner.Kernel.ProviderPlan do
          effective_event_policy
        ) do
     %{
-      application_content_digest: request.package.application_content_digest,
+      application_content_digest: identity.package.application_content_digest,
       effective_application_digest: effective_digest,
       bundle_hashes: %{
         workflow: workflow_bundle.hash,
         missions: Map.new(mission_bundles, fn {name, bundle} -> {name, bundle && bundle.hash} end)
       },
-      input_authority_class: request.input.authority,
-      limits: request.package.limits,
+      input_authority_class: identity.input_authority,
+      limits: identity.package.limits,
       effective_data_class: effective_data_class,
       effective_flow: effective_flow,
       effective_event_policy: effective_event_policy

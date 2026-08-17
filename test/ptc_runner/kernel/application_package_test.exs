@@ -94,6 +94,44 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
   end
 
   @tag :tmp_dir
+  test "package adapters skip input acquisition and match request packages", %{
+    tmp_dir: directory
+  } do
+    documents = fixture_documents()
+    manifest_path = write_documents(directory, documents)
+    missing_input = fixture_documents(input: %{"path" => "missing-input.json"})
+    missing_path = write_documents(Path.join(directory, "missing"), missing_input)
+
+    assert {:ok, request} =
+             ApplicationPackage.request_memory("app.json", documents, result_projection: :native)
+
+    assert {:ok, memory_package} = ApplicationPackage.package_memory("app.json", documents)
+    assert {:ok, directory_package} = ApplicationPackage.package_directory(manifest_path)
+
+    assert package_projection(memory_package) == package_projection(request.package)
+    assert package_projection(directory_package) == package_projection(request.package)
+
+    assert {:error, _reason} = ApplicationPackage.request_memory("app.json", missing_input)
+
+    assert {:error, _reason} =
+             ApplicationPackage.request_directory(missing_path, result_projection: :native)
+
+    assert {:ok, skipped_memory} = ApplicationPackage.package_memory("app.json", missing_input)
+    assert {:ok, skipped_directory} = ApplicationPackage.package_directory(missing_path)
+    assert ApplicationPackage.valid?(skipped_memory)
+    assert ApplicationPackage.valid?(skipped_directory)
+
+    assert {:error, :invalid_application_options} =
+             ApplicationPackage.package_memory("app.json", documents, input: "input.json")
+
+    assert {:error, :invalid_application_options} =
+             ApplicationPackage.package_memory("app.json", documents, input_authority: :private)
+
+    assert {:error, :invalid_application_options} =
+             ApplicationPackage.package_directory(manifest_path, input: "input.json")
+  end
+
+  @tag :tmp_dir
   test "directory manifest filenames are transport paths, not portable logical names", %{
     tmp_dir: directory
   } do
@@ -356,6 +394,14 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
                result_projecton: :json
              )
 
+    assert {:error, :invalid_application_options} =
+             ApplicationPackage.package_directory(missing, result_projecton: :json)
+
+    assert {:error, :invalid_application_options} =
+             ApplicationPackage.package_memory("app.json", invalid_memory,
+               result_projecton: :json
+             )
+
     for limits <- invalid_limits do
       for adapter <- [
             fn ->
@@ -371,6 +417,14 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
             end,
             fn ->
               ApplicationPackage.request_memory("app.json", invalid_memory,
+                installed_limits: limits
+              )
+            end,
+            fn ->
+              ApplicationPackage.package_directory(missing, installed_limits: limits)
+            end,
+            fn ->
+              ApplicationPackage.package_memory("app.json", invalid_memory,
                 installed_limits: limits
               )
             end

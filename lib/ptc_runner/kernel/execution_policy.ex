@@ -56,6 +56,29 @@ defmodule PtcRunner.Kernel.ExecutionPolicy do
 
   def new(_opts), do: {:error, :invalid_execution_policy}
 
+  @spec from_package(%{events: map()}, keyword()) ::
+          {:ok, t()} | {:error, :invalid_execution_policy | :event_identity_conflict}
+  @doc """
+  Seals one policy from application event ownership and compile-time options.
+
+  Reads `:event_identity`, `:inspection_capture`, and `:result_projection`.
+  `:event_identity` fixes both IDs and is rejected when the application
+  already owns either identity. `:result_projection` defaults to `:native`.
+  """
+  def from_package(%{events: events}, opts) when is_list(opts) do
+    with {:ok, run_id, trace_id} <- event_identity(events, opts) do
+      new(
+        event_policy: events.policy,
+        run_id: run_id,
+        trace_id: trace_id,
+        inspection_capture: Keyword.get(opts, :inspection_capture, false),
+        result_projection: Keyword.get(opts, :result_projection, :native)
+      )
+    end
+  end
+
+  def from_package(_package, _opts), do: {:error, :invalid_execution_policy}
+
   @spec valid?(term()) :: boolean()
   @doc "Checks the policy's in-VM construction attestation."
   def valid?(%__MODULE__{attestation: attestation} = policy),
@@ -79,6 +102,19 @@ defmodule PtcRunner.Kernel.ExecutionPolicy do
     do: String.valid?(value)
 
   defp optional_id?(_value), do: false
+
+  defp event_identity(events, opts) do
+    case Keyword.fetch(opts, :event_identity) do
+      :error ->
+        {:ok, events.run_id, events.trace_id}
+
+      {:ok, identity} when is_nil(events.run_id) and is_nil(events.trace_id) ->
+        {:ok, identity, identity}
+
+      {:ok, _identity} ->
+        {:error, :event_identity_conflict}
+    end
+  end
 
   defp payload(policy) do
     {

@@ -1,5 +1,12 @@
 defmodule PtcRunner.Kernel.CommandRunOutcome do
-  @moduledoc false
+  @moduledoc """
+  Converts a sealed execution outcome into the public command DTO.
+
+  Hosts and the CLI share this seam: `settle/6` opens
+  `PtcRunner.Kernel.ExecutionOutcome` under a publication authority and
+  projects a `PtcRunner.Kernel.CommandOutcome`. Do not add a second public
+  projection.
+  """
 
   alias PtcRunner.Kernel.ArtifactPublisher
   alias PtcRunner.Kernel.CommandDiagnostic
@@ -16,6 +23,12 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.ValueContractDiagnostic
 
+  @doc """
+  Opens one execution outcome and projects the public command DTO.
+
+  `provider_activity` is the sealed boolean already decided for the run, not
+  a reconstruction from process state.
+  """
   @spec settle(
           term(),
           PublicationAuthority.t(),
@@ -66,6 +79,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
       )
   end
 
+  @doc false
   @spec project(map(), {:ok, map()} | {:error, map()}, binary(), boolean()) ::
           {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
   def project(evidence, settlement, run_ref, provider_activity)
@@ -123,6 +137,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
         :incomplete
       )
 
+  @doc false
   @spec operation_failure(
           binary(),
           CommandDiagnostic.t() | term(),

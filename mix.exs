@@ -354,6 +354,8 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel,
           PtcRunner.Kernel.ApplicationPackage,
           PtcRunner.Kernel.Capability,
+          PtcRunner.Kernel.CommandOutcome,
+          PtcRunner.Kernel.CommandRunOutcome,
           PtcRunner.Kernel.Component,
           PtcRunner.Kernel.Error,
           PtcRunner.Kernel.EventSink,
@@ -378,6 +380,7 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.RunConfig,
           PtcRunner.Kernel.RunRequest,
           PtcRunner.Kernel.RunAnalysis,
+          PtcRunner.Kernel.ServingTemplate,
           PtcRunner.Kernel.TraceLog,
           PtcRunner.Kernel.WorkflowEnvironment
         ],
