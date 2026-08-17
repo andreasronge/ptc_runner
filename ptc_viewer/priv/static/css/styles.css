@@ -2103,6 +2103,17 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
 }
 .live-empty-hint { font-size: 11px; }
 
+/* --- runs section header --- */
+.live-runs-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin: 4px 2px 10px;
+}
+.live-clear-ended {
+  background: none; border: 1px solid var(--border); border-radius: 5px;
+  color: var(--muted); font-size: 11px; padding: 3px 10px; cursor: pointer;
+}
+.live-clear-ended:hover { color: var(--fg); border-color: var(--muted); }
+
 /* --- run card --- */
 .live-runs { display: flex; flex-direction: column; gap: 18px; }
 
@@ -2131,6 +2142,20 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px; color: var(--muted);
 }
 .live-elapsed { font-size: 13px; color: var(--fg); font-variant-numeric: tabular-nums; }
+
+/* Collapsed ended runs keep only the head row: badge, label, elapsed,
+   tool-call count, run id. Running cards never collapse. */
+.live-card.collapsed { padding: 10px 20px; }
+.live-card.collapsed .live-card-head { margin-bottom: 0; flex-wrap: nowrap; }
+.live-card.collapsed > *:not(.live-card-head) { display: none; }
+
+.live-card-toggle, .live-card-close {
+  background: none; border: none; padding: 0 2px; cursor: pointer;
+  color: var(--muted); font-size: 12px; line-height: 1;
+}
+.live-card-toggle:hover, .live-card-close:hover { color: var(--fg); }
+.live-card-toggle[hidden], .live-card-summary[hidden] { display: none; }
+.live-card-summary { font-size: 11px; color: var(--muted); white-space: nowrap; }
 
 .live-badge {
   display: inline-flex; align-items: center; gap: 6px;

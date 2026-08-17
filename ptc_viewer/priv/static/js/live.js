@@ -13,14 +13,20 @@ const WORD_BYTES = 8;
 
 export function createLiveController({ onLiveCount } = {}) {
   const runsEl = document.getElementById('live-runs');
+  const runsHeadEl = document.getElementById('live-runs-head');
+  const clearEndedEl = document.getElementById('live-clear-ended');
   const emptyEl = document.getElementById('live-empty');
   const connEl = document.getElementById('live-connection');
   const launchEl = document.getElementById('live-launch');
-  const cards = new Map(); // run_id -> { frame, el, fields }
+  const cards = new Map(); // run_id -> { frame, el, fields, ended, collapsed }
 
   let source = null;
+  // Only the most recently ended run stays expanded; the one before it folds
+  // away so a finished run cannot keep dominating the page.
+  let newestEndedId = null;
 
   connect();
+  clearEndedEl.addEventListener('click', () => clearEnded());
   initLaunch(launchEl).catch(() => {});
 
   function connect() {
@@ -47,18 +53,65 @@ export function createLiveController({ onLiveCount } = {}) {
     let card = cards.get(frame.run_id);
     if (!card) {
       card = createCard(frame.run_id);
+      card.fields.close.addEventListener('click', () => removeRun(frame.run_id));
+      card.fields.toggle.addEventListener('click', () => setCollapsed(card, !card.collapsed));
       cards.set(frame.run_id, card);
       runsEl.prepend(card.el);
     }
     if (card.frame && typeof frame.seq === 'number' && frame.seq < card.frame.seq) return;
     card.frame = frame;
     updateCard(card, frame);
+    trackLifecycle(card, frame);
     refreshChrome();
   }
 
+  // A run that just ended takes the expanded slot from the previous one; a run
+  // still going is never collapsible.
+  function trackLifecycle(card, frame) {
+    const wasEnded = card.ended;
+    card.ended = frame.phase !== 'running';
+
+    if (card.ended && !wasEnded) {
+      const previous = newestEndedId && newestEndedId !== frame.run_id && cards.get(newestEndedId);
+      if (previous) setCollapsed(previous, true);
+      newestEndedId = frame.run_id;
+    }
+
+    setCollapsed(card, card.ended ? card.collapsed : false);
+  }
+
+  function setCollapsed(card, collapsed) {
+    card.collapsed = Boolean(collapsed) && card.ended;
+    card.el.classList.toggle('collapsed', card.collapsed);
+
+    const { toggle, summary } = card.fields;
+    toggle.hidden = !card.ended;
+    toggle.textContent = card.collapsed ? '▸' : '▾';
+    toggle.setAttribute('aria-expanded', String(!card.collapsed));
+    toggle.setAttribute('aria-label', card.collapsed ? 'Expand run' : 'Collapse run');
+    summary.hidden = !card.collapsed;
+  }
+
+  // Optimistic: the card goes now, the store forgets it so a reload agrees.
+  function removeRun(runId) {
+    const card = cards.get(runId);
+    if (!card) return;
+    card.el.remove();
+    cards.delete(runId);
+    if (newestEndedId === runId) newestEndedId = null;
+    refreshChrome();
+    fetch(`/api/live/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' }).catch(() => {});
+  }
+
+  function clearEnded() {
+    for (const [runId, card] of [...cards]) if (card.ended) removeRun(runId);
+  }
+
   function refreshChrome() {
-    const liveCount = [...cards.values()].filter(c => c.frame?.phase === 'running').length;
+    const values = [...cards.values()];
+    const liveCount = values.filter(c => c.frame?.phase === 'running').length;
     emptyEl.hidden = cards.size > 0;
+    runsHeadEl.hidden = !values.some(c => c.ended);
     onLiveCount?.(liveCount);
   }
 
@@ -190,12 +243,15 @@ function createCard(runId) {
   el.innerHTML = `
     <header class="live-card-head">
       <div class="live-card-title">
+        <button type="button" class="live-card-toggle" data-role="toggle" aria-expanded="true" aria-label="Collapse run" hidden>▾</button>
         <span class="live-badge" data-role="badge"><span class="live-badge-dot"></span><span data-role="badge-text">RUNNING</span></span>
         <h2 data-role="label"></h2>
       </div>
       <div class="live-card-meta">
+        <span class="live-card-summary" data-role="summary" hidden></span>
         <span class="live-run-id" data-role="run-id"></span>
         <span class="live-elapsed" data-role="elapsed"></span>
+        <button type="button" class="live-card-close" data-role="close" aria-label="Close run" title="Close run">✕</button>
       </div>
     </header>
 
@@ -230,7 +286,7 @@ function createCard(runId) {
   const fields = {};
   for (const node of el.querySelectorAll('[data-role]')) fields[node.dataset.role] = node;
   fields['run-id'].textContent = runId;
-  return { frame: null, el, fields };
+  return { frame: null, el, fields, ended: false, collapsed: false };
 }
 
 /* ---------- per-frame update ---------- */
@@ -247,6 +303,7 @@ function updateCard(card, frame) {
 
   const calls = totalCalls(usage.capability_calls);
   f['kpi-calls'].textContent = String(calls);
+  f.summary.textContent = `${calls} tool ${calls === 1 ? 'call' : 'calls'}`;
   f['kpi-evals'].textContent = usage.subordinate_evaluations ?? '–';
   f['kpi-left'].textContent = frame.remaining_ms == null ? '–' : fmtSeconds(frame.remaining_ms);
   updateWorkers(f, frame.parallel);

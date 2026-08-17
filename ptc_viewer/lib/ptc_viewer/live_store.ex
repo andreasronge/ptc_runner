@@ -46,6 +46,15 @@ defmodule PtcViewer.LiveStore do
   def snapshot(store), do: GenServer.call(store, :snapshot)
 
   @doc """
+  Forgets `run_id`. Closing a card is a viewer-side decision, so a run that is
+  still posting frames can be deleted too — it simply reappears on its next
+  frame, which is the honest behaviour for a self-contained frame stream.
+  """
+  @spec delete_run(pid(), binary()) :: :ok | {:error, :unknown_run}
+  def delete_run(store, run_id) when is_binary(run_id),
+    do: GenServer.call(store, {:delete, run_id})
+
+  @doc """
   Subscribes `pid` and returns the encoded snapshot atomically, so no frame
   can fall between the snapshot and the first live delivery. Subscribers
   receive `{:live_frame, json}` messages and are auto-removed on DOWN.
@@ -102,6 +111,14 @@ defmodule PtcViewer.LiveStore do
 
   def handle_call(:snapshot, _from, state),
     do: {:reply, Enum.map(ordered(state.runs), & &1.frame), state}
+
+  def handle_call({:delete, run_id}, _from, state) do
+    if Map.has_key?(state.runs, run_id) do
+      {:reply, :ok, %{state | runs: Map.delete(state.runs, run_id)}}
+    else
+      {:reply, {:error, :unknown_run}, state}
+    end
+  end
 
   def handle_call({:subscribe, pid}, _from, state) do
     ref = Process.monitor(pid)

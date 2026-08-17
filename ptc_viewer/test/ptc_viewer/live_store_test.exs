@@ -49,6 +49,24 @@ defmodule PtcViewer.LiveStoreTest do
     assert "run-live" in run_ids
   end
 
+  test "delete_run forgets a run and reports an unknown one", %{store: store} do
+    :ok = LiveStore.put_frame(store, "run-a", %{"seq" => 0, "phase" => "ok"})
+    :ok = LiveStore.put_frame(store, "run-b", %{"seq" => 0, "phase" => "running"})
+
+    assert :ok = LiveStore.delete_run(store, "run-a")
+    assert [%{"run_id" => "run-b"}] = LiveStore.snapshot(store)
+
+    assert {:error, :unknown_run} = LiveStore.delete_run(store, "run-a")
+  end
+
+  test "a deleted run reappears when it posts another frame", %{store: store} do
+    :ok = LiveStore.put_frame(store, "run-a", %{"seq" => 0, "phase" => "running"})
+    :ok = LiveStore.delete_run(store, "run-a")
+
+    :ok = LiveStore.put_frame(store, "run-a", %{"seq" => 1, "phase" => "ok"})
+    assert [%{"run_id" => "run-a", "seq" => 1}] = LiveStore.snapshot(store)
+  end
+
   test "rejects a frame that cannot encode", %{store: store} do
     assert {:error, :invalid_frame} = LiveStore.put_frame(store, "run-a", %{"pid" => self()})
     assert LiveStore.snapshot(store) == []

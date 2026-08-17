@@ -102,10 +102,11 @@ assert.equal(templatePayloadMatches(current, { ...envelope('server-b', 2, 7), se
 
 assert.match(continuationExplanation('committed_with_history'), /\*1/);
 assert.match(continuationExplanation('preserved'), /preserved/);
-assert.equal(nextTabName('runs', 'ArrowLeft'), 'repl');
-assert.equal(nextTabName('repl', 'ArrowRight'), 'runs');
+assert.equal(nextTabName('runs', 'ArrowLeft'), 'live');
+assert.equal(nextTabName('repl', 'ArrowRight'), 'live');
+assert.equal(nextTabName('live', 'ArrowRight'), 'runs');
 assert.equal(nextTabName('repl', 'Home'), 'runs');
-assert.equal(nextTabName('runs', 'End'), 'repl');
+assert.equal(nextTabName('runs', 'End'), 'live');
 
 const fakeDialog = { returnValue: 'confirm', opened: false, showModal() { this.opened = true; } };
 openResetDialog(fakeDialog);

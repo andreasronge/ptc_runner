@@ -137,6 +137,16 @@ defmodule PtcViewer.Router do
     end
   end
 
+  delete "/api/live/runs/:run_id" do
+    with {:ok, store} <- live_store(conn),
+         :ok <- LiveStore.delete_run(store, run_id) do
+      send_live_json(conn, 200, %{"status" => "ok"})
+    else
+      {:error, :live_disabled} -> send_live_json(conn, 503, %{"error" => "live_disabled"})
+      {:error, :unknown_run} -> send_live_json(conn, 404, %{"error" => "unknown_run"})
+    end
+  end
+
   get "/api/live/stream" do
     case live_store(conn) do
       {:ok, store} ->

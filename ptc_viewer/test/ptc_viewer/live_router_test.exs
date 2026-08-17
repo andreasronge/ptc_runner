@@ -32,6 +32,30 @@ defmodule PtcViewer.LiveRouterTest do
              Jason.decode!(get_conn.resp_body)
   end
 
+  test "deleting a run removes it from the snapshot", %{opts: opts, store: store} do
+    :ok = LiveStore.put_frame(store, "run-abc", %{"seq" => 0, "phase" => "ok"})
+
+    delete_conn = conn(:delete, "/api/live/runs/run-abc") |> call_router(opts)
+    assert delete_conn.status == 200
+    assert Jason.decode!(delete_conn.resp_body) == %{"status" => "ok"}
+
+    get_conn = conn(:get, "/api/live/runs") |> call_router(opts)
+    assert %{"runs" => []} = Jason.decode!(get_conn.resp_body)
+  end
+
+  test "deleting an unknown run answers 404 JSON", %{opts: opts} do
+    delete_conn = conn(:delete, "/api/live/runs/nope") |> call_router(opts)
+
+    assert delete_conn.status == 404
+    assert Jason.decode!(delete_conn.resp_body) == %{"error" => "unknown_run"}
+  end
+
+  test "deleting a run answers 503 when no store is configured", %{tmp_dir: trace_dir} do
+    opts = [trace_dir: trace_dir, kernel_trace_adapter: nil]
+
+    assert (conn(:delete, "/api/live/runs/run-abc") |> call_router(opts)).status == 503
+  end
+
   test "rejects a non-JSON frame body", %{opts: opts} do
     post_conn =
       conn(:post, "/api/live/runs/run-abc", "not json")
