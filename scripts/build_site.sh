@@ -61,6 +61,14 @@ output_parent="$(cd "$(dirname "$output_dir")" 2> /dev/null && pwd -P)" || {
 }
 output_dir="$output_parent/$(basename "$output_dir")"
 
+# `-L` is tested before `-e`, which follows the link and so reports false for a
+# dangling one -- letting the guard fall through and delete a symlink this
+# script never created.
+if [ -L "$output_dir" ]; then
+  echo "refusing to delete '$output_dir': it is a symlink" >&2
+  exit 64
+fi
+
 if [ -e "$output_dir" ]; then
   [ -d "$output_dir" ] || {
     echo "'$output_dir' exists and is not a directory" >&2
@@ -94,32 +102,44 @@ shopt -u nullglob
 
 published=0
 for schema in "${schemas[@]}"; do
-  name="$(basename "$schema")"
-  expected="$site_origin/schemas/$name"
-  # `$id` below is the JSON Schema key, not a shell variable, so the single
-  # quotes that stop the shell touching it are deliberate.
-  # shellcheck disable=SC2016
-  declared="$(python3 -c '
-import json, sys
-
-try:
-    document = json.load(open(sys.argv[1]))
-except ValueError as error:
-    sys.stderr.write("%s: not valid JSON (%s)\n" % (sys.argv[1], error))
-    sys.exit(65)
-
-print(document.get("$id", ""))
-' "$schema")"
-
-  if [ "$declared" != "$expected" ]; then
-    echo "$name declares \$id '${declared:-<none>}' but publishes to '$expected'" >&2
-    echo 'Reconcile the schema generator with the site origin before deploying.' >&2
-    exit 65
-  fi
-
-  cp "$schema" "$output_dir/schemas/$name"
+  cp "$schema" "$output_dir/schemas/$(basename "$schema")"
   published=$((published + 1))
 done
+
+# Identity is checked against the assembled artifact, not against the sources
+# copied into it. Validating only `priv/schemas/` would leave any schema that
+# arrived some other way -- a stray `site/**/*.schema.json`, say -- published
+# unchecked while this guard still claimed to cover the site.
+python3 - "$output_dir" "$site_origin" <<'IDENTITY' || exit 65
+import json
+import pathlib
+import sys
+
+output_dir = pathlib.Path(sys.argv[1])
+site_origin = sys.argv[2]
+failed = False
+
+for schema in sorted(output_dir.rglob("*.schema.json")):
+    served_at = "%s/%s" % (site_origin, schema.relative_to(output_dir).as_posix())
+
+    try:
+        declared = json.loads(schema.read_text(encoding="utf-8")).get("$id", "")
+    except ValueError as error:
+        sys.stderr.write("%s: not valid JSON (%s)\n" % (schema.name, error))
+        failed = True
+        continue
+
+    if declared != served_at:
+        sys.stderr.write(
+            "%s declares $id '%s' but publishes to '%s'\n"
+            % (schema.name, declared or "<none>", served_at)
+        )
+        failed = True
+
+if failed:
+    sys.stderr.write("Reconcile the schema generator with the site origin before deploying.\n")
+    sys.exit(65)
+IDENTITY
 
 # Every root-relative reference the pages write by hand -- schema URLs, the
 # stylesheet, images. A dangling one is invisible until a reader hits it, so it
@@ -166,6 +186,11 @@ for page in sorted(root.rglob("*.html")):
     references |= parser.found
 
 for reference in sorted(references):
+    # Browsers strip leading and trailing ASCII whitespace from a URL attribute
+    # before resolving it, so `href=" /missing"` is a root-relative request that
+    # an unstripped comparison would classify as external and never check.
+    reference = reference.strip("\t\n\f\r ")
+
     if not reference.startswith("/"):
         continue
 

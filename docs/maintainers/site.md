@@ -142,8 +142,13 @@ that server and under Pages, but not through `file://`.
    unreachable in browsers until the certificate exists. GitHub provisions it
    automatically a few minutes after DNS resolves.
 
-   `site/CNAME` is published with the site so the custom domain survives a
-   redeploy; without it, a deployment resets the domain setting.
+   The Pages settings are the only place the domain is stored. This repository
+   deliberately ships no `CNAME` file: a custom Actions workflow is the
+   publishing path here, and for that path GitHub's documentation states that
+   "no `CNAME` file is created, and any existing `CNAME` file is ignored and is
+   not required". One was committed here at first, on the belief that it kept
+   the domain across redeploys. It does not, and an inert file that looks
+   load-bearing is worse than no file.
 
 ## Why GitHub Pages
 
