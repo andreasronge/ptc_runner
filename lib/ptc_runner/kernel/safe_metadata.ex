@@ -39,7 +39,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     unknown-action
   )
   @llm_provider_failures ~w(
-    authentication-failed payment-required rate-limited denied not-found timeout
+    authentication-failed payment-required rate-limited tool-calling-unsupported denied not-found timeout
     invalid-request unavailable transport-error internal domain-error invalid-result
   )
 
@@ -138,6 +138,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
              :authentication_failed,
              :payment_required,
              :rate_limited,
+             :tool_calling_unsupported,
              :denied,
              :not_found,
              :timeout,
@@ -212,6 +213,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   defp provider_failure_atom("authentication-failed"), do: :authentication_failed
   defp provider_failure_atom("payment-required"), do: :payment_required
   defp provider_failure_atom("rate-limited"), do: :rate_limited
+  defp provider_failure_atom("tool-calling-unsupported"), do: :tool_calling_unsupported
   defp provider_failure_atom("denied"), do: :denied
   defp provider_failure_atom("not-found"), do: :not_found
   defp provider_failure_atom("timeout"), do: :timeout

@@ -140,7 +140,7 @@ if Code.ensure_loaded?(ReqLLM) do
 
       model
       |> generate_with_tools(messages, tools, request_opts(req))
-      |> normalize_call_result()
+      |> normalize_call_result(:tools)
     end
 
     def call(model, req) do
@@ -591,10 +591,22 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
-    defp normalize_call_result({:error, reason}), do: provider_failure(reason)
-    defp normalize_call_result(result), do: result
+    defp normalize_call_result(result, mode \\ :ordinary)
 
-    defp provider_failure(reason), do: {:error, normalize_provider_error(reason)}
+    defp normalize_call_result({:error, reason}, mode), do: provider_failure(reason, mode)
+    defp normalize_call_result(result, _mode), do: result
+
+    defp provider_failure(reason), do: provider_failure(reason, :ordinary)
+    defp provider_failure(reason, mode), do: {:error, normalize_provider_error(reason, mode)}
+
+    defp normalize_provider_error(reason, :tools) do
+      case tool_calling_unsupported_details(reason) do
+        {:ok, details} -> ProviderError.new(:tool_calling_unsupported, details)
+        :error -> normalize_provider_error(reason)
+      end
+    end
+
+    defp normalize_provider_error(reason, _mode), do: normalize_provider_error(reason)
 
     defp normalize_provider_error(%ProviderError{} = error), do: error
 
@@ -651,7 +663,7 @@ if Code.ensure_loaded?(ReqLLM) do
       do: ProviderError.new(:invalid_request, "LLM provider does not support structured output")
 
     defp normalize_provider_error(:tool_calling_not_supported),
-      do: ProviderError.new(:invalid_request, "LLM provider does not support tool calling")
+      do: ProviderError.new(:invalid_request, "LLM adapter route does not support tool calling")
 
     defp normalize_provider_error(_reason),
       do: ProviderError.new(:unavailable, "LLM provider unavailable", retryable?: true)
@@ -689,6 +701,42 @@ if Code.ensure_loaded?(ReqLLM) do
     defp provider_message(%{"error" => message}) when is_binary(message), do: message
     defp provider_message(%{"message" => message}) when is_binary(message), do: message
     defp provider_message(_body), do: nil
+
+    defp tool_calling_unsupported_details(%ReqLLM.Error.API.Request{
+           status: 404,
+           reason: reason
+         })
+         when is_binary(reason),
+         do: known_tool_calling_rejection(reason, http_error_details(404, reason))
+
+    defp tool_calling_unsupported_details(%ReqLLM.Error.API.Response{
+           status: 404,
+           reason: reason
+         })
+         when is_binary(reason),
+         do: known_tool_calling_rejection(reason, http_error_details(404, reason))
+
+    defp tool_calling_unsupported_details(%{status: 404, body: body}) do
+      case provider_message(body) do
+        message when is_binary(message) ->
+          known_tool_calling_rejection(message, http_error_details(404, message))
+
+        _missing ->
+          :error
+      end
+    end
+
+    defp tool_calling_unsupported_details(_reason), do: :error
+
+    defp known_tool_calling_rejection(message, details) do
+      if message
+         |> String.downcase()
+         |> String.contains?("no endpoints found that support tool use") do
+        {:ok, details}
+      else
+        :error
+      end
+    end
 
     defp safe_error_details(details, fallback) when is_binary(details) do
       if String.valid?(details) and details != "", do: details, else: fallback

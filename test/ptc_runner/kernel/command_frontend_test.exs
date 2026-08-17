@@ -62,6 +62,34 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     refute_received :unexpected_repl
   end
 
+  test "missing switch values and fixed positional arity render declaration-owned guidance" do
+    cases = [
+      {[
+         "run",
+         "ptc.json",
+         "--envelope"
+       ], :missing_switch_value, "; --envelope requires a value"},
+      {[
+         "run",
+         "ptc.json",
+         "--output"
+       ], :missing_switch_value, "; --output requires a value"},
+      {["run"], :positional_arity, "; usage: ptc run MANIFEST.json|PROJECT.json [OPTIONS]"},
+      {[
+         "run",
+         "ptc.json",
+         "extra.json"
+       ], :positional_arity, "; usage: ptc run MANIFEST.json|PROJECT.json [OPTIONS]"}
+    ]
+
+    for {argv, kind, guidance} <- cases do
+      assert {:error, entry} = CommandEntry.open_with_ref(argv, :standalone, @run_ref)
+      assert entry.rejection.code == :invalid_arguments
+      assert entry.rejection.kind == kind
+      assert CommandRenderer.rejection(@run_ref, entry.rejection) =~ guidance
+    end
+  end
+
   @tag :tmp_dir
   test "transcript startup and internal failures retain transcript diagnostics", %{tmp_dir: dir} do
     argv = [

@@ -165,6 +165,12 @@ Direct Anthropic selectors, Anthropic models through OpenRouter, and Claude
 models on Bedrock support the adapter's prompt-cache policy when the
 installation sets `"cache": true`.
 
+Agent loops and other requests that give the model callable tools require a
+model endpoint with tool-calling support. A model may work for an ordinary
+completion while refusing that tool-bearing request; the run then reports
+`llm_tool_calling_unsupported` rather than claiming the configured model is
+missing.
+
 The manifest selects only `deepseek`; it cannot change any field above. When
 the adapter attests that the resolved model is safe public identity, provider
 snapshots and model-grouped usage include it. Endpoint-bearing or otherwise

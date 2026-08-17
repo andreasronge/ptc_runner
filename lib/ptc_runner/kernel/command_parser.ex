@@ -302,6 +302,10 @@ defmodule PtcRunner.Kernel.CommandParser do
     end
   end
 
+  defp validate_command(command, _positional, _options, _ordered, _frontend_options, _frontend)
+       when command in [:init, :validate, :run, :viewer],
+       do: {:error, CommandRejection.positional_arity(command)}
+
   defp validate_command(command, _positional, _options, _ordered, _frontend_options, _frontend),
     do: reject(command, :invalid_arguments)
 
@@ -495,9 +499,17 @@ defmodule PtcRunner.Kernel.CommandParser do
   end
 
   defp reject_unknown_or_generic(command, invalid, accepted, frontend) do
-    if Enum.any?(invalid, fn {raw, _value} -> raw not in accepted end),
-      do: {:error, CommandRejection.unknown_switch(command, frontend)},
-      else: reject(command, :invalid_arguments)
+    cond do
+      Enum.any?(invalid, fn {raw, _value} -> raw not in accepted end) ->
+        {:error, CommandRejection.unknown_switch(command, frontend)}
+
+      missing = Enum.find(invalid, fn {_raw, value} -> is_nil(value) end) ->
+        {raw, nil} = missing
+        {:error, CommandRejection.missing_switch_value(command, raw, frontend)}
+
+      true ->
+        reject(command, :invalid_arguments)
+    end
   end
 
   defp reject_closed_command(command, arguments, frontend) do
