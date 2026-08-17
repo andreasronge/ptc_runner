@@ -19,7 +19,7 @@ ptc run hello-ptc/ptc-project.json
 ```
 
 ```json
-{}
+{"greeting":"hello world"}
 ```
 
 `init` creates an application, a project document with local artifact settings,

@@ -23,7 +23,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
   (ns main)
 
   (defn run [input]
-    (return input))
+    (return {"greeting" (str "hello " (get input "name"))}))
   """
 
   @manifest """
@@ -39,7 +39,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
       "entry": "main/run"
     },
     "input": {
-      "value": {}
+      "value": {"name": "world"}
     }
   }
   """

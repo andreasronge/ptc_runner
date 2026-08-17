@@ -16,7 +16,7 @@ defmodule PtcRunner.ViewerLaunchAdapterTest do
 
     project = Path.join(target, "ptc-project.json")
     input_name = "viewer-input.json"
-    File.write!(Path.join(target, input_name), Jason.encode!(%{"hello" => "viewer"}))
+    File.write!(Path.join(target, input_name), Jason.encode!(%{"name" => "viewer"}))
     test_process = self()
 
     report = fn run_id, frame ->
@@ -35,7 +35,7 @@ defmodule PtcRunner.ViewerLaunchAdapterTest do
                report
              )
 
-    assert output =~ "viewer"
+    assert output =~ "hello viewer"
     assert_receive {:live_frame, run_id, %{phase: "ok", label: "hello-ptc · hello.core/run"}}
     assert is_binary(run_id)
   end
