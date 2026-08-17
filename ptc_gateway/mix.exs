@@ -14,9 +14,12 @@ defmodule PtcGateway.MixProject do
 
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: extra_applications(Mix.env())
     ]
   end
+
+  defp extra_applications(:test), do: [:logger, :inets]
+  defp extra_applications(_env), do: [:logger]
 
   defp deps do
     [

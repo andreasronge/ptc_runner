@@ -4,6 +4,7 @@ defmodule PtcGateway.Connection do
   use GenServer
 
   alias PtcGateway.Admission
+  alias PtcGateway.Catalog
   alias PtcGateway.Protocol
   alias PtcGateway.RequestOwner
 
@@ -67,11 +68,11 @@ defmodule PtcGateway.Connection do
     read = Keyword.get(opts, :read) || (&stdio_read/0)
     write = Keyword.get(opts, :write) || (&stdio_write/1)
 
-    if is_pid(admission) and valid_tools?(tools) and is_function(read, 0) and
+    if is_pid(admission) and Catalog.valid?(tools) and is_function(read, 0) and
          is_function(write, 1) do
       {:ok,
        %{
-         tools: Map.new(tools, &{&1.name, &1}),
+         tools: Catalog.index(tools),
          catalog: tools,
          admission: admission,
          read: read,
@@ -254,18 +255,4 @@ defmodule PtcGateway.Connection do
   end
 
   defp stdio_write(frame), do: IO.write(:stdio, frame)
-
-  defp valid_tools?(tools) when is_list(tools) do
-    names = Enum.map(tools, & &1.name)
-    Enum.all?(tools, &valid_tool?/1) and names == Enum.uniq(names)
-  end
-
-  defp valid_tools?(_tools), do: false
-
-  defp valid_tool?(tool) do
-    is_map(tool) and is_binary(tool.name) and tool.name != "" and
-      is_binary(tool.description) and is_map(tool.input_schema) and
-      is_map(tool.output_schema) and is_map(tool.meta) and
-      is_function(tool.call, 1)
-  end
 end

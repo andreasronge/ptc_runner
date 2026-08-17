@@ -85,20 +85,38 @@ defmodule PtcGateway.HTTP.Router do
   end
 
   defp host(conn) do
-    {expected_host, expected_port} = conn.assigns.gateway.authority
+    case expected_authority(conn) do
+      {:ok, expected_host, expected_port} ->
+        case Plug.Conn.get_req_header(conn, "host") do
+          [header] ->
+            case parse_host(header) do
+              {:ok, ^expected_host, ^expected_port} ->
+                :ok
 
-    case Plug.Conn.get_req_header(conn, "host") do
-      [header] ->
-        case parse_host(header) do
-          {:ok, ^expected_host, ^expected_port} ->
-            :ok
+              _other ->
+                {:error, 403, %{"error" => "host rejected"}}
+            end
 
           _other ->
             {:error, 403, %{"error" => "host rejected"}}
         end
 
-      _other ->
+      :error ->
         {:error, 403, %{"error" => "host rejected"}}
+    end
+  end
+
+  defp expected_authority(conn) do
+    case conn.assigns.gateway.authority do
+      {host, port} when is_binary(host) and is_integer(port) ->
+        {:ok, host, port}
+
+      pid when is_pid(pid) ->
+        {host, port} = PtcGateway.HTTP.Bind.authority(pid)
+        {:ok, host, port}
+
+      _other ->
+        :error
     end
   end
 
