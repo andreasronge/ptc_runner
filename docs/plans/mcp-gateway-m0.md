@@ -151,11 +151,15 @@ providers) and 2b (host runtime + admission) if review size demands.
   recreate the capacity-reset bug one level higher, since its monitors and
   lease state die with it. `:temporary` alone is not the guarantee — a
   restarted *parent* supervisor would start the child anew with empty
-  lease state while old leaseholders survive — so on owner death a
-  **VM-persistent tombstone** (a `:persistent_term` written exactly once)
-  marks admission dead, owner startup refuses while the tombstone exists,
-  every dispatch refuses with a closed diagnostic, and readiness reports
-  unhealthy until the VM restarts. The test matrix covers owner death
+  lease state while old leaseholders survive — and writing a tombstone
+  *on death* is unreliable (`terminate/2` never runs on `:kill`; an
+  external watcher races the restart). The claim is therefore made **at
+  birth**: before admitting any work, the first owner atomically writes a
+  VM-persistent identity (a `:persistent_term` claimed exactly once and
+  never erased), and any later owner creation **refuses** while that
+  claim exists. Owner death then naturally leaves the VM poisoned —
+  every dispatch refuses with a closed diagnostic and readiness reports
+  unhealthy — until VM restart. The test matrix covers owner death
   followed by subtree/application restart. A runtime crash or restart
   beneath a living owner neither resets capacity while old leaseholders
   still run nor strands their leases, because monitors release them as
