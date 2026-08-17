@@ -53,11 +53,17 @@ outside the repository makes git exit 128 with empty output — indistinguishabl
 from "nothing tracked here", which made a repository *ancestor* look safest of
 all.
 
-## The authority diagram
+## The diagrams
 
-`site/authority-narrows.webp` is image-model output, not a hand-drawn asset, so
-the prompt below is its source. Keep them together: without it the diagram can
-only be replaced, never amended.
+Both are image-model output, not hand-drawn assets, so the prompts below are
+their source. Keep them together: without the prompt a diagram can only be
+replaced, never amended.
+
+They are a pair and must stay stylistically identical — same palette, same flat
+vector treatment, same title placement. A replacement for one that does not
+match the other reads as a mistake on the page.
+
+### `site/authority-narrows.webp`
 
 > A clean flat vector technical diagram, editorial infographic style, on a warm
 > off-white background (#FBFAF8). Composition: a centered vertical funnel of
@@ -99,7 +105,51 @@ than cosmetic:
 
 The image carries a light background in both themes. A dark-mode variant would
 need a second render with the background at `#16150F` and text at `#ECE7DD`,
-served through `<picture>` with `prefers-color-scheme`.
+served through `<picture>` with `prefers-color-scheme`. The same applies to the
+second diagram.
+
+### `site/loop-is-a-library.webp`
+
+> A clean flat vector technical diagram, editorial infographic style, on a warm
+> off-white background (#FBFAF8). Landscape, three columns, generous margins.
+> Title, top left, large bold dark ink: "The loop is a library, not the
+> runtime". LEFT COLUMN, headed "WORKFLOW PRELUDE" in bold deep navy, with the
+> smaller grey subtitle "compiled from selected components". Inside it, a
+> vertical stack of five small rounded boxes in monospace, connected by thin
+> downward arrows: "agent.main", "agent.core", "agent.prompt", "agent.retry",
+> "llm". A rust-orange dashed outline around the stack, tagged in rust italic:
+> "replaceable". MIDDLE COLUMN, a circular loop of four labelled steps drawn as
+> arrows forming a ring, each in a small box: "1 prompt", "2 model writes
+> PTC-Lisp", "3 evaluate", "4 observation". Above the ring, the small grey
+> caption: "agent.core drives this". RIGHT COLUMN, headed "MISSION PRELUDE" in
+> bold deep navy, with the smaller grey subtitle "a separate compiled
+> aggregate". Inside it, one box in monospace labelled "the generated program",
+> and below it two smaller stacked boxes labelled "your domain components" and
+> "prompt-visible exports". ACROSS THE BOTTOM, spanning the full width, one wide
+> rust-orange bordered bar containing the single bold line: "every tool:
+> requirement is checked against the assembled providers — never granted by
+> them". Style: flat 2D vector, technical documentation aesthetic, thin 2px
+> strokes, no gradients, no 3D, no drop shadows, no glow. Palette strictly deep
+> navy (#1F3A5F), rust orange (#9A4A1E), warm grey (#6B6459) on warm off-white.
+> Crisp geometric shapes, precise alignment, correctly spelled text. 16:9 aspect
+> ratio.
+
+The generated PNG was 1672x941 and 1.2 MB; `cwebp -q 92` brings it to 126 KB.
+
+Three things to check on any replacement, each of which would make the picture
+wrong rather than merely ugly:
+
+- **The two preludes must read as separate aggregates**, not one shared pool. A
+  mission gets its own compiled bundle, and `agent.core` is not in it.
+- **The dashed `replaceable` outline belongs around the component stack**, never
+  around the bottom bar. Components are swappable; the capability check is not.
+- **The bottom bar must read as a gate, not a supply line.** An arrow feeding
+  capabilities *into* the preludes inverts the mechanic — the reference is
+  explicit that requirements "validate authority; they never create it".
+
+One vocabulary trap: a prelude is not a file. It is the immutable compiled
+aggregate of the components selected for one environment, including their
+dependency closure, frozen for the run. A component is the file.
 
 ## Local preview
 

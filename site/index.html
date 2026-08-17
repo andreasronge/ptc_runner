@@ -42,17 +42,48 @@ executes it and records what happened.</p>
             never adds to'. A second arrow, captioned 'splits, never merges', leads to two
             separated boxes: WORKFLOW, trusted policy, holds the model; and MISSION, the
             model-written program, holds the tools.">
-  <figcaption>Every layer selects from the one above it and can only narrow. Selecting a library
-  installs its dependency closure — it does not grant tool authority, so swapping the agent loop
-  changes policy, not power.</figcaption>
+  <figcaption>Every layer selects from the one above it and can only narrow. The operator installs
+  authority, the author selects from it, and the model-written program runs inside what is
+  left.</figcaption>
 </figure>
 
+<p>Inside those two environments, the agent loop itself is ordinary PTC-Lisp. It is a library you
+select, not behaviour baked into the runtime, so you can replace it with a domain-specific loop of
+your own — and doing so grants no new authority.</p>
+
+<figure class="diagram">
+  <img src="/loop-is-a-library.webp" width="1672" height="941"
+       alt="The loop is a library, not the runtime. A workflow prelude, compiled from selected
+            components, contains a stack of agent.main, agent.core, agent.prompt, agent.retry and
+            llm, outlined and tagged 'replaceable'. In the centre a four-step ring driven by
+            agent.core: prompt, model writes PTC-Lisp, evaluate, observation. On the right a
+            separate mission prelude holding the generated program, your domain components, and
+            prompt-visible exports. A bar across the bottom reads: every tool: requirement is
+            checked against the assembled providers — never granted by them.">
+  <figcaption>A prelude is the immutable compiled aggregate of the components selected for one
+  environment, frozen for the run. A local component cannot shadow a shipped library ID, and
+  selecting a library installs its dependency closure without granting any tool authority.</figcaption>
+</figure>
+
+<h2>Install</h2>
+
+<p>On macOS it is a one-command install, or a container image if you would rather have one. There
+is no Docker requirement and no Elixir or Erlang to install first — the executable carries its own
+runtime. Once it is on your machine:</p>
+
+<pre><code>ptc init hello-ptc
+ptc run hello-ptc/ptc-project.json</code></pre>
+
+<pre><code>{"greeting":"hello world"}</code></pre>
+
+<p class="muted-note">That runs without contacting a model, and writes a structured trace you can
+open in the viewer. The same <code>ptc run</code> drives agentic projects.</p>
+
 <div class="note">
-  <p><strong>0.x, under active development.</strong> Breaking changes are expected. The public
-  one-command installer and published container image are not available yet — today you build the
-  standalone executable locally, run the locally built container, or use the Hex package. The
+  <p><strong>0.x, under active development.</strong> Breaking changes are expected, and the
+  install routes above land with the next release. The
   <a href="https://github.com/andreasronge/ptc_runner#availability">availability table</a>
-  states exactly where each route stands.</p>
+  tracks exactly where each one stands today.</p>
 </div>
 
 <h2>JSON Schemas</h2>
