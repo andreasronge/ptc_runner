@@ -50,5 +50,23 @@
     "tags": {
       "mode": "direct"
     }
+  },
+  "missions": {
+    "stats": {
+      "components": [
+        {
+          "id": "demo.stats",
+          "path": "stats.clj"
+        }
+      ]
+    },
+    "greet": {
+      "components": [
+        {
+          "id": "demo.greet",
+          "path": "greet.clj"
+        }
+      ]
+    }
   }
 }
