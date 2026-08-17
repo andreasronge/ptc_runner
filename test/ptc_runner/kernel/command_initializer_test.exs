@@ -44,7 +44,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
     assert {:ok, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["init", target])
 
     assert outcome.envelope["result"] == %{
-             "created" => [".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
+             "created" => ["AGENTS.md", ".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
            }
 
     assert File.read!(Path.join(target, "main.clj")) == @main_clj
@@ -60,6 +60,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
 
     assert Enum.sort(File.ls!(target)) == [
              ".gitignore",
+             "AGENTS.md",
              "main.clj",
              "ptc-project.json",
              "ptc.json"
@@ -350,6 +351,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
 
     assert Enum.sort(File.ls!(target)) == [
              ".gitignore",
+             "AGENTS.md",
              "main.clj",
              "ptc-project.json",
              "ptc.json"

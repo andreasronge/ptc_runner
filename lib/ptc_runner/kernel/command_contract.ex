@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.DocumentationLibrary
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -19,6 +20,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   @non_run_schema_modes [
     {"help", :help, false, false},
     {"version", :version, false, false},
+    {"docs", :docs, false, false},
     {"init", :init, false, false},
     {"validate", :validate, false, false},
     {"doctor", {:doctor, :connect}, :catalog, true},
@@ -115,6 +117,7 @@ defmodule PtcRunner.Kernel.CommandContract do
             ),
             success_envelope("help", help_result_schema()),
             success_envelope("version", version_result_schema()),
+            success_envelope("docs", docs_result_schema()),
             success_envelope("init", init_result()),
             success_envelope("validate", validate_result()),
             run_success_envelope(
@@ -210,7 +213,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   @doc false
   @spec valid_success_result?(atom(), term()) :: boolean()
   def valid_success_result?(command, result)
-      when command in [:help, :version, :init, :validate, :doctor, :models] do
+      when command in [:help, :version, :docs, :init, :validate, :doctor, :models] do
     with true <- JSONValue.value?(result),
          {:ok, root} <-
            command
@@ -300,7 +303,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   end
 
   def valid_success_semantics?(command, _result)
-      when command in [:help, :version, :init, :validate],
+      when command in [:help, :version, :docs, :init, :validate],
       do: true
 
   def valid_success_semantics?(_command, _result), do: false
@@ -745,6 +748,19 @@ defmodule PtcRunner.Kernel.CommandContract do
   @spec version_result() :: map()
   def version_result, do: %{"version" => @version}
 
+  @doc """
+  Builds the `docs` result: the served listing, or one embedded page.
+  """
+  @spec docs_result(binary() | nil) :: map()
+  def docs_result(nil), do: %{"pages" => DocumentationLibrary.listing()}
+
+  def docs_result(page) when is_binary(page) do
+    case DocumentationLibrary.fetch(page) do
+      {:ok, content} -> %{"page" => page, "content" => content}
+      :error -> raise ArgumentError, "invalid docs page"
+    end
+  end
+
   defp error_envelope(command, rows, provider_activity, compound?) do
     diagnostic = diagnostic_schema(rows, provider_activity)
 
@@ -805,7 +821,7 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: true
 
   defp diagnostic_pair_allowed?(mode, :arguments, :invalid_arguments)
-       when mode in [:help, :version],
+       when mode in [:help, :version, :docs],
        do: true
 
   defp diagnostic_pair_allowed?(:run_unclassified, :arguments, code)
@@ -817,7 +833,7 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: true
 
   defp diagnostic_pair_allowed?(mode, :internal, :internal_error)
-       when mode in [:help, :version, :init, :validate, :models, :doctor, :unknown],
+       when mode in [:help, :version, :docs, :init, :validate, :models, :doctor, :unknown],
        do: true
 
   defp diagnostic_pair_allowed?({:doctor, :connect}, :internal, :internal_error), do: true
@@ -1376,11 +1392,47 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp version_result_schema, do: version_result() |> const_object()
 
+  # The listing is pinned by identity and order: one positional name constant
+  # per served page, an exact length, and no additional entries, so an omitted,
+  # reordered, duplicated, or renamed page cannot be sealed. Titles, sizes, and
+  # bodies stay structural on purpose — they are derived from the shipped
+  # documents, and pinning them here would rebuild this artifact, and fail the
+  # staleness gate, on every documentation edit.
+  defp docs_result_schema do
+    names = DocumentationLibrary.names()
+
+    %{
+      "oneOf" => [
+        closed(~w(pages), %{
+          "pages" => %{
+            "type" => "array",
+            "minItems" => length(names),
+            "maxItems" => length(names),
+            "prefixItems" => Enum.map(names, &listed_page_schema/1),
+            "items" => false
+          }
+        }),
+        closed(~w(page content), %{
+          "page" => %{"enum" => names},
+          "content" => %{"type" => "string", "minLength" => 1}
+        })
+      ]
+    }
+  end
+
+  defp listed_page_schema(name) do
+    closed(~w(name title bytes), %{
+      "name" => %{"const" => name},
+      "title" => %{"type" => "string", "minLength" => 1},
+      "bytes" => %{"type" => "integer", "minimum" => 1}
+    })
+  end
+
   defp init_result,
     do:
       closed(~w(created), %{
         "created" => %{
-          "const" => [".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
+          "const" => ["AGENTS.md", ".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
         }
       })
 
@@ -1567,6 +1619,7 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp success_result_schema(:help), do: help_result_schema()
   defp success_result_schema(:version), do: version_result_schema()
+  defp success_result_schema(:docs), do: docs_result_schema()
   defp success_result_schema(:init), do: init_result()
   defp success_result_schema(:validate), do: validate_result()
   defp success_result_schema(:doctor), do: doctor_success_result()

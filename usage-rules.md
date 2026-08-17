@@ -5,6 +5,10 @@ package into a host application. They are not instructions for models running
 inside PtcRunner, and they do not replace the repository-maintenance rules in
 `AGENTS.md`.
 
+To drive the `ptc` executable instead of embedding the package, run
+`ptc docs agent-guide` — an installed executable serves the guide and every
+reference for its own version.
+
 ## Consult the public contracts
 
 - Use `mix usage_rules.docs PtcRunner.Kernel` and

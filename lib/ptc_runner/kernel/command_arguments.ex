@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.CommandArguments do
           :help
           | :version
           | :init
+          | :docs
           | :validate
           | :run
           | :doctor

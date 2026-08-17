@@ -15,10 +15,10 @@ ptc repl --project ptc-project.json --mission review
 ptc viewer ptc-project.json
 ```
 
-`ptc init DIRECTORY` generates this file alongside `ptc.json` and
-`main.clj`. PtcRunner never searches parent directories or guesses a project
-from its filename; the `"kind": "ptc-project"` discriminator identifies the
-document.
+`ptc init DIRECTORY` generates this file alongside `ptc.json`, `main.clj`, and
+an `AGENTS.md` routing card for coding agents. PtcRunner never searches parent
+directories or guesses a project from its filename; the `"kind": "ptc-project"`
+discriminator identifies the document.
 
 The kernel tutorial ships one project document per runnable example. A
 credential-free run and its Viewer need only the same JSON path:

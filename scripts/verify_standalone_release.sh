@@ -141,14 +141,29 @@ grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' "$release_tmp_dir/version.stdout"
 "$command_bin" help > "$release_tmp_dir/help.stdout"
 grep -q '^Usage:$' "$release_tmp_dir/help.stdout"
 grep -Fqx '  --help    — show root help' "$release_tmp_dir/help.stdout"
-for command in init validate run doctor models repl viewer; do
+for command in init docs validate run doctor models repl viewer; do
   grep -q "ptc $command" "$release_tmp_dir/help.stdout"
   "$command_bin" help "$command" > "$release_tmp_dir/help-$command.stdout"
 done
 
 "$command_bin" init "$fixture_root/initialized" > "$release_tmp_dir/init.stdout"
 test -f "$fixture_root/initialized/ptc.json"
-grep -qx 'created .gitignore, main.clj, ptc.json, ptc-project.json' "$release_tmp_dir/init.stdout"
+grep -qx 'created AGENTS.md, .gitignore, main.clj, ptc.json, ptc-project.json' "$release_tmp_dir/init.stdout"
+test -f "$fixture_root/initialized/AGENTS.md"
+
+# The release must serve its own documentation from the embedded catalog, with
+# no repository checkout, no `priv` documentation directory, and no network.
+"$command_bin" docs > "$release_tmp_dir/docs.stdout"
+grep -q '^Pages:$' "$release_tmp_dir/docs.stdout"
+grep -q '^  agent-guide ' "$release_tmp_dir/docs.stdout"
+"$command_bin" docs agent-guide > "$release_tmp_dir/docs-agent-guide.stdout"
+grep -qx '# Drive ptc as an agent' "$release_tmp_dir/docs-agent-guide.stdout"
+"$command_bin" docs schema-project > "$release_tmp_dir/docs-schema-project.stdout"
+grep -q 'ptc-project-config.schema.json' "$release_tmp_dir/docs-schema-project.stdout"
+if "$command_bin" docs no-such-page > "$release_tmp_dir/docs-unknown.stdout" 2>&1; then
+  echo "expected 'ptc docs no-such-page' to fail" >&2
+  exit 1
+fi
 
 "$command_bin" validate "$application_root/ptc.json" > "$release_tmp_dir/validate.stdout"
 grep -q '"provider_activity":false' "$release_tmp_dir/validate.stdout"

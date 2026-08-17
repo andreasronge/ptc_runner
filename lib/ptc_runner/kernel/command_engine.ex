@@ -290,6 +290,14 @@ defmodule PtcRunner.Kernel.CommandEngine do
       :version ->
         {:ok, CommandOutcome.success(:version, run_ref, CommandContract.version_result())}
 
+      :docs ->
+        {:ok,
+         CommandOutcome.success(
+           :docs,
+           run_ref,
+           CommandContract.docs_result(arguments.options.page)
+         )}
+
       :doctor ->
         CommandDoctor.dispatch(arguments, run_ref, runtime)
 
