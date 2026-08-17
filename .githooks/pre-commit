@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Pre-commit hook: runs gates per top-level Mix project.
-# Projects: "." and "ptc_viewer". Non-existent dirs are skipped.
+# Projects: ".", "ptc_viewer", and "ptc_gateway". Non-existent dirs are skipped.
 
 set -e
 
@@ -9,7 +9,7 @@ echo "🔍 Running pre-commit checks..."
 
 START_TIME=$(date +%s)
 
-PROJECTS=("." "ptc_viewer")
+PROJECTS=("." "ptc_viewer" "ptc_gateway")
 
 ALL_STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
 ALL_DELETED=$(git diff --cached --diff-filter=D --name-only)
@@ -20,7 +20,7 @@ ALL_RENAMED=$(git diff --cached --diff-filter=R --name-only)
 project_filter() {
   local proj="$1" input="$2"
   if [ "$proj" = "." ]; then
-    echo "$input" | grep -v -E '^ptc_viewer/' || true
+    echo "$input" | grep -v -E '^(ptc_viewer|ptc_gateway)/' || true
   else
     echo "$input" | grep -E "^${proj}/" || true
   fi

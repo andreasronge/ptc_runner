@@ -162,6 +162,12 @@ Open a project's runs in the local read-only Viewer:
 ptc viewer PROJECT.json
 ```
 
+Serve compiled applications as MCP tools over stdio:
+
+```console
+ptc serve GATEWAY.json
+```
+
 PtcRunner can also analyze its own immutable run evidence through a bounded
 analysis profile. The analysis receives a frozen evidence capture rather than
 ambient access to the artifact directory:

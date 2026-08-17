@@ -17,4 +17,5 @@ source "$script_dir/_common.sh"
 # long-running starts. GitHub does not run this script -- there each job gets
 # the same fetch from the setup action, and each job is already independent.
 ci_fetch_deps ptc_viewer
+ci_fetch_deps ptc_gateway
 ci_fetch_deps ptc_runner_launcher

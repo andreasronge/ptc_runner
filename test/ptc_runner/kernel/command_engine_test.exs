@@ -117,7 +117,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         get_in(branch, ["properties", "topic", "const"])
       end)
 
-    assert topics == ~w(doctor init models repl root run run transcript validate viewer)
+    assert topics == ~w(doctor init models repl root run run serve transcript validate viewer)
 
     run_options =
       help_branch
@@ -2525,6 +2525,22 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert rejection.command == :repl
       assert rejection.code == :invalid_arguments
     end
+  end
+
+  test "serve accepts one gateway document" do
+    assert {:ok, arguments} = CommandParser.parse(["serve", "gateway.json"])
+    assert arguments.command == :serve
+    assert arguments.application == "gateway.json"
+    assert arguments.options == %{}
+  end
+
+  test "serve rejects extra switches and missing paths" do
+    assert {:error, rejection} = CommandParser.parse(["serve"])
+    assert rejection.command == :serve
+
+    assert {:error, rejection} = CommandParser.parse(["serve", "gateway.json", "--port", "1"])
+    assert rejection.command == :serve
+    assert rejection.code == :invalid_arguments
   end
 
   test "viewer accepts one project and the closed listener vocabulary" do

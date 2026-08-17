@@ -1,6 +1,7 @@
 defmodule PtcRunner.MixCommandAdapter do
   @moduledoc false
 
+  alias PtcRunner.GatewayFrontend
   alias PtcRunner.Kernel.CommandPresentation
   alias PtcRunner.Kernel.CommandRouter
   alias PtcRunner.MixCommandRuntime
@@ -30,6 +31,9 @@ defmodule PtcRunner.MixCommandAdapter do
 
   defp run_one_shot(%{command: :transcript} = arguments, runtime, _frontend_opts),
     do: TranscriptFrontend.run(arguments, runtime)
+
+  defp run_one_shot(%{command: :serve} = arguments, runtime, _frontend_opts),
+    do: GatewayFrontend.run(arguments, runtime)
 
   defp run_one_shot(%{command: :viewer} = arguments, runtime, _frontend_opts),
     do: ViewerFrontend.run(arguments, runtime)

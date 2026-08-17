@@ -13,7 +13,7 @@ export HEX_SPONSOR=false
 
 # A gate fetches what it is about to compile.
 #
-# `ptc_viewer` and `ptc_runner_launcher` are separate Mix projects: the root's
+# `ptc_viewer`, `ptc_gateway`, and `ptc_runner_launcher` are separate Mix projects: the root's
 # `deps/` says nothing about whether theirs were ever fetched. GitHub supplies
 # each from the setup action's `project-directory`
 # (.github/actions/setup-elixir), so a gate that assumes them is green in CI

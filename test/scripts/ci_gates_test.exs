@@ -8,6 +8,7 @@ defmodule PtcRunner.Scripts.CIGatesTest do
   @core_dialyzer Path.join(@root, "scripts/ci/core-dialyzer.sh")
   @preflight Path.join(@root, "scripts/ci/preflight.sh")
   @viewer Path.join(@root, "scripts/ci/viewer.sh")
+  @gateway Path.join(@root, "scripts/ci/gateway.sh")
   @launcher_package Path.join(@root, "scripts/ci/launcher-package.sh")
   @git_env GitEnv.clear()
 
@@ -87,6 +88,20 @@ defmodule PtcRunner.Scripts.CIGatesTest do
            ]
   end
 
+  test "the Gateway gate fetches the Gateway's own dependencies before compiling it" do
+    %{marker: marker} = fake = fake_mix()
+
+    {output, status} = run_gate(@gateway, fake, env: [{"CI", nil}, {"ERL_FLAGS", nil}])
+
+    assert status == 0, output
+
+    assert File.read!(marker) |> String.split("\n", trim: true) == [
+             "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_gateway :: deps.get --check-locked",
+             "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_gateway :: compile --warnings-as-errors",
+             "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_gateway :: test --warnings-as-errors"
+           ]
+  end
+
   # The launcher project's own `precommit` alias fetches with a bare
   # `deps.get`, which repairs a diverged lockfile instead of rejecting it. The
   # gate establishes the locked fetch first, so entering it directly -- from
@@ -117,6 +132,7 @@ defmodule PtcRunner.Scripts.CIGatesTest do
 
     assert File.read!(marker) |> String.split("\n", trim: true) == [
              "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_viewer :: deps.get --check-locked",
+             "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_gateway :: deps.get --check-locked",
              "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_runner_launcher :: deps.get --check-locked"
            ]
   end
@@ -129,7 +145,8 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     mix_project = File.read!(Path.join(@root, "mix.exs"))
     launcher = File.read!(Path.join(@root, "scripts/ci/launcher.sh"))
 
-    for entrypoint <- ~w(core-tests core-static core-dialyzer core-release viewer docs launcher) do
+    for entrypoint <-
+          ~w(core-tests core-static core-dialyzer core-release viewer gateway docs launcher) do
       assert workflow =~ "scripts/ci/#{entrypoint}.sh"
       assert hook =~ "scripts/ci/#{entrypoint}.sh"
     end

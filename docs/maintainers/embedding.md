@@ -237,6 +237,15 @@ roots, the same private-data decision the command would make, and optionally
 present in the standalone release and absent from the published Hex package, so
 probe it with `Code.ensure_loaded?/1` before calling it.
 
+## Start the Gateway
+
+`ptc serve GATEWAY.json` compiles each configured application into a
+`PtcRunner.Kernel.ServingTemplate` and serves it over stdio as MCP
+`2026-07-28` newline-delimited JSON. `PtcGateway` is present in the standalone
+release and absent from the published Hex package, so probe it with
+`Code.ensure_loaded?/1` before calling it. Write-effect configuration and
+digest mismatch refuse startup.
+
 ## Keep policy in PTC-Lisp
 
 Embedding should not move prompts, model-turn logic, retries, delegation, or

@@ -38,6 +38,11 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
              |> Map.put("core", "true")
              |> Map.put("viewer", "true")
 
+    assert classify(["ptc_gateway/lib/ptc_gateway.ex"]) ==
+             all_false()
+             |> Map.put("core", "true")
+             |> Map.put("gateway", "true")
+
     assert classify(["lib/ptc_runner/lisp/eval.ex"]) ==
              all_false()
              |> Map.put("core", "true")
@@ -100,7 +105,7 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
 
   defp all_false do
     Map.new(
-      ~w(core launcher mcp_http mcp_filesystem java viewer docs),
+      ~w(core launcher mcp_http mcp_filesystem java viewer gateway docs),
       &{&1, "false"}
     )
   end

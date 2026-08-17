@@ -19,6 +19,7 @@ Run `ptc help COMMAND` for the exact switches accepted by an installed version.
 | `ptc transcript RUN_ID ...` | Publish one correlated private model transcript |
 | `ptc repl` | Open a direct, manifest-backed, or analysis session |
 | `ptc viewer PROJECT.json` | Browse a project's captured traces in a local web UI |
+| `ptc serve GATEWAY.json` | Serve compiled applications as MCP tools over stdio |
 
 Help is generated from the same declarations as the strict parser, so use
 `ptc help COMMAND` as the canonical command and option reference.

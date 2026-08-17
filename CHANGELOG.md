@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ptc serve GATEWAY.json` starts the stdio MCP Gateway companion. Nested
+  `ptc_gateway/` ships inside the assembled release and is absent from the
+  published Hex package, where the command reports the companion as
+  unavailable. Boot compiles each configured application into a serving
+  template and refuses write-effect configuration or digest mismatch.
+
 - `ptc viewer PROJECT.json` opens the canonical trace Viewer from both the
   `mix ptc` and standalone frontends, replacing the development-only
   `mix ptc.viewer` task. The Viewer now ships inside the assembled release and
