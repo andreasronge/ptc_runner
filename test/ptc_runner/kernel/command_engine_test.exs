@@ -117,7 +117,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         get_in(branch, ["properties", "topic", "const"])
       end)
 
-    assert topics == ~w(doctor init models repl root run run transcript validate viewer)
+    assert topics == ~w(docs doctor init models repl root run run transcript validate viewer)
 
     run_options =
       help_branch

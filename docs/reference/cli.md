@@ -11,6 +11,7 @@ Run `ptc help COMMAND` for the exact switches accepted by an installed version.
 | Command | Purpose |
 | --- | --- |
 | `ptc init DIRECTORY` | Publish a validated minimal application without replacing an existing target |
+| `ptc docs [PAGE]` | List the documentation embedded in this executable, or print one page |
 | `ptc validate MANIFEST or PROJECT` | Load and compile without executing the workflow |
 | `ptc run MANIFEST or PROJECT` | Execute the application entry |
 | `ptc run MANIFEST --env-file FILE` | Load environment-backed credentials from this exact file |
@@ -43,6 +44,27 @@ Complete readiness reports, including `readiness: "failed"`, are written to
 stdout. Failed reports retain their nonzero exit status; failures that cannot
 produce a complete report are written to stderr.
 `--show-model-selectors` adds only safe selectors.
+
+## Read the embedded documentation
+
+Every installation carries the language specification, references, and JSON
+Schemas that describe its own version. `ptc docs` lists them; `ptc docs PAGE`
+prints one page verbatim to stdout:
+
+```console
+ptc docs
+ptc docs agent-guide
+ptc docs schema-manifest
+```
+
+Pages are embedded when the executable is built, so they need no network
+access and cannot describe a different version. An unrecognized page name is
+rejected as invalid arguments. `docs` publishes no envelope and reads no
+application, host configuration, or project document.
+
+Coding agents and LLMs driving the executable should start at
+[Drive ptc as an agent](../guides/agent-cli-usage.md), served as
+`ptc docs agent-guide`.
 
 ## Run a manifest
 
@@ -206,7 +228,7 @@ classified failures use their diagnostic catalog status; caught internal
 failures use `70`.
 
 `run`, `validate`, `doctor`, `models`, and `init` accept `--envelope`.
-`repl`, `transcript`, `viewer`, help, and version do not. A private run
+`repl`, `transcript`, `viewer`, `docs`, help, and version do not. A private run
 envelope omits the result value. Installation, packaging, and container
 commands live in the [installation documentation](../installation/standalone.md),
 not in this process-contract reference.

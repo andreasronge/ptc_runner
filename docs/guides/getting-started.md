@@ -9,13 +9,14 @@ Create a provider-free project if you do not already have one:
 ptc init hello-ptc
 ```
 
-It contains three application roles:
+It contains four application roles:
 
 | File | Purpose |
 | --- | --- |
 | `ptc-project.json` | Stable local paths, artifacts, and Viewer preferences |
 | `ptc.json` | Workflow, input, missions, selected providers, and narrower limits |
 | `main.clj` | The generated example component selected by the workflow |
+| `AGENTS.md` | Routing card telling a coding agent which commands answer what |
 
 The project document is the normal command argument. It points to the other
 files, so commands do not depend on the shell's current directory.

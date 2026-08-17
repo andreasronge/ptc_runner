@@ -48,6 +48,12 @@ defmodule PtcRunner.Kernel.CommandRenderer do
       %{"status" => "ok", "command" => "version", "result" => %{"version" => version}} ->
         {:stdout, version <> "\n"}
 
+      %{"status" => "ok", "command" => "docs", "result" => %{"content" => content}} ->
+        {:stdout, content}
+
+      %{"status" => "ok", "command" => "docs", "result" => %{"pages" => pages}} ->
+        {:stdout, docs_listing_text(pages)}
+
       %{"status" => "ok", "command" => "init", "result" => %{"created" => created}} ->
         {:stdout, "created " <> Enum.join(created, ", ") <> "\n"}
 
@@ -240,6 +246,17 @@ defmodule PtcRunner.Kernel.CommandRenderer do
       |> append_notices(notices)
 
     Enum.join(lines, "\n") <> "\n"
+  end
+
+  defp docs_listing_text(pages) do
+    width = pages |> Enum.map(&String.length(&1["name"])) |> Enum.max(fn -> 0 end)
+
+    rows =
+      Enum.map(pages, fn page ->
+        "  " <> String.pad_trailing(page["name"], width) <> " — " <> page["title"]
+      end)
+
+    Enum.join(["Usage:", "  ptc docs PAGE", "", "Pages:" | rows], "\n") <> "\n"
   end
 
   defp append_options(lines, [], _labels, _width), do: lines
