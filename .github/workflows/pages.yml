@@ -1,0 +1,53 @@
+name: Pages
+
+# Publishes ptc-runner.dev. The site is static and needs no Elixir: the build
+# copies `site/` and the already-generated `priv/schemas/*.json`, whose
+# freshness is proved by the docs and precommit gates, not here.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "priv/schemas/ptc-*.schema.json"
+      - "scripts/build_site.sh"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel one in flight: an interrupted
+# deploy leaves the live site on the previous version with no rerun queued.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Build and deploy site
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Assemble site
+        run: scripts/build_site.sh _site
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

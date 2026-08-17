@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JSON Schemas — PtcRunner</title>
+<meta name="description" content="Stable $id URLs for the PtcRunner project, application, host, and command-envelope JSON Schemas.">
+<link rel="canonical" href="https://ptc-runner.dev/schemas/">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <p class="crumb"><a href="/">&larr; PtcRunner</a></p>
+  <h1>JSON Schemas</h1>
+</header>
+
+<p>These are the stable <code>$id</code> URLs referenced by PtcRunner documents. Point your
+editor at one to get completion and validation while authoring:</p>
+
+<pre><code>{
+  "$schema": "https://ptc-runner.dev/schemas/ptc-project-config.schema.json",
+  "kind": "ptc-project",
+  "version": 1,
+  "application": {"path": "ptc.json"}
+}</code></pre>
+
+<p>PtcRunner keeps three roles in three separate files. Credential values and provider
+declarations do not belong in the project file, and project choices do not become part of
+application content identity.</p>
+
+<div class="schema">
+  <h3><a href="/schemas/ptc-project-config.schema.json">ptc-project-config.schema.json</a></h3>
+  <span class="role">operator or project checkout</span>
+  <p><code>ptc-project.json</code> — paths to the other files, local artifact policy, and Viewer
+  preferences. This is the document you hand to <code>ptc run</code>, <code>ptc doctor</code>,
+  <code>ptc repl</code>, and <code>ptc viewer</code>.</p>
+  <span class="url mono">https://ptc-runner.dev/schemas/ptc-project-config.schema.json</span>
+</div>
+
+<div class="schema">
+  <h3><a href="/schemas/ptc-application-manifest.schema.json">ptc-application-manifest.schema.json</a></h3>
+  <span class="role">application author or model</span>
+  <p><code>ptc.json</code> — workflow, components, input, provider selections, and narrower
+  limits. Model-authorable application selection; runtime loading remains authoritative.</p>
+  <span class="url mono">https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json</span>
+</div>
+
+<div class="schema">
+  <h3><a href="/schemas/ptc-host-config.schema.json">ptc-host-config.schema.json</a></h3>
+  <span class="role">operator</span>
+  <p><code>ptc-host.json</code> — installed providers, credential references, commands,
+  endpoints, and outer limits. Operator-owned provider installation; runtime loading remains
+  authoritative.</p>
+  <span class="url mono">https://ptc-runner.dev/schemas/ptc-host-config.schema.json</span>
+</div>
+
+<div class="schema">
+  <h3><a href="/schemas/ptc-command-envelope-v2.schema.json">ptc-command-envelope-v2.schema.json</a></h3>
+  <span class="role">machine integration</span>
+  <p>The V2 command envelope written by <code>ptc run --envelope FILE</code>. An atomic,
+  no-replace file whose status and exit-code relationship is sealed by the command contract —
+  parse this instead of stdout.</p>
+  <span class="url mono">https://ptc-runner.dev/schemas/ptc-command-envelope-v2.schema.json</span>
+</div>
+
+<p class="muted-note">Each schema is published verbatim from <code>priv/schemas/</code> in the
+repository, so the hosted copy and the runtime validator are always the same bytes.</p>
+
+<footer>
+  <a href="/">&larr; PtcRunner</a>
+</footer>
+
+</div>
+</body>
+</html>
