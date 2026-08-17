@@ -162,7 +162,8 @@ Open a project's runs in the local read-only Viewer:
 ptc viewer PROJECT.json
 ```
 
-Serve compiled applications as MCP tools over stdio:
+Serve compiled applications as MCP tools over stdio, or over HTTP when the
+gateway document names `http` and a private token file:
 
 ```console
 ptc serve GATEWAY.json

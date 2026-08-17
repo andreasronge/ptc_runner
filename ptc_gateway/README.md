@@ -11,8 +11,12 @@ published Hex package does not carry it. Start it from the root command:
 ptc serve gateway.json
 ```
 
-Bandit and Plug live only in this companion. `ptc serve` is still stdio;
-`PtcGateway.start_http/1` binds loopback by default (`{0, 0, 0, 0}` is an
-explicit operator choice). The pinned protocol is MCP `2026-07-28`. Stdio
-uses newline-delimited JSON; HTTP POST `/mcp` uses JSON bodies.
-`notifications/cancelled` is stdio-only.
+Bandit and Plug live only in this companion. Stdio is the default. When the
+gateway document names `http`, the host loads a private token file and
+`PtcGateway.start_http/1` binds loopback unless `listen` is `0.0.0.0`. A
+wildcard bind requires an explicit Host name. The pinned protocol is MCP
+`2026-07-28`. Stdio uses newline-delimited JSON; HTTP POST `/mcp` uses JSON
+bodies. `notifications/cancelled` is stdio-only. Rotation of the bearer
+token is restart, not reload. The gateway never puts the token in plug
+options, child specs, or process status. Bandit `:start`/`:exception`
+telemetry still include the raw `Authorization` header; `:stop` does not.

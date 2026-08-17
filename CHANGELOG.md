@@ -13,9 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ptc_gateway/` ships inside the assembled release and is absent from the
   published Hex package, where the command reports the companion as
   unavailable. Boot compiles each configured application into a serving
-  template and refuses write-effect configuration or digest mismatch. The
-  companion can also bind streamable HTTP on loopback via
-  `PtcGateway.start_http/1`; `{0, 0, 0, 0}` is an explicit operator choice.
+  template and refuses write-effect configuration or digest mismatch. When
+  the gateway document names `http`, `ptc serve` loads a private bearer
+  token file and binds streamable HTTP on loopback; `{0, 0, 0, 0}` remains
+  an explicit operator choice. Environment variables are not a token source.
+  The gateway never puts the token in plug options, child specs, or process
+  status. Bandit `:start`/`:exception` telemetry still include the raw
+  `Authorization` header; `:stop` does not.
 
 - `ptc viewer PROJECT.json` opens the canonical trace Viewer from both the
   `mix ptc` and standalone frontends, replacing the development-only

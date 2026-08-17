@@ -54,6 +54,95 @@ defmodule PtcRunner.GatewayFrontendTest do
     assert {:error, :effect_not_read} = GatewayFrontend.compile(config)
   end
 
+  test "starts HTTP from a private token file and refuses a missing token", %{tmp: tmp} do
+    echo =
+      write_app(
+        tmp,
+        "echo",
+        ~S|(ns app) (defn run {:effect :read} [input] (return {"answer" (get input "n")}))|
+      )
+
+    token_path = Path.join(tmp, "gateway.token")
+    File.write!(token_path, "gateway-token-fixture\n")
+    File.chmod!(token_path, 0o600)
+
+    config = Path.join(tmp, "gateway.json")
+
+    write_config!(config, [echo_tool(echo, "echo")], %{
+      "token_file" => "gateway.token",
+      "port" => 0
+    })
+
+    assert {:ok, compiled} = GatewayFrontend.compile(config)
+    assert compiled.http.token == "gateway-token-fixture"
+    refute String.contains?(inspect(compiled.http.token_file), "gateway-token-fixture")
+
+    assert {:ok, pid} = GatewayFrontend.start(compiled)
+    on_exit(fn -> if Process.alive?(pid), do: GatewayFrontend.stop(pid) end)
+    assert {:ok, {{127, 0, 0, 1}, port}} = PtcGateway.listener_info(pid)
+
+    origin = "http://127.0.0.1:#{port}"
+    assert %{"status" => "ok"} = Req.get!(origin <> "/health").body
+    ready = Req.get!(origin <> "/ready", auth: {:bearer, "gateway-token-fixture"})
+    assert ready.status == 200
+    assert ready.body == %{"status" => "ready"}
+
+    listed =
+      Req.post!(origin <> "/mcp",
+        json: %{"jsonrpc" => "2.0", "id" => 1, "method" => "tools/list", "params" => %{}},
+        auth: {:bearer, "gateway-token-fixture"}
+      )
+
+    assert listed.status == 200
+    names = listed.body["result"]["tools"] |> Enum.map(& &1["name"])
+    assert names == ["echo"]
+
+    GatewayFrontend.stop(pid)
+
+    File.rm!(token_path)
+    assert {:error, :invalid_gateway_token} = GatewayFrontend.compile(config)
+  end
+
+  test "wildcard HTTP requires an explicit Host name", %{tmp: tmp} do
+    echo =
+      write_app(
+        tmp,
+        "echo",
+        ~S|(ns app) (defn run {:effect :read} [input] (return {"answer" (get input "n")}))|
+      )
+
+    token_path = Path.join(tmp, "gateway.token")
+    File.write!(token_path, "gateway-token-fixture\n")
+    File.chmod!(token_path, 0o600)
+    config = Path.join(tmp, "gateway.json")
+
+    write_config!(config, [echo_tool(echo, "echo")], %{
+      "token_file" => "gateway.token",
+      "listen" => "0.0.0.0",
+      "port" => 0
+    })
+
+    assert {:error, :invalid_gateway_config} = GatewayFrontend.compile(config)
+
+    write_config!(config, [echo_tool(echo, "echo")], %{
+      "token_file" => "gateway.token",
+      "listen" => "0.0.0.0",
+      "host" => "http://example.com",
+      "port" => 0
+    })
+
+    assert {:error, :invalid_gateway_config} = GatewayFrontend.compile(config)
+
+    write_config!(config, [echo_tool(echo, "echo")], %{
+      "token_file" => "gateway.token",
+      "listen" => "0.0.0.0",
+      "host" => "foo@bar",
+      "port" => 0
+    })
+
+    assert {:error, :invalid_gateway_config} = GatewayFrontend.compile(config)
+  end
+
   test "refuses a digest mismatch", %{tmp: tmp} do
     echo =
       write_app(
@@ -125,7 +214,7 @@ defmodule PtcRunner.GatewayFrontendTest do
     }
   end
 
-  defp write_config!(path, tools) do
+  defp write_config!(path, tools, http \\ nil) do
     encoded = %{
       "version" => 1,
       "admission" => %{"max_in_flight" => 2},
@@ -143,6 +232,11 @@ defmodule PtcRunner.GatewayFrontendTest do
            }}
         end)
     }
+
+    encoded =
+      if is_map(http),
+        do: Map.put(encoded, "http", http),
+        else: encoded
 
     File.write!(path, Jason.encode!(encoded))
   end

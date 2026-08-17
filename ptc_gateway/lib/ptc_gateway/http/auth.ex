@@ -3,25 +3,23 @@ defmodule PtcGateway.HTTP.Auth do
   Bearer comparison for the HTTP gateway.
 
   The companion receives an already-validated token from the host. Comparison
-  is `Plug.Crypto.secure_compare/2` and nothing else; tokens are never logged.
-  The `Authorization` scheme is matched case-insensitively per RFC 6750.
+  is `Plug.Crypto.secure_compare/2` and nothing else. The `Authorization`
+  scheme is matched case-insensitively per RFC 6750. The gateway never logs
+  the token and never keeps it in plug options or process status. Bandit
+  request `:start` and `:exception` telemetry still include the raw
+  `Authorization` header because Bandit emits those events before the plug
+  runs; `:stop` uses the stripped connection.
   """
 
-  @spec authorized?(Plug.Conn.t(), binary()) :: boolean()
-  def authorized?(%Plug.Conn{} = conn, expected) when is_binary(expected) and expected != "" do
+  @spec presented(Plug.Conn.t()) :: {:ok, binary()} | :error
+  def presented(%Plug.Conn{} = conn) do
     case Plug.Conn.get_req_header(conn, "authorization") do
-      [header] ->
-        case bearer_token(header) do
-          {:ok, presented} -> matches?(presented, expected)
-          :error -> false
-        end
-
-      _other ->
-        false
+      [header] -> bearer_token(header)
+      _other -> :error
     end
   end
 
-  def authorized?(_conn, _expected), do: false
+  def presented(_conn), do: :error
 
   @spec matches?(binary(), binary()) :: boolean()
   def matches?(presented, expected)

@@ -6,13 +6,17 @@ defmodule PtcGateway.HTTP.Router do
   `Origin` must exactly match the configured allowlist. `Host` must match the
   configured authority's host and port. `X-Forwarded-*` and `Forwarded` are
   ignored. `/health` is unauthenticated; `/ready` and `/mcp` require bearer
-  authentication. `notifications/cancelled` is unsupported over HTTP.
+  authentication. `notifications/cancelled` is unsupported over HTTP. The
+  Authorization header is removed from the Plug connection before dispatch so
+  Bandit's `:stop` telemetry carries the stripped conn. Bandit still copies the
+  raw conn into `:start` (and `:exception`) before the plug runs.
   """
 
   use Plug.Router
 
   alias PtcGateway.Admission
   alias PtcGateway.HTTP.Auth
+  alias PtcGateway.HTTP.Secret
   alias PtcGateway.Protocol
   alias PtcGateway.RequestOwner
 
@@ -23,13 +27,16 @@ defmodule PtcGateway.HTTP.Router do
   def call(conn, opts) when is_list(opts), do: call(conn, Map.new(opts))
 
   def call(conn, %{} = config) do
-    token = Map.fetch!(config, :token)
+    {presented, conn} = take_authorization(conn)
+    Process.put(:ptc_gateway_presented, presented)
 
-    conn
-    |> Plug.Conn.put_private(:ptc_gateway_token, token)
-    |> Plug.Conn.assign(:gateway, Map.delete(config, :token))
-    |> super(config)
-    |> clear_token()
+    try do
+      conn
+      |> Plug.Conn.assign(:gateway, config)
+      |> super(config)
+    after
+      Process.delete(:ptc_gateway_presented)
+    end
   end
 
   get "/health" do
@@ -146,18 +153,25 @@ defmodule PtcGateway.HTTP.Router do
 
   defp parse_host_port(_host, _port), do: :error
 
-  defp bearer(conn) do
-    token = conn.private.ptc_gateway_token
+  defp take_authorization(conn) do
+    presented =
+      case Auth.presented(conn) do
+        {:ok, token} -> token
+        :error -> :missing
+      end
 
-    if is_binary(token) and Auth.authorized?(conn, token) do
+    {presented, Plug.Conn.delete_req_header(conn, "authorization")}
+  end
+
+  defp bearer(conn) do
+    secret = conn.assigns.gateway.secret
+    presented = Process.get(:ptc_gateway_presented)
+
+    if is_pid(secret) and is_binary(presented) and Secret.matches?(secret, presented) do
       :ok
     else
       {:error, 401, %{"error" => "unauthorized"}}
     end
-  end
-
-  defp clear_token(conn) do
-    %{conn | private: Map.delete(conn.private, :ptc_gateway_token)}
   end
 
   defp respond_ready(%Plug.Conn{halted: true} = conn), do: conn
@@ -165,11 +179,16 @@ defmodule PtcGateway.HTTP.Router do
   defp respond_ready(conn) do
     admission = conn.assigns.gateway.admission
 
-    if is_pid(admission) and Process.alive?(admission) do
+    if is_pid(admission) and Process.alive?(admission) and ready_catalog?(conn) do
       send_json(conn, 200, %{"status" => "ready"})
     else
       send_json(conn, 503, %{"status" => "unready"})
     end
+  end
+
+  defp ready_catalog?(conn) do
+    catalog = conn.assigns.gateway.catalog
+    is_list(catalog) and catalog != []
   end
 
   defp dispatch_mcp(%Plug.Conn{halted: true} = conn), do: conn

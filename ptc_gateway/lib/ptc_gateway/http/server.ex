@@ -7,6 +7,7 @@ defmodule PtcGateway.HTTP.Server do
   alias PtcGateway.Catalog
   alias PtcGateway.HTTP.Bind
   alias PtcGateway.HTTP.Router
+  alias PtcGateway.HTTP.Secret
 
   @loopback {127, 0, 0, 1}
   @wildcard {0, 0, 0, 0}
@@ -43,17 +44,20 @@ defmodule PtcGateway.HTTP.Server do
   def init(params) do
     children = [
       {Admission, ceiling: params.max_in_flight},
-      {Bind, host: params.host, port: params.port}
+      {Bind, host: params.host, port: params.port},
+      Secret
     ]
 
     Supervisor.init(children, strategy: :rest_for_one, auto_shutdown: :any_significant)
   end
 
   defp start_tree(params) do
-    with {:ok, pid} <- Supervisor.start_link(__MODULE__, params) do
+    {token, supervisor_params} = Map.pop!(params, :token)
+
+    with {:ok, pid} <- Supervisor.start_link(__MODULE__, supervisor_params) do
       true = Process.unlink(pid)
 
-      case start_bandit(pid, params) do
+      case start_bandit(pid, supervisor_params, token) do
         {:ok, _bandit} ->
           {:ok, pid}
 
@@ -68,10 +72,13 @@ defmodule PtcGateway.HTTP.Server do
     end
   end
 
-  defp start_bandit(pid, params) do
+  defp start_bandit(pid, params, token) do
     with {:ok, admission} <- child_pid(pid, Admission),
          {:ok, bind} <- child_pid(pid, Bind),
-         {:ok, bandit} <- Supervisor.start_child(pid, bandit_spec(params, admission, bind)),
+         {:ok, secret} <- child_pid(pid, Secret),
+         :ok <- Secret.install(secret, token),
+         {:ok, bandit} <-
+           Supervisor.start_child(pid, bandit_spec(params, admission, bind, secret)),
          {:ok, {_ip, port}} <- ThousandIsland.listener_info(bandit),
          :ok <- Bind.put(bind, {params.host, port}) do
       {:ok, bandit}
@@ -82,14 +89,14 @@ defmodule PtcGateway.HTTP.Server do
     end
   end
 
-  defp bandit_spec(params, admission, bind) do
+  defp bandit_spec(params, admission, bind, secret) do
     %{
       id: Bandit,
       start:
         {Bandit, :start_link,
          [
            [
-             plug: {Router, router_config(params, admission, bind)},
+             plug: {Router, router_config(params, admission, bind, secret)},
              scheme: :http,
              port: params.port,
              ip: params.ip,
@@ -102,9 +109,9 @@ defmodule PtcGateway.HTTP.Server do
     }
   end
 
-  defp router_config(params, admission, bind) do
+  defp router_config(params, admission, bind, secret) do
     [
-      token: params.token,
+      secret: secret,
       authority: bind,
       origin_allowlist: params.origin_allowlist,
       admission: admission,
@@ -119,12 +126,13 @@ defmodule PtcGateway.HTTP.Server do
     ceiling = Keyword.get(opts, :max_in_flight, 8)
     ip = Keyword.get(opts, :ip, @loopback)
     port = Keyword.get(opts, :port, 4180)
-    host = Keyword.get(opts, :host, "127.0.0.1")
     origin_allowlist = Keyword.get(opts, :origin_allowlist, [])
 
-    if Catalog.valid?(tools) and valid_token?(token) and is_integer(ceiling) and ceiling > 0 and
-         ip in @addresses and is_integer(port) and port in 0..65_535 and is_binary(host) and
-         host != "" and valid_origins?(origin_allowlist) do
+    with true <-
+           Catalog.valid?(tools) and valid_token?(token) and is_integer(ceiling) and
+             ceiling > 0 and ip in @addresses and is_integer(port) and port in 0..65_535 and
+             valid_origins?(origin_allowlist),
+         {:ok, host} <- canonical_host(ip, Keyword.get(opts, :host)) do
       {:ok,
        %{
          tools: tools,
@@ -136,12 +144,29 @@ defmodule PtcGateway.HTTP.Server do
          origin_allowlist: origin_allowlist
        }}
     else
-      {:error, :invalid_gateway_config}
+      _reason -> {:error, :invalid_gateway_config}
     end
   end
 
   defp valid_token?(token) when is_binary(token) and token != "", do: true
   defp valid_token?(_token), do: false
+
+  defp canonical_host(@wildcard, host), do: parse_host(host)
+
+  defp canonical_host(_loopback, nil), do: {:ok, "127.0.0.1"}
+
+  defp canonical_host(_loopback, host), do: parse_host(host)
+
+  defp parse_host(host) when is_binary(host) and byte_size(host) in 1..253 do
+    if host =~
+         ~r/\A[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\z/ do
+      {:ok, host}
+    else
+      :error
+    end
+  end
+
+  defp parse_host(_host), do: :error
 
   defp valid_origins?(origins) when is_list(origins) do
     Enum.all?(origins, &(is_binary(&1) and &1 != ""))

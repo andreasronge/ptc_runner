@@ -6,7 +6,16 @@ defmodule PtcRunner.Kernel.GatewayConfig do
   description, and the expected `application_content_digest` /
   `effective_application_digest` pair plus per-occurrence provider snapshot
   digests. Boot and call-time revalidation compare those fields key by key.
+
+  An optional `http` object selects streamable HTTP instead of stdio. It names
+  the listen address from the closed Viewer vocabulary (`127.0.0.1` default,
+  `0.0.0.0` explicit), a port, the canonical `Host` name (required when
+  listening on `0.0.0.0`; no scheme or port), an origin allowlist, and a
+  `token_file` path. The host loads that file through `GatewayToken`; this
+  document never carries the secret.
   """
+
+  alias PtcRunner.Kernel.ViewerBinding
 
   @digest ~r/\A[0-9a-f]{64}\z/
   @effective ~r/\Asha256:[0-9a-f]{64}\z/
@@ -16,7 +25,16 @@ defmodule PtcRunner.Kernel.GatewayConfig do
           path: binary(),
           max_in_flight: pos_integer(),
           host: binary() | nil,
+          http: http() | nil,
           tools: [tool()]
+        }
+
+  @type http :: %{
+          listen: ViewerBinding.address(),
+          port: 0..65_535,
+          host: binary(),
+          token_file: binary(),
+          origin_allowlist: [binary()]
         }
 
   @type tool :: %{
@@ -48,11 +66,13 @@ defmodule PtcRunner.Kernel.GatewayConfig do
 
     with true <- is_integer(ceiling) and ceiling > 0,
          true <- is_nil(host) or (is_binary(host) and host != ""),
-         {:ok, parsed} <- parse_tools(tools, root) do
+         {:ok, parsed} <- parse_tools(tools, root),
+         {:ok, http} <- parse_http(Map.get(value, "http"), root) do
       {:ok,
        %{
          max_in_flight: ceiling,
          host: host && Path.expand(host, root),
+         http: http,
          tools: parsed
        }}
     else
@@ -61,6 +81,51 @@ defmodule PtcRunner.Kernel.GatewayConfig do
   end
 
   defp parse(_value, _root), do: {:error, :invalid_gateway_config}
+
+  defp parse_http(nil, _root), do: {:ok, nil}
+
+  defp parse_http(%{} = http, root) do
+    with {:ok, listen} <- ViewerBinding.address(Map.get(http, "listen")),
+         {:ok, port} <- parse_port(Map.get(http, "port", 4180)),
+         token_file when is_binary(token_file) and token_file != "" <- http["token_file"],
+         {:ok, host} <- parse_http_host(listen, Map.get(http, "host")),
+         origins when is_list(origins) <- Map.get(http, "origin_allowlist", []),
+         true <- Enum.all?(origins, &(is_binary(&1) and &1 != "")) do
+      {:ok,
+       %{
+         listen: listen,
+         port: port,
+         host: host,
+         token_file: Path.expand(token_file, root),
+         origin_allowlist: origins
+       }}
+    else
+      _reason -> {:error, :invalid_gateway_config}
+    end
+  end
+
+  defp parse_http(_http, _root), do: {:error, :invalid_gateway_config}
+
+  defp parse_http_host({0, 0, 0, 0}, host), do: canonical_host(host)
+
+  defp parse_http_host(_loopback, nil), do: {:ok, "127.0.0.1"}
+
+  defp parse_http_host(_loopback, host), do: canonical_host(host)
+
+  defp canonical_host(host) when is_binary(host) and byte_size(host) in 1..253 do
+    if host =~
+         ~r/\A[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\z/ do
+      {:ok, host}
+    else
+      :error
+    end
+  end
+
+  defp canonical_host(_host), do: :error
+
+  defp parse_port(port) when is_integer(port) and port in 0..65_535, do: {:ok, port}
+  defp parse_port(port) when is_binary(port), do: ViewerBinding.port(port)
+  defp parse_port(_port), do: :error
 
   defp parse_tools(tools, root) do
     tools

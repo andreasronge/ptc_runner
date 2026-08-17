@@ -6,6 +6,7 @@ defmodule PtcGateway.HTTP.RouterTest do
   alias PtcGateway.Admission
   alias PtcGateway.HTTP.Auth
   alias PtcGateway.HTTP.Router
+  alias PtcGateway.HTTP.Secret
   alias PtcGateway.Protocol
 
   @token "gateway-token-fixture"
@@ -28,7 +29,10 @@ defmodule PtcGateway.HTTP.RouterTest do
 
   setup do
     {:ok, admission} = start_supervised({Admission, ceiling: 2})
-    {:ok, admission: admission}
+    {:ok, secret} = Secret.start_link([])
+    :ok = Secret.install(secret, @token)
+    on_exit(fn -> if Process.alive?(secret), do: GenServer.stop(secret) end)
+    {:ok, admission: admission, secret: secret}
   end
 
   test "bearer comparison uses the constant-time primitive" do
@@ -38,31 +42,49 @@ defmodule PtcGateway.HTTP.RouterTest do
     assert Auth.matches?(@token, @token)
   end
 
-  test "health is unauthenticated", %{admission: admission} do
-    conn = call(:get, "/health", admission)
+  test "health is unauthenticated", ctx do
+    conn = call(:get, "/health", ctx)
     assert conn.status == 200
     assert Jason.decode!(conn.resp_body) == %{"status" => "ok"}
   end
 
-  test "ready and mcp require bearer authentication", %{admission: admission} do
-    ready = call(:get, "/ready", admission, authorize?: false)
+  test "ready and mcp require bearer authentication", ctx do
+    ready = call(:get, "/ready", ctx, authorize?: false)
     assert ready.status == 401
 
-    mcp = call(:post, "/mcp", admission, authorize?: false, body: request(1, "tools/list", %{}))
+    mcp = call(:post, "/mcp", ctx, authorize?: false, body: request(1, "tools/list", %{}))
     assert mcp.status == 401
   end
 
-  test "lists two tools over JSON POST", %{admission: admission} do
-    conn = call(:post, "/mcp", admission, body: request(2, "tools/list", %{}))
+  test "ready is unready when the catalog is empty", ctx do
+    conn =
+      conn(:get, "/ready")
+      |> put_host_header(host_header())
+      |> maybe_authorize(true)
+      |> Router.call(
+        secret: ctx.secret,
+        authority: @authority,
+        origin_allowlist: [@origin],
+        admission: ctx.admission,
+        catalog: [],
+        tools: %{}
+      )
+
+    assert conn.status == 503
+    assert Jason.decode!(conn.resp_body) == %{"status" => "unready"}
+  end
+
+  test "lists two tools over JSON POST", ctx do
+    conn = call(:post, "/mcp", ctx, body: request(2, "tools/list", %{}))
     assert conn.status == 200
     body = Jason.decode!(conn.resp_body)
     names = body["result"]["tools"] |> Enum.map(& &1["name"]) |> Enum.sort()
     assert names == ["double", "echo"]
   end
 
-  test "calls a tool through the request owner", %{admission: admission} do
+  test "calls a tool through the request owner", ctx do
     conn =
-      call(:post, "/mcp", admission,
+      call(:post, "/mcp", ctx,
         body: request(3, "tools/call", %{"name" => "echo", "arguments" => %{"n" => 7}})
       )
 
@@ -72,9 +94,9 @@ defmodule PtcGateway.HTTP.RouterTest do
     assert body["result"]["isError"] == false
   end
 
-  test "a present Origin must match the allowlist exactly", %{admission: admission} do
+  test "a present Origin must match the allowlist exactly", ctx do
     rejected =
-      call(:post, "/mcp", admission,
+      call(:post, "/mcp", ctx,
         body: request(1, "tools/list", %{}),
         origin: "http://evil.example"
       )
@@ -82,7 +104,7 @@ defmodule PtcGateway.HTTP.RouterTest do
     assert rejected.status == 403
 
     allowed =
-      call(:post, "/mcp", admission,
+      call(:post, "/mcp", ctx,
         body: request(1, "tools/list", %{}),
         origin: @origin
       )
@@ -90,9 +112,7 @@ defmodule PtcGateway.HTTP.RouterTest do
     assert allowed.status == 200
   end
 
-  test "Host must match the configured authority and ignores forwarded headers", %{
-    admission: admission
-  } do
+  test "Host must match the configured authority and ignores forwarded headers", ctx do
     conn =
       conn(:post, "/mcp", request(1, "tools/list", %{}))
       |> Map.put(:host, "127.0.0.1")
@@ -101,42 +121,44 @@ defmodule PtcGateway.HTTP.RouterTest do
       |> Plug.Conn.put_req_header("authorization", "Bearer #{@token}")
       |> Plug.Conn.put_req_header("x-forwarded-host", "127.0.0.1:4180")
       |> Plug.Conn.put_req_header("forwarded", "host=127.0.0.1:4180")
-      |> Router.call(router_opts(admission))
+      |> Router.call(router_opts(ctx))
 
     assert conn.status == 403
     assert Jason.decode!(conn.resp_body) == %{"error" => "host rejected"}
   end
 
-  test "bearer scheme matching is case-insensitive", %{admission: admission} do
+  test "bearer scheme matching is case-insensitive", ctx do
     conn =
       conn(:post, "/mcp", request(1, "tools/list", %{}))
       |> put_host_header(host_header())
       |> Plug.Conn.put_req_header("authorization", "bearer #{@token}")
-      |> Router.call(router_opts(admission))
+      |> Router.call(router_opts(ctx))
 
     assert conn.status == 200
   end
 
-  test "the token is not assigned onto the connection", %{admission: admission} do
-    conn = call(:get, "/health", admission)
+  test "the token is not assigned onto the connection", ctx do
+    conn = call(:get, "/health", ctx)
     refute Map.has_key?(conn.assigns.gateway, :token)
     refute Map.has_key?(conn.private, :ptc_gateway_token)
+    refute inspect(conn.assigns.gateway) =~ @token
+    refute Plug.Conn.get_req_header(conn, "authorization") == ["Bearer #{@token}"]
   end
 
-  test "bodies larger than the protocol frame cap are parse errors", %{admission: admission} do
+  test "bodies larger than the protocol frame cap are parse errors", ctx do
     body = :binary.copy("x", Protocol.max_frame_bytes() + 1)
 
     conn =
       conn(:post, "/mcp", body)
       |> put_host_header(host_header())
       |> Plug.Conn.put_req_header("authorization", "Bearer #{@token}")
-      |> Router.call(router_opts(admission))
+      |> Router.call(router_opts(ctx))
 
     assert conn.status == 200
     assert Jason.decode!(conn.resp_body)["error"]["code"] == -32_700
   end
 
-  test "HTTP cancellation is rejected", %{admission: admission} do
+  test "HTTP cancellation is rejected", ctx do
     body =
       Jason.encode!(%{
         "jsonrpc" => "2.0",
@@ -144,12 +166,12 @@ defmodule PtcGateway.HTTP.RouterTest do
         "params" => %{"requestId" => 1}
       })
 
-    conn = call(:post, "/mcp", admission, body: body)
+    conn = call(:post, "/mcp", ctx, body: body)
     assert conn.status == 400
     assert Jason.decode!(conn.resp_body) == %{"error" => "cancellation unsupported over HTTP"}
   end
 
-  defp call(method, path, admission, opts \\ []) do
+  defp call(method, path, ctx, opts \\ []) do
     body = Keyword.get(opts, :body)
     authorize? = Keyword.get(opts, :authorize?, true)
 
@@ -157,7 +179,7 @@ defmodule PtcGateway.HTTP.RouterTest do
     |> put_host_header(host_header())
     |> maybe_authorize(authorize?)
     |> maybe_origin(Keyword.get(opts, :origin))
-    |> Router.call(router_opts(admission))
+    |> Router.call(router_opts(ctx))
   end
 
   defp host_header do
@@ -177,14 +199,14 @@ defmodule PtcGateway.HTTP.RouterTest do
   defp maybe_origin(conn, nil), do: conn
   defp maybe_origin(conn, origin), do: Plug.Conn.put_req_header(conn, "origin", origin)
 
-  defp router_opts(admission) do
+  defp router_opts(ctx) do
     tools = tools()
 
     [
-      token: @token,
+      secret: ctx.secret,
       authority: @authority,
       origin_allowlist: [@origin],
-      admission: admission,
+      admission: ctx.admission,
       catalog: tools,
       tools: Map.new(tools, &{&1.name, &1})
     ]

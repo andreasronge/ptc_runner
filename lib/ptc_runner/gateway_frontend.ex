@@ -1,14 +1,16 @@
 defmodule PtcRunner.GatewayFrontend do
   @moduledoc """
-  Serves compiled applications as MCP tools over stdio.
+  Serves compiled applications as MCP tools over stdio or streamable HTTP.
 
       ptc serve gateway.json
 
   Boot loads the static gateway document, compiles each tool into a
   `PtcRunner.Kernel.ServingTemplate`, and refuses startup on digest mismatch,
-  missing contracts, or an effect that is not provably `:read`. The stdio
-  companion is optional: it ships in the assembled release and is absent from
-  the Hex package, where this command reports `gateway_unavailable`.
+  missing contracts, or an effect that is not provably `:read`. When the
+  document names `http`, the host loads the bearer token from a private file
+  and binds loopback unless `listen` is `0.0.0.0`. Otherwise it serves stdio.
+  The companion is optional: it ships in the assembled release and is absent
+  from the Hex package, where this command reports `gateway_unavailable`.
   """
 
   alias PtcRunner.Kernel.ApplicationPackage
@@ -16,6 +18,7 @@ defmodule PtcRunner.GatewayFrontend do
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.GatewayConfig
+  alias PtcRunner.Kernel.GatewayToken
   alias PtcRunner.Kernel.HostRuntime
   alias PtcRunner.Kernel.ServingTemplate
 
@@ -57,8 +60,9 @@ defmodule PtcRunner.GatewayFrontend do
   @spec compile(binary()) :: {:ok, map()} | {:error, atom()}
   def compile(path) when is_binary(path) do
     with {:ok, config} <- GatewayConfig.load(path),
-         {:ok, tools} <- compile_tools(config.tools, []) do
-      {:ok, %{tools: tools, max_in_flight: config.max_in_flight}}
+         {:ok, tools} <- compile_tools(config.tools, []),
+         {:ok, http} <- load_http(config.http) do
+      {:ok, %{tools: tools, max_in_flight: config.max_in_flight, http: http}}
     end
   end
 
@@ -78,6 +82,10 @@ defmodule PtcRunner.GatewayFrontend do
       {:error, :digest_mismatch} ->
         {:error, :digest_mismatch,
          "a served application digest does not match the gateway document"}
+
+      {:error, :invalid_gateway_token} ->
+        {:error, :invalid_gateway_token,
+         "gateway token file is missing, empty, or not a private regular file"}
 
       {:error, reason} ->
         {:error, reason, "could not start PTC Gateway"}
@@ -180,7 +188,46 @@ defmodule PtcRunner.GatewayFrontend do
     end
   end
 
+  defp load_http(nil), do: {:ok, nil}
+
+  defp load_http(http) when is_map(http) do
+    case GatewayToken.load(http.token_file) do
+      {:ok, token} -> {:ok, Map.put(http, :token, token)}
+      {:error, :invalid_gateway_token} -> {:error, :invalid_gateway_token}
+    end
+  end
+
+  @doc false
+  @spec start(map(), keyword()) :: {:ok, pid()} | {:error, atom()}
+  def start(compiled, opts \\ []) when is_map(compiled) and is_list(opts) do
+    start_gateway(compiled, opts)
+  end
+
+  @doc false
+  @spec stop(pid()) :: :ok
+  def stop(pid), do: apply_stop(pid)
+
   defp start_gateway(compiled, opts) do
+    if companion_installed?() do
+      start_transport(compiled, opts)
+    else
+      {:error, :gateway_unavailable}
+    end
+  end
+
+  defp start_transport(%{http: http} = compiled, _opts) when is_map(http) do
+    apply_start_http(
+      tools: compiled.tools,
+      max_in_flight: compiled.max_in_flight,
+      token: http.token,
+      ip: http.listen,
+      port: http.port,
+      host: http.host,
+      origin_allowlist: http.origin_allowlist
+    )
+  end
+
+  defp start_transport(compiled, opts) do
     start_opts =
       [
         tools: compiled.tools,
@@ -189,15 +236,14 @@ defmodule PtcRunner.GatewayFrontend do
       |> maybe_put(:read, Keyword.get(opts, :read))
       |> maybe_put(:write, Keyword.get(opts, :write))
 
-    if companion_installed?() do
-      apply_start(start_opts)
-    else
-      {:error, :gateway_unavailable}
-    end
+    apply_start(start_opts)
   end
 
   # credo:disable-for-next-line Credo.Check.Refactor.Apply
   defp apply_start(opts), do: apply(@gateway, :start, [opts])
+
+  # credo:disable-for-next-line Credo.Check.Refactor.Apply
+  defp apply_start_http(opts), do: apply(@gateway, :start_http, [opts])
 
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)

@@ -240,11 +240,17 @@ probe it with `Code.ensure_loaded?/1` before calling it.
 ## Start the Gateway
 
 `ptc serve GATEWAY.json` compiles each configured application into a
-`PtcRunner.Kernel.ServingTemplate` and serves it over stdio as MCP
-`2026-07-28` newline-delimited JSON. `PtcGateway` is present in the standalone
-release and absent from the published Hex package, so probe it with
-`Code.ensure_loaded?/1` before calling it. Write-effect configuration and
-digest mismatch refuse startup.
+`PtcRunner.Kernel.ServingTemplate`. Without `http`, it serves stdio as MCP
+`2026-07-28` newline-delimited JSON. With `http`, the host loads a bearer
+token from a private owner-readable file (environment variables are not a
+source) and binds loopback unless `listen` is `0.0.0.0`. A wildcard bind
+requires an explicit `host` name with no scheme or port. `PtcGateway` is
+present in the standalone release and absent from the published Hex package,
+so probe it with `Code.ensure_loaded?/1` before calling it. Write-effect
+configuration, digest mismatch, and an unreadable token file refuse startup.
+The bearer is never kept in plug options or process status; Bandit request
+`:start` and `:exception` telemetry still include the raw `Authorization`
+header because Bandit emits them before the plug runs.
 
 ## Keep policy in PTC-Lisp
 

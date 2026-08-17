@@ -43,8 +43,15 @@ defmodule PtcGateway do
   Starts one streamable HTTP gateway on loopback unless `:ip` is `{0, 0, 0, 0}`.
 
   `:token` is the already-validated bearer secret from the host. `:port` `0`
-  binds an ephemeral port. `:host` is the canonical Host-header name and
-  defaults to `"127.0.0.1"`.
+  binds an ephemeral port. `:host` is the canonical Host-header name (no
+  scheme or port). Loopback defaults it to `"127.0.0.1"`; a wildcard bind
+  requires an explicit host.
+
+  The gateway never puts the token in plug options, supervisor child specs,
+  process status, or Bandit `:stop` telemetry. Bandit copies the raw
+  `Plug.Conn` into `:start` and `:exception` before the plug can strip
+  `Authorization`; those events therefore include the wire header. This
+  companion does not start `Bandit.Trace`.
   """
   @spec start_http(keyword()) :: {:ok, pid()} | {:error, atom()}
   def start_http(opts \\ [])

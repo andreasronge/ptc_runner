@@ -65,6 +65,39 @@ defmodule PtcGateway.HTTP.ServerTest do
              PtcGateway.start_http(tools: tools(), token: "", max_in_flight: 1, port: 0)
   end
 
+  test "wildcard bind requires an explicit Host name" do
+    assert {:error, :invalid_gateway_config} =
+             PtcGateway.start_http(
+               tools: tools(),
+               token: @token,
+               max_in_flight: 1,
+               ip: {0, 0, 0, 0},
+               port: 0
+             )
+
+    assert {:error, :invalid_gateway_config} =
+             PtcGateway.start_http(
+               tools: tools(),
+               token: @token,
+               max_in_flight: 1,
+               ip: {0, 0, 0, 0},
+               host: "http://example.com",
+               port: 0
+             )
+
+    for host <- ["example.com\t", "foo@bar", "foo?bar", "foo#bar", "foo\\bar", "exam ple"] do
+      assert {:error, :invalid_gateway_config} =
+               PtcGateway.start_http(
+                 tools: tools(),
+                 token: @token,
+                 max_in_flight: 1,
+                 ip: {0, 0, 0, 0},
+                 host: host,
+                 port: 0
+               )
+    end
+  end
+
   test "wildcard bind is an explicit operator choice" do
     {:ok, gateway} =
       PtcGateway.start_http(
@@ -72,17 +105,82 @@ defmodule PtcGateway.HTTP.ServerTest do
         token: @token,
         max_in_flight: 1,
         ip: {0, 0, 0, 0},
+        host: "127.0.0.1",
         port: 0
       )
 
     assert {:ok, {{0, 0, 0, 0}, port}} = PtcGateway.listener_info(gateway)
     assert port > 0
     {200, _} = HTTPClient.get(url(port, "/health"))
+
+    {200, ready} =
+      HTTPClient.get(url(port, "/ready"), [{"authorization", "Bearer #{@token}"}])
+
+    assert ready == %{"status" => "ready"}
     PtcGateway.stop(gateway)
+  end
+
+  test "Bandit stop telemetry does not carry the bearer token" do
+    parent = self()
+    handler = "gateway-http-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach_many(
+      handler,
+      [
+        [:bandit, :request, :start],
+        [:bandit, :request, :stop],
+        [:bandit, :request, :exception]
+      ],
+      &__MODULE__.capture_telemetry/4,
+      parent
+    )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    {:ok, gateway} = start_http()
+    refute inspect(:sys.get_status(gateway)) =~ @token
+    {:ok, {_ip, port}} = PtcGateway.listener_info(gateway)
+
+    {200, ready} =
+      HTTPClient.get(url(port, "/ready"), [{"authorization", "Bearer #{@token}"}])
+
+    assert ready == %{"status" => "ready"}
+
+    assert_receive {:telemetry, :start, start_inspected}, 1_000
+    assert_receive {:telemetry, :stop, stop_inspected}, 1_000
+    refute_received {:telemetry, :exception, _}
+
+    refute stop_inspected =~ @token
+    refute stop_inspected =~ "Bearer "
+    assert start_inspected =~ @token
+
+    PtcGateway.stop(gateway)
+  end
+
+  test "secret-holder death stops the HTTP gateway" do
+    {:ok, gateway} = start_http()
+    ref = Process.monitor(gateway)
+    secret = child_pid!(gateway, PtcGateway.HTTP.Secret)
+    Process.exit(secret, :kill)
+
+    assert_receive {:DOWN, ^ref, :process, ^gateway, _reason}
+  end
+
+  def capture_telemetry([:bandit, :request, kind], _measurements, metadata, parent) do
+    send(parent, {:telemetry, kind, inspect(metadata)})
   end
 
   defp start_http do
     PtcGateway.start_http(tools: tools(), token: @token, max_in_flight: 2, port: 0)
+  end
+
+  defp child_pid!(supervisor, id) do
+    supervisor
+    |> Supervisor.which_children()
+    |> Enum.find_value(fn
+      {^id, pid, _type, _modules} when is_pid(pid) -> pid
+      _other -> nil
+    end)
   end
 
   defp tools do
