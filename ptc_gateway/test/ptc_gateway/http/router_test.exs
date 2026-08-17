@@ -94,6 +94,118 @@ defmodule PtcGateway.HTTP.RouterTest do
     assert body["result"]["isError"] == false
   end
 
+  test "tools/call with event-stream Accept is an SSE response", ctx do
+    conn =
+      call(:post, "/mcp", ctx,
+        body: request(3, "tools/call", %{"name" => "echo", "arguments" => %{"n" => 7}}),
+        accept: "text/event-stream"
+      )
+
+    assert conn.status == 200
+    assert Plug.Conn.get_resp_header(conn, "content-type") == ["text/event-stream"]
+    assert conn.resp_body =~ ": \n\n"
+    body = sse_json(conn.resp_body)
+    assert body["result"]["structuredContent"] == %{"answer" => 7}
+  end
+
+  test "SSE tools/call errors stay on the event-stream transport", ctx do
+    unknown =
+      call(:post, "/mcp", ctx,
+        body: request(4, "tools/call", %{"name" => "missing", "arguments" => %{}}),
+        accept: "text/event-stream"
+      )
+
+    assert Plug.Conn.get_resp_header(unknown, "content-type") == ["text/event-stream"]
+    assert sse_json(unknown.resp_body)["error"]["code"] == -32_602
+
+    invalid =
+      call(:post, "/mcp", ctx,
+        body: request(5, "tools/call", %{"name" => 1, "arguments" => %{}}),
+        accept: "text/event-stream"
+      )
+
+    assert Plug.Conn.get_resp_header(invalid, "content-type") == ["text/event-stream"]
+    assert sse_json(invalid.resp_body)["error"]["code"] == -32_602
+
+    holders =
+      for _index <- 1..2 do
+        spawn(fn -> receive do: (:never -> :never) end)
+      end
+
+    on_exit(fn -> Enum.each(holders, &Process.exit(&1, :kill)) end)
+
+    Enum.each(holders, fn holder ->
+      assert :ok = Admission.checkout(ctx.admission, holder)
+    end)
+
+    saturated =
+      call(:post, "/mcp", ctx,
+        body: request(6, "tools/call", %{"name" => "echo", "arguments" => %{"n" => 1}}),
+        accept: "text/event-stream"
+      )
+
+    assert Plug.Conn.get_resp_header(saturated, "content-type") == ["text/event-stream"]
+    assert sse_json(saturated.resp_body)["error"]["code"] == -32_000
+  end
+
+  test "SSE Accept requires the event-stream type and a positive q", ctx do
+    prefix =
+      call(:post, "/mcp", ctx,
+        body: request(3, "tools/call", %{"name" => "echo", "arguments" => %{"n" => 1}}),
+        accept: "text/event-streaming"
+      )
+
+    assert hd(Plug.Conn.get_resp_header(prefix, "content-type")) =~ "json"
+
+    rejected =
+      call(:post, "/mcp", ctx,
+        body: request(3, "tools/call", %{"name" => "echo", "arguments" => %{"n" => 1}}),
+        accept: "text/event-stream;q=0"
+      )
+
+    assert hd(Plug.Conn.get_resp_header(rejected, "content-type")) =~ "json"
+
+    parameterized =
+      call(:post, "/mcp", ctx,
+        body: request(3, "tools/call", %{"name" => "echo", "arguments" => %{"n" => 1}}),
+        accept: "text/event-stream; charset=utf-8"
+      )
+
+    assert Plug.Conn.get_resp_header(parameterized, "content-type") == ["text/event-stream"]
+
+    quoted_comma =
+      call(:post, "/mcp", ctx,
+        body: request(3, "tools/call", %{"name" => "echo", "arguments" => %{"n" => 1}}),
+        accept: ~s(text/event-stream; profile="a,b"; q=0)
+      )
+
+    assert hd(Plug.Conn.get_resp_header(quoted_comma, "content-type")) =~ "json"
+
+    quoted_semicolon =
+      call(:post, "/mcp", ctx,
+        body: request(3, "tools/call", %{"name" => "echo", "arguments" => %{"n" => 1}}),
+        accept: ~s(text/event-stream; profile="a;q=0")
+      )
+
+    assert Plug.Conn.get_resp_header(quoted_semicolon, "content-type") == ["text/event-stream"]
+
+    unterminated =
+      call(:post, "/mcp", ctx,
+        body: request(3, "tools/call", %{"name" => "echo", "arguments" => %{"n" => 1}}),
+        accept: ~s(text/event-stream; profile="unterminated)
+      )
+
+    assert hd(Plug.Conn.get_resp_header(unterminated, "content-type")) =~ "json"
+
+    dangling_escape =
+      call(:post, "/mcp", ctx,
+        body: request(3, "tools/call", %{"name" => "echo", "arguments" => %{"n" => 1}}),
+        accept: "text/event-stream; profile=\"ok\\"
+      )
+
+    assert hd(Plug.Conn.get_resp_header(dangling_escape, "content-type")) =~ "json"
+  end
+
   test "a present Origin must match the allowlist exactly", ctx do
     rejected =
       call(:post, "/mcp", ctx,
@@ -179,6 +291,7 @@ defmodule PtcGateway.HTTP.RouterTest do
     |> put_host_header(host_header())
     |> maybe_authorize(authorize?)
     |> maybe_origin(Keyword.get(opts, :origin))
+    |> maybe_accept(Keyword.get(opts, :accept))
     |> Router.call(router_opts(ctx))
   end
 
@@ -198,6 +311,24 @@ defmodule PtcGateway.HTTP.RouterTest do
 
   defp maybe_origin(conn, nil), do: conn
   defp maybe_origin(conn, origin), do: Plug.Conn.put_req_header(conn, "origin", origin)
+
+  defp maybe_accept(conn, nil), do: conn
+  defp maybe_accept(conn, accept), do: Plug.Conn.put_req_header(conn, "accept", accept)
+
+  defp sse_json(body) do
+    body
+    |> String.split("\n\n")
+    |> Enum.find_value(fn event ->
+      data =
+        event
+        |> String.split("\n")
+        |> Enum.filter(&String.starts_with?(&1, "data:"))
+        |> Enum.map_join("\n", &String.trim_leading(&1, "data:"))
+        |> String.trim()
+
+      if data != "", do: Jason.decode!(data)
+    end)
+  end
 
   defp router_opts(ctx) do
     tools = tools()

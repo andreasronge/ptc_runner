@@ -6,7 +6,9 @@ defmodule PtcGateway.HTTP.Router do
   `Origin` must exactly match the configured allowlist. `Host` must match the
   configured authority's host and port. `X-Forwarded-*` and `Forwarded` are
   ignored. `/health` is unauthenticated; `/ready` and `/mcp` require bearer
-  authentication. `notifications/cancelled` is unsupported over HTTP. The
+  authentication. `notifications/cancelled` is unsupported over HTTP; SSE
+  `tools/call` cancellation is stream closure, detected by heartbeat comment
+  writes. A plain JSON `tools/call` runs to completion or deadline. The
   Authorization header is removed from the Plug connection before dispatch so
   Bandit's `:stop` telemetry carries the stripped conn. Bandit still copies the
   raw conn into `:start` (and `:exception`) before the plug runs.
@@ -17,6 +19,7 @@ defmodule PtcGateway.HTTP.Router do
   alias PtcGateway.Admission
   alias PtcGateway.HTTP.Auth
   alias PtcGateway.HTTP.Secret
+  alias PtcGateway.HTTP.SSE
   alias PtcGateway.Protocol
   alias PtcGateway.RequestOwner
 
@@ -243,10 +246,10 @@ defmodule PtcGateway.HTTP.Router do
 
     cond do
       not is_binary(name) or not is_map(arguments) or is_struct(arguments) ->
-        send_rpc(conn, Protocol.encode_rpc_error(id, :invalid_params))
+        respond_rpc(conn, Protocol.encode_rpc_error(id, :invalid_params))
 
       not Map.has_key?(tools, name) ->
-        send_rpc(conn, Protocol.encode_rpc_error(id, :unknown_tool))
+        respond_rpc(conn, Protocol.encode_rpc_error(id, :unknown_tool))
 
       true ->
         admit_call(conn, id, Map.fetch!(tools, name), arguments)
@@ -264,11 +267,32 @@ defmodule PtcGateway.HTTP.Router do
 
       :saturated ->
         send(owner, :abort)
-        send_rpc(conn, Protocol.encode_rpc_error(id, :admission))
+        respond_rpc(conn, Protocol.encode_rpc_error(id, :admission))
     end
   end
 
   defp await_call(conn, owner, id) do
+    if SSE.accepted?(conn) do
+      SSE.stream(conn, owner, id, heartbeat_ms(conn))
+    else
+      await_json(conn, owner, id)
+    end
+  end
+
+  defp respond_rpc(conn, frame) do
+    if SSE.accepted?(conn) do
+      SSE.send_message(conn, frame)
+    else
+      send_rpc(conn, frame)
+    end
+  end
+
+  defp heartbeat_ms(conn) do
+    ms = conn.assigns.gateway[:heartbeat_ms]
+    if is_integer(ms) and ms > 0, do: ms, else: 1_000
+  end
+
+  defp await_json(conn, owner, id) do
     receive do
       {:request_finished, ^owner, ^id, result} ->
         frame =

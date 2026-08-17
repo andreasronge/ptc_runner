@@ -39,6 +39,7 @@ defmodule PtcGateway.ProtocolTest do
     assert discover["id"] == 1
     assert discover["result"]["supportedVersions"] == ["2026-07-28"]
     assert discover["result"]["capabilities"]["tools"] == %{}
+    assert discover["result"]["_meta"]["ptc/httpCancellation"] == "stream-closure"
     refute Map.has_key?(discover, "Content-Length")
 
     tools = [

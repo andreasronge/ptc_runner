@@ -116,7 +116,8 @@ defmodule PtcGateway.HTTP.Server do
       origin_allowlist: params.origin_allowlist,
       admission: admission,
       catalog: params.tools,
-      tools: Catalog.index(params.tools)
+      tools: Catalog.index(params.tools),
+      heartbeat_ms: params.heartbeat_ms
     ]
   end
 
@@ -127,11 +128,12 @@ defmodule PtcGateway.HTTP.Server do
     ip = Keyword.get(opts, :ip, @loopback)
     port = Keyword.get(opts, :port, 4180)
     origin_allowlist = Keyword.get(opts, :origin_allowlist, [])
+    heartbeat_ms = Keyword.get(opts, :heartbeat_ms, 1_000)
 
     with true <-
            Catalog.valid?(tools) and valid_token?(token) and is_integer(ceiling) and
              ceiling > 0 and ip in @addresses and is_integer(port) and port in 0..65_535 and
-             valid_origins?(origin_allowlist),
+             valid_origins?(origin_allowlist) and valid_heartbeat?(heartbeat_ms),
          {:ok, host} <- canonical_host(ip, Keyword.get(opts, :host)) do
       {:ok,
        %{
@@ -141,7 +143,8 @@ defmodule PtcGateway.HTTP.Server do
          ip: ip,
          port: port,
          host: host,
-         origin_allowlist: origin_allowlist
+         origin_allowlist: origin_allowlist,
+         heartbeat_ms: heartbeat_ms
        }}
     else
       _reason -> {:error, :invalid_gateway_config}
@@ -173,6 +176,9 @@ defmodule PtcGateway.HTTP.Server do
   end
 
   defp valid_origins?(_origins), do: false
+
+  defp valid_heartbeat?(ms) when is_integer(ms) and ms in 10..60_000, do: true
+  defp valid_heartbeat?(_ms), do: false
 
   defp child_pid(supervisor, id) do
     supervisor

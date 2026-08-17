@@ -80,7 +80,8 @@ defmodule PtcGateway.Protocol do
         "io.modelcontextprotocol/serverInfo" => %{
           "name" => @server_name,
           "version" => @server_version
-        }
+        },
+        "ptc/httpCancellation" => "stream-closure"
       }
     }
   end

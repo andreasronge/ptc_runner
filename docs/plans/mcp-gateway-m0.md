@@ -277,11 +277,11 @@ without the in-repo client.
 ## PR 4 — streamable HTTP, single shared authority
 
 **4 status (this branch):** in progress — Bandit listens on loopback by
-default; JSON POST reuses the PR 3 protocol and admission owners; stdio
-`ptc serve` is still stdio when the gateway document omits `http`. An `http`
+default; JSON POST reuses the PR 3 protocol and admission owners; an `http`
 object loads a private token file in the host and binds loopback unless
-`listen` is `0.0.0.0`. Remaining: SSE heartbeats, container packaging, and
-the pinned official SDK harness.
+`listen` is `0.0.0.0`. SSE `tools/call` writes heartbeat comments and
+cancels the request owner on the first failed write. Remaining: container
+packaging and the pinned official SDK harness.
 
 Centered on `ptc_gateway/` — Bandit/Plug enter there and stay out of the
 root application — but this PR also touches root release assembly,

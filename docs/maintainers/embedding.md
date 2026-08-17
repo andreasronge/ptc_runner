@@ -250,7 +250,9 @@ so probe it with `Code.ensure_loaded?/1` before calling it. Write-effect
 configuration, digest mismatch, and an unreadable token file refuse startup.
 The bearer is never kept in plug options or process status; Bandit request
 `:start` and `:exception` telemetry still include the raw `Authorization`
-header because Bandit emits them before the plug runs.
+header because Bandit emits them before the plug runs. HTTP `tools/call`
+with `Accept: text/event-stream` uses SSE heartbeats; the first failed
+write cancels the request owner. JSON calls run to completion or deadline.
 
 ## Keep policy in PTC-Lisp
 

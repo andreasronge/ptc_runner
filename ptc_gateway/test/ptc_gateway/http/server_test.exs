@@ -45,6 +45,21 @@ defmodule PtcGateway.HTTP.ServerTest do
 
     assert called["result"]["structuredContent"] == %{"answer" => 4}
 
+    {200, sse} =
+      HTTPClient.post(
+        url(port, "/mcp"),
+        request(3, "tools/call", %{"name" => "echo", "arguments" => %{"n" => 5}}),
+        [
+          {"authorization", "Bearer #{@token}"},
+          {"accept", "text/event-stream"}
+        ]
+      )
+
+    assert is_binary(sse)
+    assert sse =~ "data:"
+    decoded = sse_json(sse)
+    assert decoded["result"]["structuredContent"] == %{"answer" => 5}
+
     PtcGateway.stop(gateway)
     assert {:error, _reason} = HTTPClient.get(url(port, "/health"))
   end
@@ -166,6 +181,59 @@ defmodule PtcGateway.HTTP.ServerTest do
     assert_receive {:DOWN, ^ref, :process, ^gateway, _reason}
   end
 
+  test "closing an SSE tools/call stream kills the request owner" do
+    parent = self()
+
+    tools = [
+      %{
+        name: "block",
+        description: "Block",
+        input_schema: @input_schema,
+        output_schema: @output_schema,
+        meta: %{"ptc/application_content_digest" => "c"},
+        call: fn _arguments ->
+          send(parent, {:owner, self()})
+          receive do: (:never -> :never)
+        end
+      }
+    ]
+
+    {:ok, gateway} =
+      PtcGateway.start_http(
+        tools: tools,
+        token: @token,
+        max_in_flight: 1,
+        port: 0,
+        heartbeat_ms: 25
+      )
+
+    {:ok, {_ip, port}} = PtcGateway.listener_info(gateway)
+    body = request(1, "tools/call", %{"name" => "block", "arguments" => %{"n" => 1}})
+
+    {:ok, socket} =
+      :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, packet: :raw, active: false])
+
+    request = [
+      "POST /mcp HTTP/1.1\r\n",
+      "Host: 127.0.0.1:#{port}\r\n",
+      "Authorization: Bearer #{@token}\r\n",
+      "Accept: text/event-stream\r\n",
+      "Content-Type: application/json\r\n",
+      "Content-Length: #{byte_size(body)}\r\n",
+      "\r\n",
+      body
+    ]
+
+    :ok = :gen_tcp.send(socket, request)
+    headers = recv_until(socket, "\r\n\r\n")
+    assert headers =~ "text/event-stream"
+    assert_receive {:owner, owner}, 1_000
+    ref = Process.monitor(owner)
+    :ok = :gen_tcp.close(socket)
+    assert_receive {:DOWN, ^ref, :process, ^owner, _reason}, 1_000
+    PtcGateway.stop(gateway)
+  end
+
   def capture_telemetry([:bandit, :request, kind], _measurements, metadata, parent) do
     send(parent, {:telemetry, kind, inspect(metadata)})
   end
@@ -205,6 +273,34 @@ defmodule PtcGateway.HTTP.ServerTest do
   end
 
   defp url(port, path), do: "http://127.0.0.1:#{port}#{path}"
+
+  defp sse_json(body) when is_binary(body) do
+    body
+    |> String.split("\n\n")
+    |> Enum.find_value(fn event ->
+      data =
+        event
+        |> String.split("\n")
+        |> Enum.filter(&String.starts_with?(&1, "data:"))
+        |> Enum.map_join("\n", &String.trim_leading(&1, "data:"))
+        |> String.trim()
+
+      if data != "", do: Jason.decode!(data)
+    end)
+  end
+
+  defp recv_until(socket, marker) do
+    recv_until(socket, marker, "")
+  end
+
+  defp recv_until(socket, marker, acc) do
+    if String.contains?(acc, marker) do
+      acc
+    else
+      {:ok, data} = :gen_tcp.recv(socket, 0, 1_000)
+      recv_until(socket, marker, acc <> data)
+    end
+  end
 
   defp request(id, method, params) do
     Jason.encode!(%{

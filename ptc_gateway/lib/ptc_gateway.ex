@@ -11,9 +11,9 @@ defmodule PtcGateway do
 
   The pinned protocol is MCP `2026-07-28`. Stdio uses newline-delimited JSON
   and rejects HTTP `Content-Length` framing. HTTP POST `/mcp` uses JSON
-  bodies; `notifications/cancelled` is stdio-only. This companion does not
-  compile applications; the host passes already-compiled tool descriptors and
-  a call function per tool.
+  request bodies and JSON or SSE responses; `notifications/cancelled` is
+  stdio-only. This companion does not compile applications; the host passes
+  already-compiled tool descriptors and a call function per tool.
   """
 
   alias PtcGateway.HTTP.Server, as: HTTPServer
@@ -52,6 +52,11 @@ defmodule PtcGateway do
   `Plug.Conn` into `:start` and `:exception` before the plug can strip
   `Authorization`; those events therefore include the wire header. This
   companion does not start `Bandit.Trace`.
+
+  `tools/call` with `Accept: text/event-stream` responds as SSE. Heartbeat
+  comments are written on `:heartbeat_ms` (default 1000). The first failed
+  write kills the request owner. JSON `tools/call` runs to completion or
+  deadline. `notifications/cancelled` is unsupported over HTTP.
   """
   @spec start_http(keyword()) :: {:ok, pid()} | {:error, atom()}
   def start_http(opts \\ [])
