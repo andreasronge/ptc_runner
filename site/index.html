@@ -13,6 +13,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
 </head>
 <body>
 <div class="guide-shell">
@@ -142,6 +143,18 @@ replace it with a domain-specific loop of your own — and doing so grants no ne
   environment, frozen for the run. A local component cannot shadow a shipped library ID, and
   selecting a library installs its dependency closure without granting any tool authority.</figcaption>
 </figure>
+
+<h2>Built on the BEAM</h2>
+
+<p>Every environment runs in its own process on the BEAM, the virtual machine
+built for telephone switches, where huge numbers of concurrent connections, low
+latency, and failure isolation were the requirements. That gives each sandbox
+properties an operating system would provide: preemptive scheduling, so a
+runaway program cannot starve its neighbours; a configurable per-process heap
+limit enforced by the VM, so a sandbox that exceeds its memory budget is
+stopped without taking the machine; and let-it-crash isolation, so one failing
+run never corrupts another. Processes are cheap enough that a normal machine
+hosts thousands of sandboxes at once, with no container per run.</p>
 
 <h2>Install</h2>
 

@@ -62,6 +62,7 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
       expected
       |> Map.put(Path.join("site/guides", "index.html"), index_document(sections, pages))
       |> Map.put(@landing_page, landing_document(sections, pages))
+      |> Map.merge(vendored_highlighter())
 
     validate_anchors!(expected)
 
@@ -77,7 +78,9 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
   defp sections! do
     docs = Mix.Project.config() |> Keyword.fetch!(:docs)
     extras = docs |> Keyword.fetch!(:extras) |> Enum.flat_map(&extra_path/1)
-    groups = docs |> Keyword.fetch!(:groups_for_extras) |> Enum.map(fn {k, v} -> {to_string(k), v} end)
+
+    groups =
+      docs |> Keyword.fetch!(:groups_for_extras) |> Enum.map(fn {k, v} -> {to_string(k), v} end)
 
     known = MapSet.new(groups, fn {title, _members} -> title end)
 
@@ -374,6 +377,7 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
     <link rel="stylesheet" href="/style.css">
     <link rel="stylesheet" href="/guides.css">
+    <script type="module" src="/docs.js"></script>
     </head>
     <body>
     <div class="guide-shell">
@@ -387,12 +391,26 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
     """
   end
 
+  # The site highlights PTC-Lisp with the same vendored highlight.js core and
+  # Clojure grammar as the Viewer; copying at generation time is what keeps
+  # the two the same bytes.
+  defp vendored_highlighter do
+    viewer_vendor = "ptc_viewer/priv/static/js/vendor/highlightjs"
+
+    Map.new(["core.min.js", "clojure.min.js"], fn file ->
+      {Path.join("site/vendor/highlightjs", file), File.read!(Path.join(viewer_vendor, file))}
+    end)
+  end
+
   # ── Anchor validation across the published pages ────────────────────────
 
   # Every internal fragment link must name an id that exists on its target
   # page, so a renamed heading fails generation instead of shipping as a
   # dead in-page jump.
   defp validate_anchors!(expected) do
+    expected =
+      for {path, html} <- expected, String.ends_with?(path, ".html"), into: %{}, do: {path, html}
+
     ids_by_path =
       Map.new(expected, fn {path, html} ->
         ids =

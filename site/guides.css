@@ -105,6 +105,56 @@
 .pager a:hover { text-decoration: underline; }
 .pager .pager-next { margin-left: auto; text-align: right; }
 
+/* Copy buttons on code blocks; the script in docs.js adds them. */
+.guide-main pre { position: relative; }
+.copy-button {
+  position: absolute;
+  top: .45rem;
+  right: .45rem;
+  font: inherit;
+  font-size: .72rem;
+  padding: .15rem .55rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s ease-in-out;
+}
+.guide-main pre:hover .copy-button,
+.copy-button:focus-visible { opacity: 1; }
+.copy-button:hover { color: var(--accent); border-color: var(--accent); }
+@media (hover: none) {
+  .copy-button { opacity: 1; }
+}
+
+/* PTC-Lisp highlighting — highlight.js token classes over the site palette. */
+:root {
+  --hl-keyword: #1f5c8a;
+  --hl-string: #46703c;
+  --hl-number: #7d5a1e;
+  --hl-title: #8a3d1e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --hl-keyword: #82b1d8;
+    --hl-string: #a4c194;
+    --hl-number: #cbb083;
+    --hl-title: #e0a373;
+  }
+}
+
+.guide-main .hljs-comment, .guide-main .hljs-quote { color: var(--muted); font-style: italic; }
+.guide-main .hljs-string, .guide-main .hljs-regexp, .guide-main .hljs-char { color: var(--hl-string); }
+.guide-main .hljs-keyword, .guide-main .hljs-built_in { color: var(--hl-keyword); }
+.guide-main .hljs-symbol, .guide-main .hljs-literal { color: var(--accent); }
+.guide-main .hljs-number { color: var(--hl-number); }
+.guide-main .hljs-title { color: var(--hl-title); font-weight: 600; }
+.guide-main .hljs-meta { color: var(--muted); }
+.guide-main .hljs-name { color: var(--text); }
+
 @media (max-width: 52rem) {
   .guide-shell {
     grid-template-columns: minmax(0, 1fr);

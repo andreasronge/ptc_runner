@@ -123,6 +123,19 @@ most generated programs take:
      (reduce +)) ; => 35
 ```
 
+## Go parallel
+
+`map` has a parallel twin. `pmap` runs the function on each element in its
+own process and returns the results in order:
+
+```clojure
+(pmap (fn [n] (* n n)) [1 2 3 4]) ; => [1 4 9 16]
+```
+
+Processes are cheap here, so fanning a slow step out over a whole collection
+is one word, not an architecture. It stays bounded like everything else: a
+worker budget, a per-worker heap limit, and the run's shared deadline.
+
 ## Decide
 
 `nil` and `false` are falsy; everything else, including `0` and `""`, is

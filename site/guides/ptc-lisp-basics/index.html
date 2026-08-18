@@ -17,6 +17,7 @@ way is…">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
 </head>
 <body>
 <div class="guide-shell">
@@ -135,7 +136,10 @@ access are interchangeable — generated code uses both.</p><h2 id="transform-co
 most generated programs take:</p><pre><code class="clojure language-clojure">(-&gt;&gt; [1 2 3 4 5]
      (filter odd?)
      (map (fn [n] (* n n)))
-     (reduce +)) ; =&gt; 35</code></pre><h2 id="decide">Decide</h2><p><code class="inline">nil</code> and <code class="inline">false</code> are falsy; everything else, including <code class="inline">0</code> and <code class="inline">&quot;&quot;</code>, is
+     (reduce +)) ; =&gt; 35</code></pre><h2 id="go-parallel">Go parallel</h2><p><code class="inline">map</code> has a parallel twin. <code class="inline">pmap</code> runs the function on each element in its
+own process and returns the results in order:</p><pre><code class="clojure language-clojure">(pmap (fn [n] (* n n)) [1 2 3 4]) ; =&gt; [1 4 9 16]</code></pre><p>Processes are cheap here, so fanning a slow step out over a whole collection
+is one word, not an architecture. It stays bounded like everything else: a
+worker budget, a per-worker heap limit, and the run's shared deadline.</p><h2 id="decide">Decide</h2><p><code class="inline">nil</code> and <code class="inline">false</code> are falsy; everything else, including <code class="inline">0</code> and <code class="inline">&quot;&quot;</code>, is
 truthy:</p><pre><code class="clojure language-clojure">(if (&gt; 3 2) &quot;yes&quot; &quot;no&quot;) ; =&gt; &quot;yes&quot;
 (if 0 &quot;truthy&quot; &quot;falsy&quot;) ; =&gt; &quot;truthy&quot;
 (nil? nil)              ; =&gt; true</code></pre><h2 id="mistakes-are-values">Mistakes are values</h2><p>Where many languages raise, the sandbox returns a recoverable error value and
