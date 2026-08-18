@@ -1799,16 +1799,16 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp read_credential(_directory, %{source: :literal, value: value}),
     do: {:ok, value}
 
-  # A control character disqualifies a credential wherever it is carried: an
-  # HTTP header value cannot hold CR or LF, and a child process environment
-  # entry holding one is pathological. Enforcing it here reports the fault as
-  # the credential check it is, in `active_preflight`, rather than letting the
-  # header renderer discover it at acquisition, where the reason has no
-  # classification and fails closed as an internal error.
+  # Only NUL disqualifies a credential outright. The two sinks disagree about
+  # the rest: an HTTP header value cannot hold CR or LF, while a child process
+  # environment entry legitimately can — a PEM block or a JSON service-account
+  # key delivered through `transport.env` is a whole credential with interior
+  # newlines. `render_headers/2` owns the stricter rule, because it is the only
+  # sink that needs it.
   defp valid_secret?(value),
     do:
       is_binary(value) and byte_size(value) in 1..@max_credential_bytes and
-        String.valid?(value) and not String.match?(value, ~r/[\x00-\x1f\x7f]/u)
+        String.valid?(value) and not String.contains?(value, <<0>>)
 
   defp render_environment(bindings, credentials) do
     Enum.reduce_while(bindings, {:ok, %{}}, fn {name, binding}, {:ok, environment} ->
@@ -1822,10 +1822,17 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end)
   end
 
+  # A header value cannot hold CR or LF, so a credential carrying one cannot
+  # authenticate this request. Reporting that as `:mcp_authentication_failed`
+  # is what `PtcRunner.Kernel.AcquisitionReason` prescribes for a rejected
+  # credential, and it is the same class the endpoint's own refusal produces.
+  # Left as a bare `:credential_unavailable` it escaped `acquire/7` unclassified
+  # and fell closed as an internal error, which told the reader the fault was
+  # not theirs.
   defp render_headers(auth, credentials) do
     Enum.reduce_while(auth, {:ok, []}, fn entry, {:ok, headers} ->
       with {:ok, secret} <- Map.fetch(credentials, entry.binding),
-           false <- String.contains?(secret, ["\r", "\n"]) do
+           false <- carriable_header_value?(secret) do
         header =
           case entry.scheme do
             :bearer -> {"Authorization", "Bearer " <> secret}
@@ -1835,6 +1842,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
         {:cont, {:ok, [header | headers]}}
       else
+        true -> {:halt, {:error, :mcp_authentication_failed}}
         _reason -> {:halt, {:error, :credential_unavailable}}
       end
     end)
@@ -1843,4 +1851,6 @@ defmodule PtcRunner.Kernel.HostInstallation do
       {:error, _reason} = error -> error
     end
   end
+
+  defp carriable_header_value?(secret), do: String.contains?(secret, ["\r", "\n"])
 end

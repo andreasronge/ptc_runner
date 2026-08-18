@@ -97,10 +97,12 @@ PTC-Lisp, canonical traces, or committed files.
 
 Surrounding whitespace is not part of a secret and is trimmed from every
 source, so `gh auth token > vendor.token` and an editor that adds a trailing
-newline both work. A value that still carries a control character after
-trimming — an interior newline, say — cannot be carried in an HTTP header or a
-child process environment, and fails as `credential_unavailable` at the
-credential check rather than partway into acquisition.
+newline both work. Interior structure is preserved: a PEM block or a JSON
+service-account key is one credential, and `transport.env` hands it to the
+child process whole. An HTTP header cannot carry a newline, so a credential
+bound to `transport.auth` that still holds one after trimming reports
+`authentication_rejected` — the same class the endpoint's own refusal
+reports — rather than an internal fault.
 
 `ptc` and `mix ptc` accept `--env-file FILE` on `run`, active `doctor`, and
 manifest-backed `repl`. When any selected installation binds an `env`

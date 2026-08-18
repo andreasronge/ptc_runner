@@ -28,6 +28,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
@@ -2651,12 +2652,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "a credential that cannot be carried is refused at resolution, not at acquisition", %{
+  test "a credential that cannot be carried reports authentication, not an internal fault", %{
     tmp_dir: directory
   } do
-    # An interior newline survives trimming and cannot go into a header. It is a
-    # fact about the credential, so it belongs to the credential check rather
-    # than to whatever the transport was about to attempt.
+    # An interior newline survives trimming and cannot go into a header, so this
+    # credential cannot authenticate the request. It reports the class the
+    # endpoint's own refusal reports, rather than escaping unclassified and
+    # falling closed as an internal error.
     File.write!(Path.join(directory, "tok.txt"), "ptc-not\na-real-token")
 
     host_path =
@@ -2680,15 +2682,53 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert outcome.exit_status == 4
     assert outcome.envelope["error"]["phase"] == "active_preflight"
-    assert outcome.envelope["error"]["code"] == "credential_unavailable"
+    assert outcome.envelope["error"]["code"] == "authentication_rejected"
+    refute outcome.envelope["error"]["phase"] == "internal"
 
-    assert %{"status" => "fail", "code" => "credential_unavailable"} =
+    assert %{"status" => "fail", "code" => "authentication_rejected"} =
              Enum.find(
                outcome.envelope["result"]["checks"],
-               &(&1["name"] == "provider/remote/credentials")
+               &(&1["name"] == "provider/remote/connectivity")
              )
 
     assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a whole multi-line credential still reaches a child process environment", %{
+    tmp_dir: directory
+  } do
+    # A PEM block or a JSON service-account key is one credential with interior
+    # newlines, and `transport.env` exists to hand exactly that to the child.
+    # Only the header sink cannot carry them.
+    pem = "-----BEGIN PRIVATE KEY-----\nMIIBVgIBADAN\n-----END PRIVATE KEY-----\n"
+    File.write!(Path.join(directory, "key.pem"), pem)
+
+    host_path =
+      write_host_config(directory, "multiline-credential", %{
+        "credentials" => %{"key" => %{"file" => "key.pem"}},
+        "install" => %{
+          "workspace" => %{
+            "source" => "mcp",
+            "installation_revision" => "workspace-v1",
+            "transport" => %{
+              "type" => "stdio",
+              "command" => System.find_executable("sh"),
+              "env" => %{"SERVICE_KEY" => %{"binding" => "key"}}
+            },
+            "tools" => %{"read" => %{"as" => "workspace.read", "effect" => "read"}}
+          }
+        }
+      })
+
+    {:ok, host} = HostConfig.load(host_path)
+
+    # Trailing whitespace is not part of the secret; the interior structure is.
+    assert {:ok, %{"key" => resolved}} =
+             HostInstallation.resolve_runtime_credentials(host, ["key"])
+
+    assert resolved == String.trim(pem)
+    assert String.contains?(resolved, "\n")
   end
 
   test "undeclared options are rejected before cross-command conflict rules" do
