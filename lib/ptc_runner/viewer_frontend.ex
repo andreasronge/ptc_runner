@@ -335,6 +335,7 @@ defmodule PtcRunner.ViewerFrontend do
         if(inspection?,
           do: PtcRunner.Kernel.ProjectViewerAdapter
         ),
+      inspection_absence: inspection_absence(project, inspection?),
       live_token: System.get_env("PTC_VIEWER_TOKEN"),
       live_trace_refresh: fn run_id -> ViewerSnapshotStore.refresh(snapshots, run_id) end,
       launch: launch_spec(project, callbacks.frontend, callbacks.env_file),
@@ -343,6 +344,17 @@ defmodule PtcRunner.ViewerFrontend do
       repl_config: repl_config(project)
     ]
   end
+
+  # `capture_inspection/3` requires both the recorded artifact and the private
+  # grant, so an absent store has two possible causes and only the project
+  # document distinguishes them. A reader whose `artifacts.inspection` is
+  # already true and who is told to set it has been sent to the wrong field.
+  defp inspection_absence(_project, true), do: nil
+
+  defp inspection_absence(%{artifacts: %{inspection: true}, viewer: %{private: false}}, false),
+    do: :not_private
+
+  defp inspection_absence(_project, false), do: :not_recorded
 
   defp launch_spec(project, frontend, env_file) do
     label = workflow_label(project)

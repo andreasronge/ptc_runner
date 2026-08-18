@@ -338,7 +338,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
     ProviderDescriptor.new(
       source: installation.source,
       installation_revision: installation.installation_revision,
-      credential_names: descriptor_credential_names(installation),
+      credential_names: installation_credential_names(installation),
       authorization_mode: authorization_mode(installation),
       data_class: descriptor_data_class(installation),
       accepts_data:
@@ -356,15 +356,24 @@ defmodule PtcRunner.Kernel.HostInstallation do
     )
   end
 
-  defp descriptor_credential_names(%{source: :mcp, transport: transport}) do
+  @doc """
+  Returns the host credential names one installation resolves at runtime.
+
+  An MCP transport binds credentials through `env` or `auth` exactly as an LLM
+  installation binds one through `credential`, so anything that reasons about
+  what an installation needs must ask this rather than the source tag. An
+  OAuth-authorized transport resolves no host credential.
+  """
+  @spec installation_credential_names(map()) :: [binary()]
+  def installation_credential_names(%{source: :mcp, transport: transport}) do
     case authority_from_transport(transport) do
       %Authority{} -> []
       nil -> credential_names(transport)
     end
   end
 
-  defp descriptor_credential_names(%{source: :llm, credential: credential}), do: [credential]
-  defp descriptor_credential_names(_installation), do: []
+  def installation_credential_names(%{source: :llm, credential: credential}), do: [credential]
+  def installation_credential_names(_installation), do: []
 
   defp descriptor_data_class(%{source: source})
        when source in [:ptc_private_trace_snapshot, :ptc_inspection_snapshot],
@@ -1758,10 +1767,22 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   def resolve_runtime_credentials(_host, _names), do: {:error, :credential_unavailable}
 
-  defp resolve_credential(_directory, %{source: :env, name: name}),
+  # Surrounding whitespace is never part of a secret, and every ordinary way of
+  # putting one in a file adds it: `echo`, an editor save, `gh auth token >
+  # file`. The host reference recommends `file:` for secrets, so the newline is
+  # on the recommended path. All three sources trim, so the same token supplied
+  # three ways is one value.
+  defp resolve_credential(directory, declaration) do
+    case read_credential(directory, declaration) do
+      {:ok, value} when is_binary(value) -> {:ok, String.trim(value)}
+      other -> other
+    end
+  end
+
+  defp read_credential(_directory, %{source: :env, name: name}),
     do: System.fetch_env(name)
 
-  defp resolve_credential(directory, %{source: :file, path: path}) do
+  defp read_credential(directory, %{source: :file, path: path}) do
     if Path.type(path) == :absolute do
       with {:ok, canonical} <- ConfinedFile.resolve_absolute(path),
            do:
@@ -1775,9 +1796,15 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp resolve_credential(_directory, %{source: :literal, value: value}),
+  defp read_credential(_directory, %{source: :literal, value: value}),
     do: {:ok, value}
 
+  # Only NUL disqualifies a credential outright. The two sinks disagree about
+  # the rest: an HTTP header value cannot hold CR or LF, while a child process
+  # environment entry legitimately can — a PEM block or a JSON service-account
+  # key delivered through `transport.env` is a whole credential with interior
+  # newlines. `render_headers/2` owns the stricter rule, because it is the only
+  # sink that needs it.
   defp valid_secret?(value),
     do:
       is_binary(value) and byte_size(value) in 1..@max_credential_bytes and
@@ -1795,10 +1822,17 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end)
   end
 
+  # A header value cannot hold CR or LF, so a credential carrying one cannot
+  # authenticate this request. Reporting that as `:mcp_authentication_failed`
+  # is what `PtcRunner.Kernel.AcquisitionReason` prescribes for a rejected
+  # credential, and it is the same class the endpoint's own refusal produces.
+  # Left as a bare `:credential_unavailable` it escaped `acquire/7` unclassified
+  # and fell closed as an internal error, which told the reader the fault was
+  # not theirs.
   defp render_headers(auth, credentials) do
     Enum.reduce_while(auth, {:ok, []}, fn entry, {:ok, headers} ->
       with {:ok, secret} <- Map.fetch(credentials, entry.binding),
-           false <- String.contains?(secret, ["\r", "\n"]) do
+           false <- carriable_header_value?(secret) do
         header =
           case entry.scheme do
             :bearer -> {"Authorization", "Bearer " <> secret}
@@ -1808,6 +1842,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
         {:cont, {:ok, [header | headers]}}
       else
+        true -> {:halt, {:error, :mcp_authentication_failed}}
         _reason -> {:halt, {:error, :credential_unavailable}}
       end
     end)
@@ -1816,4 +1851,6 @@ defmodule PtcRunner.Kernel.HostInstallation do
       {:error, _reason} = error -> error
     end
   end
+
+  defp carriable_header_value?(secret), do: String.contains?(secret, ["\r", "\n"])
 end

@@ -236,10 +236,29 @@ canonical run reached a terminal event with no dropped events, no expected
 model exchange is missing, and no turn or generated-source association is
 ambiguous. It is a statement about the reconstruction, not a promise that every
 field of every record is present. `ptc transcript` refuses to write a file at
-all unless `complete?` holds and `ambiguous?` does not, so that field is always
-`true` in a published transcript; read it over
-`/api/analysis/runs/{id}/conversation`, which applies no such gate, when you
-need it to be able to say no.
+all unless `complete?` holds, so that field is always `true` in a published
+transcript; read it over `/api/analysis/runs/{id}/conversation`, which applies
+no such gate, when you need it to be able to say no.
+
+The refusal names which of the three facts failed and by how much, because they
+have different next actions. `transcript/ambiguous_evidence` means nothing is
+missing: the canonical run is complete and every expected exchange was
+captured, but some turn or generated-source association resolves to more than
+one predecessor. Re-running does not help; read the ungated route instead.
+`transcript/incomplete_evidence` means the canonical trace is not terminal or
+dropped events, or the inspection artifact does not carry every exchange the
+trace expects — both facts about the capture rather than the reconstruction.
+
+### Reaching the ungated reconstruction
+
+`/api/analysis/runs/{id}/conversation` is served by `ptc viewer` and needs the
+project's private grant. Two separate settings withhold it, and the Viewer's
+private routes answer for each by name:
+
+| answer | cause | next action |
+| --- | --- | --- |
+| `404 inspection_not_configured` | the project records no inspection artifact | set `artifacts.trace` and `artifacts.inspection` and run again |
+| `404 inspection_not_private` | the artifact exists, this Viewer was not granted it | set `viewer.private` and start the Viewer again; nothing needs re-running |
 
 `omitted_count` is pagination: how many selected items this page did not
 return. It never reports evidence withheld by policy. A source grant that

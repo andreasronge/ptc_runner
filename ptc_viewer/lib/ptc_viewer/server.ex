@@ -30,6 +30,7 @@ defmodule PtcViewer.Server do
     kernel_adapter = Keyword.get(opts, :kernel_trace_adapter)
     inspection_file = Keyword.get(opts, :inspection_file)
     inspection_adapter = Keyword.get(opts, :inspection_adapter)
+    inspection_absence = Keyword.get(opts, :inspection_absence)
     repl_adapter = Keyword.get(opts, :repl_adapter)
     repl_config = Keyword.get(opts, :repl_config, %{})
     private_traces = Keyword.get(opts, :private_traces, false) == true
@@ -53,6 +54,7 @@ defmodule PtcViewer.Server do
         kernel_adapter: kernel_adapter,
         inspection_file: inspection_file,
         inspection_adapter: inspection_adapter,
+        inspection_absence: inspection_absence,
         repl_adapter: repl_adapter,
         repl_config: repl_config,
         private_traces: private_traces,
@@ -266,6 +268,7 @@ defmodule PtcViewer.Server do
       kernel_trace_adapter: params.kernel_adapter,
       inspection_store: inspection_store,
       inspection_adapter: params.inspection_adapter,
+      inspection_absence: params.inspection_absence,
       repl_store: repl_store,
       repl_enabled: not is_nil(repl_store),
       live_store: live_store,

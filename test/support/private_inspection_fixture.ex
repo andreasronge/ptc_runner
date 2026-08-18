@@ -42,6 +42,67 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     })
   end
 
+  @doc """
+  Builds a capture whose reconstruction is ambiguous while nothing is missing.
+
+  Two exchanges answer the same request with the same response, so a third
+  request extending that prefix has two maximal predecessors and cannot be
+  attributed to either. The run is terminal, drops no events, and captures
+  every exchange the trace expects, so `canonical_complete?` is true and
+  `missing_exchange_count` is zero: the only failing condition is ambiguity.
+  """
+  def create_ambiguous!(root, run_id \\ "ambiguous-private-run") do
+    %{traces: traces, inspection: inspection} = fixture = create_directories(root, run_id)
+
+    ids = Enum.map(1..3, &"llm-#{&1}-#{run_id}")
+
+    events =
+      [event(run_id, 1, "run-started", %{"missions" => %{}})] ++
+        Enum.flat_map(Enum.with_index(ids, 1), fn {capability_id, index} ->
+          [
+            event(run_id, index * 2, "capability-started", %{
+              "capability_id" => capability_id,
+              "environment" => "workflow",
+              "name" => "llm-request"
+            }),
+            event(run_id, index * 2 + 1, "capability-stopped", %{
+              "capability_id" => capability_id,
+              "environment" => "workflow",
+              "name" => "llm-request",
+              "status" => "ok"
+            })
+          ]
+        end) ++ [event(run_id, 8, "run-stopped", %{"outcome" => "ok"})]
+
+    File.write!(Path.join(traces, "#{run_id}.jsonl"), encode_jsonl(events))
+
+    user = %{"role" => "user", "content" => "private-prompt-#{run_id}"}
+    assistant = %{"role" => "assistant", "content" => "private-answer-#{run_id}"}
+    follow_up = %{"role" => "user", "content" => "private-follow-up-#{run_id}"}
+
+    requests = [[user], [user], [user, assistant, follow_up]]
+
+    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
+
+    Enum.each(Enum.zip(ids, requests), fn {capability_id, messages} ->
+      emit!(sink, "capability-input", %{capability_id: capability_id}, %{
+        environment: :workflow,
+        name: "llm-request",
+        arguments: %{"messages" => messages, "system" => "private-system-#{run_id}"}
+      })
+
+      emit!(sink, "capability-output", %{capability_id: capability_id}, %{
+        environment: :workflow,
+        name: "llm-request",
+        result: %{status: :ok, value: %{"content" => assistant["content"]}}
+      })
+    end)
+
+    persist_inspection!(sink, inspection, run_id, events)
+
+    fixture
+  end
+
   def create_result!(root, value, run_id \\ "private-result-run") do
     %{traces: traces, inspection: inspection} = fixture = create_directories(root, run_id)
     {:ok, result_hash} = ResultIdentity.strict_json_hash(value)

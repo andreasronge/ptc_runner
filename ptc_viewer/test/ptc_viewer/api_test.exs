@@ -101,6 +101,12 @@ defmodule PtcViewer.ApiTest do
 
     assert {:error, :inspection_not_configured} =
              PtcViewer.Api.conversation([inspection_adapter: adapter], "run-1")
+
+    # A project that records inspection artifacts but withholds the private
+    # grant reaches the same absent store by a different route. Reporting it as
+    # "not configured" sends the reader to change the field they already set.
+    assert {:error, :inspection_not_private} =
+             PtcViewer.Api.conversation([inspection_absence: :not_private], "run-1")
   end
 
   test "preludes delegates the pinned inspection grant", %{trace_dir: trace_dir} do

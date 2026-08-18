@@ -28,6 +28,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
@@ -2537,23 +2538,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end)
 
     host_path =
-      write_host_config(directory, "connect-missing-credential", %{
-        "credentials" => %{"key" => %{"env" => environment_name}},
-        "install" => %{
-          "workspace" => %{
-            "source" => "mcp",
-            "installation_revision" => "workspace-v1",
-            "transport" => %{
-              "type" => "stdio",
-              "command" => System.find_executable("sh"),
-              "env" => %{"TOKEN" => %{"binding" => "key"}}
-            },
-            "tools" => %{
-              "read" => %{"as" => "workspace.read", "effect" => "read"}
-            }
-          }
-        }
-      })
+      write_host_config(
+        directory,
+        "connect-missing-credential",
+        stdio_credential_host(environment_name)
+      )
 
     application =
       doctor_application(directory, "connect-missing-credential", mission: ["workspace"])
@@ -2585,6 +2574,161 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              Enum.find(result["checks"], &(&1["name"] == "provider/workspace/connectivity"))
 
     assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "--env-file supplies an MCP transport credential, not only an LLM one", %{
+    tmp_dir: directory
+  } do
+    environment_name = "PTC_TEST_MCP_ENV_FILE_CREDENTIAL"
+    previous_environment = System.get_env(environment_name)
+    System.delete_env(environment_name)
+
+    on_exit(fn ->
+      if previous_environment,
+        do: System.put_env(environment_name, previous_environment),
+        else: System.delete_env(environment_name)
+    end)
+
+    host_path =
+      write_host_config(directory, "mcp-env-file", stdio_credential_host(environment_name))
+
+    application = doctor_application(directory, "mcp-env-file", mission: ["workspace"])
+    env_file = Path.join(directory, "mcp.env")
+    File.write!(env_file, "#{environment_name}=test-secret\n")
+
+    presentation =
+      StandaloneCLI.execute([
+        "doctor",
+        application,
+        "--host-config",
+        host_path,
+        "--connect",
+        "--env-file",
+        env_file
+      ])
+
+    # An MCP-only project reached `credential_unavailable` with the named file
+    # never read: environment setup was gated on the selected provider being an
+    # LLM, while an MCP transport binds environment credentials the same way.
+    assert System.get_env(environment_name) == "test-secret"
+
+    refute presentation.outcome.envelope["error"]["code"] == "credential_unavailable"
+  end
+
+  @tag :tmp_dir
+  test "a credential written by an ordinary shell redirect is usable, not internal", %{
+    tmp_dir: directory
+  } do
+    # `printf '%s\\n' "$TOKEN" > tok.txt`, `echo`, an editor save, and
+    # `gh auth token > file` all produce the trailing newline, and the host
+    # reference recommends `file:` for secrets. It reached the one phase that
+    # tells the reader the fault is not theirs.
+    File.write!(Path.join(directory, "tok.txt"), "ptc-not-a-real-token\n")
+
+    host_path =
+      write_host_config(directory, "credential-newline", bearer_credential_host("tok.txt"))
+
+    application = doctor_application(directory, "credential-newline", mission: ["remote"])
+
+    presentation =
+      StandaloneCLI.execute([
+        "doctor",
+        application,
+        "--host-config",
+        host_path,
+        "--connect"
+      ])
+
+    error = presentation.outcome.envelope["error"]
+    refute error["phase"] == "internal"
+    refute error["code"] == "internal_error"
+    refute presentation.exit_status == 70
+
+    # Surrounding whitespace is not part of a secret, so the credential is the
+    # same one the clean file would have supplied and the run reaches the
+    # endpoint it was configured for.
+    assert error["phase"] == "active_preflight"
+  end
+
+  @tag :tmp_dir
+  test "a credential that cannot be carried reports authentication, not an internal fault", %{
+    tmp_dir: directory
+  } do
+    # An interior newline survives trimming and cannot go into a header, so this
+    # credential cannot authenticate the request. It reports the class the
+    # endpoint's own refusal reports, rather than escaping unclassified and
+    # falling closed as an internal error.
+    File.write!(Path.join(directory, "tok.txt"), "ptc-not\na-real-token")
+
+    host_path =
+      write_host_config(
+        directory,
+        "credential-interior-newline",
+        bearer_credential_host("tok.txt")
+      )
+
+    application =
+      doctor_application(directory, "credential-interior-newline", mission: ["remote"])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.exit_status == 4
+    assert outcome.envelope["error"]["phase"] == "active_preflight"
+    assert outcome.envelope["error"]["code"] == "authentication_rejected"
+    refute outcome.envelope["error"]["phase"] == "internal"
+
+    assert %{"status" => "fail", "code" => "authentication_rejected"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/remote/connectivity")
+             )
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a whole multi-line credential still reaches a child process environment", %{
+    tmp_dir: directory
+  } do
+    # A PEM block or a JSON service-account key is one credential with interior
+    # newlines, and `transport.env` exists to hand exactly that to the child.
+    # Only the header sink cannot carry them.
+    pem = "-----BEGIN PRIVATE KEY-----\nMIIBVgIBADAN\n-----END PRIVATE KEY-----\n"
+    File.write!(Path.join(directory, "key.pem"), pem)
+
+    host_path =
+      write_host_config(directory, "multiline-credential", %{
+        "credentials" => %{"key" => %{"file" => "key.pem"}},
+        "install" => %{
+          "workspace" => %{
+            "source" => "mcp",
+            "installation_revision" => "workspace-v1",
+            "transport" => %{
+              "type" => "stdio",
+              "command" => System.find_executable("sh"),
+              "env" => %{"SERVICE_KEY" => %{"binding" => "key"}}
+            },
+            "tools" => %{"read" => %{"as" => "workspace.read", "effect" => "read"}}
+          }
+        }
+      })
+
+    {:ok, host} = HostConfig.load(host_path)
+
+    # Trailing whitespace is not part of the secret; the interior structure is.
+    assert {:ok, %{"key" => resolved}} =
+             HostInstallation.resolve_runtime_credentials(host, ["key"])
+
+    assert resolved == String.trim(pem)
+    assert String.contains?(resolved, "\n")
   end
 
   test "undeclared options are rejected before cross-command conflict rules" do
@@ -4686,6 +4830,57 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "host-schema failures inside an installation are told apart by their pointer", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "host-schema-depth", valid_manifest())
+    base = valid_host_config()
+
+    # Six structurally different mistakes reported one identical pointer,
+    # `/install`, because an installation is a tagged union and the member that
+    # broke is named only inside the rejected branches.
+    cases = [
+      {"wrong-parent",
+       put_in(base, ["install", "workspace", "ceilings"], %{"run_timeout_ms" => 1}),
+       "/install/*/ceilings"},
+      {"ceiling-range",
+       put_in(base, ["install", "workspace", "ceilings"], %{"timeout_ms" => 999_999}),
+       "/install/*/ceilings/timeout_ms"},
+      {"transport-range",
+       put_in(base, ["install", "workspace", "transport", "start_timeout_ms"], 99_999),
+       "/install/*/transport/start_timeout_ms"},
+      {"revision-pattern",
+       put_in(base, ["install", "workspace", "installation_revision"], "WORKSPACE-V1"),
+       "/install/*/installation_revision"},
+      {"tool-effect", put_in(base, ["install", "workspace", "tools", "read", "effect"], "delete"),
+       "/install/*/tools"}
+    ]
+
+    pointers =
+      for {name, host, expected} <- cases do
+        host_path = write_host_config(directory, "depth-#{name}", host)
+
+        outcome =
+          assert_error(
+            ["validate", application, "--host-config", host_path],
+            "host",
+            "host_schema_invalid"
+          )
+
+        assert outcome.envelope["error"]["path"] == expected
+
+        # The installation alias and the upstream tool name are the author's
+        # own words. Neither reaches the pointer.
+        refute outcome.envelope["error"]["path"] =~ "workspace"
+        refute outcome.envelope["error"]["path"] =~ "read"
+        assert_schema_valid(outcome.envelope)
+        outcome.envelope["error"]["path"]
+      end
+
+    assert length(Enum.uniq(pointers)) == 5
+  end
+
+  @tag :tmp_dir
   test "phase-2 host loading preserves every closed host diagnostic", %{tmp_dir: directory} do
     application = write_application(directory, "host-diagnostics", valid_manifest())
     base = valid_host_config()
@@ -4917,8 +5112,12 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
       outcome = assert_error(["validate", directory_path], "application", "schema_violation")
 
+      # A mission name is the author's own, so it is elided rather than named;
+      # the closed schema beneath it stays addressable.
       expected_pointer =
-        if hd(path) == "missions", do: "/missions", else: Enum.map_join(path, "", &"/#{&1}")
+        if hd(path) == "missions",
+          do: "/missions/*",
+          else: Enum.map_join(path, "", &"/#{&1}")
 
       assert outcome.envelope["error"]["path"] == expected_pointer
       refute Jason.encode!(outcome.envelope) =~ "caller-secret"
@@ -5027,7 +5226,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       outcome = assert_error(["validate", directory_path], "application", "schema_violation")
 
       expected_pointer =
-        if hd(path) == "missions", do: "/missions", else: Enum.map_join(path, "", &"/#{&1}")
+        Enum.map_join(path, "", fn
+          "default" -> "/*"
+          segment -> "/#{segment}"
+        end)
 
       assert outcome.envelope["error"]["path"] == expected_pointer
 
@@ -7255,6 +7457,46 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       end
 
     write_application(directory, name, manifest)
+  end
+
+  # One credentialed MCP installation per transport shape. The credential is the
+  # subject of every test that uses these, so the surrounding document is
+  # shared rather than restated.
+  defp stdio_credential_host(environment_name) do
+    %{
+      "credentials" => %{"key" => %{"env" => environment_name}},
+      "install" => %{
+        "workspace" => %{
+          "source" => "mcp",
+          "installation_revision" => "workspace-v1",
+          "transport" => %{
+            "type" => "stdio",
+            "command" => System.find_executable("sh"),
+            "env" => %{"TOKEN" => %{"binding" => "key"}}
+          },
+          "tools" => %{"read" => %{"as" => "workspace.read", "effect" => "read"}}
+        }
+      }
+    }
+  end
+
+  defp bearer_credential_host(credential_file) do
+    %{
+      "credentials" => %{"tok" => %{"file" => credential_file}},
+      "install" => %{
+        "remote" => %{
+          "source" => "mcp",
+          "installation_revision" => "remote-v1",
+          "transport" => %{
+            "type" => "streamable_http",
+            "endpoint" => "https://127.0.0.1:1/mcp",
+            "auth" => [%{"scheme" => "bearer", "binding" => "tok"}]
+          },
+          "tools" => %{"read" => %{"as" => "remote.read", "effect" => "read"}},
+          "ceilings" => %{"timeout_ms" => 2_000}
+        }
+      }
+    }
   end
 
   defp env_credential_host do

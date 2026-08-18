@@ -14,9 +14,15 @@ defmodule PtcRunner.Kernel.SchemaPath do
   explain, so every returned segment is one the schema authorizes.
 
   Keywords that admit caller-chosen names — `additionalProperties` above all —
-  are deliberately not traversed, so a path into an open map keeps the segments
-  down to that map and drops the caller's own key. A host diagnostic under
-  `install` therefore stops at `install` rather than naming the installation.
+  never contribute the caller's own key. Where the map's `propertyNames` proves
+  no admissible member could render as the elision placeholder
+  `PtcRunner.Kernel.CommandPath` owns, the key is replaced by that placeholder
+  and the walk continues into the closed schema beneath it; where it cannot,
+  the walk stops at the map as before. A host diagnostic under `install` therefore reaches
+  `/install/*/ceilings/timeout_ms` while naming no installation, and one under
+  `install/*/tools` — whose members are upstream tool names, and which admits
+  `*` itself — still stops, because an ambiguous pointer is worse than a short
+  one.
 
   A `oneOf` descends into the first branch that explains the current segment.
   A branch selected with knowledge of the whole remaining path could sometimes
@@ -44,8 +50,18 @@ defmodule PtcRunner.Kernel.SchemaPath do
       {:ok, child} when is_integer(segment) and segment >= 0 ->
         walk(rest, child, [{:index, segment} | retained])
 
+      :error when is_binary(segment) ->
+        elide(rest, schema, retained)
+
       :error ->
         Enum.reverse(retained)
+    end
+  end
+
+  defp elide(rest, schema, retained) do
+    case CommandPath.elidable_child(schema) do
+      {:ok, child} -> walk(rest, child, [{:property, CommandPath.elision()} | retained])
+      :error -> Enum.reverse(retained)
     end
   end
 

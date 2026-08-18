@@ -255,6 +255,49 @@ defmodule PtcRunner.ReplFrontendTest do
                  end
   end
 
+  @tag :tmp_dir
+  test "an unknown namespace in a workflow session names the switch that opens a mission", %{
+    tmp_dir: directory
+  } do
+    manifest_path = Path.join(directory, "ptc.json")
+    File.write!(Path.join(directory, "main.clj"), "(ns app) (defn run [x] (return x))")
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "app", "path" => "main.clj"}],
+          "entry" => "app/run"
+        },
+        "missions" => %{"writing" => %{}, "review" => %{}},
+        "input" => %{"value" => %{}}
+      })
+    )
+
+    # The analyzer lists thirty-odd language namespaces and names no mission,
+    # because a workflow session carries none. Which switch would add them is a
+    # REPL fact the analyzer cannot know.
+    error =
+      assert_raise Mix.Error, fn ->
+        run_repl(["--manifest", manifest_path, "-e", "(review/summarize 1)"])
+      end
+
+    assert error.message =~ "unknown namespace review/"
+    assert error.message =~ "--mission NAME"
+    assert error.message =~ "declared: review, writing"
+  end
+
+  @tag :tmp_dir
+  test "a direct session with no declared mission adds no switch it cannot honour", %{
+    tmp_dir: _directory
+  } do
+    error = assert_raise Mix.Error, fn -> run_repl(["-e", "(review/summarize 1)"]) end
+
+    assert error.message =~ "unknown namespace review/"
+    refute error.message =~ "--mission"
+  end
+
   test "--mission is manifest-only and cannot select a code-owned profile" do
     assert_raise Mix.Error, ~r/--mission requires --manifest/, fn ->
       run_repl(["--mission", "review", "-e", "42"])

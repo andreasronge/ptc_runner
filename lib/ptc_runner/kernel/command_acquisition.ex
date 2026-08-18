@@ -364,19 +364,28 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
 
   defp environment_setup_aliases(nil, %PreparedRun{}), do: []
 
+  # An MCP transport binds an environment credential through `transport.env` or
+  # `transport.auth` just as an LLM installation binds one through `credential`.
+  # Gating this on `source: :llm` left `--env-file` silently unread for an
+  # MCP-only project, which then failed with `credential_unavailable` naming a
+  # variable the operator had supplied in the file.
   defp environment_setup_aliases(%HostConfig{} = host, %PreparedRun{} = prepared) do
-    selected = MapSet.new(prepared.provider_declarations, & &1.name)
-
-    selected
-    |> Enum.filter(fn name ->
-      with %{source: :llm, credential: credential} <- Map.get(host.install, name),
-           %{source: :env} <- Map.get(host.credentials, credential) do
-        true
-      else
-        _other -> false
-      end
-    end)
+    prepared.provider_declarations
+    |> MapSet.new(& &1.name)
+    |> Enum.filter(&environment_credentialed?(host, &1))
     |> Enum.sort()
+  end
+
+  defp environment_credentialed?(%HostConfig{} = host, name) do
+    case Map.get(host.install, name) do
+      nil ->
+        false
+
+      installation ->
+        installation
+        |> HostInstallation.installation_credential_names()
+        |> Enum.any?(&match?(%{source: :env}, Map.get(host.credentials, &1)))
+    end
   end
 
   defp validation_outcome(arguments, run_ref, prepared, catalog, runtime_services) do

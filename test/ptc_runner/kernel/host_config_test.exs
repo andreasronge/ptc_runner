@@ -108,15 +108,17 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       },
       {
         put_in(valid_config(), ["install", "workspace", "installation_revision"], nil),
-        [{:property, "install"}]
+        [{:property, "install"}, {:property, "*"}, {:property, "installation_revision"}]
       },
       {
+        # The installation alias is elided; the upstream tool name is not,
+        # because `tools` admits a member that would render as the placeholder.
         put_in(
           valid_config(),
           ["install", "workspace", "tools", "read_text", "description"],
           nil
         ),
-        [{:property, "install"}]
+        [{:property, "install"}, {:property, "*"}, {:property, "tools"}]
       }
     ]
 

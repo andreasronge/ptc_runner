@@ -1124,7 +1124,14 @@ defmodule PtcRunner.Kernel.ReplSession do
   defp prelude(%{bundle: nil}), do: nil
   defp prelude(%{bundle: bundle}), do: bundle.prelude
 
-  defp owned_mode_info(%{mode: :workflow}), do: %{kind: :workflow}
+  # A workflow session reports the missions the manifest declares but this
+  # session cannot reach, so a frontend can name the switch that would open one
+  # instead of leaving the reader with the language's own namespace list.
+  defp owned_mode_info(%{mode: :workflow, config: %{missions: missions}})
+       when is_map(missions),
+       do: %{kind: :workflow, declared_missions: missions |> Map.keys() |> Enum.sort()}
+
+  defp owned_mode_info(%{mode: :workflow}), do: %{kind: :workflow, declared_missions: []}
 
   defp owned_mode_info(%{mode: %{kind: :mission, name: name} = mode, config: config}) do
     inventory = Map.fetch!(config.missions, name).inventory

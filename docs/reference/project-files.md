@@ -78,7 +78,10 @@ file. Project choices do not become part of application content identity.
 ```
 
 `kind`, `version`, and `application` are required. `host`, `artifacts`, and
-`viewer` are optional. Every object rejects unknown and duplicate keys. Paths
+`viewer` are optional. A document that declares `"kind": "ptc-project"` and
+then fails this schema is refused as `arguments/project_invalid`, naming the
+document rather than the command line, which was correct. Every object rejects
+unknown and duplicate keys. Paths
 are portable relative paths resolved beneath the project document's directory;
 absolute paths and `..` traversal are rejected. The generated schema is served
 as `ptc docs schema-project`
@@ -154,6 +157,12 @@ missing or failing platform openers do not stop Viewer.
 The REPL and private-data settings are orthogonal. Enabling both presents the
 public-trace REPL alongside the private evidence panels without adding private
 inspection authority to the evaluation session.
+
+Because `artifacts.inspection` and `viewer.private` must both hold, the private
+routes distinguish which one is missing: `inspection_not_configured` for a
+project that records no inspection artifact, `inspection_not_private` for one
+that records it and withheld the grant. The second needs no re-run — the
+artifact on disk is already usable once the Viewer restarts with the grant.
 
 Viewer-started workflows and missions use the project's `host.env_file` when
 one is declared. `ptc viewer ptc-project.json --env-file FILE` supplies an

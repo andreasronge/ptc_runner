@@ -317,6 +317,7 @@ Every classified diagnostic and the status it exits with:
 | 2 | `arguments` | `invalid_arguments` | no | use the documented arguments for this command |
 | 2 | `arguments` | `invalid_command` | no | use one of the supported commands |
 | 2 | `arguments` | `project_host_undeclared` | no | the project document declares no host block; add one to use this command |
+| 2 | `arguments` | `project_invalid` | no | the named project document is not a valid project document; check it against the project schema (ptc docs schema-project) |
 | 3 | `application` | `application_not_found` | no | the application manifest does not exist |
 | 3 | `application` | `application_unavailable` | no | the application is unavailable |
 | 3 | `application` | `contract_invalid` | no | an application value contract is invalid |

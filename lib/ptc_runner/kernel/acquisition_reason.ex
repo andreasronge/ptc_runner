@@ -76,7 +76,12 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   # `:credential_unavailable` is the one reachable-looking reason deliberately
   # absent: it cannot arrive on a command path now that phase-8 step 5 resolves
   # the sealed union up front and acquisition refuses a preparation the map does
-  # not cover.
+  # not cover. It was defeated once, by the header renderer answering a CR or LF
+  # with this reason at acquisition time: it reached here, found no branch, and
+  # a credential written with an ordinary `echo` reported an internal error.
+  # That sink now answers `:mcp_authentication_failed`, which is the translation
+  # the comment above prescribes for a rejected credential. A sink that can
+  # reject a credential must pick a reason with a branch here.
 
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject

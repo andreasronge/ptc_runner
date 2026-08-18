@@ -92,7 +92,11 @@ The project form is the normal local command: the project supplies the
 application, host configuration, and lazy environment-file paths, while
 `--mission` remains an explicit invocation choice. Mission names are not
 duplicated in `ptc-project.json`. The manifest form is the equivalent low-level
-command. Omitting `--mission` keeps the workflow REPL behavior.
+command. Omitting `--mission` keeps the workflow REPL behavior — which carries
+no mission namespaces, so a mission's own namespace is rejected as unknown.
+That rejection names `--mission` and lists the missions the manifest declares,
+because the language diagnostic that raises it knows only the language's
+namespaces.
 
 A mission session starts with a fresh continuation and evaluates through the
 same strict JSON boundary as ordinary mission execution. It exposes that
