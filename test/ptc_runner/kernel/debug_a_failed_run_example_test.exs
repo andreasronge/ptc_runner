@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
 
   alias Mix.Tasks.Ptc.Repair
   alias PtcRunner.Kernel.ComponentOverride
+  alias PtcRunner.Kernel.ValueContract
 
   @moduletag :slow
   @moduletag timeout: 180_000
@@ -187,6 +188,127 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     end
 
     refute File.exists?(Path.join(directory, "candidate-refused"))
+  end
+
+  test "the repair report contract permits a normalized workflow target without a mission" do
+    schema =
+      @example
+      |> Path.join("repair-agent/report.schema.json")
+      |> File.read!()
+      |> Jason.decode!()
+
+    assert {:ok, contract} = ValueContract.compile(schema)
+
+    report = %{
+      "decision" => "propose-change",
+      "run_id" => "run-1",
+      "cause" => "the workflow routed the wrong value",
+      "target_environment" => "workflow",
+      "target_mission" => nil,
+      "component_id" => "main",
+      "function_id" => "main/run",
+      "base_source_hash" => "sha256:" <> String.duplicate("a", 64),
+      "candidate_source" => "(ns main)",
+      "evidence" => ["the two captured values differ"]
+    }
+
+    refute ValueContract.valid?(contract, report)
+    assert ValueContract.valid?(contract, Map.delete(report, "target_mission"))
+
+    mission_report =
+      Map.merge(report, %{
+        "target_environment" => "mission",
+        "target_mission" => "pricing"
+      })
+
+    assert ValueContract.valid?(contract, mission_report)
+    refute ValueContract.valid?(contract, Map.put(mission_report, "target_mission", nil))
+  end
+
+  @tag :tmp_dir
+  test "the same repair path replaces faulty workflow routing while preserving correct missions",
+       %{
+         tmp_dir: directory
+       } do
+    example = Path.join(directory, "debug-a-failed-run")
+    File.cp_r!(@example, example)
+
+    for artifact <- ~w(target-workflow-control/.ptc repair-agent-workflow-control/.ptc) do
+      File.rm_rf!(Path.join(example, artifact))
+    end
+
+    target = Path.join(example, "target-workflow-control.ptc-project.json")
+    assert {target_output, 5} = run(target)
+    assert target_output =~ "execution/workflow_failed"
+
+    base = File.read!(Path.join(example, "target-workflow-control/main.clj"))
+
+    candidate =
+      String.replace(
+        base,
+        ~S|"reservation_id" (get input "order_id")|,
+        ~S|"reservation_id" (get reservation "reservation_id")|
+      )
+
+    assert candidate != base
+
+    report_path = Path.join(directory, "workflow-repair.json")
+    out = Path.join(directory, "workflow-candidate")
+    trial = Path.join(directory, "workflow-trial")
+
+    File.write!(
+      report_path,
+      Jason.encode!(%{
+        "decision" => "propose-change",
+        "run_id" => "workflow-control-incident",
+        "cause" =>
+          "main passes the incoming order id to shipping instead of the reservation id returned by inventory",
+        "target_environment" => "workflow",
+        "component_id" => "main",
+        "function_id" => "main/run",
+        "base_source_hash" => ComponentOverride.hash(base),
+        "candidate_source" => candidate,
+        "evidence" => [
+          "inventory returned reservation:order-17, while the shipping program received order-17"
+        ]
+      })
+    )
+
+    output =
+      capture_io(fn ->
+        Repair.run([
+          Path.join(example, "target-workflow-control/ptc.json"),
+          "--report",
+          report_path,
+          "--out",
+          out,
+          "--validation-suite",
+          Path.join(example, "repair-agent/workflow-control-suite.json"),
+          "--validation-out",
+          trial,
+          "--allow-live-validation"
+        ])
+      end)
+
+    assert output =~ "candidate passed 3 host-owned validation cases"
+
+    trial_report = Jason.decode!(File.read!(Path.join(trial, "report.json")))
+    assert trial_report["outcome"] == "pass"
+
+    assert Enum.map(trial_report["cases"], & &1["name"]) ==
+             ["observed-order", "held-out-order", "held-out-identifiers"]
+
+    assert {_output, 0} =
+             run(target, [
+               "--component-override-descriptor",
+               Path.join(out, "descriptor.json")
+             ])
+
+    assert private_result!(Path.join(example, "target-workflow-control/.ptc/results")) == %{
+             "destination" => "north-depot",
+             "reservation_id" => "reservation:order-17",
+             "status" => "scheduled"
+           }
   end
 
   defp run(project, extra_args \\ []) do

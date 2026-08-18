@@ -27,9 +27,23 @@
     (fail "abstain requires run id, cause, non-empty evidence, and non-empty missing evidence")))
 
 (defn propose
-  "Complete with a propose-change report from a map containing run_id, cause, target_environment, target_mission, component_id, function_id, base_source_hash, candidate_source, and evidence."
+  "Complete with a propose-change report containing run_id, cause, target_environment, component_id, function_id, base_source_hash, candidate_source, and evidence. Include target_mission only for a mission target; use nil or omit it for a workflow target."
   {:signature "(report :map) -> :map"}
   [report]
   (if (map? report)
-    (return (assoc report "decision" "propose-change"))
+    (let [target-environment (get report "target_environment")
+          proposal (assoc report "decision" "propose-change")]
+      (cond
+        (= "workflow" target-environment)
+        (return (dissoc proposal "target_mission"))
+
+        (and (= "mission" target-environment)
+             (nonblank-string? (get report "target_mission")))
+        (return proposal)
+
+        :else
+        ;; Return a contract-invalid value instead of failing the evaluation.
+        ;; agent.core can feed result-contract diagnostics back to the model;
+        ;; an explicit fail is terminal and would discard its correction turn.
+        (return (assoc proposal "target_mission" nil))))
     (fail "propose requires one report map")))

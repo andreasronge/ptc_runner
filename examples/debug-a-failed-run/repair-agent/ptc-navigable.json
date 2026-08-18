@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "repair.navigable",
+        "path": "navigable.clj",
+        "dependencies": ["agent.core", "kernel"]
+      },
+      {"library": "agent.core"},
+      {"library": "kernel"}
+    ],
+    "entry": "repair.navigable/run"
+  },
+  "missions": {
+    "seed-derived": {
+      "components": [
+        {"library": "debug.nav"},
+        {
+          "id": "debug.workspace",
+          "path": "workspace.clj",
+          "dependencies": ["debug.nav"]
+        },
+        {
+          "id": "debug.case",
+          "path": "case.clj",
+          "dependencies": ["debug.nav", "debug.workspace"]
+        }
+      ],
+      "providers": ["debug.nav", "failed-run-traces"]
+    },
+    "investigate": {
+      "components": [{"library": "debug.nav"}],
+      "providers": ["debug.nav", "failed-run-traces"]
+    },
+    "synthesize": {
+      "components": [
+        {"library": "debug.nav"},
+        {"id": "repair.terminal", "path": "repair.terminal.clj"}
+      ],
+      "providers": ["debug.nav", "failed-run-traces"]
+    }
+  },
+  "contracts": {
+    "result_schema": {"path": "report.schema.json"}
+  },
+  "input": {
+    "value": {
+      "task": "Analyze the identified failed run using only evidence you actually read. Choose what logs and frozen sources to inspect. Propose a complete component replacement only if the evidence distinguishes one faulty implementation from its callers, dependencies, contracts, and input; otherwise abstain and identify the missing evidence. Do not assume that any source you inspect is faulty.",
+      "context_mission": "seed-derived",
+      "agent": {
+        "phases": [
+          {
+            "mission": "investigate",
+            "max_turns": 6,
+            "instruction": "Choose and read only evidence that can distinguish a responsible component. Return an evidence summary when ready to complete."
+          },
+          {
+            "mission": "synthesize",
+            "max_turns": 2,
+            "instruction": "Complete from retained evidence. Use at most one final debug.nav read only if a decisive fact is still missing, then call exactly one repair terminal action."
+          }
+        ],
+        "result_instruction": "During investigation, use debug.nav and return an evidence summary when ready. In the final phase, make at most one last evidence read if necessary, then call exactly one top-level repair.terminal/abstain or repair.terminal/propose action; the action completes the report itself, so do not wrap it in return.",
+        "max_observation_chars": 16384,
+        "max_transcript_chars": 262144,
+        "consolidate_at_turns_remaining": 2
+      }
+    }
+  },
+  "providers": {
+    "workflow": [{"name": "deepseek"}],
+    "mission": [
+      {"name": "debug.nav"},
+      {"name": "failed-run-traces", "config": {"expose": false}}
+    ]
+  },
+  "limits": {
+    "run_duration_ms": 600000,
+    "workflow_timeout_ms": 540000,
+    "evaluation_timeout_ms": 480000,
+    "subordinate_evaluations": 10
+  },
+  "events": {"policy": "private"},
+  "labels": {
+    "name": "debug-a-failed-run-repair-navigable",
+    "tags": {"mode": "agent"}
+  }
+}

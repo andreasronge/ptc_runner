@@ -4,7 +4,7 @@
     {
       "type": "object",
       "additionalProperties": false,
-      "required": ["decision", "run_id", "cause", "target_environment", "target_mission", "component_id", "function_id", "base_source_hash", "candidate_source", "evidence"],
+      "required": ["decision", "run_id", "cause", "target_environment", "component_id", "function_id", "base_source_hash", "candidate_source", "evidence"],
       "properties": {
         "decision": {"type": "string", "const": "propose-change"},
         "run_id": {"type": "string", "minLength": 1},

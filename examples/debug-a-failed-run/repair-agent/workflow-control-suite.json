@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "observed-order",
+      "input": {
+        "order_id": "order-17",
+        "item": "lamp",
+        "destination": "north-depot"
+      },
+      "expected": {
+        "reservation_id": "reservation:order-17",
+        "destination": "north-depot",
+        "status": "scheduled"
+      }
+    },
+    {
+      "name": "held-out-order",
+      "input": {
+        "order_id": "order-91",
+        "item": "desk",
+        "destination": "south-depot"
+      },
+      "expected": {
+        "reservation_id": "reservation:order-91",
+        "destination": "south-depot",
+        "status": "scheduled"
+      }
+    },
+    {
+      "name": "held-out-identifiers",
+      "input": {
+        "order_id": "R-looks-reserved",
+        "item": "chair",
+        "destination": "west-depot"
+      },
+      "expected": {
+        "reservation_id": "reservation:R-looks-reserved",
+        "destination": "west-depot",
+        "status": "scheduled"
+      }
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://ptc-runner.dev/schemas/ptc-project-config.schema.json",
+  "kind": "ptc-project",
+  "version": 1,
+  "application": {
+    "path": "repair-agent/ptc-navigable.json"
+  },
+  "host": {
+    "path": "ptc-host-workflow-control.json"
+  },
+  "artifacts": {
+    "root": "repair-agent-navigable-workflow-control/.ptc",
+    "trace": true,
+    "inspection": true,
+    "result": true,
+    "envelope": true
+  },
+  "viewer": {
+    "port": 4133,
+    "open": true,
+    "repl": true,
+    "private": true
+  }
+}

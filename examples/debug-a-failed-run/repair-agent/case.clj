@@ -24,10 +24,7 @@
     {"run" (first (get listing "items"))
      "truncated" (get listing "truncated")}))
 
-(defn context
-  "Return a bounded structural case packet: terminal workflow error, directly nested evaluations and generated turns, the single nested mission capability result when present, and the exact frozen working set. Typed relationships remain available for expansion with debug.nav."
-  {:signature "(run-id :string?) -> :map"}
-  [requested-run-id]
+(defn- incident-head [requested-run-id]
   (let [selection (selected-run requested-run-id)
         run (get selection "run")
         run-id (get run "run_id")
@@ -38,7 +35,42 @@
         workflow-evaluation-id (get failure "evaluation_id")]
     (if (or (nil? run) (nil? failure) (nil? workflow-evaluation-id))
       (fail "the selected run has no complete workflow failure to project")
-      (let [nested
+      {"selection" selection
+       "run" run
+       "errors" errors
+       "failure" failure
+       "workflow_evaluation_id" workflow-evaluation-id})))
+
+(defn seed
+  "Return only the failed-run identity, boundary failure, and navigation catalog. The caller must choose which evidence to read next."
+  {:signature "(run-id :string?) -> :map"}
+  [requested-run-id]
+  (let [head (incident-head requested-run-id)
+        run (get head "run")
+        run-id (get run "run_id")
+        failure (get head "failure")
+        opened (debug.nav/open run-id)]
+    {"run"
+     (select-keys run ["run_id" "status" "terminal_reason" "duration_ms"
+                       "error_count" "evaluations" "llm_calls"])
+     "workflow_failure"
+     (select-keys failure ["evaluation_id" "environment" "kind" "reason"
+                           "details" "relationships"])
+     "navigation"
+     {"collections" (get opened "collections")}}))
+
+(defn context
+  "Return a bounded structural case packet: terminal workflow error, directly nested evaluations and generated turns, the single nested mission capability result when present, and the exact frozen working set. Typed relationships remain available for expansion with debug.nav."
+  {:signature "(run-id :string?) -> :map"}
+  [requested-run-id]
+  (let [head (incident-head requested-run-id)
+        selection (get head "selection")
+        run (get head "run")
+        run-id (get run "run_id")
+        errors (get head "errors")
+        failure (get head "failure")
+        workflow-evaluation-id (get head "workflow_evaluation_id")
+        nested
             (debug.nav/read
               run-id
               {"collection" "activity"
@@ -93,35 +125,54 @@
             single-call (if (= 1 (count (get calls "items")))
                           (first (get calls "items"))
                           nil)
-            working-set (debug.workspace/changed run-id generated-sources)]
-        {"run"
-         (select-keys run ["run_id" "status" "terminal_reason" "duration_ms"
-                           "error_count" "evaluations" "llm_calls"])
-         "workflow_failure"
-         (select-keys failure ["evaluation_id" "environment" "kind" "reason"
-                               "details" "relationships"])
-         "directly_nested_activity"
-         (mapv #(select-keys % ["sequence" "type" "data" "relationships"])
-               (get nested "items"))
-         "generated_turns" projected-turns
-         "generated_sources"
-         (mapv
-           #(select-keys % ["evaluation_id" "parent_evaluation_id"
-                            "mission_name" "source" "relationships"])
-           generated-sources)
-         "single_nested_capability_call"
-         (if single-call
-           (select-keys single-call ["capability_id" "mission_name" "name"
-                                     "arguments" "result" "complete?"])
-           nil)
-         "working_set" (get working-set "files")
-         "completeness"
-         {"runs_truncated" (get selection "truncated")
-          "errors_truncated" (get errors "truncated")
-          "nested_activity_truncated" (get nested "truncated")
-          "turns_complete" (get-in turns ["evidence" "complete?"])
-          "turns_ambiguity_count" (get-in turns ["evidence" "ambiguity_count"])
-          "generated_sources_truncated"
-          (boolean (some #(get % "truncated") generated-pages))
-          "capability_calls_truncated" (get calls "truncated")
-          "working_set_complete" (get working-set "complete?")}}))))
+            working-set (debug.workspace/changed run-id generated-sources)
+            ;; Generated-program relationships reach the mission components
+            ;; they called, but a workflow-control failure may live in the
+            ;; host-authored workflow that routed values between those calls.
+            ;; Include the complete bounded workflow environment without
+            ;; naming a suspect; candidate selection remains the model's job.
+        workflow-sources
+        (debug.nav/read
+          run-id
+          {"collection" "prelude_sources"
+           "environment" "workflow"
+           "limit" 100})]
+    {"run"
+     (select-keys run ["run_id" "status" "terminal_reason" "duration_ms"
+                       "error_count" "evaluations" "llm_calls"])
+     "workflow_failure"
+     (select-keys failure ["evaluation_id" "environment" "kind" "reason"
+                           "details" "relationships"])
+     "directly_nested_activity"
+     (mapv #(select-keys % ["sequence" "type" "data" "relationships"])
+           (get nested "items"))
+     "generated_turns" projected-turns
+     "generated_sources"
+     (mapv
+       #(select-keys % ["evaluation_id" "parent_evaluation_id"
+                        "mission_name" "source" "relationships"])
+       generated-sources)
+     "single_nested_capability_call"
+     (if single-call
+       (select-keys single-call ["capability_id" "mission_name" "name"
+                                 "arguments" "result" "complete?"])
+       nil)
+     "working_set" (get working-set "files")
+     "workflow_sources"
+     (mapv
+       #(select-keys % ["component_id" "environment" "mission_name"
+                        "source_hash" "source" "relationships"])
+       (get workflow-sources "items"))
+     "completeness"
+     {"runs_truncated" (get selection "truncated")
+      "errors_truncated" (get errors "truncated")
+      "nested_activity_truncated" (get nested "truncated")
+      "turns_complete" (get-in turns ["evidence" "complete?"])
+      "turns_ambiguity_count" (get-in turns ["evidence" "ambiguity_count"])
+      "generated_sources_truncated"
+      (boolean (some #(get % "truncated") generated-pages))
+      "capability_calls_truncated" (get calls "truncated")
+      "working_set_complete" (get working-set "complete?")
+      "workflow_sources_complete"
+      (and (not (get workflow-sources "truncated"))
+           (nil? (get workflow-sources "next_cursor")))}}))

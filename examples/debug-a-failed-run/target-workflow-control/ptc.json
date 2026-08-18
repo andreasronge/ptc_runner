@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "main", "path": "main.clj", "dependencies": ["kernel"]},
+      {"library": "kernel"}
+    ],
+    "entry": "main/run"
+  },
+  "missions": {
+    "inventory": {
+      "components": [
+        {"id": "inventory", "path": "inventory.clj"}
+      ]
+    },
+    "shipping": {
+      "components": [
+        {"id": "shipping", "path": "shipping.clj"}
+      ]
+    }
+  },
+  "input": {
+    "value": {
+      "order_id": "order-17",
+      "item": "lamp",
+      "destination": "north-depot"
+    }
+  },
+  "events": {"policy": "private"},
+  "labels": {
+    "name": "debug-workflow-control-target",
+    "tags": {"mode": "deterministic"}
+  }
+}
