@@ -44,15 +44,23 @@ filesystem example listed above implements the required profile and is the
 deterministic baseline for this reference.
 
 A cold `npx` launch can spend more than the default budget before that protocol
-response arrives. One budget bounds the whole acquisition — staging, the stdio
-spawn, and the `server/discover` round trip — and it is the lower of two values:
+response arrives. Acquisition derives one per-operation budget and then applies
+it to each step separately: once to starting the transport, which for stdio
+covers launcher staging and the child spawn, and again to each discovery request,
+beginning with `server/discover`. It is not a single budget for the whole
+sequence, so a slow start and a slow answer can add up past any one of them.
 
-- the installation's `ceilings.timeout_ms`, default `5000`; and
+That per-operation value is the lowest of:
+
+- the installation's `ceilings.timeout_ms` in `ptc-host.json`, default `5000`;
 - for a mission provider, the manifest's `limits.evaluation_timeout_ms`,
-  default `1000`.
+  default `1000`; and
+- the provider entry's own `config.timeout_ms` under the manifest's `providers`,
+  when it sets one. It may only narrow the two above, never widen them — a
+  larger value is refused as an invalid selection.
 
-Both must be wide enough, because the effective budget is the smaller one. In
-`ptc.json`:
+Every one of them must be wide enough, because the lowest wins. Raising one
+while another stays at its default changes nothing. In `ptc.json`:
 
 ```json
 {"limits": {"evaluation_timeout_ms": 20000}}
@@ -64,17 +72,18 @@ and in `ptc-host.json`, beside the installation's `transport`:
 {"ceilings": {"timeout_ms": 20000}}
 ```
 
-`start_timeout_ms` inside the stdio transport is not a third budget. It is an
-upper bound on the launcher handshake alone and is clamped to whatever remains
-of the budget above, so raising it cannot widen anything — leaving it at its
-`5000` default is fine once the two budgets above are set.
+`start_timeout_ms` inside the stdio transport is not another budget to raise. It
+is an upper bound on the launcher handshake alone and is clamped to whatever
+remains of the transport-start budget, so raising it cannot widen anything —
+leaving it at its `5000` default is fine once the values above are set.
 
-If the budget expires before the server answers, the closed result is
-`provider_acquisition_timeout`, which is retryable and distinct from
-`provider_unavailable`: the server was reached and simply did not answer in
-time, so PtcRunner never received the response needed to prove a protocol
-mismatch. Raise the budget and run it again. A first launch on a cold npm cache,
-or any launch on a loaded machine, is the usual cause.
+When a budget expires, the closed result is `provider_acquisition_timeout`,
+which is retryable and distinct from `provider_unavailable`. It reports only
+that the clock ran out: the step that expired may have been the spawn or the
+discovery answer, so PtcRunner cannot say the server was reached, only that it
+never received the response needed to prove a protocol mismatch. Raise the
+budgets and run it again. A first launch on a cold npm cache, or any launch on a
+loaded machine, is the usual cause.
 
 ## Run the checked-in file agent
 

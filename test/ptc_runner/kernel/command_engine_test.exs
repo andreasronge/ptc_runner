@@ -2074,6 +2074,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                &(&1["name"] == "provider/workspace/connectivity")
              )
 
+    # The marker proves which step ran out of clock. `:mcp_timeout` also carries
+    # launcher staging and spawn expiry, so without this the test would pass on a
+    # slow spawn and stop covering the case it is named for: discovery was
+    # reached, and the answer was merely late.
+    assert File.read!(marker) =~ "server/discover"
     assert_schema_valid(outcome.envelope)
   end
 

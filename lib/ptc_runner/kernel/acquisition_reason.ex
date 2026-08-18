@@ -35,12 +35,14 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   #   * `:provider_unavailable` — the provider could not be reached or started.
   #     A transport that would not open, a stdio child that would not spawn, a
   #     callback that raised or exited.
-  #   * `:provider_acquisition_timeout` — the provider was reached and simply did
-  #     not answer in time. This is deliberately not `:provider_unavailable`: the
-  #     budget that expired is the installation's own `ceilings.timeout_ms`, which
-  #     also bounds the stdio spawn and discovery round trip, so the operator has
-  #     something to raise. A cold first launch is the common cause, which is why
-  #     the row is retryable.
+  #   * `:provider_acquisition_timeout` — a budget expired before acquisition
+  #     finished. Deliberately not `:provider_unavailable`, which asserts a
+  #     failure to reach or start the provider; this asserts only that the clock
+  #     ran out, which is the weaker and — because `:mcp_timeout` also carries
+  #     launcher staging and spawn expiry, not just an unanswered discovery — the
+  #     only claim that holds for every producer. What the operator can act on is
+  #     the same either way: raise the budget. A cold first launch is the common
+  #     cause, which is why the row is retryable.
   #   * `:provider_protocol_error` — the provider answered and the answer was
   #     unusable: an invalid catalog or tool schema, a response past its ceiling,
   #     or a preparation/preflight/build that failed normalization.
