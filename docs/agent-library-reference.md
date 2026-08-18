@@ -104,8 +104,10 @@ This is the composable result-contract entry used by `agent.main/run`.
 
 Runs ordered mission phases while retaining the exact correlated assistant and
 tool transcript. Each phase requires `mission` and `max_turns`, and may provide
-an `instruction`. At a boundary, the host rebuilds the system prompt from the
-next mission's authority and appends the instruction as a user message. A
+an `instruction`, delivered when its phase begins: the first phase's
+instruction is appended to the initial task, and at each later boundary the
+host rebuilds the system prompt from the next mission's authority and appends
+that phase's instruction as a user message. A
 `return` in a non-final phase closes that phase and is retained as bounded
 observation evidence; only the final phase can satisfy the application result
 contract.

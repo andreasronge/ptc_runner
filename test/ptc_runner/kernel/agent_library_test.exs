@@ -227,6 +227,37 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert synthesize_annotation["mission"] == "synthesize"
   end
 
+  # An instruction is delivered when its phase begins. Later phases receive it
+  # in the transition message; the first phase has no transition, so it must
+  # ride with the initial task instead of being silently dropped.
+  test "agent.core delivers the first phase's instruction with the initial task" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "call-1", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+      ]
+    }
+
+    {:ok, synthesize} = MissionEnvironment.new([])
+    {:ok, config} = agent_config([response], [], missions: %{"synthesize" => synthesize})
+
+    source = ~S"""
+    (agent.core/run-phased-result-value
+      "Decide."
+      {"phases"
+       [{"mission" "synthesize"
+         "max_turns" 1
+         "instruction" "Call exactly one terminal action."}]})
+    """
+
+    assert {:ok, %{value: 42}} = Kernel.run(source, config)
+
+    assert_receive {:agent_request, request}
+    first = request["messages"] |> List.first() |> Map.fetch!("content")
+    assert first =~ "Decide."
+    assert first =~ "Call exactly one terminal action."
+  end
+
   test "agent.core retains a non-final return but only lets the final phase complete" do
     responses = [
       %{

@@ -312,10 +312,15 @@
       (loop [turn 0
              agent-turn 0
              phase-index 0
+             ;; An instruction is delivered when its phase begins. Later
+             ;; phases receive it in the transition message; the first phase
+             ;; has no transition, so it rides with the initial task.
              messages [{"role" "user"
                         "content"
                         (with-phase-budget
-                          task
+                          (if (nonblank-string? (get initial-phase "instruction"))
+                            (str task "\n\n" (get initial-phase "instruction"))
+                            task)
                           (get initial-phase "max_turns")
                           consolidate-at-turns-remaining
                           (next-phase? phases 0))}]
