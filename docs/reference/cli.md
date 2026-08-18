@@ -21,6 +21,7 @@ Run `ptc help COMMAND` for the exact switches accepted by an installed version.
 | `ptc transcript RUN_ID ...` | Publish one correlated private model transcript |
 | `ptc repl` | Open a direct, manifest-backed, or analysis session |
 | `ptc viewer PROJECT.json` | Browse a project's captured traces in a local web UI |
+| `ptc serve GATEWAY.json` | Serve compiled applications as MCP tools over stdio or HTTP |
 | `ptc viewer PROJECT.json --env-file FILE` | Use one exact dotenv file for Viewer-started workflows and missions |
 
 Help is generated from the same declarations as the strict parser, so use
@@ -388,6 +389,8 @@ Every classified diagnostic and the status it exits with:
 | 5 | `execution` | `provider_failed` | no | a provider failed during execution |
 | 5 | `execution` | `replay_fixture_missing` | no | no replay fixture matches the workflow request |
 | 5 | `execution` | `workflow_failed` | no | the workflow failed |
+| 6 | `execution` | `provider_admission_saturated` | no | aggregate provider-task admission is saturated |
+| 6 | `execution` | `provider_admission_unavailable` | no | aggregate provider-task admission is unavailable |
 | 6 | `execution` | `run_timeout` | no | the run duration limit was exceeded |
 | 6 | `execution` | `runtime_limit_exceeded` | no | a runtime limit was exceeded |
 | 7 | `destination` | `destination_exists` | no | an artifact destination already exists |

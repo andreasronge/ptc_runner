@@ -141,8 +141,12 @@ a separate read followed by an update is a race.
 ### Close and publish
 
 Normal completion, timeout, caller death, worker death, and termination all
-drain the same owned resource set. Provider work is drained before provider
-closers run. Cleanup remains bounded even when a callback or owner fails.
+drain the same owned resource set. The workflow sandbox is watchdog-monitored
+from the session worker (`Sandbox` `link: true` does not create a BEAM
+link): death of that worker issues an asynchronous `Process.exit(sandbox,
+:kill)` that owner drain does not await. Provider work is drained before
+provider closers run. Cleanup remains bounded even when a callback or owner
+fails.
 
 `PublicationAuthority.authorize/4` anchors and reserves destinations before
 provider activity. `ArtifactPublisher` later consumes only the sealed

@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   remains a separate caller operation.
   """
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.BundleCompiler
   alias PtcRunner.Kernel.CommandDiagnostic
@@ -25,6 +26,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionSessionOwner
+  alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LocalPreflight
   alias PtcRunner.Kernel.MissionReplTarget
@@ -49,27 +51,21 @@ defmodule PtcRunner.Kernel.RunCoordinator do
     with true <- RunRequest.valid?(request),
          true <- InstallationCatalog.valid?(catalog),
          true <- catalog.installed_limits == request.package.installed_limits,
-         compile_deadline = System.monotonic_time(:millisecond) + @mission_compile_timeout_ms,
-         {:ok, workflow_bundle} <-
-           compile_required(request.package.workflow_components, compile_deadline),
-         {:ok, mission_bundles} <-
-           compile_named_missions(
-             request.package.missions,
-             compile_deadline,
-             external_size(workflow_bundle)
-           ),
-         :ok <- validate_entry(workflow_bundle, request.package.entry),
+         {:ok, workflow_bundle, mission_bundles} <- compile_application(request.package),
          :ok <-
            validate_entry_missions(
              workflow_bundle,
              request.package.entry,
              request.package.missions
            ),
-         {:ok, declarations} <-
-           prepare_providers(request, workflow_bundle, mission_bundles, catalog),
-         {:ok, derived} <-
-           derive_provider_plan(request, workflow_bundle, mission_bundles, declarations),
-         declarations <- add_post_selection_context(declarations, derived.post_selection_context),
+         {:ok, declarations, derived} <-
+           bind_providers(
+             request.package,
+             workflow_bundle,
+             mission_bundles,
+             catalog,
+             ProviderPlan.identity(request)
+           ),
          prepared_declarations <- prepared_declarations(declarations),
          {:ok, prepared} <-
            ProviderActivity.start_owned(fn activity ->
@@ -474,12 +470,77 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   defp span_opts(_span, _bytes), do: []
 
   @doc false
-  @spec validate_entry(PtcRunner.Kernel.FrozenBundle.t(), binary()) ::
+  @spec compile_application(ApplicationPackage.t()) ::
+          {:ok, FrozenBundle.t(), %{binary() => FrozenBundle.t() | nil}}
+          | {:error, CommandDiagnostic.t()}
+  def compile_application(%ApplicationPackage{} = package) do
+    compile_deadline = System.monotonic_time(:millisecond) + @mission_compile_timeout_ms
+
+    with {:ok, workflow_bundle} <-
+           compile_required(package.workflow_components, compile_deadline),
+         {:ok, mission_bundles} <-
+           compile_named_missions(
+             package.missions,
+             compile_deadline,
+             external_size(workflow_bundle)
+           ),
+         :ok <- validate_entry(workflow_bundle, package.entry) do
+      {:ok, workflow_bundle, mission_bundles}
+    end
+  end
+
+  def compile_application(_package), do: {:error, diagnostic(:internal, :internal_error)}
+
+  @doc false
+  @spec validate_entry(FrozenBundle.t(), binary()) ::
           :ok | {:error, CommandDiagnostic.t()}
   def validate_entry(workflow_bundle, entry) do
     if PreparedRun.entry_callable?(workflow_bundle, entry),
       do: :ok,
       else: {:error, diagnostic(:bundle, :entry_invalid)}
+  end
+
+  @doc false
+  @spec bind_providers(
+          ApplicationPackage.t(),
+          FrozenBundle.t(),
+          %{binary() => FrozenBundle.t() | nil},
+          InstallationCatalog.t(),
+          map()
+        ) ::
+          {:ok, [map()], map()} | {:error, CommandDiagnostic.t()}
+  def bind_providers(package, workflow_bundle, mission_bundles, catalog, identity)
+      when is_map(identity) do
+    with {:ok, declarations} <-
+           prepare_providers(package, workflow_bundle, mission_bundles, catalog, identity),
+         {:ok, derived} <-
+           derive_provider_plan(identity, workflow_bundle, mission_bundles, declarations) do
+      {:ok, add_post_selection_context(declarations, derived.post_selection_context), derived}
+    end
+  end
+
+  def bind_providers(_package, _workflow_bundle, _mission_bundles, _catalog, _identity),
+    do: {:error, diagnostic(:internal, :internal_error)}
+
+  @doc false
+  @spec prepared_declarations([map()]) :: [map()]
+  def prepared_declarations(declarations) when is_list(declarations) do
+    Enum.map(declarations, fn declaration ->
+      %{
+        name: declaration.name,
+        destination: declaration.destination,
+        index: declaration.index,
+        config: declaration.config,
+        validation_state: declaration.validation_state,
+        selection_context: declaration.selection_context,
+        provider_projection:
+          ProviderDescriptor.public_projection(
+            declaration.descriptor,
+            declaration.name,
+            declaration.config
+          )
+      }
+    end)
   end
 
   @doc """
@@ -514,8 +575,8 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   defp mission_context_entry?(_bundle, _entry), do: false
 
-  defp prepare_providers(request, workflow_bundle, mission_bundles, catalog) do
-    request.package.providers
+  defp prepare_providers(package, workflow_bundle, mission_bundles, catalog, identity) do
+    package.providers
     |> provider_specs()
     |> Enum.reduce_while({:ok, []}, fn {destination, selection, index}, {:ok, prepared} ->
       name = selection["name"]
@@ -524,7 +585,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
       case InstallationCatalog.fetch(catalog, name) do
         {:ok, descriptor} ->
           prepare_provider(
-            request,
+            {package, identity.input_authority},
             workflow_bundle,
             mission_bundles,
             descriptor,
@@ -545,7 +606,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   end
 
   defp prepare_provider(
-         request,
+         {package, input_authority},
          workflow_bundle,
          mission_bundles,
          descriptor,
@@ -557,7 +618,8 @@ defmodule PtcRunner.Kernel.RunCoordinator do
     with :ok <- validate_placement(descriptor, name, occurrence),
          selection_context <-
            selection_context(
-             request,
+             package,
+             input_authority,
              workflow_bundle,
              mission_bundles,
              descriptor,
@@ -565,7 +627,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              occurrence
            ),
          {:ok, normalized} <-
-           SelectionRules.normalize(descriptor.selection_rules, config, request.package.limits) do
+           SelectionRules.normalize(descriptor.selection_rules, config, package.limits) do
       declaration = %{
         name: name,
         destination: occurrence.destination,
@@ -601,7 +663,8 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   end
 
   defp selection_context(
-         request,
+         package,
+         input_authority,
          workflow_bundle,
          mission_bundles,
          descriptor,
@@ -610,21 +673,21 @@ defmodule PtcRunner.Kernel.RunCoordinator do
        ) do
     %{
       display: ProviderDescriptor.display_projection(descriptor, name),
-      application_content_digest: request.package.application_content_digest,
+      application_content_digest: package.application_content_digest,
       bundle_hashes: %{
         workflow: workflow_bundle.hash,
         missions: mission_bundle_hashes(mission_bundles)
       },
-      input_authority_class: request.input.authority,
+      input_authority_class: input_authority,
       execution_scope_id: make_ref(),
       destination: occurrence.destination,
       index: occurrence.index,
-      limits: request.package.limits
+      limits: package.limits
     }
   end
 
-  defp derive_provider_plan(request, workflow_bundle, mission_bundles, declarations) do
-    case ProviderPlan.derive(request, workflow_bundle, mission_bundles, declarations) do
+  defp derive_provider_plan(identity, workflow_bundle, mission_bundles, declarations) do
+    case ProviderPlan.derive_identity(identity, workflow_bundle, mission_bundles, declarations) do
       {:ok, derived} ->
         {:ok, derived}
 
@@ -645,25 +708,6 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   defp add_post_selection_context(declarations, context) do
     Enum.map(declarations, fn declaration ->
       Map.update!(declaration, :selection_context, &Map.merge(&1, context))
-    end)
-  end
-
-  defp prepared_declarations(declarations) do
-    Enum.map(declarations, fn declaration ->
-      %{
-        name: declaration.name,
-        destination: declaration.destination,
-        index: declaration.index,
-        config: declaration.config,
-        validation_state: declaration.validation_state,
-        selection_context: declaration.selection_context,
-        provider_projection:
-          ProviderDescriptor.public_projection(
-            declaration.descriptor,
-            declaration.name,
-            declaration.config
-          )
-      }
     end)
   end
 

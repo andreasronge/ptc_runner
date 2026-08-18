@@ -382,13 +382,12 @@ defmodule PtcRunner.Kernel.Evaluation do
       max_program_bytes: limits.subordinate_source_bytes,
       filter_context: false,
       caller: :kernel,
-      preserve_runtime_callables: true,
-      link: true
+      preserve_runtime_callables: true
     ]
 
     mission_calls_before = mission_capability_calls(state)
 
-    result = Lisp.run_native(source, options)
+    result = Lisp.run_owned(source, options)
 
     case inspection_analysis(
            capture.inspection_sink,

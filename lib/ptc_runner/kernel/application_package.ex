@@ -9,6 +9,11 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   `application_content_digest`; it contains no application directory, file
   descriptor, reader callback, selected input, or input name.
 
+  `acquire_*` and `request_*` always select input. `package_directory/2` and
+  `package_memory/3` skip input acquisition entirely so a host can compile a
+  serving template without a call-time value and without failing on a
+  missing or invalid manifest input.
+
   Directory acquisition caches every referenced byte exactly once. Compilation
   never reopens a captured path. This prevents time-of-check/time-of-use drift
   within one acquired record, but it is not a transactional multi-file
@@ -55,6 +60,8 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   @directory_acquisition_options @common_acquisition_options ++
                                    [:component_override_descriptor]
   @memory_acquisition_options @common_acquisition_options ++ [:component_override]
+  @package_directory_options [:installed_limits, :component_override_descriptor]
+  @package_memory_options [:installed_limits, :component_override]
   @directory_request_options @directory_acquisition_options ++
                                [:inspection_capture, :result_projection, :event_identity]
   @memory_request_options @memory_acquisition_options ++
@@ -143,6 +150,43 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   def acquire_memory(_manifest_name, _documents, _opts),
     do: {:error, :invalid_application_source}
 
+  @spec package_directory(binary(), keyword()) :: {:ok, t()} | {:error, term()}
+  @doc """
+  Acquires one confined-directory application without selecting input.
+
+  Options are exactly `:installed_limits` and
+  `:component_override_descriptor`. `:input` and `:input_authority` are not
+  admitted: authority is frozen later by the serving template, and a missing
+  manifest input must not fail compilation.
+  """
+  def package_directory(path, opts \\ [])
+
+  def package_directory(path, opts) when is_binary(path) and is_list(opts) do
+    with :ok <- validate_options(opts, @package_directory_options),
+         do: do_acquire_directory(path, opts, :skip)
+  end
+
+  def package_directory(_path, _opts), do: {:error, :invalid_application_source}
+
+  @spec package_memory(binary(), %{binary() => binary()}, keyword()) ::
+          {:ok, t()} | {:error, term()}
+  @doc """
+  Acquires one trusted in-memory application without selecting input.
+
+  Options are exactly `:installed_limits` and `:component_override`. `:input`
+  and `:input_authority` are not admitted.
+  """
+  def package_memory(manifest_name, documents, opts \\ [])
+
+  def package_memory(manifest_name, documents, opts)
+      when is_binary(manifest_name) and is_map(documents) and is_list(opts) do
+    with :ok <- validate_options(opts, @package_memory_options),
+         do: do_acquire_memory(manifest_name, documents, opts, :skip)
+  end
+
+  def package_memory(_manifest_name, _documents, _opts),
+    do: {:error, :invalid_application_source}
+
   @spec request_directory(binary(), keyword()) :: {:ok, RunRequest.t()} | {:error, term()}
   @doc """
   Acquires and seals one complete directory-backed run request.
@@ -157,7 +201,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   def request_directory(path, opts) when is_binary(path) and is_list(opts) do
     with :ok <- validate_options(opts, @directory_request_options),
          {:ok, package, input} <- do_acquire_directory(path, opts),
-         {:ok, policy} <- execution_policy(package, opts),
+         {:ok, policy} <- ExecutionPolicy.from_package(package, opts),
          do: RunRequest.new(package, input, policy)
   end
 
@@ -179,7 +223,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
       when is_binary(manifest_name) and is_map(documents) and is_list(opts) do
     with :ok <- validate_options(opts, @memory_request_options),
          {:ok, package, input} <- do_acquire_memory(manifest_name, documents, opts),
-         {:ok, policy} <- execution_policy(package, opts),
+         {:ok, policy} <- ExecutionPolicy.from_package(package, opts),
          do: RunRequest.new(package, input, policy)
   end
 
@@ -196,15 +240,15 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
 
   def valid?(_package), do: false
 
-  defp do_acquire_directory(path, opts) do
+  defp do_acquire_directory(path, opts, input_mode \\ :select) do
     with {:ok, source} <- ApplicationSource.open_directory(path) do
-      acquire_source(source, directory_override(source, opts), opts)
+      acquire_source(source, directory_override(source, opts), opts, input_mode)
     end
   end
 
-  defp do_acquire_memory(manifest_name, documents, opts) do
+  defp do_acquire_memory(manifest_name, documents, opts, input_mode \\ :select) do
     with {:ok, source} <- ApplicationSource.open_memory(manifest_name, documents) do
-      acquire_source(source, memory_override(source, opts), opts)
+      acquire_source(source, memory_override(source, opts), opts, input_mode)
     end
   end
 
@@ -234,19 +278,23 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
     end
   end
 
-  defp acquire_source(source, override_result, opts) do
+  defp acquire_source(source, override_result, opts, input_mode) do
     installed_limits = Keyword.get(opts, :installed_limits, Limits.installed_defaults())
 
     try do
       with true <- Limits.valid?(installed_limits),
            {:ok, manifest} <-
              Manifest.load_source(source, installed_limits, materialize_input: false),
-           {:ok, input} <- select_input(source, manifest, opts),
+           {:ok, selected} <- maybe_select_input(source, manifest, opts, input_mode),
            {:ok, override} <- override_result,
            {:ok, effective, identities} <- apply_override(manifest, override),
            {:ok, accounting} <- ApplicationSource.finish(source),
            {:ok, package} <- build(effective, identities, accounting) do
-        {:ok, package, input}
+        case {input_mode, selected} do
+          {:select, %ExecutionInput{} = input} -> {:ok, package, input}
+          {:skip, :skipped} -> {:ok, package}
+          _other -> {:error, :invalid_application_package}
+        end
       else
         false -> {:error, :invalid_installed_limits}
         {:error, _reason} = error -> error
@@ -256,6 +304,11 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
       ApplicationSource.close(source)
     end
   end
+
+  defp maybe_select_input(_source, _manifest, _opts, :skip), do: {:ok, :skipped}
+
+  defp maybe_select_input(source, manifest, opts, :select),
+    do: select_input(source, manifest, opts)
 
   defp select_input(source, manifest, opts) do
     authority = Keyword.get(opts, :input_authority, :normal)
@@ -646,31 +699,6 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   defp library_component_ids(components, kinds),
     do:
       for(component <- components, Map.fetch!(kinds, component.id) == :library, do: component.id)
-
-  defp execution_policy(package, opts) do
-    with {:ok, run_id, trace_id} <- event_identity(package.events, opts) do
-      ExecutionPolicy.new(
-        event_policy: package.events.policy,
-        run_id: run_id,
-        trace_id: trace_id,
-        inspection_capture: Keyword.get(opts, :inspection_capture, false),
-        result_projection: Keyword.get(opts, :result_projection, :native)
-      )
-    end
-  end
-
-  defp event_identity(events, opts) do
-    case Keyword.fetch(opts, :event_identity) do
-      :error ->
-        {:ok, events.run_id, events.trace_id}
-
-      {:ok, identity} when is_nil(events.run_id) and is_nil(events.trace_id) ->
-        {:ok, identity, identity}
-
-      {:ok, _identity} ->
-        {:error, :event_identity_conflict}
-    end
-  end
 
   defp payload(package) do
     package

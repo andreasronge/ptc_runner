@@ -16,6 +16,7 @@ mcp_http=false
 mcp_filesystem=false
 java=false
 viewer=false
+gateway=false
 docs=false
 saw_path=false
 
@@ -26,6 +27,7 @@ select_all() {
   mcp_filesystem=true
   java=true
   viewer=true
+  gateway=true
   docs=true
 }
 
@@ -67,12 +69,18 @@ while IFS= read -r path || [ -n "$path" ]; do
       ;;
 
     docs/*|README.md|CHANGELOG.md|LICENSES/*|ptc_runner_launcher/README.md|\
-      ptc_runner_launcher/CHANGELOG.md|ptc_viewer/README.md|ptc_viewer/CHANGELOG.md)
+      ptc_runner_launcher/CHANGELOG.md|ptc_viewer/README.md|ptc_viewer/CHANGELOG.md|\
+      ptc_gateway/README.md)
       docs=true
       ;;
 
     ptc_runner_launcher/*)
       launcher=true
+      ;;
+
+    ptc_gateway/*)
+      core=true
+      gateway=true
       ;;
 
     ptc_viewer/*)
@@ -156,4 +164,5 @@ printf 'mcp_http=%s\n' "$mcp_http"
 printf 'mcp_filesystem=%s\n' "$mcp_filesystem"
 printf 'java=%s\n' "$java"
 printf 'viewer=%s\n' "$viewer"
+printf 'gateway=%s\n' "$gateway"
 printf 'docs=%s\n' "$docs"

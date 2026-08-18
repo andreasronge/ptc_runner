@@ -462,6 +462,17 @@ defmodule PtcRunner.Lisp do
           {:ok, Step.t()} | {:error, Step.t()}
   def run_native(source, opts \\ []), do: instrumented_run(source, opts, :native)
 
+  # Kernel-owned native run. Forces Sandbox `link: true` (a watchdog, not a
+  # BEAM link) so death of this process asynchronously kills the sandbox.
+  # Direct `run_native/2` stays unlinked by default. `link: false` in opts
+  # cannot opt out.
+  @doc false
+  @spec run_owned(String.t(), keyword()) ::
+          {:ok, Step.t()} | {:error, Step.t()}
+  def run_owned(source, opts \\ []), do: run_native(source, force_owned_sandbox(opts))
+
+  defp force_owned_sandbox(opts), do: Keyword.put(opts, :link, true)
+
   defp instrumented_run(source, opts, history_mode) when history_mode in [:native, :public] do
     reject_imported_tool_cache!(opts)
     caller = validate_caller!(Keyword.get(opts, :caller, :direct))
@@ -962,6 +973,12 @@ defmodule PtcRunner.Lisp do
   @spec check_native(String.t(), keyword()) :: :ok | {:error, Step.t()}
   def check_native(source, opts \\ []) when is_binary(source),
     do: check_native_mode(source, opts, true)
+
+  # Kernel-owned compile. Same watchdog contract as `run_owned/2`.
+  @doc false
+  @spec check_owned(String.t(), keyword()) :: :ok | {:error, Step.t()}
+  def check_owned(source, opts \\ []) when is_binary(source),
+    do: check_native(source, force_owned_sandbox(opts))
 
   defp check_native_mode(source, opts, check_tool_resolution?) do
     reject_imported_tool_cache!(opts)

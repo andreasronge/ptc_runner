@@ -1,6 +1,7 @@
 defmodule PtcRunner.OneShotFrontend do
   @moduledoc false
 
+  alias PtcRunner.GatewayFrontend
   alias PtcRunner.ReplFrontend
   alias PtcRunner.TranscriptFrontend
   alias PtcRunner.ViewerFrontend
@@ -11,6 +12,9 @@ defmodule PtcRunner.OneShotFrontend do
 
   def run(%{command: :transcript} = arguments, runtime, _frontend_opts),
     do: TranscriptFrontend.run(arguments, runtime)
+
+  def run(%{command: :serve} = arguments, runtime, _frontend_opts),
+    do: GatewayFrontend.run(arguments, runtime)
 
   def run(%{command: :viewer} = arguments, runtime, _frontend_opts),
     do: ViewerFrontend.run(arguments, runtime)

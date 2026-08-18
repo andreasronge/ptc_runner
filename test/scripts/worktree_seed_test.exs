@@ -6,7 +6,7 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
   @script Path.expand("../../scripts/worktree.sh", __DIR__)
   @git_env GitEnv.clear()
 
-  @key_files ~w(mise.toml mix.lock ptc_viewer/mix.lock ptc_runner_launcher/mix.lock)
+  @key_files ~w(mise.toml mix.lock ptc_viewer/mix.lock ptc_gateway/mix.lock ptc_runner_launcher/mix.lock)
 
   test "seeds a fresh worktree with the main checkout's build artifacts" do
     %{main: main, worktree: worktree} = repo_with_worktree()

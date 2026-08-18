@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ptc serve GATEWAY.json` starts the stdio MCP Gateway companion. Nested
+  `ptc_gateway/` ships inside the assembled release and is absent from the
+  published Hex package, where the command reports the companion as
+  unavailable. Boot compiles each configured application into a serving
+  template and refuses write-effect configuration or digest mismatch. When
+  the gateway document names `http`, `ptc serve` loads a private bearer
+  token file and binds streamable HTTP on loopback; `{0, 0, 0, 0}` remains
+  an explicit operator choice. Environment variables are not a token source.
+  The gateway never puts the token in plug options, child specs, or process
+  status. Bandit `:start`/`:exception` telemetry still include the raw
+  `Authorization` header; `:stop` does not. HTTP `tools/call` with
+  `Accept: text/event-stream` is SSE with heartbeat comments; the first
+  failed write cancels the request owner.
+
 - `ptc viewer PROJECT.json` opens the canonical trace Viewer from both the
   `mix ptc` and standalone frontends, replacing the development-only
   `mix ptc.viewer` task. The Viewer now ships inside the assembled release and

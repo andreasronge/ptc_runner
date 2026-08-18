@@ -565,11 +565,9 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
             # A trivial `(loop [x 0] (recur (inc x)))` would race this test's
             # own setup regardless of load -- see `long_running_body/1` for
             # why it is not the infinite loop it looks like. The heavier
-            # `repeats: 5` (~30s to reach the cap on its own) is safe here,
-            # unlike in RunCoordinatorExecutionTest:
-            # `Evaluation.evaluate_with_lease/6` passes `link: true`, so the
-            # underlying sandbox process is genuinely torn down when this
-            # evaluation's caller dies -- no orphaned-process risk to bound.
+            # `repeats: 5` (~30s to reach the cap on its own) is safe here:
+            # `Lisp.run_owned/2` watchdog-monitors the sandbox from this
+            # evaluation's caller, so caller death asynchronously kills it.
             # This still finishes fast, since the test interrupts the
             # evaluation long before that natural completion.
             ReplSession.eval(session, long_running_body(5))

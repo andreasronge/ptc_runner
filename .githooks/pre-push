@@ -72,6 +72,7 @@ DOC_PATTERNS = [
     re.compile(r"^[^/]+\.md$"),
     re.compile(r"^ptc_runner_launcher/.*\.md$"),
     re.compile(r"^ptc_viewer/.*\.md$"),
+    re.compile(r"^ptc_gateway/.*\.md$"),
     re.compile(r"^CHANGELOG\.md$"),
     re.compile(r"^LICENSES/.*$"),
     re.compile(r"^\.gitignore$"),
@@ -381,6 +382,7 @@ mcp_http=false
 mcp_filesystem=false
 java=false
 viewer=false
+gateway=false
 docs=false
 # shellcheck disable=SC1090
 source "$SCOPES_FILE"
@@ -431,6 +433,7 @@ run_gate() {
 #   lane A   core-static -> core-Dialyzer   _build/test  (shared: serial)
 #   lane B   core-release                   _build/prod
 #   lane C   Viewer                         ptc_viewer/_build/test
+#   lane D   Gateway                        ptc_gateway/_build/test
 #
 # Documentation keeps its head start above: it owns `_build/dev` and is
 # the only stage that writes the root `deps/`, so finishing it first also
@@ -596,6 +599,11 @@ if [ "$viewer" = true ] || [ "$core" = true ]; then
   run_viewer_gate=true
 fi
 
+run_gateway_gate=false
+if [ "$gateway" = true ] || [ "$core" = true ]; then
+  run_gateway_gate=true
+fi
+
 if [ "$run_core_gates" = true ]; then
   run_gate "core tests" "$HOOK_REPO_ROOT/scripts/ci/core-tests.sh"
 fi
@@ -610,7 +618,11 @@ if [ -n "${PTC_PRE_PUSH_SERIAL:-}" ]; then
   if [ "$run_viewer_gate" = true ]; then
     run_gate "Viewer validation" "$HOOK_REPO_ROOT/scripts/ci/viewer.sh"
   fi
-elif [ "$run_core_gates" = true ] || [ "$run_viewer_gate" = true ]; then
+
+  if [ "$run_gateway_gate" = true ]; then
+    run_gate "Gateway validation" "$HOOK_REPO_ROOT/scripts/ci/gateway.sh"
+  fi
+elif [ "$run_core_gates" = true ] || [ "$run_viewer_gate" = true ] || [ "$run_gateway_gate" = true ]; then
   echo ""
   echo "📦 Deterministic gates (concurrent lanes)"
 
@@ -622,6 +634,10 @@ elif [ "$run_core_gates" = true ] || [ "$run_viewer_gate" = true ]; then
 
   if [ "$run_viewer_gate" = true ]; then
     start_lane "Viewer validation" "$HOOK_REPO_ROOT/scripts/ci/viewer.sh"
+  fi
+
+  if [ "$run_gateway_gate" = true ]; then
+    start_lane "Gateway validation" "$HOOK_REPO_ROOT/scripts/ci/gateway.sh"
   fi
 
   if ! wait_lanes; then

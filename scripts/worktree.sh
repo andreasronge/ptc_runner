@@ -167,6 +167,7 @@ issue_state() {
 seed_key_files() {
   case "$1" in
     ptc_viewer/*) printf '%s\n' mise.toml ptc_viewer/mix.lock ;;
+    ptc_gateway/*) printf '%s\n' mise.toml ptc_gateway/mix.lock ;;
     ptc_runner_launcher/*) printf '%s\n' mise.toml ptc_runner_launcher/mix.lock ;;
     *) printf '%s\n' mise.toml mix.lock ;;
   esac
@@ -186,7 +187,7 @@ seed_key_divergence() {
   return 0
 }
 
-# deps/_build make `mix deps.get` and `mix compile` incremental in all three
+# deps/_build make `mix deps.get` and `mix compile` incremental in all four
 # Mix projects; priv/plts carries the writable project PLT so dialyxir
 # updates it instead of re-adding ~1,500 modules (the core PLT is already
 # shared machine-wide via ~/.cache/ptc_runner -- see mix.exs).
@@ -196,6 +197,8 @@ SEED_ARTIFACTS=(
   priv/plts
   ptc_viewer/deps
   ptc_viewer/_build
+  ptc_gateway/deps
+  ptc_gateway/_build
   ptc_runner_launcher/deps
   ptc_runner_launcher/_build
 )

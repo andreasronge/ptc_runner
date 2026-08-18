@@ -27,6 +27,7 @@ jobs:
       mcp_filesystem: ${{ steps.scopes.outputs.mcp_filesystem }}
       java: ${{ steps.scopes.outputs.java }}
       viewer: ${{ steps.scopes.outputs.viewer }}
+      gateway: ${{ steps.scopes.outputs.gateway }}
       docs: ${{ steps.scopes.outputs.docs }}
 
     steps:
@@ -471,6 +472,29 @@ jobs:
       - name: Compile and test Viewer
         run: scripts/ci/viewer.sh
 
+  gateway:
+    needs: changes
+    if: needs.changes.outputs.gateway == 'true' || needs.changes.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    name: Gateway validation
+    env:
+      MIX_ENV: test
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Gateway Elixir environment
+        uses: ./.github/actions/setup-elixir
+        with:
+          project-directory: ptc_gateway
+          cache-plt: 'false'
+          install-babashka: 'false'
+
+      - name: Compile and test Gateway
+        run: scripts/ci/gateway.sh
+
   docs:
     needs: changes
     if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.core == 'true'
@@ -502,6 +526,7 @@ jobs:
       - core-dialyzer
       - core-release
       - viewer
+      - gateway
       - docs
       - mcp-stdio-launcher
       - mcp-stdio-launcher-package

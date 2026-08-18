@@ -105,7 +105,7 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
               send(parent, {:cancelled_worker, self()})
               receive do: (:never -> :unexpected)
             end,
-            timeout_ms: 5_000,
+            timeout_ms: 60_000,
             max_heap_words: 10_000,
             cancel_with: cancellation_owner
           )

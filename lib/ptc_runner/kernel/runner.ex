@@ -235,7 +235,7 @@ defmodule PtcRunner.Kernel.Runner do
       telemetry_run: state.pid
     ]
 
-    case Lisp.run_native(entry_source, opts) do
+    case Lisp.run_owned(entry_source, opts) do
       {:ok, %{return: {:__ptc_fail__, value}} = step} ->
         capture_execution_failure(
           config,

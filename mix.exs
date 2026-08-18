@@ -133,7 +133,7 @@ defmodule PtcRunner.MixProject do
       {:usage_rules, "~> 1.2", only: :dev, runtime: false},
       {:recon, "~> 2.5", only: [:dev, :test], runtime: false},
       {:benchee, "~> 1.3", only: [:dev, :test], runtime: false}
-    ] ++ viewer_dep()
+    ] ++ viewer_dep() ++ gateway_dep()
   end
 
   # Keep published and ordinary development builds on Hex while allowing an
@@ -207,19 +207,34 @@ defmodule PtcRunner.MixProject do
     end
   end
 
+  # Same activation rule as the Viewer: checkout, tests, and `mix release`
+  # carry the companion; `mix hex.build` must not see a path dependency.
+  # `runtime: false` keeps the gateway out of `ensure_all_started(:ptc_runner)`.
+  defp gateway_dep do
+    gateway_path = Path.expand("ptc_gateway", __DIR__)
+
+    if File.regular?(Path.join(gateway_path, "mix.exs")) and
+         (Mix.env() in [:dev, :test] or Enum.any?(System.argv(), &(&1 == "release"))) do
+      [{:ptc_gateway, path: "ptc_gateway", runtime: false}]
+    else
+      []
+    end
+  end
+
   defp aliases do
     [
       ptc: &run_ptc/1,
-      # The nested-project fetch leads: the Viewer and launcher gates run after
-      # the root suite, so without it a worktree that never fetched them learns
-      # so several minutes in. Each gate still fetches its own project -- this
-      # only moves the discovery to the front. GitHub gets the same fetch from
-      # the setup action, per job.
+      # The nested-project fetch leads: the Viewer, Gateway, and launcher
+      # gates run after the root suite, so without it a worktree that never
+      # fetched them learns so several minutes in. Each gate still fetches
+      # its own project -- this only moves the discovery to the front.
+      # GitHub gets the same fetch from the setup action, per job.
       precommit: [
         "cmd scripts/ci/preflight.sh",
         "cmd scripts/ci/core-quality.sh",
         "cmd scripts/ci/core-tests.sh",
         "cmd scripts/ci/viewer.sh",
+        "cmd scripts/ci/gateway.sh",
         "cmd scripts/ci/launcher-package.sh",
         "cmd scripts/ci/core-release.sh"
       ],
@@ -287,7 +302,7 @@ defmodule PtcRunner.MixProject do
   defp ptc_prepare_task([]), do: "compile"
 
   defp ptc_prepare_task([command | _rest])
-       when command in ["help", "version", "--version", "repl", "viewer"],
+       when command in ["help", "version", "--version", "repl", "serve", "viewer"],
        do: "compile"
 
   defp ptc_prepare_task(_args), do: "app.config"
@@ -299,7 +314,7 @@ defmodule PtcRunner.MixProject do
         # Both are `runtime: false`, so they are named here to travel with the
         # release at all. `:load` keeps them out of the boot start phase; the
         # provider activity boundary and `ptc viewer` start them explicitly.
-        applications: [req_llm: :load, ptc_viewer: :load],
+        applications: [req_llm: :load, ptc_viewer: :load, ptc_gateway: :load],
         overlays: ["rel/overlays"]
       ]
     ]
@@ -354,12 +369,15 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel,
           PtcRunner.Kernel.ApplicationPackage,
           PtcRunner.Kernel.Capability,
+          PtcRunner.Kernel.CommandOutcome,
+          PtcRunner.Kernel.CommandRunOutcome,
           PtcRunner.Kernel.Component,
           PtcRunner.Kernel.Error,
           PtcRunner.Kernel.EventSink,
           PtcRunner.Kernel.ExecutionInput,
           PtcRunner.Kernel.ExecutionPolicy,
           PtcRunner.Kernel.FrozenBundle,
+          PtcRunner.Kernel.HostRuntime,
           PtcRunner.Kernel.InspectionArtifact,
           PtcRunner.Kernel.InspectionSink,
           PtcRunner.Kernel.Library,
@@ -378,6 +396,7 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.RunConfig,
           PtcRunner.Kernel.RunRequest,
           PtcRunner.Kernel.RunAnalysis,
+          PtcRunner.Kernel.ServingTemplate,
           PtcRunner.Kernel.TraceLog,
           PtcRunner.Kernel.WorkflowEnvironment
         ],
@@ -392,10 +411,12 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.Evaluation,
           PtcRunner.Kernel.ExecutionOutcome,
           PtcRunner.Kernel.Events,
+          PtcRunner.Kernel.GatewayConfig,
           PtcRunner.Kernel.JSONValue,
           PtcRunner.Kernel.JSONSchema,
           PtcRunner.Kernel.MCPProtocol,
           PtcRunner.Kernel.Program,
+          PtcRunner.Kernel.ProviderAdmission,
           PtcRunner.Kernel.PublicationAuthority,
           PtcRunner.Kernel.RunState,
           PtcRunner.Kernel.Runner,

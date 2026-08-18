@@ -63,6 +63,55 @@ modules:
 - `PtcRunner.Kernel.EventSink`
 - `PtcRunner.Kernel.RunConfig`
 - `PtcRunner.Kernel`
+- `PtcRunner.Kernel.ServingTemplate`
+- `PtcRunner.Kernel.HostRuntime`
+- `PtcRunner.Kernel.CommandOutcome`
+- `PtcRunner.Kernel.CommandRunOutcome`
+
+## Serve one compiled application
+
+`PtcRunner.Kernel.ServingTemplate` compiles an application once and executes
+repeated calls without recompilation. Acquire the package with
+`PtcRunner.Kernel.ApplicationPackage.package_memory/3` or
+`package_directory/2` so a missing manifest input cannot fail compilation.
+Both input and result contracts are required. The default `effects: :read_only`
+policy refuses any local public export that is not provably `:read`. A call
+supplies only the input value; the frozen policy includes the input authority
+class. The public result is `PtcRunner.Kernel.CommandOutcome`. Frozen
+`inspection_capture: true` is bound onto each call's publication authority
+so the Kernel opens an inspection sink.
+
+`PtcRunner.Kernel.HostRuntime` is the supervised per-VM singleton for
+provider-backed serving. It starts `:req_llm` / `:llm_db` once (dotenv
+disabled), validates that the aggregate admission ceiling does not exceed
+Finch pool capacity, and executes `call/3` under the template's frozen
+policy. Provider-task admission is checked at dispatch, not at call
+admission; saturation and a dead admission owner yield closed diagnostics.
+`ServingTemplate.call/2` remains provider-free and refuses a template that
+selected providers.
+
+This slice still acquires providers per call. Pooled retention of provider
+services is a later trigger.
+
+```elixir
+alias PtcRunner.Kernel.ApplicationPackage
+alias PtcRunner.Kernel.CommandOutcome
+alias PtcRunner.Kernel.HostRuntime
+alias PtcRunner.Kernel.ServingTemplate
+
+documents = %{
+  "app.json" => File.read!("app.json"),
+  "workflow.clj" => File.read!("workflow.clj"),
+  "input.schema.json" => File.read!("input.schema.json"),
+  "result.schema.json" => File.read!("result.schema.json")
+}
+
+{:ok, package} = ApplicationPackage.package_memory("app.json", documents)
+{:ok, template} = ServingTemplate.compile(package)
+{:ok, _pid} = HostRuntime.start_link()
+{:ok, outcome} = HostRuntime.call(HostRuntime, template, %{"n" => 21})
+CommandOutcome.to_map(outcome)
+```
 
 ## Resolve shipped libraries
 
@@ -187,6 +236,23 @@ roots, the same private-data decision the command would make, and optionally
 `:ip` to choose between the loopback default and `{0, 0, 0, 0}`. `PtcViewer` is
 present in the standalone release and absent from the published Hex package, so
 probe it with `Code.ensure_loaded?/1` before calling it.
+
+## Start the Gateway
+
+`ptc serve GATEWAY.json` compiles each configured application into a
+`PtcRunner.Kernel.ServingTemplate`. Without `http`, it serves stdio as MCP
+`2026-07-28` newline-delimited JSON. With `http`, the host loads a bearer
+token from a private owner-readable file (environment variables are not a
+source) and binds loopback unless `listen` is `0.0.0.0`. A wildcard bind
+requires an explicit `host` name with no scheme or port. `PtcGateway` is
+present in the standalone release and absent from the published Hex package,
+so probe it with `Code.ensure_loaded?/1` before calling it. Write-effect
+configuration, digest mismatch, and an unreadable token file refuse startup.
+The bearer is never kept in plug options or process status; Bandit request
+`:start` and `:exception` telemetry still include the raw `Authorization`
+header because Bandit emits them before the plug runs. HTTP `tools/call`
+with `Accept: text/event-stream` uses SSE heartbeats; the first failed
+write cancels the request owner. JSON calls run to completion or deadline.
 
 ## Keep policy in PTC-Lisp
 

@@ -335,6 +335,20 @@ defmodule PtcRunner.Kernel.CommandParser do
     end
   end
 
+  defp validate_command(:serve, [config], options, ordered, frontend_options, frontend) do
+    if allowed?(:serve, options, frontend) and valid_nonempty_string?(config) and options == %{} do
+      arguments(:serve,
+        application: config,
+        options: options,
+        ordered_options: ordered,
+        frontend_options: frontend_options,
+        frontend: frontend
+      )
+    else
+      reject(:serve, :invalid_arguments)
+    end
+  end
+
   defp validate_command(:viewer, [project], options, ordered, frontend_options, frontend) do
     if allowed?(:viewer, options, frontend) and valid_nonempty_string?(project) and
          viewer_port_valid?(options) and viewer_listen_valid?(options) do
@@ -351,7 +365,7 @@ defmodule PtcRunner.Kernel.CommandParser do
   end
 
   defp validate_command(command, _positional, _options, _ordered, _frontend_options, _frontend)
-       when command in [:init, :validate, :run, :viewer],
+       when command in [:init, :validate, :run, :serve, :viewer],
        do: {:error, CommandRejection.positional_arity(command)}
 
   defp validate_command(command, _positional, _options, _ordered, _frontend_options, _frontend),

@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
   this projection.
   """
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.RunRequest
@@ -30,15 +31,53 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
         ) ::
           {:ok, %{projection: map(), digest: binary()}} | {:error, :invalid_effective_application}
   @doc "Builds the literal effective projection and its domain-separated digest."
-  def build(request, workflow_bundle, mission_bundles, providers, effective_event_policy) do
-    with true <- RunRequest.valid?(request),
+  def build(
+        %RunRequest{} = request,
+        workflow_bundle,
+        mission_bundles,
+        providers,
+        effective_event_policy
+      ) do
+    if RunRequest.valid?(request) do
+      build_identity(
+        identity(request),
+        workflow_bundle,
+        mission_bundles,
+        providers,
+        effective_event_policy
+      )
+    else
+      {:error, :invalid_effective_application}
+    end
+  end
+
+  def build(_request, _workflow_bundle, _mission_bundles, _providers, _effective_event_policy),
+    do: {:error, :invalid_effective_application}
+
+  @doc false
+  @spec build_identity(
+          map(),
+          FrozenBundle.t(),
+          %{binary() => FrozenBundle.t() | nil},
+          normalized_providers(),
+          :normal | :private
+        ) ::
+          {:ok, %{projection: map(), digest: binary()}} | {:error, :invalid_effective_application}
+  def build_identity(
+        identity,
+        workflow_bundle,
+        mission_bundles,
+        providers,
+        effective_event_policy
+      ) do
+    with true <- identity_valid?(identity),
          true <- FrozenBundle.valid?(workflow_bundle),
-         true <- valid_mission_bundles?(mission_bundles, request.package.missions),
+         true <- valid_mission_bundles?(mission_bundles, identity.package.missions),
          true <- valid_providers?(providers),
          true <- effective_event_policy in [:normal, :private],
          projection <-
            projection(
-             request,
+             identity,
              workflow_bundle,
              mission_bundles,
              providers,
@@ -55,8 +94,28 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
     end
   end
 
-  defp projection(request, workflow_bundle, mission_bundles, providers, effective_event_policy) do
-    package = request.package
+  defp identity(%RunRequest{} = request) do
+    %{
+      package: request.package,
+      input_authority: request.input.authority,
+      inspection_capture: request.policy.inspection_capture,
+      result_projection: request.policy.result_projection
+    }
+  end
+
+  defp identity_valid?(identity) when is_map(identity) do
+    Enum.sort(Map.keys(identity)) ==
+      [:input_authority, :inspection_capture, :package, :result_projection] and
+      ApplicationPackage.valid?(identity.package) and
+      identity.input_authority in [:normal, :private] and
+      is_boolean(identity.inspection_capture) and
+      identity.result_projection in [:native, :json]
+  end
+
+  defp identity_valid?(_identity), do: false
+
+  defp projection(identity, workflow_bundle, mission_bundles, providers, effective_event_policy) do
+    package = identity.package
 
     %{
       "bundle_hashes" => %{
@@ -74,15 +133,15 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
       },
       "effective_event_policy" => Atom.to_string(effective_event_policy),
       "entry" => package.entry,
-      "input_authority_class" => Atom.to_string(request.input.authority),
-      "inspection_capture_enabled" => request.policy.inspection_capture,
+      "input_authority_class" => Atom.to_string(identity.input_authority),
+      "inspection_capture_enabled" => identity.inspection_capture,
       "limits" => LimitCatalog.effective_projection(package.limits),
       "providers" => %{
         "workflow" => providers.workflow,
         "mission" => providers.mission
       },
       "ptc_semantic_revision" => package.ptc_semantic_revision,
-      "result_projection" => Atom.to_string(request.policy.result_projection)
+      "result_projection" => Atom.to_string(identity.result_projection)
     }
   end
 

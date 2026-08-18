@@ -6,8 +6,8 @@ defmodule PtcRunner.Kernel.CommandArguments do
   consumed before `RunCoordinator`. Artifact destinations are captured against
   the invocation working directory after parsing. `run` destinations move into
   the sealed phase-6 command continuation; `repl` and `transcript` destinations
-  remain on the arguments passed to their dedicated frontends. `viewer` has no
-  destination: it publishes nothing.
+  remain on the arguments passed to their dedicated frontends. `viewer` and
+  `serve` have no destination: they publish nothing.
   """
 
   @enforce_keys [
@@ -32,6 +32,7 @@ defmodule PtcRunner.Kernel.CommandArguments do
           | :models
           | :transcript
           | :repl
+          | :serve
           | :viewer
   @type t :: %__MODULE__{
           command: command(),

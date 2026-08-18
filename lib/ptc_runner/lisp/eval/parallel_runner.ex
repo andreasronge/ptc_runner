@@ -74,15 +74,16 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   restores the prior flag in an `after` block, converting worker link
   signals into `{:EXIT, _, _}` messages.
 
-  Because the sandbox process may *itself* be linked to a disposable caller
-  through the `link: true` mode of `Sandbox.execute/3`, the temporary
-  `trap_exit` must not swallow that caller's
-  cancellation. `run/3` therefore distinguishes `{:EXIT, ...}` signals
-  by source: signals from its own workers are handled as worker exits,
-  while an *abnormal* exit from any non-worker is treated as real
-  cancellation — all workers are killed and the exit is re-propagated so
-  linked cancellation still tears the sandbox down. `:normal` exits from
-  non-workers are ignored.
+  Sandbox `link: true` does not create a BEAM link. It starts a watchdog
+  that monitors the `Sandbox.execute/3` caller and asynchronously
+  `Process.exit/2`s the sandbox worker with `:kill`, which is untrappable.
+  The `:links`-based cancellation drain below is therefore unreachable for
+  that watchdog path. `run/3` still distinguishes `{:EXIT, ...}` signals
+  by source so a genuine BEAM-linked non-worker is not swallowed by the
+  temporary `trap_exit`: worker signals are handled as worker exits, while
+  an *abnormal* exit from any non-worker is treated as real cancellation —
+  all workers are killed and the exit is re-propagated. `:normal` exits
+  from non-workers are ignored.
   """
 
   alias PtcRunner.Lisp.Eval.ParallelBudget
@@ -264,13 +265,13 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   @cancellation_drain_window_ms 5
 
   # Post-restore drain. By this point every worker has been reaped and
-  # unlinked, so the only remaining link is to an external caller (the
-  # `link: true` sandbox's caller). If there is NO such link, no
-  # cancellation is possible — drain the mailbox non-blocking (zero
-  # added latency, the common case). If there IS a linked caller, park
-  # briefly so an in-flight cancellation is delivered: as a direct kill
-  # (`trap_exit` now false) or, if already a trapped message, matched
-  # and re-propagated. See the P2-b ordering argument in `run/3`.
+  # unlinked. Sandbox `link: true` is a watchdog, not a BEAM link, so
+  # this process usually has no remaining links — drain the mailbox
+  # non-blocking (zero added latency, the common case). If a genuine
+  # BEAM-linked caller exists, park briefly so an in-flight cancellation
+  # is delivered: as a direct kill (`trap_exit` now false) or, if already
+  # a trapped message, matched and re-propagated. See the P2-b ordering
+  # argument in `run/3`.
   defp blocking_cancellation_drain(cancellation) do
     case Process.info(self(), :links) do
       {:links, []} -> drain_worker_signals(cancellation)

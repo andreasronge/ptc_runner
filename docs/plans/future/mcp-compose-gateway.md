@@ -1,7 +1,14 @@
 # Inbound MCP gateway: serving governed compound tools
 
 **Status:** future, trigger-gated; written 2026-07-31, narrowed after review
-the same day. No approved implementation work. This plan assumes the
+the same day. Mode M0 and scope tier 2 (HTTP, single shared authority) were
+activated on 2026-08-17 and sliced into pull requests by
+[`../mcp-gateway-m0.md`](../mcp-gateway-m0.md) (issue #1465), with two
+recorded amendments: the static M0 configuration may hold several entries
+(each still exactly one application exposed as one tool), and pooled
+provider services are staged — boot performs a validation acquisition and
+every call revalidates digests, while pooled retention keeps its own
+trigger. Everything else remains unapproved. This plan assumes the
 completed [stable CLI contract](../lisp-kernel/stable-cli-contract.md): the
 transport-neutral `ApplicationPackage`/`ExecutionInput`/`ExecutionPolicy`/
 `RunRequest` seam, the memory acquisition adapter, the
@@ -83,7 +90,9 @@ and executes one ordinary bounded Kernel run: own heap, own deadline,
 canonical trace, closed diagnostics mapped to MCP tool errors.
 
 No boot Lisp program, no multiple exports, no dynamic surface, no
-notifications. Read-only compound tools only: the configuration refuses an
+server-initiated notifications (inbound `notifications/cancelled` from the
+client is transport hygiene, not surface). Read-only compound tools only:
+the configuration refuses an
 application whose grant includes a write-effect tool. Write-bearing compound
 tools are deferred behind an explicit trigger because multiple upstream
 writes are not transactional; they require idempotency, partial-effect
@@ -171,7 +180,11 @@ stay warm across calls, while every run remains individually bounded and
 individually traced. Defining the ownership, cleanup, and drift-recheck
 contract for pooled provider services relative to the execution-scoped
 services of the CLI plan is the largest genuinely new engineering item in
-this plan.
+this plan. The 2026-08-17 activation stages this: compilation is once
+(the serving template), while provider services remain per-call — boot
+performs a validation acquisition and every call revalidates digests —
+until pooled retention's own trigger fires
+([`../mcp-gateway-m0.md`](../mcp-gateway-m0.md), deviation 2).
 
 ### Admission control and cancellation
 
@@ -181,7 +194,12 @@ gateway enforces a bounded in-flight call limit with explicit rejection —
 no hidden unbounded queue. Client disconnect or cancellation must reach the
 run owner, which already kills and drains attached provider work before
 connector cleanup; the gateway wires transport lifecycle to that existing
-contract.
+contract. The cancellation *signal* is transport-qualified by the
+activation: `notifications/cancelled` is honored on stdio only, HTTP SSE
+cancellation is response-stream closure, and HTTP plain-JSON calls run to
+completion or deadline — a sessionless shared-authority endpoint has no
+collision-proof identity to correlate a later cancellation POST against
+([`../mcp-gateway-m0.md`](../mcp-gateway-m0.md)).
 
 ### Contracts, schemas, and attestation
 
