@@ -93,7 +93,18 @@
             single-call (if (= 1 (count (get calls "items")))
                           (first (get calls "items"))
                           nil)
-            working-set (debug.workspace/changed run-id generated-sources)]
+            working-set (debug.workspace/changed run-id generated-sources)
+            ;; Generated-program relationships reach the mission components
+            ;; they called, but a workflow-control failure may live in the
+            ;; host-authored workflow that routed values between those calls.
+            ;; Include the complete bounded workflow environment without
+            ;; naming a suspect; candidate selection remains the model's job.
+            workflow-sources
+            (debug.nav/read
+              run-id
+              {"collection" "prelude_sources"
+               "environment" "workflow"
+               "limit" 100})]
         {"run"
          (select-keys run ["run_id" "status" "terminal_reason" "duration_ms"
                            "error_count" "evaluations" "llm_calls"])
@@ -115,6 +126,11 @@
                                      "arguments" "result" "complete?"])
            nil)
          "working_set" (get working-set "files")
+         "workflow_sources"
+         (mapv
+           #(select-keys % ["component_id" "environment" "mission_name"
+                            "source_hash" "source" "relationships"])
+           (get workflow-sources "items"))
          "completeness"
          {"runs_truncated" (get selection "truncated")
           "errors_truncated" (get errors "truncated")
@@ -124,4 +140,7 @@
           "generated_sources_truncated"
           (boolean (some #(get % "truncated") generated-pages))
           "capability_calls_truncated" (get calls "truncated")
-          "working_set_complete" (get working-set "complete?")}}))))
+          "working_set_complete" (get working-set "complete?")
+          "workflow_sources_complete"
+          (and (not (get workflow-sources "truncated"))
+               (nil? (get workflow-sources "next_cursor")))}}))))

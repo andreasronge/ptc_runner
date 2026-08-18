@@ -4,7 +4,16 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Ptc.Repair
+  alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.ComponentOverride
+  alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.Library
+  alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.ValueContract
+  alias PtcRunner.Kernel.WorkflowEnvironment
 
   @moduletag :slow
   @moduletag timeout: 180_000
@@ -187,6 +196,204 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     end
 
     refute File.exists?(Path.join(directory, "candidate-refused"))
+  end
+
+  test "the repair report contract permits a workflow target without a mission" do
+    schema =
+      @example
+      |> Path.join("repair-agent/report.schema.json")
+      |> File.read!()
+      |> Jason.decode!()
+
+    assert {:ok, contract} = ValueContract.compile(schema)
+
+    report = %{
+      "decision" => "propose-change",
+      "run_id" => "run-1",
+      "cause" => "the workflow routed the wrong value",
+      "target_environment" => "workflow",
+      "target_mission" => nil,
+      "component_id" => "main",
+      "function_id" => "main/run",
+      "base_source_hash" => "sha256:" <> String.duplicate("a", 64),
+      "candidate_source" => "(ns main)",
+      "evidence" => ["the two captured values differ"]
+    }
+
+    # nil is not an accepted spelling of "no mission": the field is either a
+    # nonblank mission name or absent.
+    refute ValueContract.valid?(contract, report)
+    assert ValueContract.valid?(contract, Map.delete(report, "target_mission"))
+
+    mission_report =
+      Map.merge(report, %{
+        "target_environment" => "mission",
+        "target_mission" => "pricing"
+      })
+
+    assert ValueContract.valid?(contract, mission_report)
+    refute ValueContract.valid?(contract, Map.put(mission_report, "target_mission", nil))
+  end
+
+  test "the terminal propose action enforces the target rule the schema cannot express" do
+    {:ok, kernel_component} = Library.component("kernel")
+    {:ok, workflow_bundle} = Kernel.compile_bundle([kernel_component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: workflow_bundle)
+
+    {:ok, terminal_component} =
+      Component.new(
+        id: "repair.terminal",
+        source: File.read!(Path.join(@example, "repair-agent/repair.terminal.clj")),
+        origin: "example"
+      )
+
+    {:ok, terminal_bundle} = Kernel.compile_bundle([terminal_component])
+    {:ok, synthesize} = MissionEnvironment.new(bundle: terminal_bundle)
+    {:ok, limits} = Limits.new(subordinate_evaluations: 8)
+
+    propose = fn report ->
+      {:ok, sink} = EventSink.start(:normal, limits, run_id: "repair-terminal-example")
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          missions: %{"default" => synthesize, "synthesize" => synthesize},
+          input: %{"input" => report},
+          limits: limits,
+          event_sink: sink
+        )
+
+      Kernel.run(
+        ~S|(return (kernel/eval-source-with "synthesize" "(repair.terminal/propose data/params)" data/input))|,
+        config
+      )
+    end
+
+    base = %{
+      "run_id" => "run-1",
+      "cause" => "routing",
+      "component_id" => "main",
+      "function_id" => "main/run",
+      "base_source_hash" => "sha256:" <> String.duplicate("a", 64),
+      "candidate_source" => "(ns main)",
+      "evidence" => ["captured values differ"]
+    }
+
+    # A workflow proposal is accepted, and a redundant mission name is
+    # dropped rather than burning a correction turn.
+    assert {:ok, %{value: evaluation}} =
+             propose.(
+               Map.merge(base, %{"target_environment" => "workflow", "target_mission" => "x"})
+             )
+
+    assert evaluation["outcome"] == "returned"
+    assert evaluation["value"]["decision"] == "propose-change"
+    refute Map.has_key?(evaluation["value"], "target_mission")
+
+    # A mission proposal keeps its mandatory nonblank mission.
+    assert {:ok, %{value: mission_evaluation}} =
+             propose.(
+               Map.merge(base, %{"target_environment" => "mission", "target_mission" => "pricing"})
+             )
+
+    assert mission_evaluation["outcome"] == "returned"
+    assert mission_evaluation["value"]["target_mission"] == "pricing"
+
+    for invalid <- [
+          Map.put(base, "target_environment", "mission"),
+          Map.merge(base, %{"target_environment" => "mission", "target_mission" => "  "}),
+          Map.put(base, "target_environment", "component"),
+          base
+        ] do
+      assert {:ok, %{value: refused}} = propose.(invalid)
+      assert refused["outcome"] == "failed"
+    end
+  end
+
+  @tag :tmp_dir
+  test "the same repair path replaces faulty workflow routing while preserving correct missions",
+       %{tmp_dir: directory} do
+    example = Path.join(directory, "debug-a-failed-run")
+    File.cp_r!(@example, example)
+
+    for artifact <- ~w(target-workflow-control/.ptc repair-agent-workflow-control/.ptc) do
+      File.rm_rf!(Path.join(example, artifact))
+    end
+
+    target = Path.join(example, "target-workflow-control.ptc-project.json")
+    assert {target_output, 5} = run(target)
+    assert target_output =~ "execution/workflow_failed"
+
+    base = File.read!(Path.join(example, "target-workflow-control/main.clj"))
+
+    candidate =
+      String.replace(
+        base,
+        ~S|"reservation_id" (get input "order_id")|,
+        ~S|"reservation_id" (get reservation "reservation_id")|
+      )
+
+    assert candidate != base
+
+    report_path = Path.join(directory, "workflow-repair.json")
+    out = Path.join(directory, "workflow-candidate")
+    trial = Path.join(directory, "workflow-trial")
+
+    # A workflow target has no mission, so the report omits target_mission
+    # entirely - exactly the shape the terminal action publishes.
+    File.write!(
+      report_path,
+      Jason.encode!(%{
+        "decision" => "propose-change",
+        "run_id" => "workflow-control-incident",
+        "cause" =>
+          "main passes the incoming order id to shipping instead of the reservation id returned by inventory",
+        "target_environment" => "workflow",
+        "component_id" => "main",
+        "function_id" => "main/run",
+        "base_source_hash" => ComponentOverride.hash(base),
+        "candidate_source" => candidate,
+        "evidence" => [
+          "inventory returned reservation:order-17, while the shipping program received order-17"
+        ]
+      })
+    )
+
+    output =
+      capture_io(fn ->
+        Repair.run([
+          Path.join(example, "target-workflow-control/ptc.json"),
+          "--report",
+          report_path,
+          "--out",
+          out,
+          "--validation-suite",
+          Path.join(example, "repair-agent/workflow-control-suite.json"),
+          "--validation-out",
+          trial,
+          "--allow-live-validation"
+        ])
+      end)
+
+    assert output =~ "candidate passed 3 host-owned validation cases"
+
+    trial_report = Jason.decode!(File.read!(Path.join(trial, "report.json")))
+    assert trial_report["outcome"] == "pass"
+
+    assert Enum.map(trial_report["cases"], & &1["name"]) ==
+             ["observed-order", "held-out-order", "held-out-identifiers"]
+
+    assert {_output, 0} =
+             run(target, [
+               "--component-override-descriptor",
+               Path.join(out, "descriptor.json")
+             ])
+
+    assert private_result!(Path.join(example, "target-workflow-control/.ptc/results")) == %{
+             "destination" => "north-depot",
+             "reservation_id" => "reservation:order-17",
+             "status" => "scheduled"
+           }
   end
 
   defp run(project, extra_args \\ []) do

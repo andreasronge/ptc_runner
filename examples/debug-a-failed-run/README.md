@@ -150,6 +150,47 @@ ambiguity: either component could absorb the difference, and one observed case
 cannot distinguish them. `mix ptc.repair` refuses an abstention
 (`repair_not_proposed`) — nothing is materialized from insufficient evidence.
 
+### The workflow-control arm
+
+`target-workflow-control/` changes the failure class without changing the
+repair machinery. Inventory correctly returns a reservation identifier and
+shipping correctly preserves the identifier it receives. The workflow calls
+both missions in the right order but routes the incoming order identifier into
+shipping instead of the reservation identifier returned by inventory. Its
+cross-step invariant catches the mismatch and fails the run.
+
+This arm tests whether diagnosis is overfit to faulty mission components. The
+incident packet includes both generated mission programs, the frozen mission
+source closure, and the bounded workflow source set. It does not name which
+source is faulty. A repair must target the workflow `main` component — omitting
+`target_mission`, because a workflow target has none — and leave the two
+correct mission components unchanged:
+
+```console
+mix ptc run examples/debug-a-failed-run/target-workflow-control.ptc-project.json
+mix ptc run examples/debug-a-failed-run/repair-agent-workflow-control.ptc-project.json --env-file .env
+cat examples/debug-a-failed-run/repair-agent-workflow-control/.ptc/results/*.private.json
+```
+
+Validate a proposed workflow replacement against the observed order and two
+held-out identifier shapes:
+
+```console
+mix ptc.repair examples/debug-a-failed-run/target-workflow-control/ptc.json \
+  --report examples/debug-a-failed-run/repair-agent-workflow-control/.ptc/results/*.private.json \
+  --out examples/debug-a-failed-run/repair-agent-workflow-control/.ptc/candidate \
+  --validation-suite examples/debug-a-failed-run/repair-agent/workflow-control-suite.json \
+  --validation-out examples/debug-a-failed-run/repair-agent-workflow-control/.ptc/trial \
+  --allow-live-validation
+```
+
+Promotion again uses the validated override rather than editing the example:
+
+```console
+mix ptc run examples/debug-a-failed-run/target-workflow-control.ptc-project.json \
+  --component-override-descriptor examples/debug-a-failed-run/repair-agent-workflow-control/.ptc/candidate/descriptor.json
+```
+
 ## What each file does
 
 | Path | Role |
@@ -166,6 +207,8 @@ cannot distinguish them. `mix ptc.repair` refuses an abstention
 | `repair-agent/repair.terminal.clj` | the two typed terminal actions: propose a replacement, or abstain |
 | `repair-agent/suite.json` | host-owned validation cases, including held-out inputs the model never saw |
 | `target-ambiguous/` | the underdetermined variant whose evidence supports no single repair |
+| `target-workflow-control/` | the variant whose defect is workflow value routing between two correct missions |
+| `repair-agent/workflow-control-suite.json` | host-owned cases for the workflow repair, including held-out identifier shapes |
 
 The inspection snapshot provider must be selected under the alias `debug.nav`,
 because the shipped prelude binds `<alias>.runs`, `<alias>.open`, and
