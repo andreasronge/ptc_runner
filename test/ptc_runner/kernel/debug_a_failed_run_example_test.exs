@@ -1,6 +1,11 @@
 defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureIO
+
+  alias Mix.Tasks.Ptc.Repair
+  alias PtcRunner.Kernel.ComponentOverride
+
   @moduletag :slow
   @moduletag timeout: 180_000
 
@@ -85,10 +90,109 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     assert evidence["closure_complete"] == false
   end
 
-  defp run(project) do
+  # The repair leg is deterministic once a report exists: materialization,
+  # G1-G4, the host-owned suite, and the promoted rerun make no model call.
+  # Fabricating the report keeps this test offline while proving exactly the
+  # artifacts and commands the example's live repair agent hands to a human.
+  @tag :tmp_dir
+  test "a proposed repair is validated by the host suite and promotes to a passing run", %{
+    tmp_dir: directory
+  } do
+    example = Path.join(directory, "debug-a-failed-run")
+    File.cp_r!(@example, example)
+
+    for artifact <- ~w(target/.ptc debugger/.ptc repair-agent/.ptc target-ambiguous/.ptc) do
+      File.rm_rf!(Path.join(example, artifact))
+    end
+
+    base = File.read!(Path.join(example, "target/pricing.rule.clj"))
+    candidate = String.replace(base, "(+ subtotal 2)", "(+ subtotal 20)")
+    assert candidate != base
+
+    report_path = Path.join(directory, "repair.json")
+    out = Path.join(directory, "candidate")
+    trial = Path.join(directory, "trial")
+
+    File.write!(
+      report_path,
+      Jason.encode!(%{
+        "decision" => "propose-change",
+        "run_id" => "example-incident",
+        "cause" => "pricing.rule adds 2 where its contract states the flat charge is 20",
+        "target_environment" => "mission",
+        "target_mission" => "pricing",
+        "component_id" => "pricing.rule",
+        "function_id" => "pricing.rule/apply-standard",
+        "base_source_hash" => ComponentOverride.hash(base),
+        "candidate_source" => candidate,
+        "evidence" => ["the docstring and the observed total 102 both contradict (+ subtotal 2)"]
+      })
+    )
+
+    output =
+      capture_io(fn ->
+        Repair.run([
+          Path.join(example, "target/ptc.json"),
+          "--report",
+          report_path,
+          "--out",
+          out,
+          "--validation-suite",
+          Path.join(example, "repair-agent/suite.json"),
+          "--validation-out",
+          trial,
+          "--allow-live-validation"
+        ])
+      end)
+
+    assert output =~ "candidate passed 3 host-owned validation cases"
+
+    trial_report = Jason.decode!(File.read!(Path.join(trial, "report.json")))
+    assert trial_report["outcome"] == "pass"
+
+    assert Enum.map(trial_report["cases"], & &1["name"]) ==
+             ["observed-order", "held-out-small", "held-out-zero"]
+
+    # Promotion stays a separate, explicit decision: the same target that
+    # failed runs green under the validated override without any file edited.
+    assert {_output, 0} =
+             run(Path.join(example, "target.ptc-project.json"), [
+               "--component-override-descriptor",
+               Path.join(out, "descriptor.json")
+             ])
+
+    assert private_result!(Path.join(example, "target/.ptc/results")) == %{"total" => 120}
+
+    # An abstention is a complete result for the agent, and a refused input
+    # here: nothing is materialized from insufficient evidence.
+    File.write!(
+      report_path,
+      Jason.encode!(%{
+        "decision" => "insufficient-evidence",
+        "run_id" => "example-incident",
+        "cause" => "the evidence does not distinguish one faulty implementation",
+        "evidence" => ["two constant components could each absorb the difference"],
+        "missing_evidence" => ["a second observed case"]
+      })
+    )
+
+    assert_raise Mix.Error, ~r/repair_not_proposed/, fn ->
+      Repair.run([
+        Path.join(example, "target/ptc.json"),
+        "--report",
+        report_path,
+        "--out",
+        Path.join(directory, "candidate-refused")
+      ])
+    end
+
+    refute File.exists?(Path.join(directory, "candidate-refused"))
+  end
+
+  defp run(project, extra_args \\ []) do
     System.cmd(
       System.find_executable("mix"),
-      ["ptc", "run", project],
+      ["ptc", "run", project] ++ extra_args,
       cd: @root,
       env: [{"MIX_ENV", "test"}, {"MIX_QUIET", "1"}],
       stderr_to_stdout: true

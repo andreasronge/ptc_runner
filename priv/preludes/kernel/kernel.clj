@@ -46,6 +46,16 @@
       (get response :value)
       response)))
 
+(defn check-terminal-source
+  "Check that bounded dynamic source compiles and consists of exactly one top-level return or fail form, without executing it."
+  [mission source]
+  (let [response (tool/kernel-check-source {:source source
+                                            :require :terminal
+                                            :mission mission})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      response)))
+
 (defn mission-inventory
   "Return the exact frozen model-visible mission inventory JSON."
   [mission]

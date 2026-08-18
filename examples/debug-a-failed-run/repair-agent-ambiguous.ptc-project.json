@@ -1,0 +1,24 @@
+{
+  "$schema": "https://ptc-runner.dev/schemas/ptc-project-config.schema.json",
+  "kind": "ptc-project",
+  "version": 1,
+  "application": {
+    "path": "repair-agent/ptc.json"
+  },
+  "host": {
+    "path": "ptc-host-ambiguous.json"
+  },
+  "artifacts": {
+    "root": "repair-agent-ambiguous/.ptc",
+    "trace": true,
+    "inspection": true,
+    "result": true,
+    "envelope": true
+  },
+  "viewer": {
+    "port": 4128,
+    "open": true,
+    "repl": true,
+    "private": true
+  }
+}

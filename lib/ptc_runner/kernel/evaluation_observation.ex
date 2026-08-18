@@ -42,6 +42,34 @@ defmodule PtcRunner.Kernel.EvaluationObservation do
       })
   end
 
+  # A returned value normally terminates the run, but a phased agent retains a
+  # non-final return as transcript evidence, so it needs the same bounded
+  # observation. The value stays: the caller still completes the run with it
+  # when this is the final phase.
+  def project(%{outcome: :returned} = evaluation, max_chars)
+      when is_integer(max_chars) and max_chars > 0 do
+    observation = success(evaluation, max_chars)
+
+    evaluation
+    |> Map.put(:observation, observation.text)
+    |> Map.put(:preview, %{
+      truncated?: observation.truncated?,
+      caps_hit: observation.caps_hit,
+      sampled_keys: observation.sampled_keys,
+      prints_truncated?: observation.prints_truncated?
+    })
+  rescue
+    _error ->
+      evaluation
+      |> Map.put(:observation, "user=> #<preview unavailable>")
+      |> Map.put(:preview, %{
+        truncated?: true,
+        caps_hit: [:output],
+        sampled_keys: [],
+        prints_truncated?: Map.get(evaluation, :prints, []) != []
+      })
+  end
+
   def project(evaluation, _max_chars), do: evaluation
 
   @doc false

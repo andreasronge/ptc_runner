@@ -1,0 +1,31 @@
+{
+  "credentials": {
+    "openrouter_key": {"env": "OPENROUTER_API_KEY"}
+  },
+  "install": {
+    "failed-run-traces": {
+      "source": "ptc_private_trace_snapshot",
+      "installation_revision": "failed-run-traces-ambiguous-v1",
+      "directory": "target-ambiguous/.ptc/traces"
+    },
+    "debug.nav": {
+      "source": "ptc_inspection_snapshot",
+      "installation_revision": "failed-run-inspection-ambiguous-v1",
+      "directory": "target-ambiguous/.ptc/inspection"
+    },
+    "deepseek": {
+      "source": "llm",
+      "installation_revision": "debug-agent-v1",
+      "model": "openrouter:deepseek/deepseek-v4-flash",
+      "credential": "openrouter_key",
+      "cache": false,
+      "params": {"temperature": 0, "max_tokens": 4096},
+      "accepts_data": ["normal", "private_inspection"]
+    }
+  },
+  "limits": {
+    "run_duration_ms": 600000,
+    "workflow_timeout_ms": 540000,
+    "evaluation_timeout_ms": 480000
+  }
+}

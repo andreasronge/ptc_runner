@@ -10,6 +10,8 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
   alias Mix.Tasks.Ptc
   alias Mix.Tasks.Ptc.Materialize
+  alias Mix.Tasks.Ptc.Repair
+  alias PtcRunner.Kernel.ComponentOverride
 
   # The placeholder idiom. It must stub every export its consumers call: a
   # component that declares nothing cannot be depended on, because the base
@@ -347,12 +349,204 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
     end
   end
 
+  @tag :tmp_dir
+  test "a structured repair report passes a host-owned private validation suite", %{
+    tmp_dir: dir
+  } do
+    manifest = write_application(dir)
+    report = Path.join(dir, "repair.json")
+    suite = Path.join(dir, "suite.json")
+    validation_out = Path.join(dir, "validation")
+    out = Path.join(dir, "candidate")
+
+    File.write!(report, Jason.encode!(repair_report(ComponentOverride.hash(@placeholder))))
+    write_validation_suite(suite, [{"observed", 21, 42}, {"held-out", 5, 10}], "input")
+
+    output =
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.repair")
+
+        Repair.run([
+          manifest,
+          "--report",
+          report,
+          "--out",
+          out,
+          "--validation-suite",
+          suite,
+          "--validation-out",
+          validation_out,
+          "--allow-live-validation",
+          "--origin-run-id",
+          "debugger-run-1"
+        ])
+      end)
+
+    assert output =~ "candidate ready"
+    assert output =~ "candidate passed 2 host-owned validation cases"
+    refute output =~ "42"
+    assert File.read!(Path.join(out, "candidate.clj")) == @authored
+
+    assert %{
+             "candidate_source_hash" => source_hash,
+             "cases" => [
+               %{
+                 "name" => "observed",
+                 "status" => "pass",
+                 "artifacts" => %{
+                   "inspection" => "01/inspection/run.inspection.jsonl",
+                   "traces" => "01/traces"
+                 }
+               },
+               %{"name" => "held-out", "status" => "pass"}
+             ],
+             "outcome" => "pass"
+           } = Jason.decode!(File.read!(Path.join(validation_out, "report.json")))
+
+    assert source_hash == ComponentOverride.hash(@authored)
+    assert File.dir?(Path.join(validation_out, "01/traces"))
+    assert File.regular?(Path.join(validation_out, "01/inspection/run.inspection.jsonl"))
+
+    assert %{
+             "base_source_hash" => base_hash,
+             "provenance" => %{"run_id" => "debugger-run-1"}
+           } = Jason.decode!(File.read!(Path.join(out, "descriptor.json")))
+
+    assert base_hash == ComponentOverride.hash(@placeholder)
+  end
+
+  @tag :tmp_dir
+  test "a held-out case rejects a hard-coded candidate that passes the observed input", %{
+    tmp_dir: dir
+  } do
+    manifest = write_application(dir)
+    report = Path.join(dir, "repair.json")
+    suite = Path.join(dir, "suite.json")
+    validation_out = Path.join(dir, "validation")
+    out = Path.join(dir, "candidate")
+
+    hard_coded = String.replace(@authored, "(* 2 n)", "42")
+
+    File.write!(
+      report,
+      Jason.encode!(repair_report(ComponentOverride.hash(@placeholder), hard_coded))
+    )
+
+    write_validation_suite(suite, [{"observed", 21, 42}, {"held-out", 5, 10}])
+
+    assert_raise Mix.Error, ~r/1 of 2 host-owned validation cases failed/, fn ->
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.repair")
+
+        Repair.run([
+          manifest,
+          "--report",
+          report,
+          "--out",
+          out,
+          "--validation-suite",
+          suite,
+          "--validation-out",
+          validation_out,
+          "--allow-live-validation"
+        ])
+      end)
+    end
+
+    assert File.exists?(out)
+
+    assert %{
+             "cases" => [
+               %{"name" => "observed", "status" => "pass"},
+               %{"name" => "held-out", "status" => "fail"}
+             ],
+             "outcome" => "fail"
+           } = Jason.decode!(File.read!(Path.join(validation_out, "report.json")))
+
+    assert %{
+             "kind" => "repair-validation-feedback",
+             "state" => "candidate-rejected",
+             "candidate" => %{
+               "authority" => "model-authored-untrusted",
+               "value" => %{"candidate_source" => ^hard_coded}
+             },
+             "validation" => %{
+               "authority" => "host-authored",
+               "outcome" => "fail",
+               "cases" => [
+                 %{
+                   "name" => "observed",
+                   "input" => %{"value" => 21},
+                   "expected" => 42,
+                   "actual" => %{"state" => "available", "value" => 42}
+                 },
+                 %{
+                   "name" => "held-out",
+                   "input" => %{"value" => 5},
+                   "expected" => 10,
+                   "actual" => %{"state" => "available", "value" => 42},
+                   "reason" => "result_mismatch"
+                 }
+               ]
+             },
+             "version" => 1
+           } = Jason.decode!(File.read!(Path.join(validation_out, "feedback.json")))
+  end
+
+  @tag :tmp_dir
+  test "validation requires an explicit live-effects acknowledgement", %{tmp_dir: dir} do
+    manifest = write_application(dir)
+    report = Path.join(dir, "repair.json")
+    suite = Path.join(dir, "suite.json")
+
+    File.write!(report, Jason.encode!(repair_report(ComponentOverride.hash(@placeholder))))
+    write_validation_suite(suite, [{"observed", 21, 42}])
+
+    assert_raise Mix.Error, ~r/allow-live-validation/, fn ->
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.repair")
+
+        Repair.run([
+          manifest,
+          "--report",
+          report,
+          "--out",
+          Path.join(dir, "candidate"),
+          "--validation-suite",
+          suite,
+          "--validation-out",
+          Path.join(dir, "validation")
+        ])
+      end)
+    end
+  end
+
+  @tag :tmp_dir
+  test "automatic repair refuses a stale captured base and discards the candidate", %{
+    tmp_dir: dir
+  } do
+    manifest = write_application(dir)
+    report = Path.join(dir, "repair.json")
+    out = Path.join(dir, "candidate")
+
+    File.write!(report, Jason.encode!(repair_report("sha256:" <> String.duplicate("0", 64))))
+
+    assert_raise Mix.Error, ~r/captured base hash does not match/, fn ->
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.repair")
+        Repair.run([manifest, "--report", report, "--out", out])
+      end)
+    end
+
+    refute File.exists?(out)
+  end
+
   defp write_application(dir) do
     File.write!(Path.join(dir, "helper.clj"), @placeholder)
 
     File.write!(
       Path.join(dir, "main.clj"),
-      ~S|(ns main) (defn run [_i] (return (helper/double 21)))|
+      ~S|(ns main) (defn run [input] (return (helper/double (get input "value"))))|
     )
 
     manifest = %{
@@ -364,7 +558,7 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
         ],
         "entry" => "main/run"
       },
-      "input" => %{"value" => %{}},
+      "input" => %{"value" => %{"value" => 21}},
       "limits" => %{"run_duration_ms" => 30_000}
     }
 
@@ -393,5 +587,26 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
     path = Path.join(dir, "mission-ptc.json")
     File.write!(path, Jason.encode!(manifest))
     path
+  end
+
+  defp repair_report(base_source_hash, source \\ @authored) do
+    %{
+      "decision" => "propose-change",
+      "run_id" => "debugger-run-1",
+      "target_environment" => "workflow",
+      "target_mission" => "default",
+      "component_id" => "helper",
+      "base_source_hash" => base_source_hash,
+      "candidate_source" => source
+    }
+  end
+
+  defp write_validation_suite(path, cases, input_key \\ "private_input") do
+    encoded_cases =
+      Enum.map(cases, fn {name, input, expected} ->
+        %{"name" => name, input_key => %{"value" => input}, "expected" => expected}
+      end)
+
+    File.write!(path, Jason.encode!(%{"version" => 1, "cases" => encoded_cases}))
   end
 end

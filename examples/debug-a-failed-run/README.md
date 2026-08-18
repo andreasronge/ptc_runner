@@ -5,9 +5,10 @@ application's immutable failed run. No model, network access, or credential is
 involved: both runs are deterministic.
 
 `target/` prices an order through `orders` → `pricing.tax`, which branches to
-`pricing.base` and `pricing.rule`. The rule adds 2 while the captured call
-requires the subtotal plus 20, so the run fails. `pricing.discount` is an
-unused decoy: nothing in the failing call reaches it.
+`pricing.base` and `pricing.rule`. The rule adds 2 while its own docstring
+states the flat charge is 20 and the captured call requires the subtotal plus
+20, so the run fails. `pricing.discount` is an unused decoy: nothing in the
+failing call reaches it.
 
 `debugger/` installs the target's frozen trace and inspection directories as
 snapshot providers and walks the evidence with the shipped `debug.nav` prelude.
@@ -77,6 +78,78 @@ confidently wrong, blaming `orders` for not calling the unused decoy. That is
 the point of the decoy, and the reason this layer reports evidence rather than
 choosing a diagnosis.
 
+## Optional: close the loop with a generated repair
+
+`repair-agent/` extends the same incident into a bounded repair loop: the host
+assembles an immutable incident packet from the capture before model turn one,
+a phased agent run reads it under a tool-free `synthesize` mission, and the
+model completes through exactly one typed terminal action —
+`repair.terminal/propose` with a complete replacement component, or
+`repair.terminal/abstain` with the missing evidence. The result contract
+refuses anything else.
+
+This leg uses `mix ptc.repair`, a maintainers surface that runs from a source
+checkout rather than the standalone executable, so the commands below use
+`mix ptc` from the repository root against `examples/debug-a-failed-run/`.
+
+Capture the failure, then let the model propose:
+
+```console
+mix ptc run examples/debug-a-failed-run/target.ptc-project.json
+mix ptc run examples/debug-a-failed-run/repair-agent.ptc-project.json --env-file .env
+cat examples/debug-a-failed-run/repair-agent/.ptc/results/*.private.json
+```
+
+A verified live run proposed replacing `pricing.rule` with the 20-unit charge
+its docstring states, citing the contradiction between the implementation and
+its own contract. The proposal is model-authored and untrusted; nothing has
+been executed or changed yet.
+
+Validation is host policy and makes no model call. `mix ptc.repair` binds the
+report to the currently installed component by source hash, materializes the
+candidate through the static G1–G4 gate, and runs the host-owned suite —
+`repair-agent/suite.json` holds the observed order plus two held-out cases the
+model never saw:
+
+```console
+mix ptc.repair examples/debug-a-failed-run/target/ptc.json \
+  --report examples/debug-a-failed-run/repair-agent/.ptc/results/*.private.json \
+  --out examples/debug-a-failed-run/repair-agent/.ptc/candidate \
+  --validation-suite examples/debug-a-failed-run/repair-agent/suite.json \
+  --validation-out examples/debug-a-failed-run/repair-agent/.ptc/trial \
+  --allow-live-validation
+```
+
+Promotion stays a separate, explicit decision. Run the same failing target
+under the validated candidate without editing any file:
+
+```console
+mix ptc run examples/debug-a-failed-run/target.ptc-project.json \
+  --component-override-descriptor examples/debug-a-failed-run/repair-agent/.ptc/candidate/descriptor.json
+```
+
+The run that exited 5 now exits 0 with `{"total":120}`. Passing cases prove
+only the named inputs; they do not prove the candidate unique or correct
+beyond them.
+
+### The abstain arm
+
+`target-ambiguous/` plants a failure the evidence cannot attribute: two
+constant components sum to the wrong total, and no contract pins either one.
+The same repair agent — same manifest, same prompt, only the snapshot install
+differs — must refuse to guess:
+
+```console
+mix ptc run examples/debug-a-failed-run/target-ambiguous.ptc-project.json
+mix ptc run examples/debug-a-failed-run/repair-agent-ambiguous.ptc-project.json --env-file .env
+cat examples/debug-a-failed-run/repair-agent-ambiguous/.ptc/results/*.private.json
+```
+
+A verified live run returned `insufficient-evidence`, naming exactly the
+ambiguity: either component could absorb the difference, and one observed case
+cannot distinguish them. `mix ptc.repair` refuses an abstention
+(`repair_not_proposed`) — nothing is materialized from insufficient evidence.
+
 ## What each file does
 
 | Path | Role |
@@ -87,6 +160,12 @@ choosing a diagnosis.
 | `debugger/ptc.json` | selects `debug.nav` and the snapshot providers into the `evidence` mission |
 | `debugger/evidence.walk.clj` | the bounded walk over runs, errors, generated source, and prelude source |
 | `debugger-agent/ptc.json` | the optional live-model variant over the same mission authority |
+| `repair-agent/ptc.json` | the phased repair agent: packet acquisition, then a tool-free terminal decision |
+| `repair-agent/preloaded.clj` | host workflow that acquires the incident packet before model turn one |
+| `repair-agent/case.clj`, `repair-agent/workspace.clj` | the packet projection and the derived frozen working set |
+| `repair-agent/repair.terminal.clj` | the two typed terminal actions: propose a replacement, or abstain |
+| `repair-agent/suite.json` | host-owned validation cases, including held-out inputs the model never saw |
+| `target-ambiguous/` | the underdetermined variant whose evidence supports no single repair |
 
 The inspection snapshot provider must be selected under the alias `debug.nav`,
 because the shipped prelude binds `<alias>.runs`, `<alias>.open`, and
