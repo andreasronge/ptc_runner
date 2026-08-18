@@ -177,6 +177,10 @@ defmodule PtcRunner.Kernel.MCPSource do
   `:mcp_authorization_required`,
   `:mcp_input_required_refused`, `:mcp_unsupported_result`,
   `{:mcp_mapped_tool_missing, declared_name}`, or `:mcp_invalid_snapshot_identity`.
+  A stdio installation adds `:mcp_stdio_launcher_unavailable` and
+  `:unsupported_mcp_stdio_platform`: a launcher that cannot be resolved, staged
+  or cleaned up is a local dependency rather than an unreachable provider, and
+  reporting it as one sends the operator to the server they installed.
 
   ## Frozen result and snapshot contracts
 
@@ -567,6 +571,21 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
+  # Reasons the stdio acquisition path answers that the acquisition catalog
+  # already places on their own terms. A launcher that cannot be resolved,
+  # staged, or cleaned up is a local dependency; a bootstrap the launcher
+  # protocol rejects is a protocol fault; neither is the provider being
+  # unreachable. Everything outside this set collapses, and
+  # `PtcRunner.Kernel.AcquisitionReason` names which reasons that is.
+  @stdio_acquisition_reasons [
+    :mcp_timeout,
+    :mcp_transport_error,
+    :mcp_protocol_error,
+    :mcp_stdio_launcher_unavailable,
+    :unsupported_mcp_stdio_platform,
+    :resource_registrar_unavailable
+  ]
+
   defp normalize_stdio_acquisition(result) do
     case result do
       {:ok, _transport} = success ->
@@ -575,11 +594,11 @@ defmodule PtcRunner.Kernel.MCPSource do
       remaining_ms when is_integer(remaining_ms) and remaining_ms <= 0 ->
         {:error, :mcp_timeout}
 
-      {:error, :mcp_timeout} ->
-        {:error, :mcp_timeout}
-
       {:error, :mcp_stdio_spawn_timeout} ->
         {:error, :mcp_timeout}
+
+      {:error, reason} when reason in @stdio_acquisition_reasons ->
+        {:error, reason}
 
       {:error, _reason} ->
         {:error, :mcp_transport_error}
