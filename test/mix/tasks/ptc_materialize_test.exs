@@ -521,6 +521,38 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
     end
   end
 
+  # "Exact expected result" means exact: 42 and 42.0 are different JSON
+  # values, and a comparison that conflates them would certify a candidate
+  # returning a different representation than the host demanded.
+  @tag :tmp_dir
+  test "a numerically equal but differently typed result fails its case", %{tmp_dir: dir} do
+    manifest = write_application(dir)
+    report = Path.join(dir, "repair.json")
+    suite = Path.join(dir, "suite.json")
+
+    File.write!(report, Jason.encode!(repair_report(ComponentOverride.hash(@placeholder))))
+    write_validation_suite(suite, [{"float-expected", 21, 42.0}], "input")
+
+    assert_raise Mix.Error, ~r/1 of 1 host-owned validation cases failed/, fn ->
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.repair")
+
+        Repair.run([
+          manifest,
+          "--report",
+          report,
+          "--out",
+          Path.join(dir, "candidate"),
+          "--validation-suite",
+          suite,
+          "--validation-out",
+          Path.join(dir, "validation"),
+          "--allow-live-validation"
+        ])
+      end)
+    end
+  end
+
   # A suite is caller input: a case that is not a map must be refused as an
   # invalid suite, not crash name extraction with an Access error.
   @tag :tmp_dir

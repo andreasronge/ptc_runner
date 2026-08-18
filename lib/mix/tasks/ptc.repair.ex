@@ -131,12 +131,21 @@ defmodule Mix.Tasks.Ptc.Repair do
 
     with :ok <- PrivateDirectory.create(directory),
          :ok <- write_private(path, source) do
-      try do
-        callback.(path)
-        :ok
-      after
-        _ = File.rm(path)
-        _ = File.rmdir(directory)
+      result =
+        try do
+          callback.(path)
+          :ok
+        after
+          _ = File.rm(path)
+          _ = File.rmdir(directory)
+        end
+
+      # Cleanup residue is a failure, not a footnote: the staged file holds
+      # model-authored source that was supposed to be gone.
+      if File.exists?(path) or File.exists?(directory) do
+        {:error, :private_candidate_cleanup_failed}
+      else
+        result
       end
     else
       {:error, _reason} -> {:error, :private_candidate_staging_failed}
@@ -279,7 +288,7 @@ defmodule Mix.Tasks.Ptc.Repair do
     with :ok <- create_validation_directory(validation.out),
          {:ok, pre_suite_digest} <- application_digest(manifest),
          :ok <- same_application(base_digest, pre_suite_digest),
-         results <-
+         {:ok, results} <-
            run_cases(
              manifest,
              descriptor,
@@ -317,26 +326,36 @@ defmodule Mix.Tasks.Ptc.Repair do
 
     case PrivateDirectory.create(input_root) do
       :ok ->
-        try do
-          cases
-          |> Enum.with_index(1)
-          |> Enum.map(fn {validation_case, index} ->
-            run_case(
-              manifest,
-              descriptor,
-              root,
-              input_root,
-              validation_case,
-              index,
-              opts
-            )
-          end)
-        after
-          input_root
-          |> File.ls!()
-          |> Enum.each(&File.rm(Path.join(input_root, &1)))
+        results =
+          try do
+            cases
+            |> Enum.with_index(1)
+            |> Enum.map(fn {validation_case, index} ->
+              run_case(
+                manifest,
+                descriptor,
+                root,
+                input_root,
+                validation_case,
+                index,
+                opts
+              )
+            end)
+          after
+            case File.ls(input_root) do
+              {:ok, names} -> Enum.each(names, &File.rm(Path.join(input_root, &1)))
+              {:error, _reason} -> :ok
+            end
 
-          _ = File.rmdir(input_root)
+            _ = File.rmdir(input_root)
+          end
+
+        # Staged inputs can carry private values; residue the cleanup could
+        # not remove must fail the task rather than certify a passing suite.
+        if File.exists?(input_root) do
+          {:error, :private_input_cleanup_failed}
+        else
+          {:ok, results}
         end
 
       {:error, _reason} ->
@@ -384,9 +403,11 @@ defmodule Mix.Tasks.Ptc.Repair do
 
     result = read_json_value(output)
 
+    # Strict equality: 42 and 42.0 are different JSON values, and an exact
+    # expected result must not certify a different representation.
     {status, reason} =
       case {presentation.exit_status, result} do
-        {0, {:ok, value}} when value == expected -> {"pass", nil}
+        {0, {:ok, value}} when value === expected -> {"pass", nil}
         {0, {:ok, _value}} -> {"fail", "result_mismatch"}
         {0, {:error, _reason}} -> {"fail", "result_unavailable"}
         {exit_status, _result} -> {"fail", "exit_status_#{exit_status}"}
