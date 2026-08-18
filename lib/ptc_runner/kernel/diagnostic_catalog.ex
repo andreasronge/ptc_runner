@@ -81,6 +81,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:bundle, :unknown_namespace, 3, false,
      "the component source references an unavailable namespace"},
     {:bundle, :entry_invalid, 3, false, "the workflow entry is not a public bundle export"},
+    {:bundle, :mission_undeclared, 3, false,
+     "the workflow entry evaluates into a mission and the manifest declares none"},
     {:provider_declaration, :provider_unknown, 3, false,
      "the selected provider is not installed"},
     {:provider_declaration, :selection_invalid, 3, false, "the provider selection is invalid"},

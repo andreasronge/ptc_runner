@@ -235,49 +235,55 @@
     "Available API\n- No mission-specific data, functions, or tools are available.\n"))
 
 (defn render
-  "Renders the system prompt and model-visible mission API for one policy state."
+  "Renders the system prompt, or the capability error envelope that prevented it."
   [state]
   (if (map? state)
-    (let [context (json/parse-string
-                    (kernel/mission-model-context (or (get state :mission) "default")))]
-      (if (and (map? context) (= 2 (get context "schema_version")))
-        (str "PTC_AGENT_PROMPT_V1\n\n"
-             "Instructions\n"
-             "Use the run_ptc_lisp tool exactly once per turn with one program string.\n"
-             "Ordinary expression results are intermediate observations and continue to another turn.\n"
-             "The last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\n"
-             "Definitions created by successful programs persist and can be reused by later programs in this run.\n"
-             "Failed evaluations roll back every definition created by that failed program.\n"
-             "Use (return value) only when the task is complete; (return value) completes successfully.\n"
-             "Use (fail value) only when the task cannot be completed; (fail value) aborts the run.\n"
-             "Generated programs run only against the advertised mission API below.\n"
-             "Do not repeat irreversible capability effects merely to reconstruct state.\n"
-             "The task and each continuation message state how many programs remain; use that budget to pace exploration.\n"
-             "When a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\n"
-             "Do not answer in prose.\n\n"
-             "PTC-Lisp\n"
-             "- PTC-Lisp is a bounded Clojure-like language.\n"
-             "- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n"
-             "- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n"
-             "- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n"
-             "- Decoded JSON maps use string keys; read them with get/get-in.\n"
-             "- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n"
-             "- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n"
-             "- Value references are values; call only function references.\n"
-             "- The Available API section below is complete for mission data, prompt-visible mission functions, and granted tools.\n"
-             "- Use (apropos \"term\") to search visible mission prelude exports plus fixed built-ins and the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, and (export-meta \"ns/name\") returns attached export metadata as data. None enumerate data references or direct tool capabilities.\n"
-             "- Call granted capabilities only with the exact tool/... forms shown below.\n"
-             "- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n"
-             "- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\n"
-             "Examples\n"
-             "Turn 1: (defn add-one [x] (+ x 1))\n"
-             "Turn 2: (return (add-one 41))\n"
-             "(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\n"
-             (render-api
-               (get context "namespaces" [])
-               (prompt-entries
-                 (sort-by #(get % "form") (get context "entries" [])))))
-        nil))
+    (let [response (kernel/mission-model-context (or (get state :mission) "default"))]
+      ;; A refused capability is the one failure here that carries a cause the
+      ;; caller can act on -- a manifest that declares no mission of that name
+      ;; answers `unknown_mission`. Collapsing it into nil is what left the run
+      ;; reporting only that its prompt was invalid.
+      (if (map? response)
+        response
+        (let [context (json/parse-string response)]
+          (if (and (map? context) (= 2 (get context "schema_version")))
+            (str "PTC_AGENT_PROMPT_V1\n\n"
+                 "Instructions\n"
+                 "Use the run_ptc_lisp tool exactly once per turn with one program string.\n"
+                 "Ordinary expression results are intermediate observations and continue to another turn.\n"
+                 "The last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\n"
+                 "Definitions created by successful programs persist and can be reused by later programs in this run.\n"
+                 "Failed evaluations roll back every definition created by that failed program.\n"
+                 "Use (return value) only when the task is complete; (return value) completes successfully.\n"
+                 "Use (fail value) only when the task cannot be completed; (fail value) aborts the run.\n"
+                 "Generated programs run only against the advertised mission API below.\n"
+                 "Do not repeat irreversible capability effects merely to reconstruct state.\n"
+                 "The task and each continuation message state how many programs remain; use that budget to pace exploration.\n"
+                 "When a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\n"
+                 "Do not answer in prose.\n\n"
+                 "PTC-Lisp\n"
+                 "- PTC-Lisp is a bounded Clojure-like language.\n"
+                 "- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n"
+                 "- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n"
+                 "- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n"
+                 "- Decoded JSON maps use string keys; read them with get/get-in.\n"
+                 "- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n"
+                 "- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n"
+                 "- Value references are values; call only function references.\n"
+                 "- The Available API section below is complete for mission data, prompt-visible mission functions, and granted tools.\n"
+                 "- Use (apropos \"term\") to search visible mission prelude exports plus fixed built-ins and the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, and (export-meta \"ns/name\") returns attached export metadata as data. None enumerate data references or direct tool capabilities.\n"
+                 "- Call granted capabilities only with the exact tool/... forms shown below.\n"
+                 "- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n"
+                 "- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\n"
+                 "Examples\n"
+                 "Turn 1: (defn add-one [x] (+ x 1))\n"
+                 "Turn 2: (return (add-one 41))\n"
+                 "(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\n"
+                 (render-api
+                   (get context "namespaces" [])
+                   (prompt-entries
+                     (sort-by #(get % "form") (get context "entries" [])))))
+            nil))))
     nil))
 
 (defn transition
