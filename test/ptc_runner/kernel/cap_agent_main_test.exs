@@ -219,18 +219,9 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
     @tag :tmp_dir
     test "a manifest selects it and reaches agent.core without a local wrapper",
          %{tmp_dir: dir} do
-      manifest = %{
-        "version" => 1,
-        "workflow" => %{
-          "components" => [%{"library" => "agent.main"}],
-          "entry" => "agent.main/run"
-        },
-        # No local component: the point is that an application needs no
-        # hand-written wrapper to reach the agent loop.
-        "input" => %{
-          "value" => %{"task" => "summarize", "agent" => %{"max_turns" => 1}}
-        }
-      }
+      # No local component: the point is that an application needs no
+      # hand-written wrapper to reach the agent loop.
+      manifest = agent_main_manifest()
 
       path = Path.join(dir, "ptc.json")
       File.write!(path, Jason.encode!(manifest))
@@ -251,17 +242,7 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
 
     @tag :tmp_dir
     test "validate refuses it when the manifest declares no mission", %{tmp_dir: dir} do
-      manifest = %{
-        "version" => 1,
-        "workflow" => %{
-          "components" => [%{"library" => "agent.main"}],
-          "entry" => "agent.main/run"
-        },
-        "input" => %{
-          "value" => %{"task" => "summarize", "agent" => %{"max_turns" => 1}}
-        }
-      }
-
+      manifest = agent_main_manifest()
       path = Path.join(dir, "no-missions.ptc.json")
       File.write!(path, Jason.encode!(manifest))
 
@@ -288,6 +269,17 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
       assert {:error, %{id: "agent.main", reason: :missing_component_dependency}} =
                Kernel.compile_bundle(components)
     end
+  end
+
+  defp agent_main_manifest do
+    %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"library" => "agent.main"}],
+        "entry" => "agent.main/run"
+      },
+      "input" => %{"value" => %{"task" => "summarize", "agent" => %{"max_turns" => 1}}}
+    }
   end
 
   defp agent_main_closure do

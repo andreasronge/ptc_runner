@@ -94,6 +94,11 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
 
   @doc "Returns every embedded example name, in catalog order."
   @spec names() :: [binary()]
+  # This accessor pair matches DocumentationLibrary's because both are
+  # compile-time embedded catalogs with a closed name set. Their payloads differ
+  # — one page of text against a file tree with its own created list — so
+  # sharing them would mean a macro hiding two shapes behind one name.
+  # ex_dna:disable-for-next-line — two independent embedded catalogs, deliberately alike
   def names, do: @names
 
   @doc "Returns the public listing of embedded examples, in catalog order."

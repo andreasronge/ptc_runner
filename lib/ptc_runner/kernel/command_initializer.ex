@@ -433,30 +433,25 @@ defmodule PtcRunner.Kernel.CommandInitializer do
   end
 
   defp tree_entries(root) do
-    case File.ls(root) do
-      {:ok, names} ->
-        Enum.reduce_while(names, {:ok, []}, fn name, {:ok, entries} ->
-          path = Path.join(root, name)
+    with {:ok, names} <- File.ls(root),
+         {:ok, entries} <- Enum.reduce_while(names, {:ok, []}, &tree_entry(root, &1, &2)) do
+      {:ok, Enum.sort(entries)}
+    end
+  end
 
-          if File.dir?(path) do
-            case tree_entries(path) do
-              {:ok, nested} ->
-                {:cont, {:ok, entries ++ [name] ++ Enum.map(nested, &Path.join(name, &1))}}
+  defp tree_entry(root, name, {:ok, entries}) do
+    path = Path.join(root, name)
 
-              error ->
-                {:halt, error}
-            end
-          else
-            {:cont, {:ok, entries ++ [name]}}
-          end
-        end)
-        |> case do
-          {:ok, entries} -> {:ok, Enum.sort(entries)}
-          error -> error
-        end
+    if File.dir?(path) do
+      case tree_entries(path) do
+        {:ok, nested} ->
+          {:cont, {:ok, entries ++ [name] ++ Enum.map(nested, &Path.join(name, &1))}}
 
-      {:error, _reason} = error ->
-        error
+        error ->
+          {:halt, error}
+      end
+    else
+      {:cont, {:ok, entries ++ [name]}}
     end
   end
 
@@ -490,13 +485,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
       |> Enum.sort_by(fn {name, {kind, _identity}} ->
         {if(kind == :file, do: 0, else: 1), -length(Path.split(name))}
       end)
-      |> Enum.each(fn {name, {kind, _identity} = child} ->
-        path = Path.join(state.path, name)
-
-        if verify_staging(state) == :ok and child_matches?(state.path, state, {name, child}) do
-          if kind == :file, do: File.rm(path), else: File.rmdir(path)
-        end
-      end)
+      |> Enum.each(&remove_known_child(state, &1))
 
       if verify_staging(state) == :ok, do: File.rmdir(state.path)
     end
@@ -506,6 +495,13 @@ defmodule PtcRunner.Kernel.CommandInitializer do
     _exception -> :ok
   catch
     _kind, _reason -> :ok
+  end
+
+  defp remove_known_child(state, {name, {kind, _identity}} = child) do
+    if verify_staging(state) == :ok and child_matches?(state.path, state, child) do
+      path = Path.join(state.path, name)
+      if kind == :file, do: File.rm(path), else: File.rmdir(path)
+    end
   end
 
   defp invoke_fault(fault_hook, stage, state, target) do
