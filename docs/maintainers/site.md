@@ -10,6 +10,7 @@ introduction.
 | Piece | Where |
 | --- | --- |
 | Page content | `site/` |
+| Guide pages | `site/guides/`, generated from `docs/guides/` by `mix ptc.gen_site_guides` |
 | Published schemas | `priv/schemas/ptc-*.schema.json`, copied at build time |
 | Assembly and verification | `scripts/build_site.sh` |
 | Deployment | `.github/workflows/pages.yml` |
@@ -52,6 +53,31 @@ destructive false negatives, since a case-insensitive filesystem hides
 outside the repository makes git exit 128 with empty output — indistinguishable
 from "nothing tracked here", which made a repository *ancestor* look safest of
 all.
+
+## The guide pages
+
+`site/guides/` holds one generated page per guide plus a directory page. The
+same discipline as the schemas applies, one step earlier: the pages are
+committed HTML that `mix ptc.gen_site_guides` renders from `docs/guides/`
+(`mix ptc.gen_docs` runs it), and `mix precommit` fails on a stale, missing, or
+orphaned page. The Pages workflow stays Elixir-free because it only ever copies
+what the repository already proved current. Never edit the HTML by hand — edit
+the guide Markdown or the generator.
+
+The sidebar sections are read from the guide groups in `mix.exs`
+(`:docs` → `:groups_for_extras`), the same configuration that groups the
+HexDocs sidebar, so the two navigations cannot drift. Page order within a
+section follows `:extras`, and the generator refuses a group whose order
+disagrees.
+
+The renderer (`dev/ptc_runner/site_guides/markdown_html.ex`) fails closed:
+an element, attribute, or parser warning outside its whitelist aborts
+generation rather than publishing something silently wrong. Relative links to a
+sibling guide become `/guides/<slug>/` links; every other relative link must
+name a file that exists in the repository and becomes a GitHub link. A typo
+therefore fails `mix ptc.gen_docs --check` instead of shipping as a dead link,
+and `scripts/build_site.sh` re-validates the root-relative references in the
+assembled artifact.
 
 ## The diagrams
 
