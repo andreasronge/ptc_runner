@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Components-and-preludes reference · PtcRunner</title>
+<meta name="description" content="A component is one immutable PTC-Lisp module with one namespace. Its declared
+component dependencies define the only namespaces it may call while compiling.
+Co…">
+<link rel="canonical" href="https://ptc-runner.dev/reference/component-contracts/">
+<meta property="og:title" content="Components-and-preludes reference · PtcRunner">
+<meta property="og:description" content="A component is one immutable PTC-Lisp module with one namespace. Its declared
+component dependencies define the only namespaces it may call while compiling.
+Co…">
+<meta property="og:url" content="https://ptc-runner.dev/reference/component-contracts/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/" class="current" aria-current="page">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+<h2>Contracts</h2>
+<ul>
+<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="components-and-preludes-reference">Components-and-preludes reference</h1><blockquote><p><strong>Audience:</strong> advanced application and PTC-Lisp authors who need the complete
+component, dependency, visibility, and shipped-library contract.</p></blockquote><p>A component is one immutable PTC-Lisp module with one namespace. Its declared
+component dependencies define the only namespaces it may call while compiling.
+Components compile into a frozen bundle; shipped components are selected as
+libraries instead of copied into an application.</p><p>A project names its components in the manifest:</p><pre><code class="json language-json">&quot;components&quot;: [
+  {&quot;id&quot;: &quot;math&quot;, &quot;path&quot;: &quot;math.clj&quot;}
+]</code></pre><pre><code class="clojure language-clojure">(ns math &quot;Small arithmetic helpers.&quot; {:visibility :prompt})
+
+(defn double [x] (* x 2))</code></pre><p>Public <code class="inline">defn</code> and <code class="inline">def</code> forms become qualified exports. <code class="inline">defn-</code> remains private
+to its namespace. A cross-component call needs both a declared dependency and
+a public export in that dependency.</p><p>Dependencies are composition boundaries, not authority grants. Once a bundle
+is installed, evaluated PTC-Lisp can call every public export in it.
+<code class="inline">:visibility :discoverable</code> removes an export from prompt inventory, not from
+the callable surface. Code can find it with <code class="inline">dir</code> or <code class="inline">apropos</code> and inspect it
+with <code class="inline">doc</code> or <code class="inline">export-meta</code>. Use this visibility for support APIs that remain
+available without consuming prompt space.</p><h2 id="declare-runtime-contracts">Declare runtime contracts</h2><p>Public exports may declare contracts in their ordinary metadata map:</p><pre><code class="clojure language-clojure">(defn search
+  &quot;Search the configured document source.&quot;
+  {:signature &quot;(query :string, limit :int?) -&gt; {items [:string]}&quot;
+   :effect :read}
+  [query limit]
+  ...)
+
+(def default-limit
+  &quot;Default number of results.&quot;
+  {:type &quot;:int&quot;}
+  10)</code></pre><p>The compiler parses contracts and rejects malformed declarations,
+signature/arity mismatches, invalid effects, and incompatible constants. A
+signed function validates arguments before its body and validates every
+successful result, including an export-local <code class="inline">return</code>. <code class="inline">fail</code> is not a
+successful result, so its payload is not output-validated. Unsigned exports
+remain dynamic.</p><p>The contract is a string in its own type grammar, not Clojure reader metadata.
+Signatures cover fixed arity only. A nullable type such as <code class="inline">:int?</code> accepts
+<code class="inline">nil</code>; it does not make a positional argument optional.</p><p>See <a href="/reference/signature-syntax/">Signature syntax</a> for the complete grammar and the
+<a href="/reference/ptc-lisp-specification/#9-8-public-component-contracts">PTC-Lisp specification</a>
+for normative behavior. The
+<a href="/reference/application-manifest/#compose-components-and-libraries">manifest guide</a>
+links to a credential-free rejection and correction example.</p><h2 id="tool-authority-is-explicit">Tool authority is explicit</h2><p>Every <code class="inline">tool/name</code> used by an export is recorded as <code class="inline">tool:name</code>, including calls
+through private helpers and dependencies. Environment assembly rejects a bundle
+unless the destination environment grants every requirement. Requirements
+validate authority; they never create it.</p><h2 id="select-a-shipped-prelude">Select a shipped prelude</h2><p>Shipped libraries such as <code class="inline">runtime</code>, <code class="inline">cap</code>, <code class="inline">kernel</code>, <code class="inline">llm</code>, <code class="inline">analysis</code>, and
+the agent and result libraries are selected by ID:</p><pre><code class="json language-json">&quot;components&quot;: [
+  {&quot;id&quot;: &quot;my.agent&quot;, &quot;path&quot;: &quot;agent.clj&quot;, &quot;dependencies&quot;: [&quot;agent.core&quot;]},
+  {&quot;library&quot;: &quot;agent.core&quot;}
+]</code></pre><p>Transitive library dependencies join local components in the same frozen
+bundle. Unknown IDs, repeated selections, and local/library ID collisions are
+rejected. Workflow and mission bundles remain separate.</p><p>Manifests expand shipped dependencies into a closed component graph. Hosts
+that assemble bundles through another supported interface have the same
+responsibility.</p><p>Shipped components use the same dependency rules. For example:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Component</th><th style="text-align: left;">Purpose</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">cap</code></td><td style="text-align: left;">Fail-safe capability-envelope handling and bounded cursor traversal</td></tr><tr><td style="text-align: left;"><code class="inline">analysis</code></td><td style="text-align: left;">Three bounded public/private run-evidence navigation operations</td></tr></tbody></table></div><p>The generated <a href="/reference/prelude-reference/">shipped prelude reference</a> groups every
+installed component by purpose and lists its visibility, direct and transitive
+dependencies, reverse dependents, public functions, contracts, effects, and
+backing capability requirements.</p><p><code class="inline">analysis</code> depends on <code class="inline">cap</code>. Adding an installed dependency widens the callable
+surface, so fixed profiles pin the complete resolved component list and must
+version public surface changes.</p><p><code class="inline">cap/fold-pages</code> is the single shipped traversal helper. It reduces page items
+into caller-owned bounded state, stops at <code class="inline">max_pages</code>, and returns the opaque
+<code class="inline">next_cursor</code> plus <code class="inline">snapshot_hash</code> needed to resume in another evaluation.
+Callers must keep the reducer state bounded; collecting every item merely moves
+the source-size heap problem into the accumulator. Cursor-cycle detection covers
+each bounded invocation; the helper deliberately does not retain an unbounded
+history across resumptions.</p><p><a href="/guides/building-agents/">Building agents</a> covers the <code class="inline">agent.core</code> loop and the
+<code class="inline">agent.prompt</code> policy seam these libraries provide.</p><p>Local components use new IDs; they cannot shadow a selected shipped library
+ID. A hash-checked
+<a href="/guides/evaluating-with-replay/#evaluate-the-candidate-without-installing-it">component override</a>
+can evaluate replacement source for one selected component on a run, but it is
+an invocation option rather than a permanent manifest library installation.</p><h2 id="boundaries">Boundaries</h2><p>The manifest selects component sources and trusted provider aliases;
+executable callbacks stay in the host-owned provider registry. New provider
+types must preserve this boundary: manifests must not introduce endpoints,
+credentials, SQL, commands, or callbacks.</p><p>Private inspection is a separate host-selected artifact, described in
+<a href="/reference/cli/">Running and debugging</a>. An active bundle is
+immutable; any changed component must be compiled into a new bundle.</p><p>Hosts that compile bundles directly rather than through a manifest use the same
+compiler and dependency rules.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/project-files/">&larr; Project-configuration reference</a><a class="pager-next" href="/reference/mcp/">MCP reference &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/component-contracts.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drive ptc as an agent · PtcRunner</title>
+<meta name="description" content="You do not need network access or a remembered API to use PtcRunner. The
+executable you are running carries its own command grammar and documentation,
+so both …">
+<link rel="canonical" href="https://ptc-runner.dev/guides/agent-cli-usage/">
+<meta property="og:title" content="Drive ptc as an agent · PtcRunner">
+<meta property="og:description" content="You do not need network access or a remembered API to use PtcRunner. The
+executable you are running carries its own command grammar and documentation,
+so both …">
+<meta property="og:url" content="https://ptc-runner.dev/guides/agent-cli-usage/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/" class="current" aria-current="page">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+<h2>Contracts</h2>
+<ul>
+<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="drive-ptc-as-an-agent">Drive ptc as an agent</h1><blockquote><p><strong>Audience:</strong> LLMs and coding agents that run the <code class="inline">ptc</code> executable directly,
+and the people configuring them.</p></blockquote><p>You do not need network access or a remembered API to use PtcRunner. The
+executable you are running carries its own command grammar and documentation,
+so both always describe the version you actually invoke.</p><h2 id="ask-the-binary-instead-of-guessing">Ask the binary instead of guessing</h2><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Question</th><th style="text-align: left;">Command</th></tr></thead><tbody><tr><td style="text-align: left;">Which commands and switches exist?</td><td style="text-align: left;"><code class="inline">ptc help</code>, then <code class="inline">ptc help COMMAND</code></td></tr><tr><td style="text-align: left;">Which documentation ships here?</td><td style="text-align: left;"><code class="inline">ptc docs</code></td></tr><tr><td style="text-align: left;">How does the language or a contract work?</td><td style="text-align: left;"><code class="inline">ptc docs PAGE</code></td></tr><tr><td style="text-align: left;">What does one function do?</td><td style="text-align: left;"><code class="inline">ptc repl -e '(doc &quot;name&quot;)'</code></td></tr></tbody></table></div><p>Help output is generated from the same declarations as the strict parser, and
+<code class="inline">ptc docs</code> prints pages embedded at build time. Neither can drift from the
+running executable. Prefer both over any remembered flag, built-in, or manifest
+field, and over any page you fetched from the web for a different version.</p><p>Start with <code class="inline">ptc docs agent-guide</code> (this page), <code class="inline">ptc docs manifest</code> for the
+application document, and <code class="inline">ptc docs functions</code> for the built-in library.</p><h2 id="follow-the-loop">Follow the loop</h2><p>Each step fails early and cheaply, so run them in order rather than jumping
+straight to a credentialed run.</p><pre><code class="console language-console">ptc init hello-ptc                       # generate a working application
+ptc validate hello-ptc/ptc-project.json  # compile without executing
+ptc repl --project hello-ptc/ptc-project.json -e '(main/run {&quot;name&quot; &quot;world&quot;})'
+ptc doctor hello-ptc/ptc-project.json    # check provider readiness locally
+ptc run hello-ptc/ptc-project.json --envelope out.json</code></pre><p><code class="inline">ptc init</code> writes a complete project, including an <code class="inline">AGENTS.md</code> that points a
+later agent back at these commands. Edit <code class="inline">main.clj</code> for behavior and <code class="inline">ptc.json</code>
+for input, providers, missions, and limits.</p><h2 id="experiment-before-committing-to-a-file">Experiment before committing to a file</h2><p><code class="inline">ptc repl</code> is the cheapest place to check a language question, and its
+discovery functions work in every input context — not only at a terminal, so a
+detached agent gets the same answers:</p><pre><code class="console language-console">ptc repl -e '(apropos &quot;json&quot;)'            # search built-ins and prelude exports
+ptc repl -e '(doc &quot;reduce&quot;)'              # print one function's documentation
+ptc repl -e '(dir)'                       # list the attached prelude API</code></pre><p>Repeat <code class="inline">-e</code> to build up a session in order. Add <code class="inline">--project PROJECT.json</code> to
+evaluate against the real workflow environment, capabilities, and model routes
+instead of a bare scratchpad. This answers &quot;does this expression work&quot; without
+editing a component, revalidating, or spending a provider call.</p><h2 id="read-outcomes-as-data">Read outcomes as data</h2><p><code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, <code class="inline">models</code>, and <code class="inline">init</code> accept <code class="inline">--envelope FILE</code>,
+which atomically publishes one JSON document describing the outcome: status,
+run reference, result or classified error, and artifact state. Parse that file
+rather than scraping stdout, which is a human presentation channel that may
+also carry application output.</p><p>Exit status is part of the contract: <code class="inline">0</code> on success, the diagnostic catalog's
+status for a classified failure, <code class="inline">70</code> for a caught internal failure, and <code class="inline">74</code>
+when envelope publication itself fails. <code class="inline">ptc docs cli</code> has the complete process
+contract.</p><h2 id="expect-a-bounded-failure-report">Expect a bounded failure report</h2><p>A failed run reports a closed phase and code pair. Deliberate <code class="inline">fail</code> values are
+deliberately not copied into the command diagnostic, and private detail never
+reaches public evidence, so do not expect a stack trace or a model transcript
+in normal output. To debug, read the canonical trace the run recorded, then
+<code class="inline">ptc docs debug</code> for the query surface and <code class="inline">ptc docs traces</code> for the record
+contract. <code class="inline">ptc viewer PROJECT.json</code> browses the same evidence when a human is
+present.</p><p>When you need the exact private records — model exchanges, generated source,
+capability payloads — they require explicit private authorization; see
+<code class="inline">ptc docs repl</code> and <code class="inline">ptc docs cli</code>.</p><h2 id="respect-the-authority-boundary">Respect the authority boundary</h2><p>An application document selects only what the operator already installed. It
+cannot add credentials, endpoints, commands, or wider limits, and no prompt or
+generated program can escalate that. If a provider or tool is missing, the fix
+belongs in the host configuration a person controls (<code class="inline">ptc docs host</code>), not in
+the manifest or in a retry. Report the gap instead of working around it.</p><p>Keep credentials in the exact environment file passed with <code class="inline">--env-file</code>; never
+inline a secret into a manifest, a component, or a prompt.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/getting-started/">&larr; Understand a generated project</a><a class="pager-next" href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/agent-cli-usage.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

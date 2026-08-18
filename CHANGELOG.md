@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- ptc-runner.dev now serves the guides, installation routes, and reference
+  documentation as generated pages under `/guides/`, `/installation/`, and
+  `/reference/`, behind a sectioned sidebar that is also spliced into the
+  landing page. The sections are read from the same `mix.exs` groups that
+  structure the HexDocs sidebar, so the two navigations cannot drift.
+  `mix ptc.gen_site_guides` renders the pages (and `mix ptc.gen_docs` runs
+  it); the renderer fails closed on Markdown, attributes, or relative links
+  it cannot account for, and every internal fragment link is validated down
+  to the anchor, so a typo cannot ship as a dead link.
+- A new Language guide, "Read and write PTC-Lisp" (`docs/guides/
+  ptc-lisp-basics.md`): a ten-minute REPL tour of values, calls, maps,
+  collections, truthiness, recoverable errors, and function definitions.
+  Every `; =>` example is validated against the interpreter by a test, and
+  the REPL transcripts show real captured output.
 - Added `mix ptc.repair` to consume one structured generated `propose-change`
   repair report, bind it to the current component base hash, and pass the
   existing G1-G4 materialization gate. Optional live trials require an explicit

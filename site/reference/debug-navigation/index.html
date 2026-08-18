@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debug-navigation reference · PtcRunner</title>
+<meta name="description" content="A failed run leaves an immutable capture. A second, ordinary PTC run can
+navigate that capture: the boundary failure, the programs the run generated,
+their res…">
+<link rel="canonical" href="https://ptc-runner.dev/reference/debug-navigation/">
+<meta property="og:title" content="Debug-navigation reference · PtcRunner">
+<meta property="og:description" content="A failed run leaves an immutable capture. A second, ordinary PTC run can
+navigate that capture: the boundary failure, the programs the run generated,
+their res…">
+<meta property="og:url" content="https://ptc-runner.dev/reference/debug-navigation/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/" class="current" aria-current="page">Debug-navigation reference</a></li>
+</ul>
+
+<h2>Contracts</h2>
+<ul>
+<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="debug-navigation-reference">Debug-navigation reference</h1><blockquote><p><strong>Audience:</strong> application authors and operators who need the complete frozen
+evidence graph and <code class="inline">debug.nav</code> contract.</p></blockquote><p>A failed run leaves an immutable capture. A second, ordinary PTC run can
+navigate that capture: the boundary failure, the programs the run generated,
+their results, the prelude source those programs reached, and that source's
+frozen dependencies.</p><p>The substrate is structural. It exposes evidence and typed links; it never
+selects a suspect or proposes a repair. Reaching a conclusion — or deciding the
+evidence is insufficient — stays with the caller, whether that caller is a
+deterministic walk or a model.</p><h2 id="what-the-evidence-path-looks-like">What the evidence path looks like</h2><pre><code class="text language-text">failed immutable run
+  -&gt; runs / open / read / follow
+  -&gt; generated source and result
+  -&gt; referenced prelude source
+  -&gt; dependency prelude source
+  -&gt; supported diagnosis, or insufficient evidence</code></pre><p>Each arrow is a typed relationship carried on the evidence item itself, so a
+walker never has to guess a filter or reconstruct an identity by hand.</p><h2 id="capture-the-evidence-a-debugger-can-read">Capture the evidence a debugger can read</h2><p>Two artifacts matter, and they carry different authority.</p><p>A <strong>canonical trace</strong> is bounded operational evidence: run and evaluation
+lifecycle, capability names and outcomes, counts, and a sanitized failure
+taxonomy. It contains no prompts, model responses, capability payloads, or
+generated source.</p><p>A failed capability attempt records its closed envelope <code class="inline">kind</code> and <code class="inline">reason</code>
+on the <code class="inline">capability-stopped</code> event. An unrecognized envelope atom is retained
+only as a one-way fingerprint.</p><p>A workflow's own <code class="inline">fail</code> value never reaches the public trace as prose. An
+unrecognized <code class="inline">fail</code> kind is retained only as a one-way fingerprint on
+<code class="inline">run-stopped</code>; that taxonomy is separate from the capability-stopped class.</p><p>A <strong>private inspection artifact</strong> is an explicit <code class="inline">0600</code> host development
+authority. It adds the frozen component sources, the exact generated programs,
+capability arguments and results, model exchanges, prints, and detailed
+failures. Raised capability callbacks can include their bounded exception
+message and formatted stacktrace here, but never in the correlated canonical
+trace. Those strings may contain secrets or local paths and cannot be reliably
+redacted. Read the artifact only through an authorized private sink, and never
+publish it alongside a normal trace.</p><p>A project document captures both:</p><pre><code class="json language-json">&quot;artifacts&quot;: {&quot;root&quot;: &quot;target/.ptc&quot;, &quot;trace&quot;: true, &quot;inspection&quot;: true, &quot;result&quot;: true, &quot;envelope&quot;: true}</code></pre><p>The equivalent low-level form is <code class="inline">--trace-dir</code> plus <code class="inline">--inspect</code>. See
+<a href="/reference/cli/">Running and debugging</a> for every switch and
+<a href="/reference/project-files/">Project configuration</a> for the artifact layout.</p><p>Inspection requires a trace, because every private record is validated against
+the canonical run it claims to describe.</p><h2 id="give-the-debugger-bounded-navigation-authority">Give the debugger bounded navigation authority</h2><p>The debugger is an ordinary application. Its host document installs the failed
+run's two directories as snapshot providers:</p><pre><code class="json language-json">{
+  &quot;install&quot;: {
+    &quot;failed-run-traces&quot;: {
+      &quot;source&quot;: &quot;ptc_private_trace_snapshot&quot;,
+      &quot;installation_revision&quot;: &quot;failed-run-traces-v1&quot;,
+      &quot;directory&quot;: &quot;target/.ptc/traces&quot;
+    },
+    &quot;debug.nav&quot;: {
+      &quot;source&quot;: &quot;ptc_inspection_snapshot&quot;,
+      &quot;installation_revision&quot;: &quot;failed-run-inspection-v1&quot;,
+      &quot;directory&quot;: &quot;target/.ptc/inspection&quot;
+    }
+  }
+}</code></pre><p>Use <code class="inline">ptc_private_trace_snapshot</code> when the captured run wrote a
+<code class="inline">.private.jsonl</code> trace, and <code class="inline">ptc_trace_snapshot</code> for an ordinary one. Either
+way the inspection selection fixes the debugger's data class to
+<code class="inline">private_inspection</code>, so no normal vendor connector can run beside it.</p><p>The manifest selects both into one mission and installs the <code class="inline">debug.nav</code>
+prelude:</p><pre><code class="json language-json">&quot;missions&quot;: {
+  &quot;evidence&quot;: {
+    &quot;components&quot;: [
+      {&quot;id&quot;: &quot;evidence.walk&quot;, &quot;path&quot;: &quot;evidence.walk.clj&quot;, &quot;dependencies&quot;: [&quot;debug.nav&quot;]},
+      {&quot;library&quot;: &quot;debug.nav&quot;}
+    ],
+    &quot;providers&quot;: [&quot;debug.nav&quot;, &quot;failed-run-traces&quot;]
+  }
+},
+&quot;providers&quot;: {
+  &quot;mission&quot;: [
+    {&quot;name&quot;: &quot;debug.nav&quot;},
+    {&quot;name&quot;: &quot;failed-run-traces&quot;, &quot;config&quot;: {&quot;expose&quot;: false}}
+  ]
+}</code></pre><p><code class="inline">{&quot;expose&quot;: false}</code> keeps the trace selection as the inspection source's
+dependency without creating a second navigation namespace.</p><p>A snapshot provider names its operations <code class="inline">&lt;alias&gt;.runs</code>, <code class="inline">&lt;alias&gt;.open</code>, and
+<code class="inline">&lt;alias&gt;.read</code>, and the shipped prelude binds that conventional alias, so the
+inspection selection must be called <code class="inline">debug.nav</code>. The alternative shipped
+surface, <code class="inline">analysis</code>, binds the stable <code class="inline">analysis-runs</code>/<code class="inline">analysis-open</code>/
+<code class="inline">analysis-read</code> names a REPL profile grants; install one or the other, never
+both.</p><h2 id="navigate-with-debug-nav">Navigate with debug.nav</h2><p><code class="inline">debug.nav</code> is a thin policy layer over the snapshot provider. It adds no host
+authority and no diagnosis policy:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Call</th><th style="text-align: left;">Purpose</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">(debug.nav/runs options)</code></td><td style="text-align: left;">list captured runs, filtered by status, name, tags, or id</td></tr><tr><td style="text-align: left;"><code class="inline">(debug.nav/open run-id)</code></td><td style="text-align: left;">discover a run's collections, filters, identifiers, and completeness fields</td></tr><tr><td style="text-align: left;"><code class="inline">(debug.nav/read run-id options)</code></td><td style="text-align: left;">read one bounded native page from a named collection</td></tr><tr><td style="text-align: left;"><code class="inline">(debug.nav/follow run-id relationship options)</code></td><td style="text-align: left;">follow one typed relationship</td></tr></tbody></table></div><p><code class="inline">follow</code> takes a relationship exactly as an evidence item published it and
+reads its declared target collection and filters. It returns the original
+relationship beside the unchanged page envelope, so cursors, <code class="inline">omitted_count</code>,
+<code class="inline">snapshot_hash</code>, truncation, and the relationship's own state all survive the
+hop. Caller options may contain only <code class="inline">limit</code> and <code class="inline">cursor</code>; a relationship that
+is <code class="inline">unavailable</code> or carries null filters is refused rather than guessed at.</p><p>Start from the failure:</p><pre><code class="clojure language-clojure">(let [run (first (get (debug.nav/runs {&quot;status&quot; &quot;error&quot; &quot;limit&quot; 1}) &quot;items&quot;))
+      run-id (get run &quot;run_id&quot;)
+      error (first (get (debug.nav/read run-id {&quot;collection&quot; &quot;execution_errors&quot;}) &quot;items&quot;))]
+  {&quot;terminal_reason&quot; (get run &quot;terminal_reason&quot;)
+   &quot;relationships&quot; (map #(get % &quot;rel&quot;) (get error &quot;relationships&quot;))})</code></pre><h2 id="follow-the-typed-links">Follow the typed links</h2><p>Relationships are declared with a semantics that is deliberately narrower than
+their name:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Relation</th><th style="text-align: left;">Semantics</th><th style="text-align: left;">Reaches</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">boundary_failure</code></td><td style="text-align: left;">causation</td><td style="text-align: left;">the failing activity record</td></tr><tr><td style="text-align: left;"><code class="inline">child_evaluations</code></td><td style="text-align: left;">nesting</td><td style="text-align: left;">evaluations parented by the failing one</td></tr><tr><td style="text-align: left;"><code class="inline">direct_boundary_producer</code></td><td style="text-align: left;">causation</td><td style="text-align: left;">the child evaluation that produced the boundary value</td></tr><tr><td style="text-align: left;"><code class="inline">generated_source</code></td><td style="text-align: left;">association</td><td style="text-align: left;">that evaluation's generated program</td></tr><tr><td style="text-align: left;"><code class="inline">producing_turn</code></td><td style="text-align: left;">association</td><td style="text-align: left;">the model turn that emitted a program</td></tr><tr><td style="text-align: left;"><code class="inline">referenced_prelude_source</code></td><td style="text-align: left;">association</td><td style="text-align: left;">a component a program actually called</td></tr><tr><td style="text-align: left;"><code class="inline">dependency_prelude_source</code></td><td style="text-align: left;">dependency</td><td style="text-align: left;">a component's frozen direct dependencies</td></tr></tbody></table></div><p><code class="inline">causation</code> requires proof: a workflow boundary failure, or a direct-return
+origin marker plus exact equality with the retained child result. A parent edge
+alone is never promoted to causation. When a run fails by calling <code class="inline">fail</code>
+directly, no direct producer is proven, and that relation honestly reports
+<code class="inline">incomplete</code> instead of pointing at the most likely child.</p><p>Generated entries embedded in <code class="inline">turns</code> carry the same relationships as their
+<code class="inline">generated_sources</code> item, so a walker that starts from a model turn can follow
+evidence without a second exact read.</p><p>From a generated program, one hop reaches the component it called, and each
+further hop reaches that component's frozen dependencies:</p><pre><code class="clojure language-clojure">(let [referenced (first
+                   (filter #(= (get % &quot;rel&quot;) &quot;referenced_prelude_source&quot;)
+                           (get generated &quot;relationships&quot;)))
+      entry (first (get (get (debug.nav/follow run-id referenced {}) &quot;page&quot;) &quot;items&quot;))]
+  (get entry &quot;source&quot;))</code></pre><p>A component ID alone is not an occurrence identity: the same component can be
+frozen into the workflow environment and into several missions with different
+dependency edges. Every dependency filter therefore repeats its <code class="inline">environment</code>
+and, for a mission occurrence, its <code class="inline">mission_name</code>. The edges come only from a
+frozen prelude graph that satisfies its complete positional contract, so a
+malformed or absent graph produces one <code class="inline">incomplete</code> relation rather than a
+guessed edge.</p><h2 id="read-the-evidence-state-honestly">Read the evidence state honestly</h2><p>Every relationship carries one of four states, and a walker that ignores them
+will report confident nonsense:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">State</th><th style="text-align: left;">Meaning</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">complete</code></td><td style="text-align: left;">the host proved this edge; the filters are exact</td></tr><tr><td style="text-align: left;"><code class="inline">incomplete</code></td><td style="text-align: left;">the capture cannot answer, so no claim is made</td></tr><tr><td style="text-align: left;"><code class="inline">ambiguous</code></td><td style="text-align: left;">the target is not uniquely determined; see below</td></tr><tr><td style="text-align: left;"><code class="inline">unavailable</code></td><td style="text-align: left;">a complete search proved there is no such target</td></tr></tbody></table></div><p><code class="inline">incomplete</code> is the honest catch-all for &quot;not established&quot;: a non-terminal or
+truncated canonical run, producer evidence that was cut off, an absent or
+malformed frozen prelude graph, or a program whose prelude-call analysis was
+never captured. It does not distinguish those causes, and a null-filtered
+<code class="inline">incomplete</code> relation cannot be followed at all.</p><p><code class="inline">unavailable</code> is a finding rather than a gap: the evidence exists and contains
+no match.</p><p><code class="inline">ambiguous</code> means different things by relation. Ambiguous boundary-producer
+candidates are emitted as several separate relations, each with its own exact
+filter, rather than one unbounded scan. An ambiguous prelude or turn
+association is a single relation whose one filter matches more than one item;
+following it returns them all, and choosing between them is the caller's
+problem.</p><p>Never follow a relationship whose filters are null.</p><p>Pages carry their own completeness separately from relationship state:
+<code class="inline">next_cursor</code>, <code class="inline">omitted_count</code>, <code class="inline">truncated</code>, and <code class="inline">snapshot_hash</code>. Turn pages
+add an <code class="inline">evidence</code> block reporting canonical completeness, missing model
+exchanges, and ambiguity counts.</p><p>A diagnosis is supported when every edge it rests on is <code class="inline">complete</code> and the
+pages it read were not truncated. Otherwise the honest report is insufficient
+evidence, naming which edge was missing.</p><h3 id="what-the-completeness-fields-do-and-do-not-claim">What the completeness fields do and do not claim</h3><p>A conversation's <code class="inline">complete?</code> is the conjunction of three specific facts: the
+canonical run reached a terminal event with no dropped events, no expected
+model exchange is missing, and no turn or generated-source association is
+ambiguous. It is a statement about the reconstruction, not a promise that every
+field of every record is present. <code class="inline">ptc transcript</code> refuses to write a file at
+all unless <code class="inline">complete?</code> holds, so that field is always <code class="inline">true</code> in a published
+transcript; read it over <code class="inline">/api/analysis/runs/{id}/conversation</code>, which applies
+no such gate, when you need it to be able to say no.</p><p>The refusal names which of the three facts failed and by how much, because they
+have different next actions. <code class="inline">transcript/ambiguous_evidence</code> means nothing is
+missing: the canonical run is complete and every expected exchange was
+captured, but some turn or generated-source association resolves to more than
+one predecessor. Re-running does not help; read the ungated route instead.
+<code class="inline">transcript/incomplete_evidence</code> means the canonical trace is not terminal or
+dropped events, or the inspection artifact does not carry every exchange the
+trace expects — both facts about the capture rather than the reconstruction.</p><h3 id="reaching-the-ungated-reconstruction">Reaching the ungated reconstruction</h3><p><code class="inline">/api/analysis/runs/{id}/conversation</code> is served by <code class="inline">ptc viewer</code> and needs the
+project's private grant. Two separate settings withhold it, and the Viewer's
+private routes answer for each by name:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">answer</th><th style="text-align: left;">cause</th><th style="text-align: left;">next action</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">404 inspection_not_configured</code></td><td style="text-align: left;">the project records no inspection artifact</td><td style="text-align: left;">set <code class="inline">artifacts.trace</code> and <code class="inline">artifacts.inspection</code> and run again</td></tr><tr><td style="text-align: left;"><code class="inline">404 inspection_not_private</code></td><td style="text-align: left;">the artifact exists, this Viewer was not granted it</td><td style="text-align: left;">set <code class="inline">viewer.private</code> and start the Viewer again; nothing needs re-running</td></tr></tbody></table></div><p><code class="inline">omitted_count</code> is pagination: how many selected items this page did not
+return. It never reports evidence withheld by policy. A source grant that
+withheld trace files of the other kind reports that separately, as
+<code class="inline">excluded_private_trace_files</code> or <code class="inline">excluded_sanitized_trace_files</code> on a run
+listing or counters query.</p><h3 id="join-on-correlation-ids-never-on-sequence-numbers">Join on correlation ids, never on sequence numbers</h3><p>A transcript turn and a canonical trace event live in different sequence
+spaces. Turn <code class="inline">request_sequence</code> orders records inside the inspection snapshot;
+canonical <code class="inline">sequence</code> orders the run's event stream. Turn 1 reporting request
+sequence 12 says nothing about canonical event 12, which is an unrelated
+record. Correlation identifiers — <code class="inline">capability-5</code>, <code class="inline">mission-evaluation-9</code> — are
+the same in both artifacts and are the only sound join key.</p><h2 id="run-the-credential-free-example">Run the credential-free example</h2><p>The checked-in example needs no credential or network access. <code class="inline">target/</code> prices
+an order through <code class="inline">orders</code> → <code class="inline">pricing.tax</code>, which branches to <code class="inline">pricing.base</code> and
+<code class="inline">pricing.rule</code>. The rule adds 2 while the captured call requires 20, so the run
+fails. <code class="inline">pricing.discount</code> is an unused decoy.</p><p>Capture the failed run. It exits nonzero by design:</p><pre><code class="console language-console">ptc init debug-a-failed-run --example debug-a-failed-run
+ptc run debug-a-failed-run/target.ptc-project.json</code></pre><p>Then navigate that capture:</p><pre><code class="console language-console">ptc run debug-a-failed-run/debugger.ptc-project.json</code></pre><p>The debugger is a private run, so read its value from the project's result
+directory rather than stdout:</p><pre><code class="console language-console">cat debug-a-failed-run/debugger/.ptc/results/*.private.json</code></pre><p>It reports the boundary failure, the exact generated program including the
+required total, and the frozen dependency closure with each component's source:</p><pre><code class="json language-json">{
+  &quot;boundary_kind&quot;: &quot;workflow_failed&quot;,
+  &quot;closure_complete&quot;: true,
+  &quot;dependency_closure&quot;: [&quot;orders&quot;, &quot;pricing.tax&quot;, &quot;pricing.base&quot;, &quot;pricing.rule&quot;],
+  &quot;evidence_states&quot;: [&quot;complete&quot;, &quot;incomplete&quot;, &quot;unavailable&quot;],
+  &quot;generated_source&quot;: &quot;(let [quote (orders/place {\&quot;subtotal\&quot; 100})] (if (= (get quote \&quot;total\&quot;) 120) quote (fail {:kind \&quot;order-total-mismatch\&quot;})))&quot;,
+  &quot;terminal_reason&quot;: &quot;explicit_failure&quot;
+}</code></pre><p>The decoy never appears, because the walk follows frozen dependency edges
+rather than the manifest's component list. Both branches under <code class="inline">pricing.tax</code>
+do appear: a walk that followed one edge per component would silently drop the
+other, and might drop the defective one.</p><p>Two fields keep the report honest about its own coverage. <code class="inline">closure_complete</code> is
+false whenever the walk stopped at an edge the host could not prove or hit its
+own bound, so a partial closure is never mistaken for the whole one.
+<code class="inline">evidence_states</code> includes <code class="inline">incomplete</code> here because this run failed by calling
+<code class="inline">fail</code>, so no direct boundary producer was proven.</p><p>The generated program is what makes this diagnosis supported rather than
+plausible. It carries both values the check ran on — subtotal 100 and required
+total 120 — so the reached sources settle the question: <code class="inline">pricing.base</code> returns
+the subtotal unchanged and <code class="inline">pricing.rule</code> adds 2, and no other component in the
+closure decides the amount.</p><p>This is worth noticing, because the same example with <code class="inline">data/params</code> in the
+generated program instead of the literal order is genuinely insufficient
+evidence. The capture would still show the check and the whole source chain,
+but not the value checked, and a wrong input would then be indistinguishable
+from a wrong component. A live model given that earlier capture correctly
+refused to name a component for exactly this reason. What a run generates is
+what a later run can prove.</p><p>Confirming the diagnosis is a separate step: edit <code class="inline">target/pricing.rule.clj</code>,
+remove the stale capture, and rerun the target.</p><h2 id="let-a-model-do-the-walking">Let a model do the walking</h2><p>The same mission works for an agent. <code class="inline">debugger-agent/</code> in the example replaces
+the deterministic walk with the shipped agent loop over the same authority. It
+is the one part of the example that needs a credential, named on the command
+line so no environment file has to live inside the example directory:</p><pre><code class="console language-console">ptc run debug-a-failed-run/debugger-agent.ptc-project.json --env-file .env</code></pre><p>Keep <code class="inline">debug.nav</code> as the mission's only domain authority and select a model into
+the workflow:</p><pre><code class="json language-json">&quot;workflow&quot;: {&quot;components&quot;: [{&quot;library&quot;: &quot;agent.main&quot;}], &quot;entry&quot;: &quot;agent.main/run&quot;},
+&quot;missions&quot;: {
+  &quot;evidence&quot;: {
+    &quot;components&quot;: [{&quot;library&quot;: &quot;debug.nav&quot;}],
+    &quot;providers&quot;: [&quot;debug.nav&quot;, &quot;failed-run-traces&quot;]
+  }
+},
+&quot;providers&quot;: {
+  &quot;workflow&quot;: [{&quot;name&quot;: &quot;deepseek&quot;}],
+  &quot;mission&quot;: [{&quot;name&quot;: &quot;debug.nav&quot;}, {&quot;name&quot;: &quot;failed-run-traces&quot;, &quot;config&quot;: {&quot;expose&quot;: false}}]
+}</code></pre><p>Selecting an inspection snapshot fixes the run's class to <code class="inline">private_inspection</code>,
+so the model installation must declare
+<code class="inline">&quot;accepts_data&quot;: [&quot;normal&quot;, &quot;private_inspection&quot;]</code>. That declaration is the
+operator deciding to send captured private evidence — generated source, frozen
+component source, failure detail — to a model vendor. Make it deliberately.</p><p>Name the mission that holds the evidence, and require a result contract with an
+explicit decision so an abstention is a first-class answer rather than an empty
+diagnosis slot:</p><pre><code class="json language-json">&quot;input&quot;: {&quot;value&quot;: {&quot;task&quot;: &quot;...&quot;, &quot;agent&quot;: {&quot;max_turns&quot;: 14, &quot;mission&quot;: &quot;evidence&quot;}}},
+&quot;contracts&quot;: {&quot;result_schema&quot;: {&quot;path&quot;: &quot;report.schema.json&quot;}}</code></pre><p>The agent loop runs inside one workflow evaluation, so <code class="inline">workflow_timeout_ms</code>
+must cover every model turn, not one call. Its installed default of 30 s ends a
+multi-turn investigation mid-flight; the example raises the host ceiling and
+the manifest together.</p><h3 id="what-to-expect">What to expect</h3><p>Four limits showed up repeatedly while this example was built against a live
+model, and all four are worth designing around.</p><p><strong>Traversal beats budget.</strong> Told only to &quot;read the boundary error&quot;, the model
+looped on the public <code class="inline">activity</code> collection for eight turns and never reached
+<code class="inline">execution_errors</code>. Naming the collections and the intended order — API
+vocabulary, not answer hints — moved it onto the typed relationships
+immediately. Generic navigation authority does not imply a generic traversal
+plan.</p><p><strong>Available tools postpone conclusions.</strong> With the evidence chain fully read by
+turn 7, the model spent its remaining turns re-reading unrelated collections.
+An explicit stopping rule in the task fixed it. Treat an exhausted turn limit
+as an unfinished investigation, not an absent cause.</p><p><strong>Report shape is a separate failure mode.</strong> One run reached the right evidence
+and returned a report missing a single required field. The bounded contract
+feedback named exactly that field; the model resumed exploring instead of
+correcting. Stating the contract's fields in the task removed the problem.</p><p><strong>What the run generated decides what the debugger can prove.</strong> Against the
+current capture, whose generated program carries both the order and the
+required total, the live model traced the branching chain and correctly named
+<code class="inline">pricing.rule</code>, citing that <code class="inline">pricing.base</code> returns the subtotal unchanged while
+the rule adds 2. Against an earlier capture whose program referenced
+<code class="inline">data/params</code> instead of the literal order, the same configuration correctly
+returned <code class="inline">insufficient-evidence</code>, reasoning that without the input value a
+wrong input and a wrong component are indistinguishable. Both answers were
+right about their own evidence.</p><p><strong>A contract-valid report is still not a correct one.</strong> A third run returned a
+confident <code class="inline">diagnosed</code> report whose evidence lines were all accurate and
+genuinely read, and whose conclusion was wrong — it blamed the component that
+never calls the unused decoy. Nothing in the substrate could have prevented
+that, because the substrate deliberately does not choose a diagnosis. Treat a
+single sample as one opinion.</p><p>That is the reason this layer stops where it does. Where a claim is
+mechanically testable, test it: apply the proposed change and run it against
+host-owned cases before believing it. The model may diagnose and author;
+whether a change is accepted stays with the host.</p><h2 id="scope-and-limits">Scope and limits</h2><p>This substrate is structural navigation, not automatic debugging:</p><ul><li>it reports evidence and typed links, and never selects a diagnosis;</li><li>the walk follows dependency edges only — not callers, data flow, or
+capability side effects;</li><li>it assumes a captured failure with retained generated source; a run that
+produced no program leaves nothing to walk;</li><li>host validation, not a model report, decides whether a repair is accepted.</li></ul><p>The one shape it demonstrably covers is a complete single-call failure whose
+relevant source lies inside the called component's dependency closure.
+Discovery outside that closure, and repair of nonlocal or weakly specified
+defects, are not established.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/repl/">Kernel REPL</a> covers <code class="inline">private-run-analysis-v1</code> for
+interactive or unattended investigation of the same capture.</li><li><a href="/reference/trace-log-contract/">TraceLog contract</a> defines every collection,
+filter, relationship, and completeness field.</li><li><a href="/reference/cli/">Running and debugging</a> documents artifacts,
+diagnostics, and the transcript command.</li><li><a href="/reference/component-contracts/">Components and preludes</a> explains component
+identity, dependencies, and the shipped libraries.</li></ul>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/repl/">&larr; REPL reference</a><a class="pager-next" href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/debug-navigation.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Application-manifest reference · PtcRunner</title>
+<meta name="description" content="A manifest declares one runnable PTC-Lisp application: code, input, provider
+selections, limits, events, and optional trace labels. Loading is strict,
+path-con…">
+<link rel="canonical" href="https://ptc-runner.dev/reference/application-manifest/">
+<meta property="og:title" content="Application-manifest reference · PtcRunner">
+<meta property="og:description" content="A manifest declares one runnable PTC-Lisp application: code, input, provider
+selections, limits, events, and optional trace labels. Loading is strict,
+path-con…">
+<meta property="og:url" content="https://ptc-runner.dev/reference/application-manifest/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/" class="current" aria-current="page">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+<h2>Contracts</h2>
+<ul>
+<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="application-manifest-reference">Application-manifest reference</h1><blockquote><p><strong>Audience:</strong> application authors who need the complete manifest contract.</p></blockquote><p>A manifest declares one runnable PTC-Lisp application: code, input, provider
+selections, limits, events, and optional trace labels. Loading is strict,
+path-confined, and inert; it executes no workflow or provider callback.</p><p>The JSON Schema served as <code class="inline">ptc docs schema-manifest</code>
+(<code class="inline">priv/schemas/ptc-application-manifest.schema.json</code> in the repository) is the
+complete structural reference. Runtime loading additionally performs semantic
+checks and path-confined referenced-file handling. Manifest
+schema diagnostics include a safe JSON Pointer when one is available; a
+missing-required diagnostic points to the absent schema-declared property.</p><h2 id="start-with-one-workflow">Start with one workflow</h2><pre><code class="json language-json">{
+  &quot;version&quot;: 1,
+  &quot;workflow&quot;: {
+    &quot;components&quot;: [
+      {&quot;id&quot;: &quot;my.workflow&quot;, &quot;path&quot;: &quot;workflow.clj&quot;}
+    ],
+    &quot;entry&quot;: &quot;my.workflow/run&quot;
+  },
+  &quot;input&quot;: {&quot;value&quot;: {&quot;question&quot;: &quot;What should I process?&quot;}}
+}</code></pre><p>The Kernel evaluates <code class="inline">(my.workflow/run data/input)</code>. The entry must be a
+qualified public function that accepts the decoded input object. Unknown or
+duplicate keys, unsafe paths, malformed identifiers, and invalid JSON values
+are rejected before execution.</p><h2 id="compose-components-and-libraries">Compose components and libraries</h2><p>A local component declares its source and sorted, unique dependencies:</p><pre><code class="json language-json">{
+  &quot;id&quot;: &quot;my.workflow&quot;,
+  &quot;path&quot;: &quot;workflow.clj&quot;,
+  &quot;dependencies&quot;: [&quot;my.helpers&quot;]
+}</code></pre><p>Select an installed PTC-Lisp library by ID:</p><pre><code class="json language-json">{&quot;library&quot;: &quot;agent.core&quot;}</code></pre><p>Library dependencies expand deterministically. Local and installed components
+compile into one immutable bundle. Missing dependencies, cycles, duplicate
+selections, undeclared cross-component calls, and ID collisions fail before
+the workflow runs. See <a href="/reference/component-contracts/">Components and preludes</a>
+for bundle rules.</p><p>Public PTC-Lisp functions may declare input and output signatures:</p><pre><code class="clojure language-clojure">(ns tutorial.signatures &quot;Small signed mission functions.&quot; {:visibility :prompt})
+
+(defn double
+  &quot;Double one integer.&quot;
+  {:signature &quot;(value :int) -&gt; :int&quot;}
+  [value]
+  (* value 2))</code></pre><p>The runtime validates inputs before the body and successful outputs afterward.
+A pre-body contract failure is safe to correct; a failure after capability
+activity is not automatically retried because repeating external effects may
+be unsafe. Run the credential-free
+<a href="https://github.com/andreasronge/ptc_runner/blob/main/examples/kernel-tutorial/05-signature-feedback/ptc.json"><code class="inline">05-signature-feedback</code></a>
+example to see the correction flow. <a href="/reference/signature-syntax/">Signature syntax</a>
+defines the grammar.</p><h2 id="supply-input-and-named-missions">Supply input and named missions</h2><p>Input is either an inline JSON object or a manifest-relative JSON object file:</p><pre><code class="json language-json">&quot;input&quot;: {&quot;value&quot;: {&quot;task&quot;: &quot;Summarize the report&quot;}}</code></pre><pre><code class="json language-json">&quot;input&quot;: {&quot;path&quot;: &quot;input.json&quot;}</code></pre><p>Named missions isolate subordinate code, data, provider grants, inventory,
+model context, and continuation state:</p><pre><code class="json language-json">&quot;missions&quot;: {
+  &quot;reader&quot;: {
+    &quot;components&quot;: [{&quot;id&quot;: &quot;app.reader&quot;, &quot;path&quot;: &quot;reader.clj&quot;}],
+    &quot;data&quot;: {&quot;mode&quot;: &quot;source&quot;},
+    &quot;providers&quot;: [&quot;reader_workspace&quot;]
+  },
+  &quot;writer&quot;: {
+    &quot;components&quot;: [{&quot;id&quot;: &quot;app.writer&quot;, &quot;path&quot;: &quot;writer.clj&quot;}],
+    &quot;data&quot;: {&quot;mode&quot;: &quot;destination&quot;},
+    &quot;providers&quot;: [&quot;writer_workspace&quot;]
+  }
+}</code></pre><p>Mission provider names refer to unique occurrences already selected under
+<code class="inline">providers.mission</code>; a mission can narrow authority but cannot introduce it.
+<code class="inline">&quot;default&quot;</code> is an ordinary declared name, not an implicit fallback.
+Definitions and <code class="inline">*1</code>/<code class="inline">*2</code>/<code class="inline">*3</code> history never cross between missions.</p><p>Workflow code selects the mission explicitly with the <code class="inline">kernel/eval*</code>,
+<code class="inline">kernel/check-source</code>, or mission-introspection functions. The shipped
+<code class="inline">agent.core</code> loop uses <code class="inline">&quot;default&quot;</code> only when its own mission option is omitted,
+and that mission must exist. The
+<a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer"><code class="inline">named-mission-reader-writer</code></a>
+example demonstrates distinct read and write grants.</p><p>All manifest references use portable, lowercase logical names and resolve
+beneath the canonical manifest directory. Absolute paths, traversal, devices,
+non-regular files, and symlink escape are rejected. These rules cover files
+the host loads. The manifest path itself is selected by the caller and its
+basename does not have to use the logical-name grammar. Model-visible files
+require a separately installed and selected provider such as the
+<a href="/reference/mcp/#run-the-checked-in-file-agent">filesystem sample</a>.</p><h2 id="validate-inputs-and-results">Validate inputs and results</h2><p>Use bounded manifest-relative JSON Schema contracts:</p><pre><code class="json language-json">&quot;contracts&quot;: {
+  &quot;input_schema&quot;: {&quot;path&quot;: &quot;task.schema.json&quot;},
+  &quot;result_schema&quot;: {&quot;path&quot;: &quot;candidate.schema.json&quot;}
+}</code></pre><p>The input contract covers manifest input and command-line input overrides. It
+is checked before preflight, credentials, processes, or discovery. The result
+contract is checked after execution and evidence capture, but before stdout or
+artifact publication. A mismatch returns <code class="inline">input_contract_failed</code> or
+<code class="inline">result_contract_failed</code>; non-object input returns <code class="inline">input_invalid</code>. When the
+safe failure projection identifies a non-root declared path, the command
+envelope and terminal diagnostic include its JSON Pointer. Terminal rendering
+escapes unusual contract-authored property names rather than emitting their
+control bytes. Missing-required failures name the first missing schema-declared
+property, including when the absent property is at the contract root.</p><p>The <code class="inline">agent.main/run</code> entry also gives a model-authored terminal candidate one
+ordinary correction turn when budget remains. Feedback is schema-derived and
+bounded: it may identify a safe declared path, missing required names, allowed
+names, and an undeclared-name count, but never an undeclared submitted name or
+value.</p><p>Contracts are closed object schemas by default. The profile supports common
+object, array, scalar, enum, const, and bound keywords, plus the asserted
+<code class="inline">sha256</code> string format. It also supports one root discriminated <code class="inline">oneOf</code> for
+closed object branches. References, regexes, nested composition, union types,
+and general-purpose <code class="inline">oneOf</code> are rejected.</p><p>Two edges are worth knowing before you write one. <code class="inline">enum</code> and <code class="inline">const</code> must carry
+a sibling <code class="inline">type</code>, so <code class="inline">{&quot;enum&quot;: [&quot;a&quot;, &quot;b&quot;]}</code> is rejected and
+<code class="inline">{&quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;a&quot;, &quot;b&quot;]}</code> is accepted. The accepted bounds are
+<code class="inline">minimum</code>, <code class="inline">maximum</code>, <code class="inline">minLength</code>, <code class="inline">maxLength</code>, <code class="inline">minItems</code>, and <code class="inline">maxItems</code>;
+<code class="inline">exclusiveMinimum</code> and <code class="inline">exclusiveMaximum</code> are not in the profile.</p><p>The supported keyword profile above is deliberately closed. Unsupported schema
+composition is rejected during inert application loading rather than being
+partially interpreted at runtime. A <code class="inline">contract_invalid</code> rejection names the rule
+it broke and the JSON Pointer of the offending node inside the schema document
+— for example <code class="inline">contract schema declares an unsupported &quot;type&quot; at /properties/sum/type in result.schema.json</code> — so a misspelled type, a keyword
+outside the profile, and an unsatisfiable bound are told apart without
+bisecting the schema. Every reported segment is a key or index the submitted
+document carries, and the same pointer appears in the envelope's <code class="inline">path</code>.</p><p><code class="inline">--output PATH</code> atomically publishes only the validated result value without
+replacing an existing file. Use <code class="inline">--private-output</code> for a private run; it
+publishes an owner-only artifact and keeps the value off stdout. See
+<a href="/reference/cli/#run-a-manifest">Running and debugging</a> for destination
+requirements.</p><h2 id="select-host-installed-providers">Select host-installed providers</h2><p>A manifest selects public aliases; all credentials, endpoints, commands,
+mappings, effects, and outer ceilings stay in the host document:</p><pre><code class="json language-json">&quot;providers&quot;: {
+  &quot;workflow&quot;: [
+    {&quot;name&quot;: &quot;deepseek&quot;, &quot;config&quot;: {&quot;default&quot;: true}},
+    {&quot;name&quot;: &quot;frozen-model&quot;}
+  ],
+  &quot;mission&quot;: [
+    {
+      &quot;name&quot;: &quot;workspace&quot;,
+      &quot;config&quot;: {
+        &quot;allow&quot;: [&quot;workspace.read&quot;, &quot;workspace.write&quot;],
+        &quot;model_visible&quot;: [&quot;workspace.read&quot;]
+      }
+    }
+  ]
+}</code></pre><p>Multiple live or replay LLM aliases may be selected. At most one may be the
+default. A request selects an alias with its <code class="inline">model</code> field; omitting it works
+only when one alias is selected or a default is declared. Selection never
+falls back implicitly.</p><p>For MCP, <code class="inline">allow</code> selects installed public names without changing their
+operator-declared effects. It may be omitted only when every installed mapping
+is read-only. If any mapping is a write, an explicit non-empty list is
+required. <code class="inline">model_visible</code> may narrow discovery within the authorized names;
+visibility never grants or denies call authority.</p><p>Native trace and inspection aliases derive three navigation capabilities:
+<code class="inline">runs</code>, <code class="inline">open</code>, and <code class="inline">read</code>. <code class="inline">open</code> advertises the named collections and their
+filters; <code class="inline">read</code> returns one native bounded page. Public trace sources provide
+the <code class="inline">activity</code> collection and return <code class="inline">evidence_unavailable</code> for private
+collections. An inspection alias composes its
+required canonical trace snapshot with authorized private records. Set the
+trace dependency's config to <code class="inline">{&quot;expose&quot;: false}</code> when only the aggregate
+inspection namespace should be callable.</p><p>Snapshot acquisition is fail closed and immutable: malformed, duplicate,
+orphaned, or oversized evidence rejects the capture rather than exposing a
+partial catalog. Private inspection also requires every selected provider to
+accept the <code class="inline">private_inspection</code> data class before any directory opens.</p><p>Treat the workflow bundle and manifest as application code. Treat
+model-generated source, mission input, file content, and provider output as
+untrusted data. <a href="/reference/host-installation/">Host configuration</a> documents the
+operator side of every provider source.</p><h2 id="narrow-installed-limits">Narrow installed limits</h2><p>Manifest limits are positive hard ceilings:</p><pre><code class="json language-json">&quot;limits&quot;: {
+  &quot;run_duration_ms&quot;: 30000,
+  &quot;workflow_capability_calls&quot;: 16,
+  &quot;workflow_capability_calls_per_name&quot;: 8,
+  &quot;mission_capability_calls&quot;: 32,
+  &quot;subordinate_evaluations&quot;: 8,
+  &quot;subordinate_source_checks&quot;: 8,
+  &quot;terminal_result_bytes&quot;: 250000
+}</code></pre><p>The host installs maximums. A manifest may request a lower or equal value;
+omission uses the normal runtime default capped by a lower installed ceiling.
+Limits also bound time, heaps, concurrency, retained definitions/history,
+source, capability values, and canonical events.</p><p>Installed-only operational timeouts cannot appear in a manifest. The generated
+<a href="/reference/kernel-limits-reference/">Kernel limits reference</a> lists every name,
+meaning, unit, default, range, and scope.</p><h2 id="choose-event-privacy-and-labels">Choose event privacy and labels</h2><p>Normal canonical events are sanitized and bounded:</p><pre><code class="json language-json">&quot;events&quot;: {&quot;policy&quot;: &quot;normal&quot;}</code></pre><p><code class="inline">&quot;private&quot;</code> changes canonical trace discovery and sink requirements. It does
+not create a prompt/response transcript. Exact model exchanges, generated
+programs, connector payloads, and prints require the separate host-selected
+inspection artifact; a manifest cannot enable or choose that destination.</p><p>Optional labels support trace grouping:</p><pre><code class="json language-json">&quot;labels&quot;: {
+  &quot;name&quot;: &quot;report-agent&quot;,
+  &quot;model&quot;: &quot;deepseek&quot;,
+  &quot;provider&quot;: &quot;openrouter&quot;,
+  &quot;tags&quot;: {&quot;mode&quot;: &quot;agent&quot;, &quot;environment&quot;: &quot;staging&quot;}
+}</code></pre><p>Labels do not affect execution, authority, prompts, results, or provider
+selection. <code class="inline">name</code>, <code class="inline">model</code>, and <code class="inline">provider</code> are fingerprinted in traces; tag
+keys and values come from a small fixed vocabulary. Labels are application
+claims, not authoritative provider identity. Use the provider snapshot and
+canonical usage for accounting, and never put prompts, results, credentials,
+paths, or arbitrary user text in labels.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/host-installation/">Host configuration</a> defines the selected aliases.</li><li><a href="/guides/building-agents/">Building agents</a> puts model policy behind the grants.</li><li><a href="/reference/cli/">Running and debugging</a> validates, runs, and
+inspects the manifest.</li><li><a href="/reference/component-contracts/">Components and preludes</a> explains bundle
+composition.</li></ul><p>The generated application-manifest schema is the exact field reference; this
+guide documents the additional semantic and authority rules applied at load.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/signature-syntax/">&larr; Signature reference</a><a class="pager-next" href="/reference/host-installation/">Host-configuration reference &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/application-manifest.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

@@ -178,7 +178,11 @@ specification, tests, examples, and generated references together. Generated
 `docs/function-reference.md`, `docs/java-interop.md`,
 `docs/kernel-limits-reference.md`, `docs/prelude-reference.md`, and
 `docs/conformance/` pages must be changed through their owning source catalogs
-and `mix ptc.gen_docs`, not edited directly. `docs/reference/cli.md` is
+and `mix ptc.gen_docs`, not edited directly. The same applies to the static-site
+guide pages under `site/guides/`: they are rendered from `docs/guides/` by
+`mix ptc.gen_site_guides` (which `mix ptc.gen_docs` runs), with sections read
+from the guide groups in `mix.exs` — edit the guide Markdown or the groups,
+never the HTML. `docs/reference/cli.md` is
 hand-written apart from the exit-status catalog between its
 `BEGIN GENERATED`/`END GENERATED` markers, which the same task rewrites from
 `PtcRunner.Kernel.DiagnosticCatalog`.

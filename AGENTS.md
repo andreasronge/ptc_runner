@@ -139,11 +139,15 @@ load-sensitive failures.
 - `docs/` — specifications, guides, and implementation records.
   `priv/preludes/kernel/` — shipped Lisp libraries; recompile after editing.
 - `docs/function-reference.md`, `docs/java-interop.md`,
-  `docs/kernel-limits-reference.md`, `docs/prelude-reference.md`, and
-  `docs/conformance/` are generated, as is the exit-status catalog between the
-  `BEGIN GENERATED`/`END GENERATED` markers in `docs/reference/cli.md`. Edit
-  their owning catalogs, shipped prelude sources, or generator and run
-  `mix ptc.gen_docs`.
+  `docs/kernel-limits-reference.md`, `docs/prelude-reference.md`,
+  `docs/conformance/`, and the site documentation pages under `site/guides/`,
+  `site/installation/`, and `site/reference/` (plus the sidebar between the
+  generated markers in `site/index.html`) are generated, as is the
+  exit-status catalog between the `BEGIN GENERATED`/`END GENERATED` markers
+  in `docs/reference/cli.md`. Edit their owning catalogs, shipped prelude
+  sources, guides, or generator and run `mix ptc.gen_docs`. The sections
+  shown on ptc-runner.dev and HexDocs both come from the documentation
+  groups in `mix.exs`.
 - `ptc_viewer/` — separate nested Mix project and canonical trace viewer. Root
   `mix precommit` runs its tests but not its formatter; format Viewer edits
   from that directory.

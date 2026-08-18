@@ -10,6 +10,7 @@ introduction.
 | Piece | Where |
 | --- | --- |
 | Page content | `site/` |
+| Guide pages | `site/guides/`, generated from `docs/guides/` by `mix ptc.gen_site_guides` |
 | Published schemas | `priv/schemas/ptc-*.schema.json`, copied at build time |
 | Assembly and verification | `scripts/build_site.sh` |
 | Deployment | `.github/workflows/pages.yml` |
@@ -52,6 +53,37 @@ destructive false negatives, since a case-insensitive filesystem hides
 outside the repository makes git exit 128 with empty output — indistinguishable
 from "nothing tracked here", which made a repository *ancestor* look safest of
 all.
+
+## The documentation pages
+
+`site/guides/`, `site/installation/`, and `site/reference/` hold one generated
+page per published document plus the directory page at `site/guides/`. The
+same discipline as the schemas applies, one step earlier: the pages are
+committed HTML that `mix ptc.gen_site_guides` renders from `docs/`
+(`mix ptc.gen_docs` runs it), and `mix precommit` fails on a stale, missing, or
+orphaned page. The Pages workflow stays Elixir-free because it only ever copies
+what the repository already proved current. Never edit the HTML by hand — edit
+the source Markdown or the generator. The landing page is hand-written except
+for the sidebar between its `BEGIN GENERATED`/`END GENERATED` markers, which
+the same task rewrites.
+
+The sidebar sections are read from the documentation groups in `mix.exs`
+(`:docs` → `:groups_for_extras`), the same configuration that groups the
+HexDocs sidebar, so the two navigations cannot drift. The generator publishes
+only the groups named in its `@published_roots` — maintainer and conformance
+material stays on GitHub. Page order within a section follows `:extras`, and
+the generator refuses a group whose declared order disagrees.
+
+The renderer (`dev/ptc_runner/site_guides/markdown_html.ex`) fails closed:
+an element, attribute, or parser warning outside its whitelist aborts
+generation rather than publishing something silently wrong. Relative links to
+a published page become site links; every other relative link must name a file
+that exists in the repository and becomes a GitHub link. Heading anchors use
+the ExDoc slug scheme the repository's hand-authored fragment links were
+written against, and every internal fragment link is validated against the
+target page's actual ids. A typo therefore fails `mix ptc.gen_docs --check`
+instead of shipping as a dead link, and `scripts/build_site.sh` re-validates
+the root-relative references in the assembled artifact.
 
 ## The diagrams
 

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project-configuration reference · PtcRunner</title>
+<meta name="description" content="Use one explicitly named ptc-project.json to remember stable local paths and
+development preferences:">
+<link rel="canonical" href="https://ptc-runner.dev/reference/project-files/">
+<meta property="og:title" content="Project-configuration reference · PtcRunner">
+<meta property="og:description" content="Use one explicitly named ptc-project.json to remember stable local paths and
+development preferences:">
+<meta property="og:url" content="https://ptc-runner.dev/reference/project-files/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/" class="current" aria-current="page">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+<h2>Contracts</h2>
+<ul>
+<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="project-configuration-reference">Project-configuration reference</h1><blockquote><p><strong>Audience:</strong> application authors and operators who need the complete local
+path, artifact, override, and Viewer-preference contract.</p></blockquote><p>Use one explicitly named <code class="inline">ptc-project.json</code> to remember stable local paths and
+development preferences:</p><pre><code class="console language-console">ptc run ptc-project.json
+ptc doctor ptc-project.json
+ptc doctor ptc-project.json --connect
+ptc repl --project ptc-project.json
+ptc repl --project ptc-project.json --mission review
+ptc viewer ptc-project.json</code></pre><p><code class="inline">ptc init DIRECTORY</code> generates this file alongside <code class="inline">ptc.json</code>, <code class="inline">main.clj</code>, and
+an <code class="inline">AGENTS.md</code> routing card for coding agents. PtcRunner never searches parent
+directories or guesses a project from its filename; the <code class="inline">&quot;kind&quot;: &quot;ptc-project&quot;</code>
+discriminator identifies the document.</p><p>The kernel tutorial ships one project document per runnable example. A
+credential-free run and its Viewer need only the same JSON path:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
+ptc run kernel-tutorial/01-orders.ptc-project.json
+ptc viewer kernel-tutorial/01-orders.ptc-project.json</code></pre><p>The provider-backed examples additionally reference the shared host document
+and <code class="inline">kernel-tutorial/.env</code> from their project files. After creating
+that explicitly named environment file, their run commands have the same
+single-argument shape:</p><pre><code class="console language-console">ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><h2 id="keep-the-three-roles-separate">Keep the three roles separate</h2><div class="table-wrap"><table><thead><tr><th style="text-align: left;">File</th><th style="text-align: left;">Owner</th><th style="text-align: left;">Purpose</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">ptc.json</code></td><td style="text-align: left;">application author or model</td><td style="text-align: left;">workflow, components, input, provider selections, narrower limits</td></tr><tr><td style="text-align: left;"><code class="inline">ptc-host.json</code></td><td style="text-align: left;">operator</td><td style="text-align: left;">installed providers, credential references, commands, endpoints, outer limits</td></tr><tr><td style="text-align: left;"><code class="inline">ptc-project.json</code></td><td style="text-align: left;">operator or project checkout</td><td style="text-align: left;">paths to those files, local artifact policy, Viewer preferences</td></tr></tbody></table></div><p>Credential values and provider declarations do not belong in the project
+file. Project choices do not become part of application content identity.</p><h2 id="document-shape">Document shape</h2><pre><code class="json language-json">{
+  &quot;$schema&quot;: &quot;https://ptc-runner.dev/schemas/ptc-project-config.schema.json&quot;,
+  &quot;kind&quot;: &quot;ptc-project&quot;,
+  &quot;version&quot;: 1,
+  &quot;application&quot;: {&quot;path&quot;: &quot;ptc.json&quot;},
+  &quot;host&quot;: {
+    &quot;path&quot;: &quot;ptc-host.json&quot;,
+    &quot;env_file&quot;: {&quot;path&quot;: &quot;.env&quot;}
+  },
+  &quot;artifacts&quot;: {
+    &quot;root&quot;: &quot;.ptc&quot;,
+    &quot;trace&quot;: true,
+    &quot;inspection&quot;: false,
+    &quot;result&quot;: false,
+    &quot;envelope&quot;: true
+  },
+  &quot;viewer&quot;: {
+    &quot;port&quot;: 4123,
+    &quot;open&quot;: true,
+    &quot;repl&quot;: true,
+    &quot;private&quot;: false
+  }
+}</code></pre><p><code class="inline">kind</code>, <code class="inline">version</code>, and <code class="inline">application</code> are required. <code class="inline">host</code>, <code class="inline">artifacts</code>, and
+<code class="inline">viewer</code> are optional. A document that declares <code class="inline">&quot;kind&quot;: &quot;ptc-project&quot;</code> and
+then fails this schema is refused as <code class="inline">arguments/project_invalid</code>, naming the
+document rather than the command line, which was correct. Every object rejects
+unknown and duplicate keys. Paths
+are portable relative paths resolved beneath the project document's directory;
+absolute paths and <code class="inline">..</code> traversal are rejected. The generated schema is served
+as <code class="inline">ptc docs schema-project</code>
+(<a href="https://github.com/andreasronge/ptc_runner/blob/main/priv/schemas/ptc-project-config.schema.json"><code class="inline">priv/schemas/ptc-project-config.schema.json</code></a>
+in the repository).</p><p>Inspection requires traces because private records must correlate with a
+canonical run. <code class="inline">viewer.private</code> is a separate explicit local grant: creating a
+private artifact does not automatically expose it to Viewer. <code class="inline">viewer.repl</code>
+independently enables the browser REPL, including when <code class="inline">viewer.private</code> is
+<code class="inline">true</code>. REPL evaluations remain fixed to the public <code class="inline">run-analysis-v1</code> profile
+and its immutable normal-trace snapshot; they cannot query the private evidence
+displayed elsewhere in the Viewer.</p><h2 id="artifact-layout">Artifact layout</h2><p>For <code class="inline">run</code>, enabled project artifacts derive from the command run reference:</p><pre><code class="text language-text">.ptc/traces/&lt;run-ref&gt;.jsonl
+.ptc/traces/&lt;run-ref&gt;.private.jsonl
+.ptc/inspection/&lt;run-ref&gt;.inspection.jsonl
+.ptc/results/&lt;run-ref&gt;.json
+.ptc/results/&lt;run-ref&gt;.private.json
+.ptc/envelopes/&lt;run-ref&gt;.json</code></pre><p>The root and its fixed child directories are owner-only. The first project run
+creates the complete layout atomically; an existing incomplete, permissive, or
+symlinked layout is refused. Artifact files retain the normal no-replace and
+privacy rules.</p><h2 id="overrides-and-lazy-environment-loading">Overrides and lazy environment loading</h2><p>An explicit command value wins over the corresponding project default:</p><pre><code class="console language-console">ptc run ptc-project.json --host-config deployment/staging-host.json
+ptc run ptc-project.json --trace-dir tmp/one-off-traces
+ptc repl --project ptc-project.json --env-file deployment/staging.env
+ptc repl --project ptc-project.json --mission review
+ptc viewer ptc-project.json --env-file deployment/staging.env</code></pre><p>Mission selection, input, and component-override switches remain
+invocation-only. Mission names stay in the application manifest rather than
+being duplicated as project defaults. A project environment file is loaded
+only when inert preparation proves that a selected mission provider or its
+dependency uses an environment-backed credential. Unrelated providers do not
+cause environment-backed credentials to be read. Provider-free runs, passive
+doctor, Viewer startup, and file- or literal-backed credentials do not read it.
+Viewer-started workflows and missions read the selected file lazily through
+their ordinary command preparation.</p><p>Direct manifest invocation remains the low-level form for automation:</p><pre><code class="console language-console">ptc run ptc.json \
+  --host-config ptc-host.json \
+  --trace-dir build/traces \
+  --envelope build/command.json</code></pre><h2 id="viewer">Viewer</h2><p><code class="inline">ptc viewer ptc-project.json</code> uses the project's trace root, port,
+browser-opening preference, REPL setting, and private-data authorization. Trace
+and correlated inspection directories are captured before the listener starts;
+HTTP requests select only a run ID and never a filesystem path. Browser opening
+is a bounded convenience, and additionally requires an attached terminal:
+missing or failing platform openers do not stop Viewer.</p><p>The REPL and private-data settings are orthogonal. Enabling both presents the
+public-trace REPL alongside the private evidence panels without adding private
+inspection authority to the evaluation session.</p><p>Because <code class="inline">artifacts.inspection</code> and <code class="inline">viewer.private</code> must both hold, the private
+routes distinguish which one is missing: <code class="inline">inspection_not_configured</code> for a
+project that records no inspection artifact, <code class="inline">inspection_not_private</code> for one
+that records it and withheld the grant. The second needs no re-run — the
+artifact on disk is already usable once the Viewer restarts with the grant.</p><p>Viewer-started workflows and missions use the project's <code class="inline">host.env_file</code> when
+one is declared. <code class="inline">ptc viewer ptc-project.json --env-file FILE</code> supplies an
+invocation-time override instead. PtcRunner never searches implicitly for
+<code class="inline">.env</code>; without either form, credentials must already be present in the Viewer
+process environment or use another trusted host binding.</p><p>The listener binds <code class="inline">127.0.0.1</code>. The project document deliberately cannot change
+that: exposure is an invocation-time decision made with <code class="inline">--listen 0.0.0.0</code>,
+where it stays visible in the command line rather than stored in a file. See
+<a href="/reference/cli/#expose-it-deliberately-or-not-at-all">Running and debugging</a>.</p><p>The Viewer ships in the standalone release and container image and is absent
+from the published package.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/host-installation/">&larr; Host-configuration reference</a><a class="pager-next" href="/reference/component-contracts/">Components-and-preludes reference &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/project-files.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

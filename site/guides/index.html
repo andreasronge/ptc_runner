@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Documentation · PtcRunner</title>
+<meta name="description" content="Task-focused guides, installation routes, and the reference documentation for PtcRunner.">
+<link rel="canonical" href="https://ptc-runner.dev/guides/">
+<meta property="og:title" content="Documentation · PtcRunner">
+<meta property="og:description" content="Task-focused guides, installation routes, and the reference documentation for PtcRunner.">
+<meta property="og:url" content="https://ptc-runner.dev/guides/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+<h2>Contracts</h2>
+<ul>
+<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<article>
+<h1>Documentation</h1>
+<p class="lead">Guides in reading order, the installation routes, and the
+reference pages. Start at the top if PtcRunner is new to you.</p>
+<h2>Start</h2>
+<ul class="links">
+<li><a href="/guides/quickstart/">Quickstart</a>
+  <span class="desc">This guide uses an installed standalone executable. The public one-command
+installer is not published yet, so first build the verified executable as
+described …</span></li>
+
+<li><a href="/guides/getting-started/">Understand a generated project</a>
+  <span class="desc">Create a provider-free project if you do not already have one:</span></li>
+
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a>
+  <span class="desc">You do not need network access or a remembered API to use PtcRunner. The
+executable you are running carries its own command grammar and documentation,
+so both …</span></li>
+
+</ul>
+
+<h2>Language</h2>
+<ul class="links">
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a>
+  <span class="desc">PTC-Lisp is the small, bounded, Clojure-like language the model writes its
+mission programs in. You can learn to read it in ten minutes, and the fastest
+way is…</span></li>
+
+</ul>
+
+<h2>Configure</h2>
+<ul class="links">
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a>
+  <span class="desc">ptc-project.json remembers paths and local artifact preferences. It is not an
+application manifest and cannot grant model or tool authority.</span></li>
+
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a>
+  <span class="desc">A PtcRunner application declares code, input, selected providers, missions,
+and narrower limits in ptc.json. The document can select only names that the
+operat…</span></li>
+
+<li><a href="/guides/host-configuration/">Install models and tools</a>
+  <span class="desc">The host document is the authority boundary. An application may select and
+narrow an installed alias, but it cannot create one or change its credentials,
+endpo…</span></li>
+
+</ul>
+
+<h2>Build</h2>
+<ul class="links">
+<li><a href="/guides/using-models/">Use a model</a>
+  <span class="desc">The operator installs a model under a stable alias in the host document. The
+application selects that alias for its trusted workflow. Generated mission code
+do…</span></li>
+
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a>
+  <span class="desc">MCP is the external-tool boundary. The operator chooses the server, transport,
+credentials, public name, read/write effect, and ceilings. The application can
+s…</span></li>
+
+<li><a href="/guides/building-agents/">Customize an agent</a>
+  <span class="desc">Most users do not write the programs an agent executes. They configure a task,
+model, approved tools, data, limits, and the shipped agent.core loop. The
+model …</span></li>
+
+<li><a href="/guides/components-and-preludes/">Customize agent components</a>
+  <span class="desc">Most applications select shipped libraries and do not copy their source:</span></li>
+
+</ul>
+
+<h2>Run and debug</h2>
+<ul class="links">
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a>
+  <span class="desc">Create a provider-free project and run it:</span></li>
+
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a>
+  <span class="desc">Open the workflow environment declared by a project:</span></li>
+
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a>
+  <span class="desc">Start with the public evidence:</span></li>
+
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a>
+  <span class="desc">Live model output drifts between runs. The llm_replay provider holds model
+responses fixed so a difference between a baseline and candidate run can be
+attribut…</span></li>
+
+</ul>
+
+<h2>Installation</h2>
+<ul class="links">
+<li><a href="/installation/standalone/">Standalone installation</a>
+  <span class="desc">The standalone release contains its runtime. A target machine does not need
+Elixir, Erlang, Python, Node.js, or a separately installed sandbox to run a
+provide…</span></li>
+
+<li><a href="/installation/docker/">Docker installation</a>
+  <span class="desc">Linux is currently verified through a local container scaffold. A public image
+and multi-architecture publication contract are still pending, so there is no
+re…</span></li>
+
+<li><a href="/installation/source/">Source installation</a>
+  <span class="desc">The ordinary product interface is the ptc executable. A source checkout is
+for changing PtcRunner, validating an unreleased revision, or building a
+standalone …</span></li>
+
+</ul>
+
+<h2>Reference</h2>
+<ul class="links">
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a>
+  <span class="desc">Related docs:</span></li>
+
+<li><a href="/reference/agent-library-reference/">Agent library reference</a>
+  <span class="desc">This reference defines the shipped agent.core and agent.main PTC-Lisp
+interfaces. For a guided workflow, see
+Building agents.</span></li>
+
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a>
+  <span class="desc">Tracked differences between PTC-Lisp and Clojure semantics, discovered via conformance testing against SCI, Babashka, Joker, and manual investigation.</span></li>
+
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a>
+  <span class="desc">PTC-Lisp emulates a subset of Java interop for LLM compatibility. These are not real JVM calls — they are BEAM-native implementations that mirror the Java API …</span></li>
+
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a>
+  <span class="desc">Every limit is a positive enforced ceiling; there is no disabled or infinite form. A host installs the outer values. An application may request a lower value o…</span></li>
+
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a>
+  <span class="desc">PtcRunner ships 14 reusable PTC-Lisp components with 48 public exports. A component is one named source module with one namespace. A prelude is the immutable c…</span></li>
+
+<li><a href="/reference/signature-syntax/">Signature reference</a>
+  <span class="desc">Signatures tell a model what a function accepts and returns, and let PtcRunner
+validate both sides of the call. They are compact enough to include in model
+con…</span></li>
+
+<li><a href="/reference/application-manifest/">Application-manifest reference</a>
+  <span class="desc">A manifest declares one runnable PTC-Lisp application: code, input, provider
+selections, limits, events, and optional trace labels. Loading is strict,
+path-con…</span></li>
+
+<li><a href="/reference/host-installation/">Host-configuration reference</a>
+  <span class="desc">The host document is the operator-owned half of a PtcRunner deployment. This
+strict JSON file installs provider aliases, credentials, data classes, and
+outer l…</span></li>
+
+<li><a href="/reference/project-files/">Project-configuration reference</a>
+  <span class="desc">Use one explicitly named ptc-project.json to remember stable local paths and
+development preferences:</span></li>
+
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a>
+  <span class="desc">A component is one immutable PTC-Lisp module with one namespace. Its declared
+component dependencies define the only namespaces it may call while compiling.
+Co…</span></li>
+
+<li><a href="/reference/mcp/">MCP reference</a>
+  <span class="desc">MCP is the only way to add an external tool to a PtcRunner application. The
+operator fixes the server, transport, credentials, public names, and read/write
+eff…</span></li>
+
+<li><a href="/reference/cli/">Command-line reference</a>
+  <span class="desc">Every installation exposes the same ptc command grammar and runtime path.
+Run ptc help COMMAND for the exact switches accepted by an installed version.</span></li>
+
+<li><a href="/reference/repl/">REPL reference</a>
+  <span class="desc">ptc repl keeps its workflow, manifest-mission, and code-owned profile
+environments deliberately separate:</span></li>
+
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a>
+  <span class="desc">A failed run leaves an immutable capture. A second, ordinary PTC run can
+navigate that capture: the boundary failure, the programs the run generated,
+their res…</span></li>
+
+</ul>
+
+<h2>Contracts</h2>
+<ul class="links">
+<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a>
+  <span class="desc">Status: implemented retained product contract, including the local 0.x
+inspection increment. Complements PtcRunner.Kernel.TraceLog module
+documentation and the…</span></li>
+
+</ul>
+
+</article>
+
+</main>
+</div>
+</body>
+</html>

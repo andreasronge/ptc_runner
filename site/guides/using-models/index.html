@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Use a model · PtcRunner</title>
+<meta name="description" content="The operator installs a model under a stable alias in the host document. The
+application selects that alias for its trusted workflow. Generated mission code
+do…">
+<link rel="canonical" href="https://ptc-runner.dev/guides/using-models/">
+<meta property="og:title" content="Use a model · PtcRunner">
+<meta property="og:description" content="The operator installs a model under a stable alias in the host document. The
+application selects that alias for its trusted workflow. Generated mission code
+do…">
+<meta property="og:url" content="https://ptc-runner.dev/guides/using-models/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/" class="current" aria-current="page">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+<h2>Contracts</h2>
+<ul>
+<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="use-a-model">Use a model</h1><blockquote><p><strong>Audience:</strong> application authors and operators selecting, verifying, and
+observing a model without working on PtcRunner's provider implementation.</p></blockquote><p>The operator installs a model under a stable alias in the host document. The
+application selects that alias for its trusted workflow. Generated mission code
+does not receive the model route.</p><p>Bind credentials outside the application, preferably through a named environment
+variable or another operator-owned credential source. Then inspect the public
+installation without revealing its credential or private endpoint:</p><pre><code class="console language-console">ptc models ptc-project.json
+ptc doctor ptc-project.json</code></pre><p><code class="inline">models</code> names the selector each LLM alias configured; an endpoint-bearing
+<code class="inline">openai-compat:</code> selector is withheld instead, because it carries the
+operator's own address.</p><p>Plain <code class="inline">doctor</code> is inert. Use the active connectivity probe only when a remote
+request is intended:</p><pre><code class="console language-console">ptc doctor ptc-project.json --connect</code></pre><p>An agent loop requires a model endpoint that supports tool-bearing requests.
+A provider may accept an ordinary completion while rejecting the agent's tool
+contract; PtcRunner reports that separately from a missing model or credential
+failure.</p><p>After a run, canonical evidence records attributable call counts, usage, timing,
+and a safe failure class. Prompts and responses are private and appear only when
+the operator explicitly enables private inspection.</p><p>Start with <a href="/guides/host-configuration/">Install models and tools</a> for one complete
+operator workflow. The <a href="/reference/host-installation/">model and host reference</a>
+owns selector forms, credentials, cache policy, request parameters, ceilings,
+diagnostics, and connectivity behavior. See <a href="/guides/building-agents/">Customize an
+agent</a> for the model-neutral loop.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/host-configuration/">&larr; Install models and tools</a><a class="pager-next" href="/guides/connecting-tools-with-mcp/">Connect an MCP tool &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/using-models.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

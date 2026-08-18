@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REPL reference · PtcRunner</title>
+<meta name="description" content="ptc repl keeps its workflow, manifest-mission, and code-owned profile
+environments deliberately separate:">
+<link rel="canonical" href="https://ptc-runner.dev/reference/repl/">
+<meta property="og:title" content="REPL reference · PtcRunner">
+<meta property="og:description" content="ptc repl keeps its workflow, manifest-mission, and code-owned profile
+environments deliberately separate:">
+<meta property="og:url" content="https://ptc-runner.dev/reference/repl/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/" class="current" aria-current="page">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+<h2>Contracts</h2>
+<ul>
+<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="repl-reference">REPL reference</h1><blockquote><p><strong>Audience:</strong> application authors and operators who need the complete
+interactive, unattended, analysis-profile, and private-session contract.</p></blockquote><p><code class="inline">ptc repl</code> keeps its workflow, manifest-mission, and code-owned profile
+environments deliberately separate:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Session</th><th style="text-align: left;">Selection</th><th style="text-align: left;">Environment</th><th style="text-align: left;">Authority</th></tr></thead><tbody><tr><td style="text-align: left;">Direct scratchpad</td><td style="text-align: left;">no selector</td><td style="text-align: left;">fresh workflow</td><td style="text-align: left;">core REPL only</td></tr><tr><td style="text-align: left;">Manifest workflow</td><td style="text-align: left;"><code class="inline">--project</code> or <code class="inline">--manifest</code></td><td style="text-align: left;">manifest workflow</td><td style="text-align: left;">workflow capabilities and model routes</td></tr><tr><td style="text-align: left;">Manifest mission</td><td style="text-align: left;"><code class="inline">--project</code> or <code class="inline">--manifest</code> plus <code class="inline">--mission NAME</code></td><td style="text-align: left;">selected manifest mission</td><td style="text-align: left;">direct mission capabilities plus provider dependency closure</td></tr><tr><td style="text-align: left;">Public analysis profile</td><td style="text-align: left;"><code class="inline">--profile run-analysis-v1</code></td><td style="text-align: left;">fixed code-owned mission</td><td style="text-align: left;">immutable canonical traces</td></tr><tr><td style="text-align: left;">Private analysis profile</td><td style="text-align: left;"><code class="inline">--profile private-run-analysis-v1</code></td><td style="text-align: left;">fixed code-owned mission</td><td style="text-align: left;">correlated canonical and private inspection evidence</td></tr></tbody></table></div><p>Successful definitions and exact <code class="inline">*1</code>, <code class="inline">*2</code>, and <code class="inline">*3</code> history persist for one
+command. A failed form preserves the previously committed state. Profile and
+manifest modes are mutually exclusive because they carry different authority.</p><p>All three modes render successful values with the same bounded structural
+preview used for model observations. Collection items, nesting, nodes, strings,
+characters, and UTF-8 bytes are bounded during traversal, so displaying a large
+value does not first build its complete printable representation. Truncation is
+explicit and includes sampled map keys where available. The exact native value
+still remains in session history; use <code class="inline">*1</code>, <code class="inline">(describe *1)</code>, <code class="inline">take</code>, <code class="inline">get-in</code>,
+<code class="inline">select-keys</code>, or <code class="inline">reduce</code> to inspect or summarize a smaller part.</p><p>The default output ceiling is 2,048 characters. Set it for direct, manifest,
+or profile sessions with <code class="inline">--preview-chars</code> (64–65,536):</p><pre><code class="console language-console">ptc repl --preview-chars 4096 -e '(range 0 10000)'</code></pre><p>This presentation ceiling is independent of retained continuation, result,
+and transcript limits. Explicit <code class="inline">(pr-str value)</code> remains an exact language
+operation and can itself consume the evaluator heap; prefer <code class="inline">describe</code> or a
+bounded projection when exploring a large value.</p><p>Run <code class="inline">ptc help repl</code> for the exact switch grammar, including option
+combinations and JSON Lines records.</p><h2 id="use-a-workflow-scratchpad">Use a workflow scratchpad</h2><p>Start interactively, repeat expressions, load setup code, or evaluate one
+script:</p><pre><code class="console language-console">ptc repl
+ptc repl -e '(def x 40)' -e '(+ x 2)' -e '(+ *1 1)'
+ptc repl -l setup.clj
+ptc repl script.clj
+ptc repl - &lt; script.clj</code></pre><p>A successful <code class="inline">return</code> prints a structural preview of its value, including when
+it is the final form in a loaded setup file. The evaluator's internal return
+control wrapper is never part of REPL output.</p><p>Attach the same frozen workflow bundle, input, limits, labels, event policy,
+and workflow capabilities as <code class="inline">ptc run</code>:</p><pre><code class="console language-console">ptc repl --manifest ptc.json
+ptc repl --manifest ptc.json --host-config ptc-host.json
+ptc repl --manifest ptc.json -e '(workflow/helper data/input)'
+ptc repl --project ptc-project.json -e '(workflow/helper data/input)'</code></pre><p><code class="inline">--project</code> supplies the project's application, host, and lazy environment
+defaults while preserving the manifest REPL input grammar. It conflicts with
+<code class="inline">--manifest</code>, <code class="inline">--profile</code>, and <code class="inline">--describe-profile</code>; an explicit
+<code class="inline">--host-config</code> or <code class="inline">--env-file</code> overrides the matching project reference.</p><p>A provider-bearing manifest requires <code class="inline">--host-config</code>. The session performs the
+same audited-local checks, acquires one provider session, and reuses it for
+every expression. Direct and profile modes reject host configuration.</p><h2 id="work-directly-in-one-manifest-mission">Work directly in one manifest mission</h2><p>Select a declared mission without starting its workflow:</p><pre><code class="console language-console">ptc repl --project ptc-project.json --mission review
+ptc repl --manifest ptc.json --host-config ptc-host.json --mission review
+ptc repl --project ptc-project.json --mission default
+ptc repl --project ptc-project.json --mission review -e '(dir)'</code></pre><p>The project form is the normal local command: the project supplies the
+application, host configuration, and lazy environment-file paths, while
+<code class="inline">--mission</code> remains an explicit invocation choice. Mission names are not
+duplicated in <code class="inline">ptc-project.json</code>. The manifest form is the equivalent low-level
+command. Omitting <code class="inline">--mission</code> keeps the workflow REPL behavior — which carries
+no mission namespaces, so a mission's own namespace is rejected as unknown.
+That rejection names <code class="inline">--mission</code> and lists the missions the manifest declares,
+because the language diagnostic that raises it knows only the language's
+namespaces.</p><p>A mission session starts with a fresh continuation and evaluates through the
+same strict JSON boundary as ordinary mission execution. It exposes that
+mission's components and data, but no workflow bundle, workflow capabilities,
+model route, or other missions. Only the mission's direct providers and their
+dependency closure are opened; unrelated providers do not run local checks,
+start applications, request authorization or credentials, or acquire
+resources. Dependency-only providers support the session without contributing
+task capabilities.</p><p>The interactive banner names the selected mission, components, and direct
+provider aliases. Mission sessions add one meta-command:</p><pre><code class="text language-text">:context          Show the exact frozen model context and its SHA-256 hash</code></pre><p><code class="inline">--mission</code> requires a manifest (directly or after project expansion) and
+cannot be combined with <code class="inline">--profile</code> or <code class="inline">--describe-profile</code>. An unknown name
+lists declared missions in sorted order before sinks or provider activity.</p><p>Interactive meta-commands are deliberately small:</p><pre><code class="text language-text">:help             List session commands
+:quit             Leave the REPL</code></pre><p>Mission sessions additionally provide <code class="inline">:context</code>, shown above. Profile
+sessions explain that <code class="inline">:context</code> requires a manifest mission instead of
+attempting to use a manifest session internally.</p><p>The language functions are the canonical discovery interface in every input
+context, not only at a terminal: <code class="inline">(apropos &quot;term&quot;)</code> searches attached prelude
+exports, fixed built-ins, and the bounded Java surface, while <code class="inline">(doc &quot;name&quot;)</code>
+prints documentation. <code class="inline">(dir)</code> and <code class="inline">(export-meta &quot;ns/name&quot;)</code> inspect the
+attached prelude API specifically. An attached interactive terminal prints
+this guidance in its startup banner, and <code class="inline">:help</code> repeats it. Detached input,
+scripts, repeated <code class="inline">--eval</code>, stdin mode, and JSONL output do not print the
+startup hint.</p><p>See the <a href="/reference/ptc-lisp-specification/">PTC-Lisp specification</a> and <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/function-reference.md">function
+reference</a> for the full language surface.</p><p>Persist canonical session events with <code class="inline">--trace</code>:</p><pre><code class="console language-console">ptc repl --trace trace.jsonl
+ptc repl --manifest ptc.json --trace trace.jsonl</code></pre><p>A private manifest requires an attached terminal and
+<code class="inline">--private-terminal</code> before provider activity. It rejects scripts, stdin,
+<code class="inline">--eval</code>, <code class="inline">--load</code>, JSON Lines, and detached execution; private values and
+prints may reach only that authorized terminal. Private traces use the reserved
+<code class="inline">.private.jsonl</code> suffix and owner-only permissions.</p><p>The session owner retains the continuation, event sink, and provider resources.
+Normal close, abort, caller death, worker failure, and deadline failure converge
+on bounded cleanup before final trace persistence.</p><h2 id="query-public-traces">Query public traces</h2><p>Select the fixed public profile and its required resource:</p><pre><code class="console language-console">ptc repl --project ptc-project.json \
+  --profile run-analysis-v1 \
+  -e '(analysis/runs {})'</code></pre><p><code class="inline">--project</code> derives <code class="inline">traces</code> from the configured artifact root. The equivalent
+explicit form is useful for a copied capture or a project without trace
+artifacts:</p><pre><code class="console language-console">ptc repl \
+  --profile run-analysis-v1 \
+  --resource traces=tmp/tutorial-traces</code></pre><p>The <code class="inline">traces</code> resource must be a directory containing ordinary canonical JSONL
+files at its own level. Capture is immutable and one level deep. Empty capture
+is refused so a mispointed directory cannot look like a real empty result. A
+started session reports its admitted file and run counts.</p><p>The profile installs three navigation functions:</p><pre><code class="clojure language-clojure">(analysis/runs {&quot;limit&quot; 50})
+(analysis/open &quot;run-id&quot;)
+(analysis/read &quot;run-id&quot; {&quot;collection&quot; &quot;activity&quot; &quot;limit&quot; 100})</code></pre><p><code class="inline">analysis/open</code> advertises every collection with its filters, order, authority,
+and availability. Public sessions expose <code class="inline">activity</code>; private collections return
+<code class="inline">evidence_unavailable</code> here. Pages are bounded and report <code class="inline">truncated</code>,
+<code class="inline">omitted_count</code>, and an opaque <code class="inline">next_cursor</code> for explicit navigation.</p><p>One session can build an investigation incrementally:</p><pre><code class="clojure language-clojure">(def runs (analysis/runs {&quot;limit&quot; 50}))
+(def items (get runs &quot;items&quot;))
+(def slowest (first (sort-by #(get % &quot;duration_ms&quot;) &gt; items)))
+(def run-id (get slowest &quot;run_id&quot;))
+(analysis/open run-id)
+(analysis/read run-id {&quot;collection&quot; &quot;activity&quot; &quot;limit&quot; 100})</code></pre><p>Loaded files, repeated expressions, scripts, stdin, and interactive forms use
+one serialized mission continuation and aggregate budget. Each source input is
+bounded before evaluation. The profile contains no filesystem, network, LLM,
+agent, workflow, MCP, private-inspection, or nested-evaluation authority.</p><p>Inspect its complete safe static contract without opening any resource:</p><pre><code class="console language-console">ptc repl --describe-profile run-analysis-v1
+ptc repl --describe-profile run-analysis-v1 --format jsonl</code></pre><p>The description includes fixed resources, components, namespaces,
+capabilities, limits, and policies, but no paths, source, processes, callbacks,
+or credentials.</p><h2 id="query-private-inspection-evidence">Query private inspection evidence</h2><p>Interactive private analysis requires an attached terminal and explicit sink
+authorization:</p><pre><code class="console language-console">ptc repl \
+  --profile private-run-analysis-v1 \
+  --resource traces=tmp/tutorial-traces \
+  --resource inspection=tmp/tutorial-inspection \
+  --session-trace-dir tmp/analysis-traces \
+  --load analysis.clj \
+  --private-terminal</code></pre><p><code class="inline">--load</code> evaluates one bounded local setup file, then opens the authorized
+interactive terminal with those definitions available. <code class="inline">--eval</code>, scripts, and
+stdin remain unattended input and require <code class="inline">--private-unattended</code> instead.</p><p>The trace, inspection, and analysis-trace directories must be physically
+separate, including through ancestors and symlink aliases. Capture validates
+every private artifact against its canonical run. A malformed, changed,
+uncorrelated, oversized, or unsupported artifact rejects the complete private
+source. Use the PtcRunner build matching the artifact's reported schema when
+versions differ.</p><p>Private authority adds collections to the same three operations rather than
+adding smart diagnosis APIs:</p><pre><code class="clojure language-clojure">(def runs (analysis/runs {&quot;limit&quot; 20}))
+(def run-id (get (first (get runs &quot;items&quot;)) &quot;run_id&quot;))
+(analysis/open run-id)
+(analysis/read run-id {&quot;collection&quot; &quot;turns&quot; &quot;limit&quot; 20})
+(analysis/read run-id {&quot;collection&quot; &quot;generated_sources&quot;
+                       &quot;prelude_call&quot; &quot;workspace/read&quot;})
+(analysis/read run-id {&quot;collection&quot; &quot;prelude_sources&quot;
+                       &quot;component_id&quot; &quot;workspace&quot;})
+(analysis/read run-id {&quot;collection&quot; &quot;execution_errors&quot;})</code></pre><p>An execution error carries the workflow <code class="inline">evaluation_id</code>. Follow its exact
+children without comparing collection-local sequence numbers:</p><pre><code class="clojure language-clojure">(def error (first (get (analysis/read run-id {&quot;collection&quot; &quot;execution_errors&quot;})
+                       &quot;items&quot;)))
+(def workflow-evaluation-id (get error &quot;evaluation_id&quot;))
+(analysis/read run-id {&quot;collection&quot; &quot;generated_sources&quot;
+                       &quot;parent_evaluation_id&quot; workflow-evaluation-id})
+(analysis/read run-id {&quot;collection&quot; &quot;turns&quot;
+                       &quot;parent_evaluation_id&quot; workflow-evaluation-id})</code></pre><p><code class="inline">parent_evaluation_id</code> proves that the workflow evaluation launched the
+subordinate evaluation. It does not claim that every child caused the eventual
+workflow error.</p><p>When the retained evaluator ledger proves that a successful <code class="inline">kernel-eval</code>
+result reached the workflow boundary unchanged, the error also provides typed
+relations. Follow the supplied collection and filters rather than rebuilding
+the join:</p><pre><code class="clojure language-clojure">(def relations (get error &quot;relationships&quot;))
+(def producer
+  (first (filter (fn [relation]
+                   (= (get relation &quot;rel&quot;) &quot;direct_boundary_producer&quot;))
+                 relations)))
+(analysis/read run-id
+               (assoc (get producer &quot;filters&quot;)
+                      &quot;collection&quot; (get producer &quot;target_collection&quot;)))</code></pre><p>Relations distinguish <code class="inline">causation</code>, validated evaluation <code class="inline">nesting</code>, and static
+or source-match <code class="inline">association</code>. Their state is <code class="inline">complete</code>, <code class="inline">incomplete</code>,
+<code class="inline">ambiguous</code>, or <code class="inline">unavailable</code>; a relation with null filters is descriptive and
+must not be followed. <code class="inline">analysis/open</code> reports the snapshot/sequence domain and
+identifier paths for every collection, so canonical <code class="inline">activity.sequence</code> is
+never compared with an inspection or reconstructed-turn sequence.</p><p>Results may include exact model messages, generated programs, effective
+component source, capability payloads, prints, failure details, and terminal
+values. <code class="inline">turns</code> reconstructs cumulative model requests once when the immutable
+snapshot opens. Each item exposes one individual turn and matching generated
+source; page-level evidence reports incomplete or ambiguous reconstruction
+without guessing. The repeated system prompt is omitted from turns and remains
+available in the raw <code class="inline">model_exchanges</code> collection.</p><p>For one complete conversation, use the simpler one-shot command:</p><pre><code class="console language-console">mkdir -p tmp/tutorial-transcript
+ptc transcript RUN_ID \
+  --traces tmp/tutorial-traces \
+  --inspection tmp/tutorial-inspection \
+  --private-unattended \
+  --private-output tmp/tutorial-transcript/conversation.private.json</code></pre><p>The destination is reserved at owner-only mode before capture. Incomplete or
+ambiguous evidence fails without publication. The trace, inspection, and
+output directories must be pairwise physically separate: none may equal or
+contain another. A rejection names the two conflicting switches and how they
+overlap, without disclosing any path:</p><pre><code class="text language-text">directories for --traces and --inspection must be physically separate;
+--traces contains --inspection</code></pre><h3 id="private-analysis-without-a-terminal">Private analysis without a terminal</h3><p><code class="inline">--private-unattended</code> authorizes the command's own streams as the private
+sink. It admits expressions, setup files, scripts, stdin, and JSON Lines and is
+mutually exclusive with <code class="inline">--private-terminal</code>:</p><pre><code class="console language-console">ptc repl \
+  --profile private-run-analysis-v1 \
+  --resource traces=tmp/tutorial-traces \
+  --resource inspection=tmp/tutorial-inspection \
+  --session-trace-dir tmp/analysis-traces \
+  --private-unattended \
+  --format jsonl \
+  -e '(analysis/read &quot;run-id&quot; {&quot;collection&quot; &quot;turns&quot; &quot;limit&quot; 100})' \
+  &gt;tmp/private-analysis.jsonl</code></pre><p>The packaged command has no Mix build stream.</p><p>Both private switches are accident guards, not access control. A same-UID
+caller can read the source artifacts, and a pseudo-terminal can satisfy the
+terminal check. Unattended output may enter shell logs, coding-agent
+transcripts, or provider logs. Authorize every downstream sink for the same
+private data.</p><p>Private evaluation diagnostics never forward arbitrary evaluator text that
+could quote captured evidence. Safe diagnostics may rebuild names found
+verbatim in the operator's submitted source; otherwise the message is visibly
+redacted while the fault kind, continuation effect, and usage remain exact.</p><h2 id="keep-analysis-traces-separate">Keep analysis traces separate</h2><p>Profile sessions write a separate safe canonical trace, never into their input
+tree:</p><pre><code class="console language-console">ptc repl \
+  --profile run-analysis-v1 \
+  --resource traces=tmp/tutorial-traces \
+  --session-trace-dir tmp/analysis-traces \
+  -e '(analysis/open &quot;run-id&quot;)'</code></pre><p>Without <code class="inline">--session-trace-dir</code>, PtcRunner creates a private temporary directory
+and reports the final trace path on close. The file is atomically published and
+contains safe profile identity, hashes, sizes, timing, outcomes, and usage. It
+does not contain evaluated source, exact query payloads, private values, prints,
+or REPL history.</p><p>The output directory cannot equal, contain, or be contained by a resource
+directory or by the parent of <code class="inline">--output</code>/<code class="inline">--private-output</code>, including through
+physical aliases. A rejection names the first conflicting pair by the option or
+resource that supplied each directory, and the physical relationship between
+them:</p><pre><code class="text language-text">directories for --resource traces and --session-trace-dir must be physically
+separate; --resource traces contains --session-trace-dir</code></pre><p>Two spellings that reach one directory through a symbolic link report that they
+<code class="inline">resolve to the same physical directory</code>. Without <code class="inline">--session-trace-dir</code> the
+conflicting role is <code class="inline">the auto-created session trace directory</code>. Diagnostics
+never disclose supplied paths, resolved paths, or symlink targets.</p><h2 id="use-json-lines-in-automation">Use JSON Lines in automation</h2><p>Profile JSON Lines mode is non-interactive:</p><pre><code class="console language-console">ptc repl \
+  --profile run-analysis-v1 \
+  --resource traces=tmp/tutorial-traces \
+  --session-trace-dir tmp/analysis-traces \
+  --format jsonl \
+  -e '(def runs (analysis/runs {}))' \
+  -e '(count (get runs &quot;items&quot;))'</code></pre><p>When their lifecycle stages are reached, records appear in this order:</p><ol><li>one <code class="inline">session-started</code> after construction;</li><li>one <code class="inline">evaluation</code> per accepted source;</li><li>one <code class="inline">session-closed</code> after successful close and trace publication;</li><li>a final <code class="inline">command-error</code> when the command is unsuccessful.</li></ol><p>Validation or setup can therefore emit only <code class="inline">command-error</code>; persistence
+failure follows earlier records without claiming <code class="inline">session-closed</code>. Records use
+schema version 1. Evaluation records contain the bounded mission result and no
+extra raw-source copy.</p><p>A <code class="inline">command-error</code> rejecting a physical-separation conflict adds a
+<code class="inline">directory_conflict</code> object beside the existing <code class="inline">category</code> and <code class="inline">message</code>, so
+automation does not parse prose:</p><pre><code class="json language-json">{
+  &quot;schema_version&quot;: 1,
+  &quot;type&quot;: &quot;command-error&quot;,
+  &quot;category&quot;: &quot;cli&quot;,
+  &quot;message&quot;: &quot;directories for --resource traces and --session-trace-dir must be physically separate; --resource traces contains --session-trace-dir&quot;,
+  &quot;directory_conflict&quot;: {
+    &quot;left_role&quot;: &quot;resource.traces&quot;,
+    &quot;right_role&quot;: &quot;session_trace&quot;,
+    &quot;relation&quot;: &quot;left_contains_right&quot;
+  }
+}</code></pre><p>Roles are <code class="inline">resource.NAME</code>, <code class="inline">session_trace</code>, <code class="inline">session_trace_auto</code>, <code class="inline">output</code>, and
+<code class="inline">private_output</code>. <code class="inline">relation</code> is <code class="inline">same</code>, <code class="inline">left_contains_right</code>, or
+<code class="inline">right_contains_left</code>; <code class="inline">same</code> covers both an identical directory and distinct
+spellings that reach one directory through a symbolic link. The object carries
+no path.</p><p>By default, one failed expression stops later ones. Continue requested
+expressions while preserving the final nonzero status with:</p><pre><code class="console language-console">ptc repl \
+  --profile run-analysis-v1 \
+  --resource traces=tmp/tutorial-traces \
+  --format jsonl \
+  --continue-on-error \
+  -e '(def runs (analysis/runs {}))' \
+  -e 'missing-name' \
+  -e '(count (get runs &quot;items&quot;))'</code></pre><p><code class="inline">--output</code> and <code class="inline">--private-output</code> may atomically publish the value of exactly
+one non-interactive public or private profile evaluation. They do not replace
+existing files.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/cli/">Running and debugging</a> covers run artifacts and
+the Viewer.</li><li><a href="/reference/application-manifest/">Manifests and capabilities</a> covers attached
+manifests and snapshot providers.</li><li><a href="/reference/component-contracts/">Components and preludes</a> explains the profile's
+bundled analysis components.</li></ul>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/cli/">&larr; Command-line reference</a><a class="pager-next" href="/reference/debug-navigation/">Debug-navigation reference &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/repl.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

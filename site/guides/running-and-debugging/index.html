@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run and inspect a project · PtcRunner</title>
+<meta name="description" content="Create a provider-free project and run it:">
+<link rel="canonical" href="https://ptc-runner.dev/guides/running-and-debugging/">
+<meta property="og:title" content="Run and inspect a project · PtcRunner">
+<meta property="og:description" content="Create a provider-free project and run it:">
+<meta property="og:url" content="https://ptc-runner.dev/guides/running-and-debugging/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/" class="current" aria-current="page">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+<h2>Contracts</h2>
+<ul>
+<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="run-and-inspect-a-project">Run and inspect a project</h1><blockquote><p><strong>Audience:</strong> application authors and operators running, validating, and
+inspecting PtcRunner applications through the <code class="inline">ptc</code> executable.</p></blockquote><p>Create a provider-free project and run it:</p><pre><code class="console language-console">ptc init hello-ptc
+ptc validate hello-ptc/ptc-project.json
+ptc run hello-ptc/ptc-project.json</code></pre><p>The result is written to standard output. The project document remembers its
+artifact root, so traces and optional envelopes or results stay beside the
+project rather than depending on the caller's current directory.</p><p>Before a credentialed run, check configuration without network activity:</p><pre><code class="console language-console">ptc doctor ptc-project.json
+ptc models ptc-project.json</code></pre><p>Use <code class="inline">--connect</code> only when an active provider probe is intended:</p><pre><code class="console language-console">ptc doctor ptc-project.json --connect</code></pre><p>Browse completed runs locally:</p><pre><code class="console language-console">ptc viewer ptc-project.json</code></pre><p>The Runs list uses a matching project <code class="inline">labels.name</code> as its readable headline,
+keeps the command run ID underneath, and shows finite label tags. When every
+successful model call reported a metric, the row also shows full-run input and
+output tokens and provider-reported cost. Missing prices or usage stay absent
+rather than being presented as zero or as a partial total.</p><p>When the Live tab launches provider-backed work, pass an exact dotenv file
+with <code class="inline">--env-file FILE</code> or declare <code class="inline">host.env_file</code> in the project. The Viewer
+does not search implicitly for <code class="inline">.env</code>.</p><p>The Viewer binds to loopback by default, where Live controls need no token.
+Do not expose it to a network without setting <code class="inline">PTC_VIEWER_TOKEN</code>, especially
+when a project grants access to private inspection records.</p><p>In Docker, publish the port on host loopback, bind the Viewer to the container
+wildcard, and set <code class="inline">PTC_VIEWER_TOKEN</code>. Open
+<code class="inline">http://localhost:4123/?live_token=THE_TOKEN#/live</code> to authorize the Live
+controls; the token does not authenticate the Runs trace browser.</p><p>For automation, request a command envelope instead of parsing human-readable
+diagnostics:</p><pre><code class="console language-console">ptc run ptc-project.json --envelope command-envelope.json</code></pre><p>Use the <a href="/reference/cli/">CLI reference</a> for the complete command grammar,
+exit statuses, envelopes, artifact publication, diagnostics, transcripts,
+Viewer behavior, and process contract. Continue with <a href="/guides/debugging-a-failed-run/">Debug a failed
+run</a> when a trace needs deeper investigation.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/components-and-preludes/">&larr; Customize agent components</a><a class="pager-next" href="/guides/kernel-repl/">Explore a project interactively &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/running-and-debugging.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>
