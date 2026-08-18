@@ -127,7 +127,27 @@ a turn remains. If correction is exhausted, the Kernel reports an authenticated
 <code class="inline">result_contract_failed</code> diagnostic with the effective turn count, the final
 schema constraint, and an attested contract path when one is available. That
 authenticated cause is retained when the call is composed through sequential
-or parallel higher-order functions such as <code class="inline">map</code>, <code class="inline">pmap</code>, and <code class="inline">pcalls</code>.</p><p>This is the composable result-contract entry used by <code class="inline">agent.main/run</code>.</p><h3 id="agent-main-run"><code class="inline">agent.main/run</code></h3><p>Set the manifest entry to <code class="inline">agent.main/run</code> and supply:</p><pre><code class="json language-json">{
+or parallel higher-order functions such as <code class="inline">map</code>, <code class="inline">pmap</code>, and <code class="inline">pcalls</code>.</p><p>This is the composable result-contract entry used by <code class="inline">agent.main/run</code>.</p><h3 id="agent-core-run-phased-result-value"><code class="inline">agent.core/run-phased-result-value</code></h3><pre><code class="clojure language-clojure">(agent.core/run-phased-result-value task config)</code></pre><p>Runs ordered mission phases while retaining the exact correlated assistant and
+tool transcript. Each phase requires <code class="inline">mission</code> and <code class="inline">max_turns</code>, and may provide
+an <code class="inline">instruction</code>, delivered when its phase begins: the first phase's
+instruction is appended to the initial task, and at each later boundary the
+host rebuilds the system prompt from the next mission's authority and appends
+that phase's instruction as a user message. A
+<code class="inline">return</code> in a non-final phase closes that phase and is retained as bounded
+observation evidence; only the final phase can satisfy the application result
+contract.</p><p>Set a phase's <code class="inline">terminal_only</code> to <code class="inline">true</code> when it may only make the final
+decision; only the final phase may declare it, because an earlier phase that
+exhausted without a terminal action would hand off to the next phase and void
+the obligation. PtcRunner parses each generated program before evaluation and
+accepts only one top-level <code class="inline">return</code> or <code class="inline">fail</code> form. A nonterminal program is
+not evaluated and receives bounded correction feedback while a phase turn
+remains; exhausting the phase this way reports the <code class="inline">terminal-source-required</code>
+turn-limit reason.</p><p><code class="inline">run-phased-result-value</code> replaces <code class="inline">mission</code> and <code class="inline">max_turns</code> with a non-empty
+<code class="inline">phases</code> vector of at most eight maps. Each phase accepts <code class="inline">mission</code> (non-empty
+string), <code class="inline">max_turns</code> (integer, 1–128), optional <code class="inline">instruction</code> (non-empty
+string), and optional <code class="inline">terminal_only</code> (boolean). The sum of phase turn budgets
+must not exceed 128; an invalid vector fails with
+<code class="inline">invalid-agent-config/invalid-phases</code> before any provider request.</p><h3 id="agent-main-run"><code class="inline">agent.main/run</code></h3><p>Set the manifest entry to <code class="inline">agent.main/run</code> and supply:</p><pre><code class="json language-json">{
   &quot;task&quot;: &quot;Complete the requested analysis.&quot;,
   &quot;agent&quot;: {
     &quot;max_turns&quot;: 8

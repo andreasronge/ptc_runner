@@ -106,7 +106,11 @@ ordinary PtcRunner application can navigate a frozen failed capture through the
 shipped <code class="inline">debug.nav</code> library without gaining filesystem, network, model, or
 nested-evaluation authority.</p><pre><code class="console language-console">ptc init debug-a-failed-run --example debug-a-failed-run
 ptc run debug-a-failed-run/target.ptc-project.json
-ptc run debug-a-failed-run/debugger.ptc-project.json</code></pre><p>Use the <a href="/reference/debug-navigation/">debug-navigation reference</a> for the
+ptc run debug-a-failed-run/debugger.ptc-project.json</code></pre><p>The same example optionally closes the loop: a phased repair agent proposes a
+complete component replacement or abstains, and the host validates a proposal
+against its own held-out cases with <code class="inline">mix ptc.repair</code> before any human promotes
+it. The README materialized beside the example walks both arms; the validation
+contract is documented in the repository's maintainer guide on embedding.</p><p>Use the <a href="/reference/debug-navigation/">debug-navigation reference</a> for the
 complete evidence graph, typed links, collections, resources, pagination,
 private-authority rules, and model-assisted navigation contract. The
 <a href="/reference/trace-log-contract/">TraceLog contract</a> owns the canonical event schema.</p>
