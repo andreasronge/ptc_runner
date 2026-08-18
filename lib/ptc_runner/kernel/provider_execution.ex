@@ -797,7 +797,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          activity_before_probe =
            precredential_activity?(prepared, execution, :all) or
              Enum.any?(entries, &(&1.mode == :acquisition)),
-         {:ok, provider_activity} <-
+         {:ok, provider_activity, usage} <-
            ConnectivityProbe.run(
              prepared,
              catalog,
@@ -807,7 +807,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
              activity_before_probe
            ),
          {:ok, result} <-
-           ConnectivityResult.new(prepared, catalog, entries, provider_activity) do
+           ConnectivityResult.new(prepared, catalog, entries, provider_activity, usage) do
       if Deadline.expired?(deadline),
         do: {:error, connectivity_timeout_diagnostic(provider_activity)},
         else: {:ok, result}

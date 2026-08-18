@@ -1464,7 +1464,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                ],
                "model_aliases" => [],
                "provider_activity" => false,
-               "readiness" => "failed"
+               "readiness" => "failed",
+               "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
              }
 
       assert_schema_valid(outcome.envelope)
@@ -1840,7 +1841,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
     Application.put_env(:ptc_runner, :host_llm_test_owner, self())
     Application.put_env(:ptc_runner, :host_llm_test_provider_application, :req_llm)
-    Application.put_env(:ptc_runner, :host_llm_test_result, {:ok, %{content: "ok", tokens: %{}}})
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
+      {:ok, %{content: "ok", tokens: %{input: 8, output: 1, total_cost: 3.0e-6}}}
+    )
+
     Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
     Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
 
@@ -1892,6 +1899,24 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert System.get_env(environment_name) == "test-secret"
     assert_received {:host_llm_ensure_ready, _pid}
     assert_received {:host_llm_request, "openrouter:test/model", _request}
+
+    # The readiness check bills a real request, so it accounts for one, on the
+    # rows a run reports. `max_tokens: 1` bounds the magnitude, not the
+    # attribution.
+    assert outcome.envelope["result"]["usage"] == %{
+             "llm_usage_state" => "available",
+             "llm_usage" => [
+               %{
+                 "alias" => "model",
+                 "installation_revision" => "model-v1",
+                 "calls" => 1,
+                 "successful_calls" => 1,
+                 "usage_calls" => 1,
+                 "missing_usage_calls" => 0,
+                 "usage" => %{"input" => 8, "output" => 1, "total_cost" => 3.0e-6}
+               }
+             ]
+           }
   end
 
   @tag :tmp_dir
@@ -3259,7 +3284,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "checks" => fixed_doctor_checks,
              "model_aliases" => [],
              "provider_activity" => true,
-             "readiness" => "unverified"
+             "readiness" => "unverified",
+             "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
            })
 
     doctor_without_local = %{
@@ -3274,7 +3300,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           ],
       "model_aliases" => [],
       "provider_activity" => true,
-      "readiness" => "ready"
+      "readiness" => "ready",
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     refute CommandContract.valid_success_semantics?(:doctor, doctor_without_local)
@@ -3291,7 +3318,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           ],
       "model_aliases" => [],
       "provider_activity" => false,
-      "readiness" => "unverified"
+      "readiness" => "unverified",
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     refute CommandContract.valid_success_semantics?(:doctor, local_only_application_doctor)
@@ -3314,7 +3342,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
             ],
         "model_aliases" => [],
         "provider_activity" => false,
-        "readiness" => "unverified"
+        "readiness" => "unverified",
+        "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
       })
 
     active_doctor_result = %{
@@ -3336,7 +3365,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       ],
       "model_aliases" => [],
       "provider_activity" => true,
-      "readiness" => "ready"
+      "readiness" => "ready",
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     assert_raise ArgumentError, fn ->
@@ -3354,7 +3384,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       ],
       "model_aliases" => [],
       "provider_activity" => false,
-      "readiness" => "ready"
+      "readiness" => "ready",
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     assert %CommandOutcome{command_mode: {:doctor, :connect}} =
@@ -3425,7 +3456,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "checks" => valid_doctor.envelope["result"]["checks"],
              "model_aliases" => [],
              "provider_activity" => true,
-             "readiness" => "ready"
+             "readiness" => "ready",
+             "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
            })
 
     refute CommandContract.valid_success_semantics?(:doctor, %{
@@ -3445,7 +3477,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  ],
              "model_aliases" => [],
              "provider_activity" => false,
-             "readiness" => "ready"
+             "readiness" => "ready",
+             "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
            })
 
     refute CommandContract.valid_success_semantics?(:doctor, %{
@@ -3465,7 +3498,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  ],
              "model_aliases" => [],
              "provider_activity" => true,
-             "readiness" => "unverified"
+             "readiness" => "unverified",
+             "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
            })
 
     assert_schema_invalid(

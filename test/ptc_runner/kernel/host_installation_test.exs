@@ -1123,6 +1123,12 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     Application.put_env(:ptc_runner, :host_llm_test_owner, self())
     Application.put_env(:ptc_runner, :host_llm_test_warm_words, 100_000)
 
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
+      {:ok, %{content: "ok", tokens: %{input: 8, output: 1}}}
+    )
+
     on_exit(fn ->
       restore_env(:llm_adapter, previous_adapter)
       restore_env(:host_llm_test_owner, previous_owner)
@@ -1172,7 +1178,10 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert :ok =
              implementation.local_preflight.(selection, probe_context, runtime_services)
 
-    assert :ok = implementation.connectivity_probe.(selection, probe_context, runtime_services)
+    # The probe bills a real request, so what the provider reported it spent
+    # travels back with the success rather than being discarded.
+    assert {:ok, %{input: 8, output: 1}} =
+             implementation.connectivity_probe.(selection, probe_context, runtime_services)
 
     assert_receive {:host_llm_ensure_ready, warmup_pid}
     assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash-0731", request}

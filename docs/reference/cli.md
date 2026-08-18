@@ -47,6 +47,26 @@ stdout. Failed reports retain their nonzero exit status; failures that cannot
 produce a complete report are written to stderr.
 `--show-model-selectors` adds only safe selectors.
 
+Every readiness report carries `usage`, on the LLM rows a run reports. Each
+probed model alias contributes one call with the tokens and cost the provider
+attributed to it, so a CI step can account for what the check spent:
+
+```json
+{"usage": {"llm_usage_state": "available",
+           "llm_usage": [{"alias": "llm", "installation_revision": "v1",
+                          "calls": 1, "successful_calls": 1, "usage_calls": 1,
+                          "missing_usage_calls": 0,
+                          "usage": {"input": 8, "output": 1, "total_cost": 3.0e-6}}]}}
+```
+
+The probe asks for one output token, so this is about attribution rather than
+magnitude. A command that activated no provider reports an empty list, because
+it spent nothing. A failure that did activate one reports
+`"llm_usage_state": "unavailable"` and a null list rather than claiming zero:
+the request may have been billed with no result left to account for it. As in a
+run, `total_cost` is omitted when any call could not be priced, and
+`missing_usage_calls` counts the calls a provider reported no tokens for.
+
 ## Read the embedded documentation
 
 Every installation carries the language specification, references, and JSON

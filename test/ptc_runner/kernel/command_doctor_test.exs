@@ -158,6 +158,62 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
            )
   end
 
+  test "doctor usage semantics reject a fabricated or misattributed account" do
+    diagnostic = credential_diagnostic(true)
+    primary = CommandDiagnostic.to_map(diagnostic)
+
+    # One alias selected at two destinations, where only one probe came back
+    # with tokens: the row that carries a measurement and an unmeasured call at
+    # once, so its cost is deliberately incomplete.
+    measured = %{
+      "alias" => "model",
+      "installation_revision" => "model-v1",
+      "calls" => 2,
+      "successful_calls" => 2,
+      "usage_calls" => 1,
+      "missing_usage_calls" => 1,
+      "usage" => %{"input" => 12}
+    }
+
+    selected = %{
+      "alias" => "model",
+      "source" => "llm",
+      "installation_revision" => "model-v1",
+      "default" => true,
+      "selected" => true
+    }
+
+    valid =
+      failure_result(true)
+      |> Map.put("model_aliases", [selected])
+      |> put_in(["usage"], %{"llm_usage_state" => "available", "llm_usage" => [measured]})
+
+    assert CommandContract.valid_doctor_failure_result?(valid, primary, [])
+
+    tampered = [
+      # Spend attributed to a declaration the same report does not list.
+      put_in(valid, ["usage", "llm_usage", Access.at(0), "alias"], "other"),
+      put_in(valid, ["usage", "llm_usage", Access.at(0), "installation_revision"], "other-v1"),
+      put_in(valid, ["model_aliases", Access.at(0), "selected"], false)
+      |> put_in(["model_aliases", Access.at(0), "default"], nil),
+      # Counters that no measurement could have produced.
+      put_in(valid, ["usage", "llm_usage", Access.at(0), "calls"], 0),
+      put_in(valid, ["usage", "llm_usage", Access.at(0), "successful_calls"], 1),
+      put_in(valid, ["usage", "llm_usage", Access.at(0), "usage_calls"], 0),
+      put_in(valid, ["usage", "llm_usage", Access.at(0), "missing_usage_calls"], 0),
+      # Tokens summed from calls that reported none.
+      valid
+      |> put_in(["usage", "llm_usage", Access.at(0), "usage_calls"], 0)
+      |> put_in(["usage", "llm_usage", Access.at(0), "missing_usage_calls"], 2),
+      # A call that reported no tokens cannot leave a complete cost behind.
+      put_in(valid, ["usage", "llm_usage", Access.at(0), "usage"], %{"total_cost" => 3.0e-6})
+    ]
+
+    for result <- tampered do
+      refute CommandContract.valid_doctor_failure_result?(result, primary, [])
+    end
+  end
+
   defp credential_diagnostic(provider_activity) do
     {:ok, subject} = CommandSubject.provider("model", :credentials)
 
@@ -192,7 +248,13 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
       ],
       "model_aliases" => [],
       "provider_activity" => provider_activity,
-      "readiness" => "failed"
+      "readiness" => "failed",
+      "usage" => failure_usage(provider_activity)
     }
   end
+
+  # A failure that activated a provider may have been billed for work no result
+  # accounts for; one that activated none spent nothing.
+  defp failure_usage(true), do: %{"llm_usage_state" => "unavailable", "llm_usage" => nil}
+  defp failure_usage(false), do: %{"llm_usage_state" => "available", "llm_usage" => []}
 end
