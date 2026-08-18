@@ -73,15 +73,23 @@ run_project_gates() {
     mix deps.compile > /dev/null 2>&1 || true
   fi
 
-  # Format and credo take the staged Elixir paths so a one-file commit does
-  # not pay for the whole tree. Compile stays unscoped: Mix is incremental,
-  # and warnings-as-errors has to see the project. Paths are relative to the
-  # project cwd after `pushd`, kept as a Bash array so spaces survive as one
-  # Mix argument. Sorted so the re-run hint is stable.
+  # Format and credo take the staged Elixir paths those tools own so a
+  # one-file commit does not pay for the whole tree. Nested companions
+  # (`ptc_runner_launcher/`) stay out: the root formatter and Credo configs
+  # do not include them, and passing explicit paths would apply the wrong
+  # rules. Compile stays unscoped: Mix is incremental, and
+  # warnings-as-errors has to see the project (including the launcher path
+  # dependency). Paths are relative to the project cwd after `pushd`, kept
+  # as a Bash array so spaces survive as one Mix argument. Sorted so the
+  # re-run hint is stable.
   #
-  # Credo consistency checks (exception names, parameter-pattern style) are
-  # weaker on a subset; `mix precommit` and pre-push still run full credo.
+  # A staged `.formatter.exs` / `.credo.exs` rewrites the checker itself, so
+  # that task runs unscoped. Credo consistency checks (exception names,
+  # parameter-pattern style) are weaker on a subset; `mix precommit` and
+  # pre-push still run full credo.
   local elixir_files=()
+  local format_unscoped=0
+  local credo_unscoped=0
   if [ -n "$has_elixir" ]; then
     local elixir_list=$has_elixir
     if [ "$proj" != "." ]; then
@@ -89,7 +97,16 @@ run_project_gates() {
     fi
     local elixir_file
     while IFS= read -r elixir_file; do
-      [ -n "$elixir_file" ] && elixir_files+=("$elixir_file")
+      [ -n "$elixir_file" ] || continue
+      case "$elixir_file" in
+        mix.exs|.formatter.exs|.credo.exs|config/*|lib/*|test/*) ;;
+        *) continue ;;
+      esac
+      case "$elixir_file" in
+        .formatter.exs) format_unscoped=1 ;;
+        .credo.exs) credo_unscoped=1 ;;
+      esac
+      elixir_files+=("$elixir_file")
     done < <(printf '%s\n' "$elixir_list" | grep -v '^$' | LC_ALL=C sort)
   fi
 
@@ -97,7 +114,9 @@ run_project_gates() {
   # separate `mix` process per check. `mix do a + b + c` fails fast on the
   # first non-zero task. (cwd is the project dir, so `project_has_dep "."`.)
   local checks=()
-  if [ ${#elixir_files[@]} -gt 0 ]; then
+  if [ "$format_unscoped" = 1 ]; then
+    checks+=(format --check-formatted)
+  elif [ ${#elixir_files[@]} -gt 0 ]; then
     checks+=(format --check-formatted "${elixir_files[@]}")
   fi
   if [ -n "$has_elixir" ] || [ -n "$has_config" ] || [ -n "$has_mix" ]; then
@@ -106,8 +125,12 @@ run_project_gates() {
     fi
     checks+=(compile --warnings-as-errors)
   fi
-  if [ ${#elixir_files[@]} -gt 0 ] && project_has_dep "." "credo"; then
-    checks+=(+ credo --strict "${elixir_files[@]}")
+  if project_has_dep "." "credo"; then
+    if [ "$credo_unscoped" = 1 ]; then
+      checks+=(+ credo --strict)
+    elif [ ${#elixir_files[@]} -gt 0 ]; then
+      checks+=(+ credo --strict "${elixir_files[@]}")
+    fi
   fi
 
   if [ ${#checks[@]} -gt 0 ]; then

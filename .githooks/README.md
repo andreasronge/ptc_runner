@@ -7,8 +7,12 @@ take effect without reinstalling them.
 The pre-commit hook is the fast path: it runs format, compile, and credo
 only when staged Elixir, config, or Mix files belong to a project, and it
 passes those staged `.ex`/`.exs` paths to format and credo so a one-file
-commit does not analyze the whole tree. Credo consistency checks that compare
-the whole project therefore wait for `mix precommit` and pre-push. Compile
+commit does not analyze the whole tree. Nested launcher sources are kept off
+the root format and credo argument lists — those configs never included them,
+and an explicit path would apply the wrong rules — while a staged
+`.formatter.exs` or `.credo.exs` still runs that checker unscoped. Credo
+consistency checks that compare the whole project therefore wait for
+`mix precommit` and pre-push unless the Credo config itself changed. Compile
 stays project-wide because Mix is incremental and `--warnings-as-errors` has
 to see the build.
 Scoped tests run only for staged `*_test.exs` files, with `:slow` excluded.

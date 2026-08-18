@@ -153,6 +153,71 @@ defmodule PtcRunner.GitHooks.PreCommitTest do
            """
   end
 
+  test "runs format unscoped when .formatter.exs is staged" do
+    %{repo: repo, path: path, mix_marker: mix_marker} =
+      git_repo_with_staged([".formatter.exs"])
+
+    {output, status} = run_hook(repo, path)
+
+    assert status == 0, output
+
+    assert File.read!(mix_marker) == """
+           cwd=repo
+           arg=do
+           arg=format
+           arg=--check-formatted
+           arg=+
+           arg=compile
+           arg=--warnings-as-errors
+           arg=+
+           arg=credo
+           arg=--strict
+           arg=.formatter.exs
+           ---
+           """
+  end
+
+  test "runs credo unscoped when .credo.exs is staged" do
+    %{repo: repo, path: path, mix_marker: mix_marker} =
+      git_repo_with_staged([".credo.exs"])
+
+    {output, status} = run_hook(repo, path)
+
+    assert status == 0, output
+
+    assert File.read!(mix_marker) == """
+           cwd=repo
+           arg=do
+           arg=format
+           arg=--check-formatted
+           arg=.credo.exs
+           arg=+
+           arg=compile
+           arg=--warnings-as-errors
+           arg=+
+           arg=credo
+           arg=--strict
+           ---
+           """
+  end
+
+  test "does not pass launcher sources to root format or credo" do
+    %{repo: repo, path: path, mix_marker: mix_marker} =
+      git_repo_with_staged(["ptc_runner_launcher/lib/launcher.ex"])
+
+    {output, status} = run_hook(repo, path)
+
+    assert status == 0, output
+
+    assert File.read!(mix_marker) == """
+           cwd=repo
+           arg=do
+           arg=compile
+           arg=--warnings-as-errors
+           ---
+           """
+  end
+
   defp git_repo_with_staged(paths, opts \\ []) do
     root =
       Path.join(
