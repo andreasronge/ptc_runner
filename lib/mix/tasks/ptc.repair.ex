@@ -300,8 +300,6 @@ defmodule Mix.Tasks.Ptc.Repair do
   end
 
   defp maybe_validate(manifest, out, report, base_digest, validation, opts) do
-    descriptor = Path.join(out, CandidateArtifact.descriptor_name())
-
     # The digest is rechecked on both sides of the suite: before, so trials
     # and their installed-provider effects never run against an application
     # that changed after the report was bound; after, so a mid-suite change
@@ -314,7 +312,8 @@ defmodule Mix.Tasks.Ptc.Repair do
          {:ok, results} <-
            run_cases(
              manifest,
-             descriptor,
+             out,
+             report,
              validation.out,
              validation.suite["cases"],
              host_inputs,
@@ -342,7 +341,7 @@ defmodule Mix.Tasks.Ptc.Repair do
     end
   end
 
-  defp run_cases(manifest, descriptor, root, cases, host_inputs, opts) do
+  defp run_cases(manifest, out, report, root, cases, host_inputs, opts) do
     input_root =
       Path.join(
         Path.dirname(Path.expand(manifest)),
@@ -353,6 +352,8 @@ defmodule Mix.Tasks.Ptc.Repair do
       :ok ->
         outcome =
           try do
+            staged_descriptor = stage_candidate!(out, report, input_root)
+
             {:ok,
              cases
              |> Enum.with_index(1)
@@ -361,7 +362,7 @@ defmodule Mix.Tasks.Ptc.Repair do
 
                run_case(
                  manifest,
-                 descriptor,
+                 staged_descriptor,
                  root,
                  input_root,
                  validation_case,
@@ -439,6 +440,24 @@ defmodule Mix.Tasks.Ptc.Repair do
       {:error, _reason} ->
         Mix.raise("ptc.repair failed: a host configuration input changed during validation")
     end
+  end
+
+  # Every case executes the exact candidate the report named: the published
+  # pair is copied into the owner-only staging root and re-verified there,
+  # so a concurrent replacement of the published artifact cannot put ungated
+  # source under a passing report.
+  defp stage_candidate!(out, report, input_root) do
+    for name <- [CandidateArtifact.descriptor_name(), CandidateArtifact.candidate_name()] do
+      with {:ok, bytes} <- read_bounded(Path.join(out, name), @max_source_bytes),
+           :ok <- write_private(Path.join(input_root, name), bytes) do
+        :ok
+      else
+        _failure -> Mix.raise("ptc.repair failed: candidate staging for validation failed")
+      end
+    end
+
+    :ok = verify_published(input_root, report)
+    Path.join(input_root, CandidateArtifact.descriptor_name())
   end
 
   defp sweep_input_root(input_root) do

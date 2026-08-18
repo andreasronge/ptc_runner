@@ -113,7 +113,9 @@ observation evidence; only the final phase can satisfy the application result
 contract.
 
 Set a phase's `terminal_only` to `true` when it may only make the final
-decision. PtcRunner parses each generated program before evaluation and
+decision; only the final phase may declare it, because an earlier phase that
+exhausted without a terminal action would hand off to the next phase and void
+the obligation. PtcRunner parses each generated program before evaluation and
 accepts only one top-level `return` or `fail` form. A nonterminal program is
 not evaluated and receives bounded correction feedback while a phase turn
 remains; exhausting the phase this way reports the `terminal-source-required`

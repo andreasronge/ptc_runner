@@ -82,7 +82,11 @@
                (seq phases)
                (<= (count phases) 8)
                (every? valid-phase? phases)
-               (<= (reduce + 0 (map #(get % "max_turns") phases)) 128))
+               (<= (reduce + 0 (map #(get % "max_turns") phases)) 128)
+               ;; Only the final phase may be terminal-only: an earlier phase
+               ;; that exhausts without a terminal action would hand off to
+               ;; the next phase, silently voiding the obligation it declared.
+               (not-any? #(true? (get % "terminal_only")) (butlast phases)))
         phases
         (fail (result/error :invalid-agent-config :invalid-phases))))
     ;; The synthesized default phase receives the same mission validation the

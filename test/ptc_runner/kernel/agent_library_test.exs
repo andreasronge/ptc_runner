@@ -227,6 +227,30 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert synthesize_annotation["mission"] == "synthesize"
   end
 
+  # A non-final terminal-only phase would hand off to the next phase when it
+  # exhausts without a terminal action, silently voiding the obligation it
+  # declared, so the configuration is refused before any provider request.
+  test "agent.core refuses terminal_only on a non-final phase" do
+    {:ok, config} = agent_config([])
+
+    source = ~S"""
+    (agent.core/run-phased-result-value
+      "Decide."
+      {"phases"
+       [{"mission" "default" "max_turns" 1 "terminal_only" true}
+        {"mission" "default" "max_turns" 1}]})
+    """
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :explicit_failure,
+              details: %{failure_kind: "invalid-agent-config"}
+            }} = Kernel.run(source, config)
+
+    refute_receive {:agent_request, _request}
+  end
+
   # An instruction is delivered when its phase begins. Later phases receive it
   # in the transition message; the first phase has no transition, so it must
   # ride with the initial task instead of being silently dropped.
