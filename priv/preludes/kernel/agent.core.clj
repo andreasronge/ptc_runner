@@ -101,10 +101,22 @@
                  :limit :agent_turns
                  :limit_value max-turns)})
 
+;; A bounded loop can end four ways and only two of them are answered by buying
+;; more turns. The reason the loop already computed travels to the Kernel so the
+;; command can say which one happened, instead of telling every caller to raise
+;; max_turns.
+(defn- turn-limit-reason-name [reason]
+  (case reason
+    :intermediate-result "intermediate-result"
+    :evaluation-error "evaluation-error"
+    :protocol-error "protocol-error"
+    "turn-limit-exceeded"))
+
 (defn- propagate-subject-failure [outcome]
   (if (= :turn-limit (get outcome :kind))
     (tool/kernel-runtime-limit-failure
-      {"agent_turns" (get (get outcome :error) :limit_value)})
+      {"agent_turns" (get (get outcome :error) :limit_value)
+       "reason" (turn-limit-reason-name (get (get outcome :error) :reason))})
     (fail (get outcome :error))))
 
 (defn- result-contract-failure [value max-turns]

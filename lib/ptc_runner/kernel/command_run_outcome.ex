@@ -446,11 +446,11 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
          %Error{
            kind: :workflow_failed,
            reason: :runtime_limit_exceeded,
-           details: %{limit: :agent_turns, limit_value: limit}
+           details: %{limit: :agent_turns, limit_value: limit, limit_reason: limit_reason}
          },
          provider_activity
        ) do
-    case RuntimeLimitDiagnostic.agent_turns_message(limit) do
+    case RuntimeLimitDiagnostic.agent_turns_message(limit, limit_reason) do
       {:ok, message} ->
         diagnostic(:execution, :runtime_limit_exceeded, provider_activity, message: message)
 

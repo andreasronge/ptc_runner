@@ -824,8 +824,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   test "agent turn-limit diagnostics bind their bounded message to a null source" do
     runtime_source = CommandSource.fixed(:runtime)
 
-    for limit <- [1, 128] do
-      assert {:ok, message} = RuntimeLimitDiagnostic.agent_turns_message(limit)
+    for limit <- [1, 128],
+        reason <- RuntimeLimitDiagnostic.agent_turns_reasons() do
+      assert {:ok, message} = RuntimeLimitDiagnostic.agent_turns_message(limit, reason)
 
       assert {:ok, %CommandDiagnostic{source: nil}} =
                CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
@@ -842,10 +843,12 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
 
     for invalid_message <- [
-          "agent turn limit 0 was exceeded; raise max_turns for this agent.core/run call, or reduce the work per turn",
-          "agent turn limit 02 was exceeded; raise max_turns for this agent.core/run call, or reduce the work per turn",
-          "agent turn limit 129 was exceeded; raise max_turns for this agent.core/run call, or reduce the work per turn",
-          "agent turn limit 2 was exceeded; expose private details"
+          "agent turn limit 0 was exceeded; raise max_turns in the agent configuration, or reduce the work per turn",
+          "agent turn limit 02 was exceeded; raise max_turns in the agent configuration, or reduce the work per turn",
+          "agent turn limit 129 was exceeded; raise max_turns in the agent configuration, or reduce the work per turn",
+          "agent turn limit 2 was exceeded; expose private details",
+          "the model produced no valid tool call in 0 turns; raising max_turns repeats it. Check that the model supports tool calling and that any configured max_tokens leaves room for a complete call",
+          "the model produced no valid tool call in 2 turns; raise max_turns"
         ] do
       assert {:error, :invalid_command_diagnostic} =
                CommandDiagnostic.new(:execution, :runtime_limit_exceeded,

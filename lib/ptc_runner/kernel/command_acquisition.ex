@@ -201,7 +201,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
        ) do
     case arguments.command do
       :validate ->
-        result = validation_outcome(arguments, run_ref, prepared)
+        result = validation_outcome(arguments, run_ref, prepared, catalog, runtime_services)
         InstallationCatalog.close(catalog)
         result
 
@@ -377,6 +377,17 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
       end
     end)
     |> Enum.sort()
+  end
+
+  defp validation_outcome(arguments, run_ref, prepared, catalog, runtime_services) do
+    case RunCoordinator.declared_input_checks(prepared, catalog, runtime_services) do
+      :ok ->
+        validation_outcome(arguments, run_ref, prepared)
+
+      {:error, %CommandDiagnostic{} = diagnostic} ->
+        PreparedRun.close(prepared)
+        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+    end
   end
 
   defp validation_outcome(arguments, run_ref, prepared) do

@@ -15,6 +15,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   8. `priv/schemas/ptc-project-config.schema.json` — project launch JSON Schema
   9. `docs/kernel-limits-reference.md` — Kernel run-limit meanings and metadata
   10. `docs/prelude-reference.md` — shipped PTC-Lisp component and export catalog
+  11. the exit-status catalog inside `docs/reference/cli.md`
 
   ## Usage
 
@@ -26,7 +27,9 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   use Mix.Task
 
   alias PtcRunner.Kernel.CommandContract
+  alias PtcRunner.Kernel.CommandFrontend
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.LimitCatalog
@@ -39,6 +42,9 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   alias PtcRunner.Lisp.Registry
 
   @function_ref_path "docs/function-reference.md"
+  @cli_reference_path "docs/reference/cli.md"
+  @exit_status_begin "<!-- BEGIN GENERATED: exit-status catalog (mix ptc.gen_docs) -->"
+  @exit_status_end "<!-- END GENERATED: exit-status catalog -->"
   @limit_reference_path "docs/kernel-limits-reference.md"
   @prelude_reference_path "docs/prelude-reference.md"
   @audit_index_path "docs/conformance/index.md"
@@ -146,6 +152,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     validate_limit_catalog!()
 
     generate_limit_reference(check?)
+    generate_exit_status_catalog(check?)
     generate_prelude_reference(check?)
     generate_function_reference(check?)
     Enum.each(all_audits(), &generate_audit(&1, check?))
@@ -239,6 +246,106 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     |> Enum.chunk_every(3)
     |> Enum.map_join(",", &Enum.join/1)
     |> String.reverse()
+  end
+
+  # Hand-maintaining this table means it is wrong one release after someone adds
+  # a diagnostic. Generating it from the same catalog the command dispatches on
+  # makes the staleness gate the thing that keeps it honest.
+  defp generate_exit_status_catalog(check?) do
+    content = read_cli_reference!()
+
+    section = """
+    #{@exit_status_begin}
+
+    | Status | Meaning | Phases |
+    | ---: | --- | --- |
+    #{exit_status_summary_rows()}
+
+    Every classified diagnostic and the status it exits with:
+
+    | Status | Phase | Code | Retryable | Message |
+    | ---: | --- | --- | --- | --- |
+    #{exit_status_rows()}
+    #{@exit_status_end}\
+    """
+
+    [head, rest] = String.split(content, @exit_status_begin, parts: 2)
+    [_stale, tail] = String.split(rest, @exit_status_end, parts: 2)
+
+    write_or_check!(@cli_reference_path, head <> section <> tail, check?)
+
+    report_generation(
+      @cli_reference_path,
+      length(DiagnosticCatalog.rows()),
+      "diagnostics",
+      check?
+    )
+  end
+
+  defp read_cli_reference! do
+    content = File.read!(@cli_reference_path)
+
+    unless String.contains?(content, @exit_status_begin) and
+             String.contains?(content, @exit_status_end) do
+      Mix.raise("#{@cli_reference_path} is missing its exit-status catalog markers")
+    end
+
+    content
+  end
+
+  # `0` and the publication status are not catalog rows: one is the absence of a
+  # diagnostic and the other is the failure to publish one. Both still belong in
+  # a table a CI author branches on, so they are stated here and read from the
+  # frontend rather than repeated as literals.
+  defp exit_status_summary_rows do
+    catalog_rows =
+      DiagnosticCatalog.rows()
+      |> Enum.group_by(& &1.exit_status)
+      |> Enum.sort_by(fn {status, _rows} -> status end)
+      |> Enum.map(fn {status, rows} ->
+        {status, exit_status_meaning(status), phase_list(rows)}
+      end)
+
+    ([{0, "the command succeeded", "—"}] ++
+       catalog_rows ++
+       [
+         {CommandFrontend.envelope_failure_exit_status(),
+          "the requested envelope could not be published, so no envelope describes this failure",
+          "—"}
+       ])
+    |> Enum.map_join("\n", fn {status, meaning, phases} ->
+      "| #{status} | #{meaning} | #{phases} |"
+    end)
+  end
+
+  defp phase_list(rows) do
+    rows
+    |> Enum.map(&"`#{&1.phase}`")
+    |> Enum.uniq()
+    |> Enum.join(", ")
+  end
+
+  defp exit_status_meaning(2), do: "the arguments were rejected before any document was read"
+  defp exit_status_meaning(3), do: "a declaration document was unavailable, invalid, or rejected"
+
+  defp exit_status_meaning(4),
+    do: "a selected provider could not be checked or acquired"
+
+  defp exit_status_meaning(5), do: "the workflow ran and failed"
+  defp exit_status_meaning(6), do: "the run exceeded a limit or its duration"
+
+  defp exit_status_meaning(7),
+    do: "the run produced no usable artifact: a destination, result, or publication failure"
+
+  defp exit_status_meaning(70), do: "the command failed internally"
+
+  defp exit_status_rows do
+    DiagnosticCatalog.rows()
+    |> Enum.sort_by(&{&1.exit_status, Atom.to_string(&1.phase), Atom.to_string(&1.code)})
+    |> Enum.map_join("\n", fn row ->
+      "| #{row.exit_status} | `#{row.phase}` | `#{row.code}` | " <>
+        "#{if row.retryable, do: "yes", else: "no"} | #{row.message} |"
+    end)
   end
 
   defp generate_host_schema(check?) do

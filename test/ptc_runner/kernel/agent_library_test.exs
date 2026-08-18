@@ -1774,6 +1774,52 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     end
   end
 
+  # A loop that never received a usable tool call is not a loop that ran out of
+  # room to work, and #1475 showed both being reported as "raise max_turns".
+  test "each way a bounded loop ends carries its own turn-limit reason" do
+    prose_only = %{content: "I will explain instead of calling", tool_calls: []}
+
+    intermediate = %{
+      content: nil,
+      tool_calls: [
+        %{id: "continue", name: "run_ptc_lisp", args: %{"program" => "(def committed 42)"}}
+      ]
+    }
+
+    failing = %{
+      content: nil,
+      tool_calls: [
+        %{id: "eval-bad", name: "run_ptc_lisp", args: %{"program" => "(missing/function)"}}
+      ]
+    }
+
+    for {response, expected_reason} <- [
+          {prose_only, :protocol_error},
+          {intermediate, :intermediate_result},
+          {failing, :evaluation_error}
+        ] do
+      {:ok, config} = agent_config([response])
+
+      assert {:error,
+              %{
+                kind: :workflow_failed,
+                reason: :runtime_limit_exceeded,
+                details: %{
+                  limit: :agent_turns,
+                  limit_value: 1,
+                  limit_reason: ^expected_reason
+                }
+              }} =
+               Kernel.run(~S|(agent.core/run-value "Exhaust" {"max_turns" 1})|, config),
+             "expected #{expected_reason}"
+
+      assert Enum.any?(EventSink.events(config.event_sink), fn event ->
+               event.type == "run-stopped" and event.data[:failure_kind] == "turn-limit" and
+                 event.data[:limit_reason] == expected_reason
+             end)
+    end
+  end
+
   test "host quotas can stop a continued loop before max_turns" do
     continue = %{
       content: nil,

@@ -49,7 +49,10 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
     {:invalid_compatibility_environment, :local_preflight, :environment_unavailable, :local},
     {:mcp_command_not_found, :local_preflight, :environment_unavailable, :local},
     {:invalid_mcp_executable, :local_preflight, :environment_unavailable, :local},
-    {:invalid_replay_fixtures, :local_preflight, :environment_unavailable, :local},
+    {:replay_fixtures_unreadable, :local_preflight, :environment_unavailable, :local},
+    {:replay_fixtures_empty, :local_preflight, :environment_unavailable, :local},
+    {:replay_fixtures_too_large, :local_preflight, :environment_unavailable, :local},
+    {:replay_owner_unavailable, :local_preflight, :environment_unavailable, :local},
     {:source_unavailable, :local_preflight, :environment_unavailable, :local},
     {:invalid_snapshot, :local_preflight, :environment_unavailable, :local},
     {:mcp_stdio_launcher_unavailable, :local_preflight, :launcher_unavailable, :local},
@@ -71,6 +74,19 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
       assert diagnostic.subject.occurrence == %{destination: :workflow, index: 3}
       assert diagnostic.provider_activity
     end
+  end
+
+  test "a rejected fixture line reports its rule and number through acquisition too" do
+    diagnostic = AcquisitionReason.diagnostic({:schema_version_invalid, 7}, @occurrence)
+
+    assert {diagnostic.phase, diagnostic.code} == {:local_preflight, :environment_unavailable}
+    assert diagnostic.message == "replay fixture line 7 must set schema_version to 1"
+
+    assert AcquisitionReason.diagnostic({:not_a_fixture_reason, 7}, @occurrence).code ==
+             :internal_error
+
+    assert AcquisitionReason.diagnostic({:schema_version_invalid, 0}, @occurrence).code ==
+             :internal_error
   end
 
   test "endpoint connection diagnostics have fixed messages and retry policy" do

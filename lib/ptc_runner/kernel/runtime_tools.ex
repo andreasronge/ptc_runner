@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SourceCheck
   alias PtcRunner.Kernel.ValueContract
@@ -176,12 +177,9 @@ defmodule PtcRunner.Kernel.RuntimeTools do
               invalid_runtime_limit_failure()
           end
 
-        %{"agent_turns" => limit} when map_size(arguments) == 1 and limit in 1..128 ->
-          %TrustedError{
-            reason: :runtime_limit_exceeded,
-            message: "agent turn limit exceeded",
-            details: %{limit: :agent_turns, limit_value: limit}
-          }
+        %{"agent_turns" => limit, "reason" => reason}
+        when map_size(arguments) == 2 and limit in 1..128 ->
+          agent_turn_limit_failure(limit, reason)
 
         # The transcript ceiling is a bound the caller set in the input document
         # it just wrote, so it reports itself the way the turn limit does rather
@@ -197,6 +195,23 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         _invalid ->
           invalid_runtime_limit_failure()
       end
+    end
+  end
+
+  # The loop reports why it stopped, not only that it stopped. An unrecognised
+  # reason is refused rather than collapsed into the ordinary exhaustion case:
+  # a wrong explanation costs the reader more than a missing one.
+  defp agent_turn_limit_failure(limit, reason) do
+    case RuntimeLimitDiagnostic.agent_turns_reason(reason) do
+      {:ok, reason} ->
+        %TrustedError{
+          reason: :runtime_limit_exceeded,
+          message: "agent turn limit exceeded",
+          details: %{limit: :agent_turns, limit_value: limit, limit_reason: reason}
+        }
+
+      :error ->
+        invalid_runtime_limit_failure()
     end
   end
 

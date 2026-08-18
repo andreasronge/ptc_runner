@@ -7,6 +7,7 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.LLMReplayDiagnostic
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
@@ -355,10 +356,14 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   end
 
   def sanitize_private_error(
-        {:runtime_limit_exceeded, _message, %{limit: :agent_turns, limit_value: limit}} = reason
+        {:runtime_limit_exceeded, _message,
+         %{limit: :agent_turns, limit_value: limit, limit_reason: limit_reason}} = reason
       )
-      when limit in 1..128,
-      do: reason
+      when limit in 1..128 do
+    if RuntimeLimitDiagnostic.agent_turns_reason?(limit_reason),
+      do: reason,
+      else: {:private_prelude_error, "private prelude evaluation failed"}
+  end
 
   def sanitize_private_error(
         {:runtime_limit_exceeded, _message, %{limit: :max_transcript_chars, limit_value: limit}} =

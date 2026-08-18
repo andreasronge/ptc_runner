@@ -155,6 +155,33 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   def local_checks(_prepared, _catalog, _services, _target), do: internal_error()
 
   @doc """
+  Runs the declaration-owned local input checks for `validate`.
+
+  `validate` acquires no provider and marks no activity, but a replay
+  installation names a fixture file the declaration owns. Reading it here is
+  the same class of work as compiling the components the manifest names, and
+  keeps `validate` from passing a host document whose fixtures `run` cannot
+  load.
+  """
+  @spec declared_input_checks(
+          PreparedRun.t() | nil,
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t()
+        ) :: :ok | {:error, CommandDiagnostic.t()}
+  def declared_input_checks(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services
+      ) do
+    LocalPreflight.run_declared_inputs(prepared, catalog, services, local_deadline(prepared))
+  end
+
+  def declared_input_checks(nil, %InstallationCatalog{} = catalog, %ProviderRuntimeServices{}),
+    do: if(InstallationCatalog.valid?(catalog), do: :ok, else: internal_error())
+
+  def declared_input_checks(_prepared, _catalog, _services), do: internal_error()
+
+  @doc """
   Collects every attributable audited-local finding for default doctor.
 
   This uses the same sealed declarations, callbacks, and absolute phase budget
