@@ -272,7 +272,13 @@ defmodule Mix.Tasks.Ptc.Repair do
   defp maybe_validate(manifest, out, report, base_digest, validation, opts) do
     descriptor = Path.join(out, CandidateArtifact.descriptor_name())
 
+    # The digest is rechecked on both sides of the suite: before, so trials
+    # and their installed-provider effects never run against an application
+    # that changed after the report was bound; after, so a mid-suite change
+    # cannot certify results the final application never produced.
     with :ok <- create_validation_directory(validation.out),
+         {:ok, pre_suite_digest} <- application_digest(manifest),
+         :ok <- same_application(base_digest, pre_suite_digest),
          results <-
            run_cases(
              manifest,

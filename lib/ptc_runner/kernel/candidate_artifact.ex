@@ -128,8 +128,13 @@ defmodule PtcRunner.Kernel.CandidateArtifact do
        }}
     else
       {:error, _reason} ->
-        discard(directory)
-        {:error, :candidate_publication_failed}
+        # A failed publication that also fails to clean up leaves residue the
+        # caller must know about; reporting only the publication failure
+        # would hide it.
+        case discard(directory) do
+          :ok -> {:error, :candidate_publication_failed}
+          {:error, :candidate_cleanup_failed} -> {:error, :candidate_cleanup_failed}
+        end
     end
   end
 

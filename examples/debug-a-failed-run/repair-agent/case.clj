@@ -138,7 +138,8 @@
           "turns_complete" (get-in turns ["evidence" "complete?"])
           "turns_ambiguity_count" (get-in turns ["evidence" "ambiguity_count"])
           "generated_sources_truncated"
-          (boolean (some #(get % "truncated") generated-pages))
+          (boolean (or (get direct-generated "truncated")
+                       (some #(get % "truncated") generated-pages)))
           "capability_calls_truncated" (get calls "truncated")
           "working_set_complete" (get working-set "complete?")
           "workflow_sources_complete"

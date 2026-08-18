@@ -396,6 +396,118 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
            }
   end
 
+  # The packet builder is deterministic once a capture exists, so its honesty
+  # contract is testable without a model: the workflow-control incident holds
+  # two directly generated sources, and narrowing the direct page to one must
+  # flip generated_sources_truncated rather than silently dropping a source.
+  @tag :tmp_dir
+  test "the incident packet reports direct generated-source truncation honestly", %{
+    tmp_dir: directory
+  } do
+    example = Path.join(directory, "debug-a-failed-run")
+    File.cp_r!(@example, example)
+
+    for artifact <- ~w(target-workflow-control/.ptc repair-agent/.ptc) do
+      File.rm_rf!(Path.join(example, artifact))
+    end
+
+    assert {_output, 5} = run(Path.join(example, "target-workflow-control.ptc-project.json"))
+
+    File.write!(Path.join(example, "repair-agent/probe.clj"), """
+    (ns probe "Deterministic packet acquisition entry." {:visibility :prompt})
+
+    (defn run
+      "Build the incident packet for the most recent failed capture."
+      {:signature "(input :map) -> :map"}
+      [_input]
+      (let [evaluation
+            (kernel/eval-with
+              "case-derived"
+              (program
+                (return (debug.case/context (get data/params "run_id"))))
+              {"run_id" nil})]
+        (if (= :returned (get evaluation :outcome))
+          (return (get evaluation :value))
+          (fail (get evaluation :value)))))
+    """)
+
+    agent_manifest =
+      example |> Path.join("repair-agent/ptc.json") |> File.read!() |> Jason.decode!()
+
+    File.write!(
+      Path.join(example, "repair-agent/probe-ptc.json"),
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [
+            %{"id" => "probe", "path" => "probe.clj", "dependencies" => ["kernel"]},
+            %{"library" => "kernel"}
+          ],
+          "entry" => "probe/run"
+        },
+        "missions" => Map.take(agent_manifest["missions"], ["case-derived"]),
+        "providers" => %{"mission" => agent_manifest["providers"]["mission"]},
+        "input" => %{"value" => %{}},
+        "events" => %{"policy" => "private"},
+        "labels" => %{"name" => "packet-probe", "tags" => %{"mode" => "deterministic"}}
+      })
+    )
+
+    probe_project = Path.join(example, "probe.ptc-project.json")
+
+    File.write!(
+      probe_project,
+      Jason.encode!(%{
+        "kind" => "ptc-project",
+        "version" => 1,
+        "application" => %{"path" => "repair-agent/probe-ptc.json"},
+        "host" => %{"path" => "ptc-host-workflow-control.json"},
+        "artifacts" => %{
+          "root" => "repair-agent/.ptc",
+          "trace" => true,
+          "inspection" => true,
+          "result" => true,
+          "envelope" => true
+        }
+      })
+    )
+
+    assert {_output, 0} = run(probe_project)
+    packet = private_result!(Path.join(example, "repair-agent/.ptc/results"))
+
+    assert length(packet["generated_sources"]) == 2
+    assert packet["completeness"]["generated_sources_truncated"] == false
+    assert packet["completeness"]["workflow_sources_complete"] == true
+
+    assert Enum.any?(packet["workflow_sources"], fn source ->
+             source["component_id"] == "main" and source["source"] =~ "shipment-source"
+           end)
+
+    # Narrow only the direct page; a dropped source must surface as
+    # truncation, never as a quietly smaller packet.
+    case_path = Path.join(example, "repair-agent/case.clj")
+    source = File.read!(case_path)
+
+    direct_page = ~s|"parent_evaluation_id" workflow-evaluation-id\n               "limit" 20})|
+    assert String.contains?(source, direct_page)
+
+    File.write!(
+      case_path,
+      String.replace(
+        source,
+        direct_page,
+        ~s|"parent_evaluation_id" workflow-evaluation-id\n               "limit" 1})|
+      )
+    )
+
+    File.rm_rf!(Path.join(example, "repair-agent/.ptc"))
+    assert {_output, 0} = run(probe_project)
+    narrowed = private_result!(Path.join(example, "repair-agent/.ptc/results"))
+
+    assert length(narrowed["generated_sources"]) == 1
+    assert narrowed["completeness"]["generated_sources_truncated"] == true
+  end
+
   defp run(project, extra_args \\ []) do
     System.cmd(
       System.find_executable("mix"),
