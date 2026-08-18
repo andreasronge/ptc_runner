@@ -38,11 +38,22 @@ defmodule PtcViewer.Api do
         _missing -> {:error, :unavailable}
       end
     else
-      {:error, :inspection_not_configured}
+      {:error, absence_reason(config)}
     end
   end
 
   defp inspection_query(_config, _operation, _run_id), do: {:error, :invalid_inspection_query}
+
+  # Two different configuration choices withhold the store, and they have
+  # different next actions: one records no artifact at all, the other records it
+  # and withholds the private grant that would serve it. The host states which
+  # applies, because only the host can see the project document.
+  defp absence_reason(config) do
+    case Keyword.get(config, :inspection_absence) do
+      :not_private -> :inspection_not_private
+      _not_recorded -> :inspection_not_configured
+    end
+  end
 
   defp trace_source(config) do
     trace_dir = Keyword.fetch!(config, :trace_dir)

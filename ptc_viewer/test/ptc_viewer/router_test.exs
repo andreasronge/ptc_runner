@@ -147,6 +147,15 @@ defmodule PtcViewer.RouterTest do
     assert unconfigured.status == 404
     assert unconfigured.resp_body == "inspection_not_configured"
 
+    # The private grant is a different configuration state with a different next
+    # action, so it answers under its own reason code.
+    ungranted =
+      conn(:get, "/api/analysis/runs/run-1/conversation")
+      |> call_router(trace_dir: trace_dir, inspection_absence: :not_private)
+
+    assert ungranted.status == 404
+    assert ungranted.resp_body == "inspection_not_private"
+
     source = {:pinned, "fixed.inspection.jsonl"}
 
     adapter = fn pinned_source, run_id ->

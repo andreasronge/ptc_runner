@@ -29,6 +29,10 @@ const CONFIGURATION_REASONS = new Map([
   ['inspection_not_configured', {
     status: 'Not recorded',
     copy: 'This project does not record inspection artifacts. Set "trace" and "inspection" to true under "artifacts" in ptc-project.json and run again.'
+  }],
+  ['inspection_not_private', {
+    status: 'Not granted',
+    copy: 'This project records inspection artifacts, but this Viewer was not granted them. Set "private" to true under "viewer" in ptc-project.json and start the Viewer again. The artifacts on disk are already usable; nothing needs to be re-run.'
   }]
 ]);
 

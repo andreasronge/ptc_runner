@@ -687,9 +687,13 @@ defmodule PtcViewer.Router do
 
       # Not a transport status: this instance was never given an inspection
       # artifact. The body is the reason code the browser renders as the
-      # configuration change that would produce one.
+      # configuration change that would produce one, so the two ways to withhold
+      # the artifact answer separately.
       {:error, :inspection_not_configured} ->
         send_resp(conn, 404, "inspection_not_configured")
+
+      {:error, :inspection_not_private} ->
+        send_resp(conn, 404, "inspection_not_private")
 
       {:error, :unavailable} ->
         send_resp(conn, 503, "Inspection artifact unavailable")

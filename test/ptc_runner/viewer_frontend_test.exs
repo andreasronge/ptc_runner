@@ -54,6 +54,49 @@ defmodule PtcRunner.ViewerFrontendTest do
   end
 
   @tag :tmp_dir
+  test "an absent inspection grant names viewer.private, not the artifact it already records", %{
+    tmp_dir: directory
+  } do
+    # `artifacts.inspection` is on and the artifact is on disk; the private
+    # grant is the only thing withholding it. Reporting "not configured" sent a
+    # reader to change the field that was already correct.
+    project_path =
+      viewer_project(directory, %{"private" => false}, %{"trace" => true, "inspection" => true})
+
+    assert {:ok, viewer, address, port} = ViewerFrontend.start(project_path)
+    on_exit(fn -> if Process.alive?(viewer), do: PtcViewer.stop(viewer) end)
+
+    response =
+      Req.get!("http://#{:inet.ntoa(address)}:#{port}/api/analysis/runs/run-1/conversation",
+        retry: false
+      )
+
+    assert response.status == 404
+    assert response.body == "inspection_not_private"
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
+  @tag :tmp_dir
+  test "a project that records no inspection artifact keeps naming its own cause", %{
+    tmp_dir: directory
+  } do
+    project_path =
+      viewer_project(directory, %{"private" => true}, %{"trace" => true, "inspection" => false})
+
+    assert {:ok, viewer, address, port} = ViewerFrontend.start(project_path)
+    on_exit(fn -> if Process.alive?(viewer), do: PtcViewer.stop(viewer) end)
+
+    response =
+      Req.get!("http://#{:inet.ntoa(address)}:#{port}/api/analysis/runs/run-1/conversation",
+        retry: false
+      )
+
+    assert response.status == 404
+    assert response.body == "inspection_not_configured"
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
+  @tag :tmp_dir
   test "project command configures Live project details and its fixed launch target", %{
     tmp_dir: directory
   } do
@@ -365,7 +408,7 @@ defmodule PtcRunner.ViewerFrontendTest do
     end)
   end
 
-  defp viewer_project(directory, viewer_overrides \\ %{}) do
+  defp viewer_project(directory, viewer_overrides \\ %{}, artifact_overrides \\ %{}) do
     target = Path.join(directory, "demo")
     assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
     project_path = Path.join(target, "ptc-project.json")
@@ -378,7 +421,14 @@ defmodule PtcRunner.ViewerFrontendTest do
         viewer_overrides
       )
 
-    File.write!(project_path, Jason.encode!(put_in(project, ["viewer"], viewer)))
+    artifacts = Map.merge(project["artifacts"] || %{}, artifact_overrides)
+
+    document =
+      project
+      |> put_in(["viewer"], viewer)
+      |> put_in(["artifacts"], artifacts)
+
+    File.write!(project_path, Jason.encode!(document))
     project_path
   end
 end
