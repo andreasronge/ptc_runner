@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
 # Classify repository-relative changed paths into independently testable scopes.
-# Unknown paths deliberately select every scope so new repository areas cannot
+# Known standing files have explicit arms so the catch-all stays a fail-safe
+# for new repository areas, not the default for ordinary tracked paths.
+# Unknown paths deliberately select every scope so those new areas cannot
 # silently bypass CI. The same classifier is suitable for CI and local hooks.
 
 set -euo pipefail
@@ -55,8 +57,9 @@ while IFS= read -r path || [ -n "$path" ]; do
   fi
 
   case "$path" in
-    docs/plans/*|Plans/*)
-      # Disposable plans do not participate in product or documentation gates.
+    docs/plans/*|Plans/*|.claude/*)
+      # Disposable plans and agent tooling do not participate in product or
+      # documentation gates.
       ;;
 
     docs/function-reference.md|docs/java-interop.md|docs/kernel-limits-reference.md|\
@@ -67,7 +70,9 @@ while IFS= read -r path || [ -n "$path" ]; do
       ;;
 
     docs/*|README.md|CHANGELOG.md|LICENSES/*|ptc_runner_launcher/README.md|\
-      ptc_runner_launcher/CHANGELOG.md|ptc_viewer/README.md|ptc_viewer/CHANGELOG.md)
+      ptc_runner_launcher/CHANGELOG.md|ptc_viewer/README.md|ptc_viewer/CHANGELOG.md|\
+      AGENTS.md|CLAUDE.md|usage-rules.md|.env.example|.lycheeignore|\
+      .gitattributes|cliff.toml|REUSE.toml|site/*|dev/*)
       docs=true
       ;;
 
@@ -85,6 +90,10 @@ while IFS= read -r path || [ -n "$path" ]; do
 
     examples/mcp/filesystem/*|test/ptc_runner/kernel/filesystem_mcp_e2e_test.exs)
       mcp_filesystem=true
+      ;;
+
+    examples/*|bench/*)
+      core=true
       ;;
 
     test/support/mcp_go_stateless/*|test/ptc_runner/kernel/mcp_remote_e2e_test.exs)
@@ -130,8 +139,13 @@ while IFS= read -r path || [ -n "$path" ]; do
       ;;
 
     .github/*|scripts/*|.githooks/*|.formatter.exs|.credo.exs|\
-      .dialyzer_ignore.exs|.tool-versions)
+      .dialyzer_ignore.exs|.tool-versions|mise.toml)
       select_all
+      ;;
+
+    .duplication-baseline.json|.ex_dna.exs|conformance_inventory.json|\
+      Dockerfile|.dockerignore|rel/*)
+      core=true
       ;;
 
     .gitignore|LICENSE*)
