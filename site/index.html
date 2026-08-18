@@ -67,6 +67,36 @@ replace it with a domain-specific loop of your own — and doing so grants no ne
   selecting a library installs its dependency closure without granting any tool authority.</figcaption>
 </figure>
 
+<p>Because the loop is ordinary code, a custom workflow can do more than prompt the model:
+it decides <em>where</em> code evaluates. The diagram below shows one example — the shipped
+<a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/debug-a-failed-run">repair
+example</a>, where a workflow debugs an earlier failed run. Before the model's first turn,
+host-authored code evaluates queries inside evidence-scoped mission environments — navigating
+the failed run's traces — and composes the returned values into the prompt. The model's own
+program then runs in a mission environment of its own, and answers through a typed terminal.
+The mission names are the example's; the mechanics are PtcRunner features any workflow can
+use.</p>
+
+<figure class="diagram">
+  <img src="/code-travels.webp" width="1672" height="941"
+       alt="Code travels; authority stays. A wide box labelled WORKFLOW ENVIRONMENT,
+            host-authored code, the only sequencer, holding preloaded.clj (before turn 1)
+            and the agent loop (the model writes PTC-Lisp). Navy arrows labelled
+            kernel/eval-with descend into two mission boxes — debug.nav with keys to read
+            the failed run's traces, and failed-run-traces with keys to raw trace pages —
+            and dashed arrows return the evidence packet, composed into the turn-1 prompt.
+            An orange arrow labelled model-written code descends into a third mission box,
+            synthesize, whose keys are repair.terminal only, and a return arrow carries a
+            typed decision: propose or abstain. A legend maps navy to host-authored code
+            and orange to model-generated code — same evaluator, same trace. A bar across
+            the bottom reads: evidence flows down into the prompt — authority never flows
+            with it.">
+  <figcaption>One custom workflow, drawn from a runnable example. Host-authored code assembles
+  the evidence under authority the model never holds; the model's program answers through the
+  typed terminal its own environment provides. Both are mission evaluations in the same trace —
+  distinguishable by author, identical to the evaluator.</figcaption>
+</figure>
+
 <h2>Install</h2>
 
 <p>On macOS it is a one-command install, or a container image if you would rather have one.
