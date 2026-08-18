@@ -4842,6 +4842,57 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "host-schema failures inside an installation are told apart by their pointer", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "host-schema-depth", valid_manifest())
+    base = valid_host_config()
+
+    # Six structurally different mistakes reported one identical pointer,
+    # `/install`, because an installation is a tagged union and the member that
+    # broke is named only inside the rejected branches.
+    cases = [
+      {"wrong-parent",
+       put_in(base, ["install", "workspace", "ceilings"], %{"run_timeout_ms" => 1}),
+       "/install/*/ceilings"},
+      {"ceiling-range",
+       put_in(base, ["install", "workspace", "ceilings"], %{"timeout_ms" => 999_999}),
+       "/install/*/ceilings/timeout_ms"},
+      {"transport-range",
+       put_in(base, ["install", "workspace", "transport", "start_timeout_ms"], 99_999),
+       "/install/*/transport/start_timeout_ms"},
+      {"revision-pattern",
+       put_in(base, ["install", "workspace", "installation_revision"], "WORKSPACE-V1"),
+       "/install/*/installation_revision"},
+      {"tool-effect", put_in(base, ["install", "workspace", "tools", "read", "effect"], "delete"),
+       "/install/*/tools"}
+    ]
+
+    pointers =
+      for {name, host, expected} <- cases do
+        host_path = write_host_config(directory, "depth-#{name}", host)
+
+        outcome =
+          assert_error(
+            ["validate", application, "--host-config", host_path],
+            "host",
+            "host_schema_invalid"
+          )
+
+        assert outcome.envelope["error"]["path"] == expected
+
+        # The installation alias and the upstream tool name are the author's
+        # own words. Neither reaches the pointer.
+        refute outcome.envelope["error"]["path"] =~ "workspace"
+        refute outcome.envelope["error"]["path"] =~ "read"
+        assert_schema_valid(outcome.envelope)
+        outcome.envelope["error"]["path"]
+      end
+
+    assert length(Enum.uniq(pointers)) == 5
+  end
+
+  @tag :tmp_dir
   test "phase-2 host loading preserves every closed host diagnostic", %{tmp_dir: directory} do
     application = write_application(directory, "host-diagnostics", valid_manifest())
     base = valid_host_config()
@@ -5073,8 +5124,12 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
       outcome = assert_error(["validate", directory_path], "application", "schema_violation")
 
+      # A mission name is the author's own, so it is elided rather than named;
+      # the closed schema beneath it stays addressable.
       expected_pointer =
-        if hd(path) == "missions", do: "/missions", else: Enum.map_join(path, "", &"/#{&1}")
+        if hd(path) == "missions",
+          do: "/missions/*",
+          else: Enum.map_join(path, "", &"/#{&1}")
 
       assert outcome.envelope["error"]["path"] == expected_pointer
       refute Jason.encode!(outcome.envelope) =~ "caller-secret"
@@ -5183,7 +5238,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       outcome = assert_error(["validate", directory_path], "application", "schema_violation")
 
       expected_pointer =
-        if hd(path) == "missions", do: "/missions", else: Enum.map_join(path, "", &"/#{&1}")
+        Enum.map_join(path, "", fn
+          "default" -> "/*"
+          segment -> "/#{segment}"
+        end)
 
       assert outcome.envelope["error"]["path"] == expected_pointer
 

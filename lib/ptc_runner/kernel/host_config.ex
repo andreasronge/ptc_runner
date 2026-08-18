@@ -70,6 +70,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   @max_secret_bytes 65_536
   @max_result_bytes 1_048_576
   @max_trace_source_bytes 8_000_000
+  @max_validation_error_depth 8
   @max_inspection_source_bytes 64_000_000
   @max_inspection_files 1_024
   @max_replay_entries 10_000
@@ -520,17 +521,45 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp command_schema_value(value), do: value
 
   defp command_validation_path(errors) do
-    paths =
-      Enum.map(errors, fn
-        %{data_path: path} when is_list(path) -> path |> Enum.reverse() |> safe_host_path()
-        _error -> []
-      end)
-
-    case Enum.sort_by(paths, fn path -> {-length(path), path} end) do
+    errors
+    |> validation_data_paths(@max_validation_error_depth)
+    |> Enum.map(&safe_host_path/1)
+    |> Enum.sort_by(fn path -> {-length(path), path} end)
+    |> case do
       [path | _rest] -> path
       [] -> []
     end
   end
+
+  # An installation is a tagged union, so every mistake inside one is reported
+  # at the union node as a `oneOf` failure; the member that actually broke is
+  # named only inside the rejected branches. Reading the top level alone gave
+  # one pointer for a wrong `ceilings` key, an out-of-range
+  # `transport.start_timeout_ms`, and a missing `tools` block alike. Depth is
+  # bounded because the tree is only as deep as the schema.
+  defp validation_data_paths(errors, depth) when is_list(errors) and depth > 0 do
+    Enum.flat_map(errors, fn
+      %{data_path: path} = error when is_list(path) ->
+        [Enum.reverse(path) | validation_data_paths(branch_errors(error), depth - 1)]
+
+      _error ->
+        []
+    end)
+  end
+
+  defp validation_data_paths(_errors, _depth), do: []
+
+  defp branch_errors(%{args: args}) when is_list(args) do
+    args
+    |> Keyword.get_values(:invalidated)
+    |> Enum.concat()
+    |> Enum.flat_map(fn
+      {_index, %{errors: errors}} when is_list(errors) -> errors
+      _other -> []
+    end)
+  end
+
+  defp branch_errors(_error), do: []
 
   defp safe_host_path(path), do: SchemaPath.explained_prefix(path, schema())
 
