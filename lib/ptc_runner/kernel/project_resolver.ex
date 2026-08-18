@@ -60,8 +60,10 @@ defmodule PtcRunner.Kernel.ProjectResolver do
       {:project, project} ->
         project_argv(command, rest, project, run_ref)
 
+      # `classify/1` reads `kind` first and only rejects a document that names
+      # itself a project, so the command line is known to be correct here.
       {:error, _reason} ->
-        {:error, command_atom(command)}
+        {:error, CommandRejection.invalid_project(command_atom(command))}
     end
   end
 

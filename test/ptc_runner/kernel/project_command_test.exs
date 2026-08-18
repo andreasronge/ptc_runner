@@ -264,6 +264,38 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   end
 
   @tag :tmp_dir
+  test "an invalid project document names the document, not the command line", %{
+    tmp_dir: directory
+  } do
+    # The document declares `kind: ptc-project`, so the classifier knows
+    # exactly which file failed and why it was reading it. Reporting
+    # `invalid_arguments` sent the reader back to `ptc help run` to hunt for a
+    # switch mistake that was never there.
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    base = target |> Path.join("ptc-project.json") |> File.read!() |> Jason.decode!()
+
+    documents = [
+      {"wrong-type", put_in(base, ["artifacts", "trace"], "yes")},
+      {"unknown-key", Map.put(base, "artifactz", %{})},
+      {"missing-required", Map.delete(base, "application")}
+    ]
+
+    for {name, document} <- documents, command <- ~w(validate run doctor models) do
+      path = Path.join(target, "#{name}.json")
+      File.write!(path, Jason.encode!(document))
+
+      assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch([command, path])
+
+      assert outcome.envelope["error"]["code"] == "project_invalid"
+      assert outcome.envelope["error"]["phase"] == "arguments"
+      assert outcome.envelope["error"]["message"] =~ "project document"
+      refute outcome.envelope["error"]["code"] == "invalid_arguments"
+      refute Jason.encode!(outcome.envelope) =~ directory
+    end
+  end
+
+  @tag :tmp_dir
   test "a project declaring no host says so rather than blaming the arguments", %{
     tmp_dir: directory
   } do

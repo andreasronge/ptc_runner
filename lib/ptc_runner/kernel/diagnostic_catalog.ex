@@ -34,6 +34,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "choose only one option from the conflicting argument group"},
     {:arguments, :project_host_undeclared, 2, false,
      "the project document declares no host block; add one to use this command"},
+    {:arguments, :project_invalid, 2, false,
+     "the named project document is not a valid project document; check it against the project schema (ptc docs schema-project)"},
     {:arguments, :envelope_destination_exists, 2, false,
      "the envelope destination already exists"},
     {:arguments, :docs_page_unknown, 2, false, "no documentation page is served under that name"},
