@@ -99,6 +99,22 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     assert evidence["closure_complete"] == false
   end
 
+  # Configuration keys nothing reads are silent lies: the terminal-action
+  # guidance must ride a key the phased loop actually delivers.
+  test "the repair agent's terminal guidance lives on the phase, not a dead key" do
+    agent =
+      @example
+      |> Path.join("repair-agent/ptc.json")
+      |> File.read!()
+      |> Jason.decode!()
+      |> get_in(["input", "value", "agent"])
+
+    refute Map.has_key?(agent, "result_instruction")
+
+    assert [%{"mission" => "synthesize", "instruction" => instruction}] = agent["phases"]
+    assert instruction =~ "repair.terminal"
+  end
+
   # The repair leg is deterministic once a report exists: materialization,
   # G1-G4, the host-owned suite, and the promoted rerun make no model call.
   # Fabricating the report keeps this test offline while proving exactly the
@@ -221,7 +237,9 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     }
 
     # nil is not an accepted spelling of "no mission": the field is either a
-    # nonblank mission name or absent.
+    # nonblank mission name or absent. The mission-target requirement itself
+    # is enforced by the terminal action (which normalizes a missing mission
+    # to "" so this minLength rule rejects it) and by mix ptc.repair.
     refute ValueContract.valid?(contract, report)
     assert ValueContract.valid?(contract, Map.delete(report, "target_mission"))
 
@@ -232,7 +250,13 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
       })
 
     assert ValueContract.valid?(contract, mission_report)
+    refute ValueContract.valid?(contract, Map.put(mission_report, "target_mission", ""))
     refute ValueContract.valid?(contract, Map.put(mission_report, "target_mission", nil))
+
+    refute ValueContract.valid?(
+             contract,
+             Map.delete(Map.put(report, "target_environment", "component"), "target_mission")
+           )
   end
 
   test "the terminal propose action enforces the target rule the schema cannot express" do
@@ -299,15 +323,16 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     assert mission_evaluation["outcome"] == "returned"
     assert mission_evaluation["value"]["target_mission"] == "pricing"
 
-    for invalid <- [
-          Map.put(base, "target_environment", "mission"),
-          Map.merge(base, %{"target_environment" => "mission", "target_mission" => "  "}),
-          Map.put(base, "target_environment", "component"),
-          base
-        ] do
-      assert {:ok, %{value: refused}} = propose.(invalid)
-      assert refused["outcome"] == "failed"
-    end
+    # A malformed target returns and is left to the result contract, which
+    # rejects it with correction feedback: a mistake costs the model one
+    # turn, never the whole run. A mission target with no usable mission is
+    # normalized to "" so the contract's minLength rule names the field.
+    assert {:ok, %{value: malformed}} = propose.(Map.put(base, "target_environment", "mission"))
+    assert malformed["outcome"] == "returned"
+    assert malformed["value"]["target_mission"] == ""
+
+    assert {:ok, %{value: refused}} = propose.(42)
+    refute refused["outcome"] == "returned"
   end
 
   @tag :tmp_dir

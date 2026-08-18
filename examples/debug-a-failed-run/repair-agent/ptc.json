@@ -43,8 +43,13 @@
       "task": "Analyze this failed run from its immutable incident packet. Propose a complete component replacement only if the evidence distinguishes one faulty implementation from its callers, dependencies, contracts, and input; otherwise abstain and identify the missing evidence. Do not assume that every source in the mechanically derived working set is faulty.",
       "context_mission": "case-derived",
       "agent": {
-        "phases": [{"mission": "synthesize", "max_turns": 2}],
-        "result_instruction": "Call exactly one top-level repair.terminal/abstain or repair.terminal/propose action. The action completes the repair report itself; do not wrap it in return.",
+        "phases": [
+          {
+            "mission": "synthesize",
+            "max_turns": 2,
+            "instruction": "Call exactly one top-level repair.terminal/abstain or repair.terminal/propose action. The action completes the repair report itself; do not wrap it in return."
+          }
+        ],
         "max_observation_chars": 8192,
         "max_transcript_chars": 262144
       }

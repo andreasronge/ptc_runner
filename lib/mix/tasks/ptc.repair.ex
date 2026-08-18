@@ -314,6 +314,7 @@ defmodule Mix.Tasks.Ptc.Repair do
              descriptor,
              validation.out,
              validation.suite["cases"],
+             host_input_digests(opts),
              opts
            ),
          :ok <- verify_published(out, report),
@@ -337,7 +338,7 @@ defmodule Mix.Tasks.Ptc.Repair do
     end
   end
 
-  defp run_cases(manifest, descriptor, root, cases, opts) do
+  defp run_cases(manifest, descriptor, root, cases, host_inputs, opts) do
     input_root =
       Path.join(
         Path.dirname(Path.expand(manifest)),
@@ -352,6 +353,8 @@ defmodule Mix.Tasks.Ptc.Repair do
              cases
              |> Enum.with_index(1)
              |> Enum.map(fn {validation_case, index} ->
+               verify_host_inputs!(opts, host_inputs)
+
                run_case(
                  manifest,
                  descriptor,
@@ -389,6 +392,33 @@ defmodule Mix.Tasks.Ptc.Repair do
 
       {:error, _reason} ->
         Mix.raise("could not create private validation input staging")
+    end
+  end
+
+  # The application digest guards the code under trial; these guard the
+  # host-owned inputs every fresh case command rereads. A host configuration
+  # or credential file that changes mid-suite would otherwise let one passing
+  # report certify cases run under different installations.
+  defp host_input_digests(opts) do
+    Map.new([:host_config, :env_file], fn key ->
+      {key, host_input_digest(Keyword.get(opts, key))}
+    end)
+  end
+
+  defp host_input_digest(nil), do: nil
+
+  defp host_input_digest(path) do
+    case File.read(path) do
+      {:ok, bytes} -> :crypto.hash(:sha256, bytes)
+      {:error, reason} -> {:unreadable, reason}
+    end
+  end
+
+  defp verify_host_inputs!(opts, reference) do
+    if host_input_digests(opts) == reference do
+      :ok
+    else
+      Mix.raise("ptc.repair failed: a host configuration input changed during validation")
     end
   end
 

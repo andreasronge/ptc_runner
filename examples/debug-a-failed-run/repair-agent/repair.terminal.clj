@@ -27,20 +27,24 @@
     (fail "abstain requires run id, cause, non-empty evidence, and non-empty missing evidence")))
 
 (defn propose
-  "Complete with a propose-change report containing run_id, cause, target_environment, component_id, function_id, base_source_hash, candidate_source, and evidence. Include target_mission only for a mission target; a workflow target omits it, and a redundant one is dropped."
+  "Complete with a propose-change report containing run_id, cause, target_environment, component_id, function_id, base_source_hash, candidate_source, and evidence. A mission target requires a nonblank target_mission; a workflow target omits it, and a redundant one is dropped. Any other shape is rejected by the result contract with correction feedback, so a mistake costs a turn, not the run."
   {:signature "(report :map) -> :map"}
   [report]
   (if (map? report)
-    (let [target-environment (get report "target_environment")
-          proposal (assoc report "decision" "propose-change")]
-      (cond
-        (= "workflow" target-environment)
-        (return (dissoc proposal "target_mission"))
+    (let [proposal (assoc report "decision" "propose-change")]
+      (return
+        (cond
+          (= "workflow" (get proposal "target_environment"))
+          (dissoc proposal "target_mission")
 
-        (and (= "mission" target-environment)
-             (nonblank-string? (get report "target_mission")))
-        (return proposal)
+          ;; A mission target without a usable mission is surfaced through
+          ;; the contract: normalizing it to "" fails minLength with the
+          ;; field named, so the model gets correction feedback and a turn
+          ;; instead of a terminal abort.
+          (and (= "mission" (get proposal "target_environment"))
+               (not (nonblank-string? (get proposal "target_mission"))))
+          (assoc proposal "target_mission" "")
 
-        :else
-        (fail "propose requires target_environment workflow or mission, and a mission target requires a nonblank target_mission")))
+          :else
+          proposal)))
     (fail "propose requires one report map")))
