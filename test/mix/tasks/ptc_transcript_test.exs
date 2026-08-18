@@ -45,6 +45,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
                  %{
                    "turns" => [
                      %{
+                       "system" => system,
                        "messages_added" => [%{"content" => prompt}],
                        "response" => %{"value" => %{"answer" => answer}}
                      }
@@ -55,6 +56,10 @@ defmodule Mix.Tasks.PtcTranscriptTest do
            } = output |> File.read!() |> Jason.decode!()
 
     assert run_id == fixture.run_id
+
+    # A transcript that certifies its own completeness cannot omit the
+    # instructions that shaped the run.
+    assert system == "private-system-#{run_id}"
     assert prompt == "private-prompt-#{run_id}"
     assert answer == "private-answer-#{run_id}"
     assert File.stat!(output).mode |> Bitwise.band(0o777) == 0o600

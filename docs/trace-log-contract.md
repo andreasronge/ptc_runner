@@ -92,6 +92,17 @@ JSONL files are written in canonical sequence order. Directory loading is
 deterministic: discover supported files, normalize paths, sort them, then load
 in sorted order under one aggregate byte cap.
 
+One directory holds both sanitized and private trace files, and one source
+grant reads exactly one kind. A run listing and a counters query therefore
+report the trace files that grant refused to read, as
+`excluded_private_trace_files` on a sanitized source and
+`excluded_sanitized_trace_files` on a private-only source. The field is absent
+when nothing was excluded, and inspection artifacts are never counted: they are
+a separate artifact class rather than withheld runs. Run-scoped answers never
+carry the field. The count is advisory evidence about the directory, not part
+of the source identity, so a concurrent write to the kind a grant does not read
+never invalidates the evidence it does read.
+
 Normal trace sinks sanitize before persistence. Private canonical event sinks
 use the separate fail-closed policy specified by the event-sink section of the
 `PtcRunner.Kernel.EventSink` module documentation, but retain the same event
@@ -470,9 +481,16 @@ turn with the newly added messages, response, matching generated programs, and
 stable stream/turn identity. Turn numbers start at one independently within
 each reconstructed stream; `{stream_id, turn}` is the identity, while
 `request_sequence` only orders records inside the inspection snapshot. It must
-not be compared with canonical activity sequence numbers. The collection omits
-the repeated system prompt; exact raw model requests remain available through
-`model_exchanges`. Page-level
+not be compared with canonical activity sequence numbers. A turn carries the
+`system` prompt that shaped it. Each returned page is compacted on its own,
+after filtering and pagination, so every stream present in a page starts with
+its effective prompt and an unchanged prompt is not repeated on every turn.
+An elided `system` therefore means "unchanged since the last turn in this page
+that carried one", never "none was sent": stream linkage keys on the request
+messages alone, so one stream can span turns whose evaluated program supplied
+different prompts. Compaction is idempotent, so a presented conversation
+re-compacts the pages it collected without losing a prompt at a page seam.
+Exact raw model requests remain available through `model_exchanges`. Page-level
 `evidence` reports canonical completeness, missing exchanges, and ambiguity
 separately from pagination. Interrupted model inputs remain raw evidence but
 are excluded from `turns`, so the canonical missing-exchange count records the
@@ -588,7 +606,8 @@ Every collection query has:
 - a deterministic opaque cursor;
 - deterministic ordering and tie-breakers;
 - maximum encoded and retained result sizes under one result ceiling;
-- truncation and omitted-count metadata;
+- truncation and omitted-count metadata, which report pagination only and
+  never source-kind exclusion;
 - one aggregate source-read byte cap;
 - bounded filter/tag/name lengths and counts.
 

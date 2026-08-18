@@ -142,7 +142,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   @doc "Executes one validated, source-scoped bounded trace query."
   def query(%__MODULE__{} = trace_log, operation, arguments)
       when operation in [:list_runs, :get_run, :list_turns, :counters] and is_map(arguments) do
-    with {:ok, events, source_id} <- load(trace_log),
+    with {:ok, events, source_id, source_metadata} <- load(trace_log),
          do:
            execute(
              operation,
@@ -151,7 +151,7 @@ defmodule PtcRunner.Kernel.TraceLog do
              arguments,
              trace_log.max_result_bytes,
              trace_log.source_kind,
-             %{}
+             source_presence_metadata(operation, source_metadata)
            )
   end
 
@@ -206,6 +206,17 @@ defmodule PtcRunner.Kernel.TraceLog do
         _metadata
       ),
       do: {:error, :invalid_query}
+
+  @doc false
+  @spec source_presence_metadata(atom(), map()) :: map()
+  # Only the two operations that answer "what does this source hold" carry the
+  # exclusion count. A run-scoped answer would attach it to a single run,
+  # where it would state nothing true about that run.
+  def source_presence_metadata(operation, metadata)
+      when operation in [:list_runs, :counters] and is_map(metadata),
+      do: metadata
+
+  def source_presence_metadata(_operation, _metadata), do: %{}
 
   @doc false
   @spec compile_analysis([map()], :sanitized | :private | map()) :: map()
@@ -291,7 +302,8 @@ defmodule PtcRunner.Kernel.TraceLog do
              run_sources: %{binary() => :sanitized | :private},
              source_id: binary(),
              source_bytes: non_neg_integer(),
-             file_count: non_neg_integer()
+             file_count: non_neg_integer(),
+             excluded_trace_files: %{optional(binary()) => pos_integer()}
            }}
           | {:error, atom()}
   def capture_directory(directory, opts \\ [])
@@ -359,7 +371,8 @@ defmodule PtcRunner.Kernel.TraceLog do
              run_sources: %{binary() => :sanitized | :private},
              source_id: binary(),
              source_bytes: non_neg_integer(),
-             file_count: 1
+             file_count: 1,
+             excluded_trace_files: %{optional(binary()) => pos_integer()}
            }}
           | {:error, atom()}
   def capture_file(path, opts \\ [])
@@ -1746,6 +1759,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     |> EventSink.events()
     |> normalize()
     |> validate_loaded(trace_log.max_source_bytes)
+    |> with_source_metadata(%{})
   catch
     :exit, _reason -> {:error, :source_unavailable}
   end
@@ -1753,15 +1767,17 @@ defmodule PtcRunner.Kernel.TraceLog do
   defp load(%__MODULE__{source: {:file, path}, max_source_bytes: max_bytes}) do
     with {:ok, source} <- read_regular_file(path, max_bytes),
          {:ok, events} <- decode_jsonl(source),
-         do: validate_loaded(events, max_bytes)
+         do: events |> validate_loaded(max_bytes) |> with_source_metadata(%{})
   end
 
   defp load(%__MODULE__{source: {:directory, directory}, max_source_bytes: max_bytes} = trace_log) do
     with {:ok, %File.Stat{type: :directory}} <- File.lstat(directory),
-         {:ok, names} <- File.ls(directory),
-         {:ok, events} <-
-           load_files(directory, supported_names(names, trace_log.source_kind), max_bytes) do
-      validate_loaded(events, max_bytes)
+         {:ok, listed} <- File.ls(directory),
+         names = supported_names(listed, trace_log.source_kind),
+         {:ok, events} <- load_files(directory, names, max_bytes) do
+      events
+      |> validate_loaded(max_bytes)
+      |> with_source_metadata(excluded_trace_files(listed, names, trace_log.source_kind))
     else
       {:error, reason} = error when reason in [:source_limit_exceeded, :malformed_source] ->
         error
@@ -1771,15 +1787,41 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
+  defp with_source_metadata({:ok, events, source_id}, metadata),
+    do: {:ok, events, source_id, metadata}
+
+  defp with_source_metadata({:error, _reason} = error, _metadata), do: error
+
+  # One trace directory holds both sanitized and private artifacts, and one
+  # query boundary reads exactly one kind. Staying silent about the other kind
+  # made an all-private project answer an empty run listing, so name the files
+  # this source kind refused to read. The count is advisory and deliberately
+  # outside `source_id`: a concurrent write to the kind this boundary does not
+  # read must not invalidate the evidence it does read.
+  defp excluded_trace_files(listed, accepted, source_kind) do
+    accepted = MapSet.new(accepted)
+
+    case Enum.count(listed, &(trace_file_name?(&1) and not MapSet.member?(accepted, &1))) do
+      0 -> %{}
+      excluded -> %{exclusion_key(source_kind) => excluded}
+    end
+  end
+
+  defp exclusion_key(:sanitized), do: "excluded_private_trace_files"
+  defp exclusion_key(:private), do: "excluded_sanitized_trace_files"
+
   defp supported_names(names, source_kind) do
     names
     |> Enum.filter(&supported_name?(&1, source_kind))
     |> Enum.sort()
   end
 
-  defp supported_name?(name, source_kind) do
+  defp supported_name?(name, source_kind),
+    do: trace_file_name?(name) and private_path?(name) == (source_kind == :private)
+
+  defp trace_file_name?(name) do
     Path.basename(name) == name and String.ends_with?(name, ".jsonl") and
-      not inspection_path?(name) and private_path?(name) == (source_kind == :private)
+      not inspection_path?(name)
   end
 
   defp capture_directory_files(
@@ -1792,7 +1834,7 @@ defmodule PtcRunner.Kernel.TraceLog do
          capture_hook,
          listing_hook
        ) do
-    with {:ok, before_inventory} <-
+    with {:ok, before_inventory, excluded} <-
            directory_inventory(
              directory,
              source_kind,
@@ -1801,8 +1843,8 @@ defmodule PtcRunner.Kernel.TraceLog do
              include_sanitized,
              listing_hook
            ) do
-      capture_inventory(
-        directory,
+      directory
+      |> capture_inventory(
         before_inventory,
         max_source_bytes,
         capture_hook,
@@ -1817,8 +1859,17 @@ defmodule PtcRunner.Kernel.TraceLog do
           )
         end
       )
+      |> put_excluded_trace_files(excluded)
     end
   end
+
+  # The exclusion count is reported beside the capture, never inside the
+  # inventory the capture re-verifies: a concurrent write to the kind this
+  # capture does not read must not fail it as a changed source.
+  defp put_excluded_trace_files({:ok, capture}, excluded),
+    do: {:ok, %{capture | excluded_trace_files: excluded}}
+
+  defp put_excluded_trace_files({:error, _reason} = error, _excluded), do: error
 
   defp capture_inventory(
          directory,
@@ -1847,7 +1898,8 @@ defmodule PtcRunner.Kernel.TraceLog do
          run_sources: run_sources,
          source_id: source_id,
          source_bytes: source_bytes,
-         file_count: length(after_verify_inventory.files)
+         file_count: length(after_verify_inventory.files),
+         excluded_trace_files: %{}
        }}
     end
   end
@@ -1882,11 +1934,12 @@ defmodule PtcRunner.Kernel.TraceLog do
        ) do
     with {:ok, %File.Stat{type: :directory} = directory_stat} <-
            File.lstat(directory, time: :posix),
-         {:ok, names} <- bounded_directory_names(directory, max_directory_entries, listing_hook),
+         {:ok, listed} <- bounded_directory_names(directory, max_directory_entries, listing_hook),
          {:ok, names} <-
-           bounded_capture_names(names, source_kind, include_sanitized, max_trace_files),
+           bounded_capture_names(listed, source_kind, include_sanitized, max_trace_files),
          {:ok, files} <- inventory_files(directory, names) do
-      {:ok, %{directory: stat_identity(directory_stat), files: files}}
+      {:ok, %{directory: stat_identity(directory_stat), files: files},
+       excluded_trace_files(listed, names, source_kind)}
     else
       {:ok, %File.Stat{}} -> {:error, :malformed_source}
       {:error, :source_limit_exceeded} = error -> error
@@ -1910,7 +1963,7 @@ defmodule PtcRunner.Kernel.TraceLog do
            include_sanitized,
            listing_hook
          ) do
-      {:ok, inventory} -> {:ok, inventory}
+      {:ok, inventory, _excluded} -> {:ok, inventory}
       {:error, _reason} -> {:error, :source_changed}
     end
   end

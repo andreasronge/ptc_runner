@@ -23,6 +23,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reconstructed conversations carry the `system` prompt that shaped each turn,
+  so `ptc transcript` and the Viewer's conversation view no longer certify a
+  transcript as complete while omitting the instructions the run was given.
+  Each returned page is compacted on its own, after filtering and pagination,
+  so every stream in a page starts with its effective prompt while an unchanged
+  prompt is not repeated on every turn. Stream linkage keys on request messages
+  alone, so an elided `system` means "unchanged since the last turn in this
+  page that carried one" rather than "none was sent".
+
+- A run listing or counters query now reports the trace files its source kind
+  refused to read, as `excluded_private_trace_files` or
+  `excluded_sanitized_trace_files`. A project whose traces are all private no
+  longer answers an empty Viewer run list as though no runs existed; the run
+  picker names the exclusion and the `viewer.private` setting that reads them.
+  `omitted_count` keeps its single pagination meaning.
+
 - Raised capability callbacks now retain their bounded exception class,
   message, and formatted stacktrace only in explicitly enabled private
   inspection. Inspection V7 correlates that sensitive evidence with the

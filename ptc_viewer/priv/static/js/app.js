@@ -5,7 +5,7 @@ import { createAnalyzeButton, createReplController, nextTabName, readViewerConfi
 import { createRunCatalog } from './run-catalog.js';
 import { createLiveController, liveTokenFromSearch } from './live.js';
 import { commitCurrentLoad } from './current-load.js';
-import { displayRunName, formatRunUsage, searchableRunFields } from './run-display.js';
+import { displayRunName, emptyRunsMessage, excludedTraceNote, formatRunUsage, searchableRunFields } from './run-display.js';
 import { truncate } from './utils.js';
 
 function formatDate(isoString) {
@@ -110,6 +110,7 @@ function RunPicker() {
   const { runs, page, query, selectedRunId } = state;
   const visible = runs.filter(run => matchesQuery(run, query));
   const selected = runs.find(run => run.run_id === selectedRunId) || null;
+  const excluded = excludedTraceNote(page);
 
   // With a run open the list is reference material, not the task at hand: it
   // collapses to one control that both names the current run and returns to
@@ -139,6 +140,7 @@ function RunPicker() {
     <div class="file-picker-panel">
       <div class="file-picker-header">
         <h3>Kernel runs <span class="file-picker-count">${runs.length}${page?.truncated ? '+' : ''}</span></h3>
+        ${runs.length > 0 && excluded && html`<p class="file-picker-note">${excluded}</p>`}
         <input type="search" class="file-picker-search" placeholder="Filter by run id, status or bundle"
                aria-label="Filter runs" value=${query}
                onInput=${event => { state.query = event.currentTarget.value; renderRunPicker(); }} />
@@ -146,7 +148,7 @@ function RunPicker() {
       <div class="file-picker-list">
         ${visible.map(run => html`<${RunRow} key=${run.run_id} run=${run} />`)}
         ${!visible.length && html`<p class="file-picker-empty">
-          ${runs.length ? `No run matches “${query}”.` : 'No canonical runs in this trace directory.'}
+          ${runs.length ? `No run matches “${query}”.` : emptyRunsMessage(page)}
         </p>`}
         ${page?.next_cursor && !query && html`<${LoadMoreRuns} cursor=${page.next_cursor} />`}
       </div>

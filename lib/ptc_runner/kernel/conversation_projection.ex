@@ -26,7 +26,6 @@ defmodule PtcRunner.Kernel.ConversationProjection do
             end)
 
           turn
-          |> Map.delete("system")
           |> Map.put("stream_id", stream["stream_id"])
           |> Map.put("generated", generated)
         end)
@@ -98,6 +97,7 @@ defmodule PtcRunner.Kernel.ConversationProjection do
           turns
           |> Enum.sort_by(&{&1["turn"] || 0, &1["request_sequence"] || 0})
           |> Enum.map(&Map.drop(&1, ~w(stream_id run_id trace_id)))
+          |> elide_repeated_system()
 
         %{"stream_id" => stream_id, "turns" => turns}
       end)
@@ -115,6 +115,55 @@ defmodule PtcRunner.Kernel.ConversationProjection do
       "trace_snapshot_hash" => page["trace_snapshot_hash"]
     }
   end
+
+  # The system prompt is the instruction set that shaped a turn, and the
+  # evaluated program supplies it per call, so two turns of one stream can
+  # carry different prompts: stream linkage keys on `arguments.messages`
+  # alone. Every compiled item therefore keeps its own prompt -- `turns` is
+  # filtered and paginated downstream, and eliding before that selection would
+  # hand a caller a page whose prompt was dropped on a turn it never received.
+  #
+  # A presented conversation is the whole selection at once, so there the
+  # repeat is redundant, and repeating an unchanged prompt on every turn would
+  # multiply the largest constant in the result against its byte ceiling. Elide
+  # it only here, only against the previous turn of the same presented stream:
+  # the first turn of every presented stream always carries its prompt.
+  defp elide_repeated_system(turns) do
+    turns
+    |> Enum.map_reduce(:no_previous_turn, &elide_system/2)
+    |> elem(0)
+  end
+
+  # An elided turn still means "same prompt as the last one that carried it",
+  # so comparison tracks the last present value rather than the previous turn.
+  # That makes the compaction idempotent, which is what lets a page be
+  # compacted once on the way out and again on the way into a presentation.
+  defp elide_system(turn, last) do
+    cond do
+      not Map.has_key?(turn, "system") -> {turn, last}
+      last == {:system, turn["system"]} -> {Map.delete(turn, "system"), last}
+      true -> {turn, {:system, turn["system"]}}
+    end
+  end
+
+  @doc false
+  @spec compact_turns([map()]) :: [map()]
+  # Applied to one selected page of `turns`, after filtering and pagination.
+  # Every page is therefore self-describing -- each stream in it starts with
+  # its effective prompt -- while an unchanged prompt is not repeated on every
+  # turn, which would otherwise push a prompt-heavy run past the aggregate byte
+  # ceiling the whole-conversation collectors enforce over raw items.
+  def compact_turns(items) when is_list(items) do
+    items
+    |> Enum.map_reduce(%{}, fn item, seen ->
+      stream_id = item["stream_id"]
+      {elided, last} = elide_system(item, Map.get(seen, stream_id, :no_previous_turn))
+      {elided, Map.put(seen, stream_id, last)}
+    end)
+    |> elem(0)
+  end
+
+  def compact_turns(items), do: items
 
   defp conversation_streams(exchanges) do
     result = streams(exchanges)

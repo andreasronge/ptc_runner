@@ -433,6 +433,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
         capture_id: capture.source_id,
         captured_at: DateTime.utc_now(),
         file_count: capture.file_count,
+        excluded_trace_files: capture.excluded_trace_files,
         source: source,
         run_count: capture.events |> MapSet.new(& &1["run_id"]) |> MapSet.size(),
         snapshot_hash: SafeMetadata.fingerprint(capture.source_id),
@@ -443,8 +444,10 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   end
 
   defp query_with_snapshot_hash(state, operation, arguments) do
-    snapshot_hash = state.info.snapshot_hash
-    metadata = %{"snapshot_hash" => snapshot_hash}
+    metadata =
+      %{"snapshot_hash" => state.info.snapshot_hash}
+      |> Map.merge(TraceLog.source_presence_metadata(operation, state.info.excluded_trace_files))
+
     snapshot_query(state, operation, arguments, state.max_result_bytes, metadata)
   end
 

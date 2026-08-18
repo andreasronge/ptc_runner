@@ -122,7 +122,11 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
              })
 
     assert prompt == "private-prompt-#{run_id}"
-    refute Map.has_key?(turn, "system")
+
+    # The instructions that shaped the turn are the first thing a failed run is
+    # opened for, and the conversation is the one view that certifies its own
+    # completeness. It carries them.
+    assert turn["system"] == "private-system-#{run_id}"
 
     assert {:ok, %{"items" => [%{"arguments" => %{"system" => "private-system-" <> ^run_id}}]}} =
              RunAnalysis.query(analysis, :read, %{
