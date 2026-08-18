@@ -129,26 +129,46 @@ defmodule Mix.Tasks.Ptc.Repair do
   defp with_private_source(out, source, callback) do
     {directory, path} = PrivateDirectory.temporary_sibling(out, "candidate.clj")
 
-    with :ok <- PrivateDirectory.create(directory),
-         :ok <- write_private(path, source) do
-      result =
-        try do
-          callback.(path)
-          :ok
-        after
-          _ = File.rm(path)
-          _ = File.rmdir(directory)
+    case PrivateDirectory.create(directory) do
+      :ok ->
+        outcome =
+          case write_private(path, source) do
+            :ok ->
+              try do
+                callback.(path)
+                :ok
+              rescue
+                exception -> {:raised, exception, __STACKTRACE__}
+              end
+
+            {:error, _reason} ->
+              {:error, :private_candidate_staging_failed}
+          end
+
+        # Every exit path sweeps and verifies: the staged file holds
+        # model-authored source that was supposed to be gone, so residue is
+        # a failure, not a footnote.
+        _ = File.rm(path)
+        _ = File.rmdir(directory)
+        residue? = File.exists?(path) or File.exists?(directory)
+
+        case outcome do
+          {:raised, exception, stacktrace} ->
+            if residue? do
+              Mix.shell().error("candidate staging residue retained at #{directory}")
+            end
+
+            reraise exception, stacktrace
+
+          _outcome when residue? ->
+            {:error, :private_candidate_cleanup_failed}
+
+          outcome ->
+            outcome
         end
 
-      # Cleanup residue is a failure, not a footnote: the staged file holds
-      # model-authored source that was supposed to be gone.
-      if File.exists?(path) or File.exists?(directory) do
-        {:error, :private_candidate_cleanup_failed}
-      else
-        result
-      end
-    else
-      {:error, _reason} -> {:error, :private_candidate_staging_failed}
+      {:error, _reason} ->
+        {:error, :private_candidate_staging_failed}
     end
   end
 
@@ -326,41 +346,59 @@ defmodule Mix.Tasks.Ptc.Repair do
 
     case PrivateDirectory.create(input_root) do
       :ok ->
-        results =
+        outcome =
           try do
-            cases
-            |> Enum.with_index(1)
-            |> Enum.map(fn {validation_case, index} ->
-              run_case(
-                manifest,
-                descriptor,
-                root,
-                input_root,
-                validation_case,
-                index,
-                opts
-              )
-            end)
-          after
-            case File.ls(input_root) do
-              {:ok, names} -> Enum.each(names, &File.rm(Path.join(input_root, &1)))
-              {:error, _reason} -> :ok
-            end
-
-            _ = File.rmdir(input_root)
+            {:ok,
+             cases
+             |> Enum.with_index(1)
+             |> Enum.map(fn {validation_case, index} ->
+               run_case(
+                 manifest,
+                 descriptor,
+                 root,
+                 input_root,
+                 validation_case,
+                 index,
+                 opts
+               )
+             end)}
+          rescue
+            exception -> {:raised, exception, __STACKTRACE__}
           end
 
-        # Staged inputs can carry private values; residue the cleanup could
+        sweep_input_root(input_root)
+
+        # Staged inputs can carry private values; residue the sweep could
         # not remove must fail the task rather than certify a passing suite.
-        if File.exists?(input_root) do
-          {:error, :private_input_cleanup_failed}
-        else
-          {:ok, results}
+        residue? = File.exists?(input_root)
+
+        case outcome do
+          {:raised, exception, stacktrace} ->
+            if residue? do
+              Mix.shell().error("private validation input residue retained at #{input_root}")
+            end
+
+            reraise exception, stacktrace
+
+          _outcome when residue? ->
+            {:error, :private_input_cleanup_failed}
+
+          outcome ->
+            outcome
         end
 
       {:error, _reason} ->
         Mix.raise("could not create private validation input staging")
     end
+  end
+
+  defp sweep_input_root(input_root) do
+    case File.ls(input_root) do
+      {:ok, names} -> Enum.each(names, &File.rm(Path.join(input_root, &1)))
+      {:error, _reason} -> :ok
+    end
+
+    _ = File.rmdir(input_root)
   end
 
   defp run_case(manifest, descriptor, root, input_root, validation_case, index, opts) do
