@@ -9,6 +9,10 @@ defmodule PtcRunner.Kernel.SchemaPathTest do
 
   @adversarial ["__proto__", "constructor", "", "properties", "items", "oneOf", "../escape"]
 
+  # A name an author could plausibly choose for a member of an open map. Every
+  # generated path through one carries it, and no rendered pointer may.
+  @caller_key "caller-owned-name"
+
   test "a segment the schema does not define is dropped along with everything after it" do
     # `__proto__` is a caller-chosen install alias, so it is elided rather than
     # named; `workspace` is not a member of the closed installation schema, so
@@ -119,27 +123,52 @@ defmodule PtcRunner.Kernel.SchemaPathTest do
 
         assert {:ok, %CommandPath{segments: ^prefix}} = mint.(prefix),
                "#{label}: #{inspect(prefix)} from #{inspect(path)} is not schema-authorized"
+
+        # The whole point of eliding rather than truncating: the author's own
+        # name is replaced, never carried.
+        refute {:property, @caller_key} in prefix,
+               "#{label}: #{inspect(prefix)} carries the caller's own member name"
       end
 
       # Guard the generator: a schema shape it stopped following would make the
-      # assertions above pass vacuously. Depths differ by schema — the host
-      # tops out at two segments because installations hang off
-      # `additionalProperties`, which is deliberately not traversed.
+      # assertions above pass vacuously.
       deep = Enum.count(explained, &(length(&1) >= 2))
 
       assert deep >= div(length(explained), 2),
              "#{label}: only #{deep} of #{length(explained)} generated paths are multi-segment"
+
+      # Only schemas that carry an elidable open map can exercise elision;
+      # `component_override` has none. Deriving that rather than listing it
+      # keeps the guard honest if a schema gains or loses one.
+      elidable? =
+        Enum.any?(open_maps(schema, 6), &match?({:ok, _child}, CommandPath.elidable_child(&1)))
+
+      elided =
+        Enum.count(explained, fn path ->
+          {:property, CommandPath.elision()} in SchemaPath.explained_prefix(path, schema)
+        end)
+
+      assert elided > 0 == elidable?,
+             "#{label}: elidable?=#{elidable?} but #{elided} generated paths elide a member"
     end
   end
 
   # Raw document paths the schema explains: property names as binaries, array
-  # indices as integers, every oneOf branch followed.
+  # indices as integers, every oneOf branch followed, and every open map entered
+  # under a caller-chosen name so the elided paths are covered too. Without that
+  # last case the generator stops at `install` and the invariant above never
+  # sees a `*` segment.
   defp document_paths(_schema, 0), do: []
 
   defp document_paths(%{"properties" => properties}, depth) when is_map(properties) do
     Enum.flat_map(properties, fn {name, child} ->
       [[name] | Enum.map(document_paths(child, depth - 1), &[name | &1])]
     end)
+  end
+
+  defp document_paths(%{"additionalProperties" => child}, depth) when is_map(child) do
+    key = @caller_key
+    [[key] | Enum.map(document_paths(child, depth - 1), &[key | &1])]
   end
 
   defp document_paths(%{"items" => items}, depth),

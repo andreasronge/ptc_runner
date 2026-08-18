@@ -145,11 +145,15 @@ defmodule PtcRunner.Kernel.CommandPath do
 
   defp authorized?([], _schema), do: true
 
-  defp authorized?([{:property, name} | rest], %{"properties" => properties})
+  # A node may carry both `properties` and `additionalProperties`. None of the
+  # shipped schemas does today, but `SchemaPath` would elide there while this
+  # refused, and the two walkers disagreeing costs the diagnostic its whole
+  # path. Falling through keeps them in agreement by construction.
+  defp authorized?([{:property, name} | rest], %{"properties" => properties} = schema)
        when is_binary(name) and is_map(properties) do
     case Map.fetch(properties, name) do
       {:ok, child} -> authorized?(rest, child)
-      :error -> false
+      :error -> elided?([{:property, name} | rest], schema)
     end
   end
 
@@ -160,14 +164,19 @@ defmodule PtcRunner.Kernel.CommandPath do
   defp authorized?(segments, %{"oneOf" => branches}) when is_list(branches),
     do: Enum.any?(branches, &authorized?(segments, &1))
 
-  defp authorized?([{:property, @elision} | rest], schema) do
+  defp authorized?([{:property, @elision} | _rest] = segments, schema),
+    do: elided?(segments, schema)
+
+  defp authorized?(_segments, _schema), do: false
+
+  defp elided?([{:property, @elision} | rest], schema) do
     case elidable_child(schema) do
       {:ok, child} -> authorized?(rest, child)
       :error -> false
     end
   end
 
-  defp authorized?(_segments, _schema), do: false
+  defp elided?(_segments, _schema), do: false
 
   @doc false
   @spec elision() :: binary()
