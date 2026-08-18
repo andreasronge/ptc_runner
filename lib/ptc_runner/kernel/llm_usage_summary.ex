@@ -51,6 +51,33 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
     }
   end
 
+  @doc """
+  Builds alias-attributed rows from calls that carry no event stream.
+
+  `doctor --connect` bills one request per probed occurrence and never publishes
+  a trace, so it has the calls but not the events `summarize/2` reduces. The row
+  shape, the counters, and the rule that drops `total_cost` unless every call
+  priced its own are the ones a run reports, because a caller comparing the two
+  is comparing the same measurement.
+  """
+  @spec alias_rows([{binary(), binary(), map() | nil}]) :: [map()]
+  def alias_rows(calls) when is_list(calls) do
+    calls
+    |> Enum.reduce(%{}, fn {alias_name, revision, usage}, counters ->
+      update_counter(
+        counters,
+        {alias_name, revision},
+        Map.merge(empty_row(), %{
+          "alias" => alias_name,
+          "installation_revision" => revision
+        }),
+        usage,
+        true
+      )
+    end)
+    |> rows()
+  end
+
   @spec totals([map()]) :: map()
   def totals(events) when is_list(events) do
     terminal? = Enum.any?(events, &(field(&1, "type") == "run-stopped"))

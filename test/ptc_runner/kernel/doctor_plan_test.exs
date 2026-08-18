@@ -734,7 +734,14 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
         }
       end)
 
-    {:ok, result} = ConnectivityResult.new(prepared, catalog, entries, provider_activity)
+    usage =
+      entries
+      |> Enum.filter(&(&1.mode == :probe))
+      |> Enum.map(&%{name: &1.name, destination: &1.destination, index: &1.index, usage: nil})
+
+    {:ok, result} =
+      ConnectivityResult.new(prepared, catalog, entries, provider_activity, usage)
+
     result
   end
 
@@ -745,7 +752,8 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
       "checks" => checks,
       "model_aliases" => [],
       "provider_activity" => provider_activity,
-      "readiness" => readiness
+      "readiness" => readiness,
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     assert CommandContract.valid_success_result?(:doctor, result)

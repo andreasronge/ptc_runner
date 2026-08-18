@@ -40,19 +40,35 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
   # also rejects `false` when the sealed declarations or reached entries prove
   # work happened; `true` remains admissible for command-owned application
   # startup, which these fields cannot independently derive.
+  #
+  # `usage` accounts for what the probes actually spent: exactly one entry per
+  # `:probe` occurrence, in the same declaration order, each carrying either the
+  # closed token record its probe reported or `nil` when the provider reported
+  # none. It is sealed beside the entries for the same reason they are — a
+  # command that could substitute its own account of a billable request would be
+  # reporting spend nothing measured — and its correspondence with the probed
+  # occurrences is re-derived on every read rather than trusted.
 
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LLMUsage
   alias PtcRunner.Kernel.PreparedRun
 
   @destinations [:workflow, :mission]
   @modes [:none, :probe, :acquisition]
   @outcomes [:skipped, :reachable]
   @entry_keys [:name, :destination, :index, :mode, :outcome]
+  @usage_keys [:name, :destination, :index, :usage]
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @max_entries 128
 
-  @enforce_keys [:prepared_attestation, :catalog_attestation, :entries, :provider_activity]
+  @enforce_keys [
+    :prepared_attestation,
+    :catalog_attestation,
+    :entries,
+    :provider_activity,
+    :usage
+  ]
   defstruct @enforce_keys ++ [attestation: nil]
   @field_keys Enum.sort([:__struct__, :attestation | @enforce_keys])
 
@@ -64,27 +80,43 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
           mode: :none | :probe | :acquisition,
           outcome: outcome()
         }
+  @type usage_entry :: %{
+          name: binary(),
+          destination: :workflow | :mission,
+          index: non_neg_integer(),
+          usage: map() | nil
+        }
   @type t :: %__MODULE__{
           prepared_attestation: binary(),
           catalog_attestation: binary(),
           entries: [entry()],
           provider_activity: boolean(),
+          usage: [usage_entry()],
           attestation: binary() | nil
         }
 
-  @spec new(PreparedRun.t(), InstallationCatalog.t(), [entry()], boolean()) ::
+  @spec new(PreparedRun.t(), InstallationCatalog.t(), [entry()], boolean(), [usage_entry()]) ::
           {:ok, t()} | {:error, :invalid_connectivity_result}
   @doc false
-  def new(%PreparedRun{} = prepared, %InstallationCatalog{} = catalog, entries, provider_activity)
-      when is_list(entries) and length(entries) <= @max_entries and is_boolean(provider_activity) do
+  def new(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        entries,
+        provider_activity,
+        usage
+      )
+      when is_list(entries) and length(entries) <= @max_entries and is_boolean(provider_activity) and
+             is_list(usage) do
     if bound_pair?(prepared, catalog) and entries_valid?(entries) and
          answers_for?(entries, prepared, catalog) and
-         activity_consistent?(provider_activity, entries, prepared, catalog) do
+         activity_consistent?(provider_activity, entries, prepared, catalog) and
+         usage_valid?(usage) and usage_answers_for?(usage, entries) do
       result = %__MODULE__{
         prepared_attestation: prepared.attestation,
         catalog_attestation: catalog.attestation,
         entries: entries,
-        provider_activity: provider_activity
+        provider_activity: provider_activity,
+        usage: usage
       }
 
       {:ok, %{result | attestation: Attestation.attest(__MODULE__, payload(result))}}
@@ -93,7 +125,7 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
     end
   end
 
-  def new(_prepared, _catalog, _entries, _provider_activity),
+  def new(_prepared, _catalog, _entries, _provider_activity, _usage),
     do: {:error, :invalid_connectivity_result}
 
   @spec valid?(term()) :: boolean()
@@ -103,6 +135,7 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
       Enum.sort(Map.keys(result)) == @field_keys and is_binary(result.prepared_attestation) and
         is_binary(result.catalog_attestation) and is_boolean(result.provider_activity) and
         entries_valid?(result.entries) and activity_covers_entries?(result) and
+        usage_valid?(result.usage) and usage_answers_for?(result.usage, result.entries) and
         Attestation.valid?(__MODULE__, payload(result), attestation)
 
   def valid?(_result), do: false
@@ -127,7 +160,8 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
       result.prepared_attestation == prepared.attestation and
       result.catalog_attestation == catalog.attestation and
       answers_for?(result.entries, prepared, catalog) and
-      activity_consistent?(result.provider_activity, result.entries, prepared, catalog)
+      activity_consistent?(result.provider_activity, result.entries, prepared, catalog) and
+      usage_answers_for?(result.usage, result.entries)
   end
 
   def bound_to?(_result, _prepared, _catalog), do: false
@@ -139,6 +173,10 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
   @spec provider_activity(t()) :: boolean()
   @doc false
   def provider_activity(%__MODULE__{provider_activity: provider_activity}), do: provider_activity
+
+  @spec usage(t()) :: [usage_entry()]
+  @doc false
+  def usage(%__MODULE__{usage: usage}), do: usage
 
   # The preparation's lifecycle state is its caller's business — it is consumed
   # while the operation runs and closed afterwards — but its seal is not. A
@@ -153,7 +191,7 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
   defp payload(result),
     do:
       {result.prepared_attestation, result.catalog_attestation, result.entries,
-       result.provider_activity}
+       result.provider_activity, result.usage}
 
   defp entries_valid?(entries) when is_list(entries) and length(entries) <= @max_entries,
     do: Enum.all?(entries, &valid_entry?/1)
@@ -186,6 +224,40 @@ defmodule PtcRunner.Kernel.ConnectivityResult do
   end
 
   defp valid_entry?(_entry), do: false
+
+  defp usage_valid?(usage) when is_list(usage) and length(usage) <= @max_entries,
+    do: Enum.all?(usage, &valid_usage_entry?/1)
+
+  defp usage_valid?(_usage), do: false
+
+  defp valid_usage_entry?(%{} = entry) when not is_struct(entry) do
+    Enum.sort(Map.keys(entry)) == Enum.sort(@usage_keys) and
+      is_binary(entry.name) and entry.name =~ @name and
+      entry.destination in @destinations and
+      is_integer(entry.index) and entry.index >= 0 and
+      valid_usage_values?(entry.usage)
+  end
+
+  defp valid_usage_entry?(_entry), do: false
+
+  # `LLMUsage` owns what a token record may say — which fields, integers rather
+  # than fractions, and the value and size ceilings. A second, looser copy here
+  # would let a sealed account carry a shape the canonical normalizer refuses,
+  # so the value is required to be one `normalize/1` already produced.
+  defp valid_usage_values?(nil), do: true
+
+  defp valid_usage_values?(usage), do: match?({:ok, ^usage}, LLMUsage.normalize(usage))
+
+  # One account per probed occurrence, in the order the entries declare them. An
+  # account for an occurrence nothing probed, a missing account for one that was
+  # probed, or two accounts for the same occurrence would each let a reader
+  # attribute spend to the wrong declaration.
+  defp usage_answers_for?(usage, entries) do
+    Enum.map(usage, &{&1.name, &1.destination, &1.index}) ==
+      entries
+      |> Enum.filter(&(&1.mode == :probe))
+      |> Enum.map(&{&1.name, &1.destination, &1.index})
+  end
 
   # One entry per selected occurrence, in declaration order, each reporting the
   # mode its own sealed descriptor declares.

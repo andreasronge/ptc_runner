@@ -245,7 +245,8 @@ defmodule PtcRunner.Kernel.CommandContract do
           "checks" => checks,
           "model_aliases" => model_aliases,
           "provider_activity" => provider_activity,
-          "readiness" => readiness
+          "readiness" => readiness,
+          "usage" => usage
         }
       ) do
     case checks do
@@ -259,6 +260,7 @@ defmodule PtcRunner.Kernel.CommandContract do
 
         common =
           model_aliases_valid?(model_aliases) and
+            doctor_usage_valid?(usage, provider_activity, model_aliases) and
             Enum.all?(keys, &is_tuple/1) and
             keys == Enum.sort(keys) and
             keys == Enum.uniq(keys) and
@@ -318,7 +320,8 @@ defmodule PtcRunner.Kernel.CommandContract do
            "checks" => checks,
            "model_aliases" => model_aliases,
            "provider_activity" => provider_activity,
-           "readiness" => "failed"
+           "readiness" => "failed",
+           "usage" => usage
          } <- result,
          [
            %{"name" => "runtime"},
@@ -328,6 +331,7 @@ defmodule PtcRunner.Kernel.CommandContract do
          ] <- checks,
          keys = Enum.map(provider_checks, &doctor_provider_key/1),
          true <- model_aliases_valid?(model_aliases),
+         true <- doctor_usage_valid?(usage, provider_activity, model_aliases),
          true <- Enum.all?(keys, &is_tuple/1),
          true <- keys == Enum.sort(keys) and keys == Enum.uniq(keys),
          true <- provider_groups_start_with_local?(keys),
@@ -540,6 +544,56 @@ defmodule PtcRunner.Kernel.CommandContract do
   end
 
   defp model_aliases_valid?(_aliases), do: false
+
+  # A command that activated no provider spent nothing, so it may not claim its
+  # account is unavailable and it may not report rows for calls it never made.
+  # Rows are keyed by alias and revision, sorted and unique, the way a run's are,
+  # and every key names a model alias the same report says was selected: spend
+  # attributed to a declaration the report does not list is spend a reader
+  # cannot check.
+  defp doctor_usage_valid?(
+         %{"llm_usage_state" => "unavailable", "llm_usage" => nil},
+         true,
+         _aliases
+       ),
+       do: true
+
+  defp doctor_usage_valid?(
+         %{"llm_usage_state" => "available", "llm_usage" => rows},
+         activity,
+         aliases
+       )
+       when is_list(rows) do
+    keys = Enum.map(rows, &{&1["alias"], &1["installation_revision"]})
+
+    selected =
+      for %{"selected" => true} = row <- aliases,
+          do: {row["alias"], row["installation_revision"]}
+
+    keys == Enum.sort(Enum.uniq(keys)) and (activity or rows == []) and
+      Enum.all?(keys, &(&1 in selected)) and Enum.all?(rows, &usage_row_coherent?/1)
+  end
+
+  defp doctor_usage_valid?(_usage, _activity, _aliases), do: false
+
+  # The counter relationships `LLMUsageSummary` produces: a row exists because
+  # calls happened, a probed call that failed leaves no result to report at all,
+  # each success either reported usage or did not, and one that did not leaves
+  # the total cost incomplete.
+  defp usage_row_coherent?(%{
+         "calls" => calls,
+         "successful_calls" => successful,
+         "usage_calls" => measured,
+         "missing_usage_calls" => missing,
+         "usage" => usage
+       })
+       when is_map(usage) do
+    calls >= 1 and successful == calls and measured + missing == calls and
+      (measured > 0 or usage == %{}) and
+      (missing == 0 or not Map.has_key?(usage, "total_cost"))
+  end
+
+  defp usage_row_coherent?(_row), do: false
 
   defp valid_installation_revision?(revision) when is_binary(revision),
     do: revision =~ @installation_revision
@@ -1523,7 +1577,8 @@ defmodule PtcRunner.Kernel.CommandContract do
       ])
     ]
 
-    closed(~w(checks model_aliases provider_activity readiness), %{
+    closed(~w(checks model_aliases provider_activity readiness usage), %{
+      "usage" => doctor_usage_schema(),
       "checks" => %{
         "type" => "array",
         "minItems" => 3,
@@ -1546,7 +1601,7 @@ defmodule PtcRunner.Kernel.CommandContract do
               "oneOf" => [%{"type" => "boolean"}, %{"type" => "null"}]
             },
             "selected" => %{"type" => "boolean"},
-            "model_selector" => %{"type" => "string", "maxLength" => 4_096}
+            "model_selector" => model_selector_schema()
           }
         }
       },
@@ -1557,6 +1612,25 @@ defmodule PtcRunner.Kernel.CommandContract do
           else: %{"const" => "failed"}
         )
     })
+  end
+
+  # The LLM half of the shape a run reports, on the same rows. `doctor --connect`
+  # bills a real request per probed occurrence; a command that could not account
+  # for what it spent says so with the run's own `unavailable` state rather than
+  # reporting zero.
+  defp doctor_usage_schema do
+    %{
+      "oneOf" => [
+        closed(~w(llm_usage_state llm_usage), %{
+          "llm_usage_state" => %{"const" => "available"},
+          "llm_usage" => llm_usage_rows(llm_alias_row_schema())
+        }),
+        closed(~w(llm_usage_state llm_usage), %{
+          "llm_usage_state" => %{"const" => "unavailable"},
+          "llm_usage" => %{"type" => "null"}
+        })
+      ]
+    }
   end
 
   defp doctor_provider_check_schema(mode) do
@@ -1655,13 +1729,24 @@ defmodule PtcRunner.Kernel.CommandContract do
             "maxItems" => 2,
             "uniqueItems" => true,
             "items" => %{"enum" => ~w(workflow mission)}
-          }
+          },
+          "model_selector" => model_selector_schema()
         }
       )
 
     closed(~w(installations), %{
       "installations" => %{"type" => "array", "maxItems" => 128, "items" => item}
     })
+  end
+
+  # `ModelSelectorDisclosure` withholds endpoint-bearing selectors; the closed
+  # envelope refuses one rather than trusting every producer to remember.
+  defp model_selector_schema do
+    %{
+      "type" => "string",
+      "maxLength" => 4_096,
+      "not" => %{"pattern" => "^openai-compat:"}
+    }
   end
 
   defp success_result_schema(:help), do: help_result_schema()

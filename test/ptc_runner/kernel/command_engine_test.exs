@@ -1295,6 +1295,101 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_schema_valid(missing_host.envelope)
   end
 
+  @tag :tmp_dir
+  test "models names the configured selector and withholds an endpoint-bearing one", %{
+    tmp_dir: directory
+  } do
+    host_path =
+      write_host_config(directory, "selector-models", %{
+        "credentials" => %{"key" => %{"env" => "PTC_TEST_ABSENT_KEY"}},
+        "install" => %{
+          "cataloged" => %{
+            "source" => "llm",
+            "installation_revision" => "cataloged-v1",
+            "model" => "openrouter:test/model",
+            "credential" => "key"
+          },
+          "endpoint" => %{
+            "source" => "llm",
+            "installation_revision" => "endpoint-v1",
+            "model" => "openai-compat:https://private.example/v1|deployment",
+            "credential" => "key"
+          },
+          "tooling" => inert_stdio_installation("tooling-v1")
+        }
+      })
+
+    assert {:ok, %CommandOutcome{} = modeled} =
+             CommandEngine.prepare(["models", "--host-config", host_path])
+
+    assert [cataloged, endpoint, tooling] = modeled.envelope["result"]["installations"]
+    assert cataloged["alias"] == "cataloged"
+    assert cataloged["model_selector"] == "openrouter:test/model"
+    assert endpoint["alias"] == "endpoint"
+    refute Map.has_key?(endpoint, "model_selector")
+    assert tooling["alias"] == "tooling"
+    refute Map.has_key?(tooling, "model_selector")
+    assert_schema_valid(modeled.envelope)
+  end
+
+  @tag :tmp_dir
+  test "doctor --show-model-selectors applies the same disclosure rule as models", %{
+    tmp_dir: directory
+  } do
+    application =
+      write_application(
+        directory,
+        "selector-doctor",
+        valid_manifest(%{
+          "providers" => %{
+            "workflow" => [
+              %{"name" => "cataloged", "config" => %{}},
+              %{"name" => "endpoint", "config" => %{}}
+            ],
+            "mission" => []
+          }
+        })
+      )
+
+    host_path =
+      write_host_config(directory, "selector-doctor", %{
+        "credentials" => %{"key" => %{"env" => "PTC_TEST_ABSENT_KEY"}},
+        "install" => %{
+          "cataloged" => %{
+            "source" => "llm",
+            "installation_revision" => "cataloged-v1",
+            "model" => "openrouter:test/model",
+            "credential" => "key"
+          },
+          "endpoint" => %{
+            "source" => "llm",
+            "installation_revision" => "endpoint-v1",
+            "model" => "openai-compat:https://private.example/v1|deployment",
+            "credential" => "key"
+          }
+        }
+      })
+
+    argv = ["doctor", application, "--host-config", host_path]
+
+    assert {:ok, %CommandOutcome{} = plain} = CommandEngine.prepare(argv)
+
+    assert Enum.all?(
+             plain.envelope["result"]["model_aliases"],
+             &(not Map.has_key?(&1, "model_selector"))
+           )
+
+    assert {:ok, %CommandOutcome{} = shown} =
+             CommandEngine.prepare(argv ++ ["--show-model-selectors"])
+
+    assert [cataloged, endpoint] = shown.envelope["result"]["model_aliases"]
+    assert cataloged["alias"] == "cataloged"
+    assert cataloged["model_selector"] == "openrouter:test/model"
+    assert endpoint["alias"] == "endpoint"
+    refute Map.has_key?(endpoint, "model_selector")
+    assert_schema_valid(shown.envelope)
+  end
+
   test "default doctor reports the environment without an application or host" do
     assert {:ok, %CommandOutcome{} = outcome} = CommandEngine.prepare(["doctor"])
 
@@ -1369,7 +1464,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                ],
                "model_aliases" => [],
                "provider_activity" => false,
-               "readiness" => "failed"
+               "readiness" => "failed",
+               "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
              }
 
       assert_schema_valid(outcome.envelope)
@@ -1745,7 +1841,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
     Application.put_env(:ptc_runner, :host_llm_test_owner, self())
     Application.put_env(:ptc_runner, :host_llm_test_provider_application, :req_llm)
-    Application.put_env(:ptc_runner, :host_llm_test_result, {:ok, %{content: "ok", tokens: %{}}})
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
+      {:ok, %{content: "ok", tokens: %{input: 8, output: 1, total_cost: 3.0e-6}}}
+    )
+
     Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
     Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
 
@@ -1797,6 +1899,24 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert System.get_env(environment_name) == "test-secret"
     assert_received {:host_llm_ensure_ready, _pid}
     assert_received {:host_llm_request, "openrouter:test/model", _request}
+
+    # The readiness check bills a real request, so it accounts for one, on the
+    # rows a run reports. `max_tokens: 1` bounds the magnitude, not the
+    # attribution.
+    assert outcome.envelope["result"]["usage"] == %{
+             "llm_usage_state" => "available",
+             "llm_usage" => [
+               %{
+                 "alias" => "model",
+                 "installation_revision" => "model-v1",
+                 "calls" => 1,
+                 "successful_calls" => 1,
+                 "usage_calls" => 1,
+                 "missing_usage_calls" => 0,
+                 "usage" => %{"input" => 8, "output" => 1, "total_cost" => 3.0e-6}
+               }
+             ]
+           }
   end
 
   @tag :tmp_dir
@@ -3063,6 +3183,22 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert %CommandOutcome{} =
              CommandOutcome.success(:models, run_ref, %{"installations" => [model]})
 
+    # `ModelSelectorDisclosure` withholds endpoint-bearing selectors. The closed
+    # envelope refuses one outright, so a future producer that read the host
+    # installation directly could not publish what these commands refuse.
+    assert %CommandOutcome{} =
+             CommandOutcome.success(:models, run_ref, %{
+               "installations" => [Map.put(model, "model_selector", "openrouter:test/model")]
+             })
+
+    assert_raise ArgumentError, fn ->
+      CommandOutcome.success(:models, run_ref, %{
+        "installations" => [
+          Map.put(model, "model_selector", "openai-compat:https://private.example/v1|deployment")
+        ]
+      })
+    end
+
     for invalid_revision <- [
           String.duplicate("a", 129),
           String.duplicate("😀", 65),
@@ -3148,7 +3284,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "checks" => fixed_doctor_checks,
              "model_aliases" => [],
              "provider_activity" => true,
-             "readiness" => "unverified"
+             "readiness" => "unverified",
+             "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
            })
 
     doctor_without_local = %{
@@ -3163,7 +3300,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           ],
       "model_aliases" => [],
       "provider_activity" => true,
-      "readiness" => "ready"
+      "readiness" => "ready",
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     refute CommandContract.valid_success_semantics?(:doctor, doctor_without_local)
@@ -3180,7 +3318,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           ],
       "model_aliases" => [],
       "provider_activity" => false,
-      "readiness" => "unverified"
+      "readiness" => "unverified",
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     refute CommandContract.valid_success_semantics?(:doctor, local_only_application_doctor)
@@ -3203,7 +3342,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
             ],
         "model_aliases" => [],
         "provider_activity" => false,
-        "readiness" => "unverified"
+        "readiness" => "unverified",
+        "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
       })
 
     active_doctor_result = %{
@@ -3225,7 +3365,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       ],
       "model_aliases" => [],
       "provider_activity" => true,
-      "readiness" => "ready"
+      "readiness" => "ready",
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     assert_raise ArgumentError, fn ->
@@ -3243,7 +3384,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       ],
       "model_aliases" => [],
       "provider_activity" => false,
-      "readiness" => "ready"
+      "readiness" => "ready",
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     assert %CommandOutcome{command_mode: {:doctor, :connect}} =
@@ -3314,7 +3456,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "checks" => valid_doctor.envelope["result"]["checks"],
              "model_aliases" => [],
              "provider_activity" => true,
-             "readiness" => "ready"
+             "readiness" => "ready",
+             "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
            })
 
     refute CommandContract.valid_success_semantics?(:doctor, %{
@@ -3334,7 +3477,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  ],
              "model_aliases" => [],
              "provider_activity" => false,
-             "readiness" => "ready"
+             "readiness" => "ready",
+             "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
            })
 
     refute CommandContract.valid_success_semantics?(:doctor, %{
@@ -3354,7 +3498,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  ],
              "model_aliases" => [],
              "provider_activity" => true,
-             "readiness" => "unverified"
+             "readiness" => "unverified",
+             "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
            })
 
     assert_schema_invalid(

@@ -956,6 +956,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp connectivity_probe_bounds(_context), do: {:error, :llm_connectivity_unavailable}
 
+  # The probe bills a real request, so what it spent travels back with the
+  # success rather than being pattern-matched away: `max_tokens: 1` bounds the
+  # magnitude, not the attribution. The tokens are the adapter's own map and are
+  # closed by `ConnectivityProbe` before they become reportable evidence; a
+  # response without them still answers `:ok`, because unreachable and
+  # unattributed are different facts.
   defp run_llm_connectivity_probe(probe) do
     options =
       probe.params
@@ -986,6 +992,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
           )
 
         case result do
+          {:ok, {:ok, %{tokens: tokens}}} when is_map(tokens) -> {:ok, tokens}
           {:ok, {:ok, response}} when is_map(response) -> :ok
           _failure -> {:error, :llm_connectivity_unavailable}
         end

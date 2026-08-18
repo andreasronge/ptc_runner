@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         "ptc models PROJECT.json | --host-config HOST.json",
         "ptc init DIRECTORY [--example NAME]",
         "ptc docs [PAGE]",
+        "ptc help [COMMAND]",
         "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE",
         "ptc repl [OPTIONS] [SCRIPT|-]",
         "ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]",

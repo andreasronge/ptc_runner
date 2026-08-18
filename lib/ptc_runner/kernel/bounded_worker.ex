@@ -39,6 +39,21 @@ defmodule PtcRunner.Kernel.BoundedWorker do
   def classify_callback({:error, :timeout}), do: :timed_out
   def classify_callback(_unrecognised), do: {:error, :internal}
 
+  @doc """
+  Classifies a bounded provider callback that may answer with one payload.
+
+  The connectivity probe's shipped callback reports what its request spent, so
+  a success may carry a term beside `:ok`. Only that one shape is added: every
+  other outcome, a bare `:ok` included, is translated by `classify_callback/1`,
+  so the failure rule above stays the single copy both callers share. The
+  payload is opaque here and stays untrusted — the caller closes its shape
+  before publishing it, on the same terms as the position above.
+  """
+  @spec classify_payload_callback(term()) ::
+          :ok | {:ok, term()} | :timed_out | {:error, atom() | {atom(), pos_integer()}}
+  def classify_payload_callback({:ok, {:ok, payload}}), do: {:ok, payload}
+  def classify_payload_callback(result), do: classify_callback(result)
+
   @doc "Runs a zero-arity function in a monitored process under explicit limits."
   @spec run((-> term()), keyword()) ::
           {:ok, term()} | {:error, :timeout | :cancelled | :heap_exceeded | :worker_failed}

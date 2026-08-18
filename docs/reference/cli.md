@@ -13,11 +13,12 @@ Run `ptc help COMMAND` for the exact switches accepted by an installed version.
 | `ptc init DIRECTORY` | Publish a validated minimal application without replacing an existing target |
 | `ptc init DIRECTORY --example NAME` | Publish one embedded example tree instead of the scaffold |
 | `ptc docs [PAGE]` | List the documentation embedded in this executable, or print one page |
+| `ptc help [COMMAND]` | Print the root command list, or the exact switches one command accepts |
 | `ptc validate MANIFEST or PROJECT` | Load and compile without executing the workflow, and read the input files the declarations name |
 | `ptc run MANIFEST or PROJECT` | Execute the application entry |
 | `ptc run MANIFEST --env-file FILE` | Load environment-backed credentials from this exact file |
 | `ptc doctor [MANIFEST or PROJECT]` | Report application and provider readiness |
-| `ptc models PROJECT.json` or `--host-config HOST.json` | List public installed model-alias declarations |
+| `ptc models PROJECT.json` or `--host-config HOST.json` | List public installed model-alias declarations, each with the safe selector it configured |
 | `ptc transcript RUN_ID ...` | Publish one correlated private model transcript |
 | `ptc repl` | Open a direct, manifest-backed, or analysis session |
 | `ptc viewer PROJECT.json` | Browse a project's captured traces in a local web UI |
@@ -45,6 +46,26 @@ Complete readiness reports, including `readiness: "failed"`, are written to
 stdout. Failed reports retain their nonzero exit status; failures that cannot
 produce a complete report are written to stderr.
 `--show-model-selectors` adds only safe selectors.
+
+Every readiness report carries `usage`, on the LLM rows a run reports. Each
+probed model alias contributes one call with the tokens and cost the provider
+attributed to it, so a CI step can account for what the check spent:
+
+```json
+{"usage": {"llm_usage_state": "available",
+           "llm_usage": [{"alias": "llm", "installation_revision": "v1",
+                          "calls": 1, "successful_calls": 1, "usage_calls": 1,
+                          "missing_usage_calls": 0,
+                          "usage": {"input": 8, "output": 1, "total_cost": 3.0e-6}}]}}
+```
+
+The probe asks for one output token, so this is about attribution rather than
+magnitude. A command that activated no provider reports an empty list, because
+it spent nothing. A failure that did activate one reports
+`"llm_usage_state": "unavailable"` and a null list rather than claiming zero:
+the request may have been billed with no result left to account for it. As in a
+run, `total_cost` is omitted when any call could not be priced, and
+`missing_usage_calls` counts the calls a provider reported no tokens for.
 
 ## Read the embedded documentation
 

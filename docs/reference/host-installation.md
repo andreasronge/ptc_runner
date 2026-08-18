@@ -185,8 +185,11 @@ Use `source: "llm_replay"` when responses must be deterministic. The
 network-free example, candidate materialization, and component overrides.
 
 `doctor --connect` performs a real minimal completion for each selected live
-model and may incur provider cost. `--show-model-selectors` adds only safe
-selectors; endpoint-bearing `openai-compat:` selectors remain hidden.
+model and may incur provider cost; the readiness report's `usage` field
+attributes what each probe spent, on the rows a run reports. `--show-model-selectors` adds only safe
+selectors; endpoint-bearing `openai-compat:` selectors remain hidden. `ptc
+models` reports the same `model_selector` field under the same rule, without a
+flag and without reading the application.
 
 ### Resolve local transport paths
 

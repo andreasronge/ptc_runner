@@ -148,6 +148,43 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     assert delivered == %{"reachable-key" => "connect-secret"}
   end
 
+  test "a probe accounts for what its request spent, per occurrence" do
+    # `doctor --connect` bills a real request. The account travels with the
+    # sealed result so the command can attribute the spend instead of dropping
+    # it; an occurrence the provider metered and one it did not are different
+    # facts, and both are reported.
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "inert" => [destination: :workflow],
+        "metered" => [destination: :workflow, connectivity_mode: :probe, probe: :metered],
+        "silent" => [destination: :workflow, connectivity_mode: :probe, probe: :ok]
+      })
+
+    assert {:ok, result} = connect(prepared, execution)
+
+    assert ConnectivityResult.usage(result) == [
+             %{
+               name: "metered",
+               destination: :workflow,
+               index: 1,
+               usage: %{"input" => 8, "output" => 1, "total_cost" => 3.0e-6}
+             },
+             %{name: "silent", destination: :workflow, index: 2, usage: nil}
+           ]
+  end
+
+  test "a probe whose account cannot be read fails rather than reporting nothing spent" do
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "reachable" => [destination: :workflow, connectivity_mode: :probe, probe: :unmeasurable]
+      })
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+    assert diagnostic.phase == :internal
+    assert diagnostic.provider_activity
+    assert_received {:probe_invoked, "reachable"}
+  end
+
   test "a run over the same declaration does acquire it" do
     # The contrast is what makes the assertion above mean something: the builder
     # is reachable from this fixture, and connectivity is why it stays untouched.
@@ -437,7 +474,8 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
       "checks" => checks,
       "model_aliases" => [],
       "provider_activity" => true,
-      "readiness" => "ready"
+      "readiness" => "ready",
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     assert CommandContract.valid_success_result?(:doctor, outcome)
@@ -1201,6 +1239,8 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
 
       case behaviour do
         :ok -> :ok
+        :metered -> {:ok, %{input: 8, output: 1, total_cost: 3.0e-6}}
+        :unmeasurable -> {:ok, %{invented: 1}}
         :unavailable -> {:error, :llm_connectivity_unavailable}
         :slow -> burn_until(System.monotonic_time(:millisecond) + 250)
       end
