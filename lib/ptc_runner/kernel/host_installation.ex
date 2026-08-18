@@ -1767,10 +1767,22 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   def resolve_runtime_credentials(_host, _names), do: {:error, :credential_unavailable}
 
-  defp resolve_credential(_directory, %{source: :env, name: name}),
+  # Surrounding whitespace is never part of a secret, and every ordinary way of
+  # putting one in a file adds it: `echo`, an editor save, `gh auth token >
+  # file`. The host reference recommends `file:` for secrets, so the newline is
+  # on the recommended path. All three sources trim, so the same token supplied
+  # three ways is one value.
+  defp resolve_credential(directory, declaration) do
+    case read_credential(directory, declaration) do
+      {:ok, value} when is_binary(value) -> {:ok, String.trim(value)}
+      other -> other
+    end
+  end
+
+  defp read_credential(_directory, %{source: :env, name: name}),
     do: System.fetch_env(name)
 
-  defp resolve_credential(directory, %{source: :file, path: path}) do
+  defp read_credential(directory, %{source: :file, path: path}) do
     if Path.type(path) == :absolute do
       with {:ok, canonical} <- ConfinedFile.resolve_absolute(path),
            do:
@@ -1784,13 +1796,19 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp resolve_credential(_directory, %{source: :literal, value: value}),
+  defp read_credential(_directory, %{source: :literal, value: value}),
     do: {:ok, value}
 
+  # A control character disqualifies a credential wherever it is carried: an
+  # HTTP header value cannot hold CR or LF, and a child process environment
+  # entry holding one is pathological. Enforcing it here reports the fault as
+  # the credential check it is, in `active_preflight`, rather than letting the
+  # header renderer discover it at acquisition, where the reason has no
+  # classification and fails closed as an internal error.
   defp valid_secret?(value),
     do:
       is_binary(value) and byte_size(value) in 1..@max_credential_bytes and
-        String.valid?(value) and not String.contains?(value, <<0>>)
+        String.valid?(value) and not String.match?(value, ~r/[\x00-\x1f\x7f]/u)
 
   defp render_environment(bindings, credentials) do
     Enum.reduce_while(bindings, {:ok, %{}}, fn {name, binding}, {:ok, environment} ->

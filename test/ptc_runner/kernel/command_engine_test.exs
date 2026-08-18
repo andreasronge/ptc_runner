@@ -2641,6 +2641,108 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     refute presentation.outcome.envelope["error"]["code"] == "credential_unavailable"
   end
 
+  @tag :tmp_dir
+  test "a credential written by an ordinary shell redirect is usable, not internal", %{
+    tmp_dir: directory
+  } do
+    # `printf '%s\\n' "$TOKEN" > tok.txt`, `echo`, an editor save, and
+    # `gh auth token > file` all produce the trailing newline, and the host
+    # reference recommends `file:` for secrets. It reached the one phase that
+    # tells the reader the fault is not theirs.
+    File.write!(Path.join(directory, "tok.txt"), "ptc-not-a-real-token\n")
+
+    host_path =
+      write_host_config(directory, "credential-newline", %{
+        "credentials" => %{"tok" => %{"file" => "tok.txt"}},
+        "install" => %{
+          "remote" => %{
+            "source" => "mcp",
+            "installation_revision" => "remote-v1",
+            "transport" => %{
+              "type" => "streamable_http",
+              "endpoint" => "https://127.0.0.1:1/mcp",
+              "auth" => [%{"scheme" => "bearer", "binding" => "tok"}]
+            },
+            "tools" => %{"read" => %{"as" => "remote.read", "effect" => "read"}},
+            "ceilings" => %{"timeout_ms" => 2_000}
+          }
+        }
+      })
+
+    application = doctor_application(directory, "credential-newline", mission: ["remote"])
+
+    presentation =
+      StandaloneCLI.execute([
+        "doctor",
+        application,
+        "--host-config",
+        host_path,
+        "--connect"
+      ])
+
+    error = presentation.outcome.envelope["error"]
+    refute error["phase"] == "internal"
+    refute error["code"] == "internal_error"
+    refute presentation.exit_status == 70
+
+    # Surrounding whitespace is not part of a secret, so the credential is the
+    # same one the clean file would have supplied and the run reaches the
+    # endpoint it was configured for.
+    assert error["phase"] == "active_preflight"
+  end
+
+  @tag :tmp_dir
+  test "a credential that cannot be carried is refused at resolution, not at acquisition", %{
+    tmp_dir: directory
+  } do
+    # An interior newline survives trimming and cannot go into a header. It is a
+    # fact about the credential, so it belongs to the credential check rather
+    # than to whatever the transport was about to attempt.
+    File.write!(Path.join(directory, "tok.txt"), "ptc-not\na-real-token")
+
+    host_path =
+      write_host_config(directory, "credential-interior-newline", %{
+        "credentials" => %{"tok" => %{"file" => "tok.txt"}},
+        "install" => %{
+          "remote" => %{
+            "source" => "mcp",
+            "installation_revision" => "remote-v1",
+            "transport" => %{
+              "type" => "streamable_http",
+              "endpoint" => "https://127.0.0.1:1/mcp",
+              "auth" => [%{"scheme" => "bearer", "binding" => "tok"}]
+            },
+            "tools" => %{"read" => %{"as" => "remote.read", "effect" => "read"}},
+            "ceilings" => %{"timeout_ms" => 2_000}
+          }
+        }
+      })
+
+    application =
+      doctor_application(directory, "credential-interior-newline", mission: ["remote"])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.exit_status == 4
+    assert outcome.envelope["error"]["phase"] == "active_preflight"
+    assert outcome.envelope["error"]["code"] == "credential_unavailable"
+
+    assert %{"status" => "fail", "code" => "credential_unavailable"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/remote/credentials")
+             )
+
+    assert_schema_valid(outcome.envelope)
+  end
+
   test "undeclared options are rejected before cross-command conflict rules" do
     cases = [
       {:init, ["init", "project", "--input", "a", "--private-input", "b"]},
