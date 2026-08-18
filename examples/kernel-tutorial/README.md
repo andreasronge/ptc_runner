@@ -29,6 +29,11 @@ ptc run kernel-tutorial/03-file-agent.ptc-project.json
 ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
+The MCP server this step launches is the repository's
+`examples/mcp/filesystem` bundle, which is too large to embed. Copy that
+directory to `mcp/filesystem` beside the materialized tutorial, or run this
+step from a checkout.
+
 They require `OPENROUTER_API_KEY` and use the trusted `deepseek` model alias.
 Follow the [model-authored Quickstart](../../docs/guides/quickstart.md#run-a-model-authored-program)
 once before running them. Example 03 also requires Node.js 22 or newer; its

@@ -66,7 +66,11 @@ response needed to prove a protocol mismatch.
 ## Run the checked-in file agent
 
 The tutorial server is a committed JavaScript bundle. It requires Node.js 22 or
-newer but no npm install or build:
+newer but no npm install or build. The MCP server this step launches is the repository's
+`examples/mcp/filesystem` bundle, which is too large to embed. Copy that
+directory to `mcp/filesystem` beside the materialized tutorial, or run this
+step from a checkout.
+
 
 ```console
 ptc init kernel-tutorial --example kernel-tutorial

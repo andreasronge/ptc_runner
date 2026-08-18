@@ -18,7 +18,10 @@ ptc run kernel-tutorial/03-file-agent.ptc-project.json
 
 That example maps one server operation to `workspace.read` and exposes only a
 bounded wrapper to the mission. Its server has its own runtime prerequisite;
-the first provider-free PtcRunner project does not.
+the first provider-free PtcRunner project does not. The server it launches is
+the repository's `examples/mcp/filesystem` bundle, which is too large to embed:
+copy that directory to `mcp/filesystem` beside the materialized tutorial, or run
+this step from a checkout.
 
 PtcRunner requires the MCP `2026-07-28` profile and `server/discover`. An
 incompatible endpoint fails closed instead of falling back to a legacy
