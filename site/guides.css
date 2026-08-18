@@ -1,0 +1,110 @@
+/* Layout and content styles for the generated guide pages under /guides/.
+   Base tokens and element styles come from style.css; this file only adds
+   the two-column shell, the sidebar, tables, and the pager. */
+
+.guide-shell {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr);
+  gap: 3rem;
+  max-width: 66rem;
+  margin: 0 auto;
+  padding: 2.75rem 1.25rem 5rem;
+}
+
+.guide-nav {
+  position: sticky;
+  top: 2rem;
+  align-self: start;
+  font-size: .9rem;
+  max-height: calc(100vh - 4rem);
+  overflow-y: auto;
+}
+
+.guide-nav .brand {
+  margin: 0 0 1.5rem;
+  font-weight: 650;
+  font-size: 1.05rem;
+}
+.guide-nav .brand a { color: var(--text); text-decoration: none; }
+.guide-nav .brand a:hover { color: var(--accent); }
+
+.guide-nav .nav-home { margin: 0 0 .5rem; }
+
+.guide-nav h2 {
+  font-size: .72rem;
+  margin: 1.4rem 0 .4rem;
+  padding-bottom: .3rem;
+}
+
+.guide-nav ul { list-style: none; margin: 0; padding: 0; }
+.guide-nav li { margin: 0; }
+.guide-nav li a {
+  display: block;
+  padding: .28rem .5rem;
+  margin-left: -.5rem;
+  border-radius: 4px;
+  color: var(--text);
+  text-decoration: none;
+}
+.guide-nav li a:hover { color: var(--accent); }
+.guide-nav li a.current {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.guide-main { min-width: 0; }
+.guide-main article h1 {
+  font-size: 2rem;
+  margin-bottom: 1.25rem;
+}
+
+.mobile-crumb { display: none; }
+
+.table-wrap { overflow-x: auto; margin: 0 0 1rem; }
+.guide-main table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: .9rem;
+  line-height: 1.5;
+}
+.guide-main th, .guide-main td {
+  padding: .45rem .65rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.guide-main th {
+  text-align: left;
+  font-weight: 620;
+  border-bottom-width: 2px;
+}
+
+.guide-main blockquote {
+  margin: 0 0 1rem;
+  padding: .1rem 1.1rem;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 4px;
+}
+
+.pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 3rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  font-size: .95rem;
+}
+.pager a { text-decoration: none; }
+.pager a:hover { text-decoration: underline; }
+.pager .pager-next { margin-left: auto; text-align: right; }
+
+@media (max-width: 52rem) {
+  .guide-shell {
+    grid-template-columns: minmax(0, 1fr);
+    padding-top: 2rem;
+  }
+  .guide-nav { display: none; }
+  .mobile-crumb { display: block; }
+}

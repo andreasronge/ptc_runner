@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect an MCP tool · PtcRunner</title>
+<meta name="description" content="MCP is the external-tool boundary. The operator chooses the server, transport,
+credentials, public name, read/write effect, and ceilings. The application can
+s…">
+<link rel="canonical" href="https://ptc-runner.dev/guides/connecting-tools-with-mcp/">
+<meta property="og:title" content="Connect an MCP tool · PtcRunner">
+<meta property="og:description" content="MCP is the external-tool boundary. The operator chooses the server, transport,
+credentials, public name, read/write effect, and ceilings. The application can
+s…">
+<meta property="og:url" content="https://ptc-runner.dev/guides/connecting-tools-with-mcp/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Guides">
+    <p class="nav-home"><a href="/guides/">All guides</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/" class="current" aria-current="page">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All guides</a></p>
+<article>
+<h1 id="connect-an-mcp-tool">Connect an MCP tool</h1><blockquote><p><strong>Audience:</strong> operators and application authors granting a model the smallest
+useful external tool surface.</p></blockquote><p>MCP is the external-tool boundary. The operator chooses the server, transport,
+credentials, public name, read/write effect, and ceilings. The application can
+select and narrow that installation but cannot widen it.</p><p>Use the checked-in file-agent example to see the complete split:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
+ptc doctor kernel-tutorial/03-file-agent.ptc-project.json
+ptc doctor kernel-tutorial/03-file-agent.ptc-project.json --connect
+ptc run kernel-tutorial/03-file-agent.ptc-project.json</code></pre><p>That example maps one server operation to <code class="inline">workspace.read</code> and exposes only a
+bounded wrapper to the mission. Its server has its own runtime prerequisite;
+the first provider-free PtcRunner project does not. The server it launches is
+the repository's <code class="inline">examples/mcp/filesystem</code> bundle, which is too large to embed:
+copy that directory to <code class="inline">mcp/filesystem</code> beside the materialized tutorial, or run
+this step from a checkout.</p><p>PtcRunner requires the MCP <code class="inline">2026-07-28</code> profile and <code class="inline">server/discover</code>. An
+incompatible endpoint fails closed instead of falling back to a legacy
+handshake; check the <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/reference/mcp.md#protocol-compatibility">protocol compatibility reference</a>
+before choosing a server.</p><p>When adding a real tool:</p><ol><li>install the MCP source in the operator-owned host document;</li><li>map only the upstream operations the mission needs;</li><li>give every public mapping an explicit <code class="inline">read</code> or <code class="inline">write</code> effect;</li><li>select the alias in the intended mission;</li><li>explicitly allow selected write-bearing tools; and</li><li>run plain <code class="inline">doctor</code> before the active <code class="inline">--connect</code> probe.</li></ol><p>Treat an indeterminate write as an unknown outcome, not as a safe automatic
+retry. Keep credentials out of application manifests and model-visible
+descriptions.</p><p>Use the <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/reference/mcp.md">MCP reference</a> for stdio and HTTP transports,
+tool mapping, effects, authentication, OAuth, lifecycle, cursors, content
+identity, ceilings, and diagnostics.</p>
+</article>
+<nav class="pager" aria-label="Guide order"><a class="pager-previous" href="/guides/using-models/">&larr; Use a model</a><a class="pager-next" href="/guides/building-agents/">Customize an agent &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/connecting-tools-with-mcp.md">Edit this
+  guide on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

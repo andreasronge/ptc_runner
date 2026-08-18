@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install models and tools · PtcRunner</title>
+<meta name="description" content="The host document is the authority boundary. An application may select and
+narrow an installed alias, but it cannot create one or change its credentials,
+endpo…">
+<link rel="canonical" href="https://ptc-runner.dev/guides/host-configuration/">
+<meta property="og:title" content="Install models and tools · PtcRunner">
+<meta property="og:description" content="The host document is the authority boundary. An application may select and
+narrow an installed alias, but it cannot create one or change its credentials,
+endpo…">
+<meta property="og:url" content="https://ptc-runner.dev/guides/host-configuration/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Guides">
+    <p class="nav-home"><a href="/guides/">All guides</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/" class="current" aria-current="page">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All guides</a></p>
+<article>
+<h1 id="install-models-and-tools">Install models and tools</h1><blockquote><p><strong>Audience:</strong> operators installing credentials, model routes, MCP tools, and
+outer policy independently of an application.</p></blockquote><p>The host document is the authority boundary. An application may select and
+narrow an installed alias, but it cannot create one or change its credentials,
+endpoint, command, effects, or ceilings.</p><p>Install one model alias with a credential read from the process environment:</p><pre><code class="json language-json">{
+  &quot;credentials&quot;: {
+    &quot;model_key&quot;: {&quot;env&quot;: &quot;OPENROUTER_API_KEY&quot;}
+  },
+  &quot;install&quot;: {
+    &quot;model&quot;: {
+      &quot;source&quot;: &quot;llm&quot;,
+      &quot;installation_revision&quot;: &quot;model-v1&quot;,
+      &quot;model&quot;: &quot;openrouter:deepseek/deepseek-v4-flash&quot;,
+      &quot;credential&quot;: &quot;model_key&quot;,
+      &quot;cache&quot;: false,
+      &quot;params&quot;: {&quot;max_tokens&quot;: 4096}
+    }
+  }
+}</code></pre><p>Keep its path in <code class="inline">ptc-project.json</code>, then verify the selected application:</p><pre><code class="console language-console">ptc doctor ptc-project.json
+ptc doctor ptc-project.json --connect
+ptc models ptc-project.json</code></pre><p>Plain <code class="inline">doctor</code> validates configuration without loading credentials or dialing
+providers. <code class="inline">--connect</code> is an explicit connectivity probe and may consume remote
+resources.</p><p>Install MCP tools with the same separation: the host fixes the transport and
+public tool mapping, while the application selects the alias and may narrow a
+write-bearing tool set. Follow <a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a>
+for one complete workflow.</p><p>The <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/reference/host-installation.md">host-configuration reference</a> owns the
+complete credential forms, provider sources, transport rules, OAuth behavior,
+data classes, ceilings, and diagnostics.</p>
+</article>
+<nav class="pager" aria-label="Guide order"><a class="pager-previous" href="/guides/manifests-and-capabilities/">&larr; Configure an application</a><a class="pager-next" href="/guides/using-models/">Use a model &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/host-configuration.md">Edit this
+  guide on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

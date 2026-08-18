@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- ptc-runner.dev now serves every guide as a generated page under `/guides/`,
+  with a sectioned sidebar (Start, Configure, Build, Run and debug) read from
+  the same `mix.exs` guide groups that structure the HexDocs sidebar, so the
+  two navigations cannot drift. `mix ptc.gen_site_guides` renders the pages
+  (and `mix ptc.gen_docs` runs it); the renderer fails closed on Markdown,
+  attributes, or relative links it cannot account for, so a typo cannot ship
+  as a dead link.
 - Added `mix ptc.repair` to consume one structured generated `propose-change`
   repair report, bind it to the current component base hash, and pass the
   existing G1-G4 materialization gate. Optional live trials require an explicit

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configure an application · PtcRunner</title>
+<meta name="description" content="A PtcRunner application declares code, input, selected providers, missions,
+and narrower limits in ptc.json. The document can select only names that the
+operat…">
+<link rel="canonical" href="https://ptc-runner.dev/guides/manifests-and-capabilities/">
+<meta property="og:title" content="Configure an application · PtcRunner">
+<meta property="og:description" content="A PtcRunner application declares code, input, selected providers, missions,
+and narrower limits in ptc.json. The document can select only names that the
+operat…">
+<meta property="og:url" content="https://ptc-runner.dev/guides/manifests-and-capabilities/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Guides">
+    <p class="nav-home"><a href="/guides/">All guides</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/" class="current" aria-current="page">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All guides</a></p>
+<article>
+<h1 id="configure-an-application">Configure an application</h1><blockquote><p><strong>Audience:</strong> application authors assembling a PtcRunner workflow and its
+bounded mission environments.</p></blockquote><p>A PtcRunner application declares code, input, selected providers, missions,
+and narrower limits in <code class="inline">ptc.json</code>. The document can select only names that the
+operator installed. It cannot add credentials, endpoints, commands, or wider
+authority.</p><p>Start with a generated project:</p><pre><code class="console language-console">ptc init my-application
+ptc run my-application/ptc-project.json</code></pre><p>The generated application is deliberately small:</p><pre><code class="json language-json">{
+  &quot;version&quot;: 1,
+  &quot;workflow&quot;: {
+    &quot;components&quot;: [{&quot;id&quot;: &quot;main&quot;, &quot;path&quot;: &quot;main.clj&quot;}],
+    &quot;entry&quot;: &quot;main/run&quot;
+  },
+  &quot;input&quot;: {&quot;value&quot;: {&quot;name&quot;: &quot;world&quot;}}
+}</code></pre><p>Add a provider only after the operator has installed its alias. Model access
+belongs to the trusted workflow; task tools belong to the mission that runs
+model-authored programs:</p><pre><code class="json language-json">{
+  &quot;providers&quot;: {&quot;workflow&quot;: [{&quot;name&quot;: &quot;model&quot;}]},
+  &quot;missions&quot;: {
+    &quot;default&quot;: {
+      &quot;components&quot;: [],
+      &quot;providers&quot;: [&quot;workspace&quot;]
+    }
+  }
+}</code></pre><p>Validate structure and selected authority before running:</p><pre><code class="console language-console">ptc validate my-application/ptc-project.json
+ptc doctor my-application/ptc-project.json</code></pre><p>Use the <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/reference/application-manifest.md">application-manifest reference</a>
+for every field, validation rule, mission shape, provider-selection rule,
+event policy, and limit. Continue with <a href="/guides/host-configuration/">host configuration</a>
+to install the aliases the application selects.</p>
+</article>
+<nav class="pager" aria-label="Guide order"><a class="pager-previous" href="/guides/project-configuration/">&larr; Keep a runnable project together</a><a class="pager-next" href="/guides/host-configuration/">Install models and tools &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/manifests-and-capabilities.md">Edit this
+  guide on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evaluate changes with replay · PtcRunner</title>
+<meta name="description" content="Live model output drifts between runs. The llm_replay provider holds model
+responses fixed so a difference between a baseline and candidate run can be
+attribut…">
+<link rel="canonical" href="https://ptc-runner.dev/guides/evaluating-with-replay/">
+<meta property="og:title" content="Evaluate changes with replay · PtcRunner">
+<meta property="og:description" content="Live model output drifts between runs. The llm_replay provider holds model
+responses fixed so a difference between a baseline and candidate run can be
+attribut…">
+<meta property="og:url" content="https://ptc-runner.dev/guides/evaluating-with-replay/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Guides">
+    <p class="nav-home"><a href="/guides/">All guides</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/" class="current" aria-current="page">Evaluate changes with replay</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All guides</a></p>
+<article>
+<h1 id="evaluate-changes-with-replay">Evaluate changes with replay</h1><blockquote><p><strong>Audience:</strong> application authors comparing an agent prompt or prelude change
+against fixed model responses before an explicit promotion decision.</p></blockquote><p>Live model output drifts between runs. The <code class="inline">llm_replay</code> provider holds model
+responses fixed so a difference between a baseline and candidate run can be
+attributed to the candidate component rather than another model sample.</p><p>Replay changes neither the manifest grammar nor the application's model alias.
+The operator swaps the installed provider behind that alias.</p><h2 id="run-the-network-free-example">Run the network-free example</h2><p>The checked-in example needs no credential or network access:</p><pre><code class="console language-console">ptc init llm-replay --example llm-replay
+ptc run llm-replay/ptc.json \
+  --host-config llm-replay/ptc-host.json</code></pre><pre><code class="json language-json">{&quot;content&quot;:&quot;Frozen answer&quot;}</code></pre><h2 id="install-a-replay-model">Install a replay model</h2><p>The host document names a JSON Lines fixture:</p><pre><code class="json language-json">&quot;frozen-model&quot;: {
+  &quot;source&quot;: &quot;llm_replay&quot;,
+  &quot;installation_revision&quot;: &quot;frozen-model-v1&quot;,
+  &quot;fixtures&quot;: &quot;evaluation/replay.jsonl&quot;
+}</code></pre><p>Every fixture line has <code class="inline">schema_version</code> 1, a deterministic hash of the
+provider-neutral request, and exactly one <code class="inline">response</code> or ordered <code class="inline">responses</code>
+field:</p><pre><code class="json language-json">{&quot;schema_version&quot;:1,&quot;request_hash&quot;:&quot;sha256:0000000000000000000000000000000000000000000000000000000000000000&quot;,&quot;response&quot;:{&quot;content&quot;:&quot;frozen&quot;}}</code></pre><p>Plain doctor parses the selected fixture under installed ceilings without
+starting the provider:</p><pre><code class="console language-console">ptc doctor llm-replay/ptc.json \
+  --host-config llm-replay/ptc-host.json</code></pre><p>A missing, empty, malformed, duplicate, or oversized fixture set fails its
+local provider check as <code class="inline">fixtures_unreadable</code>, and the message names the rule
+the file broke. A line-level rejection names the line as well:</p><pre><code class="text language-text">replay fixture line 3 must set schema_version to 1</code></pre><p>The line number is the number in the file, counting blank lines. Nothing the
+line contains is published — only which rule it broke.</p><p><code class="inline">ptc validate</code> reads the same file under the same ceilings, so a manifest and
+host document that validate cannot fail on the fixture when <code class="inline">run</code> reaches it.
+The remaining local checks — an installed model's adapter, an MCP server's
+executable — stay out of <code class="inline">validate</code>: whether they are present says nothing
+about whether the documents are well formed.</p><h2 id="author-fixtures-from-exact-requests">Author fixtures from exact requests</h2><p>Start with any schema-valid placeholder hash and the response shape the
+workflow expects. A normal-data miss reports:</p><pre><code class="text language-text">no replay fixture matches this request (request_hash: sha256:...)</code></pre><p>Copy that hash into the fixture and rerun. For private-data requests, publish an
+owner-only inspection artifact and read the hash from its capability record;
+the public diagnostic intentionally omits the unsalted value.</p><p>Matching is exact. Changed messages, tools, or provider-neutral parameters
+produce another hash and fail instead of silently consuming unrelated evidence.
+An ordered <code class="inline">responses</code> sequence supports workflows that make the same request
+more than once.</p><h2 id="evaluate-the-candidate-without-installing-it">Evaluate the candidate without installing it</h2><p><code class="inline">--component-override-descriptor</code> replaces one component already selected by
+the manifest:</p><pre><code class="json language-json">{
+  &quot;target&quot;: {&quot;environment&quot;: &quot;workflow&quot;},
+  &quot;component_id&quot;: &quot;my.agent&quot;,
+  &quot;base_source_hash&quot;: &quot;sha256:&lt;64 lowercase hex&gt;&quot;,
+  &quot;source_hash&quot;: &quot;sha256:&lt;64 lowercase hex&gt;&quot;,
+  &quot;path&quot;: &quot;candidate.clj&quot;
+}</code></pre><p>For a mission component, use
+<code class="inline">{&quot;environment&quot;: &quot;mission&quot;, &quot;mission&quot;: &quot;reader&quot;}</code> as the target. The
+candidate path is confined to the descriptor directory. <code class="inline">source_hash</code>
+identifies the candidate bytes; <code class="inline">base_source_hash</code> prevents evaluation against
+a component version from which it was not derived. Dependencies, signatures,
+exports, and capability requirements are checked normally.</p><p>Candidate creation is a trusted build step and is not currently exposed by the
+standalone executable. The source-checkout tool for maintainers is documented
+under &quot;Materialize candidate source&quot; in <code class="inline">docs/maintainers/embedding.md</code>, which
+is a repository document rather than a page the executable carries.</p><p>The optional closed <code class="inline">provenance</code> object may contain <code class="inline">run_id</code>, <code class="inline">prompt_hash</code>,
+<code class="inline">authored_at</code>, and <code class="inline">accept_widened_effect</code>. These are operator claims rather
+than proof of origin.</p><p>Run the unchanged baseline and the override with the same replay installation,
+inputs, host ceilings, and content snapshots. Compare their values, envelopes,
+usage, and canonical traces. Replay removes model sampling as a variable; it
+does not make external MCP content deterministic unless that content is also
+frozen and identified.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/guides/components-and-preludes/">Components and preludes</a> defines component
+identity, dependencies, exports, and signatures.</li><li><a href="/guides/running-and-debugging/">Running and debugging</a> documents override switches,
+artifacts, traces, and private inspection.</li><li><a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/kernel-limits-reference.md">Kernel limits</a> lists every run ceiling that
+must remain comparable between evaluations.</li></ul>
+</article>
+<nav class="pager" aria-label="Guide order"><a class="pager-previous" href="/guides/debugging-a-failed-run/">&larr; Debug a failed run</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/evaluating-with-replay.md">Edit this
+  guide on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

@@ -16,6 +16,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   9. `docs/kernel-limits-reference.md` — Kernel run-limit meanings and metadata
   10. `docs/prelude-reference.md` — shipped PTC-Lisp component and export catalog
   11. the exit-status catalog inside `docs/reference/cli.md`
+  12. the static-site guide pages under `site/guides/` (via `mix ptc.gen_site_guides`)
 
   ## Usage
 
@@ -162,6 +163,11 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     generate_manifest_schema(check?)
     generate_command_schema(check?)
     generate_project_schema(check?)
+
+    # The site-guide generator needs EarmarkParser and therefore lives under
+    # dev/; dispatching by name keeps this module compilable in :prod, where
+    # dev/ tasks do not exist and this task is never run.
+    Mix.Task.run("ptc.gen_site_guides", if(check?, do: ["--check"], else: []))
   end
 
   defp validate_limit_catalog! do

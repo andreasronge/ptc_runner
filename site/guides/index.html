@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guides · PtcRunner</title>
+<meta name="description" content="Task-focused guides for building, configuring, and debugging PtcRunner projects.">
+<link rel="canonical" href="https://ptc-runner.dev/guides/">
+<meta property="og:title" content="Guides · PtcRunner">
+<meta property="og:description" content="Task-focused guides for building, configuring, and debugging PtcRunner projects.">
+<meta property="og:url" content="https://ptc-runner.dev/guides/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Guides">
+    <p class="nav-home"><a href="/guides/">All guides</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<article>
+<h1>Guides</h1>
+<p class="lead">Task-focused guides, in reading order. Start at the top if
+PtcRunner is new to you.</p>
+<h2>Start</h2>
+<ul class="links">
+<li><a href="/guides/quickstart/">Quickstart</a>
+  <span class="desc">This guide uses an installed standalone executable. The public one-command
+installer is not published yet, so first build the verified executable as
+described …</span></li>
+
+<li><a href="/guides/getting-started/">Understand a generated project</a>
+  <span class="desc">Create a provider-free project if you do not already have one:</span></li>
+
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a>
+  <span class="desc">You do not need network access or a remembered API to use PtcRunner. The
+executable you are running carries its own command grammar and documentation,
+so both …</span></li>
+
+</ul>
+
+<h2>Configure</h2>
+<ul class="links">
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a>
+  <span class="desc">ptc-project.json remembers paths and local artifact preferences. It is not an
+application manifest and cannot grant model or tool authority.</span></li>
+
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a>
+  <span class="desc">A PtcRunner application declares code, input, selected providers, missions,
+and narrower limits in ptc.json. The document can select only names that the
+operat…</span></li>
+
+<li><a href="/guides/host-configuration/">Install models and tools</a>
+  <span class="desc">The host document is the authority boundary. An application may select and
+narrow an installed alias, but it cannot create one or change its credentials,
+endpo…</span></li>
+
+</ul>
+
+<h2>Build</h2>
+<ul class="links">
+<li><a href="/guides/using-models/">Use a model</a>
+  <span class="desc">The operator installs a model under a stable alias in the host document. The
+application selects that alias for its trusted workflow. Generated mission code
+do…</span></li>
+
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a>
+  <span class="desc">MCP is the external-tool boundary. The operator chooses the server, transport,
+credentials, public name, read/write effect, and ceilings. The application can
+s…</span></li>
+
+<li><a href="/guides/building-agents/">Customize an agent</a>
+  <span class="desc">Most users do not write the programs an agent executes. They configure a task,
+model, approved tools, data, limits, and the shipped agent.core loop. The
+model …</span></li>
+
+<li><a href="/guides/components-and-preludes/">Customize agent components</a>
+  <span class="desc">Most applications select shipped libraries and do not copy their source:</span></li>
+
+</ul>
+
+<h2>Run and debug</h2>
+<ul class="links">
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a>
+  <span class="desc">Create a provider-free project and run it:</span></li>
+
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a>
+  <span class="desc">Open the workflow environment declared by a project:</span></li>
+
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a>
+  <span class="desc">Start with the public evidence:</span></li>
+
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a>
+  <span class="desc">Live model output drifts between runs. The llm_replay provider holds model
+responses fixed so a difference between a baseline and candidate run can be
+attribut…</span></li>
+
+</ul>
+
+</article>
+
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keep a runnable project together · PtcRunner</title>
+<meta name="description" content="ptc-project.json remembers paths and local artifact preferences. It is not an
+application manifest and cannot grant model or tool authority.">
+<link rel="canonical" href="https://ptc-runner.dev/guides/project-configuration/">
+<meta property="og:title" content="Keep a runnable project together · PtcRunner">
+<meta property="og:description" content="ptc-project.json remembers paths and local artifact preferences. It is not an
+application manifest and cannot grant model or tool authority.">
+<meta property="og:url" content="https://ptc-runner.dev/guides/project-configuration/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Guides">
+    <p class="nav-home"><a href="/guides/">All guides</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/" class="current" aria-current="page">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All guides</a></p>
+<article>
+<h1 id="keep-a-runnable-project-together">Keep a runnable project together</h1><blockquote><p><strong>Audience:</strong> application authors and operators who want one stable command
+for local runs, traces, results, and the Viewer.</p></blockquote><p><code class="inline">ptc-project.json</code> remembers paths and local artifact preferences. It is not an
+application manifest and cannot grant model or tool authority.</p><p>Create and run one:</p><pre><code class="console language-console">ptc init my-project
+ptc run my-project/ptc-project.json
+ptc viewer my-project/ptc-project.json</code></pre><p>The project document keeps three responsibilities separate:</p><ul><li><code class="inline">application.path</code> points to the application manifest;</li><li><code class="inline">host.path</code> and an optional environment-file path belong to the operator;</li><li><code class="inline">artifacts</code> and <code class="inline">viewer</code> describe local outputs and inspection preferences.</li></ul><p>Paths resolve from the project document rather than from the caller's current
+directory, so the same command works from another directory. Command-line
+overrides remain invocation choices and do not rewrite the project.
+<code class="inline">ptc viewer PROJECT.json --env-file FILE</code> overrides <code class="inline">host.env_file</code> for work
+launched from the Live tab; no <code class="inline">.env</code> path is discovered implicitly.</p><p>Commit the project and application configuration when they contain no secrets.
+Keep credential values and private run artifacts outside version control. New
+projects include the required artifact ignore patterns.</p><p>Use the <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/reference/project-files.md">project-configuration reference</a>
+for the complete document shape, path resolution, override precedence,
+artifact layout, and Viewer settings.</p>
+</article>
+<nav class="pager" aria-label="Guide order"><a class="pager-previous" href="/guides/agent-cli-usage/">&larr; Drive ptc as an agent</a><a class="pager-next" href="/guides/manifests-and-capabilities/">Configure an application &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/project-configuration.md">Edit this
+  guide on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

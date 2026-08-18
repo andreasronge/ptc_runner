@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Explore a project interactively · PtcRunner</title>
+<meta name="description" content="Open the workflow environment declared by a project:">
+<link rel="canonical" href="https://ptc-runner.dev/guides/kernel-repl/">
+<meta property="og:title" content="Explore a project interactively · PtcRunner">
+<meta property="og:description" content="Open the workflow environment declared by a project:">
+<meta property="og:url" content="https://ptc-runner.dev/guides/kernel-repl/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Guides">
+    <p class="nav-home"><a href="/guides/">All guides</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/" class="current" aria-current="page">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All guides</a></p>
+<article>
+<h1 id="explore-a-project-interactively">Explore a project interactively</h1><blockquote><p><strong>Audience:</strong> application authors and operators inspecting a workflow,
+mission, or immutable run capture.</p></blockquote><p>Open the workflow environment declared by a project:</p><pre><code class="console language-console">ptc repl --project ptc-project.json</code></pre><p>Evaluate one expression without opening a terminal:</p><pre><code class="console language-console">ptc repl --project ptc-project.json -e '(dir)'</code></pre><p>Inspect one mission with its own components, data, and direct provider closure:</p><pre><code class="console language-console">ptc repl --project ptc-project.json --mission default</code></pre><p>Mission sessions do not inherit workflow model access or other missions. They
+are useful for checking exactly what a generated program can see.</p><p>Analyze public traces through the fixed, read-only profile:</p><pre><code class="console language-console">ptc repl --project ptc-project.json \
+  --profile run-analysis-v1 \
+  -e '(analysis/runs {})'</code></pre><p>Private inspection is a separate explicit mode because it can reveal prompts,
+responses, generated source, and tool payloads. Do not grant it merely to query
+ordinary activity.</p><p>Use the <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/reference/repl.md">REPL reference</a> for every session mode, selector,
+profile, preview limit, script form, JSON Lines contract, private-authority
+requirement, and cleanup rule.</p>
+</article>
+<nav class="pager" aria-label="Guide order"><a class="pager-previous" href="/guides/running-and-debugging/">&larr; Run and inspect a project</a><a class="pager-next" href="/guides/debugging-a-failed-run/">Debug a failed run &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/kernel-repl.md">Edit this
+  guide on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>
