@@ -66,6 +66,42 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
+  test "an ambiguous reconstruction names ambiguity and its count, not incompleteness", %{
+    tmp_dir: root
+  } do
+    fixture = PrivateInspectionFixture.create_ambiguous!(root)
+    output = Path.join(fixture.output, "ambiguous.private.json")
+
+    presentation = MixCommandAdapter.execute(transcript_argv(fixture, output))
+
+    assert presentation.exit_status == 1
+    # The refusal is correct; naming incompleteness for it is not. Nothing is
+    # missing here, so a user told "incomplete" hunts for artifacts they have.
+    assert presentation.stderr =~ "transcript/ambiguous_evidence"
+    refute presentation.stderr =~ "incomplete_evidence"
+    assert presentation.stderr =~ "is ambiguous: 1 turn or generated-source association"
+    assert presentation.stderr =~ "viewer.private"
+    assert presentation.stderr =~ "/api/analysis/runs/RUN_ID/conversation"
+    refute File.exists?(output)
+  end
+
+  @tag :tmp_dir
+  test "an uncaptured model exchange reports incompleteness and its count", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create_interrupted!(root)
+    output = Path.join(fixture.output, "interrupted.private.json")
+
+    presentation = MixCommandAdapter.execute(transcript_argv(fixture, output))
+
+    assert presentation.exit_status == 1
+    assert presentation.stderr =~ "transcript/incomplete_evidence"
+    assert presentation.stderr =~ "1 model exchange the canonical trace expects"
+    assert presentation.stderr =~ "not captured under --inspection"
+    assert presentation.stderr =~ "0 ambiguous associations"
+    assert presentation.stderr =~ "/api/analysis/runs/RUN_ID/conversation"
+    refute File.exists?(output)
+  end
+
+  @tag :tmp_dir
   test "destination failures identify --private-output without echoing its path", %{tmp_dir: root} do
     fixture = PrivateInspectionFixture.create!(root)
     output = Path.join(fixture.output, "occupied.private.json")
@@ -79,6 +115,50 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     assert presentation.stderr =~ "already exists"
     refute presentation.stderr =~ output
     assert File.read!(output) == "original"
+  end
+
+  @tag :tmp_dir
+  test "each --private-output rule is refused under its own code and names the rule", %{
+    tmp_dir: root
+  } do
+    fixture = PrivateInspectionFixture.create!(root)
+
+    missing_parent = Path.join([fixture.output, "absent", "out.private.json"])
+
+    parent_is_file = Path.join(root, "regular-file")
+    File.write!(parent_is_file, "not a directory")
+
+    world_writable = Path.join(root, "world-writable")
+    File.mkdir_p!(world_writable)
+    File.chmod!(world_writable, 0o777)
+
+    real_parent = Path.join(root, "real-parent")
+    File.mkdir_p!(real_parent)
+    symlinked_parent = Path.join(root, "linked-parent")
+    File.ln_s!(real_parent, symlinked_parent)
+
+    # Four filesystem rules, four causes. Three testers met two of these
+    # through one message and each inferred a different rule.
+    cases = [
+      {missing_parent, "destination_directory_missing", "does not exist"},
+      {Path.join(parent_is_file, "out.private.json"), "destination_parent_unavailable",
+       "not an existing directory"},
+      {Path.join(world_writable, "out.private.json"), "destination_parent_unsafe",
+       "group- or world-writable"},
+      {Path.join(symlinked_parent, "out.private.json"), "destination_parent_unavailable",
+       "symbolic link"}
+    ]
+
+    for {output, code, rule} <- cases do
+      presentation = MixCommandAdapter.execute(transcript_argv(fixture, output))
+
+      assert presentation.exit_status == 1
+      assert presentation.stderr =~ "transcript/#{code}"
+      assert presentation.stderr =~ "--private-output"
+      assert presentation.stderr =~ rule
+      refute presentation.stderr =~ root
+      refute File.exists?(output)
+    end
   end
 
   @tag :tmp_dir
