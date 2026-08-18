@@ -685,6 +685,12 @@ defmodule PtcViewer.Router do
       {:error, :inspection_run_mismatch} ->
         send_resp(conn, 404, "Inspection run mismatch")
 
+      # Not a transport status: this instance was never given an inspection
+      # artifact. The body is the reason code the browser renders as the
+      # configuration change that would produce one.
+      {:error, :inspection_not_configured} ->
+        send_resp(conn, 404, "inspection_not_configured")
+
       {:error, :unavailable} ->
         send_resp(conn, 503, "Inspection artifact unavailable")
 
