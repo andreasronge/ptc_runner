@@ -338,7 +338,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
     ProviderDescriptor.new(
       source: installation.source,
       installation_revision: installation.installation_revision,
-      credential_names: descriptor_credential_names(installation),
+      credential_names: installation_credential_names(installation),
       authorization_mode: authorization_mode(installation),
       data_class: descriptor_data_class(installation),
       accepts_data:
@@ -356,15 +356,24 @@ defmodule PtcRunner.Kernel.HostInstallation do
     )
   end
 
-  defp descriptor_credential_names(%{source: :mcp, transport: transport}) do
+  @doc """
+  Returns the host credential names one installation resolves at runtime.
+
+  An MCP transport binds credentials through `env` or `auth` exactly as an LLM
+  installation binds one through `credential`, so anything that reasons about
+  what an installation needs must ask this rather than the source tag. An
+  OAuth-authorized transport resolves no host credential.
+  """
+  @spec installation_credential_names(map()) :: [binary()]
+  def installation_credential_names(%{source: :mcp, transport: transport}) do
     case authority_from_transport(transport) do
       %Authority{} -> []
       nil -> credential_names(transport)
     end
   end
 
-  defp descriptor_credential_names(%{source: :llm, credential: credential}), do: [credential]
-  defp descriptor_credential_names(_installation), do: []
+  def installation_credential_names(%{source: :llm, credential: credential}), do: [credential]
+  def installation_credential_names(_installation), do: []
 
   defp descriptor_data_class(%{source: source})
        when source in [:ptc_private_trace_snapshot, :ptc_inspection_snapshot],

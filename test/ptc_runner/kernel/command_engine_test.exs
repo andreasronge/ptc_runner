@@ -2587,6 +2587,60 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_schema_valid(outcome.envelope)
   end
 
+  @tag :tmp_dir
+  test "--env-file supplies an MCP transport credential, not only an LLM one", %{
+    tmp_dir: directory
+  } do
+    environment_name = "PTC_TEST_MCP_ENV_FILE_CREDENTIAL"
+    previous_environment = System.get_env(environment_name)
+    System.delete_env(environment_name)
+
+    on_exit(fn ->
+      if previous_environment,
+        do: System.put_env(environment_name, previous_environment),
+        else: System.delete_env(environment_name)
+    end)
+
+    host_path =
+      write_host_config(directory, "mcp-env-file", %{
+        "credentials" => %{"key" => %{"env" => environment_name}},
+        "install" => %{
+          "workspace" => %{
+            "source" => "mcp",
+            "installation_revision" => "workspace-v1",
+            "transport" => %{
+              "type" => "stdio",
+              "command" => System.find_executable("sh"),
+              "env" => %{"TOKEN" => %{"binding" => "key"}}
+            },
+            "tools" => %{"read" => %{"as" => "workspace.read", "effect" => "read"}}
+          }
+        }
+      })
+
+    application = doctor_application(directory, "mcp-env-file", mission: ["workspace"])
+    env_file = Path.join(directory, "mcp.env")
+    File.write!(env_file, "#{environment_name}=test-secret\n")
+
+    presentation =
+      StandaloneCLI.execute([
+        "doctor",
+        application,
+        "--host-config",
+        host_path,
+        "--connect",
+        "--env-file",
+        env_file
+      ])
+
+    # An MCP-only project reached `credential_unavailable` with the named file
+    # never read: environment setup was gated on the selected provider being an
+    # LLM, while an MCP transport binds environment credentials the same way.
+    assert System.get_env(environment_name) == "test-secret"
+
+    refute presentation.outcome.envelope["error"]["code"] == "credential_unavailable"
+  end
+
   test "undeclared options are rejected before cross-command conflict rules" do
     cases = [
       {:init, ["init", "project", "--input", "a", "--private-input", "b"]},
