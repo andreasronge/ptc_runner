@@ -838,6 +838,8 @@ defmodule PtcRunner.Kernel.CommandContract do
        when mode in [:help, :version, :docs],
        do: true
 
+  defp diagnostic_pair_allowed?(:docs, :arguments, :docs_page_unknown), do: true
+
   defp diagnostic_pair_allowed?(:run_unclassified, :arguments, code)
        when code in [:invalid_arguments, :conflicting_arguments],
        do: true

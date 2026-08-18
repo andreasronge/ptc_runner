@@ -217,8 +217,9 @@ ptc run ptc.json --envelope command-envelope.json
 
 The standalone streams are human presentation channels and may also contain
 output from applications or children. The envelope is an atomic, no-replace
-file with schema `priv/schemas/ptc-command-envelope-v2.schema.json`. Its status
-and exit-code relationship is sealed by the same command contract.
+file whose JSON Schema this executable serves as `ptc docs schema-envelope`
+(`priv/schemas/ptc-command-envelope-v2.schema.json` in the repository). Its
+status and exit-code relationship is sealed by the same command contract.
 
 After arguments parse, an ordinary or caught command outcome publishes one
 requested envelope. Invalid arguments and VM/OS termination can produce none.

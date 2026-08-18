@@ -96,7 +96,8 @@ exports, and capability requirements are checked normally.
 
 Candidate creation is a trusted build step and is not currently exposed by the
 standalone executable. The source-checkout tool for maintainers is documented
-under [Embedding and host APIs](../maintainers/embedding.md#materialize-candidate-source).
+under "Materialize candidate source" in `docs/maintainers/embedding.md`, which
+is a repository document rather than a page the executable carries.
 
 The optional closed `provenance` object may contain `run_id`, `prompt_hash`,
 `authored_at`, and `accept_widened_effect`. These are operator claims rather

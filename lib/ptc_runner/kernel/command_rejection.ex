@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
   """
 
   alias PtcRunner.Kernel.CommandDeclaration
+  alias PtcRunner.Kernel.DocumentationLibrary
 
   @commands [:help, :version, :unknown | CommandDeclaration.commands()]
   @codes [:invalid_command, :invalid_arguments, :conflicting_arguments]
@@ -32,6 +33,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
             | :missing_switch_value
             | :positional_arity
             | :invalid_destination
+            | :unknown_page
             | :destination_exists
             | :destination_collision
             | :private_output_recovery_collision
@@ -70,6 +72,27 @@ defmodule PtcRunner.Kernel.CommandRejection do
       code: code,
       kind: :generic,
       accepted: [],
+      option: nil,
+      destination: nil,
+      conflicts: []
+    }
+  end
+
+  @doc """
+  Builds the rejection for a `ptc docs` page name nothing serves.
+
+  Bare `ptc docs` already lists the served set, so the failing form is the one
+  case where a reader is holding a name and cannot see the alternatives. The
+  list is declaration-owned, like the accepted switches of `unknown_switch/2`;
+  the caller's own token is not retained.
+  """
+  @spec docs_page_unknown() :: t()
+  def docs_page_unknown do
+    %__MODULE__{
+      command: :docs,
+      code: :docs_page_unknown,
+      kind: :unknown_page,
+      accepted: DocumentationLibrary.names(),
       option: nil,
       destination: nil,
       conflicts: []

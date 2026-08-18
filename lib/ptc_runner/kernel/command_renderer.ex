@@ -202,6 +202,9 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   defp rejection_suffix(%CommandRejection{kind: :unknown_switch, accepted: accepted}),
     do: "; unknown switch; accepted: " <> Enum.join(accepted, ", ")
 
+  defp rejection_suffix(%CommandRejection{kind: :unknown_page, accepted: accepted}),
+    do: "; pages: " <> Enum.join(accepted, ", ")
+
   defp rejection_suffix(%CommandRejection{kind: :missing_switch_value, option: option}),
     do: "; #{option} requires a value"
 

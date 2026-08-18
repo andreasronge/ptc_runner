@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
+  alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.DocumentationLibrary
 
@@ -49,8 +50,20 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
 
     assert envelope["command"] == "docs"
     assert envelope["error"]["phase"] == "arguments"
-    assert envelope["error"]["code"] == "invalid_arguments"
+    assert envelope["error"]["code"] == "docs_page_unknown"
     refute envelope |> Jason.encode!() |> String.contains?("sensitive-page-name")
+
+    # The failing form is the one place a reader holds a name and cannot see the
+    # alternatives, so the rendering lists them.
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["docs", "sensitive-page-name"])
+
+    assert {:stderr, rendered} =
+             CommandRenderer.render(outcome, CommandRejection.docs_page_unknown())
+
+    for name <- DocumentationLibrary.names() do
+      assert rendered =~ name
+    end
   end
 
   test "docs outcomes satisfy the published envelope schema" do
@@ -108,7 +121,11 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     # Titles, sizes, and bodies are derived from the shipped documents. Pinning
     # any of them here would make every documentation edit rebuild this
     # generated artifact and fail the staleness gate.
-    for %{"title" => title, "bytes" => bytes} <- DocumentationLibrary.listing() do
+    # `schema-envelope` serves this very schema, so its title is the contract's
+    # own and appears for that reason rather than because documentation was
+    # pinned into it.
+    for %{"name" => name, "title" => title, "bytes" => bytes} <- DocumentationLibrary.listing(),
+        name != "schema-envelope" do
       refute encoded =~ ~s("#{title}")
       refute encoded =~ ~s("bytes":#{bytes})
     end
@@ -119,6 +136,21 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
              CommandEngine.dispatch(["docs", "--envelope", "out.json"])
 
     assert envelope["error"]["phase"] == "arguments"
+  end
+
+  test "no served page prints a link the executable cannot follow" do
+    for name <- DocumentationLibrary.names(), not String.starts_with?(name, "schema-") do
+      links =
+        ~r/!?\[[^\]]*\]\(([^)\s]+)\)/
+        |> Regex.scan(page_content(name))
+        |> Enum.map(fn [_match, target] -> target end)
+        |> Enum.reject(
+          &(String.starts_with?(&1, ["http://", "https://", "mailto:", "//"]) or
+              String.starts_with?(&1, "#"))
+        )
+
+      assert links == [], "#{name} still prints repository-relative links: #{inspect(links)}"
+    end
   end
 
   test "every page cross-reference inside the served documentation resolves" do

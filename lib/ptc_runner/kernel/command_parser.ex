@@ -185,7 +185,7 @@ defmodule PtcRunner.Kernel.CommandParser do
           frontend_options: frontend_options,
           frontend: frontend
         ),
-      else: reject(:docs, :invalid_arguments)
+      else: {:error, CommandRejection.docs_page_unknown()}
   end
 
   defp validate_command(:validate, [application], options, ordered, frontend_options, frontend) do

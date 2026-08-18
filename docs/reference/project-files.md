@@ -79,8 +79,10 @@ file. Project choices do not become part of application content identity.
 `kind`, `version`, and `application` are required. `host`, `artifacts`, and
 `viewer` are optional. Every object rejects unknown and duplicate keys. Paths
 are portable relative paths resolved beneath the project document's directory;
-absolute paths and `..` traversal are rejected. The generated schema is
-[`priv/schemas/ptc-project-config.schema.json`](https://github.com/andreasronge/ptc_runner/blob/main/priv/schemas/ptc-project-config.schema.json).
+absolute paths and `..` traversal are rejected. The generated schema is served
+as `ptc docs schema-project`
+([`priv/schemas/ptc-project-config.schema.json`](https://github.com/andreasronge/ptc_runner/blob/main/priv/schemas/ptc-project-config.schema.json)
+in the repository).
 
 Inspection requires traces because private records must correlate with a
 canonical run. `viewer.private` is a separate explicit local grant: creating a

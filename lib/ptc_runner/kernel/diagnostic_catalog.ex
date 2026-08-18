@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the project document declares no host block; add one to use this command"},
     {:arguments, :envelope_destination_exists, 2, false,
      "the envelope destination already exists"},
+    {:arguments, :docs_page_unknown, 2, false, "no documentation page is served under that name"},
     {:host, :host_unavailable, 3, false, "the host configuration is unavailable"},
     {:host, :host_invalid, 3, false, "the host configuration is invalid"},
     {:host, :host_schema_invalid, 3, false, "the host configuration does not satisfy its schema"},

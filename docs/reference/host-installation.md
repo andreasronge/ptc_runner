@@ -62,7 +62,8 @@ actions happen later during preflight and acquisition.
 
 Only `install` is required. The other top-level keys are `$schema`,
 `credentials`, `limits`, and `runtime`; unknown and duplicate keys are
-rejected. Use `priv/schemas/ptc-host-config.schema.json` for the complete
+rejected. Use `ptc docs schema-host`
+(`priv/schemas/ptc-host-config.schema.json` in the repository) for the complete
 structural vocabulary, defaults, bounds, and editor completion. Runtime
 validation remains authoritative for semantic checks.
 
@@ -94,7 +95,7 @@ missing, empty, or unreadable value fails with `credential_unavailable`; there
 is no ambient provider-specific fallback. Never put credentials in a manifest,
 PTC-Lisp, canonical traces, or committed files.
 
-`ptc` and `ptc` accept `--env-file FILE` on `run`, active `doctor`, and
+`ptc` and `mix ptc` accept `--env-file FILE` on `run`, active `doctor`, and
 manifest-backed `repl`. When a selected LLM uses an `env` credential, the
 frontend loads that exact file before provider activity; it never searches for
 one. Every imported value persists for the process lifetime, and an existing
