@@ -4,6 +4,15 @@ Run `./scripts/install-hooks.sh` once per clone. The installed hooks are small
 wrappers around the tracked implementations in this directory, so hook updates
 take effect without reinstalling them.
 
+The pre-commit hook is the fast path: it runs format, compile, and credo
+only when staged Elixir, config, or Mix files belong to a project, and it
+passes those staged `.ex`/`.exs` paths to format and credo so a one-file
+commit does not analyze the whole tree. Credo consistency checks that compare
+the whole project therefore wait for `mix precommit` and pre-push. Compile
+stays project-wide because Mix is incremental and `--warnings-as-errors` has
+to see the build.
+Scoped tests run only for staged `*_test.exs` files, with `:slow` excluded.
+
 The pre-push hook classifies the pushed and dirty paths, then invokes the same
 repository-owned root, Viewer, launcher, release, or documentation entry
 points as GitHub Actions. For mixed documentation and code changes, ExDoc runs
