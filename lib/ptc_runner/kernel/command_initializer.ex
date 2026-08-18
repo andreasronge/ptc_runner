@@ -368,6 +368,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
 
   defp write_child(state, target, fault_hook, name, bytes) do
     with :ok <- verify_staging(state),
+         :ok <- verify_ancestors(state, name),
          path = Path.join(state.path, name),
          {:ok, :ok} <-
            File.open(path, [:write, :exclusive, :binary], fn device ->
@@ -386,6 +387,26 @@ defmodule PtcRunner.Kernel.CommandInitializer do
     else
       _failure -> {:error, capture_known_child(state, name)}
     end
+  end
+
+  # A nested write resolves through the directories this run created, so each one
+  # must still be the directory it created before the file is opened through it.
+  # Verifying only the staging root would let an ancestor replaced after creation
+  # put the write outside the tree.
+  defp verify_ancestors(state, name) do
+    name
+    |> ancestors()
+    |> Enum.reduce_while(:ok, fn relative, :ok ->
+      case Map.fetch(state.children, relative) do
+        {:ok, {:directory, _identity} = child} ->
+          if child_matches?(state.path, state, {relative, child}),
+            do: {:cont, :ok},
+            else: {:halt, {:error, :staging_changed}}
+
+        _missing_or_not_a_directory ->
+          {:halt, {:error, :staging_changed}}
+      end
+    end)
   end
 
   defp capture_known_child(state, name) do

@@ -15,11 +15,23 @@ defmodule PtcRunner.Kernel.DocumentationLinks do
   # The rewrite applies to the embedded copy only. The files on disk keep
   # ordinary relative links, which is what the website and HexDocs render.
 
-  # Fence-aware, because a fenced block may legitimately contain link syntax as
-  # sample text and rewriting it would corrupt an example rather than repair a
-  # link. Link text may wrap across lines, so the pattern is applied to whole
-  # unfenced spans rather than line by line.
-  @link ~r/(!?)\[([^\]]*)\]\(([^)\s]+)\)/
+  # Fence- and code-span-aware, because sample text may legitimately contain link
+  # syntax and rewriting it would corrupt an example rather than repair a link.
+  # Link text may wrap across lines, so the pattern is applied to whole prose
+  # spans rather than line by line. The optional title group covers
+  # `](target "Title")`; a reference-style definition is handled separately,
+  # because a link label cannot hold a command.
+  # Link text may wrap once and carries no brackets of its own. Allowing either
+  # let a stray `[` — `at main.clj bytes [45,58)` — pair with a `]` paragraphs
+  # away and swallow everything between them.
+  @link ~r/(!?)\[([^\[\]\n]*(?:\n[^\[\]\n]*)?)\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/
+  @reference_definition ~r/^ {0,3}\[[^\]]+\]:\s*<?([^>\s]+)>?/m
+  # Line-scoped, so an unpaired backtick cannot pair with one paragraphs away and
+  # mask a real link between them. A code span that wraps lines therefore
+  # protects nothing, which is the harmless direction: the rewrite of a link
+  # inside one would be cosmetic, while a masked link ships dead.
+  @code_span ~r/(`+[^`\n]*`+)/
+  @fence ~w(``` ~~~)
   @absolute ~w(http:// https:// mailto: //)
 
   @doc """
@@ -43,7 +55,7 @@ defmodule PtcRunner.Kernel.DocumentationLinks do
 
         {:text, span}, unresolved ->
           {rewritten, span_unresolved} = rewrite_span(span, directory, names_by_path)
-          {rewritten, unresolved ++ span_unresolved}
+          {rewritten, unresolved ++ span_unresolved ++ reference_definitions(span)}
       end)
 
     case unresolved do
@@ -58,7 +70,7 @@ defmodule PtcRunner.Kernel.DocumentationLinks do
     content
     |> String.split("\n")
     |> Enum.reduce({[], :text}, fn line, {spans, kind} ->
-      fence? = String.starts_with?(String.trim_leading(line), "```")
+      fence? = String.starts_with?(String.trim_leading(line), @fence)
       next = if fence?, do: flip(kind), else: kind
       line_kind = if fence?, do: :code, else: kind
 
@@ -75,22 +87,67 @@ defmodule PtcRunner.Kernel.DocumentationLinks do
   defp flip(:text), do: :code
   defp flip(:code), do: :text
 
-  defp rewrite_span(span, directory, names_by_path) do
-    @link
+  # A reference-style definition cannot become a command, because the label it
+  # binds is used elsewhere as `[text][label]`. Report it rather than leave a
+  # relative destination the executable cannot follow.
+  defp reference_definitions(span) do
+    @reference_definition
     |> Regex.scan(span, return: :binary)
-    |> Enum.reduce({span, []}, fn [matched, bang, text, target], {span, unresolved} ->
-      case replacement(bang, text, target, directory, names_by_path) do
-        {:ok, replacement} ->
-          {String.replace(span, matched, replacement, global: false), unresolved}
+    |> Enum.map(fn [_matched, target] -> target end)
+    |> Enum.reject(&(String.starts_with?(&1, @absolute) or String.starts_with?(&1, "#")))
+  end
 
-        :keep ->
-          {span, unresolved}
+  # Matches are located by byte offset rather than by content, so a link is
+  # replaced where it occurs and a code span is skipped only when it is the whole
+  # match. Splitting on code spans first would tear apart the common
+  # ``[`docs/x.md`](x.md)`` form, whose link text is itself a code span.
+  defp rewrite_span(span, directory, names_by_path) do
+    code = code_ranges(span)
 
-        {:error, resolved} ->
-          {span, unresolved ++ [resolved]}
-      end
+    {replacements, unresolved} =
+      @link
+      |> Regex.scan(span, return: :index)
+      |> Enum.reject(fn [{start, _length} | _groups] -> inside?(code, start) end)
+      |> Enum.map_reduce([], fn match, unresolved ->
+        [whole, bang, text, target] = Enum.take(match, 4)
+
+        case replacement(
+               slice(span, bang),
+               slice(span, text),
+               slice(span, target),
+               directory,
+               names_by_path
+             ) do
+          {:ok, replacement} -> {{whole, replacement}, unresolved}
+          :keep -> {nil, unresolved}
+          {:error, resolved} -> {nil, unresolved ++ [resolved]}
+        end
+      end)
+
+    {apply_replacements(span, Enum.filter(replacements, & &1)), unresolved}
+  end
+
+  # Right to left, so an earlier replacement cannot move a later offset.
+  defp apply_replacements(span, replacements) do
+    replacements
+    |> Enum.sort_by(fn {{start, _length}, _replacement} -> start end, :desc)
+    |> Enum.reduce(span, fn {{start, length}, replacement}, span ->
+      binary_part(span, 0, start) <>
+        replacement <> binary_part(span, start + length, byte_size(span) - start - length)
     end)
   end
+
+  defp code_ranges(span) do
+    @code_span
+    |> Regex.scan(span, return: :index)
+    |> Enum.map(fn [{start, length} | _groups] -> {start, start + length} end)
+  end
+
+  defp inside?(ranges, offset),
+    do: Enum.any?(ranges, fn {start, stop} -> offset >= start and offset < stop end)
+
+  defp slice(_span, {_start, 0}), do: ""
+  defp slice(span, {start, length}), do: binary_part(span, start, length)
 
   defp replacement(bang, text, target, directory, names_by_path) do
     cond do

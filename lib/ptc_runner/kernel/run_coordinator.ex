@@ -459,12 +459,17 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   Rejects an entry that evaluates into a mission when the manifest declares none.
 
   `kernel-mission-model-context` answers `unknown_mission` for every name a
-  manifest without missions can supply, so such a run cannot reach its first
-  model request. That is decidable from the two documents `validate` already
-  parses: the compiled entry's transitive tool references, and whether the
-  manifest's mission map is empty. Which mission the entry will *name* is not
-  decidable here — it comes from runtime configuration — so this deliberately
-  checks only the case where no name could resolve.
+  manifest without missions can supply, so a run that reaches it cannot reach its
+  first model request. Both facts are in the documents `validate` already parses:
+  the compiled entry's transitive tool references, and whether the manifest's
+  mission map is empty. Which mission the entry will *name* is not decidable here
+  — it comes from runtime configuration — so nothing else is checked.
+
+  The reference set is a may-call set, so an entry that reaches the capability
+  only on a branch its input never takes is refused too. That is the deliberate
+  trade: such a manifest carries a mission-evaluating library it never uses, the
+  remedy is one declared mission, and the failure it replaces is a paid run
+  ending in `execution/workflow_failed` with nothing naming the cause.
   """
   @spec validate_entry_missions(PtcRunner.Kernel.FrozenBundle.t(), binary(), map() | nil) ::
           :ok | {:error, CommandDiagnostic.t()}

@@ -153,6 +153,26 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     end
   end
 
+  test "rewriting a page changes only the lines that carry a link" do
+    root = Path.expand("../../..", __DIR__)
+
+    for {name, source_path} <- catalog(), not String.starts_with?(name, "schema-") do
+      source = File.read!(Path.join(root, source_path)) |> String.split("\n")
+      served = page_content(name) |> String.split("\n")
+
+      assert length(source) == length(served),
+             "#{name} gained or lost lines while its links were rewritten"
+
+      # A link match spans at most two lines and both carry a bracket, so a line
+      # without one must survive untouched. A stray bracket that let link text
+      # run across paragraphs corrupted prose exactly this way.
+      for {source_line, served_line} <- Enum.zip(source, served),
+          not String.contains?(source_line, "[") and not String.contains?(source_line, "]") do
+        assert source_line == served_line, "#{name} rewrote a line that carries no link"
+      end
+    end
+  end
+
   test "every page cross-reference inside the served documentation resolves" do
     for name <- DocumentationLibrary.names(),
         [_match, referenced] <- Regex.scan(~r/`ptc docs ([a-z][a-z-]*)`/, page_content(name)) do
@@ -180,6 +200,12 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     for [_match, page] <- Regex.scan(~r/`ptc docs ([a-z-]+)`/, routing) do
       assert page in DocumentationLibrary.names()
     end
+  end
+
+  defp catalog do
+    Enum.map(DocumentationLibrary.listing(), fn %{"name" => name} ->
+      {name, DocumentationLibrary.source_path(name)}
+    end)
   end
 
   defp page_content(name) do

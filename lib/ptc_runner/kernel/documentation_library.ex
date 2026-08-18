@@ -115,6 +115,7 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
              %{"name" => page.name, "title" => page.title, "bytes" => page.bytes}
            end)
   @contents Map.new(@pages, &{&1.name, &1.content})
+  @source_paths Map.new(@catalog, fn {name, path} -> {name, path} end)
 
   @doc """
   Returns every served page name, in catalog order.
@@ -130,6 +131,10 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
   """
   @spec listing() :: [%{optional(binary()) => binary() | non_neg_integer()}]
   def listing, do: @listing
+
+  @doc false
+  @spec source_path(binary()) :: binary() | nil
+  def source_path(name) when is_binary(name), do: Map.get(@source_paths, name)
 
   @doc """
   Returns the embedded content of one page.
