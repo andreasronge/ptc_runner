@@ -23,13 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Reconstructed conversations carry the `system` prompt that shaped each turn.
-  It appears on the first turn of every stream and on every later turn whose
-  prompt differs from the one before it, so `ptc transcript` and the Viewer's
-  conversation view no longer certify a transcript as complete while omitting
-  the instructions the run was given. Stream linkage keys on request messages
-  alone, so an absent `system` means "unchanged since the previous turn of this
-  stream" rather than "none was sent".
+- Reconstructed conversations carry the `system` prompt that shaped each turn,
+  so `ptc transcript` and the Viewer's conversation view no longer certify a
+  transcript as complete while omitting the instructions the run was given.
+  Every `turns` item keeps its own prompt, since that collection is filtered
+  and paginated; a presented conversation repeats it only when it changes, and
+  the first turn of every presented stream always carries it. Stream linkage
+  keys on request messages alone, so an elided `system` means "unchanged since
+  the previous presented turn" rather than "none was sent".
 
 - A run listing or counters query now reports the trace files its source kind
   refused to read, as `excluded_private_trace_files` or

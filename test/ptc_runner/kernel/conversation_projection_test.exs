@@ -63,6 +63,53 @@ defmodule PtcRunner.Kernel.ConversationProjectionTest do
       assert mission_turn["system"] == "mission instructions"
     end
 
+    test "every compiled turn keeps its own prompt, because turns are filtered downstream" do
+      first = exchange("llm-1", 1, [user("start")], "instructions v1", "one")
+
+      second =
+        exchange(
+          "llm-2",
+          3,
+          [user("start"), assistant("one"), user("again")],
+          "instructions v1",
+          "two"
+        )
+
+      projection = ConversationProjection.compile([first, second], [], @trace_facts)
+
+      assert Enum.map(projection.items, & &1["system"]) == ["instructions v1", "instructions v1"]
+    end
+
+    test "a presented page that starts mid-stream still carries its prompt" do
+      first = exchange("llm-1", 1, [user("start")], "instructions v1", "one")
+
+      second =
+        exchange(
+          "llm-2",
+          3,
+          [user("start"), assistant("one"), user("again")],
+          "instructions v1",
+          "two"
+        )
+
+      projection = ConversationProjection.compile([first, second], [], @trace_facts)
+
+      # `turns` filters and paginates before presentation, so a caller can be
+      # handed the second turn without ever seeing the first. Eliding against a
+      # turn the caller did not receive would drop the prompt entirely while
+      # still reporting complete evidence.
+      later_page = %{
+        "items" => Enum.filter(projection.items, &(&1["turn"] == 2)),
+        "evidence" => projection.evidence
+      }
+
+      assert %{"streams" => [%{"turns" => [turn]}]} =
+               ConversationProjection.present_page(later_page)
+
+      assert turn["turn"] == 2
+      assert turn["system"] == "instructions v1"
+    end
+
     test "an exchange sent without a system prompt says so rather than staying silent" do
       assert %{"streams" => [%{"turns" => [turn]}]} =
                present([exchange("llm-1", 1, [user("start")], nil, "one")])
