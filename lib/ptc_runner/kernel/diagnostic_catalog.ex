@@ -32,6 +32,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:arguments, :envelope_destination_exists, 2, false,
      "the envelope destination already exists"},
     {:arguments, :docs_page_unknown, 2, false, "no documentation page is served under that name"},
+    {:arguments, :example_unknown, 2, false, "no example is embedded under that name"},
     {:host, :host_unavailable, 3, false, "the host configuration is unavailable"},
     {:host, :host_invalid, 3, false, "the host configuration is invalid"},
     {:host, :host_schema_invalid, 3, false, "the host configuration does not satisfy its schema"},

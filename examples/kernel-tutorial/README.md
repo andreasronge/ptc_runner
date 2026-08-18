@@ -1,6 +1,8 @@
 # Kernel tutorial examples
 
-Run these examples from the repository root.
+Materialize a copy of this directory with
+`ptc init kernel-tutorial --example kernel-tutorial`, then run the commands
+below from the directory that copy sits in.
 [`docs/guides/quickstart.md`](../../docs/guides/quickstart.md) is the shortest
 path from a clone to a live model run;
 [`docs/guides/getting-started.md`](../../docs/guides/getting-started.md) walks
@@ -8,22 +10,23 @@ through the same examples in detail, and
 [`docs/guides/building-agents.md`](../../docs/guides/building-agents.md)
 explains the agent examples.
 
-Each example has a project document in this directory. Point `mix ptc run` at
+Each example has a project document in this directory. Point `ptc run` at
 it to reuse the application, host, environment, artifact, and Viewer paths.
 Examples 01 and 05 are credential-free and select no providers:
 
-```bash
-mix ptc run examples/kernel-tutorial/01-orders.ptc-project.json
-mix ptc run examples/kernel-tutorial/05-signature-feedback.ptc-project.json
+```console
+ptc init kernel-tutorial --example kernel-tutorial
+ptc run kernel-tutorial/01-orders.ptc-project.json
+ptc run kernel-tutorial/05-signature-feedback.ptc-project.json
 ```
 
 Examples 02 through 04 select providers. Their project documents all reference
 the shared host installation and the tutorial's explicitly named `.env`:
 
-```bash
-mix ptc run examples/kernel-tutorial/02-deepseek-extract.ptc-project.json
-mix ptc run examples/kernel-tutorial/03-file-agent.ptc-project.json
-mix ptc run examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
+```console
+ptc run kernel-tutorial/02-deepseek-extract.ptc-project.json
+ptc run kernel-tutorial/03-file-agent.ptc-project.json
+ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
 They require `OPENROUTER_API_KEY` and use the trusted `deepseek` model alias.

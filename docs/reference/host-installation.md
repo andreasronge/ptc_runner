@@ -297,7 +297,8 @@ Run active local, credential, authorization, and connectivity checks without
 invoking the workflow:
 
 ```console
-ptc doctor examples/kernel-tutorial/02-deepseek-extract.ptc-project.json --connect
+ptc init kernel-tutorial --example kernel-tutorial
+ptc doctor kernel-tutorial/02-deepseek-extract.ptc-project.json --connect
 ```
 
 `readiness` is `ready` only after successful active checks. Plain doctor is

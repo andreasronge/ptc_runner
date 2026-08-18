@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.DocumentationLibrary
+  alias PtcRunner.Kernel.ExampleLibrary
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -839,6 +840,7 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: true
 
   defp diagnostic_pair_allowed?(:docs, :arguments, :docs_page_unknown), do: true
+  defp diagnostic_pair_allowed?(:init, :arguments, :example_unknown), do: true
 
   defp diagnostic_pair_allowed?(:run_unclassified, :arguments, code)
        when code in [:invalid_arguments, :conflicting_arguments],
@@ -1450,13 +1452,21 @@ defmodule PtcRunner.Kernel.CommandContract do
     })
   end
 
-  defp init_result,
-    do:
-      closed(~w(created), %{
-        "created" => %{
-          "const" => ["AGENTS.md", ".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
-        }
-      })
+  # The scaffold's own list, plus one sealed list per embedded example tree, so
+  # `--example` cannot publish a top-level entry the contract did not admit.
+  defp init_result do
+    scaffold = ["AGENTS.md", ".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
+
+    examples =
+      Enum.map(ExampleLibrary.names(), fn name ->
+        {:ok, created} = ExampleLibrary.created(name)
+        %{"const" => created}
+      end)
+
+    closed(~w(created), %{
+      "created" => %{"oneOf" => [%{"const" => scaffold} | examples]}
+    })
+  end
 
   defp validate_result do
     closed(

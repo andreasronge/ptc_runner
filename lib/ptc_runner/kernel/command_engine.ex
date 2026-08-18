@@ -305,7 +305,9 @@ defmodule PtcRunner.Kernel.CommandEngine do
         models_outcome(arguments, run_ref)
 
       :init ->
-        CommandInitializer.initialize(arguments.directory, run_ref)
+        CommandInitializer.initialize(arguments.directory, run_ref,
+          example: Map.get(arguments.options, :example)
+        )
     end
   rescue
     _exception -> {:error, arguments_outcome(arguments, run_ref, :internal, :internal_error)}

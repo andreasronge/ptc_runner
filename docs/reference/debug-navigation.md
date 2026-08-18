@@ -239,20 +239,21 @@ fails. `pricing.discount` is an unused decoy.
 Capture the failed run. It exits nonzero by design:
 
 ```console
-ptc run examples/debug-a-failed-run/target.ptc-project.json
+ptc init debug-a-failed-run --example debug-a-failed-run
+ptc run debug-a-failed-run/target.ptc-project.json
 ```
 
 Then navigate that capture:
 
 ```console
-ptc run examples/debug-a-failed-run/debugger.ptc-project.json
+ptc run debug-a-failed-run/debugger.ptc-project.json
 ```
 
 The debugger is a private run, so read its value from the project's result
 directory rather than stdout:
 
 ```console
-cat examples/debug-a-failed-run/debugger/.ptc/results/*.private.json
+cat debug-a-failed-run/debugger/.ptc/results/*.private.json
 ```
 
 It reports the boundary failure, the exact generated program including the
@@ -305,7 +306,7 @@ is the one part of the example that needs a credential, named on the command
 line so no environment file has to live inside the example directory:
 
 ```console
-ptc run examples/debug-a-failed-run/debugger-agent.ptc-project.json --env-file .env
+ptc run debug-a-failed-run/debugger-agent.ptc-project.json --env-file .env
 ```
 
 Keep `debug.nav` as the mission's only domain authority and select a model into

@@ -69,7 +69,8 @@ The tutorial server is a committed JavaScript bundle. It requires Node.js 22 or
 newer but no npm install or build:
 
 ```console
-ptc doctor examples/kernel-tutorial/03-file-agent.ptc-project.json
+ptc init kernel-tutorial --example kernel-tutorial
+ptc doctor kernel-tutorial/03-file-agent.ptc-project.json
 ```
 
 Passive doctor validates the application, resolves `node`, and checks the
@@ -78,7 +79,7 @@ server. After completing the [model-authored Quickstart](../guides/quickstart.md
 run the agent:
 
 ```console
-ptc run examples/kernel-tutorial/03-file-agent.ptc-project.json
+ptc run kernel-tutorial/03-file-agent.ptc-project.json
 ```
 
 The model sees one prompt-visible `tutorial.files/read-page` function. It does

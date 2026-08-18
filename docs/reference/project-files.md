@@ -24,17 +24,18 @@ The kernel tutorial ships one project document per runnable example. A
 credential-free run and its Viewer need only the same JSON path:
 
 ```console
-ptc run examples/kernel-tutorial/01-orders.ptc-project.json
-ptc viewer examples/kernel-tutorial/01-orders.ptc-project.json
+ptc init kernel-tutorial --example kernel-tutorial
+ptc run kernel-tutorial/01-orders.ptc-project.json
+ptc viewer kernel-tutorial/01-orders.ptc-project.json
 ```
 
 The provider-backed examples additionally reference the shared host document
-and `examples/kernel-tutorial/.env` from their project files. After creating
+and `kernel-tutorial/.env` from their project files. After creating
 that explicitly named environment file, their run commands have the same
 single-argument shape:
 
 ```console
-ptc run examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
+ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
 ## Keep the three roles separate

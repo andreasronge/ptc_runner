@@ -10,9 +10,10 @@ select and narrow that installation but cannot widen it.
 Use the checked-in file-agent example to see the complete split:
 
 ```console
-ptc doctor examples/kernel-tutorial/03-file-agent.ptc-project.json
-ptc doctor examples/kernel-tutorial/03-file-agent.ptc-project.json --connect
-ptc run examples/kernel-tutorial/03-file-agent.ptc-project.json
+ptc init kernel-tutorial --example kernel-tutorial
+ptc doctor kernel-tutorial/03-file-agent.ptc-project.json
+ptc doctor kernel-tutorial/03-file-agent.ptc-project.json --connect
+ptc run kernel-tutorial/03-file-agent.ptc-project.json
 ```
 
 That example maps one server operation to `workspace.read` and exposes only a

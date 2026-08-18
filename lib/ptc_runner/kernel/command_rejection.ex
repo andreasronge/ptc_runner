@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
 
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.DocumentationLibrary
+  alias PtcRunner.Kernel.ExampleLibrary
 
   @commands [:help, :version, :unknown | CommandDeclaration.commands()]
   @codes [:invalid_command, :invalid_arguments, :conflicting_arguments]
@@ -34,6 +35,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
             | :positional_arity
             | :invalid_destination
             | :unknown_page
+            | :unknown_example
             | :destination_exists
             | :destination_collision
             | :private_output_recovery_collision
@@ -93,6 +95,25 @@ defmodule PtcRunner.Kernel.CommandRejection do
       code: :docs_page_unknown,
       kind: :unknown_page,
       accepted: DocumentationLibrary.names(),
+      option: nil,
+      destination: nil,
+      conflicts: []
+    }
+  end
+
+  @doc """
+  Builds the rejection for a `ptc init --example` name nothing embeds.
+
+  Same shape as `docs_page_unknown/0`: the embedded set is declaration-owned and
+  is listed, while the caller's own token is not retained.
+  """
+  @spec example_unknown() :: t()
+  def example_unknown do
+    %__MODULE__{
+      command: :init,
+      code: :example_unknown,
+      kind: :unknown_example,
+      accepted: ExampleLibrary.names(),
       option: nil,
       destination: nil,
       conflicts: []
