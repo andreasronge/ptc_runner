@@ -26,6 +26,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SourceCheck
+  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.Format
@@ -2210,6 +2211,8 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert %{data: %{environment: :workflow, name: "add"}} = started
     assert %{data: %{environment: :workflow, name: "add", status: :ok}} = stopped
+    refute Map.has_key?(stopped.data, :kind)
+    refute Map.has_key?(stopped.data, :reason)
   end
 
   test "ambiguous normalized capability arguments are rejected before provider dispatch" do
@@ -3691,6 +3694,71 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     refute String.contains?(encoded_events, private)
     refute String.contains?(encoded_events, prompt)
     refute String.contains?(encoded_events, session)
+  end
+
+  test "a rejected workflow annotation records the closed class on capability-stopped" do
+    assert {:ok, components} = Library.components(["runtime", "workflow.event"])
+    assert {:ok, bundle} = Kernel.compile_bundle(components)
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "rejected-annotation-class")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    secret = "PRIVATE_GENERATED_SOURCE_(return_42)"
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "error",
+                "kind" => "invalid_annotation",
+                "reason" => "invalid_workflow_annotation"
+              }
+            }} =
+             Kernel.run(
+               ~s|(return (workflow.event/annotate "progress" {"stage" "started" "source" "#{secret}"}))|,
+               config
+             )
+
+    assert %{
+             data: %{
+               name: "workflow-annotate",
+               status: :error,
+               kind: :invalid_annotation,
+               reason: :invalid_workflow_annotation
+             }
+           } =
+             Enum.find(
+               EventSink.events(sink),
+               &(&1.type == "capability-stopped")
+             )
+
+    refute inspect(EventSink.events(sink)) =~ secret
+
+    assert {:ok, trace_log} = TraceLog.new(source: sink)
+
+    assert {:ok, %{"items" => items}} =
+             TraceLog.query(trace_log, :list_turns, %{
+               "run_id" => "rejected-annotation-class",
+               "capability" => "workflow-annotate"
+             })
+
+    assert Enum.any?(items, fn
+             %{"type" => "capability-stopped", "data" => data} ->
+               data["kind"] == "invalid_annotation" and
+                 data["reason"] == "invalid_workflow_annotation"
+
+             _other ->
+               false
+           end)
   end
 
   test "terminal workflow results and retained mission memory use Kernel limits and state" do

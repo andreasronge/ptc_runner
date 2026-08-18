@@ -247,7 +247,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
              retryable?: false
            }
 
-    assert %{data: %{status: :error}} =
+    assert %{data: %{status: :error, kind: :provider_error, reason: :exception}} =
              Enum.find(events, &(&1.type == "capability-stopped"))
 
     refute Enum.any?(events, &(&1.type == "limit-exceeded"))
@@ -257,6 +257,23 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
     assert diagnostic["payload"]["message_truncated"]
     assert diagnostic["payload"]["stacktrace_truncated"]
     assert output["payload"]["result"]["reason"] == "exception"
+  end
+
+  test "capability-stopped carries the closed rejection class without the payload" do
+    secret = "SECRET_PROVIDER_DETAIL"
+
+    {result, events} =
+      dispatch_mission_with_events([], 100, fn ->
+        {:error, ProviderError.new(:unavailable, secret, retryable?: true)}
+      end)
+
+    assert %{status: :error, kind: :provider_error, reason: :unavailable, details: ^secret} =
+             result
+
+    stopped = Enum.find(events, &(&1.type == "capability-stopped"))
+    assert %{data: %{status: :error, kind: :provider_error, reason: :unavailable}} = stopped
+    refute Map.has_key?(stopped.data, :details)
+    refute inspect(stopped) =~ secret
   end
 
   test "workflow raises retain diagnostics without mission attribution" do

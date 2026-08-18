@@ -91,6 +91,60 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
     end
   end
 
+  describe "capability rejection class" do
+    test "keeps known Kernel envelope atoms readable" do
+      assert SafeMetadata.rejection_class(%{
+               status: :error,
+               kind: :invalid_annotation,
+               reason: :invalid_workflow_annotation,
+               details: "PRIVATE PAYLOAD"
+             }) == %{kind: :invalid_annotation, reason: :invalid_workflow_annotation}
+    end
+
+    test "fingerprints unrecognized atoms instead of copying them" do
+      class =
+        SafeMetadata.rejection_class(%{
+          status: :error,
+          kind: :secret_rejection_kind,
+          reason: :secret_rejection_reason
+        })
+
+      assert class == %{
+               kind_fingerprint:
+                 SafeMetadata.fingerprint("capability-kind:secret_rejection_kind"),
+               reason_fingerprint:
+                 SafeMetadata.fingerprint("capability-reason:secret_rejection_reason")
+             }
+
+      refute inspect(class) =~ "secret_rejection"
+    end
+
+    test "fingerprints an unknown reason beside a known kind" do
+      class =
+        SafeMetadata.rejection_class(%{
+          status: :error,
+          kind: :protocol_error,
+          reason: :secret_rejection_reason
+        })
+
+      assert class.kind == :protocol_error
+      refute Map.has_key?(class, :reason)
+
+      assert class.reason_fingerprint ==
+               SafeMetadata.fingerprint("capability-reason:secret_rejection_reason")
+    end
+
+    test "omits non-atoms and successful envelopes" do
+      assert SafeMetadata.rejection_class(%{
+               status: :error,
+               kind: "PRIVATE_KIND",
+               reason: "PRIVATE_REASON"
+             }) == %{}
+
+      assert SafeMetadata.rejection_class(%{status: :ok, kind: :invalid_annotation}) == %{}
+    end
+  end
+
   describe "LLM provider failure taxonomy" do
     test "retains only a closed class from the nested provider envelope" do
       failure = %{
