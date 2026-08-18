@@ -186,7 +186,9 @@ network-free example, candidate materialization, and component overrides.
 
 `doctor --connect` performs a real minimal completion for each selected live
 model and may incur provider cost. `--show-model-selectors` adds only safe
-selectors; endpoint-bearing `openai-compat:` selectors remain hidden.
+selectors; endpoint-bearing `openai-compat:` selectors remain hidden. `ptc
+models` reports the same `model_selector` field under the same rule, without a
+flag and without reading the application.
 
 ### Resolve local transport paths
 

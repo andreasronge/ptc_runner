@@ -1546,7 +1546,7 @@ defmodule PtcRunner.Kernel.CommandContract do
               "oneOf" => [%{"type" => "boolean"}, %{"type" => "null"}]
             },
             "selected" => %{"type" => "boolean"},
-            "model_selector" => %{"type" => "string", "maxLength" => 4_096}
+            "model_selector" => model_selector_schema()
           }
         }
       },
@@ -1655,13 +1655,24 @@ defmodule PtcRunner.Kernel.CommandContract do
             "maxItems" => 2,
             "uniqueItems" => true,
             "items" => %{"enum" => ~w(workflow mission)}
-          }
+          },
+          "model_selector" => model_selector_schema()
         }
       )
 
     closed(~w(installations), %{
       "installations" => %{"type" => "array", "maxItems" => 128, "items" => item}
     })
+  end
+
+  # `ModelSelectorDisclosure` withholds endpoint-bearing selectors; the closed
+  # envelope refuses one rather than trusting every producer to remember.
+  defp model_selector_schema do
+    %{
+      "type" => "string",
+      "maxLength" => 4_096,
+      "not" => %{"pattern" => "^openai-compat:"}
+    }
   end
 
   defp success_result_schema(:help), do: help_result_schema()

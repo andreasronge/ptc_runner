@@ -16,6 +16,10 @@ ptc models ptc-project.json
 ptc doctor ptc-project.json
 ```
 
+`models` names the selector each LLM alias configured; an endpoint-bearing
+`openai-compat:` selector is withheld instead, because it carries the
+operator's own address.
+
 Plain `doctor` is inert. Use the active connectivity probe only when a remote
 request is intended:
 

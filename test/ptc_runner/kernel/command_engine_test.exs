@@ -1295,6 +1295,101 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_schema_valid(missing_host.envelope)
   end
 
+  @tag :tmp_dir
+  test "models names the configured selector and withholds an endpoint-bearing one", %{
+    tmp_dir: directory
+  } do
+    host_path =
+      write_host_config(directory, "selector-models", %{
+        "credentials" => %{"key" => %{"env" => "PTC_TEST_ABSENT_KEY"}},
+        "install" => %{
+          "cataloged" => %{
+            "source" => "llm",
+            "installation_revision" => "cataloged-v1",
+            "model" => "openrouter:test/model",
+            "credential" => "key"
+          },
+          "endpoint" => %{
+            "source" => "llm",
+            "installation_revision" => "endpoint-v1",
+            "model" => "openai-compat:https://private.example/v1|deployment",
+            "credential" => "key"
+          },
+          "tooling" => inert_stdio_installation("tooling-v1")
+        }
+      })
+
+    assert {:ok, %CommandOutcome{} = modeled} =
+             CommandEngine.prepare(["models", "--host-config", host_path])
+
+    assert [cataloged, endpoint, tooling] = modeled.envelope["result"]["installations"]
+    assert cataloged["alias"] == "cataloged"
+    assert cataloged["model_selector"] == "openrouter:test/model"
+    assert endpoint["alias"] == "endpoint"
+    refute Map.has_key?(endpoint, "model_selector")
+    assert tooling["alias"] == "tooling"
+    refute Map.has_key?(tooling, "model_selector")
+    assert_schema_valid(modeled.envelope)
+  end
+
+  @tag :tmp_dir
+  test "doctor --show-model-selectors applies the same disclosure rule as models", %{
+    tmp_dir: directory
+  } do
+    application =
+      write_application(
+        directory,
+        "selector-doctor",
+        valid_manifest(%{
+          "providers" => %{
+            "workflow" => [
+              %{"name" => "cataloged", "config" => %{}},
+              %{"name" => "endpoint", "config" => %{}}
+            ],
+            "mission" => []
+          }
+        })
+      )
+
+    host_path =
+      write_host_config(directory, "selector-doctor", %{
+        "credentials" => %{"key" => %{"env" => "PTC_TEST_ABSENT_KEY"}},
+        "install" => %{
+          "cataloged" => %{
+            "source" => "llm",
+            "installation_revision" => "cataloged-v1",
+            "model" => "openrouter:test/model",
+            "credential" => "key"
+          },
+          "endpoint" => %{
+            "source" => "llm",
+            "installation_revision" => "endpoint-v1",
+            "model" => "openai-compat:https://private.example/v1|deployment",
+            "credential" => "key"
+          }
+        }
+      })
+
+    argv = ["doctor", application, "--host-config", host_path]
+
+    assert {:ok, %CommandOutcome{} = plain} = CommandEngine.prepare(argv)
+
+    assert Enum.all?(
+             plain.envelope["result"]["model_aliases"],
+             &(not Map.has_key?(&1, "model_selector"))
+           )
+
+    assert {:ok, %CommandOutcome{} = shown} =
+             CommandEngine.prepare(argv ++ ["--show-model-selectors"])
+
+    assert [cataloged, endpoint] = shown.envelope["result"]["model_aliases"]
+    assert cataloged["alias"] == "cataloged"
+    assert cataloged["model_selector"] == "openrouter:test/model"
+    assert endpoint["alias"] == "endpoint"
+    refute Map.has_key?(endpoint, "model_selector")
+    assert_schema_valid(shown.envelope)
+  end
+
   test "default doctor reports the environment without an application or host" do
     assert {:ok, %CommandOutcome{} = outcome} = CommandEngine.prepare(["doctor"])
 
@@ -3062,6 +3157,22 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert %CommandOutcome{} =
              CommandOutcome.success(:models, run_ref, %{"installations" => [model]})
+
+    # `ModelSelectorDisclosure` withholds endpoint-bearing selectors. The closed
+    # envelope refuses one outright, so a future producer that read the host
+    # installation directly could not publish what these commands refuse.
+    assert %CommandOutcome{} =
+             CommandOutcome.success(:models, run_ref, %{
+               "installations" => [Map.put(model, "model_selector", "openrouter:test/model")]
+             })
+
+    assert_raise ArgumentError, fn ->
+      CommandOutcome.success(:models, run_ref, %{
+        "installations" => [
+          Map.put(model, "model_selector", "openai-compat:https://private.example/v1|deployment")
+        ]
+      })
+    end
 
     for invalid_revision <- [
           String.duplicate("a", 129),

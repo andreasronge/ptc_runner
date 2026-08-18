@@ -18,7 +18,7 @@ Run `ptc help COMMAND` for the exact switches accepted by an installed version.
 | `ptc run MANIFEST or PROJECT` | Execute the application entry |
 | `ptc run MANIFEST --env-file FILE` | Load environment-backed credentials from this exact file |
 | `ptc doctor [MANIFEST or PROJECT]` | Report application and provider readiness |
-| `ptc models PROJECT.json` or `--host-config HOST.json` | List public installed model-alias declarations |
+| `ptc models PROJECT.json` or `--host-config HOST.json` | List public installed model-alias declarations, each with the safe selector it configured |
 | `ptc transcript RUN_ID ...` | Publish one correlated private model transcript |
 | `ptc repl` | Open a direct, manifest-backed, or analysis session |
 | `ptc viewer PROJECT.json` | Browse a project's captured traces in a local web UI |

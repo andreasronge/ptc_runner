@@ -37,6 +37,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.ModelSelectorDisclosure
   alias PtcRunner.Kernel.ProjectArtifactRoot
   alias PtcRunner.Kernel.ProjectResolver
   alias PtcRunner.Kernel.PublicationAuthority
@@ -320,11 +321,13 @@ defmodule PtcRunner.Kernel.CommandEngine do
          %CommandArguments{options: %{host_config: host_config}} = arguments,
          run_ref
        ) do
-    case CommandAcquisition.with_catalog(host_config, fn _host, catalog ->
-           {:ok,
-            CommandOutcome.success(:models, run_ref, %{
-              "installations" => InstallationCatalog.public_installations(catalog)
-            })}
+    case CommandAcquisition.with_catalog(host_config, fn host, catalog ->
+           installations =
+             catalog
+             |> InstallationCatalog.public_installations()
+             |> ModelSelectorDisclosure.annotate(host)
+
+           {:ok, CommandOutcome.success(:models, run_ref, %{"installations" => installations})}
          end) do
       {:error, %CommandDiagnostic{} = diagnostic} ->
         {:error, arguments_outcome(arguments, run_ref, diagnostic)}

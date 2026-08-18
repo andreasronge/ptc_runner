@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   alias PtcRunner.Kernel.DoctorEnvironment
   alias PtcRunner.Kernel.DoctorPlan
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.ModelSelectorDisclosure
   alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderExecution
@@ -285,21 +286,8 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   defp diagnostic_activity(diagnostic, secondary),
     do: Enum.any?([diagnostic | secondary], & &1.provider_activity)
 
-  defp maybe_add_model_selectors(aliases, nil, _options), do: aliases
-
-  defp maybe_add_model_selectors(aliases, host, %{show_model_selectors: true}) do
-    Enum.map(aliases, fn row ->
-      case Map.fetch(host.install, row["alias"]) do
-        {:ok, %{source: :llm, model: selector}} when is_binary(selector) ->
-          if String.starts_with?(selector, "openai-compat:"),
-            do: row,
-            else: Map.put(row, "model_selector", selector)
-
-        _other ->
-          row
-      end
-    end)
-  end
+  defp maybe_add_model_selectors(aliases, host, %{show_model_selectors: true}),
+    do: ModelSelectorDisclosure.annotate(aliases, host)
 
   defp maybe_add_model_selectors(aliases, _host, _options), do: aliases
 
