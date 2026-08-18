@@ -72,10 +72,16 @@ and in `ptc-host.json`, beside the installation's `transport`:
 {"ceilings": {"timeout_ms": 20000}}
 ```
 
-`start_timeout_ms` inside the stdio transport is not another budget to raise. It
-is an upper bound on the launcher handshake alone and is clamped to whatever
-remains of the transport-start budget, so raising it cannot widen anything —
-leaving it at its `5000` default is fine once the values above are set.
+`start_timeout_ms` inside the stdio transport bounds one step: the launcher
+handshake that spawns the child. The runtime applies it as
+`min(start_timeout_ms, remaining transport-start budget)`, so it can only narrow,
+never widen, the values above — but once those are raised past its `5000`
+default, that default becomes the narrower cap on the handshake. Raise it too if
+the step that expires is the spawn rather than the answer:
+
+```json
+{"start_timeout_ms": 15000}
+```
 
 When a budget expires, the closed result is `provider_acquisition_timeout`,
 which is retryable and distinct from `provider_unavailable`. It reports only
