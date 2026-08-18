@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent library reference · PtcRunner</title>
+<meta name="description" content="This reference defines the shipped agent.core and agent.main PTC-Lisp
+interfaces. For a guided workflow, see
+Building agents.">
+<link rel="canonical" href="https://ptc-runner.dev/reference/agent-library-reference/">
+<meta property="og:title" content="Agent library reference · PtcRunner">
+<meta property="og:description" content="This reference defines the shipped agent.core and agent.main PTC-Lisp
+interfaces. For a guided workflow, see
+Building agents.">
+<meta property="og:url" content="https://ptc-runner.dev/reference/agent-library-reference/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/" class="current" aria-current="page">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+<h2>Contracts</h2>
+<ul>
+<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="agent-library-reference">Agent library reference</h1><p>This reference defines the shipped <code class="inline">agent.core</code> and <code class="inline">agent.main</code> PTC-Lisp
+interfaces. For a guided workflow, see
+<a href="/guides/building-agents/">Building agents</a>.</p><p>The libraries implement a provider-neutral loop: request one
+<code class="inline">run_ptc_lisp</code> action, evaluate its program in a named mission, and either
+finish or send bounded feedback for another turn. The Kernel continues to own
+execution, authority, effects, and resource limits.</p><h2 id="install-the-library">Install the library</h2><p>A local workflow component must declare <code class="inline">agent.core</code> as a dependency and the
+manifest must select the shipped library:</p><pre><code class="json language-json">{
+  &quot;id&quot;: &quot;my.agent&quot;,
+  &quot;path&quot;: &quot;agent.clj&quot;,
+  &quot;dependencies&quot;: [&quot;agent.core&quot;]
+},
+{&quot;library&quot;: &quot;agent.core&quot;}</code></pre><p>The resolved closure includes <code class="inline">agent.feedback</code>, <code class="inline">agent.native</code>, <code class="inline">agent.prompt</code>,
+<code class="inline">agent.retry</code>, <code class="inline">kernel</code>, <code class="inline">llm</code>, <code class="inline">result</code>, and <code class="inline">workflow.event</code>.</p><p>Select <code class="inline">{&quot;library&quot;: &quot;agent.main&quot;}</code> when the manifest entry is
+<code class="inline">agent.main/run</code>; its dependency closure includes <code class="inline">agent.core</code>.</p><h2 id="entry-functions">Entry functions</h2><p>All <code class="inline">agent.core</code> entries take a task string and configuration map.</p><h3 id="agent-core-run"><code class="inline">agent.core/run</code></h3><pre><code class="clojure language-clojure">(agent.core/run task config)</code></pre><p>Runs the loop as a terminal workflow entry. By default it completes the outer
+program with:</p><pre><code class="clojure language-clojure">{:ok true :value application-value}</code></pre><p>Set <code class="inline">&quot;result_envelope&quot;</code> to <code class="inline">false</code> to complete with the raw application value.</p><h3 id="agent-core-run-value"><code class="inline">agent.core/run-value</code></h3><pre><code class="clojure language-clojure">(agent.core/run-value task config)</code></pre><p>Returns the application value to its PTC-Lisp caller without completing the
+outer workflow. A subject failure calls <code class="inline">fail</code>, so use this entry when the
+caller should continue only after a successful agent result.</p><h3 id="agent-core-run-outcome"><code class="inline">agent.core/run-outcome</code></h3><pre><code class="clojure language-clojure">(agent.core/run-outcome task config)</code></pre><p>Represents model-attributable completion or failure as data:</p><pre><code class="clojure language-clojure">{:status :returned :value application-value}
+
+{:status :subject-failure
+ :kind failure-kind
+ :error bounded-error}</code></pre><p>Subject failures include model-program failure, exhausted turns, and a
+non-retryable generated-program error. Provider, prompt, transcript, quota,
+evaluation-admission, and other host failures still fail the outer workflow.
+This prevents an evaluator from scoring a provider outage against the subject.</p><h3 id="agent-core-run-result-value"><code class="inline">agent.core/run-result-value</code></h3><pre><code class="clojure language-clojure">(agent.core/run-result-value task config)</code></pre><p>Runs the same loop, validates every model-authored terminal candidate against
+the manifest result contract, and returns the contract-valid value to its
+PTC-Lisp caller. Invalid candidates receive bounded correction feedback while
+a turn remains. If correction is exhausted, the Kernel reports an authenticated
+<code class="inline">result_contract_failed</code> diagnostic with the effective turn count, the final
+schema constraint, and an attested contract path when one is available. That
+authenticated cause is retained when the call is composed through sequential
+or parallel higher-order functions such as <code class="inline">map</code>, <code class="inline">pmap</code>, and <code class="inline">pcalls</code>.</p><p>This is the composable result-contract entry used by <code class="inline">agent.main/run</code>.</p><h3 id="agent-main-run"><code class="inline">agent.main/run</code></h3><p>Set the manifest entry to <code class="inline">agent.main/run</code> and supply:</p><pre><code class="json language-json">{
+  &quot;task&quot;: &quot;Complete the requested analysis.&quot;,
+  &quot;agent&quot;: {
+    &quot;max_turns&quot;: 8
+  }
+}</code></pre><p><code class="inline">agent.main/run</code> delegates to <code class="inline">agent.core</code>, validates each terminal candidate
+against the manifest result contract while a correction turn remains, and
+returns the raw contract-valid value. It is a domain-blind convenience entry;
+it does not add task-specific prompt policy.</p><h2 id="configuration">Configuration</h2><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Key</th><th style="text-align: left;">Default</th><th style="text-align: left;">Accepted value</th><th style="text-align: left;">Effect</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">model</code></td><td style="text-align: left;">selected installation default</td><td style="text-align: left;">string</td><td style="text-align: left;">Selects a manifest-installed workflow model alias.</td></tr><tr><td style="text-align: left;"><code class="inline">mission</code></td><td style="text-align: left;"><code class="inline">&quot;default&quot;</code></td><td style="text-align: left;">non-empty string</td><td style="text-align: left;">Selects the mission whose API is rendered and whose environment evaluates programs.</td></tr><tr><td style="text-align: left;"><code class="inline">max_turns</code></td><td style="text-align: left;"><code class="inline">4</code></td><td style="text-align: left;">integer, 1–128</td><td style="text-align: left;">Bounds provider requests and generated programs in this loop.</td></tr><tr><td style="text-align: left;"><code class="inline">max_program_chars</code></td><td style="text-align: left;"><code class="inline">64000</code></td><td style="text-align: left;">integer, 1–1,000,000</td><td style="text-align: left;">Bounds one <code class="inline">run_ptc_lisp</code> program string.</td></tr><tr><td style="text-align: left;"><code class="inline">max_observation_chars</code></td><td style="text-align: left;"><code class="inline">2048</code></td><td style="text-align: left;">integer, 1–65,536</td><td style="text-align: left;">Bounds the untrusted structural preview and <code class="inline">println</code> body of one successful observation.</td></tr><tr><td style="text-align: left;"><code class="inline">max_transcript_chars</code></td><td style="text-align: left;"><code class="inline">262144</code></td><td style="text-align: left;">integer, 1–1,000,000</td><td style="text-align: left;">Bounds the JSON-encoded prospective provider request.</td></tr><tr><td style="text-align: left;"><code class="inline">consolidate_at_turns_remaining</code></td><td style="text-align: left;">omitted</td><td style="text-align: left;">integer, 1–effective <code class="inline">max_turns</code></td><td style="text-align: left;">Adds generic consolidation guidance at and below this remaining-turn count.</td></tr><tr><td style="text-align: left;"><code class="inline">result_envelope</code></td><td style="text-align: left;"><code class="inline">true</code></td><td style="text-align: left;">boolean</td><td style="text-align: left;">Changes only <code class="inline">agent.core/run</code>; <code class="inline">false</code> returns the raw value.</td></tr></tbody></table></div><p>For the four <code class="inline">max_*</code> options, an omitted or <code class="inline">nil</code> value selects the documented
+default, and an out-of-range integer fails with
+<code class="inline">invalid-agent-config/option-out-of-range</code> before any provider request or
+mission evaluation; the failure value names the option and its accepted
+inclusive range. Signature validation rejects wrong value types before the
+loop starts. <code class="inline">consolidate_at_turns_remaining</code> fails the same way with
+<code class="inline">invalid-agent-config/invalid-consolidation-threshold</code> when set outside <code class="inline">1</code> to
+the effective <code class="inline">max_turns</code>.</p><p>Omitted or <code class="inline">nil</code> <code class="inline">mission</code> selects <code class="inline">default</code>. An empty, non-string, or unknown
+mission fails; the loop never falls back to a different environment.</p><p>When one model installation is selected, <code class="inline">model</code> may be omitted. With several,
+omission uses the selection marked <code class="inline">&quot;default&quot;: true</code>. Otherwise the request
+fails and lists the available aliases. A <code class="inline">model</code> value is an installation
+alias, never a raw provider model ID. An unknown or <code class="inline">null</code> alias does not fall
+back.</p><p>Agent options do not raise Kernel limits. Source size, subordinate evaluations,
+provider calls, memory, results, events, parallel work, and the run deadline
+remain bounded independently. See
+<a href="/reference/application-manifest/#narrow-installed-limits">Application-manifest reference</a>.</p><h2 id="turn-and-transcript-protocol">Turn and transcript protocol</h2><p>The model receives exactly one function tool:</p><pre><code class="json language-json">{
+  &quot;name&quot;: &quot;run_ptc_lisp&quot;,
+  &quot;parameters&quot;: {
+    &quot;type&quot;: &quot;object&quot;,
+    &quot;additionalProperties&quot;: false,
+    &quot;required&quot;: [&quot;program&quot;],
+    &quot;properties&quot;: {&quot;program&quot;: {&quot;type&quot;: &quot;string&quot;}}
+  }
+}</code></pre><p>A valid action contains exactly one tool call with:</p><ul><li>a non-empty string ID;</li><li>the name <code class="inline">run_ptc_lisp</code>;</li><li>exactly one <code class="inline">program</code> string argument;</li><li>a non-blank program within <code class="inline">max_program_chars</code>.</li></ul><p>Assistant narration may accompany the tool call and is retained with it. Text
+without a call, several calls, a wrong name, malformed arguments, or an invalid
+program produces a protocol correction while a turn remains.</p><p>The initial task and every retained feedback message state the number of turns
+remaining, including the next program. With one turn left, the message requires
+the next program to call <code class="inline">return</code> or <code class="inline">fail</code>. A configured consolidation
+threshold adds domain-blind synthesis guidance before the final turn.</p><p>If the loop spends its effective <code class="inline">max_turns</code> without returning, <code class="inline">run-outcome</code>
+returns bounded subject-failure data. Entries and callers that propagate that
+failure through <code class="inline">run</code>, <code class="inline">run-value</code>, or <code class="inline">run-result-value</code> report
+<code class="inline">execution/runtime_limit_exceeded</code> and name the effective turn ceiling.</p><p>What the message recommends depends on how the final turn ended, because only
+some of these endings are answered by buying more turns:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Reason</th><th style="text-align: left;">Final turn produced</th><th style="text-align: left;">Reported remedy</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">intermediate_result</code></td><td style="text-align: left;">a successful program that did not <code class="inline">return</code></td><td style="text-align: left;">raise <code class="inline">max_turns</code>, or reduce the work per turn</td></tr><tr><td style="text-align: left;"><code class="inline">evaluation_error</code></td><td style="text-align: left;">a program that failed</td><td style="text-align: left;">raise <code class="inline">max_turns</code>, or simplify the work per turn</td></tr><tr><td style="text-align: left;"><code class="inline">protocol_error</code></td><td style="text-align: left;">no usable <code class="inline">run_ptc_lisp</code> call</td><td style="text-align: left;">check tool-calling support and any configured <code class="inline">max_tokens</code> first</td></tr></tbody></table></div><p>A <code class="inline">max_tokens</code> too small for the model to emit a complete tool call produces
+<code class="inline">protocol_error</code> on every turn, so raising <code class="inline">max_turns</code> only buys more of the
+same failure. The remedy names the agent configuration rather than
+<code class="inline">agent.core/run</code>, because a manifest that declares <code class="inline">agent.main/run</code> never
+mentions the inner entry.</p><p>The canonical failed <code class="inline">run-stopped</code> event retains the bounded <code class="inline">agent_turns</code>
+limit name, its value, and the same <code class="inline">limit_reason</code>, so trace consumers can
+present the same cause.</p><p>Before dispatch, the loop JSON-encodes the complete prospective request:
+system prompt, accumulated messages, tool schema, and optional model alias. A
+request larger than <code class="inline">max_transcript_chars</code>, or one that cannot be encoded,
+fails without calling the provider. Earlier assistant/tool pairs are never
+silently discarded to make the request fit. The provider may enforce a lower
+request limit.</p><p>Exceeding <code class="inline">max_transcript_chars</code> reports itself the way the turn ceiling does:
+<code class="inline">execution/runtime_limit_exceeded</code> naming the limit and its effective value,
+with the canonical failed <code class="inline">run-stopped</code> event retaining
+<code class="inline">failure_kind: transcript-limit</code> plus the bounded limit name and value. A
+request that cannot be encoded at all remains a workflow failure, because no
+ceiling was reached.</p><h2 id="prompt-and-mission-api">Prompt and mission API</h2><p><code class="inline">agent.prompt/initial-state</code>, <code class="inline">agent.prompt/render</code>, and
+<code class="inline">agent.prompt/transition</code> form the replaceable prompt-policy seam. Each must
+return the documented state or text shape; invalid results fail the workflow
+as prompt errors.</p><p>The default prompt renders one deterministic <code class="inline">Available API</code> for the selected
+mission. If any prompt-visible PTC-Lisp facade functions exist, raw <code class="inline">tool/...</code>
+entries are suppressed. Otherwise direct capabilities are shown. Function
+signatures, schema constraints and descriptions, effect metadata, and bounded
+documentation are rendered when available.</p><p>Top-level mission <code class="inline">data</code> keys are rendered as <code class="inline">data/&lt;name&gt;</code> values with their
+bounded structural types, but never their values. The inventory is the complete
+prompt-visible mission surface. <code class="inline">dir</code> and <code class="inline">export-meta</code> inspect visible
+attached prelude exports. <code class="inline">apropos</code> and <code class="inline">doc</code> cover those exports plus fixed
+built-ins and the bounded Java surface. None enumerate data values or direct
+tool capabilities. When the inventory is empty, the prompt says so explicitly
+instead of leaving a blank heading.
+The generic examples do not name <code class="inline">data/input</code>; an agent sees that reference
+only when the selected mission actually grants an <code class="inline">input</code> data key.</p><p>Numeric Kernel limits remain enforced but are not copied into the default
+prompt. Trusted workflow code can read the exact frozen structured inventory
+with <code class="inline">kernel/mission-inventory</code>.</p><p>Agent prompts must remain domain-blind: they may describe the language,
+available API, task, budgets, and correction policy, but not fixture values,
+benchmark domains, or expected answer patterns.</p><h2 id="evaluation-outcomes">Evaluation outcomes</h2><p>The loop interprets mission evaluation outcomes as follows:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Outcome</th><th style="text-align: left;">Loop behavior</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">(return value)</code></td><td style="text-align: left;">Completes as <code class="inline">:returned</code>; <code class="inline">agent.main</code> first validates the result contract.</td></tr><tr><td style="text-align: left;">Ordinary value</td><td style="text-align: left;">Sends a bounded success observation and continues if a turn remains.</td></tr><tr><td style="text-align: left;"><code class="inline">(fail value)</code></td><td style="text-align: left;">Becomes a subject failure, except for the proven read-only capability case below.</td></tr><tr><td style="text-align: left;">Retryable evaluation error</td><td style="text-align: left;">Sends bounded correction feedback if a turn remains.</td></tr><tr><td style="text-align: left;"><code class="inline">:busy</code> or <code class="inline">:limit_exceeded</code> admission</td><td style="text-align: left;">Fails the workflow as <code class="inline">evaluation-unavailable</code>; correcting source cannot clear a host condition.</td></tr><tr><td style="text-align: left;">Terminal provider-originated mission failure</td><td style="text-align: left;">Becomes a model-program subject failure.</td></tr><tr><td style="text-align: left;">Host input validation unavailable</td><td style="text-align: left;">Fails the workflow as <code class="inline">capability-unavailable/input-validation-unavailable</code>.</td></tr></tbody></table></div><p>An ordinary successful turn commits definitions and adds its native value to
+the bounded <code class="inline">*1</code>/<code class="inline">*2</code>/<code class="inline">*3</code> history. A terminal return commits definitions but
+does not add the returned value. Failed turns preserve the previously committed
+definitions and history.</p><h2 id="feedback-bounds-and-disclosure">Feedback bounds and disclosure</h2><p>Successful observations contain a heap-proportional structural preview and
+chronological <code class="inline">println</code> output. Preview traversal has independent collection,
+depth, node, string, character, and UTF-8 byte ceilings; it does not first
+serialize the complete value. When truncated, feedback reports the ceilings
+hit, sampled map keys (including bounded nested samples), and reminds the model
+that the complete committed value remains in <code class="inline">*1</code>. The body is marked as
+untrusted and escapes its closing marker. Closures and other executable values
+cross only as inert display labels.</p><p>The preview is non-authoritative presentation work: a preview failure cannot
+turn a committed evaluation into a failure. A retained-memory or <code class="inline">*1</code> history
+commit rejection instead rolls the candidate continuation back and reports
+actionable guidance. Programs with only read effects may be corrected and
+retried; after a write or unknown effect, the loop tells the model not to
+repeat the program because the external effect cannot be rolled back.</p><p>Heap and compile-heap feedback explicitly says that the failed program was
+rolled back, earlier definitions remain available, and a corrected program
+should filter, page, project, or reduce before collecting a large result.</p><p>Evaluation-error feedback contains a bounded outcome, error code, and safe
+message. A correctable capability error contains its public <code class="inline">kind</code> and
+<code class="inline">reason</code>. Input-schema feedback may name up to three schema-declared paths,
+violated constraints, and small declared numeric, length, or item bounds. It
+does not echo submitted values, enum or const literals, undeclared property
+names, opaque validator reasons, or provider details.</p><p>When <code class="inline">agent.main</code> rejects a returned value, feedback may identify permitted
+and missing keys at retained closed-object paths, only the count of undeclared
+submitted keys, and small schema-declared numeric, length, or item bounds.
+Open objects report missing required keys without treating extension keys as
+invalid. Candidate values, tagged-union matches, enum literals, and const
+literals are omitted from model feedback. Result-contract diagnostics are
+capped at 32,768 characters, then the whole request is checked against
+<code class="inline">max_transcript_chars</code>.</p><p>The terminal exhaustion transition is fail-only and available only to the
+shipped <code class="inline">agent.core</code> prelude. It revalidates the final candidate against the
+host's frozen result contract and creates no additional candidate-bearing
+record. The candidate does not enter public errors, command envelopes,
+canonical events, or ordinary logs. Existing authorized private inspection can
+still contain the model response and generated source that produced it.</p><p>An outer <code class="inline">fail</code> value is not copied into the public Kernel error or canonical
+trace. Framework failure kinds remain readable; application-defined scalar
+kinds become stable fingerprints. Exact failure values, prompts, generated
+source, and capability payloads require an authorized private inspection
+artifact. Built-in LLM adapters retain only a bounded provider status and
+human-readable reason there; request bodies, raw response bodies, headers, and
+transport causes are not retained as provider-error details.</p><h2 id="retry-and-effect-safety">Retry and effect safety</h2><p>The loop retries only while another turn remains. Retryability also depends on
+whether repeating a program could repeat an effect the Kernel cannot undo:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Observed activity before failure</th><th style="text-align: left;">Retry policy</th></tr></thead><tbody><tr><td style="text-align: left;">No capability call</td><td style="text-align: left;">Correctable.</td></tr><tr><td style="text-align: left;">Only declared <code class="inline">read</code> capabilities</td><td style="text-align: left;">Correctable.</td></tr><tr><td style="text-align: left;">Only reserved mission runtime routes</td><td style="text-align: left;">Correctable.</td></tr><tr><td style="text-align: left;">Any declared <code class="inline">write</code> capability</td><td style="text-align: left;">Do not repeat.</td></tr><tr><td style="text-align: left;">Any capability with missing effect metadata</td><td style="text-align: left;">Do not repeat.</td></tr></tbody></table></div><p>Runtime routes such as capability discovery and usage queries are treated as
+safe reads. A resource kill after reads remains correctable because it commits
+no Lisp state and repeats no external mutation.</p><p>Read failures preserve their provider retry classification. Once a write may
+have been dispatched, every non-success is non-retryable and may report
+<code class="inline">mutation_state: indeterminate</code>; cancellation does not prove rollback.
+Provider callback crashes and process deaths are unclassified and therefore
+non-retryable. MCP <code class="inline">input_required</code> exchanges are terminal even on a read
+route.</p><p>An explicit <code class="inline">fail</code> is terminal by default. It becomes correctable only when
+the evaluator proves all of the following:</p><ol><li>the failed value is the exact last recorded capability result, preserved
+through a direct call, simple lexical binding or helper forwarding, or
+<code class="inline">cap/unwrap!</code>;</li><li>the capability failure is marked retryable by the evaluator;</li><li>every observed capability effect was declared <code class="inline">read</code>.</li></ol><p>Rebuilding, copying, or destructuring an equal error-shaped map does not
+qualify. Neither does an error-shaped value after an unrelated read.</p><p>After an unsafe evaluation failure, the loop never repeats that program. If a
+turn remains, it offers one closing turn that asks the model to decide from
+evidence already gathered. A second unsafe failure, or no remaining turn,
+becomes a <code class="inline">non-retryable-evaluation</code> subject failure.</p><h2 id="provider-neutral-requests">Provider-neutral requests</h2><p><code class="inline">agent.core</code> calls the <code class="inline">llm/request</code> wrapper. Its request supports:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Key</th><th style="text-align: left;">Shape</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">system</code></td><td style="text-align: left;">optional string</td></tr><tr><td style="text-align: left;"><code class="inline">messages</code></td><td style="text-align: left;">role/content message array</td></tr><tr><td style="text-align: left;"><code class="inline">tools</code></td><td style="text-align: left;">optional provider-neutral tool definitions</td></tr><tr><td style="text-align: left;"><code class="inline">cache</code></td><td style="text-align: left;">optional boolean preference; host-fixed policy wins</td></tr><tr><td style="text-align: left;"><code class="inline">model</code></td><td style="text-align: left;">optional manifest installation alias</td></tr></tbody></table></div><p>Successful responses contain <code class="inline">content</code> and may contain <code class="inline">tool_calls</code> and
+<code class="inline">tokens</code>. Normalized tool calls use <code class="inline">id</code>, <code class="inline">name</code>, and <code class="inline">args</code>. Invalid provider
+arguments may include a bounded <code class="inline">args_error</code> classification. Token usage may
+include <code class="inline">input</code>, <code class="inline">output</code>, <code class="inline">cache_creation</code>, <code class="inline">cache_read</code>, and <code class="inline">total_cost</code>.
+When provider pricing is unavailable, <code class="inline">total_cost</code> is absent; a present zero is
+a measured zero-cost response.</p><p>Provider failures remain bounded capability error envelopes so workflow policy
+can decide whether to fail or recover. Credentials, endpoints, sampling,
+timeouts, and byte ceilings remain host-owned and are never supplied through
+the PTC-Lisp configuration map.</p><h2 id="concurrency-and-admission">Concurrency and admission</h2><p>A run has one subordinate-evaluation lease. Agent loops under <code class="inline">pcalls</code> can
+overlap provider calls, then their evaluations queue in FIFO order. The wait is
+bounded by <code class="inline">evaluation_admission_timeout_ms</code> and the run deadline. Exhausted
+<code class="inline">subordinate_evaluations</code> or an expired admission wait fails the workflow
+without spending another agent turn or model call.
+When <code class="inline">subordinate_evaluations</code> is exhausted, the command error names that
+limit and its configured ceiling and recommends either raising the applicable
+manifest or host ceiling, or reducing total subordinate evaluations or agent
+turns.</p><p>Set enough <code class="inline">parallel_timeout_ms</code> headroom for the complete parallel phase. The
+Kernel limit reference, not the agent configuration, defines these ceilings.</p><p>Use <code class="inline">pcalls</code> for a fixed heterogeneous fan-out of zero-arity tasks and <code class="inline">pmap</code>
+for a runtime-sized homogeneous collection. Both resolve as callable values,
+so a workflow may store them, pass them through a helper, or invoke them with
+<code class="inline">apply</code>; direct and indirect calls consume the same worker budget and deadline.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/ptc-lisp-specification/">&larr; PTC-Lisp Language Specification</a><a class="pager-next" href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/agent-library-reference.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

@@ -18,6 +18,8 @@
   font-size: .9rem;
   max-height: calc(100vh - 4rem);
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 
 .guide-nav .brand {
@@ -58,6 +60,9 @@
   font-size: 2rem;
   margin-bottom: 1.25rem;
 }
+
+/* The landing page shares the shell; keep its measure comfortable. */
+.guide-main.landing { max-width: 48rem; }
 
 .mobile-crumb { display: none; }
 

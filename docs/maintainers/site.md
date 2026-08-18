@@ -54,30 +54,36 @@ outside the repository makes git exit 128 with empty output — indistinguishabl
 from "nothing tracked here", which made a repository *ancestor* look safest of
 all.
 
-## The guide pages
+## The documentation pages
 
-`site/guides/` holds one generated page per guide plus a directory page. The
+`site/guides/`, `site/installation/`, and `site/reference/` hold one generated
+page per published document plus the directory page at `site/guides/`. The
 same discipline as the schemas applies, one step earlier: the pages are
-committed HTML that `mix ptc.gen_site_guides` renders from `docs/guides/`
+committed HTML that `mix ptc.gen_site_guides` renders from `docs/`
 (`mix ptc.gen_docs` runs it), and `mix precommit` fails on a stale, missing, or
 orphaned page. The Pages workflow stays Elixir-free because it only ever copies
 what the repository already proved current. Never edit the HTML by hand — edit
-the guide Markdown or the generator.
+the source Markdown or the generator. The landing page is hand-written except
+for the sidebar between its `BEGIN GENERATED`/`END GENERATED` markers, which
+the same task rewrites.
 
-The sidebar sections are read from the guide groups in `mix.exs`
+The sidebar sections are read from the documentation groups in `mix.exs`
 (`:docs` → `:groups_for_extras`), the same configuration that groups the
-HexDocs sidebar, so the two navigations cannot drift. Page order within a
-section follows `:extras`, and the generator refuses a group whose order
-disagrees.
+HexDocs sidebar, so the two navigations cannot drift. The generator publishes
+only the groups named in its `@published_roots` — maintainer and conformance
+material stays on GitHub. Page order within a section follows `:extras`, and
+the generator refuses a group whose declared order disagrees.
 
 The renderer (`dev/ptc_runner/site_guides/markdown_html.ex`) fails closed:
 an element, attribute, or parser warning outside its whitelist aborts
-generation rather than publishing something silently wrong. Relative links to a
-sibling guide become `/guides/<slug>/` links; every other relative link must
-name a file that exists in the repository and becomes a GitHub link. A typo
-therefore fails `mix ptc.gen_docs --check` instead of shipping as a dead link,
-and `scripts/build_site.sh` re-validates the root-relative references in the
-assembled artifact.
+generation rather than publishing something silently wrong. Relative links to
+a published page become site links; every other relative link must name a file
+that exists in the repository and becomes a GitHub link. Heading anchors use
+the ExDoc slug scheme the repository's hand-authored fragment links were
+written against, and every internal fragment link is validated against the
+target page's actual ids. A typo therefore fails `mix ptc.gen_docs --check`
+instead of shipping as a dead link, and `scripts/build_site.sh` re-validates
+the root-relative references in the assembled artifact.
 
 ## The diagrams
 

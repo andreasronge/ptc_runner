@@ -19,6 +19,7 @@ defmodule PtcRunner.SiteGuides.MarkdownHTML do
     "a" => ["href"],
     "blockquote" => [],
     "code" => ["class"],
+    "del" => [],
     "em" => [],
     "h1" => [],
     "h2" => [],
@@ -26,7 +27,7 @@ defmodule PtcRunner.SiteGuides.MarkdownHTML do
     "h4" => [],
     "h5" => [],
     "h6" => [],
-    "hr" => [],
+    "hr" => ["class"],
     "li" => [],
     "ol" => [],
     "p" => [],
@@ -78,6 +79,11 @@ defmodule PtcRunner.SiteGuides.MarkdownHTML do
     end
   end
 
+  # Generated references open with an HTML comment; the title is the first
+  # real element after it.
+  defp title!([{:comment, _attributes, _children, _meta} | rest], source),
+    do: title!(rest, source)
+
   defp title!([{"h1", _attributes, children, _meta} | _rest], _source) do
     text_content(children)
   end
@@ -110,6 +116,15 @@ defmodule PtcRunner.SiteGuides.MarkdownHTML do
 
   defp render_node(text, _context, ids) when is_binary(text), do: {escape(text), ids}
 
+  # HTML comments (generated-file banners, region markers) render as nothing.
+  defp render_node({:comment, _attributes, _children, _meta}, _context, ids), do: {"", ids}
+
+  # Raw `<a id="..."></a>` anchor targets, used by the conformance-gaps
+  # reference for its stable GAP/DIV ids.
+  defp render_node({"a", [{"id", id}], [], _meta}, _context, ids) do
+    {["<a id=\"", escape(id), "\"></a>"], MapSet.put(ids, id)}
+  end
+
   defp render_node({tag, attributes, children, _meta} = node, context, ids)
        when is_binary(tag) do
     permitted =
@@ -125,7 +140,7 @@ defmodule PtcRunner.SiteGuides.MarkdownHTML do
 
     cond do
       tag in @void_tags ->
-        {"<#{tag}>", ids}
+        {["<#{tag}", render_attributes(attributes), ">"], ids}
 
       tag in @heading_tags ->
         {id, ids} = heading_id(text_content(children), ids)
@@ -168,15 +183,18 @@ defmodule PtcRunner.SiteGuides.MarkdownHTML do
     Enum.map(attributes, fn {name, value} -> [" ", name, "=\"", escape(value), "\""] end)
   end
 
-  # GitHub-style anchors, deduplicated the way readers expect: the second
-  # "Limits" heading on a page becomes "limits-1".
+  # ExDoc-style anchors — every run of non-alphanumerics becomes one hyphen
+  # ("9.8 Public contracts" anchors as "9-8-public-contracts"). That is the
+  # scheme the repository's hand-authored fragment links were written
+  # against, because `mix ptc.verify_docs` validates them on rendered ExDoc
+  # pages. Deduplicated the way readers expect: a second "Limits" heading on
+  # a page becomes "limits-1".
   defp heading_id(text, ids) do
     base =
       text
       |> String.downcase()
-      |> String.replace(~r/[^a-z0-9\s-]/u, "")
-      |> String.trim()
-      |> String.replace(~r/\s+/, "-")
+      |> String.replace(~r/[^a-z0-9]+/u, "-")
+      |> String.trim("-")
 
     base = if base == "", do: "section", else: base
 

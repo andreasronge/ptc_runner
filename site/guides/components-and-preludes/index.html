@@ -18,13 +18,18 @@
 <div class="guide-shell">
 <aside class="guide-nav">
   <p class="brand"><a href="/">PtcRunner</a></p>
-  <nav aria-label="Guides">
-    <p class="nav-home"><a href="/guides/">All guides</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
 <h2>Start</h2>
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
 </ul>
 
 <h2>Configure</h2>
@@ -50,11 +55,42 @@
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
 
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+<h2>Contracts</h2>
+<ul>
+<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a></li>
+</ul>
+
   </nav>
 </aside>
 
 <main class="guide-main">
-<p class="crumb mobile-crumb"><a href="/guides/">&larr; All guides</a></p>
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
 <h1 id="customize-agent-components">Customize agent components</h1><blockquote><p><strong>Audience:</strong> advanced application authors replacing shipped prompts,
 policies, libraries, or complete agent loops.</p></blockquote><p>Most applications select shipped libraries and do not copy their source:</p><pre><code class="json language-json">{
@@ -71,16 +107,16 @@ application needs different prompts, feedback, retry policy, continuation, or
 completion rules.</p><p>Each component declares its direct namespace dependencies. Selecting a library
 installs its immutable dependency closure, but does not grant tool authority.
 Mission tools still come only from providers installed by the operator and
-selected for that mission.</p><p>Keep reusable components narrow:</p><ul><li>expose a small documented public surface;</li><li>declare signatures where model-written calls benefit from validation;</li><li>keep prompt-visible helpers focused on the task contract;</li><li>separate workflow policy from mission-only task functions; and</li><li>use a new component ID for a permanently customized prompt or loop.</li></ul><p>Use the <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/reference/component-contracts.md">components-and-preludes reference</a>
+selected for that mission.</p><p>Keep reusable components narrow:</p><ul><li>expose a small documented public surface;</li><li>declare signatures where model-written calls benefit from validation;</li><li>keep prompt-visible helpers focused on the task contract;</li><li>separate workflow policy from mission-only task functions; and</li><li>use a new component ID for a permanently customized prompt or loop.</li></ul><p>Use the <a href="/reference/component-contracts/">components-and-preludes reference</a>
 for namespaces, dependency rules, visibility, signatures, shipped library
 selection, compilation, and authority boundaries. The
-<a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/agent-library-reference.md">agent library reference</a> documents the exact
+<a href="/reference/agent-library-reference/">agent library reference</a> documents the exact
 shipped loop entries and options.</p>
 </article>
-<nav class="pager" aria-label="Guide order"><a class="pager-previous" href="/guides/building-agents/">&larr; Customize an agent</a><a class="pager-next" href="/guides/running-and-debugging/">Run and inspect a project &rarr;</a></nav>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/building-agents/">&larr; Customize an agent</a><a class="pager-next" href="/guides/running-and-debugging/">Run and inspect a project &rarr;</a></nav>
 <footer>
   Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/components-and-preludes.md">Edit this
-  guide on GitHub</a>.
+  page on GitHub</a>.
 </footer>
 
 </main>

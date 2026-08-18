@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Standalone installation · PtcRunner</title>
+<meta name="description" content="The standalone release contains its runtime. A target machine does not need
+Elixir, Erlang, Python, Node.js, or a separately installed sandbox to run a
+provide…">
+<link rel="canonical" href="https://ptc-runner.dev/installation/standalone/">
+<meta property="og:title" content="Standalone installation · PtcRunner">
+<meta property="og:description" content="The standalone release contains its runtime. A target machine does not need
+Elixir, Erlang, Python, Node.js, or a separately installed sandbox to run a
+provide…">
+<meta property="og:url" content="https://ptc-runner.dev/installation/standalone/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/" class="current" aria-current="page">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+<h2>Contracts</h2>
+<ul>
+<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="standalone-installation">Standalone installation</h1><blockquote><p><strong>Audience:</strong> operators installing the self-contained <code class="inline">ptc</code> executable on a
+supported machine.</p></blockquote><p>The standalone release contains its runtime. A target machine does not need
+Elixir, Erlang, Python, Node.js, or a separately installed sandbox to run a
+provider-free application or an agent whose external tools are remote.</p><h2 id="current-availability">Current availability</h2><p>The repository builds and verifies a relocatable macOS arm64 archive, but the
+current public release predates that packaging path and does not contain the
+archive. A one-command installer must not be advertised until a published
+release carries the verified asset and adjacent checksum.</p><p>For now, build the archive from a source checkout as described in
+<a href="/installation/source/">Source installation</a>, or use the local <a href="/installation/docker/">Docker image</a>.
+A one-command installer will become the default only after a public release
+contains the verified asset it downloads.</p><h2 id="artifact-contract">Artifact contract</h2><p>A packaged archive is named <code class="inline">ptc-VERSION-macos-ARCH.tar.gz</code> and ships with an
+adjacent SHA-256 file. It records its minimum supported macOS version in
+<code class="inline">MINIMUM_MACOS</code>.</p><p>macOS archives are ad-hoc signed. They are not Developer ID signed and are not
+notarized. Verify the adjacent checksum before extracting an archive. A browser
+download carrying a quarantine flag may require the operator to remove that
+flag before the first run.</p><p>After extraction, verify the executable before using credentials:</p><pre><code class="console language-console">ptc --version
+ptc init hello-ptc
+ptc run hello-ptc/ptc-project.json</code></pre><p>External MCP servers retain their own runtime and installation requirements.
+The standalone executable removes PtcRunner's toolchain requirement; it does
+not silently bundle every server an operator may choose to grant.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/evaluating-with-replay/">&larr; Evaluate changes with replay</a><a class="pager-next" href="/installation/docker/">Docker installation &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/installation/standalone.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

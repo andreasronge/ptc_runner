@@ -438,6 +438,7 @@ defmodule PtcRunner.MixProject do
           "docs/guides/quickstart.md",
           "docs/guides/getting-started.md",
           "docs/guides/agent-cli-usage.md",
+          "docs/guides/ptc-lisp-basics.md",
           "docs/guides/project-configuration.md",
           "docs/guides/manifests-and-capabilities.md",
           "docs/guides/host-configuration.md",
@@ -468,14 +469,13 @@ defmodule PtcRunner.MixProject do
           "docs/maintainers/kernel.md"
         ] ++ Path.wildcard("docs/conformance/*-audit.md"),
       groups_for_extras: [
-        Maintainers:
-          ~r/docs\/maintainers\/(coding-agent-review|documentation|duplication-gate|embedding|kernel|signature-integration)\.md/,
-        Installation: ~r/docs\/installation\/.+\.md/,
-        Contracts: ~r/docs\/trace-log-contract\.md/,
         Start: [
           "docs/guides/quickstart.md",
           "docs/guides/getting-started.md",
           "docs/guides/agent-cli-usage.md"
+        ],
+        Language: [
+          "docs/guides/ptc-lisp-basics.md"
         ],
         Configure: [
           "docs/guides/project-configuration.md",
@@ -494,9 +494,13 @@ defmodule PtcRunner.MixProject do
           "docs/guides/debugging-a-failed-run.md",
           "docs/guides/evaluating-with-replay.md"
         ],
+        Installation: ~r/docs\/installation\/.+\.md/,
         Reference:
           ~r/docs\/(?:reference\/.+|(?:agent-library|ptc-lisp|clojure|function-reference|java-|kernel-limits|prelude-|signature-).+)\.md/,
-        Conformance: ~r/docs\/conformance\/.+\.md/
+        Contracts: ~r/docs\/trace-log-contract\.md/,
+        Conformance: ~r/docs\/conformance\/.+\.md/,
+        Maintainers:
+          ~r/docs\/maintainers\/(coding-agent-review|documentation|duplication-gate|embedding|kernel|signature-integration)\.md/
       ]
     ]
   end

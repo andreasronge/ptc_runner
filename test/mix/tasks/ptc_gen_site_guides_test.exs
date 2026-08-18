@@ -66,16 +66,20 @@ defmodule Mix.Tasks.Ptc.GenSiteGuidesTest do
   end
 
   describe "rewrite_link/3" do
-    @slugs %{"docs/guides/other.md" => "other"}
+    @slugs %{"docs/guides/other.md" => "/guides/other/"}
 
-    test "a sibling guide becomes a site page, keeping the fragment" do
+    test "a published page becomes a site link, keeping the fragment" do
       assert GenSiteGuides.rewrite_link("other.md#part", "docs/guides/here.md", @slugs) ==
                "/guides/other/#part"
     end
 
-    test "another repository file becomes a GitHub link" do
-      assert GenSiteGuides.rewrite_link("../reference/cli.md", "docs/guides/here.md", @slugs) ==
-               "https://github.com/andreasronge/ptc_runner/blob/main/docs/reference/cli.md"
+    test "an unpublished repository file becomes a GitHub link" do
+      assert GenSiteGuides.rewrite_link(
+               "../maintainers/kernel.md",
+               "docs/guides/here.md",
+               @slugs
+             ) ==
+               "https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/kernel.md"
     end
 
     test "a repository directory becomes a GitHub tree link" do

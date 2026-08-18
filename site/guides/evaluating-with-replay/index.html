@@ -22,13 +22,18 @@ attribut…">
 <div class="guide-shell">
 <aside class="guide-nav">
   <p class="brand"><a href="/">PtcRunner</a></p>
-  <nav aria-label="Guides">
-    <p class="nav-home"><a href="/guides/">All guides</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
 <h2>Start</h2>
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
 </ul>
 
 <h2>Configure</h2>
@@ -54,11 +59,42 @@ attribut…">
 <li><a href="/guides/evaluating-with-replay/" class="current" aria-current="page">Evaluate changes with replay</a></li>
 </ul>
 
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+<h2>Contracts</h2>
+<ul>
+<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a></li>
+</ul>
+
   </nav>
 </aside>
 
 <main class="guide-main">
-<p class="crumb mobile-crumb"><a href="/guides/">&larr; All guides</a></p>
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
 <h1 id="evaluate-changes-with-replay">Evaluate changes with replay</h1><blockquote><p><strong>Audience:</strong> application authors comparing an agent prompt or prelude change
 against fixed model responses before an explicit promotion decision.</p></blockquote><p>Live model output drifts between runs. The <code class="inline">llm_replay</code> provider holds model
@@ -110,13 +146,13 @@ usage, and canonical traces. Replay removes model sampling as a variable; it
 does not make external MCP content deterministic unless that content is also
 frozen and identified.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/guides/components-and-preludes/">Components and preludes</a> defines component
 identity, dependencies, exports, and signatures.</li><li><a href="/guides/running-and-debugging/">Running and debugging</a> documents override switches,
-artifacts, traces, and private inspection.</li><li><a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/kernel-limits-reference.md">Kernel limits</a> lists every run ceiling that
+artifacts, traces, and private inspection.</li><li><a href="/reference/kernel-limits-reference/">Kernel limits</a> lists every run ceiling that
 must remain comparable between evaluations.</li></ul>
 </article>
-<nav class="pager" aria-label="Guide order"><a class="pager-previous" href="/guides/debugging-a-failed-run/">&larr; Debug a failed run</a></nav>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/debugging-a-failed-run/">&larr; Debug a failed run</a><a class="pager-next" href="/installation/standalone/">Standalone installation &rarr;</a></nav>
 <footer>
   Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/evaluating-with-replay.md">Edit this
-  guide on GitHub</a>.
+  page on GitHub</a>.
 </footer>
 
 </main>

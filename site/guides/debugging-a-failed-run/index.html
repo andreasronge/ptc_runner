@@ -18,13 +18,18 @@
 <div class="guide-shell">
 <aside class="guide-nav">
   <p class="brand"><a href="/">PtcRunner</a></p>
-  <nav aria-label="Guides">
-    <p class="nav-home"><a href="/guides/">All guides</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
 <h2>Start</h2>
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
 </ul>
 
 <h2>Configure</h2>
@@ -50,11 +55,42 @@
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
 
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+<h2>Contracts</h2>
+<ul>
+<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a></li>
+</ul>
+
   </nav>
 </aside>
 
 <main class="guide-main">
-<p class="crumb mobile-crumb"><a href="/guides/">&larr; All guides</a></p>
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
 <h1 id="debug-a-failed-run">Debug a failed run</h1><blockquote><p><strong>Audience:</strong> application authors and operators diagnosing a run from its
 immutable trace and, when explicitly retained, private inspection evidence.</p></blockquote><p>Start with the public evidence:</p><pre><code class="console language-console">ptc viewer ptc-project.json</code></pre><p>Or query it with the fixed analysis profile:</p><pre><code class="console language-console">ptc repl --project ptc-project.json \
@@ -69,15 +105,15 @@ ordinary PtcRunner application can navigate a frozen failed capture through the
 shipped <code class="inline">debug.nav</code> library without gaining filesystem, network, model, or
 nested-evaluation authority.</p><pre><code class="console language-console">ptc init debug-a-failed-run --example debug-a-failed-run
 ptc run debug-a-failed-run/target.ptc-project.json
-ptc run debug-a-failed-run/debugger.ptc-project.json</code></pre><p>Use the <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/reference/debug-navigation.md">debug-navigation reference</a> for the
+ptc run debug-a-failed-run/debugger.ptc-project.json</code></pre><p>Use the <a href="/reference/debug-navigation/">debug-navigation reference</a> for the
 complete evidence graph, typed links, collections, resources, pagination,
 private-authority rules, and model-assisted navigation contract. The
-<a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/trace-log-contract.md">TraceLog contract</a> owns the canonical event schema.</p>
+<a href="/reference/trace-log-contract/">TraceLog contract</a> owns the canonical event schema.</p>
 </article>
-<nav class="pager" aria-label="Guide order"><a class="pager-previous" href="/guides/kernel-repl/">&larr; Explore a project interactively</a><a class="pager-next" href="/guides/evaluating-with-replay/">Evaluate changes with replay &rarr;</a></nav>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/kernel-repl/">&larr; Explore a project interactively</a><a class="pager-next" href="/guides/evaluating-with-replay/">Evaluate changes with replay &rarr;</a></nav>
 <footer>
   Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/debugging-a-failed-run.md">Edit this
-  guide on GitHub</a>.
+  page on GitHub</a>.
 </footer>
 
 </main>

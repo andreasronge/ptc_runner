@@ -1,35 +1,53 @@
 defmodule Mix.Tasks.Ptc.GenSiteGuides do
-  @shortdoc "Generate the static-site guide pages from docs/guides"
+  @shortdoc "Generate the static-site documentation pages from docs/"
   @moduledoc """
-  Renders every guide into a committed page under `site/guides/`, plus the
-  directory page at `site/guides/index.html`.
+  Renders the published documentation groups into committed pages under
+  `site/guides/`, `site/installation/`, and `site/reference/`, plus the
+  directory page at `site/guides/index.html`, and rewrites the shared
+  sidebar between the generated markers in `site/index.html`.
 
   The sidebar structure is read from the same `mix.exs` configuration ExDoc
-  uses — the guide groups in `:groups_for_extras` name the sections, and the
-  `:extras` list orders the pages — so the HexDocs sidebar and the site
-  sidebar cannot drift apart.
+  uses — `:groups_for_extras` names the sections and `:extras` orders the
+  pages — so the HexDocs sidebar and the site sidebar cannot drift apart.
+  Only the groups named in `@published_roots` are published; maintainer and
+  conformance material stays on GitHub.
 
       mix ptc.gen_site_guides
       mix ptc.gen_site_guides --check
 
   `--check` verifies the checked-in pages without rewriting them and fails
-  on a stale, missing, or orphaned page (a renamed guide leaves an orphan
-  behind). `mix ptc.gen_docs` runs this task, so regenerating the docs
-  regenerates these pages too.
+  on a stale, missing, or orphaned page (a renamed source file leaves an
+  orphan behind). `mix ptc.gen_docs` runs this task, so regenerating the
+  docs regenerates these pages too.
 
-  Relative links to a sibling guide become site links; relative links to any
-  other repository file become GitHub links and must name a file that
-  exists. Everything else the renderer does not recognise fails the run —
-  see `PtcRunner.SiteGuides.MarkdownHTML`.
+  Relative links to a published page become site links (validated down to
+  the anchor); relative links to any other repository file become GitHub
+  links and must name a file that exists. Everything else the renderer does
+  not recognise fails the run — see `PtcRunner.SiteGuides.MarkdownHTML`.
   """
   use Mix.Task
 
   alias PtcRunner.SiteGuides.MarkdownHTML
 
-  @output_root "site/guides"
   @site_origin "https://ptc-runner.dev"
   @github "https://github.com/andreasronge/ptc_runner"
-  @guide_prefix "docs/guides/"
+
+  # Which documentation groups the site publishes, and the URL root each
+  # one's pages live under. Sidebar order follows :groups_for_extras.
+  @published_roots %{
+    "Start" => "guides",
+    "Language" => "guides",
+    "Configure" => "guides",
+    "Build" => "guides",
+    "Run and debug" => "guides",
+    "Installation" => "installation",
+    "Reference" => "reference",
+    "Contracts" => "reference"
+  }
+
+  @landing_page "site/index.html"
+  @sidebar_begin "<!-- BEGIN GENERATED: site sidebar (mix ptc.gen_site_guides) -->"
+  @sidebar_end "<!-- END GENERATED: site sidebar -->"
 
   @impl Mix.Task
   def run(args) do
@@ -41,7 +59,11 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
       Map.new(pages, fn page -> {page.output_path, page_document(page, sections, pages)} end)
 
     expected =
-      Map.put(expected, Path.join(@output_root, "index.html"), index_document(sections, pages))
+      expected
+      |> Map.put(Path.join("site/guides", "index.html"), index_document(sections, pages))
+      |> Map.put(@landing_page, landing_document(sections, pages))
+
+    validate_anchors!(expected)
 
     if check? do
       check!(expected)
@@ -54,58 +76,75 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
 
   defp sections! do
     docs = Mix.Project.config() |> Keyword.fetch!(:docs)
-    guide_extras = docs |> Keyword.fetch!(:extras) |> Enum.flat_map(&extra_guide_path/1)
+    extras = docs |> Keyword.fetch!(:extras) |> Enum.flat_map(&extra_path/1)
+    groups = docs |> Keyword.fetch!(:groups_for_extras) |> Enum.map(fn {k, v} -> {to_string(k), v} end)
 
-    guide_groups =
-      docs
-      |> Keyword.fetch!(:groups_for_extras)
-      |> Enum.filter(fn {_title, members} ->
-        is_list(members) and members != [] and Enum.all?(members, &guide_path?/1)
-      end)
+    known = MapSet.new(groups, fn {title, _members} -> title end)
 
-    grouped = Enum.flat_map(guide_groups, fn {_title, members} -> members end)
-
-    unless Enum.sort(grouped) == Enum.sort(guide_extras) and
-             Enum.uniq(grouped) == grouped do
-      Mix.raise("""
-      The guide groups in mix.exs must contain every docs/guides extra exactly once.
-      In groups but not extras: #{inspect(grouped -- guide_extras)}
-      In extras but not groups: #{inspect(guide_extras -- grouped)}
-      """)
+    for {title, _root} <- @published_roots, not MapSet.member?(known, title) do
+      Mix.raise("Published group #{inspect(title)} does not exist in mix.exs :groups_for_extras")
     end
 
-    Enum.each(guide_groups, fn {title, members} ->
-      extras_order = Enum.filter(guide_extras, &(&1 in members))
+    # Mirror ExDoc: each extra belongs to the first group that matches it.
+    group_of = fn path ->
+      Enum.find_value(groups, fn {title, members} ->
+        if group_member?(members, path), do: title
+      end)
+    end
 
-      unless members == extras_order do
-        Mix.raise("""
-        Guide group #{inspect(title)} lists its pages in a different order than
-        :extras. ExDoc orders pages by :extras; make both orders agree.
-        """)
-      end
-    end)
+    members_by_title =
+      extras
+      |> Enum.map(&{group_of.(&1), &1})
+      |> Enum.group_by(fn {title, _path} -> title end, fn {_title, path} -> path end)
 
-    Enum.map(guide_groups, fn {title, members} ->
-      %{title: to_string(title), sources: members}
-    end)
+    sections =
+      groups
+      |> Enum.filter(fn {title, _members} -> Map.has_key?(@published_roots, title) end)
+      |> Enum.map(fn {title, members} ->
+        sources = Map.get(members_by_title, title, [])
+
+        if sources == [] do
+          Mix.raise("Published group #{inspect(title)} matches no extras")
+        end
+
+        if is_list(members) and members != sources do
+          Mix.raise("""
+          Group #{inspect(title)} lists its pages in a different order than
+          :extras. ExDoc orders pages by :extras; make both orders agree.
+          """)
+        end
+
+        %{title: title, root: Map.fetch!(@published_roots, title), sources: sources}
+      end)
+
+    orphaned_guides =
+      Enum.filter(extras, fn path ->
+        String.starts_with?(path, "docs/guides/") and
+          group_of.(path) not in Map.keys(@published_roots)
+      end)
+
+    if orphaned_guides != [] do
+      Mix.raise("Guides outside every published group: #{inspect(orphaned_guides)}")
+    end
+
+    sections
   end
 
-  defp extra_guide_path(path) when is_binary(path),
-    do: if(guide_path?(path), do: [path], else: [])
+  defp extra_path(path) when is_binary(path), do: [path]
 
-  defp extra_guide_path({path, options}) when is_binary(path) and is_list(options),
-    do: if(Keyword.has_key?(options, :url), do: [], else: extra_guide_path(path))
+  defp extra_path({path, options}) when is_binary(path) and is_list(options),
+    do: if(Keyword.has_key?(options, :url), do: [], else: [path])
 
-  defp guide_path?(path) when is_binary(path),
-    do: String.starts_with?(path, @guide_prefix) and Path.extname(path) == ".md"
-
-  defp guide_path?(_other), do: false
+  defp group_member?(members, path) when is_list(members), do: path in members
+  defp group_member?(%Regex{} = members, path), do: Regex.match?(members, path)
 
   # ── Rendering ───────────────────────────────────────────────────────────
 
   defp render_pages(sections) do
-    sources = Enum.flat_map(sections, & &1.sources)
-    slug_by_source = Map.new(sources, &{&1, Path.basename(&1, ".md")})
+    url_by_source =
+      for section <- sections, source <- section.sources, into: %{} do
+        {source, "/#{section.root}/#{Path.basename(source, ".md")}/"}
+      end
 
     ordered =
       Enum.flat_map(sections, fn section ->
@@ -113,15 +152,15 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
           rendered =
             source
             |> File.read!()
-            |> MarkdownHTML.render!(source, &rewrite_link(&1, source, slug_by_source))
+            |> MarkdownHTML.render!(source, &rewrite_link(&1, source, url_by_source))
 
-          slug = Map.fetch!(slug_by_source, source)
+          url = Map.fetch!(url_by_source, source)
 
           %{
             source: source,
-            slug: slug,
-            url: "/guides/#{slug}/",
-            output_path: Path.join([@output_root, slug, "index.html"]),
+            slug: Path.basename(source, ".md"),
+            url: url,
+            output_path: Path.join(["site", String.trim(url, "/"), "index.html"]),
             section: section.title,
             title: rendered.title,
             description: rendered.description,
@@ -129,6 +168,12 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
           }
         end)
       end)
+
+    outputs = Enum.map(ordered, & &1.output_path)
+
+    if Enum.uniq(outputs) != outputs do
+      Mix.raise("Two published pages collide: #{inspect(outputs -- Enum.uniq(outputs))}")
+    end
 
     Enum.with_index(ordered, fn page, index ->
       previous = if index > 0, do: Enum.at(ordered, index - 1)
@@ -139,11 +184,11 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
     end)
   end
 
-  # Sibling guides become site pages; anything else relative must exist in
+  # Published pages link to each other; anything else relative must exist in
   # the repository and is published as a GitHub link. Unknown shapes raise so
   # a typo cannot ship as a dead link.
   @doc false
-  def rewrite_link(target, source, slug_by_source) do
+  def rewrite_link(target, source, url_by_source) do
     uri = URI.parse(target)
     fragment = if uri.fragment, do: "#" <> uri.fragment, else: ""
 
@@ -165,7 +210,7 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
           |> Path.relative_to(File.cwd!())
 
         cond do
-          slug = Map.get(slug_by_source, repo_path) -> "/guides/#{slug}/#{fragment}"
+          url = Map.get(url_by_source, repo_path) -> "#{url}#{fragment}"
           File.regular?(repo_path) -> "#{@github}/blob/main/#{repo_path}#{fragment}"
           File.dir?(repo_path) -> "#{@github}/tree/main/#{repo_path}"
           true -> Mix.raise("#{source} links to missing repository target #{target}")
@@ -182,14 +227,14 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
       canonical: @site_origin <> page.url,
       sidebar: sidebar(sections, pages, page.slug),
       main: """
-      <p class="crumb mobile-crumb"><a href="/guides/">&larr; All guides</a></p>
+      <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
       <article>
       #{page.html}
       </article>
       #{pager(page)}
       <footer>
         Found a problem? <a href="#{@github}/edit/main/#{page.source}">Edit this
-        guide on GitHub</a>.
+        page on GitHub</a>.
       </footer>
       """
     )
@@ -219,20 +264,35 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
       end)
 
     document(
-      title: "Guides · PtcRunner",
+      title: "Documentation · PtcRunner",
       description:
-        "Task-focused guides for building, configuring, and debugging PtcRunner projects.",
+        "Task-focused guides, installation routes, and the reference documentation for PtcRunner.",
       canonical: @site_origin <> "/guides/",
       sidebar: sidebar(sections, pages, nil),
       main: """
       <article>
-      <h1>Guides</h1>
-      <p class="lead">Task-focused guides, in reading order. Start at the top if
-      PtcRunner is new to you.</p>
+      <h1>Documentation</h1>
+      <p class="lead">Guides in reading order, the installation routes, and the
+      reference pages. Start at the top if PtcRunner is new to you.</p>
       #{section_html}
       </article>
       """
     )
+  end
+
+  # The landing page is hand-written; only the sidebar between the generated
+  # markers belongs to this task.
+  defp landing_document(sections, pages) do
+    content = File.read!(@landing_page)
+
+    unless String.contains?(content, @sidebar_begin) and String.contains?(content, @sidebar_end) do
+      Mix.raise("#{@landing_page} is missing its generated sidebar markers")
+    end
+
+    [head, rest] = String.split(content, @sidebar_begin, parts: 2)
+    [_stale, tail] = String.split(rest, @sidebar_end, parts: 2)
+
+    head <> @sidebar_begin <> "\n" <> sidebar(sections, pages, nil) <> @sidebar_end <> tail
   end
 
   defp sidebar(sections, pages, current_slug) do
@@ -263,8 +323,8 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
     """
     <aside class="guide-nav">
       <p class="brand"><a href="/">PtcRunner</a></p>
-      <nav aria-label="Guides">
-        <p class="nav-home"><a href="/guides/">All guides</a></p>
+      <nav aria-label="Documentation">
+        <p class="nav-home"><a href="/guides/">Overview</a></p>
     #{section_html}
       </nav>
     </aside>
@@ -289,7 +349,7 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
     if previous == "" and next == "" do
       ""
     else
-      ~s(<nav class="pager" aria-label="Guide order">#{previous}#{next}</nav>)
+      ~s(<nav class="pager" aria-label="Reading order">#{previous}#{next}</nav>)
     end
   end
 
@@ -327,11 +387,61 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
     """
   end
 
+  # ── Anchor validation across the published pages ────────────────────────
+
+  # Every internal fragment link must name an id that exists on its target
+  # page, so a renamed heading fails generation instead of shipping as a
+  # dead in-page jump.
+  defp validate_anchors!(expected) do
+    ids_by_path =
+      Map.new(expected, fn {path, html} ->
+        ids =
+          ~r/ id="([^"]+)"/
+          |> Regex.scan(html, capture: :all_but_first)
+          |> List.flatten()
+          |> MapSet.new()
+
+        {path, ids}
+      end)
+
+    errors =
+      Enum.flat_map(expected, fn {path, html} ->
+        ~r{href="(/[^"#]*/)#([^"]+)"}
+        |> Regex.scan(html, capture: :all_but_first)
+        |> Enum.flat_map(fn [target_url, fragment] ->
+          target_path = Path.join(["site", String.trim(target_url, "/"), "index.html"])
+
+          case Map.fetch(ids_by_path, target_path) do
+            {:ok, ids} ->
+              if MapSet.member?(ids, fragment),
+                do: [],
+                else: ["#{path} links to missing anchor #{target_url}##{fragment}"]
+
+            :error ->
+              ["#{path} links to unpublished target #{target_url}##{fragment}"]
+          end
+        end)
+      end)
+
+    if errors != [] do
+      Mix.raise("Internal anchors are broken:\n" <> Enum.join(errors, "\n"))
+    end
+  end
+
   # ── Write and check, with orphan detection ──────────────────────────────
 
+  defp output_roots do
+    @published_roots
+    |> Map.values()
+    |> Enum.uniq()
+    |> Enum.map(&Path.join("site", &1))
+  end
+
   defp published_pages do
-    [Path.join(@output_root, "**/*.html"), Path.join(@output_root, "*.html")]
-    |> Enum.flat_map(&Path.wildcard/1)
+    output_roots()
+    |> Enum.flat_map(fn root ->
+      Path.wildcard(Path.join(root, "**/*.html")) ++ Path.wildcard(Path.join(root, "*.html"))
+    end)
     |> Enum.uniq()
     |> Enum.sort()
   end
@@ -351,12 +461,12 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
 
     case stale ++ orphaned do
       [] ->
-        Mix.shell().info("Verified #{map_size(expected)} site guide pages")
+        Mix.shell().info("Verified #{map_size(expected)} site documentation pages")
 
       problems ->
         Mix.raise("""
-        Site guide pages are out of date; run `mix ptc.gen_docs` (or
-        `mix ptc.gen_site_guides`) and stage site/guides.
+        Site documentation pages are out of date; run `mix ptc.gen_docs` (or
+        `mix ptc.gen_site_guides`) and stage site/.
         #{Enum.join(problems, "\n")}
         """)
     end
@@ -370,11 +480,11 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
 
     for path <- published_pages(), not Map.has_key?(expected, path) do
       File.rm!(path)
-      # A renamed guide leaves its old directory behind; remove it once empty.
+      # A renamed source leaves its old directory behind; remove it once empty.
       _ = File.rmdir(Path.dirname(path))
       Mix.shell().info("Removed orphaned #{path}")
     end
 
-    Mix.shell().info("Generated #{map_size(expected)} site guide pages")
+    Mix.shell().info("Generated #{map_size(expected)} site documentation pages")
   end
 end
