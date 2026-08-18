@@ -88,6 +88,26 @@ model completes through exactly one typed terminal action —
 `repair.terminal/abstain` with the missing evidence. The result contract
 refuses anything else.
 
+One repair application covers three planted incidents. Each arm swaps only the
+snapshot install; the agent manifest and prompt never change:
+
+| Arm | Planted defect | Expected decision |
+| --- | --- | --- |
+| `target/` | `pricing.rule` adds 2 where its own contract states the flat charge is 20 | propose replacing `pricing.rule` |
+| `target-ambiguous/` | two constant charges sum to the wrong total, and no contract pins either one | abstain with `insufficient-evidence` |
+| `target-workflow-control/` | the workflow routes the order id where inventory's reservation id belongs; both missions are correct | propose replacing workflow `main`, omitting `target_mission` |
+
+How a run executes, in order. The manifest's entry,
+`repair.preloaded/run`, is trusted workflow code. Before any model call it
+uses `kernel/eval-with` to evaluate one embedded program inside the
+`case-derived` mission — the room that holds `debug.nav` and the snapshot
+providers — and that program returns the incident packet. The packet reaches
+the model only as escaped, untrusted text in its first user message. Every
+program the model then writes is evaluated in the `synthesize` mission, whose
+only exports are the two terminal actions. So the mission evaluations you see
+in a trace are one host-authored packet build plus one per model turn:
+evidence flows down into the prompt, and authority never flows with it.
+
 This leg uses `mix ptc.repair`, a maintainers surface that runs from a source
 checkout rather than the standalone executable, so the commands below use
 `mix ptc` from the repository root against `examples/debug-a-failed-run/`.
