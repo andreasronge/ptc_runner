@@ -43,25 +43,38 @@ profile, despite starting and serving legacy clients normally. The checked-in
 filesystem example listed above implements the required profile and is the
 deterministic baseline for this reference.
 
-A cold `npx` launch can spend more than the manifest's default one-second
-evaluation budget before that protocol response arrives. To reproduce the
-compatibility diagnosis, give both the application operation and the stdio
-startup enough time:
+A cold `npx` launch can spend more than the default budget before that protocol
+response arrives. One budget bounds the whole acquisition — staging, the stdio
+spawn, and the `server/discover` round trip — and it is the lower of two values:
+
+- the installation's `ceilings.timeout_ms`, default `5000`; and
+- for a mission provider, the manifest's `limits.evaluation_timeout_ms`,
+  default `1000`.
+
+Both must be wide enough, because the effective budget is the smaller one. In
+`ptc.json`:
 
 ```json
 {"limits": {"evaluation_timeout_ms": 20000}}
 ```
 
-In `ptc-host.json`, inside the stdio transport:
+and in `ptc-host.json`, beside the installation's `transport`:
 
 ```json
-{"start_timeout_ms": 15000}
+{"ceilings": {"timeout_ms": 20000}}
 ```
 
-The application limit is the outer budget. Raising only
-`start_timeout_ms` cannot widen it; if the outer budget expires first, the
-closed result is `provider_unavailable` because PtcRunner never received the
-response needed to prove a protocol mismatch.
+`start_timeout_ms` inside the stdio transport is not a third budget. It is an
+upper bound on the launcher handshake alone and is clamped to whatever remains
+of the budget above, so raising it cannot widen anything — leaving it at its
+`5000` default is fine once the two budgets above are set.
+
+If the budget expires before the server answers, the closed result is
+`provider_acquisition_timeout`, which is retryable and distinct from
+`provider_unavailable`: the server was reached and simply did not answer in
+time, so PtcRunner never received the response needed to prove a protocol
+mismatch. Raise the budget and run it again. A first launch on a cold npm cache,
+or any launch on a loaded machine, is the usual cause.
 
 ## Run the checked-in file agent
 

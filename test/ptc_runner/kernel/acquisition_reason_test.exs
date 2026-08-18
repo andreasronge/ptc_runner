@@ -21,7 +21,7 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
     {:mcp_endpoint_tls_failed, :provider_acquisition, :provider_endpoint_tls_failed,
      :acquisition},
     {:mcp_transport_error, :provider_acquisition, :provider_unavailable, :acquisition},
-    {:mcp_timeout, :provider_acquisition, :provider_unavailable, :acquisition},
+    {:mcp_timeout, :provider_acquisition, :provider_acquisition_timeout, :acquisition},
     {:mcp_remote_error, :provider_acquisition, :provider_unavailable, :acquisition},
     {:invalid_mcp_transport, :provider_acquisition, :provider_unavailable, :acquisition},
     {:resource_registrar_unavailable, :provider_acquisition, :provider_unavailable, :acquisition},

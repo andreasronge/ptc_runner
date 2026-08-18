@@ -187,6 +187,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the provider connectivity operation is rate limited"},
     {:provider_acquisition, :provider_unavailable, 4, false,
      "the selected provider could not be acquired"},
+    {:provider_acquisition, :provider_acquisition_timeout, 4, true,
+     "the selected provider did not answer within its installed timeout_ms ceiling"},
     {:provider_acquisition, :provider_endpoint_connection_refused, 4, true,
      "the installed endpoint refused the connection"},
     {:provider_acquisition, :provider_endpoint_name_unresolved, 4, false,
