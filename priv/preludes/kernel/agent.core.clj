@@ -608,7 +608,7 @@
   non-final phase and is retained as evidence; only the final phase can complete
   the agent with a contract-valid result. A terminal-only phase rejects any
   parsed program whose single top-level form is not return or fail before
-  mission evaluation."
+  mission evaluation, and only the final phase may declare terminal_only."
   {:signature "(task :string, cfg {model :string?, phases [{mission :string, max_turns :int, instruction :string?, terminal_only :bool?}], max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
   (let [outcome (run-outcome* task cfg true)]

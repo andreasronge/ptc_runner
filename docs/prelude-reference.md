@@ -177,7 +177,7 @@ that phase's instruction is appended as a user message. A return closes any
 non-final phase and is retained as evidence; only the final phase can complete
 the agent with a contract-valid result. A terminal-only phase rejects any
 parsed program whose single top-level form is not return or fail before
-mission evaluation.
+mission evaluation, and only the final phase may declare terminal_only.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`
