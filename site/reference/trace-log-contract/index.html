@@ -491,7 +491,12 @@ as ordinary empty data.</p><p>Preludes may change ergonomics, projections, defau
 cannot expand the source grant, bypass bounds/sanitization, or acquire private
 trace access.</p><h2 id="events-and-private-data">Events and private data</h2><p>The generic Kernel emits lifecycle, subordinate-evaluation, capability,
 resource, annotation, and terminal facts. Providers may attach safe typed
-metadata without making Kernel understand provider-specific transcripts.</p><p>The implemented private event policy stores the same canonical event
+metadata without making Kernel understand provider-specific transcripts.</p><p>A <code class="inline">capability-stopped</code> event with <code class="inline">status: &quot;error&quot;</code> carries the closed Lisp
+envelope <code class="inline">kind</code> and, when present, <code class="inline">reason</code> — the same payload-free class
+<code class="inline">execution_errors</code> already expose. An unrecognized envelope atom is retained
+only as a one-way fingerprint (<code class="inline">kind_fingerprint</code> / <code class="inline">reason_fingerprint</code>).
+Arguments, results, details, and messages stay off this event. Successful
+stops omit these fields.</p><p>The implemented private event policy stores the same canonical event
 vocabulary as the normal policy. It changes sink failure behavior, file
 permissions, and discovery; it does not capture prompts, responses, capability
 payloads, generated programs, or prelude source. Private JSONL destinations are

@@ -113,8 +113,11 @@ deterministic walk or a model.</p><h2 id="what-the-evidence-path-looks-like">Wha
 walker never has to guess a filter or reconstruct an identity by hand.</p><h2 id="capture-the-evidence-a-debugger-can-read">Capture the evidence a debugger can read</h2><p>Two artifacts matter, and they carry different authority.</p><p>A <strong>canonical trace</strong> is bounded operational evidence: run and evaluation
 lifecycle, capability names and outcomes, counts, and a sanitized failure
 taxonomy. It contains no prompts, model responses, capability payloads, or
-generated source. A workflow's own <code class="inline">fail</code> value never reaches it; an
-unrecognized <code class="inline">kind</code> is retained only as a one-way fingerprint.</p><p>A <strong>private inspection artifact</strong> is an explicit <code class="inline">0600</code> host development
+generated source.</p><p>A failed capability attempt records its closed envelope <code class="inline">kind</code> and <code class="inline">reason</code>
+on the <code class="inline">capability-stopped</code> event. An unrecognized envelope atom is retained
+only as a one-way fingerprint.</p><p>A workflow's own <code class="inline">fail</code> value never reaches the public trace as prose. An
+unrecognized <code class="inline">fail</code> kind is retained only as a one-way fingerprint on
+<code class="inline">run-stopped</code>; that taxonomy is separate from the capability-stopped class.</p><p>A <strong>private inspection artifact</strong> is an explicit <code class="inline">0600</code> host development
 authority. It adds the frozen component sources, the exact generated programs,
 capability arguments and results, model exchanges, prints, and detailed
 failures. Raised capability callbacks can include their bounded exception
