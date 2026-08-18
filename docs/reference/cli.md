@@ -13,6 +13,7 @@ Run `ptc help COMMAND` for the exact switches accepted by an installed version.
 | `ptc init DIRECTORY` | Publish a validated minimal application without replacing an existing target |
 | `ptc init DIRECTORY --example NAME` | Publish one embedded example tree instead of the scaffold |
 | `ptc docs [PAGE]` | List the documentation embedded in this executable, or print one page |
+| `ptc help [COMMAND]` | Print the root command list, or the exact switches one command accepts |
 | `ptc validate MANIFEST or PROJECT` | Load and compile without executing the workflow, and read the input files the declarations name |
 | `ptc run MANIFEST or PROJECT` | Execute the application entry |
 | `ptc run MANIFEST --env-file FILE` | Load environment-backed credentials from this exact file |
