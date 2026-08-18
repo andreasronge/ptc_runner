@@ -95,11 +95,20 @@ missing, empty, or unreadable value fails with `credential_unavailable`; there
 is no ambient provider-specific fallback. Never put credentials in a manifest,
 PTC-Lisp, canonical traces, or committed files.
 
+Surrounding whitespace is not part of a secret and is trimmed from every
+source, so `gh auth token > vendor.token` and an editor that adds a trailing
+newline both work. A value that still carries a control character after
+trimming — an interior newline, say — cannot be carried in an HTTP header or a
+child process environment, and fails as `credential_unavailable` at the
+credential check rather than partway into acquisition.
+
 `ptc` and `mix ptc` accept `--env-file FILE` on `run`, active `doctor`, and
-manifest-backed `repl`. When a selected LLM uses an `env` credential, the
-frontend loads that exact file before provider activity; it never searches for
-one. Every imported value persists for the process lifetime, and an existing
-process value wins. Embedded hosts load no dotenv file implicitly.
+manifest-backed `repl`. When any selected installation binds an `env`
+credential — an LLM through `credential`, or an MCP transport through
+`transport.env` or `transport.auth` — the frontend loads that exact file before
+provider activity; it never searches for one. Every imported value persists for
+the process lifetime, and an existing process value wins. Embedded hosts load
+no dotenv file implicitly.
 
 ## Choose a provider source
 

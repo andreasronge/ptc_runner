@@ -15,10 +15,10 @@ defmodule PtcRunner.Kernel.SchemaPath do
 
   Keywords that admit caller-chosen names — `additionalProperties` above all —
   never contribute the caller's own key. Where the map's `propertyNames` proves
-  no admissible member could render as `PtcRunner.Kernel.CommandPath.elision/0`,
-  the key is replaced by that placeholder and the walk continues into the
-  closed schema beneath it; where it cannot, the walk stops at the map as
-  before. A host diagnostic under `install` therefore reaches
+  no admissible member could render as the elision placeholder
+  `PtcRunner.Kernel.CommandPath` owns, the key is replaced by that placeholder
+  and the walk continues into the closed schema beneath it; where it cannot,
+  the walk stops at the map as before. A host diagnostic under `install` therefore reaches
   `/install/*/ceilings/timeout_ms` while naming no installation, and one under
   `install/*/tools` — whose members are upstream tool names, and which admits
   `*` itself — still stops, because an ambiguous pointer is worse than a short
