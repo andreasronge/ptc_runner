@@ -51,9 +51,41 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
              |> Map.put("mcp_filesystem", "true")
   end
 
+  test "known standing paths do not fall through to every scope" do
+    docs = only(["docs"])
+    core = only(["core"])
+    every_scope = only(~w(core launcher mcp_http mcp_filesystem java viewer docs))
+
+    for {path, expected} <- [
+          {"AGENTS.md", docs},
+          {"CLAUDE.md", docs},
+          {"usage-rules.md", docs},
+          {".env.example", docs},
+          {".lycheeignore", docs},
+          {".gitattributes", docs},
+          {"cliff.toml", docs},
+          {"REUSE.toml", docs},
+          {"site/index.html", docs},
+          {"dev/mix/tasks/ptc.verify_docs.ex", docs},
+          {".duplication-baseline.json", core},
+          {".ex_dna.exs", core},
+          {"conformance_inventory.json", core},
+          {"bench/lisp_throughput.exs", core},
+          {"Dockerfile", core},
+          {".dockerignore", core},
+          {"rel/overlays/bin/ptc", core},
+          {"examples/kernel-tutorial/03-file-agent/agent.clj", core},
+          {"examples/mcp/filesystem/src/index.ts", only(["mcp_filesystem"])},
+          {".claude/skills/precommit/SKILL.md", all_false()},
+          {"mise.toml", every_scope}
+        ] do
+      assert classify([path]) == expected, path
+    end
+  end
+
   test "unknown paths conservatively select every scope" do
     assert classify(["new-area/contract.data"]) ==
-             Map.new(all_false(), fn {scope, _value} -> {scope, "true"} end)
+             only(~w(core launcher mcp_http mcp_filesystem java viewer docs))
   end
 
   test "non-canonical executable-guide entries conservatively select every scope" do
@@ -62,7 +94,7 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
           "./docs/maintainers/development-setup.md"
         ] do
       assert classify(["docs/maintainers/development-setup.md"], registry: entry <> "\n") ==
-               Map.new(all_false(), fn {scope, _value} -> {scope, "true"} end)
+               only(~w(core launcher mcp_http mcp_filesystem java viewer docs))
     end
   end
 
@@ -96,6 +128,10 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
       [scope, value] = String.split(line, "=", parts: 2)
       {scope, value}
     end)
+  end
+
+  defp only(scopes) do
+    Enum.reduce(scopes, all_false(), &Map.put(&2, &1, "true"))
   end
 
   defp all_false do

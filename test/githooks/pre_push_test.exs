@@ -110,6 +110,21 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     assert List.last(invocations) == "ci-gate launcher"
   end
 
+  test "example changes run the core gate without the launcher companion" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_change("examples/kernel-tutorial/03-file-agent/agent.clj")
+
+    {output, status} = run_hook(repo, path)
+
+    assert status == 0, output
+    assert output =~ "core tests"
+    refute output =~ "launcher validation"
+
+    invocations = mix_marker |> File.read!() |> String.split("\n", trim: true)
+    assert "ci-gate core-tests" in invocations
+    refute "ci-gate launcher" in invocations
+  end
+
   test "launcher-only changes run the launcher gate" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_change("ptc_runner_launcher/c_src/launcher.c")
