@@ -45,8 +45,21 @@ defmodule PtcRunner.DocumentationGuidelinesTest do
     assert Enum.any?(extras, &String.starts_with?(&1, "docs/guides/"))
     assert Enum.any?(extras, &String.starts_with?(&1, "docs/reference/"))
     assert Keyword.has_key?(groups, :Installation)
-    assert Keyword.has_key?(groups, :Guides)
     assert Keyword.has_key?(groups, :Reference)
+
+    # The guide layer is split into explicit reading-order sections that both
+    # the HexDocs sidebar and the site generator consume. Every guide extra
+    # must belong to one; mix ptc.gen_site_guides enforces the stricter
+    # structural rules.
+    grouped_guides =
+      groups
+      |> Keyword.values()
+      |> Enum.filter(&is_list/1)
+      |> Enum.concat()
+      |> Enum.filter(&String.starts_with?(&1, "docs/guides/"))
+
+    guide_extras = Enum.filter(extras, &String.starts_with?(&1, "docs/guides/"))
+    assert Enum.sort(grouped_guides) == Enum.sort(guide_extras)
   end
 
   test "uses canonical anchors for conformance gaps" do
