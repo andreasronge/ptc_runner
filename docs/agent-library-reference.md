@@ -96,6 +96,38 @@ or parallel higher-order functions such as `map`, `pmap`, and `pcalls`.
 
 This is the composable result-contract entry used by `agent.main/run`.
 
+### `agent.core/run-phased-result-value`
+
+```clojure
+(agent.core/run-phased-result-value task config)
+```
+
+Runs ordered mission phases while retaining the exact correlated assistant and
+tool transcript. Each phase requires `mission` and `max_turns`, and may provide
+an `instruction`, delivered when its phase begins: the first phase's
+instruction is appended to the initial task, and at each later boundary the
+host rebuilds the system prompt from the next mission's authority and appends
+that phase's instruction as a user message. A
+`return` in a non-final phase closes that phase and is retained as bounded
+observation evidence; only the final phase can satisfy the application result
+contract.
+
+Set a phase's `terminal_only` to `true` when it may only make the final
+decision; only the final phase may declare it, because an earlier phase that
+exhausted without a terminal action would hand off to the next phase and void
+the obligation. PtcRunner parses each generated program before evaluation and
+accepts only one top-level `return` or `fail` form. A nonterminal program is
+not evaluated and receives bounded correction feedback while a phase turn
+remains; exhausting the phase this way reports the `terminal-source-required`
+turn-limit reason.
+
+`run-phased-result-value` replaces `mission` and `max_turns` with a non-empty
+`phases` vector of at most eight maps. Each phase accepts `mission` (non-empty
+string), `max_turns` (integer, 1–128), optional `instruction` (non-empty
+string), and optional `terminal_only` (boolean). The sum of phase turn budgets
+must not exceed 128; an invalid vector fails with
+`invalid-agent-config/invalid-phases` before any provider request.
+
 ### `agent.main/run`
 
 Set the manifest entry to `agent.main/run` and supply:

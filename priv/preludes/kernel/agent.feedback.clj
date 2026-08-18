@@ -63,6 +63,15 @@
   (str "Protocol error: " (get action :reason)
        ". Call run_ptc_lisp exactly once with one program string."))
 
+(defn terminal-source-required
+  "Renders correction guidance for a program rejected by a terminal-only phase."
+  [check]
+  (let [message (get-in check [:diagnostic :message])]
+    (str "The terminal-only phase rejected the generated program before evaluation. "
+         "Send exactly one top-level (return value) or (fail value) form"
+         (if (string? message) (str "; diagnostic=" message) "")
+         ".")))
+
 (defn evaluation-error
   "Renders bounded correction guidance for a failed evaluation."
   [evaluation]

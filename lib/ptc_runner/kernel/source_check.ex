@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.SourceCheck do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Parser
   alias PtcRunner.Utf8
 
   @diagnostic_bytes 4_096
@@ -54,30 +55,36 @@ defmodule PtcRunner.Kernel.SourceCheck do
     compile_timeout_ms = Keyword.get(opts, :compile_timeout, timeout_ms)
 
     compile_result =
-      Lisp.check_native(source,
-        memory: memory,
-        tools:
-          Evaluation.mission_tools(
-            mission,
-            state,
-            timeout_ms,
-            event_sink,
-            nil,
-            nil,
-            nil,
-            mission_name
-          ),
-        prelude: bundle_prelude(mission),
-        timeout: timeout_ms,
-        compile_timeout: compile_timeout_ms,
-        max_heap: limits.evaluation_heap_words,
-        compile_max_heap: limits.evaluation_heap_words,
-        max_program_bytes: limits.subordinate_source_bytes,
-        filter_context: false,
-        caller: :kernel,
-        preserve_runtime_callables: true,
-        link: true
-      )
+      case required_shape(source, Keyword.get(opts, :required_shape)) do
+        :ok ->
+          Lisp.check_native(source,
+            memory: memory,
+            tools:
+              Evaluation.mission_tools(
+                mission,
+                state,
+                timeout_ms,
+                event_sink,
+                nil,
+                nil,
+                nil,
+                mission_name
+              ),
+            prelude: bundle_prelude(mission),
+            timeout: timeout_ms,
+            compile_timeout: compile_timeout_ms,
+            max_heap: limits.evaluation_heap_words,
+            compile_max_heap: limits.evaluation_heap_words,
+            max_program_bytes: limits.subordinate_source_bytes,
+            filter_context: false,
+            caller: :kernel,
+            preserve_runtime_callables: true,
+            link: true
+          )
+
+        {:error, failure} ->
+          {:error, %{fail: failure}}
+      end
 
     :ok = after_compile(Keyword.get(opts, :after_compile))
 
@@ -142,6 +149,27 @@ defmodule PtcRunner.Kernel.SourceCheck do
 
   defp bundle_prelude(%{bundle: %{prelude: prelude}}), do: prelude
   defp bundle_prelude(_mission), do: nil
+
+  defp required_shape(_source, nil), do: :ok
+
+  defp required_shape(source, :terminal) do
+    case Parser.parse(source) do
+      {:ok, {:list, [{:symbol, head} | _arguments]}} when head in [:return, :fail] ->
+        :ok
+
+      {:error, _parse_error} ->
+        # Preserve the ordinary parser diagnostic from check_native/2.
+        :ok
+
+      {:ok, _other} ->
+        {:error,
+         %{
+           reason: :terminal_source_required,
+           message: "expected exactly one top-level return or fail form",
+           details: %{}
+         }}
+    end
+  end
 
   defp after_compile(nil), do: :ok
   defp after_compile(callback) when is_function(callback, 0), do: callback.()

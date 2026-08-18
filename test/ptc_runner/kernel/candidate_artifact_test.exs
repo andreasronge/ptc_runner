@@ -63,6 +63,17 @@ defmodule PtcRunner.Kernel.CandidateArtifactTest do
     refute File.exists?(out)
   end
 
+  # Cleanup that cannot remove material residue must say so: reporting only
+  # the original failure would leave the caller believing nothing remains.
+  @tag :tmp_dir
+  test "cleanup that leaves residue reports the cleanup failure", context do
+    out = Path.join(context.tmp_dir, "candidate")
+    File.mkdir_p!(Path.join(out, "candidate.clj"))
+
+    assert {:error, :candidate_cleanup_failed} = CandidateArtifact.discard(out)
+    assert File.dir?(Path.join(out, "candidate.clj"))
+  end
+
   @tag :tmp_dir
   test "an oversized candidate is refused before anything is created", context do
     out = Path.join(context.tmp_dir, "candidate")

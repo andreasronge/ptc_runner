@@ -33,6 +33,7 @@ defmodule PtcRunner.Kernel.CandidateArtifact do
 
   @type error ::
           :candidate_destination_exists
+          | :candidate_cleanup_failed
           | :candidate_publication_failed
           | :candidate_source_too_large
           | :descriptor_too_large
@@ -65,15 +66,35 @@ defmodule PtcRunner.Kernel.CandidateArtifact do
 
   def publish(_directory, _source, _descriptor), do: {:error, :invalid_candidate_destination}
 
-  @doc "Removes a published directory after a refused gate."
-  @spec discard(published() | binary()) :: :ok
+  @doc "Removes a published directory after a refused gate, reporting any material residue."
+  @spec discard(published() | binary()) :: :ok | {:error, :candidate_cleanup_failed}
   def discard(%{directory: directory}), do: discard(directory)
 
   def discard(directory) when is_binary(directory) do
-    _ = File.rm(Path.join(directory, @candidate_name))
-    _ = File.rm(Path.join(directory, @descriptor_name))
-    _ = File.rmdir(directory)
-    :ok
+    results = [
+      remove_file(Path.join(directory, @candidate_name)),
+      remove_file(Path.join(directory, @descriptor_name))
+    ]
+
+    if Enum.all?(results, &(&1 == :ok)) and remove_directory(directory) == :ok,
+      do: :ok,
+      else: {:error, :candidate_cleanup_failed}
+  end
+
+  defp remove_file(path) do
+    case File.rm(path) do
+      :ok -> :ok
+      {:error, :enoent} -> :ok
+      {:error, _reason} -> :error
+    end
+  end
+
+  defp remove_directory(path) do
+    case File.rmdir(path) do
+      :ok -> :ok
+      {:error, :enoent} -> :ok
+      {:error, _reason} -> :error
+    end
   end
 
   @doc "The descriptor filename inside a published directory."
@@ -107,8 +128,13 @@ defmodule PtcRunner.Kernel.CandidateArtifact do
        }}
     else
       {:error, _reason} ->
-        discard(directory)
-        {:error, :candidate_publication_failed}
+        # A failed publication that also fails to clean up leaves residue the
+        # caller must know about; reporting only the publication failure
+        # would hide it.
+        case discard(directory) do
+          :ok -> {:error, :candidate_publication_failed}
+          {:error, :candidate_cleanup_failed} -> {:error, :candidate_cleanup_failed}
+        end
     end
   end
 

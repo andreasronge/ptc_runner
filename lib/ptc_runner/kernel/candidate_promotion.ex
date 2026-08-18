@@ -267,6 +267,14 @@ defmodule PtcRunner.Kernel.CandidatePromotion do
     }
   end
 
+  defp widening(%{removed: removed} = comparison, _accepted?) when removed != [] do
+    fail(
+      "G3",
+      "candidate removes #{length(removed)} installed export(s)",
+      detail(comparison)
+    )
+  end
+
   defp widening(%{widened: []} = comparison, _accepted?) do
     pass("G3", "no export widens its effect or requirements", detail(comparison))
   end

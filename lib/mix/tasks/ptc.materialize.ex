@@ -130,8 +130,10 @@ defmodule Mix.Tasks.Ptc.Materialize do
   defp finish(%{outcome: :pass} = report, published), do: {:ok, report, published}
 
   defp finish(report, published) do
-    CandidateArtifact.discard(published)
-    {:refused, report}
+    case CandidateArtifact.discard(published) do
+      :ok -> {:refused, report}
+      {:error, :candidate_cleanup_failed} -> {:error, :candidate_cleanup_failed}
+    end
   end
 
   defp evaluate(base, candidate, opts) do
@@ -146,8 +148,10 @@ defmodule Mix.Tasks.Ptc.Materialize do
         {:ok, package}
 
       {:error, reason} ->
-        CandidateArtifact.discard(published)
-        {:error, reason}
+        case CandidateArtifact.discard(published) do
+          :ok -> {:error, reason}
+          {:error, :candidate_cleanup_failed} -> {:error, :candidate_cleanup_failed}
+        end
     end
   end
 

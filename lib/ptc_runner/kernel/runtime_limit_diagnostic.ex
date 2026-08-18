@@ -26,13 +26,16 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
     {:evaluation_error, "agent turn limit ",
      " was exceeded after the final program failed; raise max_turns in the agent configuration, or simplify the work per turn"},
     {:protocol_error, "the model produced no valid tool call in ",
-     " turns; raising max_turns repeats it. Check that the model supports tool calling and that any configured max_tokens leaves room for a complete call"}
+     " turns; raising max_turns repeats it. Check that the model supports tool calling and that any configured max_tokens leaves room for a complete call"},
+    {:terminal_source_required, "a terminal-only phase rejected every program within ",
+     " turns; the model must send a single top-level (return value) or (fail value) form, so raising max_turns only helps if the model can produce one"}
   ]
   @agent_reason_names [
     {"turn-limit-exceeded", :turn_limit_exceeded},
     {"intermediate-result", :intermediate_result},
     {"evaluation-error", :evaluation_error},
-    {"protocol-error", :protocol_error}
+    {"protocol-error", :protocol_error},
+    {"terminal-source-required", :terminal_source_required}
   ]
   @agent_limit_pattern "(?:[1-9]|[1-9][0-9]|1[01][0-9]|12[0-8])"
   @agent_maximum_digits 3

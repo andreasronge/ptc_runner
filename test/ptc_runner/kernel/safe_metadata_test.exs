@@ -20,6 +20,45 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
       refute SafeMetadata.annotation?("agent-action", %{"turn" => "0", "kind" => "tool-call"})
     end
 
+    test "accepts the phased shape with phase, phase-turn, and mission" do
+      for kind <- ["tool-call", "protocol-error", "provider-error"] do
+        assert SafeMetadata.annotation?("agent-action", %{
+                 "turn" => 3,
+                 "kind" => kind,
+                 "phase" => 1,
+                 "phase_turn" => 0,
+                 "mission" => "synthesize"
+               })
+      end
+    end
+
+    test "bounds the phased fields and refuses a partial phased shape" do
+      phased = %{
+        "turn" => 0,
+        "kind" => "tool-call",
+        "phase" => 0,
+        "phase_turn" => 0,
+        "mission" => "case-derived"
+      }
+
+      refute SafeMetadata.annotation?("agent-action", %{phased | "phase" => 8})
+      refute SafeMetadata.annotation?("agent-action", %{phased | "phase" => -1})
+      refute SafeMetadata.annotation?("agent-action", %{phased | "phase_turn" => 128})
+      refute SafeMetadata.annotation?("agent-action", %{phased | "mission" => ""})
+      refute SafeMetadata.annotation?("agent-action", %{phased | "mission" => "No Spaces Here"})
+
+      refute SafeMetadata.annotation?(
+               "agent-action",
+               %{phased | "mission" => String.duplicate("m", 129)}
+             )
+
+      # A phased record either carries all three phase fields or none: a
+      # partial shape would be a new, unreviewed vocabulary.
+      refute SafeMetadata.annotation?("agent-action", Map.delete(phased, "mission"))
+      refute SafeMetadata.annotation?("agent-action", Map.delete(phased, "phase_turn"))
+      refute SafeMetadata.annotation?("agent-action", Map.put(phased, "reason", "extra"))
+    end
+
     test "rejects extra keys, missing keys, and arbitrary kinds" do
       refute SafeMetadata.annotation?("agent-action", %{
                "turn" => 0,

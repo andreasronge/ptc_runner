@@ -77,9 +77,11 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   the shipped agent loop's coarse per-turn record: exactly the keys `turn`
   (an integer from 0 through 127, matching the loop's maximum turn count)
   and `kind` (one of `tool-call`, `protocol-error`, or `provider-error`).
-  It never carries detailed reasons, generated source, or model content —
-  those stay in the agent's own history and, when enabled, in private
-  inspection records.
+  A phased agent run adds exactly `phase` (0 through 7), `phase_turn`
+  (0 through 127), and `mission` (the phase's mission name) — all three or
+  none, so a partial shape stays out of the vocabulary. It never carries
+  detailed reasons, generated source, or model content — those stay in the
+  agent's own history and, when enabled, in private inspection records.
   """
   def annotation?("progress", %{"stage" => stage} = data)
       when map_size(data) == 1 and stage in @progress_stages,
@@ -89,6 +91,23 @@ defmodule PtcRunner.Kernel.SafeMetadata do
       when map_size(data) == 2 and is_integer(turn) and turn >= 0 and turn <= 127 and
              kind in @agent_action_kinds,
       do: true
+
+  def annotation?(
+        "agent-action",
+        %{
+          "turn" => turn,
+          "kind" => kind,
+          "phase" => phase,
+          "phase_turn" => phase_turn,
+          "mission" => mission
+        } = data
+      )
+      when map_size(data) == 5 and is_integer(turn) and turn >= 0 and turn <= 127 and
+             kind in @agent_action_kinds and is_integer(phase) and phase >= 0 and phase <= 7 and
+             is_integer(phase_turn) and phase_turn >= 0 and phase_turn <= 127 and
+             is_binary(mission) do
+    mission =~ ~r/\A[a-z][a-z0-9._-]{0,127}\z/
+  end
 
   def annotation?(_type, _data), do: false
 

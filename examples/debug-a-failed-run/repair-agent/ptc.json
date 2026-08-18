@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "repair.preloaded",
+        "path": "preloaded.clj",
+        "dependencies": ["agent.core", "kernel"]
+      },
+      {"library": "agent.core"},
+      {"library": "kernel"}
+    ],
+    "entry": "repair.preloaded/run"
+  },
+  "missions": {
+    "case-derived": {
+      "components": [
+        {"library": "debug.nav"},
+        {
+          "id": "debug.workspace",
+          "path": "workspace.clj",
+          "dependencies": ["debug.nav"]
+        },
+        {
+          "id": "debug.case",
+          "path": "case.clj",
+          "dependencies": ["debug.nav", "debug.workspace"]
+        }
+      ],
+      "providers": ["debug.nav", "failed-run-traces"]
+    },
+    "synthesize": {
+      "components": [
+        {"id": "repair.terminal", "path": "repair.terminal.clj"}
+      ]
+    }
+  },
+  "contracts": {
+    "result_schema": {"path": "report.schema.json"}
+  },
+  "input": {
+    "value": {
+      "task": "Analyze this failed run from its immutable incident packet. Propose a complete component replacement only if the evidence distinguishes one faulty implementation from its callers, dependencies, contracts, and input; otherwise abstain and identify the missing evidence. Do not assume that every source in the mechanically derived working set is faulty.",
+      "context_mission": "case-derived",
+      "agent": {
+        "phases": [
+          {
+            "mission": "synthesize",
+            "max_turns": 2,
+            "instruction": "Call exactly one top-level repair.terminal/abstain or repair.terminal/propose action. The action completes the repair report itself; do not wrap it in return."
+          }
+        ],
+        "max_observation_chars": 8192,
+        "max_transcript_chars": 262144
+      }
+    }
+  },
+  "providers": {
+    "workflow": [{"name": "deepseek"}],
+    "mission": [
+      {"name": "debug.nav"},
+      {"name": "failed-run-traces", "config": {"expose": false}}
+    ]
+  },
+  "limits": {
+    "run_duration_ms": 300000,
+    "workflow_timeout_ms": 300000,
+    "evaluation_timeout_ms": 60000,
+    "subordinate_evaluations": 4
+  },
+  "events": {"policy": "private"},
+  "labels": {
+    "name": "debug-a-failed-run-repair",
+    "tags": {"mode": "agent"}
+  }
+}
