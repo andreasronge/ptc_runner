@@ -470,9 +470,13 @@ turn with the newly added messages, response, matching generated programs, and
 stable stream/turn identity. Turn numbers start at one independently within
 each reconstructed stream; `{stream_id, turn}` is the identity, while
 `request_sequence` only orders records inside the inspection snapshot. It must
-not be compared with canonical activity sequence numbers. The collection omits
-the repeated system prompt; exact raw model requests remain available through
-`model_exchanges`. Page-level
+not be compared with canonical activity sequence numbers. A turn carries the
+`system` prompt that shaped it whenever that prompt differs from the previous
+turn of the same stream, and the first turn of every stream always carries it.
+An absent `system` therefore means "unchanged since the previous turn", never
+"none was sent": stream linkage keys on the request messages alone, so one
+stream can span turns whose evaluated program supplied different prompts. Exact
+raw model requests remain available through `model_exchanges`. Page-level
 `evidence` reports canonical completeness, missing exchanges, and ambiguity
 separately from pagination. Interrupted model inputs remain raw evidence but
 are excluded from `turns`, so the canonical missing-exchange count records the

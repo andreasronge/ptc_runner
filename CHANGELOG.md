@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reconstructed conversations carry the `system` prompt that shaped each turn.
+  It appears on the first turn of every stream and on every later turn whose
+  prompt differs from the one before it, so `ptc transcript` and the Viewer's
+  conversation view no longer certify a transcript as complete while omitting
+  the instructions the run was given. Stream linkage keys on request messages
+  alone, so an absent `system` means "unchanged since the previous turn of this
+  stream" rather than "none was sent".
+
 - Raised capability callbacks now retain their bounded exception class,
   message, and formatted stacktrace only in explicitly enabled private
   inspection. Inspection V7 correlates that sensitive evidence with the

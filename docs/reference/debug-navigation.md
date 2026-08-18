@@ -229,6 +229,18 @@ A diagnosis is supported when every edge it rests on is `complete` and the
 pages it read were not truncated. Otherwise the honest report is insufficient
 evidence, naming which edge was missing.
 
+### What the completeness fields do and do not claim
+
+A conversation's `complete?` is the conjunction of three specific facts: the
+canonical run reached a terminal event with no dropped events, no expected
+model exchange is missing, and no turn or generated-source association is
+ambiguous. It is a statement about the reconstruction, not a promise that every
+field of every record is present. `ptc transcript` refuses to write a file at
+all unless `complete?` holds and `ambiguous?` does not, so that field is always
+`true` in a published transcript; read it over
+`/api/analysis/runs/{id}/conversation`, which applies no such gate, when you
+need it to be able to say no.
+
 ## Run the credential-free example
 
 The checked-in example needs no credential or network access. `target/` prices

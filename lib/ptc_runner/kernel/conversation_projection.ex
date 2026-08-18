@@ -11,7 +11,8 @@ defmodule PtcRunner.Kernel.ConversationProjection do
 
     items =
       Enum.flat_map(reconstructed.streams, fn stream ->
-        Enum.map(stream["turns"], fn turn ->
+        stream["turns"]
+        |> Enum.map_reduce(:no_previous_turn, fn turn, previous_system ->
           generated =
             turn["assistant"]
             |> generated_sources()
@@ -25,11 +26,15 @@ defmodule PtcRunner.Kernel.ConversationProjection do
               )
             end)
 
-          turn
-          |> Map.delete("system")
-          |> Map.put("stream_id", stream["stream_id"])
-          |> Map.put("generated", generated)
+          item =
+            turn
+            |> retain_changed_system(previous_system)
+            |> Map.put("stream_id", stream["stream_id"])
+            |> Map.put("generated", generated)
+
+          {item, {:previous_system, turn["system"]}}
         end)
+        |> elem(0)
       end)
 
     expected = MapSet.new(Map.get(trace_facts, "expected_model_exchange_ids", []))
@@ -115,6 +120,20 @@ defmodule PtcRunner.Kernel.ConversationProjection do
       "trace_snapshot_hash" => page["trace_snapshot_hash"]
     }
   end
+
+  # The system prompt is the instruction set that shaped a turn, and the
+  # evaluated program supplies it per call, so two turns of one stream can
+  # carry different prompts: stream linkage keys on `arguments.messages`
+  # alone. Dropping it hid the field a transcript is most often opened for,
+  # and repeating an unchanged prompt on every turn would multiply the largest
+  # constant in the projection against the result-byte limit. Carry it
+  # whenever it changes; its absence means "unchanged from the previous turn
+  # of this stream", and the first turn of every stream always carries it.
+  defp retain_changed_system(turn, {:previous_system, system}) do
+    if turn["system"] == system, do: Map.delete(turn, "system"), else: turn
+  end
+
+  defp retain_changed_system(turn, :no_previous_turn), do: turn
 
   defp conversation_streams(exchanges) do
     result = streams(exchanges)

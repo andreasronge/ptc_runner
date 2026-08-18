@@ -75,6 +75,7 @@ function Conversation({ conversation }) {
             <details key=${turn.request_sequence} open>
               <summary>Turn ${turn.turn}</summary>
               <pre>${JSON.stringify({
+                system: turn.system,
                 messages_added: turn.messages_added,
                 assistant: turn.assistant,
                 generated: turn.generated,
