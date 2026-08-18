@@ -81,7 +81,9 @@
                   base-request)
         encoded (json/generate-string request)]
     (if (> (count encoded) max-transcript-chars)
-      (fail (result/error :transcript-limit :request-too-large))
+      ;; A ceiling the caller set in its own input document reports itself, the
+      ;; way the turn limit does, instead of collapsing into `workflow_failed`.
+      (tool/kernel-runtime-limit-failure {"max_transcript_chars" max-transcript-chars})
       request)))
 
 (defn- returned-outcome [value]

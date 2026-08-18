@@ -183,6 +183,17 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             details: %{limit: :agent_turns, limit_value: limit}
           }
 
+        # The transcript ceiling is a bound the caller set in the input document
+        # it just wrote, so it reports itself the way the turn limit does rather
+        # than reaching the generic workflow failure.
+        %{"max_transcript_chars" => limit}
+        when map_size(arguments) == 1 and limit in 1..1_000_000 ->
+          %TrustedError{
+            reason: :runtime_limit_exceeded,
+            message: "transcript limit exceeded",
+            details: %{limit: :max_transcript_chars, limit_value: limit}
+          }
+
         _invalid ->
           invalid_runtime_limit_failure()
       end

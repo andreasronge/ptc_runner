@@ -1093,13 +1093,19 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{phase: :execution, code: :runtime_limit_exceeded} = row,
          %{"type" => "null"}
        ),
-       do: RuntimeLimitDiagnostic.agent_turns_message_schema(row.message)
+       do: RuntimeLimitDiagnostic.agent_loop_message_schema(row.message)
 
   defp diagnostic_message_schema(
          %{phase: :execution, code: :runtime_limit_exceeded} = row,
          %{"properties" => %{"kind" => %{"const" => "runtime"}}}
        ),
        do: RuntimeLimitDiagnostic.runtime_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :run_timeout} = row,
+         %{"properties" => %{"kind" => %{"const" => "runtime"}}}
+       ),
+       do: RuntimeLimitDiagnostic.run_duration_message_schema(row.message)
 
   defp diagnostic_message_schema(
          %{phase: :result_cleanup, code: :result_contract_failed} = row,

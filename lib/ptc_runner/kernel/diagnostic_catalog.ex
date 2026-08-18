@@ -317,6 +317,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :execution, code: :runtime_limit_exceeded, message: fallback}),
     do: RuntimeLimitDiagnostic.message_schema(fallback)
 
+  def message_schema(%{phase: :execution, code: :run_timeout, message: fallback}),
+    do: RuntimeLimitDiagnostic.run_duration_message_schema(fallback)
+
   def message_schema(%{phase: :execution, code: :replay_fixture_missing, message: fallback}),
     do: LLMReplayDiagnostic.message_schema(fallback)
 
@@ -342,6 +345,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:execution, :runtime_limit_exceeded, message),
     do: RuntimeLimitDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:execution, :run_timeout, message),
+    do: RuntimeLimitDiagnostic.run_duration_message?(message)
 
   defp valid_dynamic_message?(:execution, :replay_fixture_missing, message),
     do: LLMReplayDiagnostic.valid_message?(message)

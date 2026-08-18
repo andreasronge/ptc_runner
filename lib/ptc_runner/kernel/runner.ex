@@ -700,6 +700,22 @@ defmodule PtcRunner.Kernel.Runner do
     })
   end
 
+  defp maybe_put_failure_taxonomy(
+         stopped_data,
+         {:error,
+          %Error{
+            reason: :runtime_limit_exceeded,
+            details: %{limit: :max_transcript_chars, limit_value: limit}
+          }}
+       )
+       when limit in 1..1_000_000 do
+    Map.merge(stopped_data, %{
+      failure_kind: "transcript-limit",
+      limit: :max_transcript_chars,
+      limit_value: limit
+    })
+  end
+
   defp maybe_put_failure_taxonomy(stopped_data, _result), do: stopped_data
 
   defp put_result_usage({:ok, %Result{} = result}, usage), do: {:ok, %{result | usage: usage}}
@@ -904,6 +920,19 @@ defmodule PtcRunner.Kernel.Runner do
        )
        when limit in 1..128 do
     %{limit: :agent_turns, limit_value: limit}
+  end
+
+  defp workflow_error_details(
+         %{
+           reason: :runtime_limit_exceeded,
+           details: %{limit: :max_transcript_chars, limit_value: limit}
+         },
+         _timeout_ms,
+         _limits,
+         _sink
+       )
+       when limit in 1..1_000_000 do
+    %{limit: :max_transcript_chars, limit_value: limit}
   end
 
   defp workflow_error_details(fail, _timeout_ms, _limits, sink)
