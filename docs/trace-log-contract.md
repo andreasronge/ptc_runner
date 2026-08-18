@@ -481,17 +481,16 @@ turn with the newly added messages, response, matching generated programs, and
 stable stream/turn identity. Turn numbers start at one independently within
 each reconstructed stream; `{stream_id, turn}` is the identity, while
 `request_sequence` only orders records inside the inspection snapshot. It must
-not be compared with canonical activity sequence numbers. Every `turns` item
-carries the `system` prompt that shaped it, because the collection is filtered
-and paginated: a caller must never receive a turn whose prompt was elided
-against a turn it did not receive. A presented conversation is the whole
-selection at once, so there an unchanged prompt is elided and only changes are
-repeated; the first turn of every presented stream always carries its prompt.
-An elided `system` means "unchanged since the previous presented turn of this
-stream", never "none was sent": stream linkage keys on the request messages
-alone, so one stream can span turns whose evaluated program supplied different
-prompts. Exact raw model requests remain available through `model_exchanges`.
-Page-level
+not be compared with canonical activity sequence numbers. A turn carries the
+`system` prompt that shaped it. Each returned page is compacted on its own,
+after filtering and pagination, so every stream present in a page starts with
+its effective prompt and an unchanged prompt is not repeated on every turn.
+An elided `system` therefore means "unchanged since the last turn in this page
+that carried one", never "none was sent": stream linkage keys on the request
+messages alone, so one stream can span turns whose evaluated program supplied
+different prompts. Compaction is idempotent, so a presented conversation
+re-compacts the pages it collected without losing a prompt at a page seam.
+Exact raw model requests remain available through `model_exchanges`. Page-level
 `evidence` reports canonical completeness, missing exchanges, and ambiguity
 separately from pagination. Interrupted model inputs remain raw evidence but
 are excluded from `turns`, so the canonical missing-exchange count records the

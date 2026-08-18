@@ -130,17 +130,40 @@ defmodule PtcRunner.Kernel.ConversationProjection do
   # the first turn of every presented stream always carries its prompt.
   defp elide_repeated_system(turns) do
     turns
-    |> Enum.map_reduce(:no_previous_turn, fn turn, previous ->
-      {elide_unchanged_system(turn, previous), {:previous_system, turn["system"]}}
+    |> Enum.map_reduce(:no_previous_turn, &elide_system/2)
+    |> elem(0)
+  end
+
+  # An elided turn still means "same prompt as the last one that carried it",
+  # so comparison tracks the last present value rather than the previous turn.
+  # That makes the compaction idempotent, which is what lets a page be
+  # compacted once on the way out and again on the way into a presentation.
+  defp elide_system(turn, last) do
+    cond do
+      not Map.has_key?(turn, "system") -> {turn, last}
+      last == {:system, turn["system"]} -> {Map.delete(turn, "system"), last}
+      true -> {turn, {:system, turn["system"]}}
+    end
+  end
+
+  @doc false
+  @spec compact_turns([map()]) :: [map()]
+  # Applied to one selected page of `turns`, after filtering and pagination.
+  # Every page is therefore self-describing -- each stream in it starts with
+  # its effective prompt -- while an unchanged prompt is not repeated on every
+  # turn, which would otherwise push a prompt-heavy run past the aggregate byte
+  # ceiling the whole-conversation collectors enforce over raw items.
+  def compact_turns(items) when is_list(items) do
+    items
+    |> Enum.map_reduce(%{}, fn item, seen ->
+      stream_id = item["stream_id"]
+      {elided, last} = elide_system(item, Map.get(seen, stream_id, :no_previous_turn))
+      {elided, Map.put(seen, stream_id, last)}
     end)
     |> elem(0)
   end
 
-  defp elide_unchanged_system(turn, {:previous_system, system}) do
-    if turn["system"] == system, do: Map.delete(turn, "system"), else: turn
-  end
-
-  defp elide_unchanged_system(turn, :no_previous_turn), do: turn
+  def compact_turns(items), do: items
 
   defp conversation_streams(exchanges) do
     result = streams(exchanges)

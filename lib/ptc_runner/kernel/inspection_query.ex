@@ -552,6 +552,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       projection.items
       |> Enum.filter(&collection_match?(:turns, &1, arguments))
       |> paginate(page, source_id, max_bytes, metadata)
+      |> compact_turn_page()
     else
       false -> {:error, :invalid_query}
       :error -> {:error, :not_found}
@@ -654,6 +655,13 @@ defmodule PtcRunner.Kernel.InspectionQuery do
 
     if valid?, do: :ok, else: {:error, :invalid_query}
   end
+
+  # Compaction only ever shrinks a page, so it cannot invalidate the byte
+  # fitting `paginate/4` already performed.
+  defp compact_turn_page({:ok, %{"items" => items} = page}) when is_list(items),
+    do: {:ok, Map.put(page, "items", ConversationProjection.compact_turns(items))}
+
+  defp compact_turn_page(result), do: result
 
   defp collection_match?(:turns, item, arguments) do
     equal_filter?(item, arguments, "stream_id") and

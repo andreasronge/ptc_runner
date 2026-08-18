@@ -110,6 +110,36 @@ defmodule PtcRunner.Kernel.ConversationProjectionTest do
       assert turn["system"] == "instructions v1"
     end
 
+    test "each selected page starts every stream in it with that stream's prompt" do
+      items = [
+        %{"stream_id" => "stream-1", "turn" => 1, "system" => "a"},
+        %{"stream_id" => "stream-1", "turn" => 2, "system" => "a"},
+        %{"stream_id" => "stream-2", "turn" => 1, "system" => "b"},
+        %{"stream_id" => "stream-2", "turn" => 2, "system" => "b"}
+      ]
+
+      compacted = ConversationProjection.compact_turns(items)
+
+      assert Enum.map(compacted, &Map.get(&1, "system", :elided)) == ["a", :elided, "b", :elided]
+
+      # A later page is compacted on its own, so it never elides against a turn
+      # the caller was not handed.
+      later = ConversationProjection.compact_turns(Enum.drop(items, 1))
+      assert Enum.map(later, &Map.get(&1, "system", :elided)) == ["a", "b", :elided]
+    end
+
+    test "compaction is idempotent, so a page may be compacted again on presentation" do
+      items = [
+        %{"stream_id" => "stream-1", "turn" => 1, "system" => "a"},
+        %{"stream_id" => "stream-1", "turn" => 2, "system" => "a"},
+        %{"stream_id" => "stream-1", "turn" => 3, "system" => "b"}
+      ]
+
+      once = ConversationProjection.compact_turns(items)
+      assert ConversationProjection.compact_turns(once) == once
+      assert Enum.map(once, &Map.get(&1, "system", :elided)) == ["a", :elided, "b"]
+    end
+
     test "an exchange sent without a system prompt says so rather than staying silent" do
       assert %{"streams" => [%{"turns" => [turn]}]} =
                present([exchange("llm-1", 1, [user("start")], nil, "one")])
