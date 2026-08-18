@@ -198,6 +198,33 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert List.last(synthesize_request["messages"])["content"] =~
              "Synthesize the best supported result from the retained evidence."
+
+    # The phased record is part of the safe annotation vocabulary: a failed
+    # workflow-annotate would pollute exactly the debugging evidence this
+    # feature exists to improve.
+    events = EventSink.events(config.event_sink)
+
+    refute Enum.any?(events, fn event ->
+             event.type == "capability-stopped" and
+               event.data[:name] == "workflow-annotate" and
+               event.data[:status] != :ok
+           end)
+
+    assert [explore_annotation, synthesize_annotation] =
+             events
+             |> Enum.filter(&(&1.type == "workflow-annotation"))
+             |> Enum.map(& &1.data.data)
+
+    assert explore_annotation == %{
+             "turn" => 0,
+             "kind" => "tool-call",
+             "phase" => 0,
+             "phase_turn" => 0,
+             "mission" => "explore"
+           }
+
+    assert synthesize_annotation["phase"] == 1
+    assert synthesize_annotation["mission"] == "synthesize"
   end
 
   test "agent.core retains a non-final return but only lets the final phase complete" do

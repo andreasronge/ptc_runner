@@ -14,15 +14,15 @@
 
 ;; An explicit run id pins the packet to one capture; without one, the most
 ;; recent failed run is the incident, exactly as the deterministic walk
-;; selects it.
+;; selects it. The pinned lookup filters server-side, so a capture holding
+;; more runs than one page cannot make a valid incident report as missing.
 (defn- selected-run [run-id]
-  (if (string? run-id)
-    (let [listing (debug.nav/runs {"limit" 20})]
-      {"run" (first (filter #(= run-id (get % "run_id")) (get listing "items")))
-       "truncated" (get listing "truncated")})
-    (let [listing (debug.nav/runs {"status" "error" "limit" 1})]
-      {"run" (first (get listing "items"))
-       "truncated" (get listing "truncated")})))
+  (let [listing (debug.nav/runs
+                  (if (string? run-id)
+                    {"run_id" run-id "limit" 1}
+                    {"status" "error" "limit" 1}))]
+    {"run" (first (get listing "items"))
+     "truncated" (get listing "truncated")}))
 
 (defn context
   "Return a bounded structural case packet: terminal workflow error, directly nested evaluations and generated turns, the single nested mission capability result when present, and the exact frozen working set. Typed relationships remain available for expansion with debug.nav."

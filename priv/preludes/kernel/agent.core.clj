@@ -234,6 +234,7 @@
     :intermediate-result "intermediate-result"
     :evaluation-error "evaluation-error"
     :protocol-error "protocol-error"
+    :terminal-source-required "terminal-source-required"
     "turn-limit-exceeded"))
 
 (defn- propagate-subject-failure [outcome]

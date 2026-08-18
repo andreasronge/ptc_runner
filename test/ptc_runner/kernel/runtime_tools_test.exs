@@ -27,7 +27,8 @@ defmodule PtcRunner.Kernel.RuntimeToolsTest do
           {"turn-limit-exceeded", :turn_limit_exceeded},
           {"intermediate-result", :intermediate_result},
           {"evaluation-error", :evaluation_error},
-          {"protocol-error", :protocol_error}
+          {"protocol-error", :protocol_error},
+          {"terminal-source-required", :terminal_source_required}
         ] do
       assert %TrustedError{
                reason: :runtime_limit_exceeded,
