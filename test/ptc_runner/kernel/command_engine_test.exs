@@ -2537,23 +2537,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end)
 
     host_path =
-      write_host_config(directory, "connect-missing-credential", %{
-        "credentials" => %{"key" => %{"env" => environment_name}},
-        "install" => %{
-          "workspace" => %{
-            "source" => "mcp",
-            "installation_revision" => "workspace-v1",
-            "transport" => %{
-              "type" => "stdio",
-              "command" => System.find_executable("sh"),
-              "env" => %{"TOKEN" => %{"binding" => "key"}}
-            },
-            "tools" => %{
-              "read" => %{"as" => "workspace.read", "effect" => "read"}
-            }
-          }
-        }
-      })
+      write_host_config(
+        directory,
+        "connect-missing-credential",
+        stdio_credential_host(environment_name)
+      )
 
     application =
       doctor_application(directory, "connect-missing-credential", mission: ["workspace"])
@@ -2602,21 +2590,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end)
 
     host_path =
-      write_host_config(directory, "mcp-env-file", %{
-        "credentials" => %{"key" => %{"env" => environment_name}},
-        "install" => %{
-          "workspace" => %{
-            "source" => "mcp",
-            "installation_revision" => "workspace-v1",
-            "transport" => %{
-              "type" => "stdio",
-              "command" => System.find_executable("sh"),
-              "env" => %{"TOKEN" => %{"binding" => "key"}}
-            },
-            "tools" => %{"read" => %{"as" => "workspace.read", "effect" => "read"}}
-          }
-        }
-      })
+      write_host_config(directory, "mcp-env-file", stdio_credential_host(environment_name))
 
     application = doctor_application(directory, "mcp-env-file", mission: ["workspace"])
     env_file = Path.join(directory, "mcp.env")
@@ -2652,22 +2626,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     File.write!(Path.join(directory, "tok.txt"), "ptc-not-a-real-token\n")
 
     host_path =
-      write_host_config(directory, "credential-newline", %{
-        "credentials" => %{"tok" => %{"file" => "tok.txt"}},
-        "install" => %{
-          "remote" => %{
-            "source" => "mcp",
-            "installation_revision" => "remote-v1",
-            "transport" => %{
-              "type" => "streamable_http",
-              "endpoint" => "https://127.0.0.1:1/mcp",
-              "auth" => [%{"scheme" => "bearer", "binding" => "tok"}]
-            },
-            "tools" => %{"read" => %{"as" => "remote.read", "effect" => "read"}},
-            "ceilings" => %{"timeout_ms" => 2_000}
-          }
-        }
-      })
+      write_host_config(directory, "credential-newline", bearer_credential_host("tok.txt"))
 
     application = doctor_application(directory, "credential-newline", mission: ["remote"])
 
@@ -2701,22 +2660,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     File.write!(Path.join(directory, "tok.txt"), "ptc-not\na-real-token")
 
     host_path =
-      write_host_config(directory, "credential-interior-newline", %{
-        "credentials" => %{"tok" => %{"file" => "tok.txt"}},
-        "install" => %{
-          "remote" => %{
-            "source" => "mcp",
-            "installation_revision" => "remote-v1",
-            "transport" => %{
-              "type" => "streamable_http",
-              "endpoint" => "https://127.0.0.1:1/mcp",
-              "auth" => [%{"scheme" => "bearer", "binding" => "tok"}]
-            },
-            "tools" => %{"read" => %{"as" => "remote.read", "effect" => "read"}},
-            "ceilings" => %{"timeout_ms" => 2_000}
-          }
-        }
-      })
+      write_host_config(
+        directory,
+        "credential-interior-newline",
+        bearer_credential_host("tok.txt")
+      )
 
     application =
       doctor_application(directory, "credential-interior-newline", mission: ["remote"])
@@ -7469,6 +7417,46 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       end
 
     write_application(directory, name, manifest)
+  end
+
+  # One credentialed MCP installation per transport shape. The credential is the
+  # subject of every test that uses these, so the surrounding document is
+  # shared rather than restated.
+  defp stdio_credential_host(environment_name) do
+    %{
+      "credentials" => %{"key" => %{"env" => environment_name}},
+      "install" => %{
+        "workspace" => %{
+          "source" => "mcp",
+          "installation_revision" => "workspace-v1",
+          "transport" => %{
+            "type" => "stdio",
+            "command" => System.find_executable("sh"),
+            "env" => %{"TOKEN" => %{"binding" => "key"}}
+          },
+          "tools" => %{"read" => %{"as" => "workspace.read", "effect" => "read"}}
+        }
+      }
+    }
+  end
+
+  defp bearer_credential_host(credential_file) do
+    %{
+      "credentials" => %{"tok" => %{"file" => credential_file}},
+      "install" => %{
+        "remote" => %{
+          "source" => "mcp",
+          "installation_revision" => "remote-v1",
+          "transport" => %{
+            "type" => "streamable_http",
+            "endpoint" => "https://127.0.0.1:1/mcp",
+            "auth" => [%{"scheme" => "bearer", "binding" => "tok"}]
+          },
+          "tools" => %{"read" => %{"as" => "remote.read", "effect" => "read"}},
+          "ceilings" => %{"timeout_ms" => 2_000}
+        }
+      }
+    }
   end
 
   defp env_credential_host do
