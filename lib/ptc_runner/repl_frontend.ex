@@ -97,6 +97,7 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.ManifestRepl
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ReplSession
+  alias PtcRunner.Lisp.NamespaceDiagnostic
   alias PtcRunner.Lisp.Result, as: LispResult
   alias PtcRunner.Lisp.ValuePreview
   alias PtcRunner.ReplError
@@ -1275,8 +1276,9 @@ defmodule PtcRunner.ReplFrontend do
   end
 
   defp run_workflow_session(session, opts, arguments) do
-    outcome = evaluate_mode(session, opts, arguments)
-    finish(outcome)
+    render = render_context(opts)
+    outcome = evaluate_mode(session, opts, arguments, render)
+    finish(outcome, render)
   rescue
     exception ->
       abort_session(session, :frontend_exception)
@@ -1340,38 +1342,43 @@ defmodule PtcRunner.ReplFrontend do
   defp manifest_repl_error(code) when is_atom(code),
     do: "ptc repl setup failed: #{code}"
 
-  defp evaluate_mode(session, opts, arguments) do
-    preview_chars = preview_chars(opts)
-
-    with {:ok, session} <- maybe_load(session, opts[:load], preview_chars) do
+  defp evaluate_mode(session, opts, arguments, render) do
+    with {:ok, session} <- maybe_load(session, opts[:load], render) do
       cond do
         opts[:eval] ->
-          run_sources(session, Keyword.get_values(opts, :eval), preview_chars)
+          run_sources(session, Keyword.get_values(opts, :eval), render)
 
         arguments == ["-"] ->
-          read_stdin(session, preview_chars)
+          read_stdin(session, render)
 
         arguments != [] ->
-          run_file(session, hd(arguments), preview_chars)
+          run_file(session, hd(arguments), render)
 
         true ->
           interactive(
             session,
             session_mode(opts),
-            preview_chars,
+            render,
             Keyword.fetch!(opts, :terminal_attached)
           )
       end
     end
   end
 
+  # `--mission` is manifest-only, so a direct session must not be told to pass
+  # it. The frontend is the only layer that knows which one this is: a direct
+  # session still carries one synthetic mission environment, indistinguishable
+  # in the session read model from a manifest that declares exactly one.
+  defp render_context(opts),
+    do: %{preview_chars: preview_chars(opts), mission_selectable?: opts[:manifest] != nil}
+
   defp preview_chars(opts), do: Keyword.get(opts, :preview_chars, 2_048)
 
-  defp maybe_load(session, nil, _preview_chars), do: {:ok, session}
+  defp maybe_load(session, nil, _render), do: {:ok, session}
 
-  defp maybe_load(session, path, preview_chars) do
+  defp maybe_load(session, path, render) do
     with {:ok, source} <- File.read(path),
-         {:ok, _step, session} <- evaluate(session, source, :noninteractive, preview_chars) do
+         {:ok, _step, session} <- evaluate(session, source, :noninteractive, render) do
       info("Loaded #{path}")
       {:ok, session}
     else
@@ -1380,32 +1387,32 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
-  defp run_sources(session, sources, preview_chars) do
+  defp run_sources(session, sources, render) do
     Enum.reduce_while(sources, {:ok, session}, fn source, {:ok, current} ->
-      case evaluate(current, source, :noninteractive, preview_chars) do
+      case evaluate(current, source, :noninteractive, render) do
         {:ok, _step, next} -> {:cont, {:ok, next}}
         {:error, step, next} -> {:halt, {:error, step, next}}
       end
     end)
   end
 
-  defp read_stdin(session, preview_chars) do
+  defp read_stdin(session, render) do
     case IO.read(:stdio, :eof) do
-      source when is_binary(source) -> evaluate_outcome(session, source, preview_chars)
+      source when is_binary(source) -> evaluate_outcome(session, source, render)
       :eof -> {:ok, session}
       {:error, reason} -> {:error, reason, session}
     end
   end
 
-  defp run_file(session, path, preview_chars) do
+  defp run_file(session, path, render) do
     case File.read(path) do
-      {:ok, source} -> evaluate_outcome(session, source, preview_chars)
+      {:ok, source} -> evaluate_outcome(session, source, render)
       {:error, reason} -> {:error, reason, session}
     end
   end
 
-  defp evaluate_outcome(session, source, preview_chars) do
-    case evaluate(session, source, :noninteractive, preview_chars) do
+  defp evaluate_outcome(session, source, render) do
+    case evaluate(session, source, :noninteractive, render) do
       {:ok, _step, session} -> {:ok, session}
       {:error, step, session} -> {:error, step, session}
     end
@@ -1418,9 +1425,9 @@ defmodule PtcRunner.ReplFrontend do
   # The line editor owns the banner: under the interactive reader it is the
   # reader's own slogan, which keeps it ahead of the first prompt instead of
   # racing it.
-  defp interactive(session, mode, preview_chars, terminal_attached?) do
+  defp interactive(session, mode, render, terminal_attached?) do
     banner = session_banner(ReplSession.mode_info(session), terminal_attached?)
-    LineEditor.run(mode, banner, fn -> loop(session, preview_chars) end)
+    LineEditor.run(mode, banner, fn -> loop(session, render) end)
   end
 
   defp session_banner(
@@ -1451,14 +1458,14 @@ defmodule PtcRunner.ReplFrontend do
     ~S|Explore functions with (apropos "term") and (doc "name"); inspect attached APIs with (dir) and (export-meta "ns/name").|
   end
 
-  defp loop(session, preview_chars) do
+  defp loop(session, render) do
     case read_expression("ptc> ", "") do
       :eof ->
         info("\nGoodbye!")
         {:ok, session}
 
       "" ->
-        loop(session, preview_chars)
+        loop(session, render)
 
       command when command in [":quit", ":exit"] ->
         info("Goodbye!")
@@ -1466,12 +1473,12 @@ defmodule PtcRunner.ReplFrontend do
 
       ":" <> command ->
         handle_command(String.trim(command), session)
-        loop(session, preview_chars)
+        loop(session, render)
 
       source ->
-        case evaluate(session, source, :interactive, preview_chars) do
-          {:ok, _step, next} -> loop(next, preview_chars)
-          {:error, _step, next} -> loop(next, preview_chars)
+        case evaluate(session, source, :interactive, render) do
+          {:ok, _step, next} -> loop(next, render)
+          {:error, _step, next} -> loop(next, render)
         end
     end
   end
@@ -1514,20 +1521,20 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
-  defp evaluate(session, source, mode, preview_chars) do
+  defp evaluate(session, source, mode, render) do
     case ReplSession.eval(session, source) do
       {:ok, step, next} ->
-        print_step(step, preview_chars)
+        print_step(step, render)
         {:ok, step, next}
 
       {:error, step, next} ->
-        message = format_error(step)
+        message = format_error(step, next, render)
         if mode == :interactive, do: info(message), else: error(message)
         {:error, step, next}
     end
   end
 
-  defp print_step(step, preview_chars) do
+  defp print_step(step, %{preview_chars: preview_chars}) do
     Enum.each(step.prints, &info/1)
 
     preview =
@@ -1539,19 +1546,44 @@ defmodule PtcRunner.ReplFrontend do
     info(preview.text)
   end
 
-  defp format_error(%{fail: %{reason: reason, message: message}}),
-    do: "Error (#{reason}): #{message}"
+  defp format_error(%{fail: %{reason: reason, message: message}} = step, session, render),
+    do: "Error (#{reason}): " <> mission_hint(step, session, render) <> message
 
-  defp finish({:ok, session}) do
+  # The analyzer answers an unknown namespace with the language's own list,
+  # thirty-odd entries that name no mission, because a workflow session cannot
+  # reach one. Which switch would add them is a REPL fact rather than a language
+  # fact, so it is said here instead of in the shared diagnostic -- whose exact
+  # text is also reverse-parsed by `NamespaceDiagnostic.rejected_namespace/1`.
+  #
+  # It leads, because the enumeration that follows is long enough to be
+  # truncated by the one-shot renderer and is the least actionable part of the
+  # answer.
+  defp mission_hint(%{fail: %{message: message}}, session, %{mission_selectable?: true})
+       when is_binary(message) do
+    with true <- NamespaceDiagnostic.unknown_namespace?(message),
+         %{kind: :workflow, declared_missions: [_ | _] = declared} <-
+           ReplSession.mode_info(session) do
+      "this session evaluates the workflow environment and carries no mission " <>
+        "namespaces; pass --mission NAME to evaluate one instead " <>
+        "(declared: #{Enum.join(declared, ", ")}). "
+    else
+      _other -> ""
+    end
+  end
+
+  defp mission_hint(_step, _session, _render), do: ""
+
+  defp finish({:ok, session}, _render) do
     stop_session(session)
   end
 
-  defp finish({:error, %{} = step, session}) do
+  defp finish({:error, %{} = step, session}, render) do
+    message = format_error(step, session, render)
     stop_session(session)
-    fail(format_error(step))
+    fail(message)
   end
 
-  defp finish({:error, reason, session}) do
+  defp finish({:error, reason, session}, _render) do
     stop_session(session)
     fail("ptc repl failed: #{inspect(reason)}")
   end
