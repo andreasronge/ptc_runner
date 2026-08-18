@@ -211,7 +211,7 @@ published image.
 
 ## Documentation
 
-Rendered at **[ptc-runner.dev](https://ptc-runner.dev/guides/)**; the same pages
+Rendered at **[ptc-runner.dev](https://ptc-runner.dev/)**; the same pages
 as Markdown below.
 
 - [Installation](docs/installation/standalone.md) — current standalone, Docker,
