@@ -24,15 +24,16 @@
 <p class="lead"><strong>Build AI agents that are bounded in what they can do, easy to
 change, observable in operation, and designed to improve from evidence.</strong></p>
 
-<p>Today, agents usually choose between two extremes. They either call tools one at a
-time, paying a model round trip and adding context for every step, or use a full coding
-environment and an external sandbox for more complex work. PtcRunner provides the missing
-middle: it lets a model write a small, bounded program that calls several approved tools,
-processes their results, and returns only what matters.</p>
+<h2>The missing middle</h2>
 
-<p>You normally do not write that program. You provide the task, model, approved tools,
-data, limits, and agent components. The model writes the mission program; PtcRunner
-executes it and records what happened.</p>
+<p>Agents today sit at two extremes: call tools one at a time, paying a model round trip
+for every step, or hand the model a full coding environment with an external sandbox.
+PtcRunner is the missing middle. The model writes a small, bounded program that calls
+several approved tools, processes their results, and returns only what matters. You
+provide the task, model, tools, data, and limits; PtcRunner executes the program and
+records what happened.</p>
+
+<h2>Bounded in what it can do</h2>
 
 <figure class="diagram">
   <img src="/authority-narrows.webp" width="1672" height="941"
@@ -47,11 +48,13 @@ executes it and records what happened.</p>
   left.</figcaption>
 </figure>
 
-<p>Inside those two environments, the agent loop itself is ordinary PTC-Lisp (a small, bounded
-Clojure-like language — see the
+<h2>Easy to change</h2>
+
+<p>The agent loop itself is ordinary PTC-Lisp, a small, bounded Clojure-like language (see
+the
 <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/ptc-lisp-specification.md">language
-specification</a>). It is a library you select, not behaviour baked into the runtime, so you can
-replace it with a domain-specific loop of your own — and doing so grants no new authority.</p>
+specification</a>). The loop is a library you select, not behaviour baked into the runtime,
+so you can replace it with a loop of your own, and doing so grants no new authority.</p>
 
 <figure class="diagram">
   <img src="/loop-is-a-library.webp" width="1672" height="941"
@@ -67,17 +70,17 @@ replace it with a domain-specific loop of your own — and doing so grants no ne
   selecting a library installs its dependency closure without granting any tool authority.</figcaption>
 </figure>
 
-<p>Because the loop is ordinary code, a custom workflow can do more than prompt the model:
-it decides <em>where</em> code evaluates. The diagram below shows one example, the shipped
+<h2>Improves from evidence</h2>
+
+<p>Every run records a trace, and a custom workflow decides <em>where</em> code evaluates.
+In the shipped
 <a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/debug-a-failed-run">repair
-example</a>, where a workflow debugs an earlier failed run. Before the model's first turn,
-the workflow's own code runs queries inside mission environments that can only see the
-evidence, and puts the results into the prompt. The model then writes PTC-Lisp in a mission
-environment of its own. That environment works like a REPL: what one turn defines or finds
-stays available in the next, so the model narrows the problem step by step, the way a person
-debugs. It finishes by returning a decision the runtime checks: propose a fix, or abstain.
-The mission names belong to the example; the mechanics are PtcRunner features any workflow
-can use.</p>
+example</a>, workflow code first queries a failed run's traces inside mission environments
+that can only see the evidence, and puts the results into the prompt. The model then writes
+PTC-Lisp in a mission environment of its own, which works like a REPL: what one turn finds
+stays available in the next, so the model narrows the problem the way a person debugs. It
+finishes with a decision the runtime checks: propose a fix, or abstain. The mission names
+are the example's; the mechanics work in any workflow.</p>
 
 <figure class="diagram">
   <img src="/code-travels.webp" width="1672" height="941"
