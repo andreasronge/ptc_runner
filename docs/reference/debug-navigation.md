@@ -241,6 +241,21 @@ all unless `complete?` holds and `ambiguous?` does not, so that field is always
 `/api/analysis/runs/{id}/conversation`, which applies no such gate, when you
 need it to be able to say no.
 
+`omitted_count` is pagination: how many selected items this page did not
+return. It never reports evidence withheld by policy. A source grant that
+withheld trace files of the other kind reports that separately, as
+`excluded_private_trace_files` or `excluded_sanitized_trace_files` on a run
+listing or counters query.
+
+### Join on correlation ids, never on sequence numbers
+
+A transcript turn and a canonical trace event live in different sequence
+spaces. Turn `request_sequence` orders records inside the inspection snapshot;
+canonical `sequence` orders the run's event stream. Turn 1 reporting request
+sequence 12 says nothing about canonical event 12, which is an unrelated
+record. Correlation identifiers — `capability-5`, `mission-evaluation-9` — are
+the same in both artifacts and are the only sound join key.
+
 ## Run the credential-free example
 
 The checked-in example needs no credential or network access. `target/` prices

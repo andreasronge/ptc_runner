@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   alone, so an absent `system` means "unchanged since the previous turn of this
   stream" rather than "none was sent".
 
+- A run listing or counters query now reports the trace files its source kind
+  refused to read, as `excluded_private_trace_files` or
+  `excluded_sanitized_trace_files`. A project whose traces are all private no
+  longer answers an empty Viewer run list as though no runs existed; the run
+  picker names the exclusion and the `viewer.private` setting that reads them.
+  `omitted_count` keeps its single pagination meaning.
+
 - Raised capability callbacks now retain their bounded exception class,
   message, and formatted stacktrace only in explicitly enabled private
   inspection. Inspection V7 correlates that sensitive evidence with the

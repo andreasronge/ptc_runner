@@ -125,6 +125,43 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   end
 
   @tag :tmp_dir
+  test "a sanitized snapshot names the private trace files it did not read", %{
+    tmp_dir: directory
+  } do
+    write_events(Path.join(directory, "normal.jsonl"), [event("normal", 1, "run-started")])
+    write_events(Path.join(directory, "one.private.jsonl"), [event("one", 1, "run-started")])
+    write_events(Path.join(directory, "two.private.jsonl"), [event("two", 1, "run-started")])
+
+    write_events(Path.join(directory, "ignored.inspection.jsonl"), [
+      event("inspection", 1, "run-started")
+    ])
+
+    assert {:ok, snapshot} = TraceSnapshot.start({:directory, directory}, owner: self())
+    on_exit(fn -> TraceSnapshot.stop(snapshot) end)
+
+    assert {:ok, %{"items" => [%{"run_id" => "normal"}]} = page} =
+             TraceSnapshot.query(snapshot, :list_runs, %{})
+
+    # Inspection artifacts are a different artifact class, not runs this
+    # source kind withheld, so they are never counted as excluded.
+    assert page["excluded_private_trace_files"] == 2
+
+    assert {:ok, run} = TraceSnapshot.query(snapshot, :get_run, %{"run_id" => "normal"})
+    refute Map.has_key?(run, "excluded_private_trace_files")
+
+    # The private-authorized capture is a superset of the sanitized one, so it
+    # withholds nothing and claims no exclusion.
+    assert {:ok, private_snapshot} =
+             TraceSnapshot.start({:private_authorized_directory, directory}, owner: self())
+
+    on_exit(fn -> TraceSnapshot.stop(private_snapshot) end)
+
+    assert {:ok, private_page} = TraceSnapshot.query(private_snapshot, :list_runs, %{})
+    refute Map.has_key?(private_page, "excluded_private_trace_files")
+    refute Map.has_key?(private_page, "excluded_sanitized_trace_files")
+  end
+
+  @tag :tmp_dir
   test "private-authorized capture rejects one run split across source classes", %{
     tmp_dir: directory
   } do

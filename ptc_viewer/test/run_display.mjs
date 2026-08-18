@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import {
   displayRunName,
+  emptyRunsMessage,
+  excludedTraceNote,
   formatRunUsage,
   searchableRunFields
 } from '../priv/static/js/run-display.js';
@@ -32,5 +34,34 @@ assert.deepEqual(formatRunUsage(null), []);
 
 assert(searchableRunFields(run, matchingProject).includes('chief-of-staff-02-granting-data'));
 assert(searchableRunFields(run, matchingProject).includes('agent'));
+
+// An empty listing must not claim the directory is empty when the source kind
+// withheld every run in it.
+assert.equal(
+  emptyRunsMessage({ items: [], omitted_count: 0 }),
+  'No canonical runs in this trace directory.'
+);
+
+assert.equal(
+  emptyRunsMessage({ items: [], omitted_count: 0, excluded_private_trace_files: 3 }),
+  '3 private trace files excluded — set "viewer": { "private": true } in ptc-project.json to read them.'
+);
+
+assert.equal(
+  excludedTraceNote({ excluded_private_trace_files: 1 }),
+  '1 private trace file excluded — set "viewer": { "private": true } in ptc-project.json to read them.'
+);
+
+assert.equal(
+  excludedTraceNote({ excluded_sanitized_trace_files: 2 }),
+  '2 sanitized trace files excluded — this Viewer reads private traces only.'
+);
+
+// Pagination is a different number, and an absent or unusable count is not an
+// exclusion to report.
+assert.equal(excludedTraceNote({ omitted_count: 12 }), null);
+assert.equal(excludedTraceNote({ excluded_private_trace_files: 0 }), null);
+assert.equal(excludedTraceNote({ excluded_private_trace_files: '3' }), null);
+assert.equal(excludedTraceNote(null), null);
 
 process.stdout.write('ok');

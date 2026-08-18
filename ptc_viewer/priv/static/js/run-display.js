@@ -32,3 +32,35 @@ export function searchableRunFields(run, project) {
     ...Object.entries(run?.tags || {}).flat()
   ].filter(field => typeof field === 'string');
 }
+
+// A trace directory holds sanitized and private artifacts, and one Viewer
+// source grant reads exactly one kind. Reporting the runs it read as the runs
+// that exist sent a tester hunting a rendering bug in a Viewer that was
+// working, so name the files the grant refused to read and the setting that
+// reads them.
+export function excludedTraceNote(page) {
+  const privateFiles = countedExclusion(page?.excluded_private_trace_files);
+  const sanitizedFiles = countedExclusion(page?.excluded_sanitized_trace_files);
+
+  if (privateFiles) {
+    return `${privateFiles} private trace ${plural(privateFiles, 'file')} excluded — set "viewer": { "private": true } in ptc-project.json to read them.`;
+  }
+
+  if (sanitizedFiles) {
+    return `${sanitizedFiles} sanitized trace ${plural(sanitizedFiles, 'file')} excluded — this Viewer reads private traces only.`;
+  }
+
+  return null;
+}
+
+export function emptyRunsMessage(page) {
+  return excludedTraceNote(page) || 'No canonical runs in this trace directory.';
+}
+
+function countedExclusion(value) {
+  return Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+
+function plural(count, noun) {
+  return count === 1 ? noun : `${noun}s`;
+}

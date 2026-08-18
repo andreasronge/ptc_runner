@@ -783,6 +783,62 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   end
 
   @tag :tmp_dir
+  test "run listings report the trace files their source kind refused to read", %{
+    tmp_dir: directory
+  } do
+    File.write!(Path.join(directory, "normal.jsonl"), jsonl_event("normal", 1, "run-started"))
+
+    File.write!(
+      Path.join(directory, "run.inspection.jsonl"),
+      jsonl_event("inspection", 1, "run-started")
+    )
+
+    assert :ok =
+             TraceLog.append_jsonl(
+               Path.join(directory, "secret.private.jsonl"),
+               [decoded_event("private", 1, "run-started")],
+               private: true
+             )
+
+    assert {:ok, sanitized_log} = TraceLog.new(source: {:directory, directory})
+    assert {:ok, private_log} = TraceLog.new(source: {:private_directory, directory})
+
+    assert {:ok, %{"items" => [%{"run_id" => "normal"}]} = page} =
+             TraceLog.query(sanitized_log, :list_runs, %{})
+
+    assert page["excluded_private_trace_files"] == 1
+    refute Map.has_key?(page, "excluded_sanitized_trace_files")
+
+    # Exclusion and pagination are different numbers. Nothing was truncated
+    # here, and the field that reports truncation must keep saying so.
+    assert page["omitted_count"] == 0
+
+    assert {:ok, %{"excluded_private_trace_files" => 1}} =
+             TraceLog.query(sanitized_log, :counters, %{})
+
+    # A run-scoped answer would attach a directory-wide exclusion to one run,
+    # where it states nothing true about that run.
+    assert {:ok, run} = TraceLog.query(sanitized_log, :get_run, %{"run_id" => "normal"})
+    refute Map.has_key?(run, "excluded_private_trace_files")
+
+    assert {:ok, %{"items" => [%{"run_id" => "private"}]} = private_page} =
+             TraceLog.query(private_log, :list_runs, %{})
+
+    assert private_page["excluded_sanitized_trace_files"] == 1
+  end
+
+  @tag :tmp_dir
+  test "a run listing with nothing excluded reports no exclusion at all", %{tmp_dir: directory} do
+    File.write!(Path.join(directory, "normal.jsonl"), jsonl_event("normal", 1, "run-started"))
+
+    assert {:ok, sanitized_log} = TraceLog.new(source: {:directory, directory})
+    assert {:ok, page} = TraceLog.query(sanitized_log, :list_runs, %{})
+
+    refute Map.has_key?(page, "excluded_private_trace_files")
+    refute Map.has_key?(page, "excluded_sanitized_trace_files")
+  end
+
+  @tag :tmp_dir
   test "private trace creation reports chmod failures without raising", %{tmp_dir: directory} do
     path = Path.join(directory, "chmod-failure.private.jsonl")
     event = decoded_event("private-chmod", 1, "run-started")
