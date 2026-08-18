@@ -646,6 +646,13 @@ The generic Kernel emits lifecycle, subordinate-evaluation, capability,
 resource, annotation, and terminal facts. Providers may attach safe typed
 metadata without making Kernel understand provider-specific transcripts.
 
+A `capability-stopped` event with `status: "error"` carries the closed Lisp
+envelope `kind` and, when present, `reason` — the same payload-free class
+`execution_errors` already expose. An unrecognized envelope atom is retained
+only as a one-way fingerprint (`kind_fingerprint` / `reason_fingerprint`).
+Arguments, results, details, and messages stay off this event. Successful
+stops omit these fields.
+
 The implemented private event policy stores the same canonical event
 vocabulary as the normal policy. It changes sink failure behavior, file
 permissions, and discovery; it does not capture prompts, responses, capability

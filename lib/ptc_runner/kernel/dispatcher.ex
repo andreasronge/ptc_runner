@@ -5,8 +5,11 @@ defmodule PtcRunner.Kernel.Dispatcher do
   Dispatch validates normalized arguments, atomically reserves environment and
   provider-task budgets in `PtcRunner.Kernel.RunState`, emits canonical attempt
   events, runs the trusted callback in a monitored heap-limited process, and
-  constructs the uniform Lisp result envelope. Completion is checked against
-  run closure so late results cannot re-enter Lisp.
+  constructs the uniform Lisp result envelope. An error `capability-stopped`
+  event carries the closed envelope `kind` and `reason`; an unrecognized atom
+  is retained only as a one-way fingerprint, and details stay off that event.
+  Completion is checked against run closure so late results cannot
+  re-enter Lisp.
 
   Mission failures after callback entry are classified with the capability's
   declared effect. Read failures keep an explicit typed provider retry policy.
@@ -415,6 +418,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
             status: result.status,
             duration_ms: Events.duration_ms(started_ms)
           })
+          |> Events.put_rejection_class(result)
 
         :telemetry.execute(
           [:ptc_runner, :capability, :stop],

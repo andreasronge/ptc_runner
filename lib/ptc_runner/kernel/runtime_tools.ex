@@ -934,7 +934,14 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
-  @doc "Wraps an internal runtime callback with canonical capability events."
+  @doc """
+  Wraps an internal runtime callback with canonical capability events.
+
+  An error `capability-stopped` event carries the closed envelope `kind` and
+  `reason` when those atoms belong to the Kernel vocabulary. An unrecognized
+  atom is retained only as a one-way fingerprint. Arguments, details, and
+  messages stay off the event.
+  """
   def instrument(state, event_sink, environment, name, callback, attributes \\ %{})
       when environment in [:workflow, :mission] and is_binary(name) and is_function(callback, 1) and
              is_map(attributes) do
@@ -953,19 +960,18 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         :ok ->
           result = callback.(arguments)
 
-          _ =
-            Events.emit(
-              state,
-              event_sink,
-              "capability-stopped",
-              Map.merge(attributes, %{
-                capability_id: capability_id,
-                environment: environment,
-                name: name,
-                status: result_status(result),
-                duration_ms: Events.duration_ms(started_ms)
-              })
-            )
+          stopped =
+            attributes
+            |> Map.merge(%{
+              capability_id: capability_id,
+              environment: environment,
+              name: name,
+              status: result_status(result),
+              duration_ms: Events.duration_ms(started_ms)
+            })
+            |> Events.put_rejection_class(result)
+
+          _ = Events.emit(state, event_sink, "capability-stopped", stopped)
 
           result
 

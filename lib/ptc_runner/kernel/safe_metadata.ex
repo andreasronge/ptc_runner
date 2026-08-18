@@ -44,6 +44,75 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     authentication-failed payment-required rate-limited tool-calling-unsupported denied not-found timeout
     invalid-request unavailable transport-error internal domain-error invalid-result
   )
+  @capability_rejection_kinds [
+    :capability_denied,
+    :capability_unavailable,
+    :event_sink_error,
+    :inspection_sink_error,
+    :invalid_annotation,
+    :invalid_result,
+    :limit_exceeded,
+    :protocol_error,
+    :provider_error,
+    :result_exceeded,
+    :timeout
+  ]
+  @capability_rejection_reasons [
+    :ambiguous_arguments,
+    :argument_exceeded,
+    :authentication_failed,
+    :capability_absent,
+    :capability_quota,
+    :denied,
+    :domain_error,
+    :event_sink_error,
+    :exception,
+    :exit,
+    :input_validation_unavailable,
+    :inspection_sink_error,
+    :internal,
+    :invalid_arguments,
+    :invalid_capability_description_request,
+    :invalid_capability_list_request,
+    :invalid_kernel_check_source_request,
+    :invalid_kernel_eval_request,
+    :invalid_llm_provider_failure,
+    :invalid_mission_inventory_request,
+    :invalid_mission_model_context_request,
+    :invalid_model_alias,
+    :invalid_provider_return,
+    :invalid_request,
+    :invalid_result,
+    :invalid_result_contract_failure,
+    :invalid_result_contract_request,
+    :invalid_runtime_limit_failure,
+    :invalid_runtime_remaining_request,
+    :invalid_runtime_usage_request,
+    :invalid_workflow_annotation,
+    :live_provider_tasks,
+    :model_alias_required,
+    :not_found,
+    :output_schema_mismatch,
+    :payment_required,
+    :protocol_errors,
+    :provider_exit,
+    :provider_heap_exceeded,
+    :provider_result_limit,
+    :provider_timeout,
+    :rate_limited,
+    :reservation_held,
+    :resolver_unavailable,
+    :run_closed,
+    :run_deadline,
+    :stale_evaluation,
+    :throw,
+    :timeout,
+    :tool_calling_unsupported,
+    :transport_error,
+    :unavailable,
+    :unknown_mission,
+    :unknown_model_alias
+  ]
 
   @spec normalize_labels(term()) :: {:ok, map()} | {:error, :invalid_safe_metadata}
   @doc "Validates labels and fingerprints caller-defined identifier fields."
@@ -128,6 +197,24 @@ defmodule PtcRunner.Kernel.SafeMetadata do
 
   def failure_taxonomy(_value), do: %{}
 
+  @spec rejection_class(term()) :: map()
+  @doc """
+  Projects a Lisp capability error envelope to a payload-free rejection class.
+
+  Known Kernel `kind` and `reason` atoms remain readable on canonical
+  `capability-stopped` events. An unrecognized atom is retained only as a
+  one-way fingerprint so a missed Kernel class still groups without putting
+  the atom name on the public trace. Non-atoms, details, and messages produce
+  no public fields.
+  """
+  def rejection_class(%{status: :error} = result) when is_map(result) and not is_struct(result) do
+    %{}
+    |> put_rejection_atom(result, :kind, @capability_rejection_kinds, "capability-kind:")
+    |> put_rejection_atom(result, :reason, @capability_rejection_reasons, "capability-reason:")
+  end
+
+  def rejection_class(_result), do: %{}
+
   @doc "Projects an agent LLM failure to one closed, payload-free provider class."
   @spec llm_provider_failure(term()) :: map()
   def llm_provider_failure(value) when is_map(value) and not is_struct(value) do
@@ -206,6 +293,23 @@ defmodule PtcRunner.Kernel.SafeMetadata do
       "sha256:" <> (:crypto.hash(:sha256, value) |> Base.encode16(case: :lower))
     end
   end
+
+  defp put_rejection_atom(class, result, key, allowed, prefix) do
+    case result do
+      %{^key => value} when is_atom(value) and not is_boolean(value) and not is_nil(value) ->
+        if value in allowed do
+          Map.put(class, key, value)
+        else
+          Map.put(class, fingerprint_key(key), fingerprint(prefix <> Atom.to_string(value)))
+        end
+
+      _missing_or_open ->
+        class
+    end
+  end
+
+  defp fingerprint_key(:kind), do: :kind_fingerprint
+  defp fingerprint_key(:reason), do: :reason_fingerprint
 
   defp fetch_failure_kind(value) do
     Enum.find_value(value, fn {key, kind} ->

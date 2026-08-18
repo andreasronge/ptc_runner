@@ -34,8 +34,15 @@ Two artifacts matter, and they carry different authority.
 A **canonical trace** is bounded operational evidence: run and evaluation
 lifecycle, capability names and outcomes, counts, and a sanitized failure
 taxonomy. It contains no prompts, model responses, capability payloads, or
-generated source. A workflow's own `fail` value never reaches it; an
-unrecognized `kind` is retained only as a one-way fingerprint.
+generated source.
+
+A failed capability attempt records its closed envelope `kind` and `reason`
+on the `capability-stopped` event. An unrecognized envelope atom is retained
+only as a one-way fingerprint.
+
+A workflow's own `fail` value never reaches the public trace as prose. An
+unrecognized `fail` kind is retained only as a one-way fingerprint on
+`run-stopped`; that taxonomy is separate from the capability-stopped class.
 
 A **private inspection artifact** is an explicit `0600` host development
 authority. It adds the frozen component sources, the exact generated programs,

@@ -2,17 +2,21 @@ defmodule PtcRunner.Kernel.RuntimeToolsTest do
   use ExUnit.Case, async: true
 
   @moduledoc """
-  Direct coverage of the trusted runtime-limit callback.
+  Direct coverage of trusted runtime-tool callbacks.
 
-  The route is private to the shipped `agent.core` namespace, so a component
-  test cannot reach the argument validation — the grant refuses the call before
-  the arguments are read. These exercise the closed reason set itself.
+  The runtime-limit route is private to the shipped `agent.core` namespace, so a
+  component test cannot reach the argument validation — the grant refuses the
+  call before the arguments are read. Those cases exercise the closed reason
+  set itself. Instrumented capability events are the public evidence for
+  reserved routes such as `workflow-annotate`.
   """
 
+  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.TrustedError
 
   setup do
@@ -77,5 +81,83 @@ defmodule PtcRunner.Kernel.RuntimeToolsTest do
   test "an unproven subordinate-evaluation claim is still refused", %{callback: callback} do
     assert %{status: :error, kind: :protocol_error, reason: :invalid_runtime_limit_failure} =
              callback.(%{"proof" => "forged-without-a-refusal"})
+  end
+
+  test "a rejected instrumented call records the closed class on capability-stopped" do
+    secret = "PRIVATE_ANNOTATION_DETAIL"
+
+    {_result, stopped} =
+      instrumented_call(fn _ ->
+        %{
+          status: :error,
+          kind: :invalid_annotation,
+          reason: :invalid_workflow_annotation,
+          details: secret
+        }
+      end)
+
+    assert %{
+             name: "workflow-annotate",
+             status: :error,
+             kind: :invalid_annotation,
+             reason: :invalid_workflow_annotation
+           } = stopped.data
+
+    refute Map.has_key?(stopped.data, :details)
+    refute inspect(stopped) =~ secret
+  end
+
+  test "a successful instrumented call does not invent a rejection class" do
+    {_result, stopped} = instrumented_call(fn _ -> %{status: :ok} end)
+
+    assert %{name: "workflow-annotate", status: :ok} = stopped.data
+    refute Map.has_key?(stopped.data, :kind)
+    refute Map.has_key?(stopped.data, :reason)
+  end
+
+  test "non-atom rejection fields stay off the canonical capability-stopped event" do
+    {_result, stopped} =
+      instrumented_call(fn _ ->
+        %{status: :error, kind: "PRIVATE_KIND", reason: "PRIVATE_REASON"}
+      end)
+
+    assert %{name: "workflow-annotate", status: :error} = stopped.data
+    refute Map.has_key?(stopped.data, :kind)
+    refute Map.has_key?(stopped.data, :reason)
+    refute inspect(stopped) =~ "PRIVATE"
+  end
+
+  test "unrecognized envelope atoms are fingerprinted rather than copied" do
+    {_result, stopped} =
+      instrumented_call(fn _ ->
+        %{status: :error, kind: :secret_rejection_kind, reason: :secret_rejection_reason}
+      end)
+
+    assert %{name: "workflow-annotate", status: :error} = stopped.data
+    refute Map.has_key?(stopped.data, :kind)
+    refute Map.has_key?(stopped.data, :reason)
+
+    assert stopped.data.kind_fingerprint ==
+             SafeMetadata.fingerprint("capability-kind:secret_rejection_kind")
+
+    assert stopped.data.reason_fingerprint ==
+             SafeMetadata.fingerprint("capability-reason:secret_rejection_reason")
+
+    refute inspect(stopped) =~ "secret_rejection"
+  end
+
+  defp instrumented_call(callback) do
+    {:ok, limits} = Limits.new()
+    {:ok, state} = RunState.start(limits)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "runtime-tools-instrument")
+
+    result = RuntimeTools.instrument(state, sink, :workflow, "workflow-annotate", callback).(%{})
+
+    stopped =
+      sink
+      |> EventSink.events()
+      |> Enum.find(&(&1.type == "capability-stopped"))
+
+    {result, stopped}
   end
 end
