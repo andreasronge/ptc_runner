@@ -136,13 +136,16 @@ defmodule PtcViewer.RouterTest do
     end)
   end
 
-  test "conversation route is unavailable by default and delegates a fixed source", %{
+  test "conversation route is unconfigured by default and delegates a fixed source", %{
     trace_dir: trace_dir
   } do
-    unavailable =
+    unconfigured =
       conn(:get, "/api/analysis/runs/run-1/conversation") |> call_router(trace_dir: trace_dir)
 
-    assert unavailable.status == 503
+    # A project that records no inspection artifact is a configuration state
+    # with a next action, not an unreachable service.
+    assert unconfigured.status == 404
+    assert unconfigured.resp_body == "inspection_not_configured"
 
     source = {:pinned, "fixed.inspection.jsonl"}
 

@@ -2736,9 +2736,15 @@ defmodule PtcRunner.Kernel.TraceLog do
     end)
   end
 
+  # The summary has to agree with the transcript a reader opens next, which
+  # renders one row per evaluation, capability call and exceeded limit. Counting
+  # every event carrying an error status also counted `run-stopped`, so a single
+  # failed capability call reported three errors against the rows that show it.
+  # The run's own outcome is its status, not a fourth error.
   defp error_event?(event) do
     event["type"] == "limit-exceeded" or
-      stringify(event_data(event, "status") || event_data(event, "outcome")) == "error"
+      (event["type"] in ["capability-stopped", "evaluation-stopped"] and
+         stringify(event_data(event, "status")) == "error")
   end
 
   defp duration_ms(nil, _stopped), do: nil

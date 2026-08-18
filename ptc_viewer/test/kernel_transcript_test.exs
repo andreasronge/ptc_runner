@@ -150,6 +150,53 @@ defmodule PtcViewer.KernelTranscriptTest do
     refute rendered =~ "explicit_failure"
   end
 
+  test "counts the errored rows the transcript renders, not the run outcome", %{
+    tmp_dir: directory
+  } do
+    rendered =
+      render(directory, %{
+        "metadata" => %{"run_id" => "error-count-run", "status" => "error"},
+        "turns" => %{
+          "items" => [
+            event(1, "run-started", %{}),
+            event(2, "evaluation-started", %{
+              "evaluation_id" => "workflow-evaluation-1",
+              "environment" => "workflow"
+            }),
+            event(3, "capability-started", %{
+              "capability_id" => "capability-1",
+              "environment" => "workflow",
+              "name" => "kernel-mission-model-context"
+            }),
+            event(4, "capability-stopped", %{
+              "capability_id" => "capability-1",
+              "environment" => "workflow",
+              "name" => "kernel-mission-model-context",
+              "status" => "error"
+            }),
+            event(5, "evaluation-stopped", %{
+              "evaluation_id" => "workflow-evaluation-1",
+              "environment" => "workflow",
+              "status" => "error"
+            }),
+            event(6, "run-stopped", %{
+              "outcome" => "error",
+              "reason" => "explicit_failure",
+              "failure_kind" => "mission-unavailable"
+            })
+          ]
+        }
+      })
+
+    # One errored evaluation row and one errored capability row. `run-stopped`
+    # is the status badge, not a third error.
+    assert rendered =~
+             ~s(<div class="kt-metric kt-metric-error"><strong>2</strong><span>errors</span></div>)
+
+    assert rendered =~ "Run stopped"
+    assert rendered =~ "mission unavailable"
+  end
+
   defp private_program_data(ambiguous?) do
     program = ~S|(runs/diagnose "failed-run")|
 

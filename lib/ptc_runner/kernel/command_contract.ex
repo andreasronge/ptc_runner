@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.DocumentationLibrary
+  alias PtcRunner.Kernel.ExampleLibrary
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -820,9 +821,26 @@ defmodule PtcRunner.Kernel.CommandContract do
        when mode in [:models, :doctor, {:doctor, :connect}],
        do: true
 
+  # Every command that accepts `--envelope` can be refused for naming a
+  # destination that already exists. `:run` admits the whole catalog, and a run
+  # refused at admission is reported unclassified.
+  defp diagnostic_pair_allowed?(mode, :arguments, :envelope_destination_exists)
+       when mode in [
+              :init,
+              :validate,
+              :models,
+              :doctor,
+              {:doctor, :connect},
+              :run_unclassified
+            ],
+       do: true
+
   defp diagnostic_pair_allowed?(mode, :arguments, :invalid_arguments)
        when mode in [:help, :version, :docs],
        do: true
+
+  defp diagnostic_pair_allowed?(:docs, :arguments, :docs_page_unknown), do: true
+  defp diagnostic_pair_allowed?(:init, :arguments, :example_unknown), do: true
 
   defp diagnostic_pair_allowed?(:run_unclassified, :arguments, code)
        when code in [:invalid_arguments, :conflicting_arguments],
@@ -1079,13 +1097,19 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{phase: :execution, code: :runtime_limit_exceeded} = row,
          %{"type" => "null"}
        ),
-       do: RuntimeLimitDiagnostic.agent_turns_message_schema(row.message)
+       do: RuntimeLimitDiagnostic.agent_loop_message_schema(row.message)
 
   defp diagnostic_message_schema(
          %{phase: :execution, code: :runtime_limit_exceeded} = row,
          %{"properties" => %{"kind" => %{"const" => "runtime"}}}
        ),
        do: RuntimeLimitDiagnostic.runtime_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :run_timeout} = row,
+         %{"properties" => %{"kind" => %{"const" => "runtime"}}}
+       ),
+       do: RuntimeLimitDiagnostic.run_duration_message_schema(row.message)
 
   defp diagnostic_message_schema(
          %{phase: :result_cleanup, code: :result_contract_failed} = row,
@@ -1428,13 +1452,21 @@ defmodule PtcRunner.Kernel.CommandContract do
     })
   end
 
-  defp init_result,
-    do:
-      closed(~w(created), %{
-        "created" => %{
-          "const" => ["AGENTS.md", ".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
-        }
-      })
+  # The scaffold's own list, plus one sealed list per embedded example tree, so
+  # `--example` cannot publish a top-level entry the contract did not admit.
+  defp init_result do
+    scaffold = ["AGENTS.md", ".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
+
+    examples =
+      Enum.map(ExampleLibrary.names(), fn name ->
+        {:ok, created} = ExampleLibrary.created(name)
+        %{"const" => created}
+      end)
+
+    closed(~w(created), %{
+      "created" => %{"oneOf" => [%{"const" => scaffold} | examples]}
+    })
+  end
 
   defp validate_result do
     closed(

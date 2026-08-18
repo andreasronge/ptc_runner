@@ -2,6 +2,8 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.CommandEngine
+  alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Lisp
@@ -217,18 +219,9 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
     @tag :tmp_dir
     test "a manifest selects it and reaches agent.core without a local wrapper",
          %{tmp_dir: dir} do
-      manifest = %{
-        "version" => 1,
-        "workflow" => %{
-          "components" => [%{"library" => "agent.main"}],
-          "entry" => "agent.main/run"
-        },
-        # No local component: the point is that an application needs no
-        # hand-written wrapper to reach the agent loop.
-        "input" => %{
-          "value" => %{"task" => "summarize", "agent" => %{"max_turns" => 1}}
-        }
-      }
+      # No local component: the point is that an application needs no
+      # hand-written wrapper to reach the agent loop.
+      manifest = agent_main_manifest()
 
       path = Path.join(dir, "ptc.json")
       File.write!(path, Jason.encode!(manifest))
@@ -247,6 +240,26 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
       assert {:ok, _bundle} = Kernel.compile_bundle(loaded.workflow_components)
     end
 
+    @tag :tmp_dir
+    test "validate refuses it when the manifest declares no mission", %{tmp_dir: dir} do
+      manifest = agent_main_manifest()
+      path = Path.join(dir, "no-missions.ptc.json")
+      File.write!(path, Jason.encode!(manifest))
+
+      # The entry reaches kernel-mission-model-context, which answers
+      # unknown_mission for every name a mission-less manifest could supply, so
+      # this run cannot reach its first model request. Both facts are in the
+      # documents validate already parses.
+      assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["validate", path])
+      assert outcome.envelope["error"]["phase"] == "bundle"
+      assert outcome.envelope["error"]["code"] == "mission_undeclared"
+
+      declared = Path.join(dir, "with-mission.ptc.json")
+      File.write!(declared, Jason.encode!(Map.put(manifest, "missions", %{"default" => %{}})))
+
+      assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["validate", declared])
+    end
+
     # Fetching a component does not pull its dependencies; compilation is what
     # refuses an incomplete set. A partial closure must fail loudly rather than
     # produce a bundle whose entry cannot reach the agent loop.
@@ -256,6 +269,17 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
       assert {:error, %{id: "agent.main", reason: :missing_component_dependency}} =
                Kernel.compile_bundle(components)
     end
+  end
+
+  defp agent_main_manifest do
+    %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"library" => "agent.main"}],
+        "entry" => "agent.main/run"
+      },
+      "input" => %{"value" => %{"task" => "summarize", "agent" => %{"max_turns" => 1}}}
+    }
   end
 
   defp agent_main_closure do

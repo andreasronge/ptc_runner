@@ -629,6 +629,9 @@ defmodule PtcRunner.Kernel.ManifestTest do
         "entry" => "agent.main/run"
       },
       "input" => %{"value" => %{}},
+      # The agent loop evaluates into a mission, so a manifest declaring none is
+      # refused before it can run.
+      "missions" => %{"default" => %{}},
       "providers" => %{"workflow" => [%{"name" => "fixture"}]}
     }
 

@@ -26,6 +26,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     invalid-input
     invalid-prompt
     invalid-transcript
+    mission-unavailable
     transcript-limit
     turn-limit
     model-program-failed

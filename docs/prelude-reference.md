@@ -234,7 +234,7 @@ Creates the initial domain-blind prompt-policy state from agent configuration.
 (agent.prompt/render state)
 ```
 
-Renders the system prompt and model-visible mission API for one policy state.
+Renders the system prompt, or the capability error envelope that prevented it.
 
 - **Kind:** `function`
 - **Visibility:** `discoverable`

@@ -15,8 +15,9 @@ The operator swaps the installed provider behind that alias.
 The checked-in example needs no credential or network access:
 
 ```console
-ptc run examples/llm-replay/ptc.json \
-  --host-config examples/llm-replay/ptc-host.json
+ptc init llm-replay --example llm-replay
+ptc run llm-replay/ptc.json \
+  --host-config llm-replay/ptc-host.json
 ```
 
 ```json
@@ -47,8 +48,8 @@ Plain doctor parses the selected fixture under installed ceilings without
 starting the provider:
 
 ```console
-ptc doctor examples/llm-replay/ptc.json \
-  --host-config examples/llm-replay/ptc-host.json
+ptc doctor llm-replay/ptc.json \
+  --host-config llm-replay/ptc-host.json
 ```
 
 A missing, empty, malformed, duplicate, or oversized fixture set fails its
@@ -96,7 +97,8 @@ exports, and capability requirements are checked normally.
 
 Candidate creation is a trusted build step and is not currently exposed by the
 standalone executable. The source-checkout tool for maintainers is documented
-under [Embedding and host APIs](../maintainers/embedding.md#materialize-candidate-source).
+under "Materialize candidate source" in `docs/maintainers/embedding.md`, which
+is a repository document rather than a page the executable carries.
 
 The optional closed `provenance` object may contain `run_id`, `prompt_hash`,
 `authored_at`, and `accept_widened_effect`. These are operator claims rather

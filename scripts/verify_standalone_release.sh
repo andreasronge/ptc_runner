@@ -237,10 +237,12 @@ set +e
   2> "$release_tmp_dir/existing-envelope.stderr"
 existing_envelope_status=$?
 set -e
-test "$existing_envelope_status" -eq 74
+test "$existing_envelope_status" -eq 2
 printf '%s\n' 'original' > "$release_tmp_dir/existing-envelope.expected"
 cmp "$release_tmp_dir/existing-envelope.expected" "$existing_envelope"
-grep -q 'envelope/publication_failed' "$release_tmp_dir/existing-envelope.stderr"
+grep -q 'arguments/envelope_destination_exists' "$release_tmp_dir/existing-envelope.stderr"
+grep -q 'remove it or point --envelope at another path' \
+  "$release_tmp_dir/existing-envelope.stderr"
 
 "$command_bin" doctor "$application_root/ptc.json" > "$release_tmp_dir/doctor.stdout"
 grep -q '"provider_activity":false' "$release_tmp_dir/doctor.stdout"

@@ -197,6 +197,13 @@ fails without calling the provider. Earlier assistant/tool pairs are never
 silently discarded to make the request fit. The provider may enforce a lower
 request limit.
 
+Exceeding `max_transcript_chars` reports itself the way the turn ceiling does:
+`execution/runtime_limit_exceeded` naming the limit and its effective value,
+with the canonical failed `run-stopped` event retaining
+`failure_kind: transcript-limit` plus the bounded limit name and value. A
+request that cannot be encoded at all remains a workflow failure, because no
+ceiling was reached.
+
 ## Prompt and mission API
 
 `agent.prompt/initial-state`, `agent.prompt/render`, and

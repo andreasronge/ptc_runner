@@ -24,17 +24,18 @@ The kernel tutorial ships one project document per runnable example. A
 credential-free run and its Viewer need only the same JSON path:
 
 ```console
-ptc run examples/kernel-tutorial/01-orders.ptc-project.json
-ptc viewer examples/kernel-tutorial/01-orders.ptc-project.json
+ptc init kernel-tutorial --example kernel-tutorial
+ptc run kernel-tutorial/01-orders.ptc-project.json
+ptc viewer kernel-tutorial/01-orders.ptc-project.json
 ```
 
 The provider-backed examples additionally reference the shared host document
-and `examples/kernel-tutorial/.env` from their project files. After creating
+and `kernel-tutorial/.env` from their project files. After creating
 that explicitly named environment file, their run commands have the same
 single-argument shape:
 
 ```console
-ptc run examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
+ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
 ## Keep the three roles separate
@@ -79,8 +80,10 @@ file. Project choices do not become part of application content identity.
 `kind`, `version`, and `application` are required. `host`, `artifacts`, and
 `viewer` are optional. Every object rejects unknown and duplicate keys. Paths
 are portable relative paths resolved beneath the project document's directory;
-absolute paths and `..` traversal are rejected. The generated schema is
-[`priv/schemas/ptc-project-config.schema.json`](https://github.com/andreasronge/ptc_runner/blob/main/priv/schemas/ptc-project-config.schema.json).
+absolute paths and `..` traversal are rejected. The generated schema is served
+as `ptc docs schema-project`
+([`priv/schemas/ptc-project-config.schema.json`](https://github.com/andreasronge/ptc_runner/blob/main/priv/schemas/ptc-project-config.schema.json)
+in the repository).
 
 Inspection requires traces because private records must correlate with a
 canonical run. `viewer.private` is a separate explicit local grant: creating a

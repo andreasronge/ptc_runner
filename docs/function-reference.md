@@ -8,7 +8,7 @@
 
 `*` marks PtcRunner extensions without a `clojure.core` equivalent.
 
-See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conformance Gaps](clojure-conformance-gaps.md) | [Namespace Coverage](conformance/index.md)
+See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conformance Gaps](clojure-conformance-gaps.md) | Namespace coverage: `docs/conformance/index.md`
 
 ## Table of Contents
 

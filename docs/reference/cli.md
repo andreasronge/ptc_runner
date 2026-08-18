@@ -11,6 +11,7 @@ Run `ptc help COMMAND` for the exact switches accepted by an installed version.
 | Command | Purpose |
 | --- | --- |
 | `ptc init DIRECTORY` | Publish a validated minimal application without replacing an existing target |
+| `ptc init DIRECTORY --example NAME` | Publish one embedded example tree instead of the scaffold |
 | `ptc docs [PAGE]` | List the documentation embedded in this executable, or print one page |
 | `ptc validate MANIFEST or PROJECT` | Load and compile without executing the workflow |
 | `ptc run MANIFEST or PROJECT` | Execute the application entry |
@@ -128,6 +129,13 @@ completed reservation can contain private prompts, responses, source, or a
 result, ignore both patterns as well as the configured artifact root. New
 projects created by `ptc init` include all three patterns in `.gitignore`.
 
+`ptc init DIRECTORY --example NAME` publishes one of the walkthrough projects
+this executable embeds instead of the scaffold, under the same no-replace
+commit. Run `ptc init --help` for the names, or an unknown one to have them
+listed. The trees are byte-identical to the repository's, so the commands the
+guides print work from wherever the copy was created rather than from one
+checkout directory.
+
 For runs that produce a validated terminal event batch, `execution.usage`
 includes `llm_usage` grouped by alias and installation revision,
 `llm_usage_by_model` grouped by an attested public resolved model, and
@@ -217,15 +225,20 @@ ptc run ptc.json --envelope command-envelope.json
 
 The standalone streams are human presentation channels and may also contain
 output from applications or children. The envelope is an atomic, no-replace
-file with schema `priv/schemas/ptc-command-envelope-v2.schema.json`. Its status
-and exit-code relationship is sealed by the same command contract.
+file whose JSON Schema this executable serves as `ptc docs schema-envelope`
+(`priv/schemas/ptc-command-envelope-v2.schema.json` in the repository). Its
+status and exit-code relationship is sealed by the same command contract.
 
 After arguments parse, an ordinary or caught command outcome publishes one
 requested envelope. Invalid arguments and VM/OS termination can produce none.
-If envelope publication itself fails, the standalone command exits `74` and
-cannot report that failure through the missing envelope. Success exits `0`;
-classified failures use their diagnostic catalog status; caught internal
-failures use `70`.
+Publication is no-replace, so a destination that already exists is refused
+during argument admission with `arguments/envelope_destination_exists` and exit
+`2`, before any provider work: a repeated CI step is told to remove the file
+rather than paying for a run whose result it cannot receive. If envelope
+publication itself fails, the standalone command exits `74` and cannot report
+that failure through the missing envelope. Success exits `0`; classified
+failures use their diagnostic catalog status; caught internal failures use
+`70`.
 
 `run`, `validate`, `doctor`, `models`, and `init` accept `--envelope`.
 `repl`, `transcript`, `viewer`, `docs`, help, and version do not. A private run
@@ -538,9 +551,10 @@ milliseconds.
 One shell-level check can use the stable envelope:
 
 ```console
+ptc init kernel-tutorial --example kernel-tutorial
 artifact_dir="$(mktemp -d)"
 envelope="$artifact_dir/command-envelope.json"
-ptc run examples/kernel-tutorial/01-orders/ptc.json --envelope "$envelope"
+ptc run kernel-tutorial/01-orders/ptc.json --envelope "$envelope"
 actual="$(jq -c '.result.value' "$envelope")"
 test "$actual" = \
   '{"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}'

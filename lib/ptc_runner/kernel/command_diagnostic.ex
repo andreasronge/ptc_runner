@@ -370,7 +370,16 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %{phase: :execution, code: :runtime_limit_exceeded},
          nil
        ),
-       do: RuntimeLimitDiagnostic.agent_turns_message?(message)
+       do:
+         RuntimeLimitDiagnostic.agent_turns_message?(message) or
+           RuntimeLimitDiagnostic.transcript_chars_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :execution, code: :run_timeout},
+         %CommandSource{kind: :runtime}
+       ),
+       do: RuntimeLimitDiagnostic.run_duration_message?(message)
 
   defp valid_message_source?(
          _message,

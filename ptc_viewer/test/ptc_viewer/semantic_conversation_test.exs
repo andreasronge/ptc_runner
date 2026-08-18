@@ -14,6 +14,18 @@ defmodule PtcViewer.SemanticConversationTest do
     assert unavailable =~ "Unavailable (HTTP 503)"
     assert unavailable =~ "Private conversation unavailable: inspection source unavailable."
 
+    unconfigured =
+      render(directory, %{
+        "available?" => false,
+        "status" => 404,
+        "reason" => "inspection_not_configured"
+      })
+
+    refute unconfigured =~ "HTTP"
+    assert unconfigured =~ "Not recorded"
+    assert unconfigured =~ "This project does not record inspection artifacts."
+    assert unconfigured =~ "ptc-project.json"
+
     incomplete =
       render(directory, %{
         "complete?" => false,

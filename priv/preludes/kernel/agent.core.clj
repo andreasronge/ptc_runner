@@ -2,8 +2,19 @@
 
 (defn- system-message [prompt-state]
   (let [prompt (agent.prompt/render prompt-state)]
-    (if (and (string? prompt) (not (blank? prompt)))
+    (cond
+      (and (string? prompt) (not (blank? prompt)))
       prompt
+
+      ;; The renderer answers the refused capability envelope rather than nil
+      ;; when the mission context could not be produced, so the run reports the
+      ;; cause -- `unknown_mission` for a manifest that declares no missions --
+      ;; instead of only that the prompt was invalid.
+      (map? prompt)
+      (fail (assoc (result/error :mission-unavailable (get prompt :reason))
+                   :cause prompt))
+
+      :else
       (fail (result/error :invalid-prompt :invalid-render)))))
 
 (defn- transition-prompt [prompt-state event]
@@ -70,7 +81,9 @@
                   base-request)
         encoded (json/generate-string request)]
     (if (> (count encoded) max-transcript-chars)
-      (fail (result/error :transcript-limit :request-too-large))
+      ;; A ceiling the caller set in its own input document reports itself, the
+      ;; way the turn limit does, instead of collapsing into `workflow_failed`.
+      (tool/kernel-runtime-limit-failure {"max_transcript_chars" max-transcript-chars})
       request)))
 
 (defn- returned-outcome [value]

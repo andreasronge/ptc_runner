@@ -10,7 +10,8 @@ model writes bounded mission programs during the run.
 The checked-in multi-turn example shows that default path:
 
 ```console
-ptc run examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
+ptc init kernel-tutorial --example kernel-tutorial
+ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
 It selects `agent.core`, gives the trusted workflow a model alias, and declares
