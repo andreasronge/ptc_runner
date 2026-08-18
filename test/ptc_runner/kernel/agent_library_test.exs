@@ -1452,6 +1452,44 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     end
   end
 
+  # The implicit single-phase path synthesizes a default phase, and it must
+  # apply the same mission validation the explicit phases receive: a blank or
+  # non-string mission is a caller mistake, refused before any model call.
+  test "agent.core rejects a blank or non-string mission before any model call" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "call-1", name: "run_ptc_lisp", args: %{"program" => "(return 1)"}}
+      ]
+    }
+
+    for mission <- [~s|""|, ~s|"   "|] do
+      {:ok, config} = agent_config([response])
+
+      assert {:error,
+              %{
+                kind: :workflow_failed,
+                reason: :explicit_failure,
+                details: %{failure_kind: "invalid-agent-config"}
+              }} =
+               Kernel.run(
+                 ~s|(agent.core/run "Compute" {"max_turns" 2 "mission" #{mission}})|,
+                 config
+               )
+
+      refute_receive {:agent_request, _request}
+    end
+
+    # A non-string mission never reaches the loop: the entry's own typed
+    # contract refuses it.
+    {:ok, config} = agent_config([response])
+
+    assert {:error, %{kind: :workflow_failed, reason: :prelude_contract_error}} =
+             Kernel.run(~s|(agent.core/run "Compute" {"max_turns" 2 "mission" 42})|, config)
+
+    refute_receive {:agent_request, _request}
+  end
+
   test "agent.core accepts bounded options at their documented range endpoints" do
     response = %{
       content: nil,

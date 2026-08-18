@@ -125,7 +125,11 @@ its docstring states, citing the contradiction between the implementation and
 its own contract. The proposal is model-authored and untrusted; nothing has
 been executed or changed yet.
 
-Validation is host policy and makes no model call. `mix ptc.repair` binds the
+Validation is host policy, and in this example it makes no model call because
+the target installs no model provider. In general, `--allow-live-validation`
+is an explicit acknowledgement that trial runs execute with the target's
+installed providers and can exercise their existing effects — including model
+dispatch, when the target installs one. `mix ptc.repair` binds the
 report to the currently installed component by source hash, materializes the
 candidate through the static G1–G4 gate, and runs the host-owned suite —
 `repair-agent/suite.json` holds the observed order plus two held-out cases the

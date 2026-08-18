@@ -521,6 +521,39 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
     end
   end
 
+  # A suite is caller input: a case that is not a map must be refused as an
+  # invalid suite, not crash name extraction with an Access error.
+  @tag :tmp_dir
+  test "a suite entry that is not a map is refused as an invalid suite", %{tmp_dir: dir} do
+    manifest = write_application(dir)
+    report = Path.join(dir, "repair.json")
+    File.write!(report, Jason.encode!(repair_report(ComponentOverride.hash(@placeholder))))
+
+    valid_case = %{"name" => "observed", "input" => %{"value" => 21}, "expected" => 42}
+
+    for bad_cases <- [[1], [nil], ["case"], [[]], [valid_case, 7]] do
+      suite = Path.join(dir, "suite.json")
+      File.write!(suite, Jason.encode!(%{"version" => 1, "cases" => bad_cases}))
+
+      assert_raise Mix.Error, ~r/invalid_validation_suite/, fn ->
+        Mix.Task.reenable("ptc.repair")
+
+        Repair.run([
+          manifest,
+          "--report",
+          report,
+          "--out",
+          Path.join(dir, "candidate"),
+          "--validation-suite",
+          suite,
+          "--validation-out",
+          Path.join(dir, "validation"),
+          "--allow-live-validation"
+        ])
+      end
+    end
+  end
+
   @tag :tmp_dir
   test "automatic repair refuses a stale captured base and discards the candidate", %{
     tmp_dir: dir

@@ -238,17 +238,22 @@ defmodule Mix.Tasks.Ptc.Repair do
 
   defp validate_suite(%{"version" => 1, "cases" => cases} = suite)
        when is_list(cases) and length(cases) in 1..@max_cases do
-    names = Enum.map(cases, & &1["name"])
-
+    # Shape before names: a case that is not a map must be refused, not
+    # crash name extraction.
     valid? =
       Map.keys(suite) -- ~w(version cases) == [] and
-        names == Enum.uniq(names) and
-        Enum.all?(cases, &valid_case?/1)
+        Enum.all?(cases, &valid_case?/1) and
+        unique_names?(cases)
 
     if valid?, do: :ok, else: {:error, :invalid_validation_suite}
   end
 
   defp validate_suite(_suite), do: {:error, :invalid_validation_suite}
+
+  defp unique_names?(cases) do
+    names = Enum.map(cases, & &1["name"])
+    names == Enum.uniq(names)
+  end
 
   defp valid_case?(%{"name" => name} = validation_case) do
     keys = Map.keys(validation_case) |> Enum.sort()

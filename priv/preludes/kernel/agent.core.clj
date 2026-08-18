@@ -85,8 +85,13 @@
                (<= (reduce + 0 (map #(get % "max_turns") phases)) 128))
         phases
         (fail (result/error :invalid-agent-config :invalid-phases))))
-    [{"mission" (or (get cfg "mission") "default")
-      "max_turns" default-max-turns}]))
+    ;; The synthesized default phase receives the same mission validation the
+    ;; explicit phases do: a blank or non-string mission is a caller mistake,
+    ;; not a lookup that should fail later under a different classification.
+    (let [mission (or (get cfg "mission") "default")]
+      (if (nonblank-string? mission)
+        [{"mission" mission "max_turns" default-max-turns}]
+        (fail (result/error :invalid-agent-config :invalid-mission))))))
 
 (defn- next-phase? [phases phase-index]
   (< (inc phase-index) (count phases)))
