@@ -1,9 +1,9 @@
 # TraceLog and Run Analysis — V2 Contract
 
 **Status:** implemented retained product contract, including the local 0.x
-inspection increment. Complements the
-[Kernel maintainer guide](maintainers/kernel.md) and
-`PtcRunner.Kernel.TraceLog` module documentation.
+inspection increment. Complements `PtcRunner.Kernel.TraceLog` module
+documentation and the Kernel maintainer guide, `docs/maintainers/kernel.md`,
+which is a repository document rather than a page the executable carries.
 
 ## Purpose and boundary
 
@@ -260,10 +260,14 @@ host can bind an artifact to the run that produced it without exposing the
 result in the public trace. Failed runs omit the field.
 
 A shipped `agent.core` loop whose caller propagates exhaustion records
-`failure_kind: "turn-limit"`, `limit: "agent_turns"`, and the validated
-`limit_value` from 1 through 128 on the failed `run-stopped` event. Other
-recognized explicit failures retain only their bounded failure taxonomy; these
-fields never admit caller-supplied prose.
+`failure_kind: "turn-limit"`, `limit: "agent_turns"`, the validated
+`limit_value` from 1 through 128, and `limit_reason` on the failed
+`run-stopped` event. `limit_reason` is one of `turn_limit_exceeded`,
+`intermediate_result`, `evaluation_error`, or `protocol_error`, naming what the
+final turn produced: a model still working, a program that failed, or no usable
+tool call at all. A reason outside that set is dropped rather than recorded.
+Other recognized explicit failures retain only their bounded failure taxonomy;
+these fields never admit caller-supplied prose.
 
 ## Source grants and authority
 
@@ -339,6 +343,9 @@ sufficient to select a run without loading its activity:
 - total and subordinate-evaluation counts;
 - workflow and mission capability-call counts;
 - LLM-call summary derived from named `llm-request` events when applicable;
+- full-run `llm_usage_total` input, output, and provider-reported cost values,
+  with each field omitted unless every successful LLM call reports that field
+  and the canonical trace retained every event;
 - error count and duration summary;
 - one-way fingerprints of caller-supplied name/model/provider labels, plus
   finite canonical tag keys and enumerated values;

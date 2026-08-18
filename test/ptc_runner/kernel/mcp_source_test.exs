@@ -848,6 +848,25 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "classifies the official server's bare -32601 discovery answer over stdio", %{tmp_dir: dir} do
+    marker = Path.join(dir, "unsupported-protocol-bare")
+    registry = stdio_registry(dir, marker, "unsupported-protocol-bare")
+
+    assert {:error, :mcp_protocol_version_unsupported} =
+             dir
+             |> manifest(~w(remote.structured),
+               timeout_ms: 5_000,
+               evaluation_timeout_ms: 5_000
+             )
+             |> directory_request(registry)
+             |> RunLifecycle.build()
+
+    assert File.read!(marker) =~ "server/discover"
+    refute File.read!(marker) =~ "tools/list"
+    assert File.read!(marker) =~ "session-closed"
+  end
+
+  @tag :tmp_dir
   test "normalizes a stdio server exit between discovery requests", %{tmp_dir: dir} do
     marker = Path.join(dir, "exit-after-discover")
     registry = stdio_registry(dir, marker, "exit-after-discover")
@@ -1724,7 +1743,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
-  test "stdio acquisition rejects an oversized launcher before spawning", %{tmp_dir: dir} do
+  test "stdio acquisition reports an unusable launcher as a local dependency", %{tmp_dir: dir} do
     launcher = Path.join(dir, "oversized-launcher")
     {:ok, device} = File.open(launcher, [:write, :binary])
     {:ok, _position} = :file.position(device, 16_777_216)
@@ -1749,7 +1768,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
 
-    assert {:error, :mcp_transport_error} =
+    assert {:error, :mcp_stdio_launcher_unavailable} =
              dir
              |> manifest(["remote.structured"])
              |> directory_request(registry)

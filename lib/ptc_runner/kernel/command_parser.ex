@@ -11,6 +11,8 @@ defmodule PtcRunner.Kernel.CommandParser do
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandRejection
+  alias PtcRunner.Kernel.DocumentationLibrary
+  alias PtcRunner.Kernel.ExampleLibrary
   alias PtcRunner.Kernel.ViewerBinding
 
   @type frontend :: CommandDeclaration.frontend()
@@ -159,10 +161,56 @@ defmodule PtcRunner.Kernel.CommandParser do
        do:
          arguments(:init,
            directory: directory,
+           options: %{},
            ordered_options: ordered,
            frontend_options: frontend_options,
            frontend: frontend
          )
+
+  defp validate_command(
+         :init,
+         [directory],
+         %{example: example} = options,
+         ordered,
+         frontend_options,
+         frontend
+       )
+       when map_size(options) == 1 do
+    if example in ExampleLibrary.names() do
+      arguments(:init,
+        directory: directory,
+        options: options,
+        ordered_options: ordered,
+        frontend_options: frontend_options,
+        frontend: frontend
+      )
+    else
+      {:error, CommandRejection.example_unknown()}
+    end
+  end
+
+  defp validate_command(:docs, [], options, ordered, frontend_options, frontend)
+       when map_size(options) == 0,
+       do:
+         arguments(:docs,
+           options: %{page: nil},
+           ordered_options: ordered,
+           frontend_options: frontend_options,
+           frontend: frontend
+         )
+
+  defp validate_command(:docs, [page], options, ordered, frontend_options, frontend)
+       when map_size(options) == 0 do
+    if page in DocumentationLibrary.names(),
+      do:
+        arguments(:docs,
+          options: %{page: page},
+          ordered_options: ordered,
+          frontend_options: frontend_options,
+          frontend: frontend
+        ),
+      else: {:error, CommandRejection.docs_page_unknown()}
+  end
 
   defp validate_command(:validate, [application], options, ordered, frontend_options, frontend) do
     if allowed?(:validate, options, frontend),

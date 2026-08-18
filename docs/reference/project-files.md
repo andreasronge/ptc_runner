@@ -15,26 +15,27 @@ ptc repl --project ptc-project.json --mission review
 ptc viewer ptc-project.json
 ```
 
-`ptc init DIRECTORY` generates this file alongside `ptc.json` and
-`main.clj`. PtcRunner never searches parent directories or guesses a project
-from its filename; the `"kind": "ptc-project"` discriminator identifies the
-document.
+`ptc init DIRECTORY` generates this file alongside `ptc.json`, `main.clj`, and
+an `AGENTS.md` routing card for coding agents. PtcRunner never searches parent
+directories or guesses a project from its filename; the `"kind": "ptc-project"`
+discriminator identifies the document.
 
 The kernel tutorial ships one project document per runnable example. A
 credential-free run and its Viewer need only the same JSON path:
 
 ```console
-ptc run examples/kernel-tutorial/01-orders.ptc-project.json
-ptc viewer examples/kernel-tutorial/01-orders.ptc-project.json
+ptc init kernel-tutorial --example kernel-tutorial
+ptc run kernel-tutorial/01-orders.ptc-project.json
+ptc viewer kernel-tutorial/01-orders.ptc-project.json
 ```
 
 The provider-backed examples additionally reference the shared host document
-and `examples/kernel-tutorial/.env` from their project files. After creating
+and `kernel-tutorial/.env` from their project files. After creating
 that explicitly named environment file, their run commands have the same
 single-argument shape:
 
 ```console
-ptc run examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
+ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
 ## Keep the three roles separate
@@ -79,12 +80,18 @@ file. Project choices do not become part of application content identity.
 `kind`, `version`, and `application` are required. `host`, `artifacts`, and
 `viewer` are optional. Every object rejects unknown and duplicate keys. Paths
 are portable relative paths resolved beneath the project document's directory;
-absolute paths and `..` traversal are rejected. The generated schema is
-[`priv/schemas/ptc-project-config.schema.json`](https://github.com/andreasronge/ptc_runner/blob/main/priv/schemas/ptc-project-config.schema.json).
+absolute paths and `..` traversal are rejected. The generated schema is served
+as `ptc docs schema-project`
+([`priv/schemas/ptc-project-config.schema.json`](https://github.com/andreasronge/ptc_runner/blob/main/priv/schemas/ptc-project-config.schema.json)
+in the repository).
 
 Inspection requires traces because private records must correlate with a
 canonical run. `viewer.private` is a separate explicit local grant: creating a
-private artifact does not automatically expose it to Viewer.
+private artifact does not automatically expose it to Viewer. `viewer.repl`
+independently enables the browser REPL, including when `viewer.private` is
+`true`. REPL evaluations remain fixed to the public `run-analysis-v1` profile
+and its immutable normal-trace snapshot; they cannot query the private evidence
+displayed elsewhere in the Viewer.
 
 ## Artifact layout
 
@@ -113,6 +120,7 @@ ptc run ptc-project.json --host-config deployment/staging-host.json
 ptc run ptc-project.json --trace-dir tmp/one-off-traces
 ptc repl --project ptc-project.json --env-file deployment/staging.env
 ptc repl --project ptc-project.json --mission review
+ptc viewer ptc-project.json --env-file deployment/staging.env
 ```
 
 Mission selection, input, and component-override switches remain
@@ -121,7 +129,9 @@ being duplicated as project defaults. A project environment file is loaded
 only when inert preparation proves that a selected mission provider or its
 dependency uses an environment-backed credential. Unrelated providers do not
 cause environment-backed credentials to be read. Provider-free runs, passive
-doctor, Viewer, and file- or literal-backed credentials do not read it.
+doctor, Viewer startup, and file- or literal-backed credentials do not read it.
+Viewer-started workflows and missions read the selected file lazily through
+their ordinary command preparation.
 
 Direct manifest invocation remains the low-level form for automation:
 
@@ -140,6 +150,16 @@ and correlated inspection directories are captured before the listener starts;
 HTTP requests select only a run ID and never a filesystem path. Browser opening
 is a bounded convenience, and additionally requires an attached terminal:
 missing or failing platform openers do not stop Viewer.
+
+The REPL and private-data settings are orthogonal. Enabling both presents the
+public-trace REPL alongside the private evidence panels without adding private
+inspection authority to the evaluation session.
+
+Viewer-started workflows and missions use the project's `host.env_file` when
+one is declared. `ptc viewer ptc-project.json --env-file FILE` supplies an
+invocation-time override instead. PtcRunner never searches implicitly for
+`.env`; without either form, credentials must already be present in the Viewer
+process environment or use another trusted host binding.
 
 The listener binds `127.0.0.1`. The project document deliberately cannot change
 that: exposure is an invocation-time decision made with `--listen 0.0.0.0`,

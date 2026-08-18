@@ -327,6 +327,28 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
        do: diagnostic(:result_cleanup, :result_limit_exceeded, provider_activity)
 
   defp failure_diagnostic(
+         %Error{
+           kind: :limit_exceeded,
+           details: %{limit: :run_duration_ms, limit_ms: limit_ms, phase: phase}
+         },
+         provider_activity
+       ) do
+    # `run_timeout` keeps its own code and status so a script can still tell a
+    # wall-clock stop from a turn limit, but it now names the limit and the
+    # configured value the way every other breached ceiling does.
+    case RuntimeLimitDiagnostic.live_timeout_message(:run_duration_ms, limit_ms, phase) do
+      {:ok, message} ->
+        diagnostic(:execution, :run_timeout, provider_activity,
+          message: message,
+          source: CommandSource.fixed(:runtime)
+        )
+
+      :error ->
+        diagnostic(:execution, :run_timeout, provider_activity)
+    end
+  end
+
+  defp failure_diagnostic(
          %Error{kind: :limit_exceeded, details: %{limit: :run_duration_ms}},
          provider_activity
        ),
@@ -343,6 +365,25 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
          provider_activity
        ),
        do: diagnostic(:execution, :provider_admission_unavailable, provider_activity)
+
+  defp failure_diagnostic(
+         %Error{
+           kind: :limit_exceeded,
+           details: %{limit: limit, limit_ms: limit_ms, phase: phase}
+         },
+         provider_activity
+       ) do
+    case RuntimeLimitDiagnostic.timeout_message(limit, limit_ms, phase) do
+      {:ok, message} ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity,
+          message: message,
+          source: CommandSource.fixed(:runtime)
+        )
+
+      :error ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
+    end
+  end
 
   defp failure_diagnostic(%Error{kind: :limit_exceeded}, provider_activity),
     do: diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
@@ -432,11 +473,28 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
          %Error{
            kind: :workflow_failed,
            reason: :runtime_limit_exceeded,
-           details: %{limit: :agent_turns, limit_value: limit}
+           details: %{limit: :agent_turns, limit_value: limit, limit_reason: limit_reason}
          },
          provider_activity
        ) do
-    case RuntimeLimitDiagnostic.agent_turns_message(limit) do
+    case RuntimeLimitDiagnostic.agent_turns_message(limit, limit_reason) do
+      {:ok, message} ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity, message: message)
+
+      :error ->
+        diagnostic(:execution, :workflow_failed, provider_activity)
+    end
+  end
+
+  defp failure_diagnostic(
+         %Error{
+           kind: :workflow_failed,
+           reason: :runtime_limit_exceeded,
+           details: %{limit: :max_transcript_chars, limit_value: limit}
+         },
+         provider_activity
+       ) do
+    case RuntimeLimitDiagnostic.transcript_chars_message(limit) do
       {:ok, message} ->
         diagnostic(:execution, :runtime_limit_exceeded, provider_activity, message: message)
 

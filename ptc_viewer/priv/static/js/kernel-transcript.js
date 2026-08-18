@@ -88,7 +88,7 @@ function KernelTranscript({
 
   return html`
     <section class="kernel-transcript">
-      <${Hero} metadata=${metadata} transcript=${transcript}
+      <${Hero} metadata=${metadata} transcript=${transcript} title=${options.title}
                eventCount=${events.length} truncatedPage=${partial} />
       <${Provenance} />
       <${Reference} metadata=${metadata} transcript=${transcript}
@@ -104,16 +104,16 @@ function KernelTranscript({
 
 // --- Identity and summary -------------------------------------------------
 
-function Hero({ metadata, transcript, eventCount, truncatedPage }) {
+function Hero({ metadata, transcript, title: displayTitle, eventCount, truncatedPage }) {
   const status = metadata.status || (metadata.complete ? 'complete' : 'incomplete');
   const bundle = metadata.workflow_prelude?.hash;
-  // The run ID is the identity a reader recognises and can act on; the bundle
-  // hash identifies the workflow, and two runs of one workflow share it. It
-  // stays available as a secondary fact rather than as the heading.
-  const title = metadata.run_id || metadata.name || 'Kernel run';
+  // A host-supplied display label can replace the cryptic run ID as the title;
+  // the canonical ID remains a fact readers can copy and act on.
+  const title = displayTitle || metadata.run_id || metadata.name || 'Kernel run';
   // Sanitized traces carry hashed model/provider identities; they are shown
   // abbreviated with the full value on hover, like every other digest here.
   const facts = [
+    ['Run ID', title !== metadata.run_id ? metadata.run_id : null],
     ['Trace', metadata.trace_id],
     ['Duration', duration(metadata.duration_ms)],
     ['Model', abbreviate(metadata.model), metadata.model],
@@ -121,8 +121,12 @@ function Hero({ metadata, transcript, eventCount, truncatedPage }) {
     ['Source', metadata.source],
     ['Bundle', abbreviate(bundle), bundle]
   ].filter(([, value]) => value !== null && value !== undefined && value !== '');
-  const terminalError = transcript.terminal?.data?.outcome === 'error' ? 1 : 0;
-  const errorCount = metadata.error_count ?? Math.max(transcript.limits.length, terminalError);
+  // The same rows the transcript below tones as errors: evaluations,
+  // capability calls, and exceeded limits. The run's own outcome is the status
+  // badge above and the terminal cause beneath it, not an extra error.
+  const erroredSpans = [...transcript.evaluations, ...transcript.capabilities]
+    .filter(span => isFailure(statusOf(span))).length;
+  const errorCount = metadata.error_count ?? erroredSpans + transcript.limits.length;
 
   return html`
     <div class="kt-hero">

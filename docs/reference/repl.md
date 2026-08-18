@@ -114,16 +114,28 @@ provider aliases. Mission sessions add one meta-command:
 cannot be combined with `--profile` or `--describe-profile`. An unknown name
 lists declared missions in sorted order before sinks or provider activity.
 
-Interactive meta-commands are:
+Interactive meta-commands are deliberately small:
 
 ```text
-:doc <name>       Show core function documentation
-:find <pattern>   Search the available function surface
 :help             List session commands
+:quit             Leave the REPL
 ```
 
-See the [PTC-Lisp specification](../ptc-lisp-specification.md) and
-[function reference](../function-reference.md) for the language.
+Mission sessions additionally provide `:context`, shown above. Profile
+sessions explain that `:context` requires a manifest mission instead of
+attempting to use a manifest session internally.
+
+The language functions are the canonical discovery interface in every input
+context, not only at a terminal: `(apropos "term")` searches attached prelude
+exports, fixed built-ins, and the bounded Java surface, while `(doc "name")`
+prints documentation. `(dir)` and `(export-meta "ns/name")` inspect the
+attached prelude API specifically. An attached interactive terminal prints
+this guidance in its startup banner, and `:help` repeats it. Detached input,
+scripts, repeated `--eval`, stdin mode, and JSONL output do not print the
+startup hint.
+
+See the [PTC-Lisp specification](../ptc-lisp-specification.md) and [function
+reference](../function-reference.md) for the full language surface.
 
 Persist canonical session events with `--trace`:
 

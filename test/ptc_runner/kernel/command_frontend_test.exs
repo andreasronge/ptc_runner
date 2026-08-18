@@ -231,6 +231,35 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   end
 
   @tag :tmp_dir
+  test "an existing envelope destination is refused before the run executes", %{tmp_dir: dir} do
+    parent = self()
+    application = write_application(dir)
+    path = Path.join(dir, "command-envelope.json")
+    File.write!(path, "{\"stale\":true}")
+
+    presentation =
+      CommandFrontend.execute(
+        ["run", application, "--envelope", path],
+        :standalone,
+        fn _arguments ->
+          send(parent, :unexpected_bootstrap)
+          {:ok, CommandRuntime.standalone()}
+        end
+      )
+
+    assert presentation.exit_status == 2
+    assert presentation.stdout == ""
+    assert presentation.stderr =~ "arguments/envelope_destination_exists"
+
+    assert presentation.stderr =~ "remove it or point --envelope at another path"
+
+    refute presentation.stderr =~ path
+    assert presentation.envelope_path == nil
+    assert File.read!(path) == "{\"stale\":true}"
+    refute_received :unexpected_bootstrap
+  end
+
+  @tag :tmp_dir
   test "an envelope request preserves an artifact destination diagnosis", %{tmp_dir: dir} do
     application = write_application(dir)
     envelope_path = Path.join(dir, "command-envelope.json")
@@ -429,7 +458,9 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   end
 
   @tag :tmp_dir
-  test "an existing envelope destination is not replaced and reports status 74", %{tmp_dir: dir} do
+  test "an existing envelope destination is refused at admission, not overwritten", %{
+    tmp_dir: dir
+  } do
     path = Path.join(dir, "existing.json")
     File.write!(path, "original")
 
@@ -438,12 +469,13 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
         {:error, :command_bootstrap_failed}
       end)
 
-    assert presentation.exit_status == 74
+    assert presentation.exit_status == 2
     assert presentation.stdout == ""
 
     assert presentation.stderr ==
-             "error: envelope/publication_failed: command envelope could not be published " <>
-               "(run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
+             "error: arguments/envelope_destination_exists: the envelope destination already " <>
+               "exists (run_ref: #{presentation.outcome.envelope["run_ref"]}); " <>
+               "remove it or point --envelope at another path\n"
 
     assert File.read!(path) == "original"
   end
@@ -838,8 +870,9 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
       "models" => CommandOutcome.success(:models, @run_ref, %{"installations" => []}),
       "init" =>
         CommandOutcome.success(:init, @run_ref, %{
-          "created" => [".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
+          "created" => ["AGENTS.md", ".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
         }),
+      "docs_listing" => CommandOutcome.success(:docs, @run_ref, CommandContract.docs_result(nil)),
       "help_root" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:root)),
       "help_run" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:run)),
       "version" => CommandOutcome.success(:version, @run_ref, CommandContract.version_result())

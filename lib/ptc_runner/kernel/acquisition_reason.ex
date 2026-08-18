@@ -72,6 +72,7 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
 
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
 
   # `:mcp_remote_error` is an answered case — a JSON-RPC error at discovery — and
@@ -127,12 +128,15 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
     :invalid_mcp_executable,
     :invalid_trace_snapshot_directory,
     :invalid_inspection_snapshot_directory,
-    :invalid_replay_fixtures,
-    :replay_fixtures_too_large,
-    :replay_entry_limit_exceeded,
-    :duplicate_replay_entry,
+    :replay_owner_unavailable,
     :source_unavailable,
     :invalid_snapshot
+  ]
+
+  @fixture_file_reasons [
+    :replay_fixtures_unreadable,
+    :replay_fixtures_empty,
+    :replay_fixtures_too_large
   ]
 
   @launcher_reasons [:mcp_stdio_launcher_unavailable, :unsupported_mcp_stdio_platform]
@@ -203,6 +207,18 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   def diagnostic(reason, occurrence) when reason in @environment_reasons,
     do: subject_diagnostic(:local_preflight, :environment_unavailable, :local, occurrence)
 
+  # A refused fixture file names the rule it broke, and a line-level rejection
+  # names the line. Acquisition sees the same reasons phase 7 does, so it must
+  # not report them one way and the local step another. The tuple heads above
+  # match first, so nothing else with this shape reaches here; anything this
+  # module cannot render still falls through to the internal error.
+  def diagnostic(reason, occurrence) when reason in @fixture_file_reasons,
+    do: fixture_diagnostic(reason, occurrence)
+
+  def diagnostic({entry_reason, line}, occurrence)
+      when is_atom(entry_reason) and is_integer(line) and line > 0,
+      do: fixture_diagnostic({entry_reason, line}, occurrence)
+
   def diagnostic(reason, occurrence) when reason in @launcher_reasons,
     do: subject_diagnostic(:local_preflight, :launcher_unavailable, :local, occurrence)
 
@@ -213,6 +229,22 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
     do: subject_diagnostic(:active_preflight, :selection_rejected, :selection, occurrence)
 
   def diagnostic(_reason, _occurrence), do: internal_diagnostic()
+
+  defp fixture_diagnostic(reason, occurrence) do
+    case LLMReplayFixtureDiagnostic.message(reason) do
+      {:ok, message} ->
+        subject_diagnostic(
+          :local_preflight,
+          :environment_unavailable,
+          :local,
+          occurrence,
+          message
+        )
+
+      :error ->
+        internal_diagnostic()
+    end
+  end
 
   defp acquisition_diagnostic(code, occurrence, message \\ nil),
     do: subject_diagnostic(:provider_acquisition, code, :acquisition, occurrence, message)

@@ -91,6 +91,34 @@ defmodule PtcRunner.Dotenv do
 
   def attach_environment(_runtime, _frontend_options), do: {:error, :invalid_command_runtime}
 
+  @doc false
+  @spec with_file_scope(binary(), (-> result)) :: result when result: term()
+  def with_file_scope(path, fun) when is_binary(path) and is_function(fun, 0) do
+    # The ordinary CLI is one-shot, but Viewer launches share a long-lived VM.
+    # Remember only names declared by this file so values loaded for one launch
+    # cannot become the inherited baseline of the next launch. The fixed lock
+    # also prevents two scoped launches from restoring over each other.
+    case declared_keys(path) do
+      {:ok, keys} ->
+        :global.trans({__MODULE__, :file_scope}, fn ->
+          previous = Map.new(keys, &{&1, System.get_env(&1)})
+
+          try do
+            fun.()
+          after
+            restore_environment(previous)
+          end
+        end)
+
+      {:error, _reason} ->
+        # Execute normally so the command's deferred environment setup retains
+        # its canonical public diagnostic for a missing or malformed file.
+        fun.()
+    end
+  end
+
+  def with_file_scope(_path, fun) when is_function(fun, 0), do: fun.()
+
   defp file_error(:not_found), do: :environment_file_not_found
   defp file_error(:not_regular), do: :environment_file_not_regular
   defp file_error(:unreadable), do: :environment_file_unreadable
@@ -98,6 +126,50 @@ defmodule PtcRunner.Dotenv do
   defp file_error(:invalid_utf8), do: :environment_file_invalid_utf8
   defp file_error(:environment_file_invalid), do: :environment_file_invalid_utf8
   defp file_error(_reason), do: :environment_file_unreadable
+
+  defp declared_keys(path) do
+    with {:ok, canonical} <- ConfinedFile.resolve_absolute(Path.expand(path)),
+         {:ok, bytes} <-
+           ConfinedFile.read(Path.dirname(canonical), Path.basename(canonical), @max_bytes),
+         true <- String.valid?(bytes) do
+      keys =
+        bytes
+        |> String.split("\n")
+        |> Enum.reduce([], fn line, keys ->
+          case String.trim(line) do
+            "" -> keys
+            "#" <> _comment -> keys
+            assignment -> declared_key(assignment, keys)
+          end
+        end)
+
+      {:ok, Enum.reverse(keys)}
+    else
+      _invalid -> {:error, :invalid_environment_file}
+    end
+  rescue
+    _exception -> {:error, :invalid_environment_file}
+  catch
+    _kind, _reason -> {:error, :invalid_environment_file}
+  end
+
+  defp declared_key(assignment, keys) do
+    case String.split(assignment, "=", parts: 2) do
+      [key, _value] ->
+        key = String.trim(key)
+        if key in keys, do: keys, else: [key | keys]
+
+      _invalid ->
+        keys
+    end
+  end
+
+  defp restore_environment(previous) do
+    Enum.each(previous, fn
+      {key, nil} -> System.delete_env(key)
+      {key, value} -> System.put_env(key, value)
+    end)
+  end
 
   defp parse_env_line(""), do: :ok
   defp parse_env_line("#" <> _), do: :ok

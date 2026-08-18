@@ -397,6 +397,17 @@ defmodule PtcRunner.Kernel.Dispatcher do
         name: public_name
       })
 
+    :telemetry.execute(
+      [:ptc_runner, :capability, :start],
+      %{system_time: System.system_time()},
+      %{
+        name: public_name,
+        environment: environment,
+        capability_id: capability_id,
+        live_run: state.pid
+      }
+    )
+
     case Events.emit(state, event_sink, "capability-started", data) do
       :ok ->
         {invocation_result, input_captured?} =
@@ -485,6 +496,18 @@ defmodule PtcRunner.Kernel.Dispatcher do
             status: result.status,
             duration_ms: Events.duration_ms(started_ms)
           })
+
+        :telemetry.execute(
+          [:ptc_runner, :capability, :stop],
+          %{duration_ms: Events.duration_ms(started_ms)},
+          %{
+            name: public_name,
+            environment: environment,
+            capability_id: capability_id,
+            status: result.status,
+            live_run: state.pid
+          }
+        )
 
         _ = Events.emit(state, event_sink, "capability-stopped", stopped_data)
 

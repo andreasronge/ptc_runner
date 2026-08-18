@@ -39,6 +39,8 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
+  alias PtcRunner.Lisp.Prelude
+  alias PtcRunner.LiveStatus.Target
 
   @mission_compile_timeout_ms 5_000
   @mission_bundles_bytes 4_000_000
@@ -50,6 +52,12 @@ defmodule PtcRunner.Kernel.RunCoordinator do
          true <- InstallationCatalog.valid?(catalog),
          true <- catalog.installed_limits == request.package.installed_limits,
          {:ok, workflow_bundle, mission_bundles} <- compile_application(request.package),
+         :ok <-
+           validate_entry_missions(
+             workflow_bundle,
+             request.package.entry,
+             request.package.missions
+           ),
          {:ok, declarations, derived} <-
            bind_providers(
              request.package,
@@ -143,6 +151,33 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   def local_checks(_prepared, _catalog, _services, _target), do: internal_error()
 
   @doc """
+  Runs the declaration-owned local input checks for `validate`.
+
+  `validate` acquires no provider and marks no activity, but a replay
+  installation names a fixture file the declaration owns. Reading it here is
+  the same class of work as compiling the components the manifest names, and
+  keeps `validate` from passing a host document whose fixtures `run` cannot
+  load.
+  """
+  @spec declared_input_checks(
+          PreparedRun.t() | nil,
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t()
+        ) :: :ok | {:error, CommandDiagnostic.t()}
+  def declared_input_checks(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services
+      ) do
+    LocalPreflight.run_declared_inputs(prepared, catalog, services, local_deadline(prepared))
+  end
+
+  def declared_input_checks(nil, %InstallationCatalog{} = catalog, %ProviderRuntimeServices{}),
+    do: if(InstallationCatalog.valid?(catalog), do: :ok, else: internal_error())
+
+  def declared_input_checks(_prepared, _catalog, _services), do: internal_error()
+
+  @doc """
   Collects every attributable audited-local finding for default doctor.
 
   This uses the same sealed declarations, callbacks, and absolute phase budget
@@ -181,11 +216,23 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              | :invalid_publication_authority
              | :provider_session_required
              | term()}
-  def execute(%PreparedRun{} = prepared, authority), do: open_free(prepared, authority, :run)
-
+  def execute(%PreparedRun{} = prepared, authority), do: execute(prepared, authority, nil)
   def execute(_prepared, _authority), do: {:error, :invalid_prepared_run}
 
-  defp open_free(prepared, authority, operation) do
+  @doc false
+  @spec execute(PreparedRun.t(), PublicationAuthority.t(), Target.t() | nil) ::
+          {:ok, ExecutionOutcome.t()}
+          | {:error,
+             :invalid_prepared_run
+             | :invalid_publication_authority
+             | :provider_session_required
+             | term()}
+  def execute(%PreparedRun{} = prepared, authority, live_status),
+    do: open_free(prepared, authority, :run, live_status)
+
+  def execute(_prepared, _authority, _live_status), do: {:error, :invalid_prepared_run}
+
+  defp open_free(prepared, authority, operation, live_status) do
     cond do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
@@ -198,7 +245,15 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
       true ->
         with {:ok, owner} <-
-               ExecutionSessionOwner.start(prepared, authority, self(), nil, nil, operation),
+               ExecutionSessionOwner.start(
+                 prepared,
+                 authority,
+                 self(),
+                 nil,
+                 nil,
+                 operation,
+                 live_status
+               ),
              do: ExecutionSessionOwner.await(owner)
     end
   end
@@ -218,9 +273,30 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              | term()}
   def execute(%PreparedRun{} = prepared, authority, provider_execution, notifier)
       when is_nil(notifier) or is_function(notifier, 1),
-      do: open_active(prepared, authority, provider_execution, notifier, :run)
+      do: execute(prepared, authority, provider_execution, notifier, nil)
 
   def execute(_prepared, _authority, _provider_execution, _notifier),
+    do: {:error, :invalid_prepared_run}
+
+  @doc false
+  @spec execute(
+          PreparedRun.t(),
+          PublicationAuthority.t(),
+          ProviderExecution.t(),
+          (binary() -> term()) | nil,
+          Target.t() | nil
+        ) ::
+          {:ok, ExecutionOutcome.t()}
+          | {:error,
+             :invalid_prepared_run
+             | :invalid_publication_authority
+             | :invalid_provider_execution
+             | term()}
+  def execute(%PreparedRun{} = prepared, authority, provider_execution, notifier, live_status)
+      when is_nil(notifier) or is_function(notifier, 1),
+      do: open_active(prepared, authority, provider_execution, notifier, :run, live_status)
+
+  def execute(_prepared, _authority, _provider_execution, _notifier, _live_status),
     do: {:error, :invalid_prepared_run}
 
   # Internal only, like its `execute/4` neighbour.
@@ -243,12 +319,12 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              | :invalid_provider_execution
              | term()}
   def connect(%PreparedRun{} = prepared, authority, provider_execution),
-    do: open_active(prepared, authority, provider_execution, nil, :connect)
+    do: open_active(prepared, authority, provider_execution, nil, :connect, nil)
 
   def connect(_prepared, _authority, _provider_execution),
     do: {:error, :invalid_prepared_run}
 
-  defp open_active(prepared, authority, provider_execution, notifier, operation) do
+  defp open_active(prepared, authority, provider_execution, notifier, operation, live_status) do
     cond do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
@@ -270,7 +346,8 @@ defmodule PtcRunner.Kernel.RunCoordinator do
                  self(),
                  provider_execution,
                  notifier,
-                 operation
+                 operation,
+                 live_status
                ),
              do: ExecutionSessionOwner.await(owner)
     end
@@ -465,6 +542,38 @@ defmodule PtcRunner.Kernel.RunCoordinator do
       }
     end)
   end
+
+  @doc """
+  Rejects an entry that evaluates into a mission when the manifest declares none.
+
+  `kernel-mission-model-context` answers `unknown_mission` for every name a
+  manifest without missions can supply, so a run that reaches it cannot reach its
+  first model request. Both facts are in the documents `validate` already parses:
+  the compiled entry's transitive tool references, and whether the manifest's
+  mission map is empty. Which mission the entry will *name* is not decidable here
+  — it comes from runtime configuration — so nothing else is checked.
+
+  The reference set is a may-call set, so an entry that reaches the capability
+  only on a branch its input never takes is refused too. That is the deliberate
+  trade: such a manifest carries a mission-evaluating library it never uses, the
+  remedy is one declared mission, and the failure it replaces is a paid run
+  ending in `execution/workflow_failed` with nothing naming the cause.
+  """
+  @spec validate_entry_missions(PtcRunner.Kernel.FrozenBundle.t(), binary(), map() | nil) ::
+          :ok | {:error, CommandDiagnostic.t()}
+  def validate_entry_missions(workflow_bundle, entry, missions) do
+    if map_size(missions || %{}) == 0 and mission_context_entry?(workflow_bundle, entry),
+      do: {:error, diagnostic(:bundle, :mission_undeclared)},
+      else: :ok
+  end
+
+  defp mission_context_entry?(%{prelude: prelude}, entry) when is_binary(entry) do
+    "kernel-mission-model-context" in Prelude.export_tool_refs(prelude, entry)
+  rescue
+    _exception -> false
+  end
+
+  defp mission_context_entry?(_bundle, _entry), do: false
 
   defp prepare_providers(package, workflow_bundle, mission_bundles, catalog, identity) do
     package.providers

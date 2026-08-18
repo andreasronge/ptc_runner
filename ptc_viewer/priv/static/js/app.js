@@ -3,7 +3,9 @@ import { renderKernelTranscript } from './kernel-transcript.js';
 import { renderSemanticConversation } from './semantic-conversation.js';
 import { createAnalyzeButton, createReplController, nextTabName, readViewerConfig } from './repl.js';
 import { createRunCatalog } from './run-catalog.js';
+import { createLiveController, liveTokenFromSearch } from './live.js';
 import { commitCurrentLoad } from './current-load.js';
+import { displayRunName, formatRunUsage, searchableRunFields } from './run-display.js';
 import { truncate } from './utils.js';
 
 function formatDate(isoString) {
@@ -21,6 +23,7 @@ const state = {
   analyzeActions: new Set(),
   runs: [],
   page: null,
+  project: null,
   catalogGeneration: 0,
   routeGeneration: 0,
   query: '',
@@ -99,8 +102,8 @@ function renderRunPicker() {
 function matchesQuery(run, query) {
   if (!query) return true;
   const needle = query.toLowerCase();
-  return [run.run_id, run.name, run.status, run.trace_id, run.workflow_prelude?.hash]
-    .some(field => typeof field === 'string' && field.toLowerCase().includes(needle));
+  return searchableRunFields(run, state.project)
+    .some(field => field.toLowerCase().includes(needle));
 }
 
 function RunPicker() {
@@ -113,6 +116,7 @@ function RunPicker() {
   // the list. That control is the only "back to runs" affordance, replacing
   // the tab-plus-breadcrumb pair that used to sit two labels apart.
   if (selected) {
+    const displayName = displayRunName(selected, state.project);
     return html`
       <div class="file-picker-bar">
         <button type="button" class="btn secondary file-picker-back" onClick=${() => selectRun(null)}>
@@ -122,7 +126,10 @@ function RunPicker() {
           <span class=${`trace-kind badge-${selected.status === 'ok' ? 'agent' : 'error'}`}>
             ${selected.status || 'incomplete'}
           </span>
-          <strong>${selected.run_id}</strong>
+          <span class="file-picker-current-name">
+            <strong>${displayName}</strong>
+            ${displayName !== selected.run_id && html`<small>${selected.run_id}</small>`}
+          </span>
         </span>
       </div>
     `;
@@ -148,20 +155,27 @@ function RunPicker() {
 }
 
 function RunRow({ run }) {
-  // The run ID identifies the run; the bundle hash identifies the workflow and
-  // is shared by every run of it, so it is a secondary fact rather than the
-  // row's headline.
+  const displayName = displayRunName(run, state.project);
+  const usage = formatRunUsage(run.llm_usage_total);
+
   return html`
     <button type="button" class="file-picker-item" onClick=${() => selectRun(run.run_id)}>
       <span class="file-picker-main">
         <span class=${`trace-kind badge-${run.status === 'ok' ? 'agent' : 'error'}`}>
           ${run.status || 'incomplete'}
         </span>
-        <span class="filename">${run.run_id}</span>
+        <span class="file-picker-identity">
+          <span class="filename">${displayName}</span>
+          ${displayName !== run.run_id && html`<span class="file-picker-run-id">${run.run_id}</span>`}
+        </span>
       </span>
       <span class="file-meta">
         ${run.start_timestamp && html`<span class="modified">${formatDate(run.start_timestamp)}</span>`}
         <span class="size">${run.evaluations ?? 0} evaluations</span>
+        ${usage.map(value => html`<span class="file-picker-usage">${value}</span>`)}
+        ${Object.entries(run.tags || {}).map(([key, value]) => html`
+          <span class="file-picker-tag">${key}: ${value}</span>
+        `)}
         <span class="file-picker-query" title=${run.workflow_prelude?.hash || ''}>
           ${shortenHash(run.workflow_prelude?.hash)}
         </span>
@@ -202,6 +216,7 @@ const runCatalog = createRunCatalog({
 function currentRoute() {
   const hash = location.hash.replace(/^#\/?/, '');
   if (hash === 'repl') return { tab: 'repl', runId: null };
+  if (hash === 'live' && state.live) return { tab: 'live', runId: null };
   const match = hash.match(/^run\/(.+)$/);
   if (match) return { tab: 'runs', runId: decodeURIComponent(match[1]) };
   return { tab: 'runs', runId: null };
@@ -331,6 +346,7 @@ function renderRun(data, { fresh = false, routeGeneration = state.routeGeneratio
 
   const container = document.getElementById('view-container');
   renderKernelTranscript(container, data, {
+    title: displayRunName(metadata, state.project),
     onLoadMore: async button => {
       button.disabled = true;
       button.textContent = 'Loading…';
@@ -385,17 +401,21 @@ function activateTab(name, { focus = false } = {}) {
   state.activeTab = name;
   const isRuns = name === 'runs';
   document.getElementById('runs-panel').hidden = !isRuns;
-  document.getElementById('repl-panel').hidden = isRuns;
+  document.getElementById('repl-panel').hidden = name !== 'repl';
+  document.getElementById('live-panel').hidden = name !== 'live';
   document.getElementById('breadcrumb').hidden = !isRuns;
 
-  for (const [tabName, tab] of [['runs', document.getElementById('runs-tab')], ['repl', document.getElementById('repl-tab')]]) {
+  for (const tabName of ['runs', 'repl', 'live']) {
+    const tab = document.getElementById(`${tabName}-tab`);
+    if (!tab) continue;
     const selected = tabName === name;
     tab.classList.toggle('active', selected);
     tab.setAttribute('aria-selected', String(selected));
     tab.tabIndex = selected ? 0 : -1;
   }
   if (focus) document.getElementById(`${name}-tab`).focus();
-  state.repl?.setActive(!isRuns);
+  state.repl?.setActive(name === 'repl');
+  state.live?.setActive(name === 'live');
   requestAnimationFrame(() => window.scrollTo(0, state.scrollPositions[name] || 0));
 }
 
@@ -404,13 +424,17 @@ function navigateToTab(name) {
     location.hash = '#/repl';
     return;
   }
+  if (name === 'live') {
+    location.hash = '#/live';
+    return;
+  }
   location.hash = state.selectedRunId ? `#/run/${encodeURIComponent(state.selectedRunId)}` : '#/';
 }
 
 function setupTabs() {
   const tabs = document.getElementById('primary-tabs');
   tabs.hidden = false;
-  for (const name of ['runs', 'repl']) {
+  for (const name of ['runs', 'repl', 'live']) {
     document.getElementById(`${name}-tab`).addEventListener('click', () => navigateToTab(name));
   }
   tabs.addEventListener('keydown', event => {
@@ -419,15 +443,25 @@ function setupTabs() {
     const current = event.target.id === 'runs-tab' ? 'runs'
       : event.target.id === 'repl-tab' ? 'repl'
         : state.activeTab;
-    const next = nextTabName(current, event.key);
+    const enabledTabs = ['runs', 'repl', 'live']
+      .filter(name => !document.getElementById(`${name}-tab`).hidden);
+    const next = nextTabName(current, event.key, enabledTabs);
     navigateToTab(next);
     activateTab(next, { focus: true });
   });
 }
 
 const config = readViewerConfig();
+const liveToken = liveTokenFromSearch(location.search);
+
+if (liveToken) {
+  const url = new URL(location.href);
+  url.searchParams.delete('live_token');
+  history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+setupTabs();
 if (config.repl_enabled) {
-  setupTabs();
   state.repl = createReplController({
     pageNonce: config.page_bootstrap_nonce,
     getSelectedRunId: () => state.currentRun?.metadata?.run_id || null,
@@ -435,6 +469,28 @@ if (config.repl_enabled) {
     refreshRuns: () => runCatalog.refresh(),
     onAvailabilityChange: setReplAvailability
   });
+} else {
+  document.getElementById('repl-tab').hidden = true;
+}
+if (config.live_enabled) {
+  state.live = createLiveController({
+    mutationNonce: config.live_mutation_nonce,
+    liveToken,
+    onProject: project => {
+      state.project = project;
+      renderRunPicker();
+      if (state.currentRun) renderRun(state.currentRun);
+    },
+    onInspectRun: runId => {
+      void runCatalog.refresh();
+      selectRun(runId);
+    },
+    onLiveCount: count => {
+      document.getElementById('live-tab').classList.toggle('has-live', count > 0);
+    }
+  });
+} else {
+  document.getElementById('live-tab').hidden = true;
 }
 
 window.addEventListener('hashchange', () => void applyRoute());

@@ -19,20 +19,21 @@ edge. It never names a suspect.
 Capture the failed run first. It exits nonzero by design:
 
 ```console
-mix ptc run examples/debug-a-failed-run/target.ptc-project.json
+ptc init debug-a-failed-run --example debug-a-failed-run
+ptc run debug-a-failed-run/target.ptc-project.json
 ```
 
 Then navigate that capture:
 
 ```console
-mix ptc run examples/debug-a-failed-run/debugger.ptc-project.json
+ptc run debug-a-failed-run/debugger.ptc-project.json
 ```
 
 The debugger is a private run, so its value goes to
-`examples/debug-a-failed-run/debugger/.ptc/results/` rather than stdout:
+`debug-a-failed-run/debugger/.ptc/results/` rather than stdout:
 
 ```console
-cat examples/debug-a-failed-run/debugger/.ptc/results/*.private.json
+cat debug-a-failed-run/debugger/.ptc/results/*.private.json
 ```
 
 It reports the boundary failure, the exact generated program including the
@@ -48,8 +49,8 @@ the captured call requires 20. Edit `target/pricing.rule.clj`, remove the stale
 capture, and rerun the target to see it pass:
 
 ```console
-rm -rf examples/debug-a-failed-run/target/.ptc
-mix ptc run examples/debug-a-failed-run/target.ptc-project.json
+rm -rf debug-a-failed-run/target/.ptc
+ptc run debug-a-failed-run/target.ptc-project.json
 ```
 
 ## Optional: let a model walk it
@@ -60,8 +61,8 @@ on the command line rather than placing one in this directory, which ships
 inside the published package:
 
 ```console
-mix ptc run examples/debug-a-failed-run/debugger-agent.ptc-project.json --env-file .env
-cat examples/debug-a-failed-run/debugger-agent/.ptc/results/*.private.json
+ptc run debug-a-failed-run/debugger-agent.ptc-project.json --env-file .env
+cat debug-a-failed-run/debugger-agent/.ptc/results/*.private.json
 ```
 
 Selecting the inspection snapshot fixes the run's class to

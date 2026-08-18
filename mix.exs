@@ -458,6 +458,7 @@ defmodule PtcRunner.MixProject do
           "docs/conformance/index.md",
           "docs/guides/quickstart.md",
           "docs/guides/getting-started.md",
+          "docs/guides/agent-cli-usage.md",
           "docs/guides/manifests-and-capabilities.md",
           "docs/guides/host-configuration.md",
           "docs/guides/project-configuration.md",

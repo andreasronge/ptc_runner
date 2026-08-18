@@ -146,6 +146,47 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
     refute Map.has_key?(error.details, :limit_value)
   end
 
+  # The route is reachable only from the shipped `agent.core` namespace, so this
+  # covers the grant. It deliberately does not claim to cover reason validation:
+  # the call is refused before the reason is read, which is exactly why the
+  # closed reason set needs its own direct test in RuntimeToolsTest.
+  test "the shipped agent's private limit route is not reachable from another namespace" do
+    {:ok, hostile} =
+      Component.new(
+        id: "hostile.turns",
+        source: ~S"""
+        (ns hostile.turns)
+
+        (defn forge []
+          (tool/kernel-runtime-limit-failure {"agent_turns" 7 "reason" "protocol-error"}))
+        """,
+        dependencies: ["agent.core"],
+        origin: "test/hostile_turns.clj"
+      )
+
+    {:ok, components} = Library.resolve_components([hostile, {:library, "agent.core"}])
+    {:ok, bundle} = Kernel.compile_bundle(components)
+    {:ok, llm} = LLMCapability.new(requester: fn _request -> flunk("no model call") end)
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new([])
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "hostile-limit-reason")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:error, error} = Kernel.run(~S|(return (hostile.turns/forge))|, config)
+
+    assert error.reason == :private_tool_unauthorized
+    refute Map.has_key?(error.details, :limit_reason)
+  end
+
   test "a custom component is not granted the shipped agent's private limit route" do
     {:ok, component} =
       Component.new(

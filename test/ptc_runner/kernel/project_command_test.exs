@@ -15,8 +15,10 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
     project = Path.join(target, "ptc-project.json")
 
-    assert {:ok, %CommandOutcome{envelope: %{"status" => "ok", "run_ref" => run_ref}}} =
+    assert {:ok, %CommandOutcome{envelope: %{"status" => "ok", "run_ref" => run_ref} = envelope}} =
              CommandEngine.dispatch(["run", project])
+
+    assert envelope["result"]["value"] == %{"greeting" => "hello world"}
 
     assert [trace] = Path.wildcard(Path.join([target, ".ptc", "traces", "*.jsonl"]))
     assert File.regular?(trace)

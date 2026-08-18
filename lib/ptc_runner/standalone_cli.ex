@@ -1,36 +1,37 @@
 defmodule PtcRunner.StandaloneCLI do
   @moduledoc false
 
-  alias PtcRunner.GatewayFrontend
   alias PtcRunner.Kernel.CommandPresentation
   alias PtcRunner.Kernel.CommandRouter
-  alias PtcRunner.ReplFrontend
+  alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.OneShotFrontend
   alias PtcRunner.StandaloneCommandRuntime
-  alias PtcRunner.TranscriptFrontend
-  alias PtcRunner.ViewerFrontend
 
   @doc false
   @spec execute([binary()]) :: CommandPresentation.t()
-  def execute(argv),
+  def execute(argv), do: execute(argv, [])
+
+  @doc false
+  @spec execute([binary()], keyword()) :: CommandPresentation.t()
+  def execute(argv, frontend_opts) when is_list(frontend_opts),
     do:
       CommandRouter.execute(
         argv,
         :standalone,
-        &StandaloneCommandRuntime.bootstrap/1,
-        &run_one_shot/2
+        fn arguments -> bootstrap(arguments, frontend_opts) end,
+        fn arguments, runtime ->
+          OneShotFrontend.run(
+            arguments,
+            runtime,
+            Keyword.delete(frontend_opts, :live_status)
+          )
+        end
       )
 
-  defp run_one_shot(%{command: :repl} = arguments, runtime),
-    do: ReplFrontend.run(arguments, runtime)
-
-  defp run_one_shot(%{command: :transcript} = arguments, runtime),
-    do: TranscriptFrontend.run(arguments, runtime)
-
-  defp run_one_shot(%{command: :serve} = arguments, runtime),
-    do: GatewayFrontend.run(arguments, runtime)
-
-  defp run_one_shot(%{command: :viewer} = arguments, runtime),
-    do: ViewerFrontend.run(arguments, runtime)
+  defp bootstrap(arguments, frontend_opts) do
+    with {:ok, runtime} <- StandaloneCommandRuntime.bootstrap(arguments),
+         do: CommandRuntime.attach_live_status(runtime, frontend_opts)
+  end
 
   @doc false
   @spec main([binary()]) :: no_return()

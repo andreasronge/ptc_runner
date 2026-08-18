@@ -102,10 +102,16 @@ assert.equal(templatePayloadMatches(current, { ...envelope('server-b', 2, 7), se
 
 assert.match(continuationExplanation('committed_with_history'), /\*1/);
 assert.match(continuationExplanation('preserved'), /preserved/);
-assert.equal(nextTabName('runs', 'ArrowLeft'), 'repl');
-assert.equal(nextTabName('repl', 'ArrowRight'), 'runs');
+assert.equal(nextTabName('runs', 'ArrowLeft'), 'live');
+assert.equal(nextTabName('repl', 'ArrowRight'), 'live');
+assert.equal(nextTabName('live', 'ArrowRight'), 'runs');
 assert.equal(nextTabName('repl', 'Home'), 'runs');
-assert.equal(nextTabName('runs', 'End'), 'repl');
+assert.equal(nextTabName('runs', 'End'), 'live');
+assert.equal(nextTabName('runs', 'ArrowRight', ['runs', 'live']), 'live');
+assert.equal(nextTabName('live', 'ArrowLeft', ['runs', 'live']), 'runs');
+assert.equal(nextTabName('runs', 'ArrowRight', ['runs', 'repl']), 'repl');
+assert.equal(nextTabName('repl', 'ArrowRight', ['runs', 'repl']), 'runs');
+assert.equal(nextTabName('runs', 'ArrowRight', []), 'runs');
 
 const fakeDialog = { returnValue: 'confirm', opened: false, showModal() { this.opened = true; } };
 openResetDialog(fakeDialog);
@@ -116,8 +122,14 @@ const config = { repl_enabled: true, page_bootstrap_nonce: 'nonce' };
 const encoded = Buffer.from(JSON.stringify(config)).toString('base64url');
 const fakeDocument = { querySelector: () => ({ content: encoded }) };
 assert.deepEqual(readViewerConfig(fakeDocument), config);
-assert.deepEqual(readViewerConfig({ querySelector: () => null }), { repl_enabled: false });
-assert.deepEqual(readViewerConfig({ querySelector: () => ({ content: 'not-json' }) }), { repl_enabled: false });
+assert.deepEqual(readViewerConfig({ querySelector: () => null }), {
+  repl_enabled: false,
+  live_enabled: false
+});
+assert.deepEqual(readViewerConfig({ querySelector: () => ({ content: 'not-json' }) }), {
+  repl_enabled: false,
+  live_enabled: false
+});
 
 const ids = [
   'repl-status', 'repl-lifecycle', 'repl-captured-at', 'repl-run-count',

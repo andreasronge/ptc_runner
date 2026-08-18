@@ -1,13 +1,16 @@
 defmodule PtcRunner.Lisp.Introspection do
   @moduledoc """
-  Read-only introspection over the attached prelude's public exports.
+  Read-only introspection over the callable PTC-Lisp surface.
 
-  Backs the `dir`, `apropos`, `doc`, and `export-meta` builtins. The same
+  Backs the `dir`, `apropos`, `doc`, and `export-meta` builtins. `dir` and
+  `export-meta` describe the attached prelude. `apropos` and `doc` additionally
+  expose fixed built-ins and the bounded Java surface from
+  `PtcRunner.Lisp.Registry`. The same
   answers are produced in the REPL, in workflow and mission source, and inside
   a prelude export reading another prelude's documentation — there is no
   REPL-only path.
 
-  ## What is visible
+  ## Attached prelude visibility
 
   Only public export records (`%PtcRunner.Lisp.Prelude.Export{}`), which cover
   both `:prompt` and `:discoverable` visibility. Private `defn-` helpers have no
@@ -54,15 +57,17 @@ defmodule PtcRunner.Lisp.Introspection do
 
   ## Misses
 
-  An unknown ref, a malformed ref, or an absent prelude is a miss, not a
-  failure: `export_meta/3` answers `nil`, `render_doc/3` answers a "no
-  documentation" line, and the listing functions answer `[]`. Asking about
-  something that does not exist is a normal part of exploring.
+  An exact attached export occupies its ref before its visibility filter is
+  applied. A hidden attached ref therefore cannot fall through to registry
+  documentation for the same spelling. Otherwise `doc` falls back to the
+  registry, and `apropos` merges visible attached refs with canonical registry
+  names. An unknown or malformed ref is a miss, not a failure.
   """
 
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Export
+  alias PtcRunner.Lisp.Registry
 
   @type visible :: (Export.t() -> boolean())
   @type operation :: :dir | :apropos | :doc | :export_meta
@@ -158,11 +163,13 @@ defmodule PtcRunner.Lisp.Introspection do
   end
 
   @doc """
-  Sorted visible export refs whose ref or docstring contains `query`.
+  Sorted visible export refs and canonical registry names matching `query`.
 
-  Matching is case-insensitive substring. An export with no docstring is
-  matched on its ref alone. A blank query matches nothing rather than
-  everything — an empty search is not a request for the whole surface.
+  Matching is a case-insensitive literal substring. Attached exports search
+  their ref and docstring; registry entries search their name, signatures,
+  description, notes, divergences, and section. A blank query matches nothing
+  rather than everything — an empty search is not a request for the whole
+  surface.
   """
   @spec apropos(Prelude.t() | nil, String.t(), visible()) :: [String.t()]
   def apropos(prelude, query, visible) when is_binary(query) do
@@ -171,10 +178,23 @@ defmodule PtcRunner.Lisp.Introspection do
     if needle == "" do
       []
     else
-      prelude
-      |> visible_exports(visible)
-      |> Enum.filter(&matches?(&1, needle))
-      |> Enum.map(& &1.ref)
+      prelude_matches =
+        prelude
+        |> visible_exports(visible)
+        |> Enum.filter(&matches?(&1, needle))
+        |> Enum.map(& &1.ref)
+
+      hidden_registry_names = hidden_registry_names(prelude, visible)
+
+      registry_matches =
+        needle
+        |> Registry.apropos()
+        |> Enum.reject(&MapSet.member?(hidden_registry_names, &1.name))
+        |> Enum.map(& &1.name)
+
+      prelude_matches
+      |> Kernel.++(registry_matches)
+      |> Enum.uniq()
       |> Enum.sort()
     end
   end
@@ -197,16 +217,27 @@ defmodule PtcRunner.Lisp.Introspection do
   end
 
   @doc """
-  Rendered human-readable documentation for one visible export.
+  Rendered human-readable documentation for one visible attached export or
+  fixed registry entry.
 
   Callers print this rather than returning it, so documentation text is charged
-  to the print budget instead of the result channel.
+  to the print budget instead of the result channel. An attached ref occupies
+  its exact spelling before visibility is applied and therefore cannot fall
+  through to registry documentation when hidden.
   """
   @spec render_doc(Prelude.t() | nil, String.t(), visible()) :: String.t()
   def render_doc(prelude, ref, visible) when is_binary(ref) do
-    case fetch(prelude, ref, visible) do
-      nil -> ~s(No documentation found for "#{ref}".)
-      export -> render_export(export)
+    case fetch_attached(prelude, ref) do
+      %Export{} = export ->
+        if visible.(export),
+          do: render_export(export),
+          else: missing_doc(ref)
+
+      nil ->
+        case Registry.doc(ref) do
+          nil -> missing_doc(ref)
+          entry -> render_registry_entry(entry)
+        end
     end
   end
 
@@ -223,6 +254,30 @@ defmodule PtcRunner.Lisp.Introspection do
     prelude
     |> visible_exports(visible)
     |> Enum.find(&(&1.ref == ref))
+  end
+
+  defp fetch_attached(%Prelude{exports: exports}, ref), do: Enum.find(exports, &(&1.ref == ref))
+  defp fetch_attached(_prelude, _ref), do: nil
+
+  defp hidden_registry_names(%Prelude{exports: exports}, visible) do
+    exports
+    |> Enum.reject(visible)
+    |> Enum.map(& &1.ref)
+    |> MapSet.new()
+  end
+
+  defp hidden_registry_names(_prelude, _visible), do: MapSet.new()
+
+  defp missing_doc(ref), do: ~s(No documentation found for "#{ref}".)
+
+  defp render_registry_entry(entry) do
+    details =
+      [entry.description, entry.notes, entry.divergences]
+      |> Enum.reject(&(&1 in [nil, ""]))
+      |> Enum.map_join("\n", &indent/1)
+
+    (entry.signatures ++ if(details == "", do: [], else: [details]))
+    |> Enum.join("\n")
   end
 
   defp matches?(%Export{ref: ref, doc: doc}, needle) do

@@ -768,7 +768,13 @@ defmodule PtcRunner.Kernel.RunBuilder do
              deadline,
              :erlang.external_size(workflow_bundle)
            ),
-         :ok <- RunCoordinator.validate_entry(workflow_bundle, request.package.entry) do
+         :ok <- RunCoordinator.validate_entry(workflow_bundle, request.package.entry),
+         :ok <-
+           RunCoordinator.validate_entry_missions(
+             workflow_bundle,
+             request.package.entry,
+             request.package.missions
+           ) do
       assemble(
         request,
         {workflow_bundle, mission_bundles},

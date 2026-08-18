@@ -1,13 +1,11 @@
 defmodule PtcRunner.MixCommandAdapter do
   @moduledoc false
 
-  alias PtcRunner.GatewayFrontend
   alias PtcRunner.Kernel.CommandPresentation
   alias PtcRunner.Kernel.CommandRouter
+  alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.MixCommandRuntime
-  alias PtcRunner.ReplFrontend
-  alias PtcRunner.TranscriptFrontend
-  alias PtcRunner.ViewerFrontend
+  alias PtcRunner.OneShotFrontend
 
   @doc false
   @spec execute([binary()]) :: CommandPresentation.t()
@@ -20,23 +18,20 @@ defmodule PtcRunner.MixCommandAdapter do
       CommandRouter.execute(
         args,
         :mix,
-        &MixCommandRuntime.bootstrap/1,
-        fn arguments, runtime -> run_one_shot(arguments, runtime, frontend_opts) end
+        fn arguments -> bootstrap(arguments, frontend_opts) end,
+        fn arguments, runtime ->
+          OneShotFrontend.run(arguments, runtime, repl_frontend_opts(frontend_opts))
+        end
       )
 
   def execute(_args, _frontend_opts), do: execute([], [])
 
-  defp run_one_shot(%{command: :repl} = arguments, runtime, frontend_opts),
-    do: ReplFrontend.run(arguments, runtime, frontend_opts)
+  defp bootstrap(arguments, frontend_opts) do
+    with {:ok, runtime} <- MixCommandRuntime.bootstrap(arguments),
+         do: CommandRuntime.attach_live_status(runtime, frontend_opts)
+  end
 
-  defp run_one_shot(%{command: :transcript} = arguments, runtime, _frontend_opts),
-    do: TranscriptFrontend.run(arguments, runtime)
-
-  defp run_one_shot(%{command: :serve} = arguments, runtime, _frontend_opts),
-    do: GatewayFrontend.run(arguments, runtime)
-
-  defp run_one_shot(%{command: :viewer} = arguments, runtime, _frontend_opts),
-    do: ViewerFrontend.run(arguments, runtime)
+  defp repl_frontend_opts(opts), do: Keyword.delete(opts, :live_status)
 
   @doc false
   @spec run_task([binary()]) :: CommandPresentation.t() | no_return()

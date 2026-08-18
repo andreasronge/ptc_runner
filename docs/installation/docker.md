@@ -48,13 +48,19 @@ which a published port cannot reach. Bind the wildcard only inside the
 container and keep the host publication on loopback:
 
 ```console
+viewer_token="$(openssl rand -hex 32)"
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   --env HOME=/tmp \
+  --env PTC_VIEWER_TOKEN="$viewer_token" \
   -p 127.0.0.1:4123:4123 \
   -v "$PWD:/work" \
   ptc:dev viewer /work/ptc-project.json --listen 0.0.0.0
 ```
+
+Open `http://localhost:4123/?live_token=$viewer_token#/live`. The page removes
+the token from the visible URL after bootstrapping and uses it for Live
+mutations. The Runs trace browser itself remains unauthenticated.
 
 Writing `-p 4123:4123` instead exposes an unauthenticated trace browser to the
 network. The `127.0.0.1:` prefix is the host-side security decision.

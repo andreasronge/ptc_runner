@@ -14,7 +14,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
   (ns main)
 
   (defn run [input]
-    (return input))
+    (return {"greeting" (str "hello " (get input "name"))}))
   """
 
   @manifest """
@@ -30,7 +30,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
       "entry": "main/run"
     },
     "input": {
-      "value": {}
+      "value": {"name": "world"}
     }
   }
   """
@@ -44,7 +44,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
     assert {:ok, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["init", target])
 
     assert outcome.envelope["result"] == %{
-             "created" => [".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
+             "created" => ["AGENTS.md", ".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
            }
 
     assert File.read!(Path.join(target, "main.clj")) == @main_clj
@@ -60,6 +60,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
 
     assert Enum.sort(File.ls!(target)) == [
              ".gitignore",
+             "AGENTS.md",
              "main.clj",
              "ptc-project.json",
              "ptc.json"
@@ -329,6 +330,61 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
     assert staging_entries(directory) == []
   end
 
+  @tag :tmp_dir
+  test "a nested staging directory replaced by a symlink refuses the write", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "tutorial")
+    escape = Path.join(directory, "escape")
+    File.mkdir!(escape)
+    test_process = self()
+
+    # A file is opened through the directories this run created. Swapping one for
+    # a symlink after creation would put every later write outside staging, so
+    # each recorded ancestor is verified again immediately before the open.
+    fault = fn
+      {:after_child_written, name}, %{staging: staging} ->
+        send(test_process, {:child_written, name})
+        nested = Path.join(staging, "01-orders")
+
+        if String.starts_with?(name, "01-orders/") and
+             match?({:ok, %File.Stat{type: :directory}}, File.lstat(nested)) do
+          File.rm_rf!(nested)
+          File.ln_s!(escape, nested)
+          send(test_process, {:replaced_after, name})
+        end
+
+        :ok
+
+      _stage, _context ->
+        :ok
+    end
+
+    assert_initialization_failed(
+      CommandInitializer.initialize(target, @run_ref,
+        example: "kernel-tutorial",
+        fault_hook: fault
+      )
+    )
+
+    assert_received {:replaced_after, swapped}
+
+    # Nothing was written after the swap: the very next open is refused, rather
+    # than following the symlink and materializing the rest of the tree outside
+    # the staging directory.
+    assert List.last(drain_written()) == swapped
+    refute File.exists?(target)
+    assert File.ls!(escape) == []
+  end
+
+  defp drain_written(written \\ []) do
+    receive do
+      {:child_written, name} -> drain_written(written ++ [name])
+    after
+      0 -> written
+    end
+  end
+
   defp assert_initialization_failed(result),
     do: assert_initialization_error(result, "initialization_failed")
 
@@ -350,6 +406,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
 
     assert Enum.sort(File.ls!(target)) == [
              ".gitignore",
+             "AGENTS.md",
              "main.clj",
              "ptc-project.json",
              "ptc.json"

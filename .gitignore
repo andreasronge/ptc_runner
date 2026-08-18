@@ -5,6 +5,9 @@ _build/
 # If you run "mix test --cover", coverage assets end up here.
 /cover/
 
+# Assembled by scripts/build_site.sh; the published site is built in CI.
+/_site/
+
 # The directory Mix downloads your dependencies sources to.
 /deps
 examples/*/deps/

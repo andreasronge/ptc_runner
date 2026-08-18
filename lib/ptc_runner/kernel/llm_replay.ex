@@ -48,6 +48,12 @@ defmodule PtcRunner.Kernel.LLMReplay do
   fail the call rather than inventing or reusing a response. Nothing here
   performs network activity, and the safe snapshot carries the format version,
   fixture-set hash, entry counts, and ceilings — never a payload or a path.
+
+  Load failures name the rule that refused the file. A rejected line reports
+  `{reason, line}`, and the line number is the number in the file, blank lines
+  counted, so a fixture author can open the file at the offending line. The
+  reason and the number are the only per-line detail that crosses the boundary;
+  the line's bytes never do.
   """
 
   alias PtcRunner.Kernel.ConfinedFile
@@ -75,12 +81,26 @@ defmodule PtcRunner.Kernel.LLMReplay do
           max_result_bytes: pos_integer()
         }
 
+  @type entry_reason ::
+          :invalid_json
+          | :entry_not_an_object
+          | :unknown_entry_key
+          | :schema_version_invalid
+          | :request_hash_invalid
+          | :response_missing
+          | :response_ambiguous
+          | :responses_invalid
+          | :response_too_large
+          | :duplicate_entry
+          | :entry_limit_exceeded
+
   @type error ::
-          :invalid_replay_fixtures
+          :replay_fixtures_unreadable
+          | :replay_fixtures_empty
           | :replay_fixtures_too_large
-          | :duplicate_replay_entry
-          | :replay_entry_limit_exceeded
+          | :replay_owner_unavailable
           | :resource_registrar_unavailable
+          | {entry_reason(), pos_integer()}
 
   @type fixture_summary :: %{
           entry_count: pos_integer(),
@@ -144,7 +164,7 @@ defmodule PtcRunner.Kernel.LLMReplay do
     end
   end
 
-  def probe(_directory, _path, _opts), do: {:error, :invalid_replay_fixtures}
+  def probe(_directory, _path, _opts), do: {:error, :replay_fixtures_unreadable}
 
   @doc """
   Returns the requester `LLMCapability` calls, so replay and live installations
@@ -252,8 +272,9 @@ defmodule PtcRunner.Kernel.LLMReplay do
   defp read_fixtures(directory, path) do
     case ConfinedFile.read(directory, path, @max_fixture_bytes) do
       {:ok, raw} when byte_size(raw) > 0 -> {:ok, raw}
+      {:ok, _empty} -> {:error, :replay_fixtures_empty}
       {:error, :too_large} -> {:error, :replay_fixtures_too_large}
-      _reason -> {:error, :invalid_replay_fixtures}
+      _reason -> {:error, :replay_fixtures_unreadable}
     end
   end
 
@@ -264,72 +285,117 @@ defmodule PtcRunner.Kernel.LLMReplay do
     end
   end
 
+  # Line numbers are assigned before blank lines are dropped, so a reported
+  # number is the number the author's editor shows rather than a count of the
+  # lines that survived filtering.
   defp parse(raw, max_entries, max_result_bytes) do
     raw
     |> String.split("\n")
-    |> Enum.reject(&(String.trim(&1) == ""))
-    |> Enum.reduce_while({:ok, %{}}, fn line, {:ok, entries} ->
+    |> Enum.with_index(1)
+    |> Enum.reject(fn {line, _number} -> String.trim(line) == "" end)
+    |> Enum.reduce_while({:ok, %{}}, fn {line, number}, {:ok, entries} ->
       case entry(line, max_result_bytes) do
         {:ok, key, _responses} when is_map_key(entries, key) ->
-          {:halt, {:error, :duplicate_replay_entry}}
+          {:halt, {:error, {:duplicate_entry, number}}}
 
         {:ok, _key, _responses} when map_size(entries) >= max_entries ->
-          {:halt, {:error, :replay_entry_limit_exceeded}}
+          {:halt, {:error, {:entry_limit_exceeded, number}}}
 
         {:ok, key, responses} ->
           {:cont, {:ok, Map.put(entries, key, responses)}}
 
-        {:error, _reason} = error ->
-          {:halt, error}
+        {:error, reason} ->
+          {:halt, {:error, {reason, number}}}
       end
     end)
     |> case do
       {:ok, entries} when map_size(entries) > 0 -> {:ok, entries}
-      {:ok, _empty} -> {:error, :invalid_replay_fixtures}
+      {:ok, _empty} -> {:error, :replay_fixtures_empty}
       error -> error
     end
   end
 
+  # One rejection per rule. Collapsing these into a single reason is what made a
+  # fixture unauthorable: eight different mistakes produced one sentence that
+  # named none of them.
   defp entry(line, max_result_bytes) do
-    with {:ok, value} <- StrictJSON.decode(line),
-         value = RetainedSize.detach_binaries(value),
-         true <- is_map(value) and not is_struct(value),
-         true <- Map.keys(value) -- @entry_keys == [],
-         @format_version <- value["schema_version"],
-         key when is_binary(key) <- value["request_hash"],
-         true <- key =~ @hash,
+    with {:ok, value} <- decoded_object(line),
+         :ok <- known_keys(value),
+         :ok <- schema_version(value),
+         {:ok, key} <- request_hash_key(value),
          {:ok, responses} <- responses(value),
-         true <- Enum.all?(responses, &valid_response?(&1, max_result_bytes)) do
+         :ok <- bounded_responses(responses, max_result_bytes) do
       {:ok, key, responses}
-    else
-      _reason -> {:error, :invalid_replay_fixtures}
     end
   end
 
-  # Exactly one of `response` or `responses`: accepting both would leave the
-  # replay order ambiguous.
-  defp responses(%{"response" => response, "responses" => _sequence}) when is_map(response),
-    do: :error
+  defp decoded_object(line) do
+    case StrictJSON.decode(line) do
+      {:ok, value} ->
+        detached = RetainedSize.detach_binaries(value)
 
-  defp responses(%{"response" => response}) when is_map(response), do: {:ok, [response]}
+        if is_map(detached) and not is_struct(detached),
+          do: {:ok, detached},
+          else: {:error, :entry_not_an_object}
 
-  defp responses(%{"responses" => sequence})
-       when is_list(sequence) and length(sequence) in 1..1_024 do
-    if Enum.all?(sequence, &is_map/1), do: {:ok, sequence}, else: :error
+      _invalid ->
+        {:error, :invalid_json}
+    end
   end
 
-  defp responses(_value), do: :error
+  defp known_keys(value) do
+    if Map.keys(value) -- @entry_keys == [], do: :ok, else: {:error, :unknown_entry_key}
+  end
 
-  defp valid_response?(response, max_result_bytes) do
+  defp schema_version(%{"schema_version" => @format_version}), do: :ok
+  defp schema_version(_value), do: {:error, :schema_version_invalid}
+
+  defp request_hash_key(%{"request_hash" => key}) when is_binary(key) do
+    if key =~ @hash, do: {:ok, key}, else: {:error, :request_hash_invalid}
+  end
+
+  defp request_hash_key(_value), do: {:error, :request_hash_invalid}
+
+  # Exactly one of `response` or `responses`: accepting both would leave the
+  # replay order ambiguous, whatever either one holds.
+  defp responses(%{"response" => _response, "responses" => _sequence}),
+    do: {:error, :response_ambiguous}
+
+  defp responses(%{"response" => response}) when is_map(response), do: {:ok, [response]}
+  defp responses(%{"response" => _response}), do: {:error, :responses_invalid}
+
+  defp responses(%{"responses" => sequence}) when is_list(sequence) do
+    if length(sequence) in 1..1_024 and Enum.all?(sequence, &is_map/1),
+      do: {:ok, sequence},
+      else: {:error, :responses_invalid}
+  end
+
+  defp responses(%{"responses" => _sequence}), do: {:error, :responses_invalid}
+  defp responses(_value), do: {:error, :response_missing}
+
+  defp bounded_responses(responses, max_result_bytes) do
+    cond do
+      not Enum.all?(responses, &JSONValue.map?/1) ->
+        {:error, :responses_invalid}
+
+      not Enum.all?(responses, &within_ceiling?(&1, max_result_bytes)) ->
+        {:error, :response_too_large}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp within_ceiling?(response, max_result_bytes) do
     bytes = RetainedSize.bytes_with_cap(response, max_result_bytes)
-    JSONValue.map?(response) and is_integer(bytes) and bytes <= max_result_bytes
+    is_integer(bytes) and bytes <= max_result_bytes
   end
 
   defp start_owner(entries, owner, registrar) do
     case LLMReplayOwner.start(entries, owner, registrar) do
       {:ok, pid} -> {:ok, pid}
       {:error, :resource_registrar_unavailable} = error -> error
-      _reason -> {:error, :invalid_replay_fixtures}
+      _reason -> {:error, :replay_owner_unavailable}
     end
   end
 

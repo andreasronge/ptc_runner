@@ -32,7 +32,9 @@ shipped `debug.nav` library without gaining filesystem, network, model, or
 nested-evaluation authority.
 
 ```console
-ptc run examples/debug-a-failed-run/ptc-project.json
+ptc init debug-a-failed-run --example debug-a-failed-run
+ptc run debug-a-failed-run/target.ptc-project.json
+ptc run debug-a-failed-run/debugger.ptc-project.json
 ```
 
 Use the [debug-navigation reference](../reference/debug-navigation.md) for the

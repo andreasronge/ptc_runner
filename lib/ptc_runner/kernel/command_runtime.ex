@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
 
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.LiveStatus.Target
 
   @environment_file_errors [
     :environment_file_not_found,
@@ -24,6 +25,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
     :authorization_targets,
     :authorization_notifier,
     :environment_setup,
+    :live_status,
     :attestation
   ]
   defstruct @enforce_keys
@@ -34,6 +36,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
           authorization_targets: [binary()],
           authorization_notifier: (binary() -> any()) | nil,
           environment_setup: (-> :ok | {:error, term()}) | nil,
+          live_status: Target.t() | nil,
           attestation: binary()
         }
 
@@ -55,13 +58,15 @@ defmodule PtcRunner.Kernel.CommandRuntime do
              :provider_application_mode,
              :authorization_targets,
              :authorization_notifier,
-             :environment_setup
+             :environment_setup,
+             :live_status
            ] == [] and length(keys) == MapSet.size(MapSet.new(keys)) do
       runtime = %__MODULE__{
         provider_application_mode: Keyword.get(opts, :provider_application_mode, :host_owned),
         authorization_targets: Keyword.get(opts, :authorization_targets, []),
         authorization_notifier: Keyword.get(opts, :authorization_notifier),
         environment_setup: Keyword.get(opts, :environment_setup),
+        live_status: Keyword.get(opts, :live_status),
         attestation: <<>>
       }
 
@@ -148,7 +153,8 @@ defmodule PtcRunner.Kernel.CommandRuntime do
         provider_application_mode: runtime.provider_application_mode,
         authorization_targets: runtime.authorization_targets,
         authorization_notifier: runtime.authorization_notifier,
-        environment_setup: combined
+        environment_setup: combined,
+        live_status: runtime.live_status
       )
     else
       {:error, :invalid_command_runtime}
@@ -156,6 +162,39 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   end
 
   def with_environment(_runtime, _setup), do: {:error, :invalid_command_runtime}
+
+  @doc false
+  @spec with_live_status(t(), Target.t()) :: {:ok, t()} | {:error, :invalid_command_runtime}
+  def with_live_status(%__MODULE__{} = runtime, %Target{} = target) do
+    if valid?(runtime) and Target.valid?(target) do
+      new(
+        provider_application_mode: runtime.provider_application_mode,
+        authorization_targets: runtime.authorization_targets,
+        authorization_notifier: runtime.authorization_notifier,
+        environment_setup: runtime.environment_setup,
+        live_status: target
+      )
+    else
+      {:error, :invalid_command_runtime}
+    end
+  end
+
+  def with_live_status(_runtime, _target), do: {:error, :invalid_command_runtime}
+
+  @doc false
+  @spec attach_live_status(t(), keyword()) :: {:ok, t()} | {:error, :invalid_command_runtime}
+  def attach_live_status(%__MODULE__{} = runtime, opts) when is_list(opts) do
+    if Keyword.keyword?(opts) do
+      case Keyword.fetch(opts, :live_status) do
+        {:ok, target} -> with_live_status(runtime, target)
+        :error -> {:ok, runtime}
+      end
+    else
+      {:error, :invalid_command_runtime}
+    end
+  end
+
+  def attach_live_status(_runtime, _opts), do: {:error, :invalid_command_runtime}
 
   defp fields_valid?(runtime) do
     Enum.sort(Map.keys(runtime)) == @field_keys and
@@ -165,7 +204,8 @@ defmodule PtcRunner.Kernel.CommandRuntime do
       runtime.authorization_targets == Enum.uniq(runtime.authorization_targets) and
       Enum.all?(runtime.authorization_targets, &valid_name?/1) and
       authorization_pair_valid?(runtime.authorization_targets, runtime.authorization_notifier) and
-      (is_nil(runtime.environment_setup) or is_function(runtime.environment_setup, 0))
+      (is_nil(runtime.environment_setup) or is_function(runtime.environment_setup, 0)) and
+      (is_nil(runtime.live_status) or Target.valid?(runtime.live_status))
   end
 
   defp authorization_pair_valid?([], nil), do: true
@@ -183,5 +223,5 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   defp payload(runtime),
     do:
       {runtime.provider_application_mode, runtime.authorization_targets,
-       runtime.authorization_notifier, runtime.environment_setup}
+       runtime.authorization_notifier, runtime.environment_setup, runtime.live_status}
 end

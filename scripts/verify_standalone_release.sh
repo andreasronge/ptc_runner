@@ -142,14 +142,29 @@ grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' "$release_tmp_dir/version.stdout"
 "$command_bin" help > "$release_tmp_dir/help.stdout"
 grep -q '^Usage:$' "$release_tmp_dir/help.stdout"
 grep -Fqx '  --help    — show root help' "$release_tmp_dir/help.stdout"
-for command in init validate run doctor models repl viewer serve; do
+for command in init docs validate run doctor models repl viewer serve; do
   grep -q "ptc $command" "$release_tmp_dir/help.stdout"
   "$command_bin" help "$command" > "$release_tmp_dir/help-$command.stdout"
 done
 
 "$command_bin" init "$fixture_root/initialized" > "$release_tmp_dir/init.stdout"
 test -f "$fixture_root/initialized/ptc.json"
-grep -qx 'created .gitignore, main.clj, ptc.json, ptc-project.json' "$release_tmp_dir/init.stdout"
+grep -qx 'created AGENTS.md, .gitignore, main.clj, ptc.json, ptc-project.json' "$release_tmp_dir/init.stdout"
+test -f "$fixture_root/initialized/AGENTS.md"
+
+# The release must serve its own documentation from the embedded catalog, with
+# no repository checkout, no `priv` documentation directory, and no network.
+"$command_bin" docs > "$release_tmp_dir/docs.stdout"
+grep -q '^Pages:$' "$release_tmp_dir/docs.stdout"
+grep -q '^  agent-guide ' "$release_tmp_dir/docs.stdout"
+"$command_bin" docs agent-guide > "$release_tmp_dir/docs-agent-guide.stdout"
+grep -qx '# Drive ptc as an agent' "$release_tmp_dir/docs-agent-guide.stdout"
+"$command_bin" docs schema-project > "$release_tmp_dir/docs-schema-project.stdout"
+grep -q 'ptc-project-config.schema.json' "$release_tmp_dir/docs-schema-project.stdout"
+if "$command_bin" docs no-such-page > "$release_tmp_dir/docs-unknown.stdout" 2>&1; then
+  echo "expected 'ptc docs no-such-page' to fail" >&2
+  exit 1
+fi
 
 "$command_bin" validate "$application_root/ptc.json" > "$release_tmp_dir/validate.stdout"
 grep -q '"provider_activity":false' "$release_tmp_dir/validate.stdout"
@@ -223,10 +238,12 @@ set +e
   2> "$release_tmp_dir/existing-envelope.stderr"
 existing_envelope_status=$?
 set -e
-test "$existing_envelope_status" -eq 74
+test "$existing_envelope_status" -eq 2
 printf '%s\n' 'original' > "$release_tmp_dir/existing-envelope.expected"
 cmp "$release_tmp_dir/existing-envelope.expected" "$existing_envelope"
-grep -q 'envelope/publication_failed' "$release_tmp_dir/existing-envelope.stderr"
+grep -q 'arguments/envelope_destination_exists' "$release_tmp_dir/existing-envelope.stderr"
+grep -q 'remove it or point --envelope at another path' \
+  "$release_tmp_dir/existing-envelope.stderr"
 
 "$command_bin" doctor "$application_root/ptc.json" > "$release_tmp_dir/doctor.stdout"
 grep -q '"provider_activity":false' "$release_tmp_dir/doctor.stdout"
@@ -389,24 +406,29 @@ fi
     end
   end
 
-  socket = connect.(connect)
-
-  :ok =
-    :gen_tcp.send(
-      socket,
-      "GET /api/kernel/runs HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nConnection: close\r\n\r\n"
-    )
-
-  read = fn read, acc ->
+  read = fn read, socket, acc ->
     case :gen_tcp.recv(socket, 0, 10_000) do
-      {:ok, bytes} -> read.(read, acc <> bytes)
+      {:ok, bytes} -> read.(read, socket, acc <> bytes)
       {:error, :closed} -> acc
       {:error, reason} -> raise "the packaged viewer response failed: #{inspect(reason)}"
     end
   end
 
-  response = read.(read, "")
-  :ok = :gen_tcp.close(socket)
+  request = fn path ->
+    socket = connect.(connect)
+
+    :ok =
+      :gen_tcp.send(
+        socket,
+        "GET #{path} HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nConnection: close\r\n\r\n"
+      )
+
+    response = read.(read, socket, "")
+    :ok = :gen_tcp.close(socket)
+    response
+  end
+
+  response = request.("/api/kernel/runs")
 
   unless String.starts_with?(response, "HTTP/1.1 200 ") do
     raise "the packaged viewer did not answer 200: #{String.slice(response, 0, 120)}"
@@ -414,6 +436,13 @@ fi
 
   unless String.contains?(response, run_ref) do
     raise "the packaged viewer did not list the run it was pointed at"
+  end
+
+  launch_response = request.("/api/live/launch")
+
+  unless String.starts_with?(launch_response, "HTTP/1.1 200 ") and
+           String.contains?(launch_response, ~s("enabled":true)) do
+    raise "the packaged project viewer did not enable its fixed launch target"
   end
 ' "$viewer_port" "$viewer_run_ref"
 

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PtcRunner</title>
+<meta name="description" content="PtcRunner is a runtime for Code Mode agents: the model writes a small, bounded program that calls several approved tools, and the runtime executes it under explicit limits and records what happened.">
+<link rel="canonical" href="https://ptc-runner.dev/">
+<meta property="og:title" content="PtcRunner">
+<meta property="og:description" content="A runtime for Code Mode agents. Bounded programs, explicit limits, recorded evidence.">
+<meta property="og:url" content="https://ptc-runner.dev/">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>PtcRunner</h1>
+  <p class="kicker">A runtime for Code Mode agents</p>
+</header>
+
+<p class="lead"><strong>Build AI agents that are bounded in what they can do, easy to
+change, observable in operation, and designed to improve from evidence.</strong></p>
+
+<p>Today, agents usually choose between two extremes. They either call tools one at a
+time, paying a model round trip and adding context for every step, or use a full coding
+environment and an external sandbox for more complex work. PtcRunner provides the missing
+middle: it lets a model write a small, bounded program that calls several approved tools,
+processes their results, and returns only what matters.</p>
+
+<p>You normally do not write that program. You provide the task, model, approved tools,
+data, limits, and agent components. The model writes the mission program; PtcRunner
+executes it and records what happened.</p>
+
+<figure class="diagram">
+  <img src="/authority-narrows.webp" width="1672" height="941"
+       alt="Authority only narrows. A full-width box labelled OPERATOR, ptc-host.json, holding
+            credentials, endpoints, and outer ceilings. An arrow down to a narrower box labelled
+            AUTHOR, ptc.json, holding aliases, missions, and limits, captioned 'selects from,
+            never adds to'. A second arrow, captioned 'splits, never merges', leads to two
+            separated boxes: WORKFLOW, trusted policy, holds the model; and MISSION, the
+            model-written program, holds the tools.">
+  <figcaption>Every layer selects from the one above it and can only narrow. The operator installs
+  authority, the author selects from it, and the model-written program runs inside what is
+  left.</figcaption>
+</figure>
+
+<p>Inside those two environments, the agent loop itself is ordinary PTC-Lisp (a small, bounded
+Clojure-like language — see the
+<a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/ptc-lisp-specification.md">language
+specification</a>). It is a library you select, not behaviour baked into the runtime, so you can
+replace it with a domain-specific loop of your own — and doing so grants no new authority.</p>
+
+<figure class="diagram">
+  <img src="/loop-is-a-library.webp" width="1672" height="941"
+       alt="The loop is a library, not the runtime. A workflow prelude, compiled from selected
+            components, contains a stack of agent.main, agent.core, agent.prompt, agent.retry and
+            llm, outlined and tagged 'replaceable'. In the centre a four-step ring driven by
+            agent.core: prompt, model writes PTC-Lisp, evaluate, observation. On the right a
+            separate mission prelude holding the generated program, your domain components, and
+            prompt-visible exports. A bar across the bottom reads: every tool: requirement is
+            checked against the assembled providers — never granted by them.">
+  <figcaption>A prelude is the immutable compiled aggregate of the components selected for one
+  environment, frozen for the run. A local component cannot shadow a shipped library ID, and
+  selecting a library installs its dependency closure without granting any tool authority.</figcaption>
+</figure>
+
+<h2>Install</h2>
+
+<p>On macOS it is a one-command install, or a container image if you would rather have one.
+Installing directly needs neither a container nor any separate runtime — the executable carries
+its own. Once it is on your machine:</p>
+
+<pre><code>ptc init hello-ptc
+ptc run hello-ptc/ptc-project.json</code></pre>
+
+<pre><code>{"greeting":"hello world"}</code></pre>
+
+<p class="muted-note">That runs without contacting a model, and writes a structured trace you can
+open in the viewer. The same <code>ptc run</code> drives agentic projects.</p>
+
+<div class="note">
+  <p><strong>0.x, under active development.</strong> Breaking changes are expected, and the
+  install routes above land with the next release. The
+  <a href="https://github.com/andreasronge/ptc_runner#availability">availability table</a>
+  tracks exactly where each one stands today.</p>
+</div>
+
+<h2>JSON Schemas</h2>
+
+<a class="callout" href="/schemas/">
+  <strong>Schema reference &rarr;</strong>
+  <span>The stable URLs for the project, application, host, and command-envelope
+  schemas. Point your editor at one to get completion and validation while authoring.</span>
+</a>
+
+<h2>Links</h2>
+
+<ul class="links">
+  <li><a href="https://github.com/andreasronge/ptc_runner">GitHub repository</a>
+    — <span class="desc">source, guides, and runnable examples</span></li>
+  <li><a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/ptc-lisp-specification.md">PTC-Lisp
+    language specification</a>
+    — <span class="desc">the bounded Clojure-like language the model writes in</span></li>
+  <li><a href="https://hex.pm/packages/ptc_runner">Hex package</a>
+    — <span class="desc"><code>ptc_runner</code></span></li>
+  <li><a href="https://hexdocs.pm/ptc_runner/">HexDocs</a>
+    — <span class="desc">API documentation for the last published release</span></li>
+  <li><a href="https://github.com/andreasronge/ptc_runner/blob/main/CHANGELOG.md">Changelog</a>
+    — <span class="desc">what changed between versions</span></li>
+  <li><a href="https://github.com/andreasronge/ptc_runner/issues">Issues</a>
+    — <span class="desc">bugs and feature requests</span></li>
+</ul>
+
+<footer>
+  MIT licensed. Built from
+  <a href="https://github.com/andreasronge/ptc_runner">andreasronge/ptc_runner</a>.
+</footer>
+
+</div>
+</body>
+</html>

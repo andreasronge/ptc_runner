@@ -21,10 +21,10 @@ The generated application is deliberately small:
 {
   "version": 1,
   "workflow": {
-    "components": [{"id": "app.main", "path": "main.clj"}],
-    "entry": "app.main/run"
+    "components": [{"id": "main", "path": "main.clj"}],
+    "entry": "main/run"
   },
-  "input": {"value": {}}
+  "input": {"value": {"name": "world"}}
 }
 ```
 

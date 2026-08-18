@@ -21,7 +21,7 @@ defmodule PtcRunner.Lisp.Registry do
       Registry.builtins_by_category(:string)
       #=> [:format, :name, :str, ...]
 
-      Registry.find_doc("sort")
+      Registry.apropos("sort")
       #=> [%{name: "sort", ...}, %{name: "sort-by", ...}]
 
   See also: `PtcRunner.Lisp.Env`, `PtcRunner.Lisp.Analyze`
@@ -313,35 +313,50 @@ defmodule PtcRunner.Lisp.Registry do
   end
 
   @doc """
-  Searches functions by name, description, or section pattern.
+  Searches functions by a case-insensitive literal substring.
+
+  Canonical names, signatures (including qualified Java spellings),
+  descriptions, notes, divergences, and sections are searchable. Results keep
+  canonical registry names and a blank query matches nothing.
 
   ## Examples
 
-      iex> results = PtcRunner.Lisp.Registry.find_doc("sort")
+      iex> results = PtcRunner.Lisp.Registry.apropos("sort")
       iex> Enum.any?(results, & &1.name == "sort")
       true
 
-      iex> results = PtcRunner.Lisp.Registry.find_doc("interop")
+      iex> results = PtcRunner.Lisp.Registry.apropos("interop")
       iex> Enum.all?(results, & &1.section == "Interop")
       true
   """
-  @spec find_doc(String.t()) :: [map()]
-  def find_doc(pattern) do
-    case Regex.compile(pattern, "i") do
-      {:ok, regex} ->
-        Enum.filter(implemented(), fn entry ->
-          Regex.match?(regex, entry.name) or Regex.match?(regex, entry.description) or
-            Regex.match?(regex, entry.section)
-        end)
+  @spec apropos(String.t()) :: [map()]
+  def apropos(query) when is_binary(query) do
+    query
+    |> String.trim()
+    |> String.downcase()
+    |> search_entries()
+  end
 
-      {:error, _} ->
-        lower = String.downcase(pattern)
+  defp search_entries(""), do: []
 
-        Enum.filter(implemented(), fn entry ->
-          String.contains?(String.downcase(entry.name), lower) or
-            String.contains?(String.downcase(entry.description), lower) or
-            String.contains?(String.downcase(entry.section), lower)
-        end)
-    end
+  defp search_entries(needle) do
+    Enum.filter(implemented(), fn entry ->
+      entry
+      |> searchable_doc_fields()
+      |> Enum.any?(&String.contains?(String.downcase(&1), needle))
+    end)
+  end
+
+  defp searchable_doc_fields(entry) do
+    [
+      entry.name,
+      entry.signatures,
+      entry.description,
+      entry.notes,
+      entry.divergences,
+      entry.section
+    ]
+    |> List.flatten()
+    |> Enum.filter(&is_binary/1)
   end
 end

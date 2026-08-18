@@ -6,7 +6,8 @@ A manifest declares one runnable PTC-Lisp application: code, input, provider
 selections, limits, events, and optional trace labels. Loading is strict,
 path-confined, and inert; it executes no workflow or provider callback.
 
-The checked-in `priv/schemas/ptc-application-manifest.schema.json` is the
+The JSON Schema served as `ptc docs schema-manifest`
+(`priv/schemas/ptc-application-manifest.schema.json` in the repository) is the
 complete structural reference. Runtime loading additionally performs semantic
 checks and path-confined referenced-file handling. Manifest
 schema diagnostics include a safe JSON Pointer when one is available; a

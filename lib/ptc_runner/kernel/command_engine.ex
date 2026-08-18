@@ -290,6 +290,14 @@ defmodule PtcRunner.Kernel.CommandEngine do
       :version ->
         {:ok, CommandOutcome.success(:version, run_ref, CommandContract.version_result())}
 
+      :docs ->
+        {:ok,
+         CommandOutcome.success(
+           :docs,
+           run_ref,
+           CommandContract.docs_result(arguments.options.page)
+         )}
+
       :doctor ->
         CommandDoctor.dispatch(arguments, run_ref, runtime)
 
@@ -297,7 +305,9 @@ defmodule PtcRunner.Kernel.CommandEngine do
         models_outcome(arguments, run_ref)
 
       :init ->
-        CommandInitializer.initialize(arguments.directory, run_ref)
+        CommandInitializer.initialize(arguments.directory, run_ref,
+          example: Map.get(arguments.options, :example)
+        )
     end
   rescue
     _exception -> {:error, arguments_outcome(arguments, run_ref, :internal, :internal_error)}

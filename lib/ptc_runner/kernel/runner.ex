@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.ResultIdentity
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.StrictJSON
@@ -109,31 +110,49 @@ defmodule PtcRunner.Kernel.Runner do
   end
 
   defp run_claimed(entry_source, config, state) do
-    execution =
-      try do
-        result = run_workflow(entry_source, config, state)
-        result = apply_terminal_failure(result, state)
-        {:ok, result}
-      catch
-        kind, reason ->
-          {:raised, kind, reason, __STACKTRACE__}
-      after
-        close_run_state(state)
+    reporter = PtcRunner.LiveStatus.maybe_start(config, state)
+
+    try do
+      execution =
+        try do
+          result = run_workflow(entry_source, config, state)
+          {:ok, apply_terminal_failure(result, state)}
+        catch
+          kind, reason ->
+            {:raised, kind, reason, __STACKTRACE__}
+        after
+          close_run_state(state)
+        end
+
+      usage = run_state_usage(state)
+      cleanup = RunConfig.close_provider_session(config)
+
+      case execution do
+        {:ok, result} ->
+          result = apply_provider_cleanup_failure(result, cleanup, usage)
+          {final_result, _events} = finalized = finalize_result(result, usage, config.event_sink)
+
+          _ =
+            PtcRunner.LiveStatus.complete(
+              reporter,
+              outcome(final_result),
+              live_terminal_reason(final_result)
+            )
+
+          finalized
+
+        # An unexpected internal exception keeps its original reason and stack
+        # trace. A cleanup failure must not replace a programming defect with a
+        # tidier diagnostic.
+        {:raised, kind, reason, stacktrace} ->
+          :erlang.raise(kind, reason, stacktrace)
       end
-
-    usage = run_state_usage(state)
-    cleanup = RunConfig.close_provider_session(config)
-
-    case execution do
-      {:ok, result} ->
-        result = apply_provider_cleanup_failure(result, cleanup, usage)
-        finalize_result(result, usage, config.event_sink)
-
-      # An unexpected internal exception keeps its original reason and stack
-      # trace. A cleanup failure must not replace a programming defect with a
-      # tidier diagnostic.
-      {:raised, kind, reason, stacktrace} ->
-        :erlang.raise(kind, reason, stacktrace)
+    catch
+      kind, reason ->
+        _ = PtcRunner.LiveStatus.complete(reporter, :error, :internal_error)
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    after
+      PtcRunner.LiveStatus.stop(reporter)
     end
   end
 
@@ -212,7 +231,8 @@ defmodule PtcRunner.Kernel.Runner do
       max_parallel_workers: config.limits.live_provider_tasks,
       max_program_bytes: config.limits.entry_source_bytes,
       filter_context: false,
-      caller: :kernel
+      caller: :kernel,
+      telemetry_run: state.pid
     ]
 
     case Lisp.run_owned(entry_source, opts) do
@@ -607,6 +627,19 @@ defmodule PtcRunner.Kernel.Runner do
   defp terminal_reason({:ok, _result}), do: nil
   defp terminal_reason({:error, %Error{reason: reason}}), do: reason
 
+  defp live_terminal_reason({:ok, _result}), do: nil
+
+  defp live_terminal_reason(
+         {:error, %Error{details: %{limit: limit, limit_ms: limit_ms, phase: phase}} = error}
+       ) do
+    case RuntimeLimitDiagnostic.live_timeout_message(limit, limit_ms, phase) do
+      {:ok, message} -> message
+      :error -> error.reason
+    end
+  end
+
+  defp live_terminal_reason({:error, %Error{reason: reason}}), do: reason
+
   defp maybe_put_result_hash(stopped_data, {:ok, %Result{value: value}}) do
     case ResultIdentity.hash(value) do
       {:ok, result_hash} -> Map.put(stopped_data, :result_hash, result_hash)
@@ -656,13 +689,34 @@ defmodule PtcRunner.Kernel.Runner do
          {:error,
           %Error{
             reason: :runtime_limit_exceeded,
-            details: %{limit: :agent_turns, limit_value: limit}
+            details: %{limit: :agent_turns, limit_value: limit, limit_reason: limit_reason}
           }}
        )
        when limit in 1..128 do
+    if RuntimeLimitDiagnostic.agent_turns_reason?(limit_reason) do
+      Map.merge(stopped_data, %{
+        failure_kind: "turn-limit",
+        limit: :agent_turns,
+        limit_value: limit,
+        limit_reason: limit_reason
+      })
+    else
+      stopped_data
+    end
+  end
+
+  defp maybe_put_failure_taxonomy(
+         stopped_data,
+         {:error,
+          %Error{
+            reason: :runtime_limit_exceeded,
+            details: %{limit: :max_transcript_chars, limit_value: limit}
+          }}
+       )
+       when limit in 1..1_000_000 do
     Map.merge(stopped_data, %{
-      failure_kind: "turn-limit",
-      limit: :agent_turns,
+      failure_kind: "transcript-limit",
+      limit: :max_transcript_chars,
       limit_value: limit
     })
   end
@@ -746,9 +800,15 @@ defmodule PtcRunner.Kernel.Runner do
   defp maybe_emit_workflow_limit(
          state,
          sink,
-         {:error, %Error{kind: :limit_exceeded, reason: reason}}
+         {:error, %Error{kind: :limit_exceeded, reason: reason, details: details}}
        ),
-       do: Events.emit(state, sink, "limit-exceeded", %{reason: reason})
+       do:
+         Events.emit(
+           state,
+           sink,
+           "limit-exceeded",
+           Map.merge(%{reason: reason}, Map.take(details, [:limit, :limit_ms, :phase]))
+         )
 
   defp maybe_emit_workflow_limit(_state, _sink, _result), do: :ok
 
@@ -781,10 +841,12 @@ defmodule PtcRunner.Kernel.Runner do
             do: :workflow_timeout_ms,
             else: :run_duration_ms
 
+        limit_ms = Map.fetch!(limits, limit)
+
         %{
           message: "#{limit} expired during a parallel operation",
           limit: limit,
-          limit_ms: timeout_ms,
+          limit_ms: limit_ms,
           phase: :execution
         }
 
@@ -794,12 +856,14 @@ defmodule PtcRunner.Kernel.Runner do
             do: :workflow_timeout_ms,
             else: :run_duration_ms
 
+        limit_ms = Map.fetch!(limits, limit)
+
         phase = if reason == :compile_timeout, do: :compilation, else: :execution
 
         %{
           message: "#{limit} exceeded during #{phase} after #{timeout_ms}ms",
           limit: limit,
-          limit_ms: timeout_ms,
+          limit_ms: limit_ms,
           phase: phase
         }
     end
@@ -853,14 +917,29 @@ defmodule PtcRunner.Kernel.Runner do
   defp workflow_error_details(
          %{
            reason: :runtime_limit_exceeded,
-           details: %{limit: :agent_turns, limit_value: limit}
+           details: %{limit: :agent_turns, limit_value: limit, limit_reason: limit_reason}
          },
          _timeout_ms,
          _limits,
          _sink
        )
        when limit in 1..128 do
-    %{limit: :agent_turns, limit_value: limit}
+    if RuntimeLimitDiagnostic.agent_turns_reason?(limit_reason),
+      do: %{limit: :agent_turns, limit_value: limit, limit_reason: limit_reason},
+      else: %{}
+  end
+
+  defp workflow_error_details(
+         %{
+           reason: :runtime_limit_exceeded,
+           details: %{limit: :max_transcript_chars, limit_value: limit}
+         },
+         _timeout_ms,
+         _limits,
+         _sink
+       )
+       when limit in 1..1_000_000 do
+    %{limit: :max_transcript_chars, limit_value: limit}
   end
 
   defp workflow_error_details(fail, _timeout_ms, _limits, sink)

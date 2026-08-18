@@ -19,7 +19,7 @@ ptc run hello-ptc/ptc-project.json
 ```
 
 ```json
-{}
+{"greeting":"hello world"}
 ```
 
 `init` creates an application, a project document with local artifact settings,
@@ -29,19 +29,18 @@ model or external tool and records a canonical trace and command envelope under
 
 ## Run a model-authored program
 
-Clone the tutorial projects and create their owner-only environment file:
+Materialize the tutorial projects and create their owner-only environment file:
 
 ```console
-git clone --depth 1 https://github.com/andreasronge/ptc_runner.git
-cd ptc_runner
-cp .env.example examples/kernel-tutorial/.env
-chmod 600 examples/kernel-tutorial/.env
+ptc init kernel-tutorial --example kernel-tutorial
+printf 'OPENROUTER_API_KEY=\n' > kernel-tutorial/.env
+chmod 600 kernel-tutorial/.env
 ```
 
 Set `OPENROUTER_API_KEY` in that exact file, then run:
 
 ```console
-ptc run examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
+ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
 ```json
@@ -62,14 +61,14 @@ select the installed model alias but cannot name its endpoint or key.
 Check configuration without contacting the provider:
 
 ```console
-ptc doctor examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json
+ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
 Probe credentials and connectivity only when remote work and possible cost are
 intended:
 
 ```console
-ptc doctor examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect
+ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect
 ```
 
 Continue with [Understand a generated project](getting-started.md), [Use a

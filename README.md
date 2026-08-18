@@ -32,11 +32,15 @@ ptc run hello-ptc/ptc-project.json
 ```
 
 ```json
-{}
+{"greeting":"hello world"}
 ```
 
 This verifies the executable and creates a structured trace without contacting
 a model. The same `ptc run` command drives agentic projects.
+
+The executable documents itself: `ptc help` lists every command, and `ptc docs`
+lists the language specification, references, and JSON Schemas embedded for
+that exact version. Coding agents should start at `ptc docs agent-guide`.
 
 ### Run a model-authored program
 

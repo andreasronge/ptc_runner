@@ -97,7 +97,6 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.ManifestRepl
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ReplSession
-  alias PtcRunner.Lisp.Registry
   alias PtcRunner.Lisp.Result, as: LispResult
   alias PtcRunner.Lisp.ValuePreview
   alias PtcRunner.ReplError
@@ -137,7 +136,10 @@ defmodule PtcRunner.ReplFrontend do
           run_manifest_session(opts, arguments)
 
         {:ok, :direct} ->
-          run_direct_session(opts, arguments)
+          run_direct_session(
+            Keyword.put(opts, :terminal_attached, terminal_attached?),
+            arguments
+          )
 
         {:error, message} ->
           command_error(opts, :cli, message)
@@ -858,7 +860,11 @@ defmodule PtcRunner.ReplFrontend do
   # limit, which the interactive line editor cannot drive, so this loop keeps
   # the plain reader and with it `Ctrl+D`.
   defp interactive_profile(session, opts, state) do
-    info("PTC-Lisp REPL [#{opts[:profile]}] (Ctrl+D or :quit to exit; :help for commands)\n")
+    banner =
+      "PTC-Lisp REPL [#{opts[:profile]}] (Ctrl+D or :quit to exit; :help for commands)" <>
+        terminal_hint(Keyword.fetch!(opts, :terminal_attached))
+
+    info(banner)
 
     profile_loop(session, opts, state)
   end
@@ -1070,17 +1076,21 @@ defmodule PtcRunner.ReplFrontend do
 
     info("""
     Commands:
-      :doc <name>      Show core function documentation
-      :find <pattern>  Search core functions
       :help            Show this help
       :quit            Leave the REPL
+
+    #{introspection_hint()}
 
     Profile: #{profile_id}; components: #{components}; exported namespaces: #{namespaces}
     Use (tool/runtime-usage {}) to inspect remaining bounded usage.
     """)
   end
 
-  defp handle_profile_command(command, _profile_id), do: handle_command(command, nil)
+  defp handle_profile_command("context", _profile_id),
+    do: info(":context is available only in a manifest mission REPL")
+
+  defp handle_profile_command(_command, _profile_id),
+    do: info("Unknown command. Available: :help, :quit")
 
   @spec command_error(keyword(), atom(), binary()) :: no_return()
   defp command_error(opts, category, message), do: command_error(opts, category, message, %{})
@@ -1335,10 +1345,22 @@ defmodule PtcRunner.ReplFrontend do
 
     with {:ok, session} <- maybe_load(session, opts[:load], preview_chars) do
       cond do
-        opts[:eval] -> run_sources(session, Keyword.get_values(opts, :eval), preview_chars)
-        arguments == ["-"] -> read_stdin(session, preview_chars)
-        arguments != [] -> run_file(session, hd(arguments), preview_chars)
-        true -> interactive(session, session_mode(opts), preview_chars)
+        opts[:eval] ->
+          run_sources(session, Keyword.get_values(opts, :eval), preview_chars)
+
+        arguments == ["-"] ->
+          read_stdin(session, preview_chars)
+
+        arguments != [] ->
+          run_file(session, hd(arguments), preview_chars)
+
+        true ->
+          interactive(
+            session,
+            session_mode(opts),
+            preview_chars,
+            Keyword.fetch!(opts, :terminal_attached)
+          )
       end
     end
   end
@@ -1396,27 +1418,38 @@ defmodule PtcRunner.ReplFrontend do
   # The line editor owns the banner: under the interactive reader it is the
   # reader's own slogan, which keeps it ahead of the first prompt instead of
   # racing it.
-  defp interactive(session, mode, preview_chars) do
-    banner = session_banner(ReplSession.mode_info(session))
+  defp interactive(session, mode, preview_chars, terminal_attached?) do
+    banner = session_banner(ReplSession.mode_info(session), terminal_attached?)
     LineEditor.run(mode, banner, fn -> loop(session, preview_chars) end)
   end
 
-  defp session_banner(%{
-         kind: :mission,
-         mission: name,
-         component_ids: component_ids,
-         direct_provider_aliases: provider_aliases,
-         inventory_hash: hash
-       }) do
+  defp session_banner(
+         %{
+           kind: :mission,
+           mission: name,
+           component_ids: component_ids,
+           direct_provider_aliases: provider_aliases,
+           inventory_hash: hash
+         },
+         terminal_attached?
+       ) do
     components = Enum.join(component_ids, ", ")
     providers = if provider_aliases == [], do: "none", else: Enum.join(provider_aliases, ", ")
 
     "PTC-Lisp mission REPL [#{name}; components: #{components}; providers: #{providers}; " <>
       "inventory #{String.slice(hash, 0, 12)}; no workflow/model access] " <>
-      "(:quit to exit; :help for commands)"
+      "(:quit to exit; :help for commands)" <> terminal_hint(terminal_attached?)
   end
 
-  defp session_banner(_mode), do: LineEditor.banner()
+  defp session_banner(_mode, terminal_attached?),
+    do: LineEditor.banner() <> terminal_hint(terminal_attached?)
+
+  defp terminal_hint(true), do: "\n" <> introspection_hint()
+  defp terminal_hint(false), do: ""
+
+  defp introspection_hint do
+    ~S|Explore functions with (apropos "term") and (doc "name"); inspect attached APIs with (dir) and (export-meta "ns/name").|
+  end
 
   defp loop(session, preview_chars) do
     case read_expression("ptc> ", "") do
@@ -1569,11 +1602,11 @@ defmodule PtcRunner.ReplFrontend do
 
     info(
       "Commands:\n" <>
-        "  :doc <name>      Show core function documentation\n" <>
-        "  :find <pattern>  Search core functions\n" <>
         context <>
         "  :help            Show this help\n" <>
         "  :quit            Leave the REPL\n\n" <>
+        introspection_hint() <>
+        "\n\n" <>
         "Successful results and definitions persist. *1, *2, and *3 read recent results."
     )
   end
@@ -1593,39 +1626,14 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
-  defp handle_command("doc " <> name, _session) do
-    case Registry.doc(String.trim(name)) do
-      nil -> info("No documentation found for: #{String.trim(name)}")
-      entry -> info(format_registry_doc(entry))
-    end
-  end
-
-  defp handle_command("find " <> pattern, _session) do
-    pattern
-    |> String.trim()
-    |> Registry.find_doc()
-    |> Enum.each(fn entry ->
-      info("#{entry.name} — #{Enum.join(entry.signatures, " | ")}")
-    end)
-  end
-
   defp handle_command(_command, session) do
     commands =
       case ReplSession.mode_info(session) do
-        %{kind: :mission} -> ":doc <name>, :find <pattern>, :context, :help, :quit"
-        _mode -> ":doc <name>, :find <pattern>, :help, :quit"
+        %{kind: :mission} -> ":context, :help, :quit"
+        _mode -> ":help, :quit"
       end
 
     info("Unknown command. Available: #{commands}")
-  end
-
-  defp format_registry_doc(entry) do
-    details =
-      [entry.description, entry.notes, entry.divergences]
-      |> Enum.reject(&(&1 in [nil, ""]))
-      |> Enum.join("\n  ")
-
-    Enum.join(entry.signatures, "\n") <> "\n  " <> details
   end
 
   defp info(message), do: IO.puts(message)

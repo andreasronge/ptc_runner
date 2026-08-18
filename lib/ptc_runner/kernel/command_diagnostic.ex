@@ -29,6 +29,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
 
@@ -361,14 +362,25 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %{phase: :execution, code: :runtime_limit_exceeded},
          %CommandSource{kind: :runtime}
        ),
-       do: RuntimeLimitDiagnostic.subordinate_evaluations_message?(message)
+       do:
+         RuntimeLimitDiagnostic.subordinate_evaluations_message?(message) or
+           RuntimeLimitDiagnostic.timeout_message?(message)
 
   defp valid_message_source?(
          message,
          %{phase: :execution, code: :runtime_limit_exceeded},
          nil
        ),
-       do: RuntimeLimitDiagnostic.agent_turns_message?(message)
+       do:
+         RuntimeLimitDiagnostic.agent_turns_message?(message) or
+           RuntimeLimitDiagnostic.transcript_chars_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :execution, code: :run_timeout},
+         %CommandSource{kind: :runtime}
+       ),
+       do: RuntimeLimitDiagnostic.run_duration_message?(message)
 
   defp valid_message_source?(
          _message,
@@ -376,6 +388,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %CommandSource{kind: :runtime}
        ),
        do: true
+
+  # A refused replay fixture belongs to the host installation that named it, not
+  # to a document the command can point a source at, so its bounded message
+  # carries the provider subject alone.
+  defp valid_message_source?(message, %{phase: :local_preflight, code: code}, nil)
+       when code in [:environment_unavailable, :fixtures_unreadable],
+       do: LLMReplayFixtureDiagnostic.valid_message?(message)
 
   defp valid_message_source?(_message, _row, _source), do: false
 end

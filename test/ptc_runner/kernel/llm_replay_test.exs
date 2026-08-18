@@ -44,7 +44,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
       File.write!(Path.join(dir, "replay.jsonl"), "not-json\n")
 
-      assert {:error, :invalid_replay_fixtures} =
+      assert {:error, {:invalid_json, 1}} =
                LLMReplay.probe(dir, "replay.jsonl", opts([]))
     end
 
@@ -128,14 +128,14 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
         %{"request_hash" => key, "response" => %{"n" => 2}}
       ])
 
-      assert {:error, :duplicate_replay_entry} = start(dir)
+      assert {:error, {:duplicate_entry, 2}} = start(dir)
 
       File.write!(
         Path.join(dir, "replay.jsonl"),
         ~s({"request_hash": "#{key}", "response": {"n": 1}, "response": {"n": 2}}\n)
       )
 
-      assert {:error, :invalid_replay_fixtures} = start(dir)
+      assert {:error, {:invalid_json, 1}} = start(dir)
     end
 
     @tag :tmp_dir
@@ -147,26 +147,61 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
         Jason.encode!(%{"request_hash" => key, "response" => %{}}) <> "\n"
       )
 
-      assert {:error, :invalid_replay_fixtures} = start(dir)
+      assert {:error, {:schema_version_invalid, 1}} = start(dir)
 
-      for entry <- [
-            %{"request_hash" => "not-a-hash", "response" => %{}},
-            %{"request_hash" => key, "response" => "not an object"},
-            %{"request_hash" => key},
-            %{"request_hash" => key, "responses" => []},
-            %{"request_hash" => key, "response" => %{}, "responses" => [%{}]},
-            %{"request_hash" => key, "response" => %{}, "unexpected" => true},
-            %{"schema_version" => 2, "request_hash" => key, "response" => %{}}
+      # Every rule is reported as itself. Collapsing these into one reason is
+      # what made a fixture unauthorable (#1373).
+      for {entry, expected} <- [
+            {%{"request_hash" => "not-a-hash", "response" => %{}}, :request_hash_invalid},
+            {%{"request_hash" => key, "response" => "not an object"}, :responses_invalid},
+            {%{"request_hash" => key}, :response_missing},
+            {%{"request_hash" => key, "responses" => []}, :responses_invalid},
+            {%{"request_hash" => key, "response" => %{}, "responses" => [%{}]},
+             :response_ambiguous},
+            {%{"request_hash" => key, "response" => %{}, "unexpected" => true},
+             :unknown_entry_key},
+            {%{"schema_version" => 2, "request_hash" => key, "response" => %{}},
+             :schema_version_invalid}
           ] do
         write(dir, [entry])
-        assert {:error, :invalid_replay_fixtures} = start(dir), "accepted #{inspect(entry)}"
+
+        assert {:error, {^expected, 1}} = start(dir), "accepted #{inspect(entry)}"
       end
+    end
+
+    @tag :tmp_dir
+    test "a rejected line is reported by its number in the file", %{tmp_dir: dir} do
+      {:ok, key} = LLMReplay.request_hash(@request)
+
+      # Blank lines are numbered before they are dropped, so the reported line
+      # is the line the author's editor shows.
+      File.write!(
+        Path.join(dir, "replay.jsonl"),
+        "\n" <>
+          Jason.encode!(%{
+            "schema_version" => 1,
+            "request_hash" => key,
+            "response" => %{"n" => 1}
+          }) <>
+          "\n\n" <> ~s({"schema_version": 1, "request_hash": "nope", "response": {}}\n)
+      )
+
+      assert {:error, {:request_hash_invalid, 4}} = start(dir)
+    end
+
+    @tag :tmp_dir
+    test "a line that is valid JSON but not an object names that", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "replay.jsonl"), "[1, 2, 3]\n")
+      assert {:error, {:entry_not_an_object, 1}} = start(dir)
     end
 
     @tag :tmp_dir
     test "rejects an empty fixture file", %{tmp_dir: dir} do
       File.write!(Path.join(dir, "replay.jsonl"), "\n\n")
-      assert {:error, :invalid_replay_fixtures} = start(dir)
+      assert {:error, :replay_fixtures_empty} = start(dir)
+
+      File.write!(Path.join(dir, "replay.jsonl"), "")
+      assert {:error, :replay_fixtures_empty} = start(dir)
     end
 
     @tag :tmp_dir
@@ -178,7 +213,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
         end
 
       write(dir, entries)
-      assert {:error, :replay_entry_limit_exceeded} = start(dir, max_entries: 3)
+      assert {:error, {:entry_limit_exceeded, 4}} = start(dir, max_entries: 3)
 
       {:ok, key} = LLMReplay.request_hash(@request)
 
@@ -186,7 +221,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
         %{"request_hash" => key, "response" => %{"blob" => String.duplicate("x", 4_096)}}
       ])
 
-      assert {:error, :invalid_replay_fixtures} = start(dir, max_result_bytes: 512)
+      assert {:error, {:response_too_large, 1}} = start(dir, max_result_bytes: 512)
     end
   end
 
@@ -323,7 +358,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       File.mkdir_p!(Path.join(dir, "host"))
       File.write!(Path.join(dir, "outside.jsonl"), "{}\n")
 
-      assert {:error, :invalid_replay_fixtures} =
+      assert {:error, :replay_fixtures_unreadable} =
                LLMReplay.start(Path.join(dir, "host"), "../outside.jsonl",
                  max_entries: 10,
                  max_result_bytes: 1_000
@@ -332,6 +367,43 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   end
 
   describe "installed provider" do
+    @tag :tmp_dir
+    test "validate refuses a fixture run cannot load, and names the line", %{tmp_dir: dir} do
+      {:ok, key} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => key, "response" => %{"content" => "ok"}}])
+      paths = write_application(dir)
+
+      assert {:ok, %CommandOutcome{} = valid} =
+               CommandEngine.dispatch(["validate", paths.manifest, "--host-config", paths.host])
+
+      assert valid.envelope["status"] == "ok"
+
+      File.write!(
+        Path.join(dir, "replay.jsonl"),
+        Jason.encode!(%{"request_hash" => key, "response" => %{"content" => "ok"}}) <> "\n"
+      )
+
+      assert {:error, %CommandOutcome{} = refused} =
+               CommandEngine.dispatch(["validate", paths.manifest, "--host-config", paths.host])
+
+      assert refused.envelope["error"]["phase"] == "local_preflight"
+      assert refused.envelope["error"]["code"] == "environment_unavailable"
+
+      assert refused.envelope["error"]["message"] ==
+               "replay fixture line 1 must set schema_version to 1"
+
+      assert refused.envelope["error"]["provider_activity"] == false
+      assert refused.envelope["error"]["subject"]["name"] == "replay-llm"
+      assert CommandContract.valid_envelope?(refused.envelope)
+
+      # `run` refuses the same file for the same reason: a passing validate must
+      # not disagree with the command it is supposed to predict.
+      assert {:error, %CommandOutcome{} = run} =
+               CommandEngine.dispatch(["run", paths.manifest, "--host-config", paths.host])
+
+      assert run.envelope["error"]["message"] == refused.envelope["error"]["message"]
+    end
+
     @tag :tmp_dir
     test "a command replay miss prints the hash needed to author a working fixture", %{
       tmp_dir: dir
@@ -394,7 +466,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     end
 
     @tag :tmp_dir
-    test "agent turn exhaustion names max_turns and its effective value", %{tmp_dir: dir} do
+    test "a loop that never got a tool call says so instead of naming max_turns", %{tmp_dir: dir} do
       {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
 
@@ -437,7 +509,9 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
              inspect(exhausted.envelope)
 
       assert exhausted.envelope["error"]["message"] ==
-               "agent turn limit 2 was exceeded; raise max_turns for this agent.core/run call, or reduce the work per turn"
+               "the model produced no valid tool call in 2 turns; raising max_turns repeats it. " <>
+                 "Check that the model supports tool calling and that any configured " <>
+                 "max_tokens leaves room for a complete call"
 
       assert exhausted.envelope["error"]["source"] == nil
       assert CommandContract.valid_envelope?(exhausted.envelope)
@@ -453,6 +527,58 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       assert stopped["data"]["failure_kind"] == "turn-limit"
       assert stopped["data"]["limit"] == "agent_turns"
       assert stopped["data"]["limit_value"] == 2
+      assert stopped["data"]["limit_reason"] == "protocol_error"
+    end
+
+    @tag :tmp_dir
+    test "the transcript ceiling names max_transcript_chars and its value", %{tmp_dir: dir} do
+      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
+
+      paths = write_application(dir)
+
+      write_agent_application(
+        paths,
+        ~S|(agent.core/run-value "Return 42" {"max_turns" 2 "max_transcript_chars" 100})|
+      )
+
+      trace_dir = Path.join(dir, "transcript-limit-traces")
+      File.mkdir_p!(trace_dir)
+
+      # The first request already exceeds the ceiling, so no fixture is needed:
+      # the bound is checked before the provider is reached.
+      assert {:error, %CommandOutcome{} = exceeded} =
+               CommandEngine.dispatch([
+                 "run",
+                 paths.manifest,
+                 "--host-config",
+                 paths.host,
+                 "--trace-dir",
+                 trace_dir
+               ])
+
+      assert exceeded.envelope["error"]["code"] == "runtime_limit_exceeded",
+             inspect(exceeded.envelope)
+
+      assert exceeded.envelope["error"]["message"] ==
+               "transcript limit 100 characters was exceeded; raise max_transcript_chars for " <>
+                 "this agent.core/run call, or reduce the work carried between turns"
+
+      assert exceeded.envelope["error"]["source"] == nil
+      assert exceeded.exit_status == 6
+      assert CommandContract.valid_envelope?(exceeded.envelope)
+
+      assert [trace_path] = Path.wildcard(Path.join(trace_dir, "*.jsonl"))
+
+      stopped =
+        trace_path
+        |> File.stream!()
+        |> Stream.map(&Jason.decode!/1)
+        |> Enum.find(&(&1["type"] == "run-stopped"))
+
+      assert stopped["data"]["failure_kind"] == "transcript-limit"
+      assert stopped["data"]["limit"] == "max_transcript_chars"
+      assert stopped["data"]["limit_value"] == 100
     end
 
     @tag :tmp_dir

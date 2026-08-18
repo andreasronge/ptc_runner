@@ -283,6 +283,50 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   end
 
   @tag :tmp_dir
+  test "the run error count is the errored rows, not every event carrying one", %{
+    tmp_dir: directory
+  } do
+    path = Path.join(directory, "error-count.jsonl")
+
+    events = [
+      decoded_event("errored-run", 1, "run-started", %{}),
+      decoded_event("errored-run", 2, "evaluation-started", %{
+        "environment" => "workflow",
+        "evaluation_id" => "workflow-evaluation"
+      }),
+      decoded_event("errored-run", 3, "capability-started", %{
+        "environment" => "workflow",
+        "capability_id" => "capability-1",
+        "name" => "kernel-mission-model-context"
+      }),
+      decoded_event("errored-run", 4, "capability-stopped", %{
+        "environment" => "workflow",
+        "capability_id" => "capability-1",
+        "name" => "kernel-mission-model-context",
+        "status" => "error"
+      }),
+      decoded_event("errored-run", 5, "evaluation-stopped", %{
+        "environment" => "workflow",
+        "evaluation_id" => "workflow-evaluation",
+        "status" => "error"
+      }),
+      decoded_event("errored-run", 6, "run-stopped", %{
+        "outcome" => "error",
+        "reason" => "explicit_failure",
+        "failure_kind" => "mission-unavailable"
+      })
+    ]
+
+    assert :ok = TraceLog.append_jsonl(path, events)
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    # One errored evaluation and one errored capability call are the two rows a
+    # reader can open. The run's own outcome is its status, not a third error.
+    assert {:ok, %{"items" => [%{"error_count" => 2, "status" => "error"}]}} =
+             TraceLog.query(trace_log, :list_runs, %{})
+  end
+
+  @tag :tmp_dir
   test "canonical validation rejects malformed workflow prelude metadata", %{tmp_dir: directory} do
     path = Path.join(directory, "malformed-workflow-prelude.jsonl")
 
@@ -1122,6 +1166,37 @@ defmodule PtcRunner.Kernel.TraceLogTest do
 
     assert {:error, :result_limit_exceeded} =
              TraceLog.query_loaded(events, "models", :counters, %{}, 100, :sanitized)
+  end
+
+  test "run summaries expose complete per-run LLM usage totals" do
+    events = [
+      decoded_event("usage-total", 1, "run-started"),
+      decoded_event("usage-total", 2, "capability-stopped", %{
+        "environment" => "workflow",
+        "name" => "llm-request",
+        "alias" => "writer",
+        "installation_revision" => "stable-v1",
+        "status" => "ok",
+        "usage" => %{"input" => 120, "output" => 30, "total_cost" => 0.0042}
+      }),
+      decoded_event("usage-total", 3, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert {:ok, %{"items" => [run]}} =
+             TraceLog.query_loaded(
+               events,
+               "usage-total",
+               :list_runs,
+               %{},
+               100_000,
+               :sanitized
+             )
+
+    assert run["llm_usage_total"] == %{
+             "input" => 120,
+             "output" => 30,
+             "total_cost" => 0.0042
+           }
   end
 
   test "invalid or ambiguous LLM snapshots make calls unattributed without failing counters" do

@@ -10,9 +10,14 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.LLMReplayDiagnostic
+  alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
+
+  # A refused replay fixture is reported through the environment code on a run
+  # and the fixtures code in doctor, and both carry the same bounded message.
+  @fixture_codes [:environment_unavailable, :fixtures_unreadable]
 
   @endpoint_codes [
     :installation_endpoint_invalid,
@@ -29,6 +34,10 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "choose only one option from the conflicting argument group"},
     {:arguments, :project_host_undeclared, 2, false,
      "the project document declares no host block; add one to use this command"},
+    {:arguments, :envelope_destination_exists, 2, false,
+     "the envelope destination already exists"},
+    {:arguments, :docs_page_unknown, 2, false, "no documentation page is served under that name"},
+    {:arguments, :example_unknown, 2, false, "no example is embedded under that name"},
     {:host, :host_unavailable, 3, false, "the host configuration is unavailable"},
     {:host, :host_invalid, 3, false, "the host configuration is invalid"},
     {:host, :host_schema_invalid, 3, false, "the host configuration does not satisfy its schema"},
@@ -79,6 +88,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:bundle, :unknown_namespace, 3, false,
      "the component source references an unavailable namespace"},
     {:bundle, :entry_invalid, 3, false, "the workflow entry is not a public bundle export"},
+    {:bundle, :mission_undeclared, 3, false,
+     "the workflow entry evaluates into a mission and the manifest declares none"},
     {:provider_declaration, :provider_unknown, 3, false,
      "the selected provider is not installed"},
     {:provider_declaration, :selection_invalid, 3, false, "the provider selection is invalid"},
@@ -317,8 +328,15 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :execution, code: :runtime_limit_exceeded, message: fallback}),
     do: RuntimeLimitDiagnostic.message_schema(fallback)
 
+  def message_schema(%{phase: :execution, code: :run_timeout, message: fallback}),
+    do: RuntimeLimitDiagnostic.run_duration_message_schema(fallback)
+
   def message_schema(%{phase: :execution, code: :replay_fixture_missing, message: fallback}),
     do: LLMReplayDiagnostic.message_schema(fallback)
+
+  def message_schema(%{phase: :local_preflight, code: code, message: fallback})
+      when code in @fixture_codes,
+      do: LLMReplayFixtureDiagnostic.message_schema(fallback)
 
   def message_schema(%{
         phase: :result_cleanup,
@@ -343,8 +361,14 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   defp valid_dynamic_message?(:execution, :runtime_limit_exceeded, message),
     do: RuntimeLimitDiagnostic.valid_message?(message)
 
+  defp valid_dynamic_message?(:execution, :run_timeout, message),
+    do: RuntimeLimitDiagnostic.run_duration_message?(message)
+
   defp valid_dynamic_message?(:execution, :replay_fixture_missing, message),
     do: LLMReplayDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:local_preflight, code, message) when code in @fixture_codes,
+    do: LLMReplayFixtureDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(:result_cleanup, :result_contract_failed, message),
     do: ResultContractDiagnostic.valid_message?(message)

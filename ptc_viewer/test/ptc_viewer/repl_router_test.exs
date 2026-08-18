@@ -198,7 +198,12 @@ defmodule PtcViewer.ReplRouterTest do
       )
 
     config = encoded |> Base.url_decode64!(padding: false) |> Jason.decode!()
-    assert config == %{"repl_enabled" => true, "page_bootstrap_nonce" => @page_nonce}
+
+    assert config == %{
+             "repl_enabled" => true,
+             "page_bootstrap_nonce" => @page_nonce,
+             "live_enabled" => false
+           }
   end
 
   defp start_repl do

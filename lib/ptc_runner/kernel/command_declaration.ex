@@ -29,11 +29,12 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         "ptc run MANIFEST.json|PROJECT.json [OPTIONS]",
         "ptc doctor [MANIFEST.json|PROJECT.json] [--host-config HOST.json] [--connect]",
         "ptc models PROJECT.json | --host-config HOST.json",
-        "ptc init DIRECTORY",
+        "ptc init DIRECTORY [--example NAME]",
+        "ptc docs [PAGE]",
         "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE",
         "ptc repl [OPTIONS] [SCRIPT|-]",
         "ptc serve GATEWAY.json",
-        "ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS]",
+        "ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]",
         "ptc --version"
       ],
       options: [
@@ -47,8 +48,14 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
       ]
     },
     init: %{
-      usage: ["ptc init DIRECTORY"],
+      usage: ["ptc init DIRECTORY [--example NAME]"],
       options: [
+        %{
+          key: :example,
+          type: :string,
+          syntax: ["--example NAME"],
+          description: "materialize one embedded example tree instead of the scaffold"
+        },
         %{
           key: :envelope,
           type: :string,
@@ -57,6 +64,10 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         },
         @help_option
       ]
+    },
+    docs: %{
+      usage: ["ptc docs [PAGE]"],
+      options: [@help_option]
     },
     validate: %{
       usage: ["ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json]"],
@@ -363,7 +374,9 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
       ]
     },
     viewer: %{
-      usage: ["ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS]"],
+      usage: [
+        "ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]"
+      ],
       options: [
         %{
           key: :port,
@@ -377,12 +390,13 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--listen 127.0.0.1|0.0.0.0"],
           description: "bind address; 0.0.0.0 exposes the Viewer beyond this host"
         },
+        @env_file_option,
         @help_option
       ]
     }
   }
 
-  @commands [:init, :validate, :run, :doctor, :models, :transcript, :repl, :serve, :viewer]
+  @commands [:init, :docs, :validate, :run, :doctor, :models, :transcript, :repl, :serve, :viewer]
   @topics [:root | @commands]
   # Commands the shared engine never dispatches: their frontend owns the
   # process for as long as it runs and returns no envelope.
@@ -390,6 +404,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
 
   @type command ::
           :init
+          | :docs
           | :validate
           | :run
           | :doctor

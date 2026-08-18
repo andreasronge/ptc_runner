@@ -89,11 +89,27 @@ defmodule PtcRunner.ReplFrontendTest do
     assert output =~ "Goodbye!"
   end
 
-  test ":doc exposes numeric comparison failures" do
-    output = capture_io(":doc >\n", fn -> run_repl([]) end)
+  test "Lisp doc replaces the removed :doc meta-command" do
+    output = capture_io(":doc >\n(doc \">\")\n:quit\n", fn -> run_repl([]) end)
 
+    assert output =~ "Unknown command. Available: :help, :quit"
     assert output =~ "(> x y & more)"
     assert output =~ "Numeric only; a reached non-numeric operand signals :type_error."
+  end
+
+  test "attached interactive sessions hint at the canonical discovery functions" do
+    output = capture_io(":help\n:quit\n", fn -> run_repl([], terminal_attached: true) end)
+
+    assert output =~
+             ~S|Explore functions with (apropos "term") and (doc "name"); inspect attached APIs with (dir) and (export-meta "ns/name").|
+
+    assert output =~ "Commands:\n  :help"
+
+    detached = capture_io(":quit\n", fn -> run_repl([], terminal_attached: false) end)
+    noninteractive = capture_io(fn -> run_repl(["-e", "42"], terminal_attached: true) end)
+
+    refute detached =~ "Explore functions with"
+    refute noninteractive =~ "Explore functions with"
   end
 
   test "empty stdin is a successful empty script" do
@@ -927,6 +943,29 @@ defmodule PtcRunner.ReplFrontendTest do
       assert output =~ expected
       assert Enum.count(File.ls!(output_directory), &String.ends_with?(&1, ".jsonl")) == 1
     end
+  end
+
+  @tag :tmp_dir
+  test "profile meta-command typos and context guidance never crash the session", %{
+    tmp_dir: directory
+  } do
+    source = Path.join(directory, "source")
+    output_directory = Path.join(directory, "output")
+    File.mkdir!(source)
+    File.mkdir!(output_directory)
+    seed_trace(source, "seed")
+
+    output =
+      capture_io(":def pmap\n:context\n:quit\n", fn ->
+        run_repl(profile_args(source, output_directory), terminal_attached: true)
+      end)
+
+    assert output =~ "Unknown command. Available: :help, :quit"
+    assert output =~ ":context is available only in a manifest mission REPL"
+    assert output =~ "Analysis trace:"
+
+    assert output =~
+             ~S|Explore functions with (apropos "term") and (doc "name"); inspect attached APIs with (dir) and (export-meta "ns/name").|
   end
 
   @tag :tmp_dir

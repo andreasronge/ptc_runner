@@ -9,13 +9,14 @@ Create a provider-free project if you do not already have one:
 ptc init hello-ptc
 ```
 
-It contains three application roles:
+It contains four application roles:
 
 | File | Purpose |
 | --- | --- |
 | `ptc-project.json` | Stable local paths, artifacts, and Viewer preferences |
 | `ptc.json` | Workflow, input, missions, selected providers, and narrower limits |
 | `main.clj` | The generated example component selected by the workflow |
+| `AGENTS.md` | Routing card telling a coding agent which commands answer what |
 
 The project document is the normal command argument. It points to the other
 files, so commands do not depend on the shell's current directory.
@@ -25,7 +26,8 @@ files, so commands do not depend on the shell's current directory.
 The checked-in orders example is deterministic and needs no credential:
 
 ```console
-ptc run examples/kernel-tutorial/01-orders.ptc-project.json
+ptc init kernel-tutorial --example kernel-tutorial
+ptc run kernel-tutorial/01-orders.ptc-project.json
 ```
 ```json
 {"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}
@@ -39,7 +41,7 @@ model or external tool is involved.
 Open the local Viewer:
 
 ```console
-ptc viewer examples/kernel-tutorial/01-orders.ptc-project.json
+ptc viewer kernel-tutorial/01-orders.ptc-project.json
 ```
 
 The canonical trace records the command, evaluations, limits, outcome, and
@@ -49,7 +51,7 @@ or tool payloads. Those sensitive records require explicit private inspection.
 You can also explore the workflow directly:
 
 ```console
-ptc repl --project examples/kernel-tutorial/01-orders.ptc-project.json
+ptc repl --project kernel-tutorial/01-orders.ptc-project.json
 ```
 
 Continue with [Configure an application](manifests-and-capabilities.md) to add

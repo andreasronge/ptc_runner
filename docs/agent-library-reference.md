@@ -185,10 +185,26 @@ threshold adds domain-blind synthesis guidance before the final turn.
 If the loop spends its effective `max_turns` without returning, `run-outcome`
 returns bounded subject-failure data. Entries and callers that propagate that
 failure through `run`, `run-value`, or `run-result-value` report
-`execution/runtime_limit_exceeded`, name the effective turn ceiling, and
-recommend raising `max_turns` for that call or reducing the work per turn. The
-canonical failed `run-stopped` event retains the bounded `agent_turns` limit
-name and value so trace consumers can present the same cause.
+`execution/runtime_limit_exceeded` and name the effective turn ceiling.
+
+What the message recommends depends on how the final turn ended, because only
+some of these endings are answered by buying more turns:
+
+| Reason | Final turn produced | Reported remedy |
+| --- | --- | --- |
+| `intermediate_result` | a successful program that did not `return` | raise `max_turns`, or reduce the work per turn |
+| `evaluation_error` | a program that failed | raise `max_turns`, or simplify the work per turn |
+| `protocol_error` | no usable `run_ptc_lisp` call | check tool-calling support and any configured `max_tokens` first |
+
+A `max_tokens` too small for the model to emit a complete tool call produces
+`protocol_error` on every turn, so raising `max_turns` only buys more of the
+same failure. The remedy names the agent configuration rather than
+`agent.core/run`, because a manifest that declares `agent.main/run` never
+mentions the inner entry.
+
+The canonical failed `run-stopped` event retains the bounded `agent_turns`
+limit name, its value, and the same `limit_reason`, so trace consumers can
+present the same cause.
 
 Before dispatch, the loop JSON-encodes the complete prospective request:
 system prompt, accumulated messages, tool schema, and optional model alias. A
@@ -196,6 +212,13 @@ request larger than `max_transcript_chars`, or one that cannot be encoded,
 fails without calling the provider. Earlier assistant/tool pairs are never
 silently discarded to make the request fit. The provider may enforce a lower
 request limit.
+
+Exceeding `max_transcript_chars` reports itself the way the turn ceiling does:
+`execution/runtime_limit_exceeded` naming the limit and its effective value,
+with the canonical failed `run-stopped` event retaining
+`failure_kind: transcript-limit` plus the bounded limit name and value. A
+request that cannot be encoded at all remains a workflow failure, because no
+ceiling was reached.
 
 ## Prompt and mission API
 
@@ -212,10 +235,11 @@ documentation are rendered when available.
 
 Top-level mission `data` keys are rendered as `data/<name>` values with their
 bounded structural types, but never their values. The inventory is the complete
-prompt-visible mission surface. `dir`, `apropos`, `doc`, and `export-meta`
-discover prompt-visible prelude exports only; they do not enumerate fixed
-built-ins, data values, or direct tool capabilities. When the inventory is
-empty, the prompt says so explicitly instead of leaving a blank heading.
+prompt-visible mission surface. `dir` and `export-meta` inspect visible
+attached prelude exports. `apropos` and `doc` cover those exports plus fixed
+built-ins and the bounded Java surface. None enumerate data values or direct
+tool capabilities. When the inventory is empty, the prompt says so explicitly
+instead of leaving a blank heading.
 The generic examples do not name `data/input`; an agent sees that reference
 only when the selected mission actually grants an `input` data key.
 
