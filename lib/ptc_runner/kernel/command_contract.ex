@@ -820,6 +820,20 @@ defmodule PtcRunner.Kernel.CommandContract do
        when mode in [:models, :doctor, {:doctor, :connect}],
        do: true
 
+  # Every command that accepts `--envelope` can be refused for naming a
+  # destination that already exists. `:run` admits the whole catalog, and a run
+  # refused at admission is reported unclassified.
+  defp diagnostic_pair_allowed?(mode, :arguments, :envelope_destination_exists)
+       when mode in [
+              :init,
+              :validate,
+              :models,
+              :doctor,
+              {:doctor, :connect},
+              :run_unclassified
+            ],
+       do: true
+
   defp diagnostic_pair_allowed?(mode, :arguments, :invalid_arguments)
        when mode in [:help, :version, :docs],
        do: true

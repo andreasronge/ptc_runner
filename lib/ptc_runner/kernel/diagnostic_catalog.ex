@@ -29,6 +29,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "choose only one option from the conflicting argument group"},
     {:arguments, :project_host_undeclared, 2, false,
      "the project document declares no host block; add one to use this command"},
+    {:arguments, :envelope_destination_exists, 2, false,
+     "the envelope destination already exists"},
     {:host, :host_unavailable, 3, false, "the host configuration is unavailable"},
     {:host, :host_invalid, 3, false, "the host configuration is invalid"},
     {:host, :host_schema_invalid, 3, false, "the host configuration does not satisfy its schema"},

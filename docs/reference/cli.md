@@ -222,10 +222,14 @@ and exit-code relationship is sealed by the same command contract.
 
 After arguments parse, an ordinary or caught command outcome publishes one
 requested envelope. Invalid arguments and VM/OS termination can produce none.
-If envelope publication itself fails, the standalone command exits `74` and
-cannot report that failure through the missing envelope. Success exits `0`;
-classified failures use their diagnostic catalog status; caught internal
-failures use `70`.
+Publication is no-replace, so a destination that already exists is refused
+during argument admission with `arguments/envelope_destination_exists` and exit
+`2`, before any provider work: a repeated CI step is told to remove the file
+rather than paying for a run whose result it cannot receive. If envelope
+publication itself fails, the standalone command exits `74` and cannot report
+that failure through the missing envelope. Success exits `0`; classified
+failures use their diagnostic catalog status; caught internal failures use
+`70`.
 
 `run`, `validate`, `doctor`, `models`, and `init` accept `--envelope`.
 `repl`, `transcript`, `viewer`, `docs`, help, and version do not. A private run

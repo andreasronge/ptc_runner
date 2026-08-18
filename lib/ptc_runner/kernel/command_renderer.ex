@@ -215,6 +215,12 @@ defmodule PtcRunner.Kernel.CommandRenderer do
        do: "; invalid destination: #{destination}"
 
   defp rejection_suffix(%CommandRejection{
+         kind: :destination_exists,
+         destination: destination
+       }),
+       do: "; remove it or point #{destination} at another path"
+
+  defp rejection_suffix(%CommandRejection{
          kind: :destination_collision,
          conflicts: [first, second]
        }),

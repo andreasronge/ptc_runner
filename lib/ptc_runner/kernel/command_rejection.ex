@@ -32,6 +32,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
             | :missing_switch_value
             | :positional_arity
             | :invalid_destination
+            | :destination_exists
             | :destination_collision
             | :private_output_recovery_collision
             | :init_destination_collision
@@ -146,6 +147,32 @@ defmodule PtcRunner.Kernel.CommandRejection do
       accepted: [],
       option: nil,
       destination: CommandDeclaration.option_switch!(command, frontend, destination),
+      conflicts: []
+    }
+  end
+
+  @doc """
+  Builds the rejection for an envelope destination that already exists.
+
+  The reserve behind every published artifact refuses to clobber, so an
+  existing envelope path is a failure however late it is discovered. Discovering
+  it at admission is the difference between refusing a command and refusing it
+  after the workflow has executed and been billed. The caller's path is not
+  retained; the switch name is declaration-owned.
+  """
+  @spec envelope_destination_exists(
+          CommandDeclaration.command(),
+          CommandDeclaration.frontend()
+        ) :: t()
+  def envelope_destination_exists(command, frontend)
+      when command in [:validate, :run, :doctor, :models, :init] do
+    %__MODULE__{
+      command: command,
+      code: :envelope_destination_exists,
+      kind: :destination_exists,
+      accepted: [],
+      option: nil,
+      destination: CommandDeclaration.option_switch!(command, frontend, :envelope),
       conflicts: []
     }
   end
