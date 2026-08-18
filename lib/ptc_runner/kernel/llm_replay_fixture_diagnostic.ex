@@ -68,10 +68,6 @@ defmodule PtcRunner.Kernel.LLMReplayFixtureDiagnostic do
 
   def message(_reason), do: :error
 
-  @doc "Returns whether a reason is one this module renders."
-  @spec reason?(term()) :: boolean()
-  def reason?(reason), do: match?({:ok, _message}, message(reason))
-
   @doc false
   @spec valid_message?(term()) :: boolean()
   def valid_message?(message) when is_binary(message),

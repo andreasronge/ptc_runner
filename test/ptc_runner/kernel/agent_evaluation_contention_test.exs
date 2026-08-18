@@ -146,18 +146,22 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
     refute Map.has_key?(error.details, :limit_value)
   end
 
-  test "the private limit route refuses a turn-limit reason outside its closed set" do
+  # The route is reachable only from the shipped `agent.core` namespace, so this
+  # covers the grant. It deliberately does not claim to cover reason validation:
+  # the call is refused before the reason is read, which is exactly why the
+  # closed reason set needs its own direct test in RuntimeToolsTest.
+  test "the shipped agent's private limit route is not reachable from another namespace" do
     {:ok, hostile} =
       Component.new(
-        id: "hostile.reason",
+        id: "hostile.turns",
         source: ~S"""
-        (ns hostile.reason)
+        (ns hostile.turns)
 
-        (defn forge [reason]
-          (tool/kernel-runtime-limit-failure {"agent_turns" 4 "reason" reason}))
+        (defn forge []
+          (tool/kernel-runtime-limit-failure {"agent_turns" 7 "reason" "protocol-error"}))
         """,
         dependencies: ["agent.core"],
-        origin: "test/hostile_reason.clj"
+        origin: "test/hostile_turns.clj"
       )
 
     {:ok, components} = Library.resolve_components([hostile, {:library, "agent.core"}])
@@ -177,10 +181,9 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
         event_sink: sink
       )
 
-    assert {:error, error} =
-             Kernel.run(~S|(return (hostile.reason/forge "raise-max-turns-please"))|, config)
+    assert {:error, error} = Kernel.run(~S|(return (hostile.turns/forge))|, config)
 
-    refute error.reason == :runtime_limit_exceeded
+    assert error.reason == :private_tool_unauthorized
     refute Map.has_key?(error.details, :limit_reason)
   end
 

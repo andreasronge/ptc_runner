@@ -36,6 +36,16 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   ]
   @agent_limit_pattern "(?:[1-9]|[1-9][0-9]|1[01][0-9]|12[0-8])"
   @agent_maximum_digits 3
+  @agent_reason_atoms Enum.map(@agent_reasons, fn {reason, _prefix, _suffix} -> reason end)
+
+  # The wire names and the messages are two lists that must describe the same
+  # closed set. If they drift, a reason the loop can send has no message and the
+  # command silently degrades to the unclassified workflow failure — so this is
+  # a compile error rather than a runtime surprise.
+  if Enum.sort(@agent_reason_atoms) !=
+       Enum.sort(Enum.map(@agent_reason_names, fn {_name, reason} -> reason end)) do
+    raise "agent turn-limit reason names and messages describe different sets"
+  end
 
   @timeout_limits [:parallel_timeout_ms, :workflow_timeout_ms]
   @timeout_phases [:compilation, :execution]
@@ -57,12 +67,11 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   @doc false
   @spec agent_turns_reasons() :: [atom()]
-  def agent_turns_reasons,
-    do: Enum.map(@agent_reasons, fn {reason, _prefix, _suffix} -> reason end)
+  def agent_turns_reasons, do: @agent_reason_atoms
 
   @doc false
   @spec agent_turns_reason?(term()) :: boolean()
-  def agent_turns_reason?(reason), do: reason in agent_turns_reasons()
+  def agent_turns_reason?(reason), do: reason in @agent_reason_atoms
 
   @doc false
   @spec agent_turns_reason(term()) :: {:ok, atom()} | :error
