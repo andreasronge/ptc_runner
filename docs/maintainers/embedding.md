@@ -260,9 +260,9 @@ Success does not install the component. Promotion remains a separate operator
 decision — run the target with `--component-override-descriptor` to execute
 the validated candidate without editing any file. Passing cases prove only
 those host-selected inputs and installed providers; include held-out cases
-when semantic generalization matters. The
-[debug-a-failed-run example](../../examples/debug-a-failed-run/README.md)
-closes this loop end to end, including the abstention arm.
+when semantic generalization matters. The checked-in `debug-a-failed-run`
+example closes this loop end to end, including the abstention arm; its README
+walks every command.
 
 ## Next steps
 
