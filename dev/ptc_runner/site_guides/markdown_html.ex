@@ -79,18 +79,21 @@ defmodule PtcRunner.SiteGuides.MarkdownHTML do
     end
   end
 
-  # Generated references open with an HTML comment; the title is the first
-  # real element after it.
-  defp title!([{:comment, _attributes, _children, _meta} | rest], source),
-    do: title!(rest, source)
+  # Generated references open with an HTML comment (whose AST tag is the atom
+  # :comment, outside EarmarkParser's declared node type); the title is the
+  # first element with a real tag after it.
+  defp title!(ast, source) do
+    case Enum.find(ast, &element?/1) do
+      {"h1", _attributes, children, _meta} ->
+        text_content(children)
 
-  defp title!([{"h1", _attributes, children, _meta} | _rest], _source) do
-    text_content(children)
+      _other ->
+        raise ArgumentError, "#{source}: the first Markdown element must be a # title"
+    end
   end
 
-  defp title!(_ast, source) do
-    raise ArgumentError, "#{source}: the first Markdown element must be a # title"
-  end
+  defp element?({tag, _attributes, _children, _meta}), do: is_binary(tag)
+  defp element?(_other), do: false
 
   defp description(ast) do
     case Enum.find(ast, &match?({"p", _attributes, _children, _meta}, &1)) do
