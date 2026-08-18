@@ -7,6 +7,14 @@ history preserves them. Current architecture belongs in the
 contracts belong in the owning module documentation, and user-facing behavior
 belongs in guides or retained specifications.
 
+## Local gates
+
+- [`faster-hooks.md`](faster-hooks.md)
+  records measured warm times for the git pre-commit hook, `mix precommit`,
+  and git pre-push, and the slices that can still shrink them. The 185s
+  `async: false` serial floor is the only way to make push substantially
+  faster; overlapping more gates on push is already spent.
+
 ## Remaining Kernel product work
 
 - [`lisp-kernel/promote-authored-component.md`](lisp-kernel/promote-authored-component.md)

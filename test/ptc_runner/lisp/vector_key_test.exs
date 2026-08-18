@@ -1,5 +1,5 @@
 defmodule PtcRunner.Lisp.VectorKeyTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   alias PtcRunner.Lisp.Runtime
 
   test "avg-by with vector path" do

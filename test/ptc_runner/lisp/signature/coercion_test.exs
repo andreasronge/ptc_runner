@@ -1,5 +1,5 @@
 defmodule PtcRunner.Lisp.Signature.CoercionTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   doctest PtcRunner.Lisp.Signature.Coercion
 
   alias PtcRunner.Lisp.Signature.Coercion

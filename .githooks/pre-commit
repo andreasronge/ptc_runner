@@ -11,6 +11,8 @@ START_TIME=$(date +%s)
 
 PROJECTS=("." "ptc_viewer")
 
+# Newline-delimited names, same as before this change. Paths with embedded
+# newlines need `git diff -z`; that is outside this scoped-format slice.
 ALL_STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
 ALL_DELETED=$(git diff --cached --diff-filter=D --name-only)
 ALL_RENAMED=$(git diff --cached --diff-filter=R --name-only)
@@ -71,27 +73,73 @@ run_project_gates() {
     mix deps.compile > /dev/null 2>&1 || true
   fi
 
+  # Format and credo take the staged Elixir paths those tools own so a
+  # one-file commit does not pay for the whole tree. Nested companions
+  # (`ptc_runner_launcher/`) stay out: the root formatter and Credo configs
+  # do not include them, and passing explicit paths would apply the wrong
+  # rules. Compile stays unscoped: Mix is incremental, and
+  # warnings-as-errors has to see the project (including the launcher path
+  # dependency). Paths are relative to the project cwd after `pushd`, kept
+  # as a Bash array so spaces survive as one Mix argument. Sorted so the
+  # re-run hint is stable.
+  #
+  # A staged `.formatter.exs` / `.credo.exs` rewrites the checker itself, so
+  # that task runs unscoped. Credo consistency checks (exception names,
+  # parameter-pattern style) are weaker on a subset; `mix precommit` and
+  # pre-push still run full credo.
+  local elixir_files=()
+  local format_unscoped=0
+  local credo_unscoped=0
+  if [ -n "$has_elixir" ]; then
+    local elixir_list=$has_elixir
+    if [ "$proj" != "." ]; then
+      elixir_list=$(printf '%s\n' "$elixir_list" | sed "s|^${proj}/||")
+    fi
+    local elixir_file
+    while IFS= read -r elixir_file; do
+      [ -n "$elixir_file" ] || continue
+      case "$elixir_file" in
+        mix.exs|.formatter.exs|.credo.exs|config/*|lib/*|test/*) ;;
+        *) continue ;;
+      esac
+      case "$elixir_file" in
+        .formatter.exs) format_unscoped=1 ;;
+        .credo.exs) credo_unscoped=1 ;;
+      esac
+      elixir_files+=("$elixir_file")
+    done < <(printf '%s\n' "$elixir_list" | grep -v '^$' | LC_ALL=C sort)
+  fi
+
   # Static checks share ONE mix invocation (one BEAM boot) instead of a
   # separate `mix` process per check. `mix do a + b + c` fails fast on the
   # first non-zero task. (cwd is the project dir, so `project_has_dep "."`.)
-  local checks=""
-  if [ -n "$has_elixir" ]; then
-    checks="format --check-formatted"
+  local checks=()
+  if [ "$format_unscoped" = 1 ]; then
+    checks+=(format --check-formatted)
+  elif [ ${#elixir_files[@]} -gt 0 ]; then
+    checks+=(format --check-formatted "${elixir_files[@]}")
   fi
   if [ -n "$has_elixir" ] || [ -n "$has_config" ] || [ -n "$has_mix" ]; then
-    checks="${checks:+$checks + }compile --warnings-as-errors"
+    if [ ${#checks[@]} -gt 0 ]; then
+      checks+=(+)
+    fi
+    checks+=(compile --warnings-as-errors)
   fi
-  if [ -n "$has_elixir" ] && project_has_dep "." "credo"; then
-    checks="${checks:+$checks + }credo --strict"
+  if project_has_dep "." "credo"; then
+    if [ "$credo_unscoped" = 1 ]; then
+      checks+=(+ credo --strict)
+    elif [ ${#elixir_files[@]} -gt 0 ]; then
+      checks+=(+ credo --strict "${elixir_files[@]}")
+    fi
   fi
 
-  if [ -n "$checks" ]; then
-    echo "  ⏳ mix do $checks"
-    # shellcheck disable=SC1010,SC2086  # controlled `mix do` task list
-    if ! static_out=$(mix do $checks 2>&1); then
+  if [ ${#checks[@]} -gt 0 ]; then
+    echo "  ⏳ mix do ${checks[*]}"
+    # shellcheck disable=SC1010  # `+` is mix do's task separator
+    if ! static_out=$(mix do "${checks[@]}" 2>&1); then
       echo "  ❌ Static checks failed in $label:"
       echo "$static_out" | tail -40
-      echo "  Re-run: (cd $proj && mix do $checks)"
+      echo "  Re-run: (cd $(printf '%q' "$proj") && mix do $(printf '%q ' "${checks[@]}"))"
       popd > /dev/null
       exit 1
     fi
@@ -108,18 +156,22 @@ run_project_gates() {
   # *is* redundant with `test/test_helper.exs`, and is kept only for symmetry.
   #
   # `:nightly` needs no flag here: `test/test_helper.exs` excludes it globally.
-  local changed_tests
+  local changed_tests=()
+  local test_list=""
   if [ "$proj" = "." ]; then
-    changed_tests=$(echo "$staged" | grep -E '^test/.*_test\.exs$' || true)
+    test_list=$(printf '%s\n' "$staged" | grep -E '^test/.*_test\.exs$' || true)
   else
-    changed_tests=$(echo "$staged" | grep -E "^${proj}/test/.*_test\.exs$" \
-                      | sed "s|^${proj}/||" || true)
+    test_list=$(printf '%s\n' "$staged" | grep -E "^${proj}/test/.*_test\.exs$" \
+                  | sed "s|^${proj}/||" || true)
   fi
+  local test_file
+  while IFS= read -r test_file; do
+    [ -n "$test_file" ] && changed_tests+=("$test_file")
+  done < <(printf '%s\n' "$test_list")
 
-  if [ -n "$changed_tests" ]; then
+  if [ ${#changed_tests[@]} -gt 0 ]; then
     echo "  ⏳ Running scoped tests (excluding :slow)..."
-    # shellcheck disable=SC2086  # word-split the space-separated file list
-    if ! test_out=$(mix test $changed_tests --exclude clojure --exclude slow 2>&1); then
+    if ! test_out=$(mix test "${changed_tests[@]}" --exclude clojure --exclude slow 2>&1); then
       echo "  ❌ Tests failed in $label:"
       echo "$test_out" | tail -40
       popd > /dev/null
