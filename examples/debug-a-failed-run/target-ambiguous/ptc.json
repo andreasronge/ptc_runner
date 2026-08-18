@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "main", "path": "main.clj", "dependencies": ["kernel"]},
+      {"library": "kernel"}
+    ],
+    "entry": "main/run"
+  },
+  "missions": {
+    "billing": {
+      "components": [
+        {
+          "id": "orders",
+          "path": "orders.clj",
+          "dependencies": ["pricing.base", "pricing.tax"]
+        },
+        {"id": "pricing.base", "path": "pricing.base.clj"},
+        {"id": "pricing.tax", "path": "pricing.tax.clj"}
+      ]
+    }
+  },
+  "input": {"value": {"subtotal": 40, "required_total": 110}},
+  "events": {"policy": "private"},
+  "labels": {
+    "name": "debug-a-failed-run-target-ambiguous",
+    "tags": {"mode": "deterministic"}
+  }
+}

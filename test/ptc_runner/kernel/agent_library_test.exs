@@ -137,6 +137,193 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:provider_closed, :terminal_success}
   end
 
+  test "agent.core carries correlated evidence across a host-enforced mission phase boundary" do
+    responses = [
+      %{
+        content: "Inspect the supplied evidence.",
+        tool_calls: [
+          %{
+            id: "explore-1",
+            name: "run_ptc_lisp",
+            args: %{"program" => "(debug.explore/evidence)"}
+          }
+        ]
+      },
+      %{
+        content: "Synthesize from the retained evidence.",
+        tool_calls: [
+          %{id: "synthesize-1", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+        ]
+      }
+    ]
+
+    {:ok, explore} = mission_with_source("debug.explore", "(defn evidence [] 42)")
+    {:ok, synthesize} = MissionEnvironment.new([])
+
+    {:ok, config} =
+      agent_config(responses, [], missions: %{"explore" => explore, "synthesize" => synthesize})
+
+    source = ~S"""
+    (agent.core/run-phased-result-value
+      "Diagnose the incident."
+      {"phases"
+       [{"mission" "explore" "max_turns" 1}
+        {"mission" "synthesize"
+         "max_turns" 1
+         "instruction" "Synthesize the best supported result from the retained evidence."}]})
+    """
+
+    assert {:ok, %{value: 42}} = Kernel.run(source, config)
+
+    assert_receive {:agent_request, explore_request}
+    assert explore_request["system"] =~ "debug.explore/evidence"
+
+    refute explore_request["messages"] |> List.first() |> Map.fetch!("content") =~
+             "FINAL TURN"
+
+    assert_receive {:agent_request, synthesize_request}
+    refute synthesize_request["system"] =~ "debug.explore/evidence"
+
+    assert Enum.any?(synthesize_request["messages"], fn message ->
+             message["role"] == "assistant" and
+               get_in(message, ["tool_calls", Access.at(0), "id"]) == "explore-1"
+           end)
+
+    assert Enum.any?(synthesize_request["messages"], fn message ->
+             message["role"] == "tool" and message["tool_call_id"] == "explore-1" and
+               message["content"] =~ "user=> 42"
+           end)
+
+    assert List.last(synthesize_request["messages"])["content"] =~ "PHASE TRANSITION"
+
+    assert List.last(synthesize_request["messages"])["content"] =~
+             "Synthesize the best supported result from the retained evidence."
+  end
+
+  test "agent.core retains a non-final return but only lets the final phase complete" do
+    responses = [
+      %{
+        content: "I can answer during exploration.",
+        tool_calls: [
+          %{id: "early-return", name: "run_ptc_lisp", args: %{"program" => "(return 41)"}}
+        ]
+      },
+      %{
+        content: "I will make the final decision under synthesis authority.",
+        tool_calls: [
+          %{id: "final-return", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+        ]
+      }
+    ]
+
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, config} =
+      agent_config(responses, [], missions: %{"explore" => mission, "synthesize" => mission})
+
+    source = ~S"""
+    (agent.core/run-phased-result-value
+      "Decide."
+      {"phases"
+       [{"mission" "explore" "max_turns" 2}
+        {"mission" "synthesize" "max_turns" 1}]})
+    """
+
+    assert {:ok, %{value: 42}} = Kernel.run(source, config)
+
+    assert_receive {:agent_request, _explore_request}
+    assert_receive {:agent_request, synthesize_request}
+
+    assert Enum.any?(synthesize_request["messages"], fn message ->
+             message["role"] == "tool" and message["tool_call_id"] == "early-return" and
+               message["content"] =~ "user=> 41"
+           end)
+
+    assert List.last(synthesize_request["messages"])["content"] =~ "PHASE TRANSITION"
+  end
+
+  test "agent.core keeps an intermediate phase on a phase-local budget" do
+    responses =
+      for {id, value} <- [{"one", 1}, {"two", 2}, {"three", 3}] do
+        %{
+          content: "Complete phase #{id}.",
+          tool_calls: [
+            %{id: id, name: "run_ptc_lisp", args: %{"program" => "(return #{value})"}}
+          ]
+        }
+      end
+
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, config} =
+      agent_config(responses, [],
+        missions: %{"one" => mission, "two" => mission, "three" => mission}
+      )
+
+    source = ~S"""
+    (agent.core/run-phased-result-value
+      "Decide in stages."
+      {"phases"
+       [{"mission" "one" "max_turns" 1}
+        {"mission" "two" "max_turns" 1}
+        {"mission" "three" "max_turns" 1}]})
+    """
+
+    assert {:ok, %{value: 3}} = Kernel.run(source, config)
+
+    assert_receive {:agent_request, _first_request}
+    assert_receive {:agent_request, middle_request}
+    assert_receive {:agent_request, final_request}
+
+    assert List.last(middle_request["messages"])["content"] =~ "FINAL PHASE TURN"
+    refute List.last(middle_request["messages"])["content"] =~ "FINAL TURN:"
+    assert List.last(final_request["messages"])["content"] =~ "FINAL TURN:"
+  end
+
+  test "agent.core terminal-only phases reject parsed nonterminal programs before evaluation" do
+    responses = [
+      %{
+        content: "Inspect once more before deciding.",
+        tool_calls: [
+          %{
+            id: "nonterminal",
+            name: "run_ptc_lisp",
+            args: %{"program" => ~S|(doc "text containing (return 42)")|}
+          }
+        ]
+      },
+      %{
+        content: "Return the bounded decision.",
+        tool_calls: [
+          %{id: "terminal", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+        ]
+      }
+    ]
+
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, config} =
+      agent_config(responses, [], missions: %{"synthesize" => mission})
+
+    source = ~S"""
+    (agent.core/run-phased-result-value
+      "Decide from retained evidence."
+      {"phases"
+       [{"mission" "synthesize" "max_turns" 2 "terminal_only" true}]})
+    """
+
+    assert {:ok, %{value: 42, usage: usage}} = Kernel.run(source, config)
+    assert usage.subordinate_evaluations == 1
+
+    assert_receive {:agent_request, first_request}
+    assert_receive {:agent_request, second_request}
+
+    assert first_request["system"] =~ "TERMINAL-ONLY PHASE"
+
+    assert List.last(second_request["messages"])["content"] =~
+             "terminal-only phase rejected the generated program before evaluation"
+  end
+
   test "default prompt concisely advertises bounded Java interop" do
     response = %{
       content: nil,
@@ -520,6 +707,19 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
               }} = Kernel.run("(agent.main/run data/input)", config)
 
       assert path.segments == [{:property, "sum"}]
+
+      assert {:ok, records} = InspectionSink.records(inspection_sink)
+      diagnostic = Enum.find(records, &(&1["record_type"] == "execution-error"))
+      assert diagnostic["payload"]["reason"] == "result_contract_failed"
+
+      assert diagnostic["payload"]["details"]
+             |> Map.take(~w(agent_turns constraint contract_source violations)) ==
+               %{
+                 "agent_turns" => max_turns,
+                 "constraint" => "minimum",
+                 "contract_source" => "manifest.json",
+                 "violations" => [%{"kind" => "minimum", "path" => "/sum"}]
+               }
 
       assert Enum.any?(EventSink.events(config.event_sink), fn event ->
                event.type == "run-stopped" and event.data[:failure_kind] == "result-contract" and
@@ -3025,9 +3225,11 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, limits} = Limits.new(limit_overrides)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "agent-library")
 
+    missions = Keyword.get(opts, :missions, %{"default" => mission})
+
     config_opts = [
       workflow_environment: workflow,
-      missions: %{"default" => mission},
+      missions: missions,
       input: Keyword.get(opts, :input, %{}),
       limits: limits,
       event_sink: sink,
@@ -3208,6 +3410,15 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
       :error ->
         MissionEnvironment.new(capabilities: capabilities, data: data)
+    end
+  end
+
+  defp mission_with_source(namespace, body) do
+    source = "(ns #{namespace})\n#{body}\n"
+
+    with {:ok, component} <- Component.new(id: namespace, source: source, origin: "test"),
+         {:ok, bundle} <- Kernel.compile_bundle([component]) do
+      MissionEnvironment.new(bundle: bundle)
     end
   end
 end

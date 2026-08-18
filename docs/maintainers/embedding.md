@@ -218,6 +218,52 @@ and prompt-visible contracts, and compares reachable effects with the base.
 Effect widening requires `--accept-widened-effect`. The task creates evidence;
 it never installs the candidate or acquires a provider.
 
+## Validate a structured generated repair
+
+A debugging agent can return a flat `propose-change` result containing the
+diagnosed run id, target environment and mission, component id, captured base
+hash, and complete candidate source. `mix ptc.repair` binds that report to the
+current application and materializes it through the same candidate gate:
+
+```console
+mix ptc.repair ptc.json \
+  --report private/repair.json \
+  --out private/candidate \
+  --origin-run-id debugger-run-id
+```
+
+Materialization executes nothing. To run a bounded behavioral trial, the host
+must separately supply exact cases and acknowledge that installed providers may
+have effects:
+
+```console
+mix ptc.repair ptc.json \
+  --report private/repair.json \
+  --out private/candidate \
+  --validation-suite private/repair-suite.json \
+  --validation-out private/repair-trial \
+  --allow-live-validation
+```
+
+The task accepts only `decision: "propose-change"`, derives the materializer
+target and component from the report, and refuses a stale captured base hash or
+a no-op source. Paths, credentials, inputs, expected results, and artifact
+destinations remain host arguments rather than model output. The suite has
+version 1 and one to 32 uniquely named cases, each with an exact `expected`
+JSON value and exactly one `input` or `private_input`. All cases run even
+after a failure, and the private trial directory receives the aggregate
+`report.json` plus owner-only `feedback.json`, a machine-readable handoff that
+separates the model-authored untrusted candidate from host-authored validation
+facts. Keep both private: they contain generated source and result values.
+
+Success does not install the component. Promotion remains a separate operator
+decision — run the target with `--component-override-descriptor` to execute
+the validated candidate without editing any file. Passing cases prove only
+those host-selected inputs and installed providers; include held-out cases
+when semantic generalization matters. The
+[debug-a-failed-run example](../../examples/debug-a-failed-run/README.md)
+closes this loop end to end, including the abstention arm.
+
 ## Next steps
 
 - [Manifests and capabilities](../guides/manifests-and-capabilities.md) defines the

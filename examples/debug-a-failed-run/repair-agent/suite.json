@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "observed-order",
+      "input": {"subtotal": 100, "required_total": 120},
+      "expected": {"total": 120}
+    },
+    {
+      "name": "held-out-small",
+      "input": {"subtotal": 50, "required_total": 70},
+      "expected": {"total": 70}
+    },
+    {
+      "name": "held-out-zero",
+      "input": {"subtotal": 0, "required_total": 20},
+      "expected": {"total": 20}
+    }
+  ]
+}

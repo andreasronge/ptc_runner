@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `mix ptc.repair` to consume one structured generated `propose-change`
+  repair report, bind it to the current component base hash, and pass the
+  existing G1-G4 materialization gate. Optional live trials require an explicit
+  effects acknowledgement and a host-owned suite of exact normal or private
+  inputs and expected results; reports never control paths, credentials,
+  inputs, host configuration, effect-widening acceptance, or promotion.
+- Added `agent.core/run-phased-result-value`: an agent run can declare ordered
+  mission phases under one turn ceiling, retaining the exact correlated
+  transcript while the host swaps mission authority between phases. A return
+  in a non-final phase becomes retained evidence; a `terminal_only` phase
+  rejects any program that is not a single top-level `return` or `fail` before
+  evaluation.
+- The `debug-a-failed-run` example closes the loop it documents: a phased
+  repair agent reads the incident packet the host acquires before model turn
+  one and completes through one typed terminal action — a complete component
+  replacement or an abstention. `mix ptc.repair` validates a proposal against
+  host-owned held-out cases, and the validated candidate reruns the failed
+  target green via `--component-override-descriptor` without editing a file.
+  A second, deliberately underdetermined target demonstrates the abstain arm.
+
 - `ptc viewer PROJECT.json` opens the canonical trace Viewer from both the
   `mix ptc` and standalone frontends, replacing the development-only
   `mix ptc.viewer` task. The Viewer now ships inside the assembled release and

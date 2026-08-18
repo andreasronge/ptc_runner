@@ -112,7 +112,7 @@ defmodule PtcRunner.Kernel.CandidatePromotionTest do
       assert [%{"ref" => "helper/pure", "effect" => "unknown"}] = detail["indeterminate"]
     end
 
-    test "a removed export is a surface change, not a widening" do
+    test "a removed export is refused even when the observed validation path does not call it" do
       candidate = """
       (ns helper "Helper exports." {:visibility :prompt})
 
@@ -125,8 +125,8 @@ defmodule PtcRunner.Kernel.CandidatePromotionTest do
 
       report = evaluate(candidate)
 
-      assert report.outcome == :pass
-      assert %{status: :pass, detail: detail} = criterion(report, "G3")
+      assert report.outcome == :fail
+      assert %{status: :fail, detail: detail} = criterion(report, "G3")
       assert detail["surface_changes"]["removed"] == ["helper/writer"]
     end
   end
