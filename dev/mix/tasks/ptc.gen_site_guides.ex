@@ -469,7 +469,7 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
       Enum.flat_map(expected, fn {path, content} ->
         case File.read(path) do
           {:ok, ^content} -> []
-          {:ok, _stale} -> ["stale: #{path}"]
+          {:ok, committed} -> ["stale: #{path}\n#{first_difference(committed, content)}"]
           {:error, _reason} -> ["missing: #{path}"]
         end
       end)
@@ -488,6 +488,25 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
         #{Enum.join(problems, "\n")}
         """)
     end
+  end
+
+  # A bare "stale" from CI is undiagnosable when the local render matches, so
+  # a mismatch names the first differing line of both versions.
+  defp first_difference(committed, rendered) do
+    committed_lines = String.split(committed, "\n")
+    rendered_lines = String.split(rendered, "\n")
+    count = max(length(committed_lines), length(rendered_lines))
+
+    index =
+      Enum.find(0..(count - 1), fn i ->
+        Enum.at(committed_lines, i) != Enum.at(rendered_lines, i)
+      end)
+
+    """
+      first difference at line #{index + 1}
+      committed: #{inspect(Enum.at(committed_lines, index), printable_limit: 200)}
+      rendered:  #{inspect(Enum.at(rendered_lines, index), printable_limit: 200)}\
+    """
   end
 
   defp write!(expected) do
