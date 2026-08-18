@@ -121,8 +121,12 @@ function Hero({ metadata, transcript, title: displayTitle, eventCount, truncated
     ['Source', metadata.source],
     ['Bundle', abbreviate(bundle), bundle]
   ].filter(([, value]) => value !== null && value !== undefined && value !== '');
-  const terminalError = transcript.terminal?.data?.outcome === 'error' ? 1 : 0;
-  const errorCount = metadata.error_count ?? Math.max(transcript.limits.length, terminalError);
+  // The same rows the transcript below tones as errors: evaluations,
+  // capability calls, and exceeded limits. The run's own outcome is the status
+  // badge above and the terminal cause beneath it, not an extra error.
+  const erroredSpans = [...transcript.evaluations, ...transcript.capabilities]
+    .filter(span => isFailure(statusOf(span))).length;
+  const errorCount = metadata.error_count ?? erroredSpans + transcript.limits.length;
 
   return html`
     <div class="kt-hero">

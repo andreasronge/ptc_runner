@@ -202,6 +202,12 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   defp rejection_suffix(%CommandRejection{kind: :unknown_switch, accepted: accepted}),
     do: "; unknown switch; accepted: " <> Enum.join(accepted, ", ")
 
+  defp rejection_suffix(%CommandRejection{kind: :unknown_page, accepted: accepted}),
+    do: "; pages: " <> Enum.join(accepted, ", ")
+
+  defp rejection_suffix(%CommandRejection{kind: :unknown_example, accepted: accepted}),
+    do: "; examples: " <> Enum.join(accepted, ", ")
+
   defp rejection_suffix(%CommandRejection{kind: :missing_switch_value, option: option}),
     do: "; #{option} requires a value"
 
@@ -213,6 +219,12 @@ defmodule PtcRunner.Kernel.CommandRenderer do
          destination: destination
        }),
        do: "; invalid destination: #{destination}"
+
+  defp rejection_suffix(%CommandRejection{
+         kind: :destination_exists,
+         destination: destination
+       }),
+       do: "; remove it or point #{destination} at another path"
 
   defp rejection_suffix(%CommandRejection{
          kind: :destination_collision,

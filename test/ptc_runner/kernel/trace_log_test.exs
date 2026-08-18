@@ -283,6 +283,50 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   end
 
   @tag :tmp_dir
+  test "the run error count is the errored rows, not every event carrying one", %{
+    tmp_dir: directory
+  } do
+    path = Path.join(directory, "error-count.jsonl")
+
+    events = [
+      decoded_event("errored-run", 1, "run-started", %{}),
+      decoded_event("errored-run", 2, "evaluation-started", %{
+        "environment" => "workflow",
+        "evaluation_id" => "workflow-evaluation"
+      }),
+      decoded_event("errored-run", 3, "capability-started", %{
+        "environment" => "workflow",
+        "capability_id" => "capability-1",
+        "name" => "kernel-mission-model-context"
+      }),
+      decoded_event("errored-run", 4, "capability-stopped", %{
+        "environment" => "workflow",
+        "capability_id" => "capability-1",
+        "name" => "kernel-mission-model-context",
+        "status" => "error"
+      }),
+      decoded_event("errored-run", 5, "evaluation-stopped", %{
+        "environment" => "workflow",
+        "evaluation_id" => "workflow-evaluation",
+        "status" => "error"
+      }),
+      decoded_event("errored-run", 6, "run-stopped", %{
+        "outcome" => "error",
+        "reason" => "explicit_failure",
+        "failure_kind" => "mission-unavailable"
+      })
+    ]
+
+    assert :ok = TraceLog.append_jsonl(path, events)
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    # One errored evaluation and one errored capability call are the two rows a
+    # reader can open. The run's own outcome is its status, not a third error.
+    assert {:ok, %{"items" => [%{"error_count" => 2, "status" => "error"}]}} =
+             TraceLog.query(trace_log, :list_runs, %{})
+  end
+
+  @tag :tmp_dir
   test "canonical validation rejects malformed workflow prelude metadata", %{tmp_dir: directory} do
     path = Path.join(directory, "malformed-workflow-prelude.jsonl")
 

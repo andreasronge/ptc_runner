@@ -736,7 +736,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
     `*` marks PtcRunner extensions without a `clojure.core` equivalent.
 
-    See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conformance Gaps](clojure-conformance-gaps.md) | [Namespace Coverage](conformance/index.md)
+    See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conformance Gaps](clojure-conformance-gaps.md) | Namespace coverage: `docs/conformance/index.md`
 
     ## Table of Contents
 
@@ -1077,7 +1077,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
     #{length(entries)} interop entries covering #{linked_class_count} Java classes in #{length(by_class)} presentation groups.
 
-    See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md) | [Namespace Coverage](conformance/index.md)
+    See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md) | Namespace coverage: `docs/conformance/index.md`
 
     #{sections}
     """

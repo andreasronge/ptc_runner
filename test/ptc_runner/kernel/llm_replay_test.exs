@@ -531,6 +531,57 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     end
 
     @tag :tmp_dir
+    test "the transcript ceiling names max_transcript_chars and its value", %{tmp_dir: dir} do
+      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
+
+      paths = write_application(dir)
+
+      write_agent_application(
+        paths,
+        ~S|(agent.core/run-value "Return 42" {"max_turns" 2 "max_transcript_chars" 100})|
+      )
+
+      trace_dir = Path.join(dir, "transcript-limit-traces")
+      File.mkdir_p!(trace_dir)
+
+      # The first request already exceeds the ceiling, so no fixture is needed:
+      # the bound is checked before the provider is reached.
+      assert {:error, %CommandOutcome{} = exceeded} =
+               CommandEngine.dispatch([
+                 "run",
+                 paths.manifest,
+                 "--host-config",
+                 paths.host,
+                 "--trace-dir",
+                 trace_dir
+               ])
+
+      assert exceeded.envelope["error"]["code"] == "runtime_limit_exceeded",
+             inspect(exceeded.envelope)
+
+      assert exceeded.envelope["error"]["message"] ==
+               "transcript limit 100 characters was exceeded; raise max_transcript_chars for " <>
+                 "this agent.core/run call, or reduce the work carried between turns"
+
+      assert exceeded.envelope["error"]["source"] == nil
+      assert exceeded.exit_status == 6
+      assert CommandContract.valid_envelope?(exceeded.envelope)
+
+      assert [trace_path] = Path.wildcard(Path.join(trace_dir, "*.jsonl"))
+
+      stopped =
+        trace_path
+        |> File.stream!()
+        |> Stream.map(&Jason.decode!/1)
+        |> Enum.find(&(&1["type"] == "run-stopped"))
+
+      assert stopped["data"]["failure_kind"] == "transcript-limit"
+      assert stopped["data"]["limit"] == "max_transcript_chars"
+      assert stopped["data"]["limit_value"] == 100
+    end
+
+    @tag :tmp_dir
     test "agent result-contract exhaustion publishes its bounded final diagnosis", %{tmp_dir: dir} do
       {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])

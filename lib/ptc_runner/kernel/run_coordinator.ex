@@ -37,6 +37,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
+  alias PtcRunner.Lisp.Prelude
   alias PtcRunner.LiveStatus.Target
 
   @mission_compile_timeout_ms 5_000
@@ -58,6 +59,12 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              external_size(workflow_bundle)
            ),
          :ok <- validate_entry(workflow_bundle, request.package.entry),
+         :ok <-
+           validate_entry_missions(
+             workflow_bundle,
+             request.package.entry,
+             request.package.missions
+           ),
          {:ok, declarations} <-
            prepare_providers(request, workflow_bundle, mission_bundles, catalog),
          {:ok, derived} <-
@@ -474,6 +481,38 @@ defmodule PtcRunner.Kernel.RunCoordinator do
       do: :ok,
       else: {:error, diagnostic(:bundle, :entry_invalid)}
   end
+
+  @doc """
+  Rejects an entry that evaluates into a mission when the manifest declares none.
+
+  `kernel-mission-model-context` answers `unknown_mission` for every name a
+  manifest without missions can supply, so a run that reaches it cannot reach its
+  first model request. Both facts are in the documents `validate` already parses:
+  the compiled entry's transitive tool references, and whether the manifest's
+  mission map is empty. Which mission the entry will *name* is not decidable here
+  — it comes from runtime configuration — so nothing else is checked.
+
+  The reference set is a may-call set, so an entry that reaches the capability
+  only on a branch its input never takes is refused too. That is the deliberate
+  trade: such a manifest carries a mission-evaluating library it never uses, the
+  remedy is one declared mission, and the failure it replaces is a paid run
+  ending in `execution/workflow_failed` with nothing naming the cause.
+  """
+  @spec validate_entry_missions(PtcRunner.Kernel.FrozenBundle.t(), binary(), map() | nil) ::
+          :ok | {:error, CommandDiagnostic.t()}
+  def validate_entry_missions(workflow_bundle, entry, missions) do
+    if map_size(missions || %{}) == 0 and mission_context_entry?(workflow_bundle, entry),
+      do: {:error, diagnostic(:bundle, :mission_undeclared)},
+      else: :ok
+  end
+
+  defp mission_context_entry?(%{prelude: prelude}, entry) when is_binary(entry) do
+    "kernel-mission-model-context" in Prelude.export_tool_refs(prelude, entry)
+  rescue
+    _exception -> false
+  end
+
+  defp mission_context_entry?(_bundle, _entry), do: false
 
   defp prepare_providers(request, workflow_bundle, mission_bundles, catalog) do
     request.package.providers

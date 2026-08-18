@@ -47,6 +47,14 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
     raise "agent turn-limit reason names and messages describe different sets"
   end
 
+  @transcript_prefix "transcript limit "
+  @transcript_suffix " characters was exceeded; raise max_transcript_chars for this agent.core/run call, or reduce the work carried between turns"
+  @transcript_limit_pattern "(?:[1-9][0-9]{0,5}|1000000)"
+  @transcript_maximum_digits 7
+  @transcript_maximum_message_bytes byte_size(@transcript_prefix) +
+                                      @transcript_maximum_digits +
+                                      byte_size(@transcript_suffix)
+
   @timeout_limits [:parallel_timeout_ms, :workflow_timeout_ms]
   @timeout_phases [:compilation, :execution]
   @timeout_value_pattern @subordinate_limit_pattern
@@ -91,6 +99,13 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   def agent_turns_message(_limit, _reason), do: :error
 
   @doc false
+  @spec transcript_chars_message(term()) :: {:ok, binary()} | :error
+  def transcript_chars_message(limit) when is_integer(limit) and limit in 1..1_000_000,
+    do: {:ok, @transcript_prefix <> Integer.to_string(limit) <> @transcript_suffix}
+
+  def transcript_chars_message(_limit), do: :error
+
+  @doc false
   @spec timeout_message(term(), term(), term()) :: {:ok, binary()} | :error
   def timeout_message(limit, limit_ms, phase)
       when limit in @timeout_limits and phase in @timeout_phases do
@@ -121,7 +136,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @spec valid_message?(term()) :: boolean()
   def valid_message?(message) when is_binary(message) do
     subordinate_evaluations_message?(message) or agent_turns_message?(message) or
-      timeout_message?(message)
+      transcript_chars_message?(message) or timeout_message?(message)
   end
 
   def valid_message?(_message), do: false
@@ -141,6 +156,36 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   end
 
   def agent_turns_message?(_message), do: false
+
+  @doc false
+  @spec transcript_chars_message?(term()) :: boolean()
+  def transcript_chars_message?(message) when is_binary(message) do
+    valid_exact_message?(
+      message,
+      @transcript_prefix,
+      @transcript_suffix,
+      @transcript_maximum_digits,
+      &transcript_chars_message/1
+    )
+  end
+
+  def transcript_chars_message?(_message), do: false
+
+  @doc false
+  @spec run_duration_message?(term()) :: boolean()
+  def run_duration_message?(message) when is_binary(message) do
+    Enum.any?(@timeout_phases, fn phase ->
+      valid_exact_message?(
+        message,
+        "run_duration_ms limit ",
+        " ms was exceeded during #{phase}",
+        @subordinate_maximum_digits,
+        &live_timeout_message(:run_duration_ms, &1, phase)
+      )
+    end)
+  end
+
+  def run_duration_message?(_message), do: false
 
   @doc false
   @spec subordinate_evaluations_message?(term()) :: boolean()
@@ -173,7 +218,9 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   def message_schema(fallback) when is_binary(fallback) do
     message_schema(
       fallback,
-      [subordinate_message_branch()] ++ agent_message_branches() ++ timeout_message_branches()
+      [subordinate_message_branch()] ++
+        agent_message_branches() ++
+        [transcript_message_branch()] ++ timeout_message_branches()
     )
   end
 
@@ -188,9 +235,14 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
     do: message_schema(fallback, [subordinate_message_branch() | timeout_message_branches()])
 
   @doc false
-  @spec agent_turns_message_schema(binary()) :: map()
-  def agent_turns_message_schema(fallback) when is_binary(fallback),
-    do: message_schema(fallback, agent_message_branches())
+  @spec agent_loop_message_schema(binary()) :: map()
+  def agent_loop_message_schema(fallback) when is_binary(fallback),
+    do: message_schema(fallback, agent_message_branches() ++ [transcript_message_branch()])
+
+  @doc false
+  @spec run_duration_message_schema(binary()) :: map()
+  def run_duration_message_schema(fallback) when is_binary(fallback),
+    do: message_schema(fallback, run_duration_message_branches())
 
   defp message_schema(fallback, branches) do
     %{
@@ -219,6 +271,28 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
             DiagnosticPattern.escape(prefix) <>
               @agent_limit_pattern <> DiagnosticPattern.escape(suffix)
           )
+      }
+    end
+  end
+
+  defp transcript_message_branch do
+    %{
+      "type" => "string",
+      "minLength" => 1,
+      "maxLength" => @transcript_maximum_message_bytes,
+      "pattern" =>
+        "^transcript limit #{@transcript_limit_pattern} characters was exceeded; raise max_transcript_chars for this agent.core/run call, or reduce the work carried between turns$(?![\\s\\S])"
+    }
+  end
+
+  defp run_duration_message_branches do
+    for phase <- @timeout_phases do
+      %{
+        "type" => "string",
+        "minLength" => 1,
+        "maxLength" => @timeout_maximum_message_bytes,
+        "pattern" =>
+          "^run_duration_ms limit #{@timeout_value_pattern} ms was exceeded during #{phase}$(?![\\s\\S])"
       }
     end
   end

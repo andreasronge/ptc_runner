@@ -25,12 +25,20 @@ defmodule PtcViewer.Api do
 
   defp inspection_query(config, operation, run_id)
        when is_list(config) and is_binary(run_id) do
-    with store when is_pid(store) <- Keyword.get(config, :inspection_store),
-         {:ok, source} <- PtcViewer.InspectionStore.fetch(store),
-         adapter when not is_nil(adapter) <- Keyword.get(config, :inspection_adapter) do
-      safely_inspection(adapter, operation, source, run_id)
+    store = Keyword.get(config, :inspection_store)
+    adapter = Keyword.get(config, :inspection_adapter)
+
+    # A Viewer started for a project that does not record inspection artifacts
+    # is given neither. That is a configuration choice with a next action, not
+    # evidence that is momentarily out of reach, and the two must not share a
+    # reason: only the second is worth retrying.
+    if is_pid(store) and not is_nil(adapter) do
+      case PtcViewer.InspectionStore.fetch(store) do
+        {:ok, source} -> safely_inspection(adapter, operation, source, run_id)
+        _missing -> {:error, :unavailable}
+      end
     else
-      _missing -> {:error, :unavailable}
+      {:error, :inspection_not_configured}
     end
   end
 

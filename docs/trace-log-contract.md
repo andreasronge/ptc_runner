@@ -1,9 +1,9 @@
 # TraceLog and Run Analysis — V2 Contract
 
 **Status:** implemented retained product contract, including the local 0.x
-inspection increment. Complements the
-[Kernel maintainer guide](maintainers/kernel.md) and
-`PtcRunner.Kernel.TraceLog` module documentation.
+inspection increment. Complements `PtcRunner.Kernel.TraceLog` module
+documentation and the Kernel maintainer guide, `docs/maintainers/kernel.md`,
+which is a repository document rather than a page the executable carries.
 
 ## Purpose and boundary
 

@@ -366,6 +366,13 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   end
 
   def sanitize_private_error(
+        {:runtime_limit_exceeded, _message, %{limit: :max_transcript_chars, limit_value: limit}} =
+          reason
+      )
+      when limit in 1..1_000_000,
+      do: reason
+
+  def sanitize_private_error(
         {:llm_provider_failed, _message, %{failure_kind: "llm-provider-error"} = details}
       ) do
     case SafeMetadata.retain_llm_provider_failure_fields(details) do

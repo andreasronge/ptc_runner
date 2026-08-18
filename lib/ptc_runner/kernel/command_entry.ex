@@ -160,7 +160,8 @@ defmodule PtcRunner.Kernel.CommandEntry do
 
       {:ok, envelope} ->
         with {:ok, envelope} <- anchor_file(envelope),
-             :ok <- distinct?(arguments, destinations, run_ref, envelope) do
+             :ok <- distinct?(arguments, destinations, run_ref, envelope),
+             :ok <- absent?(envelope) do
           arguments = %{
             arguments
             | frontend_options: Keyword.delete(arguments.frontend_options, :envelope)
@@ -180,6 +181,14 @@ defmodule PtcRunner.Kernel.CommandEntry do
                )
              )}
 
+          {:error, :destination_exists} ->
+            {:error,
+             rejected(
+               run_ref,
+               frontend,
+               CommandRejection.envelope_destination_exists(arguments.command, frontend)
+             )}
+
           {:error, {:destination_collision, key}} ->
             destination_collision(arguments, run_ref, frontend, key, :envelope)
 
@@ -191,6 +200,19 @@ defmodule PtcRunner.Kernel.CommandEntry do
                CommandRejection.init_destination_collision(frontend)
              )}
         end
+    end
+  end
+
+  # The publication reserve behind the envelope never clobbers, so an existing
+  # destination is refused whenever it is noticed. Noticing it here, where the
+  # path is already anchored and nothing has run, costs one lstat and keeps a
+  # second invocation of the same CI step from paying for a run whose result it
+  # cannot receive.
+  defp absent?(path) do
+    case File.lstat(path) do
+      {:error, :enoent} -> :ok
+      {:ok, _stat} -> {:error, :destination_exists}
+      {:error, _reason} -> :ok
     end
   end
 

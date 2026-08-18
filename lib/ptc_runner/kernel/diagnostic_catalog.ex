@@ -34,6 +34,10 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "choose only one option from the conflicting argument group"},
     {:arguments, :project_host_undeclared, 2, false,
      "the project document declares no host block; add one to use this command"},
+    {:arguments, :envelope_destination_exists, 2, false,
+     "the envelope destination already exists"},
+    {:arguments, :docs_page_unknown, 2, false, "no documentation page is served under that name"},
+    {:arguments, :example_unknown, 2, false, "no example is embedded under that name"},
     {:host, :host_unavailable, 3, false, "the host configuration is unavailable"},
     {:host, :host_invalid, 3, false, "the host configuration is invalid"},
     {:host, :host_schema_invalid, 3, false, "the host configuration does not satisfy its schema"},
@@ -84,6 +88,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:bundle, :unknown_namespace, 3, false,
      "the component source references an unavailable namespace"},
     {:bundle, :entry_invalid, 3, false, "the workflow entry is not a public bundle export"},
+    {:bundle, :mission_undeclared, 3, false,
+     "the workflow entry evaluates into a mission and the manifest declares none"},
     {:provider_declaration, :provider_unknown, 3, false,
      "the selected provider is not installed"},
     {:provider_declaration, :selection_invalid, 3, false, "the provider selection is invalid"},
@@ -318,6 +324,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :execution, code: :runtime_limit_exceeded, message: fallback}),
     do: RuntimeLimitDiagnostic.message_schema(fallback)
 
+  def message_schema(%{phase: :execution, code: :run_timeout, message: fallback}),
+    do: RuntimeLimitDiagnostic.run_duration_message_schema(fallback)
+
   def message_schema(%{phase: :execution, code: :replay_fixture_missing, message: fallback}),
     do: LLMReplayDiagnostic.message_schema(fallback)
 
@@ -347,6 +356,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:execution, :runtime_limit_exceeded, message),
     do: RuntimeLimitDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:execution, :run_timeout, message),
+    do: RuntimeLimitDiagnostic.run_duration_message?(message)
 
   defp valid_dynamic_message?(:execution, :replay_fixture_missing, message),
     do: LLMReplayDiagnostic.valid_message?(message)

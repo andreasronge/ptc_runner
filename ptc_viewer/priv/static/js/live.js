@@ -39,7 +39,7 @@ export function createLiveController({ onInspectRun, onLiveCount, onProject, mut
 
   const commandEl = emptyEl.querySelector('.live-empty-cmd');
   if (commandEl) {
-    commandEl.textContent = `PTC_VIEWER_URL=${location.origin} mix ptc run manifest.json ...`;
+    commandEl.textContent = `PTC_VIEWER_URL=${location.origin} ptc run manifest.json ...`;
   }
 
   let source = null;

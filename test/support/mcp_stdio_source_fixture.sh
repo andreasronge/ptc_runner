@@ -9,9 +9,11 @@ if [ "$mode" = "mark-close" ]; then
   mode=serve
 fi
 
-if [ "$mode" = "unsupported-protocol" ]; then
-  trap 'printf "%s\n" session-closed >> "$marker"' EXIT
-fi
+case "$mode" in
+  unsupported-protocol|unsupported-protocol-bare)
+    trap 'printf "%s\n" session-closed >> "$marker"' EXIT
+    ;;
+esac
 
 write_text_result() {
   response_id=$1
@@ -66,6 +68,10 @@ do
       if [ "$mode" = "unsupported-protocol" ]; then
         printf '%s\n' 'PRIVATE_STDERR_DETAIL' >&2
         printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"PRIVATE_REMOTE_MESSAGE","data":{"secret":"PRIVATE_REMOTE_DATA"}}}\n' "$id"
+      elif [ "$mode" = "unsupported-protocol-bare" ]; then
+        # Byte shape of @modelcontextprotocol/server-filesystem answering the
+        # pinned profile's first request: code and message, nothing else.
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"Method not found"}}\n' "$id"
       else
         printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","supportedVersions":["2026-07-28"],"capabilities":{"tools":{}},"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"fixture","version":"1.0"}},"ttlMs":0,"cacheScope":"private"}}\n' "$id"
       fi

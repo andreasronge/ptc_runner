@@ -29,7 +29,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         "ptc run MANIFEST.json|PROJECT.json [OPTIONS]",
         "ptc doctor [MANIFEST.json|PROJECT.json] [--host-config HOST.json] [--connect]",
         "ptc models PROJECT.json | --host-config HOST.json",
-        "ptc init DIRECTORY",
+        "ptc init DIRECTORY [--example NAME]",
         "ptc docs [PAGE]",
         "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE",
         "ptc repl [OPTIONS] [SCRIPT|-]",
@@ -47,8 +47,14 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
       ]
     },
     init: %{
-      usage: ["ptc init DIRECTORY"],
+      usage: ["ptc init DIRECTORY [--example NAME]"],
       options: [
+        %{
+          key: :example,
+          type: :string,
+          syntax: ["--example NAME"],
+          description: "materialize one embedded example tree instead of the scaffold"
+        },
         %{
           key: :envelope,
           type: :string,

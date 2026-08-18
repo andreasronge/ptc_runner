@@ -8,7 +8,7 @@ PTC-Lisp emulates a subset of Java interop for LLM compatibility. These are **no
 
 40 interop entries covering 12 Java classes in 13 presentation groups.
 
-See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md) | [Namespace Coverage](conformance/index.md)
+See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md) | Namespace coverage: `docs/conformance/index.md`
 
 ### java.lang.Boolean
 

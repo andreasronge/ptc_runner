@@ -868,6 +868,99 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "a run that exhausts run_duration_ms reports the limit and its value", %{
+    tmp_dir: directory
+  } do
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "slow", "path" => "slow.clj"}],
+        "entry" => "slow/run"
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"run_duration_ms" => 1},
+      "providers" => %{"workflow" => [], "mission" => []}
+    }
+
+    application =
+      write_application(directory, "run-duration-exhausted", manifest, [
+        {"slow.clj", "(ns slow) (defn run [input] (return (count (range 1 200000))))"}
+      ])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["error"]["code"] == "run_timeout"
+    assert outcome.exit_status == 6
+
+    assert outcome.envelope["error"]["message"] =~
+             ~r/^run_duration_ms limit 1 ms was exceeded during (compilation|execution)$/
+
+    assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert_schema_valid(outcome.envelope)
+  end
+
+  test "transcript-ceiling diagnostics bind their bounded message to a null source" do
+    runtime_source = CommandSource.fixed(:runtime)
+
+    for limit <- [1, 262_144, 1_000_000] do
+      assert {:ok, message} = RuntimeLimitDiagnostic.transcript_chars_message(limit)
+
+      assert {:ok, %CommandDiagnostic{source: nil, exit_status: 6}} =
+               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+                 message: message,
+                 provider_activity: true
+               )
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+                 message: message,
+                 source: runtime_source,
+                 provider_activity: true
+               )
+    end
+
+    for invalid_limit <- [0, 1_000_001, "6000"] do
+      assert :error = RuntimeLimitDiagnostic.transcript_chars_message(invalid_limit)
+    end
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: "transcript limit 0 characters was exceeded",
+               provider_activity: true
+             )
+  end
+
+  test "a run timeout names the configured run_duration_ms rather than only timing out" do
+    assert {:ok, message} =
+             RuntimeLimitDiagnostic.live_timeout_message(:run_duration_ms, 3_000, :execution)
+
+    assert message == "run_duration_ms limit 3000 ms was exceeded during execution"
+
+    # The wall-clock stop keeps its own code and status, so a script can still
+    # separate it from a turn limit on more than the exit code.
+    assert {:ok, %CommandDiagnostic{code: :run_timeout, exit_status: 6}} =
+             CommandDiagnostic.new(:execution, :run_timeout,
+               message: message,
+               source: CommandSource.fixed(:runtime),
+               provider_activity: true
+             )
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :run_timeout,
+               message: message,
+               provider_activity: true
+             )
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :run_timeout,
+               message: "run_duration_ms limit 0 ms was exceeded during execution",
+               source: CommandSource.fixed(:runtime),
+               provider_activity: true
+             )
+  end
+
+  @tag :tmp_dir
   test "frontend environment setup fails before the execution owner and activity marker", %{
     tmp_dir: directory
   } do

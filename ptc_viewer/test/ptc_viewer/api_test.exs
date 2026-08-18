@@ -90,7 +90,17 @@ defmodule PtcViewer.ApiTest do
              PtcViewer.Api.conversation(config, "run-1")
 
     assert_receive {:inspection, ^source, "run-1"}
-    assert {:error, :unavailable} = PtcViewer.Api.conversation([], "run-1")
+
+    # No store and no adapter is a project that records no inspection artifact;
+    # a store that cannot answer is evidence out of reach. Only the second is
+    # worth retrying, so the two do not share a reason.
+    assert {:error, :inspection_not_configured} = PtcViewer.Api.conversation([], "run-1")
+
+    assert {:error, :inspection_not_configured} =
+             PtcViewer.Api.conversation([inspection_store: store], "run-1")
+
+    assert {:error, :inspection_not_configured} =
+             PtcViewer.Api.conversation([inspection_adapter: adapter], "run-1")
   end
 
   test "preludes delegates the pinned inspection grant", %{trace_dir: trace_dir} do

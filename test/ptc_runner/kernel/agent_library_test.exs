@@ -1630,23 +1630,38 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:provider_closed, :transcript_rejected}
     assert {:ok, [diagnostic]} = InspectionSink.records(inspection_sink)
     assert diagnostic["record_type"] == "execution-error"
-    assert diagnostic["payload"]["reason"] == "explicit_failure"
-    assert diagnostic["payload"]["details"] == %{"failure_kind" => "transcript-limit"}
+    # The ceiling names itself: a bound the caller set in its own input document
+    # reports the limit and its value rather than a generic explicit failure.
+    assert diagnostic["payload"]["reason"] == "runtime_limit_exceeded"
+
+    assert diagnostic["payload"]["details"] == %{
+             "limit" => "max_transcript_chars",
+             "limit_value" => encoded_chars - 1
+           }
 
     {:ok, bundle} = agent_bundle(prompt_source: prompt_source)
+    parent = self()
 
-    assert {:ok, %{return: {:__ptc_fail__, failure}}} =
-             Lisp.run_native(
-               ~S|(agent.core/run "x" {"max_turns" 1 "max_transcript_chars" 1})|,
-               prelude: bundle.prelude,
-               tools: required_agent_tools(),
-               filter_context: false,
-               caller: :kernel
-             )
+    recording_tools =
+      Map.put(required_agent_tools(), "kernel-runtime-limit-failure", %TrustedTool{
+        function: fn arguments ->
+          send(parent, {:runtime_limit_failure, arguments})
+          %{status: :error}
+        end
+      })
 
-    {formatted_failure, false} = Lisp.format_value(failure)
-    assert formatted_failure =~ ":kind :transcript-limit"
-    assert formatted_failure =~ ":reason :request-too-large"
+    _ =
+      Lisp.run_native(
+        ~S|(agent.core/run "x" {"max_turns" 1 "max_transcript_chars" 1})|,
+        prelude: bundle.prelude,
+        tools: recording_tools,
+        filter_context: false,
+        caller: :kernel
+      )
+
+    # The ceiling is reported through the Kernel's runtime-limit capability,
+    # which is what carries the limit and its value out of the loop.
+    assert_receive {:runtime_limit_failure, %{"max_transcript_chars" => 1}}
   end
 
   @tag :tmp_dir
