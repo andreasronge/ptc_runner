@@ -211,6 +211,9 @@ published image.
 
 ## Documentation
 
+Rendered at **[ptc-runner.dev](https://ptc-runner.dev/guides/)**; the same pages
+as Markdown below.
+
 - [Installation](docs/installation/standalone.md) — current standalone, Docker,
   and source routes with their exact availability.
 - [Quickstart](docs/guides/quickstart.md) — configure a model and run the first
