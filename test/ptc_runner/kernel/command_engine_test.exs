@@ -2028,6 +2028,61 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "doctor --connect separates an acquisition timeout from an unreachable provider", %{
+    tmp_dir: directory
+  } do
+    # Issue #1453. The server here is healthy and would answer `server/discover`
+    # with the same `-32601` the test above classifies; it is only slower than
+    # the budget. Reporting that as `provider_unavailable` sent three separate
+    # investigations after the transport, because the one fact that ends it —
+    # nothing was wrong except the clock — was the fact being withheld. A cold
+    # `npx` launch and a loaded machine both land here.
+    marker = Path.join(directory, "slow-doctor-methods")
+
+    host_config =
+      update_in(
+        connect_host_config(marker, "slow-unsupported-protocol"),
+        ["install", "workspace", "ceilings", "timeout_ms"],
+        fn _default -> 1_000 end
+      )
+
+    host_path = write_host_config(directory, "slow-doctor", host_config)
+
+    application =
+      doctor_application(directory, "doctor-slow-profile",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 1_000}}],
+        limits: %{"evaluation_timeout_ms" => 1_000}
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.envelope["error"]["code"] == "provider_acquisition_timeout"
+    assert outcome.exit_status == 4
+    # Retryable, because the same launch usually answers once the cache is warm.
+    assert outcome.envelope["error"]["retryable"] == true
+
+    assert %{"status" => "fail", "code" => "provider_acquisition_timeout"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/workspace/connectivity")
+             )
+
+    # The marker proves which step ran out of clock. `:mcp_timeout` also carries
+    # launcher staging and spawn expiry, so without this the test would pass on a
+    # slow spawn and stop covering the case it is named for: discovery was
+    # reached, and the answer was merely late.
+    assert File.read!(marker) =~ "server/discover"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
   test "doctor --connect preserves a provider-bearing no-op result", %{tmp_dir: directory} do
     trace_directory = Path.join(directory, "traces")
     File.mkdir_p!(trace_directory)

@@ -35,6 +35,14 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   #   * `:provider_unavailable` — the provider could not be reached or started.
   #     A transport that would not open, a stdio child that would not spawn, a
   #     callback that raised or exited.
+  #   * `:provider_acquisition_timeout` — a budget expired before acquisition
+  #     finished. Deliberately not `:provider_unavailable`, which asserts a
+  #     failure to reach or start the provider; this asserts only that the clock
+  #     ran out, which is the weaker and — because `:mcp_timeout` also carries
+  #     launcher staging and spawn expiry, not just an unanswered discovery — the
+  #     only claim that holds for every producer. What the operator can act on is
+  #     the same either way: raise the budget. A cold first launch is the common
+  #     cause, which is why the row is retryable.
   #   * `:provider_protocol_error` — the provider answered and the answer was
   #     unusable: an invalid catalog or tool schema, a response past its ceiling,
   #     or a preparation/preflight/build that failed normalization.
@@ -84,11 +92,11 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   # before a builder can return them: `:mcp_stdio_spawn_failed`,
   # `:mcp_stdio_spawn_timeout`, `:mcp_stdio_owner_down`,
   # `:invalid_mcp_stdio_launch`, and `:mcp_transport_closed` all normalize into
-  # `:mcp_transport_error` or `:mcp_timeout` first.
+  # `:mcp_transport_error` or `:mcp_timeout` first, and `:mcp_timeout` has its own
+  # code below.
   @unavailable_reasons [
     :mcp_transport_error,
     :mcp_transport_busy,
-    :mcp_timeout,
     :mcp_remote_error,
     :invalid_mcp_transport,
     :resource_registrar_unavailable,
@@ -168,6 +176,9 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
 
   def diagnostic(reason, occurrence) when reason in @unavailable_reasons,
     do: acquisition_diagnostic(:provider_unavailable, occurrence)
+
+  def diagnostic(:mcp_timeout, occurrence),
+    do: acquisition_diagnostic(:provider_acquisition_timeout, occurrence)
 
   def diagnostic(:mcp_protocol_version_unsupported, occurrence),
     do: acquisition_diagnostic(:provider_protocol_version_unsupported, occurrence)

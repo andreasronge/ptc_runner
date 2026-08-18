@@ -43,25 +43,53 @@ profile, despite starting and serving legacy clients normally. The checked-in
 filesystem example listed above implements the required profile and is the
 deterministic baseline for this reference.
 
-A cold `npx` launch can spend more than the manifest's default one-second
-evaluation budget before that protocol response arrives. To reproduce the
-compatibility diagnosis, give both the application operation and the stdio
-startup enough time:
+A cold `npx` launch can spend more than the default budget before that protocol
+response arrives. Acquisition derives one per-operation budget and then applies
+it to each step separately: once to starting the transport, which for stdio
+covers launcher staging and the child spawn, and again to each discovery request,
+beginning with `server/discover`. It is not a single budget for the whole
+sequence, so a slow start and a slow answer can add up past any one of them.
+
+That per-operation value is the lowest of:
+
+- the installation's `ceilings.timeout_ms` in `ptc-host.json`, default `5000`;
+- for a mission provider, the manifest's `limits.evaluation_timeout_ms`,
+  default `1000`; and
+- the provider entry's own `config.timeout_ms` under the manifest's `providers`,
+  when it sets one. It may only narrow the two above, never widen them — a
+  larger value is refused as an invalid selection.
+
+Every one of them must be wide enough, because the lowest wins. Raising one
+while another stays at its default changes nothing. In `ptc.json`:
 
 ```json
 {"limits": {"evaluation_timeout_ms": 20000}}
 ```
 
-In `ptc-host.json`, inside the stdio transport:
+and in `ptc-host.json`, beside the installation's `transport`:
+
+```json
+{"ceilings": {"timeout_ms": 20000}}
+```
+
+`start_timeout_ms` inside the stdio transport bounds one step: the launcher
+handshake that spawns the child. The runtime applies it as
+`min(start_timeout_ms, remaining transport-start budget)`, so it can only narrow,
+never widen, the values above — but once those are raised past its `5000`
+default, that default becomes the narrower cap on the handshake. Raise it too if
+the step that expires is the spawn rather than the answer:
 
 ```json
 {"start_timeout_ms": 15000}
 ```
 
-The application limit is the outer budget. Raising only
-`start_timeout_ms` cannot widen it; if the outer budget expires first, the
-closed result is `provider_unavailable` because PtcRunner never received the
-response needed to prove a protocol mismatch.
+When a budget expires, the closed result is `provider_acquisition_timeout`,
+which is retryable and distinct from `provider_unavailable`. It reports only
+that the clock ran out: the step that expired may have been the spawn or the
+discovery answer, so PtcRunner cannot say the server was reached, only that it
+never received the response needed to prove a protocol mismatch. Raise the
+budgets and run it again. A first launch on a cold npm cache, or any launch on a
+loaded machine, is the usual cause.
 
 ## Run the checked-in file agent
 

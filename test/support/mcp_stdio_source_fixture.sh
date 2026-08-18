@@ -68,6 +68,12 @@ do
       if [ "$mode" = "unsupported-protocol" ]; then
         printf '%s\n' 'PRIVATE_STDERR_DETAIL' >&2
         printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"PRIVATE_REMOTE_MESSAGE","data":{"secret":"PRIVATE_REMOTE_DATA"}}}\n' "$id"
+      elif [ "$mode" = "slow-unsupported-protocol" ]; then
+        # Healthy legacy server that is simply slower than the acquisition
+        # budget: the same bytes as `unsupported-protocol-bare`, arriving after
+        # the caller has already given up. A cold `npx` launch behaves this way.
+        sleep 3
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"Method not found"}}\n' "$id"
       elif [ "$mode" = "unsupported-protocol-bare" ]; then
         # Byte shape of @modelcontextprotocol/server-filesystem answering the
         # pinned profile's first request: code and message, nothing else.
