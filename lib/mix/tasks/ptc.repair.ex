@@ -49,6 +49,7 @@ defmodule Mix.Tasks.Ptc.Repair do
   @max_descriptor_bytes 65_536
   @max_source_bytes 1_048_576
   @max_suite_bytes 1_048_576
+  @max_host_input_bytes 1_048_576
   @max_cases 32
   @case_name ~r/\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z/
 
@@ -305,6 +306,8 @@ defmodule Mix.Tasks.Ptc.Repair do
     # and their installed-provider effects never run against an application
     # that changed after the report was bound; after, so a mid-suite change
     # cannot certify results the final application never produced.
+    host_inputs = host_input_digests(opts)
+
     with :ok <- create_validation_directory(validation.out),
          {:ok, pre_suite_digest} <- application_digest(manifest),
          :ok <- same_application(base_digest, pre_suite_digest),
@@ -314,10 +317,11 @@ defmodule Mix.Tasks.Ptc.Repair do
              descriptor,
              validation.out,
              validation.suite["cases"],
-             host_input_digests(opts),
+             host_inputs,
              opts
            ),
          :ok <- verify_published(out, report),
+         :ok <- verify_host_inputs(opts, host_inputs),
          {:ok, final_digest} <- application_digest(manifest),
          :ok <- same_application(base_digest, final_digest),
          aggregate <- validation_report(report, opts, base_digest, results),
@@ -407,18 +411,33 @@ defmodule Mix.Tasks.Ptc.Repair do
 
   defp host_input_digest(nil), do: nil
 
+  # Bounded, regular-file reads only, like the canonical host-config and
+  # env-file loaders: an oversized file or a FIFO must not hang or exhaust
+  # the hash step before the run's own loader rejects it.
   defp host_input_digest(path) do
-    case File.read(path) do
-      {:ok, bytes} -> :crypto.hash(:sha256, bytes)
-      {:error, reason} -> {:unreadable, reason}
+    with {:ok, %File.Stat{type: :regular}} <- File.stat(path),
+         {:ok, bytes} <- read_bounded(path, @max_host_input_bytes) do
+      :crypto.hash(:sha256, bytes)
+    else
+      _other -> {:unreadable, path}
+    end
+  end
+
+  defp verify_host_inputs(opts, reference) do
+    if host_input_digests(opts) == reference do
+      :ok
+    else
+      {:error, :validation_inputs_changed}
     end
   end
 
   defp verify_host_inputs!(opts, reference) do
-    if host_input_digests(opts) == reference do
-      :ok
-    else
-      Mix.raise("ptc.repair failed: a host configuration input changed during validation")
+    case verify_host_inputs(opts, reference) do
+      :ok ->
+        :ok
+
+      {:error, _reason} ->
+        Mix.raise("ptc.repair failed: a host configuration input changed during validation")
     end
   end
 
