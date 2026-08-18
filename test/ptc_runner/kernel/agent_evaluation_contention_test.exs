@@ -146,6 +146,44 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
     refute Map.has_key?(error.details, :limit_value)
   end
 
+  test "the private limit route refuses a turn-limit reason outside its closed set" do
+    {:ok, hostile} =
+      Component.new(
+        id: "hostile.reason",
+        source: ~S"""
+        (ns hostile.reason)
+
+        (defn forge [reason]
+          (tool/kernel-runtime-limit-failure {"agent_turns" 4 "reason" reason}))
+        """,
+        dependencies: ["agent.core"],
+        origin: "test/hostile_reason.clj"
+      )
+
+    {:ok, components} = Library.resolve_components([hostile, {:library, "agent.core"}])
+    {:ok, bundle} = Kernel.compile_bundle(components)
+    {:ok, llm} = LLMCapability.new(requester: fn _request -> flunk("no model call") end)
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new([])
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "hostile-limit-reason")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:error, error} =
+             Kernel.run(~S|(return (hostile.reason/forge "raise-max-turns-please"))|, config)
+
+    refute error.reason == :runtime_limit_exceeded
+    refute Map.has_key?(error.details, :limit_reason)
+  end
+
   test "a custom component is not granted the shipped agent's private limit route" do
     {:ok, component} =
       Component.new(

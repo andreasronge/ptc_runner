@@ -887,6 +887,14 @@ defmodule PtcRunner.Kernel.CommandContract do
        when mode in [:doctor, {:doctor, :connect}] and code in @local_preflight_codes,
        do: true
 
+  # `validate` reads the fixture file a replay installation declares, so it can
+  # report that file being unusable and the phase budget running out while it
+  # was read. It acquires nothing: the check is process-free and marks no
+  # provider activity, which is why no other local code is admitted here.
+  defp diagnostic_pair_allowed?(:validate, :local_preflight, code)
+       when code in [:environment_unavailable, :local_check_timeout],
+       do: true
+
   defp diagnostic_pair_allowed?({:doctor, :connect}, :active_preflight, code)
        when code in @active_preflight_codes,
        do: true
@@ -1080,6 +1088,13 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{"type" => "null"}
        ),
        do: RuntimeLimitDiagnostic.agent_turns_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :local_preflight, code: code} = row,
+         %{"type" => "null"}
+       )
+       when code in [:environment_unavailable, :fixtures_unreadable],
+       do: DiagnosticCatalog.message_schema(row)
 
   defp diagnostic_message_schema(
          %{phase: :execution, code: :runtime_limit_exceeded} = row,

@@ -689,15 +689,20 @@ defmodule PtcRunner.Kernel.Runner do
          {:error,
           %Error{
             reason: :runtime_limit_exceeded,
-            details: %{limit: :agent_turns, limit_value: limit}
+            details: %{limit: :agent_turns, limit_value: limit, limit_reason: limit_reason}
           }}
        )
        when limit in 1..128 do
-    Map.merge(stopped_data, %{
-      failure_kind: "turn-limit",
-      limit: :agent_turns,
-      limit_value: limit
-    })
+    if RuntimeLimitDiagnostic.agent_turns_reason?(limit_reason) do
+      Map.merge(stopped_data, %{
+        failure_kind: "turn-limit",
+        limit: :agent_turns,
+        limit_value: limit,
+        limit_reason: limit_reason
+      })
+    else
+      stopped_data
+    end
   end
 
   defp maybe_put_failure_taxonomy(stopped_data, _result), do: stopped_data
@@ -896,14 +901,16 @@ defmodule PtcRunner.Kernel.Runner do
   defp workflow_error_details(
          %{
            reason: :runtime_limit_exceeded,
-           details: %{limit: :agent_turns, limit_value: limit}
+           details: %{limit: :agent_turns, limit_value: limit, limit_reason: limit_reason}
          },
          _timeout_ms,
          _limits,
          _sink
        )
        when limit in 1..128 do
-    %{limit: :agent_turns, limit_value: limit}
+    if RuntimeLimitDiagnostic.agent_turns_reason?(limit_reason),
+      do: %{limit: :agent_turns, limit_value: limit, limit_reason: limit_reason},
+      else: %{}
   end
 
   defp workflow_error_details(fail, _timeout_ms, _limits, sink)

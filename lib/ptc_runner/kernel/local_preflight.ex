@@ -83,9 +83,9 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   #
   #   * `:local_preflight` / `:environment_unavailable` —
   #     `invalid_compatibility_environment`, `invalid_mcp_working_directory`,
-  #     `mcp_command_not_found`, `invalid_mcp_executable`, `invalid_replay_fixtures`,
-  #     `replay_fixtures_too_large`, `duplicate_replay_entry`,
-  #     `replay_entry_limit_exceeded`
+  #     `mcp_command_not_found`, `invalid_mcp_executable`, and every
+  #     replay-fixture reason `PtcRunner.Kernel.LLMReplayFixtureDiagnostic`
+  #     renders, whether file-level or `{reason, line}`
   #   * `:local_preflight` / `:launcher_unavailable` —
   #     `mcp_stdio_launcher_unavailable`, `unsupported_mcp_stdio_platform`
   #   * `:local_preflight` / `:adapter_unavailable` — `invalid_llm_model`
@@ -93,7 +93,9 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # Doctor refines `mcp_command_not_found` to `command_not_found`, an existing
   # but unusable executable to `executable_unavailable`, and every replay-fixture
   # reason to `fixtures_unreadable`, so its local rows name the actionable input
-  # rather than collapsing all three into environment availability.
+  # rather than collapsing all three into environment availability. Either code
+  # carries the fixture reason's own message, so the row states which rule the
+  # file broke rather than only that a local check failed.
   # The declaration-class reasons differ by side of the marker:
   #
   #   * before it — `:provider_declaration` / `:placement_denied` for
@@ -125,6 +127,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderRuntimeServices
@@ -136,17 +139,18 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     :invalid_mcp_working_directory,
     :mcp_command_not_found,
     :invalid_mcp_executable,
-    :invalid_replay_fixtures,
-    :replay_fixtures_too_large,
-    :duplicate_replay_entry,
-    :replay_entry_limit_exceeded
+    :replay_owner_unavailable
   ]
-  @fixture_reasons [
-    :invalid_replay_fixtures,
-    :replay_fixtures_too_large,
-    :duplicate_replay_entry,
-    :replay_entry_limit_exceeded
+  @fixture_file_reasons [
+    :replay_fixtures_unreadable,
+    :replay_fixtures_empty,
+    :replay_fixtures_too_large
   ]
+  # A replay installation's fixture file is named by the declaration, so it is
+  # checked by every command that verifies declarations, not only by those that
+  # acquire providers.
+  @input_sources [:llm_replay]
+
   @launcher_reasons [:mcp_stdio_launcher_unavailable, :unsupported_mcp_stdio_platform]
   @adapter_reasons [:invalid_llm_model]
   @selection_reasons [
@@ -191,6 +195,41 @@ defmodule PtcRunner.Kernel.LocalPreflight do
         ) :: :ok | {:error, CommandDiagnostic.t()}
   def run(prepared, catalog, services, deadline, %MissionReplTarget{} = target) do
     run_scoped(prepared, catalog, services, deadline, target)
+  end
+
+  @doc """
+  Runs the audited-local checks that read a document the declaration itself
+  names, for a command that verifies declarations without acquiring providers.
+
+  `validate` reports whether this manifest and host document can run. A replay
+  installation names a fixture file the same way the manifest names a
+  component: the file is part of the declaration, so a fixture that cannot load
+  is a broken declaration rather than a missing local dependency, and reporting
+  it here keeps `validate` from passing a configuration `run` immediately
+  refuses. The environment-dependency checks — an LLM adapter, an MCP
+  executable — stay out, because whether they are present says nothing about
+  whether the documents are well formed.
+  """
+  @spec run_declared_inputs(
+          PreparedRun.t(),
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t(),
+          Deadline.t()
+        ) :: :ok | {:error, CommandDiagnostic.t()}
+  def run_declared_inputs(prepared, catalog, services, deadline) do
+    with true <- bound?(prepared, catalog, services, :inactive),
+         true <- Deadline.valid?(deadline),
+         occurrences =
+           applicable(catalog, prepared.provider_declarations, :audited_local, @input_sources),
+         true <- trusted?(catalog, occurrences) do
+      check_each(occurrences, prepared, catalog, services, deadline, audited_step(:runtime))
+    else
+      _invalid -> {:error, internal_diagnostic(false)}
+    end
+  rescue
+    _exception -> {:error, internal_diagnostic(false)}
+  catch
+    _kind, _reason -> {:error, internal_diagnostic(false)}
   end
 
   defp run_scoped(prepared, catalog, services, deadline, target) do
@@ -386,6 +425,17 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     end)
   end
 
+  defp applicable(catalog, declarations, mode, sources) do
+    catalog
+    |> applicable(declarations, mode)
+    |> Enum.filter(fn declaration ->
+      case catalog.descriptors[declaration.name] do
+        %{source: source} -> source in sources
+        _absent -> false
+      end
+    end)
+  end
+
   # Fail-closed defense in depth. `ProviderDescriptor` refuses `:audited_local`
   # from a custom source and `InstallationCatalog` refuses it without a runtime
   # binding, and `bound?/3` above revalidates both seals, so a trio that reaches
@@ -578,14 +628,21 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     BoundedWorker.classify_callback(result)
   end
 
+  # A refused fixture file states the rule it broke, and a line-level rejection
+  # states which line. Both are part of the published fixture contract, so
+  # neither leaks anything the file holds.
+  defp diagnostic({entry_reason, line}, occurrence, activity, mode)
+       when is_atom(entry_reason) and is_integer(line) and line > 0,
+       do: fixture_diagnostic({entry_reason, line}, occurrence, activity, mode)
+
+  defp diagnostic(reason, occurrence, activity, mode) when reason in @fixture_file_reasons,
+    do: fixture_diagnostic(reason, occurrence, activity, mode)
+
   defp diagnostic(:mcp_command_not_found, occurrence, activity, :doctor),
     do: local_diagnostic(:command_not_found, occurrence, activity)
 
   defp diagnostic(:invalid_mcp_executable, occurrence, activity, :doctor),
     do: local_diagnostic(:executable_unavailable, occurrence, activity)
-
-  defp diagnostic(reason, occurrence, activity, :doctor) when reason in @fixture_reasons,
-    do: local_diagnostic(:fixtures_unreadable, occurrence, activity)
 
   defp diagnostic(reason, occurrence, activity, _mode) when reason in @environment_reasons,
     do: local_diagnostic(:environment_unavailable, occurrence, activity)
@@ -603,6 +660,26 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     do: declaration_diagnostic(:selection_invalid, occurrence, activity)
 
   defp diagnostic(_reason, _occurrence, activity, _mode), do: internal_diagnostic(activity)
+
+  defp fixture_diagnostic(reason, occurrence, activity, mode) do
+    case LLMReplayFixtureDiagnostic.message(reason) do
+      {:ok, message} ->
+        subject_diagnostic(
+          :local_preflight,
+          fixture_code(mode),
+          :local,
+          occurrence,
+          activity,
+          message
+        )
+
+      :error ->
+        internal_diagnostic(activity)
+    end
+  end
+
+  defp fixture_code(:doctor), do: :fixtures_unreadable
+  defp fixture_code(_mode), do: :environment_unavailable
 
   defp local_diagnostic(code, occurrence, activity),
     do: subject_diagnostic(:local_preflight, code, :local, occurrence, activity)
@@ -628,12 +705,14 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # Activity is cumulative attempted-work evidence supplied by the step that
   # knows what preceded this check. The same condition can therefore differ
   # before and after callback dispatch without borrowing the lifecycle marker.
-  defp subject_diagnostic(phase, code, operation, occurrence, activity) do
+  defp subject_diagnostic(phase, code, operation, occurrence, activity, message \\ nil) do
     site = %{destination: occurrence.destination, index: occurrence.index}
 
     case CommandSubject.provider(occurrence.name, operation, site) do
       {:ok, subject} ->
-        CommandDiagnostic.new!(phase, code, subject: subject, provider_activity: activity)
+        opts = [subject: subject, provider_activity: activity]
+        opts = if is_binary(message), do: Keyword.put(opts, :message, message), else: opts
+        CommandDiagnostic.new!(phase, code, opts)
 
       {:error, _reason} ->
         internal_diagnostic(activity)

@@ -12,7 +12,7 @@ Run `ptc help COMMAND` for the exact switches accepted by an installed version.
 | --- | --- |
 | `ptc init DIRECTORY` | Publish a validated minimal application without replacing an existing target |
 | `ptc docs [PAGE]` | List the documentation embedded in this executable, or print one page |
-| `ptc validate MANIFEST or PROJECT` | Load and compile without executing the workflow |
+| `ptc validate MANIFEST or PROJECT` | Load and compile without executing the workflow, and read the input files the declarations name |
 | `ptc run MANIFEST or PROJECT` | Execute the application entry |
 | `ptc run MANIFEST --env-file FILE` | Load environment-backed credentials from this exact file |
 | `ptc doctor [MANIFEST or PROJECT]` | Report application and provider readiness |
@@ -178,6 +178,13 @@ arbitrary exception, rejected value, provider response, credential, or private
 payload. A provider subject appears as `provider/<alias>/<operation>` with its
 workflow or mission occurrence when known.
 
+`validate` also reads the files a declaration owns rather than the environment
+it will run in. A replay installation names a fixture file, so `validate` parses
+it under the installed ceilings and reports the rule a rejected file broke —
+with the line number for a line-level rejection. It still acquires nothing: an
+installed model's adapter and an MCP server's executable are environment
+dependencies and belong to `doctor`.
+
 Environment files fail before provider acquisition with a cause-specific code:
 `environment_file_not_found`, `environment_file_not_regular`,
 `environment_file_unreadable`, `environment_file_too_large`, or
@@ -233,6 +240,176 @@ envelope omits the result value. Installation, packaging, and container
 commands live in the [installation documentation](../installation/standalone.md),
 not in this process-contract reference.
 
+### Branch on the exit status
+
+An exit status is a class, not an identity: several diagnostics share one, and
+`runtime_limit_exceeded` and `run_timeout` both exit `6`. Branch on the status
+to decide whether to retry, and read `error.code` from the envelope when the
+branch needs to know which failure it was.
+
+A recoverable capability error does not change the exit status. Exhausting
+`workflow_capability_calls_per_name` returns
+`{"status":"error","kind":"limit_exceeded","reason":"capability_quota"}` as a
+value into PTC-Lisp; a workflow that reads past it can still `return` and the
+command exits `0`. Assert on the result value, or have the workflow `fail`,
+when a quota must end the run.
+
+The tables below are generated from the diagnostic catalog the command
+dispatches on, so they list every status a command can exit with and every
+diagnostic behind it.
+
+<!-- BEGIN GENERATED: exit-status catalog (mix ptc.gen_docs) -->
+
+| Status | Meaning | Phases |
+| ---: | --- | --- |
+| 0 | the command succeeded | — |
+| 2 | the arguments were rejected before any document was read | `arguments` |
+| 3 | a declaration document was unavailable, invalid, or rejected | `host`, `application`, `bundle`, `provider_declaration` |
+| 4 | a selected provider could not be checked or acquired | `local_preflight`, `active_preflight`, `provider_acquisition` |
+| 5 | the workflow ran and failed | `execution` |
+| 6 | the run exceeded a limit or its duration | `execution` |
+| 7 | the run produced no usable artifact: a destination, result, or publication failure | `destination`, `execution`, `result_cleanup`, `publication` |
+| 70 | the command failed internally | `internal` |
+| 74 | the requested envelope could not be published, so no envelope describes this failure | — |
+
+Every classified diagnostic and the status it exits with:
+
+| Status | Phase | Code | Retryable | Message |
+| ---: | --- | --- | --- | --- |
+| 2 | `arguments` | `conflicting_arguments` | no | choose only one option from the conflicting argument group |
+| 2 | `arguments` | `invalid_arguments` | no | use the documented arguments for this command |
+| 2 | `arguments` | `invalid_command` | no | use one of the supported commands |
+| 2 | `arguments` | `project_host_undeclared` | no | the project document declares no host block; add one to use this command |
+| 3 | `application` | `application_not_found` | no | the application manifest does not exist |
+| 3 | `application` | `application_unavailable` | no | the application is unavailable |
+| 3 | `application` | `contract_invalid` | no | an application value contract is invalid |
+| 3 | `application` | `document_limit_exceeded` | no | the application document closure exceeds its limit |
+| 3 | `application` | `duplicate_property` | no | an application document contains a duplicate property |
+| 3 | `application` | `event_identity_conflict` | no | the command event identity conflicts with the application |
+| 3 | `application` | `input_contract_failed` | no | the selected input does not satisfy the input contract |
+| 3 | `application` | `input_invalid` | no | the selected input is not an admissible JSON object |
+| 3 | `application` | `installed_limit_exceeded` | no | an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling |
+| 3 | `application` | `invalid_json` | no | an application document is not valid JSON |
+| 3 | `application` | `override_invalid` | no | the component override is invalid |
+| 3 | `application` | `reference_missing` | no | a referenced application document is unavailable |
+| 3 | `application` | `required_property_missing` | no | the application manifest is missing a required property |
+| 3 | `application` | `schema_violation` | no | the application manifest does not satisfy its schema |
+| 3 | `bundle` | `bundle_invalid` | no | the component bundle is invalid |
+| 3 | `bundle` | `bundle_limit_exceeded` | no | the component bundle exceeds a compile limit |
+| 3 | `bundle` | `compile_failed` | no | the component bundle could not be compiled |
+| 3 | `bundle` | `duplicate_definition` | no | the component bundle defines the same name more than once |
+| 3 | `bundle` | `entry_invalid` | no | the workflow entry is not a public bundle export |
+| 3 | `bundle` | `syntax_invalid` | no | the component source is not valid PTC-Lisp |
+| 3 | `bundle` | `undefined_variable` | no | the component source contains an undefined variable reference |
+| 3 | `bundle` | `unknown_namespace` | no | the component source references an unavailable namespace |
+| 3 | `host` | `host_invalid` | no | the host configuration is invalid |
+| 3 | `host` | `host_schema_invalid` | no | the host configuration does not satisfy its schema |
+| 3 | `host` | `host_unavailable` | no | the host configuration is unavailable |
+| 3 | `host` | `installation_endpoint_credentials_require_https` | no | configured MCP credentials require an https endpoint |
+| 3 | `host` | `installation_endpoint_insecure_loopback_forbidden` | no | allow_insecure_loopback is not permitted on an https endpoint; remove it |
+| 3 | `host` | `installation_endpoint_insecure_loopback_required` | no | a plain-http MCP endpoint requires allow_insecure_loopback |
+| 3 | `host` | `installation_endpoint_invalid` | no | an installed MCP endpoint is not admissible; streamable_http requires an https URL, or allow_insecure_loopback with a credential-free plain-http loopback address |
+| 3 | `host` | `installation_endpoint_literal_loopback_required` | no | allow_insecure_loopback requires a literal 127.0.0.1 or [::1] address |
+| 3 | `host` | `installation_revision_missing` | no | an installed provider is missing its behavior revision |
+| 3 | `host` | `installed_limit_invalid` | no | an installed limit is invalid |
+| 3 | `provider_declaration` | `data_policy_denied` | no | the selected providers do not admit the effective data class |
+| 3 | `provider_declaration` | `dependency_invalid` | no | the selected provider dependency graph is invalid |
+| 3 | `provider_declaration` | `placement_denied` | no | the provider is not allowed in this destination |
+| 3 | `provider_declaration` | `provider_unknown` | no | the selected provider is not installed |
+| 3 | `provider_declaration` | `selection_invalid` | no | the provider selection is invalid |
+| 3 | `provider_declaration` | `selection_unverifiable` | no | the provider selection cannot be verified declaratively |
+| 4 | `active_preflight` | `authentication_rejected` | no | provider authentication was rejected |
+| 4 | `active_preflight` | `authorization_rejected` | no | explicit provider authorization was rejected |
+| 4 | `active_preflight` | `authorization_required` | no | explicit provider authorization is required |
+| 4 | `active_preflight` | `authorization_unavailable` | yes | the authorization service is temporarily unavailable |
+| 4 | `active_preflight` | `connectivity_outcome_unknown` | no | the connectivity outcome could not be committed safely |
+| 4 | `active_preflight` | `connectivity_protocol_error` | no | the provider returned an invalid connectivity response |
+| 4 | `active_preflight` | `connectivity_rate_limited` | yes | the provider connectivity operation is rate limited |
+| 4 | `active_preflight` | `connectivity_rejected` | no | the provider rejected the connectivity operation |
+| 4 | `active_preflight` | `connectivity_timeout` | no | the connectivity operation exceeded its budget |
+| 4 | `active_preflight` | `connectivity_unavailable` | yes | the provider connectivity operation is temporarily unavailable |
+| 4 | `active_preflight` | `connectivity_unsupported` | no | the provider does not implement the declared connectivity check |
+| 4 | `active_preflight` | `credential_unavailable` | no | a required provider credential is unavailable |
+| 4 | `active_preflight` | `provider_application_unavailable` | no | a required provider application is unavailable |
+| 4 | `active_preflight` | `selection_rejected` | no | the provider rejected the normalized selection |
+| 4 | `active_preflight` | `selection_validation_failed` | no | active provider selection validation failed |
+| 4 | `active_preflight` | `selection_validation_timeout` | no | active provider selection validation timed out |
+| 4 | `local_preflight` | `adapter_unavailable` | no | a required provider adapter is unavailable |
+| 4 | `local_preflight` | `authorization_not_applicable` | no | --authorize-mcp applies only to an installation that declares OAuth |
+| 4 | `local_preflight` | `authorization_target_unknown` | no | --authorize-mcp must name an installed provider the application selects |
+| 4 | `local_preflight` | `command_not_found` | no | a required provider command could not be found |
+| 4 | `local_preflight` | `environment_file_invalid_utf8` | no | the named environment file is not valid UTF-8 |
+| 4 | `local_preflight` | `environment_file_not_found` | no | the named environment file does not exist |
+| 4 | `local_preflight` | `environment_file_not_regular` | no | the named environment file is not a regular file |
+| 4 | `local_preflight` | `environment_file_too_large` | no | the named environment file exceeds the 1 MB limit |
+| 4 | `local_preflight` | `environment_file_unreadable` | no | the named environment file cannot be read safely |
+| 4 | `local_preflight` | `environment_unavailable` | no | a required local environment is unavailable |
+| 4 | `local_preflight` | `executable_unavailable` | no | a required provider executable is unusable |
+| 4 | `local_preflight` | `fixtures_unreadable` | no | provider fixtures could not be read |
+| 4 | `local_preflight` | `launcher_unavailable` | no | a required provider launcher is unavailable |
+| 4 | `local_preflight` | `local_check_timeout` | no | a local provider check timed out |
+| 4 | `provider_acquisition` | `capability_requirement_missing` | no | a component requires a capability that the selected providers did not supply |
+| 4 | `provider_acquisition` | `provider_endpoint_connection_refused` | yes | the installed endpoint refused the connection |
+| 4 | `provider_acquisition` | `provider_endpoint_name_unresolved` | no | the installed endpoint hostname could not be resolved |
+| 4 | `provider_acquisition` | `provider_endpoint_tls_failed` | no | the installed endpoint did not complete a TLS handshake |
+| 4 | `provider_acquisition` | `provider_policy_changed` | no | the selected provider policy changed during acquisition |
+| 4 | `provider_acquisition` | `provider_protocol_error` | no | the selected provider returned an invalid acquisition response |
+| 4 | `provider_acquisition` | `provider_protocol_version_unsupported` | no | the installed endpoint does not support MCP protocol 2026-07-28 |
+| 4 | `provider_acquisition` | `provider_tool_missing` | no | the installed endpoint does not expose a declared tool |
+| 4 | `provider_acquisition` | `provider_unavailable` | no | the selected provider could not be acquired |
+| 5 | `execution` | `llm_access_denied` | no | the LLM provider denied access to the configured model |
+| 5 | `execution` | `llm_authentication_failed` | no | the LLM provider rejected authentication; check the installed credential |
+| 5 | `execution` | `llm_model_not_found` | no | the LLM provider could not find the configured model |
+| 5 | `execution` | `llm_payment_required` | no | the LLM provider rejected the request for billing or credit reasons |
+| 5 | `execution` | `llm_provider_failed` | no | the LLM provider request failed |
+| 5 | `execution` | `llm_provider_unavailable` | yes | the LLM provider is unavailable |
+| 5 | `execution` | `llm_rate_limited` | yes | the LLM provider rate limited the request |
+| 5 | `execution` | `llm_request_invalid` | no | the LLM provider rejected the configured request |
+| 5 | `execution` | `llm_timeout` | yes | the LLM provider request timed out |
+| 5 | `execution` | `llm_tool_calling_unsupported` | no | the configured model does not support tool calling |
+| 5 | `execution` | `mission_failed` | no | a subordinate mission failed |
+| 5 | `execution` | `provider_failed` | no | a provider failed during execution |
+| 5 | `execution` | `replay_fixture_missing` | no | no replay fixture matches the workflow request |
+| 5 | `execution` | `workflow_failed` | no | the workflow failed |
+| 6 | `execution` | `run_timeout` | no | the run duration limit was exceeded |
+| 6 | `execution` | `runtime_limit_exceeded` | no | a runtime limit was exceeded |
+| 7 | `destination` | `destination_exists` | no | an artifact destination already exists |
+| 7 | `destination` | `inspection_destination_unavailable` | no | the inspection destination is unavailable |
+| 7 | `destination` | `inspection_destination_unsafe` | no | the inspection destination is unsafe |
+| 7 | `destination` | `inspection_directory_missing` | no | --inspect must name a file in an existing directory |
+| 7 | `destination` | `invalid_destination` | no | an artifact destination is invalid |
+| 7 | `destination` | `invalid_inspection_destination` | no | --inspect must name a valid destination ending in .inspection.jsonl |
+| 7 | `destination` | `invalid_result_destination` | no | the result destination is invalid |
+| 7 | `destination` | `invalid_trace_destination` | no | the trace destination is invalid |
+| 7 | `destination` | `private_destination_required` | no | the run requires an authorized private destination |
+| 7 | `destination` | `recovery_reservation_failed` | no | the private result recovery reservation failed |
+| 7 | `destination` | `result_destination_unavailable` | no | the result destination is unavailable |
+| 7 | `destination` | `result_destination_unsafe` | no | the result destination is unsafe |
+| 7 | `destination` | `result_directory_missing` | no | --output and --private-output must name a file in an existing directory |
+| 7 | `destination` | `trace_destination_unavailable` | no | the trace destination is unavailable |
+| 7 | `destination` | `trace_destination_unsafe` | no | the trace destination is unsafe |
+| 7 | `destination` | `trace_directory_missing` | no | --trace-dir must be an existing normal directory |
+| 7 | `execution` | `event_capture_limit_exceeded` | no | the canonical event capture limit was exceeded |
+| 7 | `execution` | `event_sink_unavailable` | no | the canonical event sink is unavailable |
+| 7 | `execution` | `inspection_capture_limit_exceeded` | no | the private inspection capture limit was exceeded |
+| 7 | `execution` | `inspection_sink_unavailable` | no | the private inspection sink is unavailable |
+| 7 | `publication` | `destination_collision` | no | an artifact destination appeared before publication |
+| 7 | `publication` | `initialization_failed` | no | project initialization failed |
+| 7 | `publication` | `initialization_parent_missing` | no | the initialization target's parent directory does not exist |
+| 7 | `publication` | `initialization_parent_unusable` | no | the initialization target's parent directory is unusable |
+| 7 | `publication` | `initialization_target_exists` | no | the initialization target already exists |
+| 7 | `publication` | `inspection_publication_failed` | no | inspection publication failed |
+| 7 | `publication` | `recovery_cleanup_failed` | no | private result recovery cleanup failed |
+| 7 | `publication` | `result_publication_failed` | no | result publication failed |
+| 7 | `publication` | `trace_publication_failed` | no | trace publication failed |
+| 7 | `result_cleanup` | `provider_cleanup_failed` | no | provider cleanup failed |
+| 7 | `result_cleanup` | `provider_cleanup_timeout` | no | provider cleanup timed out |
+| 7 | `result_cleanup` | `result_contract_failed` | no | the workflow result does not satisfy its contract |
+| 7 | `result_cleanup` | `result_invalid` | no | the workflow result is invalid |
+| 7 | `result_cleanup` | `result_limit_exceeded` | no | the workflow result exceeds its limit |
+| 70 | `internal` | `internal_error` | no | the command failed internally |
+<!-- END GENERATED: exit-status catalog -->
+
 ### Diagnose a failed run
 
 The command reports a closed phase/code pair. If a workflow deliberately calls
@@ -241,7 +418,9 @@ canonical `run-stopped` event retain only a safe taxonomy:
 
 - a map whose `kind` is recognized retains that readable kind;
 - an authenticated `agent.core` turn-limit failure additionally retains the
-  fixed `agent_turns` name and effective integer ceiling from 1 through 128;
+  fixed `agent_turns` name, the effective integer ceiling from 1 through 128,
+  and the closed reason the loop stopped (`turn_limit_exceeded`,
+  `intermediate_result`, `evaluation_error`, or `protocol_error`);
 - an unknown map kind retains only a one-way fingerprint;
 - a string or other non-map retains no detail.
 

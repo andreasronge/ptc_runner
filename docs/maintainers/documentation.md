@@ -178,7 +178,10 @@ specification, tests, examples, and generated references together. Generated
 `docs/function-reference.md`, `docs/java-interop.md`,
 `docs/kernel-limits-reference.md`, `docs/prelude-reference.md`, and
 `docs/conformance/` pages must be changed through their owning source catalogs
-and `mix ptc.gen_docs`, not edited directly.
+and `mix ptc.gen_docs`, not edited directly. `docs/reference/cli.md` is
+hand-written apart from the exit-status catalog between its
+`BEGIN GENERATED`/`END GENERATED` markers, which the same task rewrites from
+`PtcRunner.Kernel.DiagnosticCatalog`.
 
 Run focused doctests or documentation tests, then:
 

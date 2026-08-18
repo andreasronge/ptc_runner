@@ -185,10 +185,26 @@ threshold adds domain-blind synthesis guidance before the final turn.
 If the loop spends its effective `max_turns` without returning, `run-outcome`
 returns bounded subject-failure data. Entries and callers that propagate that
 failure through `run`, `run-value`, or `run-result-value` report
-`execution/runtime_limit_exceeded`, name the effective turn ceiling, and
-recommend raising `max_turns` for that call or reducing the work per turn. The
-canonical failed `run-stopped` event retains the bounded `agent_turns` limit
-name and value so trace consumers can present the same cause.
+`execution/runtime_limit_exceeded` and name the effective turn ceiling.
+
+What the message recommends depends on how the final turn ended, because only
+some of these endings are answered by buying more turns:
+
+| Reason | Final turn produced | Reported remedy |
+| --- | --- | --- |
+| `intermediate_result` | a successful program that did not `return` | raise `max_turns`, or reduce the work per turn |
+| `evaluation_error` | a program that failed | raise `max_turns`, or simplify the work per turn |
+| `protocol_error` | no usable `run_ptc_lisp` call | check tool-calling support and any configured `max_tokens` first |
+
+A `max_tokens` too small for the model to emit a complete tool call produces
+`protocol_error` on every turn, so raising `max_turns` only buys more of the
+same failure. The remedy names the agent configuration rather than
+`agent.core/run`, because a manifest that declares `agent.main/run` never
+mentions the inner entry.
+
+The canonical failed `run-stopped` event retains the bounded `agent_turns`
+limit name, its value, and the same `limit_reason`, so trace consumers can
+present the same cause.
 
 Before dispatch, the loop JSON-encodes the complete prospective request:
 system prompt, accumulated messages, tool schema, and optional model alias. A

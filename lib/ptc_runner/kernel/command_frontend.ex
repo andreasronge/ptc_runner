@@ -14,6 +14,15 @@ defmodule PtcRunner.Kernel.CommandFrontend do
 
   @frontend_commands CommandDeclaration.frontend_commands()
 
+  # A publication failure cannot be reported through the envelope it failed to
+  # write, so it is the one status that is not a catalog row. `EX_IOERR` says
+  # what happened without claiming a diagnostic the reader cannot go read.
+  @envelope_failure_exit_status 74
+
+  @doc "The exit status of an envelope that could not be published."
+  @spec envelope_failure_exit_status() :: 74
+  def envelope_failure_exit_status, do: @envelope_failure_exit_status
+
   @type bootstrap ::
           (CommandArguments.t() ->
              {:ok, CommandRuntime.t()} | {:error, :command_bootstrap_failed})
@@ -91,7 +100,13 @@ defmodule PtcRunner.Kernel.CommandFrontend do
         rendered_presentation(outcome, path, rejection)
 
       {:error, _reason} ->
-        presentation(outcome, nil, "", CommandRenderer.envelope_failure(entry.run_ref), 74)
+        presentation(
+          outcome,
+          nil,
+          "",
+          CommandRenderer.envelope_failure(entry.run_ref),
+          @envelope_failure_exit_status
+        )
     end
   end
 

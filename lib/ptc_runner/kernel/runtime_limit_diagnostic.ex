@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @moduledoc false
 
+  alias PtcRunner.Kernel.DiagnosticPattern
   alias PtcRunner.Kernel.LimitCatalog
 
   @subordinate_prefix "subordinate_evaluations limit "
@@ -11,12 +12,30 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
                                        @subordinate_maximum_digits +
                                        byte_size(@subordinate_suffix)
 
-  @agent_prefix "agent turn limit "
-  @agent_suffix " was exceeded; raise max_turns for this agent.core/run call, or reduce the work per turn"
+  # A bounded agent loop can end four ways, and only two of them are answered by
+  # buying more turns. Naming `max_turns` for a model that never emitted a
+  # usable tool call sells the reader another round of the same failure, so each
+  # reason states what stopped the loop and what to change. The remedy names the
+  # configuration key rather than `agent.core/run`, because a manifest that
+  # declares `agent.main/run` never mentions the inner entry.
+  @agent_reasons [
+    {:turn_limit_exceeded, "agent turn limit ",
+     " was exceeded; raise max_turns in the agent configuration, or reduce the work per turn"},
+    {:intermediate_result, "agent turn limit ",
+     " was exceeded while the model was still working; raise max_turns in the agent configuration, or reduce the work per turn"},
+    {:evaluation_error, "agent turn limit ",
+     " was exceeded after the final program failed; raise max_turns in the agent configuration, or simplify the work per turn"},
+    {:protocol_error, "the model produced no valid tool call in ",
+     " turns; raising max_turns repeats it. Check that the model supports tool calling and that any configured max_tokens leaves room for a complete call"}
+  ]
+  @agent_reason_names [
+    {"turn-limit-exceeded", :turn_limit_exceeded},
+    {"intermediate-result", :intermediate_result},
+    {"evaluation-error", :evaluation_error},
+    {"protocol-error", :protocol_error}
+  ]
   @agent_limit_pattern "(?:[1-9]|[1-9][0-9]|1[01][0-9]|12[0-8])"
   @agent_maximum_digits 3
-  @agent_maximum_message_bytes byte_size(@agent_prefix) + @agent_maximum_digits +
-                                 byte_size(@agent_suffix)
 
   @timeout_limits [:parallel_timeout_ms, :workflow_timeout_ms]
   @timeout_phases [:compilation, :execution]
@@ -37,11 +56,30 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   end
 
   @doc false
-  @spec agent_turns_message(term()) :: {:ok, binary()} | :error
-  def agent_turns_message(limit) when is_integer(limit) and limit in 1..128,
-    do: {:ok, @agent_prefix <> Integer.to_string(limit) <> @agent_suffix}
+  @spec agent_turns_reasons() :: [atom()]
+  def agent_turns_reasons,
+    do: Enum.map(@agent_reasons, fn {reason, _prefix, _suffix} -> reason end)
 
-  def agent_turns_message(_limit), do: :error
+  @doc false
+  @spec agent_turns_reason?(term()) :: boolean()
+  def agent_turns_reason?(reason), do: reason in agent_turns_reasons()
+
+  @doc false
+  @spec agent_turns_reason(term()) :: {:ok, atom()} | :error
+  for {name, reason} <- @agent_reason_names do
+    def agent_turns_reason(unquote(name)), do: {:ok, unquote(reason)}
+  end
+
+  def agent_turns_reason(_name), do: :error
+
+  @doc false
+  @spec agent_turns_message(term(), term()) :: {:ok, binary()} | :error
+  for {reason, prefix, suffix} <- @agent_reasons do
+    def agent_turns_message(limit, unquote(reason)) when is_integer(limit) and limit in 1..128,
+      do: {:ok, unquote(prefix) <> Integer.to_string(limit) <> unquote(suffix)}
+  end
+
+  def agent_turns_message(_limit, _reason), do: :error
 
   @doc false
   @spec timeout_message(term(), term(), term()) :: {:ok, binary()} | :error
@@ -82,13 +120,15 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @doc false
   @spec agent_turns_message?(term()) :: boolean()
   def agent_turns_message?(message) when is_binary(message) do
-    valid_exact_message?(
-      message,
-      @agent_prefix,
-      @agent_suffix,
-      @agent_maximum_digits,
-      &agent_turns_message/1
-    )
+    Enum.any?(@agent_reasons, fn {reason, prefix, suffix} ->
+      valid_exact_message?(
+        message,
+        prefix,
+        suffix,
+        @agent_maximum_digits,
+        &agent_turns_message(&1, reason)
+      )
+    end)
   end
 
   def agent_turns_message?(_message), do: false
@@ -122,11 +162,10 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @doc false
   @spec message_schema(binary()) :: map()
   def message_schema(fallback) when is_binary(fallback) do
-    message_schema(fallback, [
-      subordinate_message_branch(),
-      agent_message_branch()
-      | timeout_message_branches()
-    ])
+    message_schema(
+      fallback,
+      [subordinate_message_branch()] ++ agent_message_branches() ++ timeout_message_branches()
+    )
   end
 
   @doc false
@@ -142,7 +181,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @doc false
   @spec agent_turns_message_schema(binary()) :: map()
   def agent_turns_message_schema(fallback) when is_binary(fallback),
-    do: message_schema(fallback, [agent_message_branch()])
+    do: message_schema(fallback, agent_message_branches())
 
   defp message_schema(fallback, branches) do
     %{
@@ -160,14 +199,19 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
     }
   end
 
-  defp agent_message_branch do
-    %{
-      "type" => "string",
-      "minLength" => 1,
-      "maxLength" => @agent_maximum_message_bytes,
-      "pattern" =>
-        "^agent turn limit #{@agent_limit_pattern} was exceeded; raise max_turns for this agent.core/run call, or reduce the work per turn$(?![\\s\\S])"
-    }
+  defp agent_message_branches do
+    for {_reason, prefix, suffix} <- @agent_reasons do
+      %{
+        "type" => "string",
+        "minLength" => 1,
+        "maxLength" => byte_size(prefix) + @agent_maximum_digits + byte_size(suffix),
+        "pattern" =>
+          DiagnosticPattern.exact(
+            DiagnosticPattern.escape(prefix) <>
+              @agent_limit_pattern <> DiagnosticPattern.escape(suffix)
+          )
+      }
+    end
   end
 
   defp timeout_message_branches do

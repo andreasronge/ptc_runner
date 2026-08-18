@@ -21,10 +21,21 @@ defmodule PtcRunner.Kernel.BoundedWorker do
   the code its caller mints for a real timeout. Anything unrecognised fails
   closed. Drift between two copies of that would be a defect in the one that
   drifted, so there is one copy.
+
+  A reason may also carry one positive integer position — the line of a
+  declared input file the callback refused. Nothing else is admitted, because
+  the position is the only per-instance detail a caller may publish and a wider
+  grammar would let a callback hand its caller an arbitrary payload.
   """
-  @spec classify_callback(term()) :: :ok | :timed_out | {:error, atom()}
+  @spec classify_callback(term()) ::
+          :ok | :timed_out | {:error, atom() | {atom(), pos_integer()}}
   def classify_callback({:ok, :ok}), do: :ok
   def classify_callback({:ok, {:error, reason}}) when is_atom(reason), do: {:error, reason}
+
+  def classify_callback({:ok, {:error, {reason, position}}})
+      when is_atom(reason) and is_integer(position) and position > 0,
+      do: {:error, {reason, position}}
+
   def classify_callback({:error, :timeout}), do: :timed_out
   def classify_callback(_unrecognised), do: {:error, :internal}
 
