@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   fmtLimit,
+  formatLiveSpend,
   failurePresentation,
   launchPollDelay,
   launchStatusPresentation,
@@ -124,6 +125,27 @@ assert.equal(
   'Limit exceeded: run_duration_ms limit 60000 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower'
 );
 assert.equal(failurePresentation({ phase: 'ok', outcome_reason: null }), null);
+
+assert.deepEqual(formatLiveSpend(null), { state: 'empty', value: '–', fields: [] });
+assert.deepEqual(formatLiveSpend({ state: 'empty' }), { state: 'empty', value: '–', fields: [] });
+assert.deepEqual(formatLiveSpend({ state: 'incomplete', input: 0, output: 0, total_cost: 0 }), {
+  state: 'incomplete',
+  value: 'incomplete',
+  fields: []
+});
+assert.deepEqual(formatLiveSpend({ state: 'unpriced', input: 3, output: 2 }), {
+  state: 'unpriced',
+  value: '3 in · 2 out',
+  fields: ['3 in', '2 out']
+});
+assert.deepEqual(
+  formatLiveSpend({ state: 'available', input: 12345, output: 678, total_cost: 0.0042 }),
+  {
+    state: 'available',
+    value: '12,345 in · 678 out · cost 0.0042',
+    fields: ['12,345 in', '678 out', 'cost 0.0042']
+  }
+);
 
 const untouchedWithHeadroom = {
   name: 'run_duration_ms',

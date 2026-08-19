@@ -9,6 +9,8 @@
 //  - Heap is a high-water readout + sparkline, deliberately NOT a gauge:
 //    the max_heap check runs only at GC, so kills can occur far below ceiling.
 
+import { formatRunUsage } from './run-display.js';
+
 const WORD_BYTES = 8;
 
 export function liveTokenFromSearch(search) {
@@ -688,6 +690,22 @@ export function fmtLimit(value, unit) {
   return grouped;
 }
 
+export function formatLiveSpend(spend) {
+  const state = spend?.state;
+  if (state === 'incomplete') {
+    return { state, value: 'incomplete', fields: [] };
+  }
+  if (state === 'available' || state === 'unpriced') {
+    const fields = formatRunUsage(spend);
+    return {
+      state,
+      value: fields.join(' · ') || (state === 'unpriced' ? 'unpriced' : '–'),
+      fields
+    };
+  }
+  return { state: 'empty', value: '–', fields: [] };
+}
+
 /* ---------- card construction ---------- */
 
 function createCard(runId) {
@@ -719,6 +737,10 @@ function createCard(runId) {
         <span class="live-kpi-value" data-role="kpi-workers">–</span>
         <span class="live-worker-dots" data-role="worker-dots" aria-hidden="true"></span>
         <span class="live-kpi-label">workers</span>
+      </div>
+      <div class="live-kpi live-kpi-spend" data-role="kpi-spend-tile" data-spend-state="empty">
+        <span class="live-kpi-value" data-role="kpi-spend">–</span>
+        <span class="live-kpi-label">spend</span>
       </div>
     </div>
 
@@ -769,6 +791,9 @@ function updateCard(card, frame) {
   f['kpi-evals'].textContent = usage.subordinate_evaluations ?? '–';
   f['kpi-left'].textContent = frame.remaining_ms == null ? '–' : fmtSeconds(frame.remaining_ms);
   updateWorkers(f, frame.parallel);
+  const spend = formatLiveSpend(usage.llm_spend);
+  f['kpi-spend'].textContent = spend.value;
+  f['kpi-spend-tile'].dataset.spendState = spend.state;
 
   renderMeters(f.meters, frame, usage, limits, calls);
   renderHeap(f, frame.heap);

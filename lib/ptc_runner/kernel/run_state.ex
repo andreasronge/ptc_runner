@@ -53,6 +53,7 @@ defmodule PtcRunner.Kernel.RunState do
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMReplayDiagnostic
+  alias PtcRunner.Kernel.LLMUsageSummary
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ProviderTaskTracker
@@ -369,6 +370,13 @@ defmodule PtcRunner.Kernel.RunState do
   @spec record_agent_protocol_error(t()) :: :ok | {:error, :closed}
   def record_agent_protocol_error(state), do: safe_call(state, :agent_protocol_error, :ok)
 
+  @doc false
+  @spec record_llm_usage(t(), binary(), binary(), atom(), map() | nil) :: :ok | {:error, :closed}
+  def record_llm_usage(state, alias_name, revision, status, usage)
+      when is_binary(alias_name) and is_binary(revision) and is_atom(status) do
+    safe_call(state, {:record_llm_usage, alias_name, revision, status, usage}, :ok)
+  end
+
   # There is no failure left to record once the owner is gone. As above, the
   # declared :ok never covered the mismatched-token reply.
   @spec fail(t(), atom(), atom()) :: :ok | {:error, :closed}
@@ -497,6 +505,7 @@ defmodule PtcRunner.Kernel.RunState do
        source_checks: 0,
        protocol_errors: 0,
        agent_protocol_errors: 0,
+       llm_usage: %{},
        replay_misses: MapSet.new(),
        llm_provider_failures: MapSet.new(),
        terminal_failure: nil,
@@ -904,6 +913,20 @@ defmodule PtcRunner.Kernel.RunState do
 
   def handle_call({token, :agent_protocol_error}, _from, %{token: token} = state) do
     {:reply, :ok, %{state | agent_protocol_errors: state.agent_protocol_errors + 1}}
+  end
+
+  def handle_call(
+        {token, {:record_llm_usage, alias_name, revision, status, usage}},
+        _from,
+        %{token: token} = state
+      )
+      when is_binary(alias_name) and is_binary(revision) and is_atom(status) do
+    {:reply, :ok,
+     %{
+       state
+       | llm_usage:
+           LLMUsageSummary.accumulate(state.llm_usage, alias_name, revision, status, usage)
+     }}
   end
 
   def handle_call({token, {:fail, kind, reason}}, _from, %{token: token} = state)
@@ -1661,6 +1684,7 @@ defmodule PtcRunner.Kernel.RunState do
       subordinate_source_checks: state.source_checks,
       protocol_errors: state.protocol_errors,
       agent_protocol_errors: state.agent_protocol_errors,
+      llm_spend: LLMUsageSummary.spend(state.llm_usage),
       evaluation_memory_bytes:
         continuations_total(state.continuations, :memory, state.limits.evaluation_memory_bytes),
       evaluation_history_bytes:

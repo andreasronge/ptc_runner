@@ -8,6 +8,7 @@ defmodule PtcRunner.LiveStatusTest do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
+  alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
@@ -201,6 +202,135 @@ defmodule PtcRunner.LiveStatusTest do
     assert :ok = RunState.stop(run_state)
     :ok = :gen_tcp.close(listener)
     assert_receive {:DOWN, ^server_ref, :process, ^server, :normal}
+  end
+
+  test "the terminal frame keeps spend recorded before capability telemetry" do
+    parent = self()
+    {:ok, target} = Target.new(fn _run_id, frame -> send(parent, {:live_frame, frame}) end)
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "live-spend-before-telemetry")
+    {:ok, config} = run_config(limits, sink, %{})
+    {:ok, run_state} = RunState.start(limits)
+    {:ok, reporter} = Reporter.start(target, config, run_state)
+
+    assert_receive {:live_frame, %{phase: "running"}}, 1_000
+
+    assert :ok =
+             RunState.record_llm_usage(run_state, "writer", "stable-v1", :ok, %{
+               "input" => 3,
+               "output" => 2,
+               "total_cost" => 0.25
+             })
+
+    late =
+      Task.async(fn ->
+        Process.sleep(30)
+
+        Reporter.handle_telemetry(
+          [:ptc_runner, :capability, :stop],
+          %{duration_ms: 12},
+          %{
+            name: "llm-request",
+            environment: :workflow,
+            capability_id: "cap-late",
+            status: :ok,
+            live_run: run_state.pid
+          },
+          {reporter, run_state.pid}
+        )
+      end)
+
+    assert :ok = Reporter.complete(reporter, :ok, nil, nil)
+    assert_receive {:live_frame, %{phase: "ok"} = frame}, 2_000
+
+    assert frame.usage.llm_spend == %{
+             "state" => "available",
+             "input" => 3,
+             "output" => 2,
+             "total_cost" => 0.25
+           }
+
+    _ = Task.await(late)
+    assert :ok = Reporter.stop(reporter)
+    assert :ok = RunState.stop(run_state)
+  end
+
+  test "capability-stop telemetry does not own the live spend total" do
+    parent = self()
+    {:ok, target} = Target.new(fn _run_id, frame -> send(parent, {:live_frame, frame}) end)
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "live-spend-telemetry-does-not-own")
+    {:ok, config} = run_config(limits, sink, %{})
+    {:ok, run_state} = RunState.start(limits)
+    {:ok, reporter} = Reporter.start(target, config, run_state)
+
+    assert_receive {:live_frame, %{phase: "running"}}, 1_000
+
+    assert :ok =
+             Reporter.handle_telemetry(
+               [:ptc_runner, :capability, :stop],
+               %{duration_ms: 12},
+               %{
+                 name: "llm-request",
+                 environment: :workflow,
+                 capability_id: "cap-unowned",
+                 status: :ok,
+                 live_run: run_state.pid
+               },
+               {reporter, run_state.pid}
+             )
+
+    assert :ok = Reporter.complete(reporter, :ok, nil, nil)
+    assert_receive {:live_frame, %{phase: "ok"} = frame}, 2_000
+    assert frame.usage.llm_spend == %{"state" => "empty"}
+
+    assert :ok = Reporter.stop(reporter)
+    assert :ok = RunState.stop(run_state)
+  end
+
+  test "a priced LLM call reaches the terminal live frame as available spend" do
+    parent = self()
+    {:ok, target} = Target.new(fn _run_id, frame -> send(parent, {:live_frame, frame}) end)
+
+    {:ok, leaf} =
+      LLMCapability.new(
+        requester: fn _request ->
+          {:ok, %{content: "ok", tokens: %{input: 3, output: 2, total_cost: 0.25}}}
+        end
+      )
+
+    {:ok, router} =
+      LLMRouter.new([
+        %{
+          alias: "writer",
+          source: "llm",
+          installation_revision: "stable-v1",
+          default?: true,
+          capability: leaf
+        }
+      ])
+
+    {:ok, components} = Library.resolve_components([{:library, "llm"}, {:library, "cap"}])
+    {:ok, bundle} = Kernel.compile_bundle(components)
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [router])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "live-spend-priced-llm")
+    {:ok, config} = run_config(limits, sink, %{}, workflow, mission)
+
+    assert {:ok, _} =
+             PtcRunner.LiveStatus.with_target(target, fn ->
+               Kernel.run(~S|(return (llm/request {"messages" []}))|, config)
+             end)
+
+    assert_receive {:live_frame, %{phase: "ok"} = frame}, 2_000
+
+    assert frame.usage.llm_spend == %{
+             "state" => "available",
+             "input" => 3,
+             "output" => 2,
+             "total_cost" => 0.25
+           }
   end
 
   test "live timeout formatting names the run-duration limit" do
