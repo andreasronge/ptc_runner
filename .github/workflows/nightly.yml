@@ -17,6 +17,13 @@ name: Nightly
 # correctness tests from every PR. Do not nightly in-process CommandEngine,
 # TraceLog lease, or pre-push classification tests.
 #
+# The interactive REPL PTY check belongs here too: it drives the packaged
+# `ptc repl` through expect(1) with timed keystrokes, which is slow and
+# load-sensitive, and GitHub Ubuntu does not ship expect. Per-PR
+# `core-release` still verifies the package and the rest of the standalone
+# smoke; it sets `PTC_SKIP_PTY_GATE`. Docker verify and the packaging script
+# keep running the check without that skip.
+#
 # Like `soak.yml` this lives outside `test.yml` so it can be dispatched on its
 # own and so a red run never blocks an unrelated pull request.
 on:
@@ -63,3 +70,30 @@ jobs:
         env:
           MIX_ENV: dev
         run: mix bench.check --skip-heap
+
+  interactive-repl:
+    runs-on: ubuntu-latest
+    name: Interactive REPL
+    timeout-minutes: 20
+    env:
+      MIX_ENV: test
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+        with:
+          cache-plt: 'false'
+          install-babashka: 'false'
+
+      # The interactive REPL check drives the packaged command through a
+      # pseudo-terminal, which no other gate can supply. macOS ships `expect`;
+      # this image does not, and the check refuses to pass by skipping.
+      - name: Install the pseudo-terminal driver
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends expect
+
+      - name: Verify the packaged interactive REPL
+        run: scripts/verify_standalone_release.sh

@@ -260,8 +260,8 @@ cmp "$release_tmp_dir/repl.expected" "$release_tmp_dir/repl.stdout"
 # can observe it. Drive the packaged command through a pseudo-terminal:
 # assemble one expression with emacs keys, recall it from history, then prove
 # the recall survives process exit. `PTC_SKIP_PTY_GATE` exists for a host that
-# knowingly cannot provide a terminal; the workflow installs `expect` instead
-# of setting it.
+# knowingly cannot provide a terminal. Per-PR core-release sets it; Nightly,
+# Docker verify, and packaging install `expect` and run the check.
 if [ -n "${PTC_SKIP_PTY_GATE:-}" ]; then
   echo 'note: PTC_SKIP_PTY_GATE set, skipped the interactive REPL check' >&2
 else

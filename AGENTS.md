@@ -97,9 +97,11 @@ how it was verified.
 - `mix nightly` — the `:nightly` tests, excluded from `mix test` by default.
   The `Nightly` workflow runs them daily; run it locally when you touch the
   `mix ptc run` downstream path, example operator walks, Mix-process CLI
-  wrappers, or the benchmark task. Never add `--trace` (or `--slowest`,
-  which implies it) to a suite you want to finish quickly: it pins
-  `--max-cases` to 1.
+  wrappers, or the benchmark task. That workflow also runs the packaged
+  interactive REPL PTY check (`expect` + `ptc repl`); PR `core-release` and
+  `mix precommit` skip it via `PTC_SKIP_PTY_GATE`. Never add `--trace` (or
+  `--slowest`, which implies it) to a suite you want to finish quickly: it
+  pins `--max-cases` to 1.
 - `mix soak` — the `:soak` memory-leak suite; the scheduled `Soak` workflow
   runs it. `:soak`, `:e2e`, `:scheduled_e2e`, `:nightly`, and `:clojure` are
   all excluded from `mix test` by default (`:clojure` needs Babashka).

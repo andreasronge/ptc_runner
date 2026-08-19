@@ -148,6 +148,19 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     assert launcher =~ ~s(bash ptc_runner_launcher/scripts/verify_precompiled.sh)
   end
 
+  test "the interactive REPL PTY check is a Nightly gate, not a PR core-release gate" do
+    workflow = File.read!(Path.join(@root, ".github/workflows/test.yml"))
+    nightly = File.read!(Path.join(@root, ".github/workflows/nightly.yml"))
+    core_release = File.read!(Path.join(@root, "scripts/ci/core-release.sh"))
+
+    refute workflow =~ "apt-get"
+    refute workflow =~ "pseudo-terminal driver"
+    assert core_release =~ ~r/PTC_SKIP_PTY_GATE=1\s+scripts\/verify_standalone_release\.sh/
+    assert nightly =~ "apt-get install --yes --no-install-recommends expect"
+    assert nightly =~ "scripts/verify_standalone_release.sh"
+    refute nightly =~ ~r/PTC_SKIP_PTY_GATE=/
+  end
+
   # Every gate is exercised the same way: the repository root as the working
   # directory, a cleared git environment, and a fake `mix` first on PATH that
   # records what it was asked to do. `:env` entries are appended, so a test can
