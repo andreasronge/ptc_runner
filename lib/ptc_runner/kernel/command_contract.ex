@@ -1223,6 +1223,19 @@ defmodule PtcRunner.Kernel.CommandContract do
        ),
        do: AgentConfigDiagnostic.message_schema(row.message)
 
+  # Both dynamic messages above are admitted only against a null source, so the
+  # sourced branches of the same rows must stay pinned to the catalog literal;
+  # otherwise the published schema would accept a pairing the command refuses to
+  # build.
+  defp diagnostic_message_schema(%{phase: :execution, code: :workflow_failed} = row, _source),
+    do: %{"const" => row.message}
+
+  defp diagnostic_message_schema(
+         %{phase: :result_cleanup, code: :result_limit_exceeded} = row,
+         _source
+       ),
+       do: %{"const" => row.message}
+
   # Only a contract source carries a rule-derived message. The application
   # source reports the same code for a malformed `contracts` section, which has
   # no schema document to locate a rule in, so it keeps the catalog literal.
