@@ -38,8 +38,10 @@ defmodule Mix.Tasks.PtcTest do
 
   # Seed everything except one dependency so this exercises the real alias
   # without rebuilding the entire dependency tree. The old unconditional
-  # --no-deps-check path leaves the omitted dependency uncompiled.
-  @tag :slow
+  # --no-deps-check path leaves the omitted dependency uncompiled. A warm
+  # run is still a real Mix compile into a throwaway `_build` (~4.5 s), so
+  # this lives on `mix nightly` with the other Mix-subprocess cases.
+  @tag :nightly
   test "a cold root command compiles dependencies before running" do
     build_path =
       Path.join(@root, "_build/ptc-cold-start-#{System.unique_integer([:positive, :monotonic])}")
@@ -275,7 +277,10 @@ defmodule Mix.Tasks.PtcTest do
     assert presentation.outcome.envelope["status"] == "ok"
   end
 
-  @tag :slow
+  # Two real `mix ptc doctor` OS processes (~3.2 s). In-process
+  # MixCommandAdapter cases in this file cover the same rendering; this one
+  # pins Mix.exit status mapping.
+  @tag :nightly
   test "the Mix process preserves human rendering and normal-mode diagnostic status" do
     args = ["doctor", "--caller-secret", "value"]
 
@@ -474,7 +479,7 @@ defmodule Mix.Tasks.PtcTest do
            } in checks
   end
 
-  @tag :slow
+  @tag :nightly
   @tag :tmp_dir
   test "the Mix process writes complete failed doctor reports to stdout", %{tmp_dir: dir} do
     invalid_dir = Path.join(dir, "invalid-application")

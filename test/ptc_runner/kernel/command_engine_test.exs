@@ -84,6 +84,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert runtime.authorization_targets == ["workspace"]
   end
 
+  test "the envelope schema compiles once per VM" do
+    assert {:ok, root} = CommandContract.envelope_schema_root()
+    assert {:ok, ^root} = CommandContract.envelope_schema_root()
+  end
+
   test "help and version are exact phase-1 successes" do
     assert {:ok, %CommandOutcome{} = help} =
              CommandEngine.prepare(["doctor", "--help"])
@@ -7233,16 +7238,12 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   defp assert_schema_valid(envelope) do
-    assert {:ok, root} =
-             JSV.build(CommandContract.schema(), atoms: false, warnings: :silent)
-
+    assert {:ok, root} = CommandContract.envelope_schema_root()
     assert {:ok, _validated} = JSV.validate(envelope, root, cast: false)
   end
 
   defp assert_schema_invalid(envelope) do
-    assert {:ok, root} =
-             JSV.build(CommandContract.schema(), atoms: false, warnings: :silent)
-
+    assert {:ok, root} = CommandContract.envelope_schema_root()
     assert {:error, _reason} = JSV.validate(envelope, root, cast: false)
   end
 

@@ -123,8 +123,22 @@ the rest sit in the same serial queue because they share the module.
 - Do not exclude `:slow` from `mix precommit`, pre-push, or CI. That tag exists
   only for the git pre-commit hook; excluding it globally dropped correctness
   tests from every PR to save 14s.
-- Do not tag more tests `:nightly` to shrink the push suite. `:nightly` means
-  "unverified on pull requests".
+- Do not tag in-process correctness tests `:nightly` to shrink the push suite
+  (CommandEngine dispatch, TraceLog leases, pre-push classification). `:nightly`
+  is for operator-path Mix/OS subprocesses and intentional multi-second waits;
+  those stop being verified on pull requests. Measured 2026-08-18 on the
+  expensive subset: five debug-a-failed-run `mix ptc run` tests summed to
+  24.6 s, the 5.5 s parallel-ceiling park, inspection lab 4.2 s serial, and
+  three Mix.Tasks.Ptc subprocesses ~11 s serial. `:slow` does not help push.
+- CommandEngine's serial cost was mostly `JSV.build(CommandContract.schema())`
+  on every `CommandOutcome.valid?` / test assertion (~75 ms compile, ~100
+  rebuilds). Caching the JSV root in persistent_term cut
+  `command_engine_test.exs` from **44.7 s to 23.0 s**. Full `core-tests.sh`
+  after that cache plus the nightly tags: **200.8 s (64.8 s async, 136.0 s
+  sync)** vs ~244 s / 174 s sync on main. Remaining serial is MCP stdio/source
+  and leftover dispatch, not schema compilation.
+- `git push --no-verify` skips `.githooks/pre-push` (confirmed: dry-run
+  returned in 5 s). `git push --dry-run` still runs the hook.
 - Do not overlap the suite with Dialyzer, release, or the launcher on
   pre-push. The remaining win is ~1s and the flake cost is documented.
 - Do not change StreamData's `CI=1` 300-run setting for local push. Five

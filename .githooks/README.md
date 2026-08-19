@@ -37,8 +37,11 @@ gate that is slow. Set `PTC_PRE_PUSH_SERIAL=1` to run every gate serially when
 diagnosing a failure or pushing from a machine too small to overlap them.
 
 For an ordinary push, run `git push` and let the hook execute the complete gate
-once. "Complete" excludes `:nightly` tests, which cost tens of seconds each and
-run in the `Nightly` workflow instead; everything else runs. Run `mix prepush` directly only to diagnose that portion of the gate or
+once. "Complete" excludes `:nightly` tests, which spawn Mix/OS processes or
+wait on multi-second deadlines and run in the `Nightly` workflow instead;
+everything else runs. `git push --no-verify` skips this hook entirely (Git
+never execs it). `git push --dry-run` still runs the hook — dry-run only
+skips sending refs. Run `mix prepush` directly only to diagnose that portion of the gate or
 when hooks are unavailable; do not run it immediately before a normal
 `git push`.
 

@@ -136,7 +136,7 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
       CommandDiagnostic.new!(:active_preflight, :connectivity_timeout, provider_activity: false)
 
     envelope = %{outcome.envelope | "error" => CommandDiagnostic.to_map(timeout)}
-    {:ok, root} = JSV.build(CommandContract.schema(), atoms: false, warnings: :silent)
+    {:ok, root} = CommandContract.envelope_schema_root()
 
     assert {:error, _reason} = JSV.validate(envelope, root, cast: false)
   end
