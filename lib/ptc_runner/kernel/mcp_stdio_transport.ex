@@ -155,6 +155,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
          stderr: "",
          stderr_limit: config.stderr_bytes,
          stderr_truncated?: false,
+         exchange_waiters: :queue.new(),
          unscoped_notification_bytes: 0,
          closing: nil,
          close_timeout_ms: config.grace_ms * 4 + 2_000,
@@ -184,6 +185,20 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
       do: {:reply, {:error, :closed}, state}
 
   def handle_call(
+        {:request, method, params, metadata, max_bytes, timeout_ms, true},
+        from,
+        state
+      ) do
+    if exchange_in_flight?(state) do
+      waiter = {from, method, params, metadata, max_bytes, timeout_ms}
+
+      {:noreply, %{state | exchange_waiters: :queue.in(waiter, state.exchange_waiters)}}
+    else
+      dispatch_request(from, method, params, metadata, max_bytes, timeout_ms, true, state)
+    end
+  end
+
+  def handle_call(
         {:request, _method, _params, _metadata, _max_bytes, _timeout_ms, _exchange?},
         _from,
         %{pending: pending} = state
@@ -196,37 +211,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
         from,
         state
       ) do
-    with :ok <- validate_request(method, params, metadata, max_bytes, timeout_ms),
-         {:ok, request, bytes} <- encode_request(state.next_id, method, params, metadata) do
-      id = state.next_id
-      {caller, _tag} = from
-      monitor = Process.monitor(caller)
-      timer = Process.send_after(self(), {:request_timeout, id}, timeout_ms)
-
-      pending = %{
-        from: from,
-        caller: caller,
-        monitor: monitor,
-        timer: timer,
-        max_bytes: max_bytes,
-        response_bytes: 0,
-        write_timeout_ms: timeout_ms,
-        exchange?: exchange?,
-        request: if(exchange?, do: request),
-        sent?: false
-      }
-
-      state =
-        state
-        |> Map.put(:next_id, id + 1)
-        |> put_in([:pending, id], pending)
-        |> put_in([:monitors, monitor], id)
-        |> enqueue_write(id, bytes, timeout_ms)
-
-      continue_after_flush(state)
-    else
-      {:error, reason} -> {:reply, {:error, reason}, state}
-    end
+    dispatch_request(from, method, params, metadata, max_bytes, timeout_ms, exchange?, state)
   end
 
   def handle_call(:close, from, %{closing: waiters} = state) when is_list(waiters),
@@ -314,7 +299,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     do: {:noreply, append_stderr(state, bytes)}
 
   def handle_info({port, {:data, "T"}}, %{port: port} = state),
-    do: {:noreply, state}
+    do: {:noreply, %{state | stderr_truncated?: true}}
 
   def handle_info({port, {:data, <<"X", finish::binary-size(6)>>}}, %{port: port} = state) do
     case decode_finish(finish) do
@@ -880,13 +865,34 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
       {nil, state} ->
         state
 
+      {%{exchange?: true} = pending, state} ->
+        GenServer.reply(pending.from, result)
+        start_next_exchange(state)
+
       {pending, state} ->
         GenServer.reply(pending.from, result)
         state
     end
   end
 
-  defp drop_pending(state, id), do: elem(pop_pending(state, id), 1)
+  defp complete_pending(state, id, result) do
+    case pop_pending(state, id) do
+      {nil, state} ->
+        state
+
+      {pending, state} ->
+        GenServer.reply(pending.from, result)
+        state
+    end
+  end
+
+  defp drop_pending(state, id) do
+    case pop_pending(state, id) do
+      {nil, state} -> state
+      {%{exchange?: true}, state} -> start_next_exchange(state)
+      {_pending, state} -> state
+    end
+  end
 
   defp pop_pending(state, id) do
     case Map.pop(state.pending, id) do
@@ -907,8 +913,10 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   end
 
   defp fail_pending(state, reason) do
+    state = fail_exchange_waiters(state, reason)
+
     Enum.reduce(Map.keys(state.pending), state, fn id, state ->
-      reply_pending(state, id, {:error, reason})
+      complete_pending(state, id, {:error, reason})
     end)
   end
 
@@ -1055,10 +1063,97 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     end
   end
 
-  defp drain_stderr(state) do
+  defp drain_stderr(%{stderr_truncated?: true} = state) do
     text = Utf8.truncate_valid(state.stderr, state.stderr_limit)
 
-    {text, state.stderr_truncated?, %{state | stderr: "", stderr_truncated?: false}}
+    {text, true, %{state | stderr: "", stderr_truncated?: false}}
+  end
+
+  defp drain_stderr(state) do
+    text = Utf8.truncate_valid(state.stderr, state.stderr_limit)
+    rest = binary_part(state.stderr, byte_size(text), byte_size(state.stderr) - byte_size(text))
+
+    {text, false, %{state | stderr: rest, stderr_truncated?: false}}
+  end
+
+  defp dispatch_request(from, method, params, metadata, max_bytes, timeout_ms, exchange?, state) do
+    case begin_request(from, method, params, metadata, max_bytes, timeout_ms, exchange?, state) do
+      {:ok, state} -> continue_after_flush(state)
+      {:error, reason, state} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp begin_request(from, method, params, metadata, max_bytes, timeout_ms, exchange?, state) do
+    with :ok <- validate_request(method, params, metadata, max_bytes, timeout_ms),
+         {:ok, request, bytes} <- encode_request(state.next_id, method, params, metadata) do
+      id = state.next_id
+      {caller, _tag} = from
+      monitor = Process.monitor(caller)
+      timer = Process.send_after(self(), {:request_timeout, id}, timeout_ms)
+
+      pending = %{
+        from: from,
+        caller: caller,
+        monitor: monitor,
+        timer: timer,
+        max_bytes: max_bytes,
+        response_bytes: 0,
+        write_timeout_ms: timeout_ms,
+        exchange?: exchange?,
+        request: if(exchange?, do: request),
+        sent?: false
+      }
+
+      {:ok,
+       state
+       |> Map.put(:next_id, id + 1)
+       |> put_in([:pending, id], pending)
+       |> put_in([:monitors, monitor], id)
+       |> enqueue_write(id, bytes, timeout_ms)}
+    else
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp exchange_in_flight?(state) do
+    Enum.any?(state.pending, fn {_id, pending} -> pending.exchange? end)
+  end
+
+  defp start_next_exchange(state) do
+    case :queue.out(state.exchange_waiters) do
+      {{:value, {from, method, params, metadata, max_bytes, timeout_ms}}, waiters} ->
+        state = %{state | exchange_waiters: waiters}
+
+        case begin_request(
+               from,
+               method,
+               params,
+               metadata,
+               max_bytes,
+               timeout_ms,
+               true,
+               state
+             ) do
+          {:ok, state} ->
+            state
+
+          {:error, reason, state} ->
+            GenServer.reply(from, {:error, reason})
+            start_next_exchange(state)
+        end
+
+      {:empty, _waiters} ->
+        state
+    end
+  end
+
+  defp fail_exchange_waiters(state, reason) do
+    Enum.each(:queue.to_list(state.exchange_waiters), fn {from, _method, _params, _metadata,
+                                                          _max_bytes, _timeout_ms} ->
+      GenServer.reply(from, {:error, reason})
+    end)
+
+    %{state | exchange_waiters: :queue.new()}
   end
 
   defp redact_status(status) do

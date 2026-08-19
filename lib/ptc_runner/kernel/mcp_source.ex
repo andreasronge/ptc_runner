@@ -16,7 +16,9 @@ defmodule PtcRunner.Kernel.MCPSource do
   explicitly enabled, version 2 inspection records retain paired exact decoded
   JSON-RPC request and response bodies correlated to that attempt. Stdio
   sessions also retain bounded child-stderr records on that same correlation;
-  those bytes can name host paths, so they stay owner-only. Transport
+  captured stdio exchanges are serialized so those bytes belong to one request.
+  A launcher truncation frame marks the capture `truncated`. Those bytes can
+  name host paths, so they stay owner-only. Transport
   credentials and environment values are never part of those bodies or
   records.
 

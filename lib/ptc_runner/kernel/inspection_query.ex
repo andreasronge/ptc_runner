@@ -7,7 +7,9 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   a validated input without an output is retained as an explicitly incomplete
   interrupted attempt. MCP request and response bodies remain paired by
   `{capability_id, request_id}`. Optional stdio `mcp-stderr` records join that
-  same identity and project onto the exchange when present. Callers therefore never join private records
+  same identity and project onto the exchange when present. Captured stdio
+  exchanges are serialized per session so that join is one request's capture
+  window, not a mix of concurrent calls. Callers therefore never join private records
   by timestamp or depend on file order beyond the artifact's validated
   sequence.
 

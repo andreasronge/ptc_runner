@@ -556,6 +556,9 @@ MCP records contain the public connector arguments and normalized result/error.
 Stdio sessions also retain bounded child-stderr text on a sibling <code class="inline">mcp-stderr</code>
 record correlated to the same <code class="inline">{capability_id, request_id}</code>; those bytes can
 name host paths and exist only under explicit private-inspection authority.
+Captured stdio exchanges are serialized so that record is one request's capture
+window. <code class="inline">truncated</code> is true when the launcher hit <code class="inline">stderr_bytes</code> or otherwise
+signaled overflow.
 When a capability callback raises, <code class="inline">capability-exception</code> retains the exception
 module name, its message at no more than 4,096 valid UTF-8 bytes, and a formatted
 stacktrace at no more than 64 frames and 65,536 valid UTF-8 bytes. Independent

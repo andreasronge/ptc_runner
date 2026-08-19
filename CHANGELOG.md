@@ -59,8 +59,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - MCP stdio now retains bounded child stderr in the private inspection
   artifact, so operator diagnostics that a well-behaved server can only put on
-  stderr are no longer dropped after the launcher captures them. A complete
-  decoded MCP refusal or JSON-RPC error is no longer reported as
+  stderr are no longer dropped after the launcher captures them. Overflow from
+  the launcher is marked truncated, captured exchanges are serialized so stderr
+  stays with one request, and a split UTF-8 sequence is held until it completes.
+  A complete decoded MCP refusal or JSON-RPC error is no longer reported as
   `mutation_state: "indeterminate"` for write tools; that flag stays reserved
   for timeouts and other unknown outcomes.
 
