@@ -41,8 +41,32 @@ resources.
 
 Install MCP tools with the same separation: the host fixes the transport and
 public tool mapping, while the application selects the alias and may narrow a
-write-bearing tool set. Follow [Connect an MCP tool](connecting-tools-with-mcp.md)
-for one complete workflow.
+write-bearing tool set. The `workspace` alias selected in
+[Configure an application](manifests-and-capabilities.md) is installed as a
+second entry under the same `install` object:
+
+```json
+{
+  "workspace": {
+    "source": "mcp",
+    "installation_revision": "workspace-v1",
+    "transport": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["server.js"]
+    },
+    "tools": {
+      "read_text_file": {"as": "workspace.read", "effect": "read"}
+    },
+    "ceilings": {"timeout_ms": 15000, "max_result_bytes": 262144}
+  }
+}
+```
+
+The upstream operation name and server command belong to the server you run;
+the public `as` name and its `read` or `write` effect are the operator's
+choice. Follow [Connect an MCP tool](connecting-tools-with-mcp.md) for one
+complete workflow against a checked-in server.
 
 The [host-configuration reference](../reference/host-installation.md) owns the
 complete credential forms, provider sources, transport rules, OAuth behavior,

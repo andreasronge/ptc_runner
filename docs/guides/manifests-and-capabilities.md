@@ -28,13 +28,18 @@ The generated application is deliberately small:
 }
 ```
 
-Add a provider only after the operator has installed its alias. Model access
-belongs to the trusted workflow; task tools belong to the mission that runs
-model-authored programs:
+Add a provider only after the operator has installed its alias. Every provider
+the application uses is selected at the top level, under `providers.workflow`
+for model access the trusted workflow holds, and under `providers.mission` for
+the task tools that missions running model-authored programs may hold. Add both
+scopes to the manifest above:
 
 ```json
 {
-  "providers": {"workflow": [{"name": "model"}]},
+  "providers": {
+    "workflow": [{"name": "model"}],
+    "mission": [{"name": "workspace"}]
+  },
   "missions": {
     "default": {
       "components": [],
@@ -44,7 +49,15 @@ model-authored programs:
 }
 ```
 
-Validate structure and selected authority before running:
+A mission's own `providers` list can only narrow what `providers.mission`
+already selected; naming an alias there does not introduce it, and a name
+absent from `providers.mission` is rejected. Omitting a name is the point: the
+grant is then absent from that mission's environment.
+
+Install the aliases first, then validate. Both commands resolve the selected
+providers against the host document, so they report the selected provider as
+not installed until [host configuration](host-configuration.md) declares
+`model` and `workspace`:
 
 ```console
 ptc validate my-application/ptc-project.json
