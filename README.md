@@ -3,23 +3,26 @@
 **Build AI agents that are bounded in what they can do, easy to change,
 observable in operation, and designed to improve from evidence.**
 
-Agents usually call one tool per model turn. That is slow, and every result
-lands in the context window.
+## The loop is a library, not the runtime
 
-Let the model write a small program instead. It calls several approved tools,
-filters and combines the results, and returns only what matters. The pattern is
-called code mode, or programmatic tool calling, and several products now offer
-it.
+A system that improves itself has to be able to change itself. In most
+frameworks the agent loop is host code, so changing the agent means editing
+privileged code, and self-modification and privilege escalation become the same
+act.
 
-PtcRunner is a version you run yourself, built around the execution boundary.
-The generated program has no shell, no filesystem, no network, and no package
-installs. It reaches the world only through tools you granted, under limits you
-set. Each run is a lightweight process rather than a container, so one machine
-holds thousands at once.
+Here the loop is an ordinary library, written in the same bounded language the
+model writes its own programs in. Everything about the agent is replaceable,
+and nothing replaceable carries authority. You can change what the agent does
+without expanding what it may do.
 
-You normally do not write the program. You provide the task, model, approved
-tools, data, limits, and agent components. PtcRunner runs it and leaves a
-structured trace you can replay and compare.
+That language is also how tools get called: the model writes one small program
+instead of taking twenty turns, the part usually called code mode. Every run
+leaves a structured trace. Replay holds the model fixed, so a change can be
+measured against its baseline instead of guessed at. A candidate arrives with
+evidence, and a human decides whether it ships.
+
+One executable, with its own runtime inside. No language to install, no sandbox
+to stand up.
 
 > PtcRunner is a 0.x project under active development. Breaking changes are
 > expected.
@@ -118,26 +121,27 @@ yourself is an advanced option, not an onboarding requirement.
 
 ## Will the model write it?
 
-Yes. PTC-Lisp is not a new language to learn. It is a bounded Clojure —
-[236 of the 250 `clojure.core` names in its audited target](docs/conformance/index.md)
-— plus type signatures, checked on the way in and on the way out.
+Yes, and it is not a new language to learn. PTC-Lisp is a bounded Clojure with
+type signatures, checked on the way in and on the way out.
 
-The job is narrow: short programs, written turn by turn in a REPL-style loop,
-against typed signatures. That is not the same as writing a large application.
-In my experience over the past year, the ranking of languages changes once you
-narrow it that way.
+The job is also narrower than writing an application: short programs, one turn
+at a time in a REPL-style loop, against typed signatures. Narrow it that way
+and the ranking of languages changes.
 
-Corpus size matters less than it looks. The callable surface is small enough to
-hand the model in full, so it never guesses which library exists. A mistake is a
-value and costs one expression, not the run. A signature violation names the
-field to fix. And there is nothing ambient to reach for: a model fluent in
-Python reaches for `open`, `requests`, and `subprocess`, and a sandbox has to
-block each one. Here there is nothing to block.
+Models handle niche languages better than their share of the training data
+suggests. PtcRunner itself is a large codebase, written mostly by models over
+half a year, in a language well outside the popular ones.
 
-The tutorials here run on a small, cheap model by default. Better still: point
-it at your own tasks and measure.
+The tutorials here run on a small, cheap model by default. Point it at your own
+tasks and measure.
 
 ## Constrain
+
+Bounded means there is no way out of the language. No `import`, no `open`, no
+`fetch`, no shell. A program can use what you passed in and the tools you
+approved, and nothing else. A sandbox works the other way round: it starts with
+a language that can do anything and takes the dangerous parts away one by one.
+Miss one and you have a breach. Here there is nothing to miss.
 
 Generated mission code has no ambient access to the filesystem, network,
 processes, a shell, package installation, or a general-purpose host language.

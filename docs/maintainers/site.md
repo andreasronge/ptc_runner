@@ -97,29 +97,32 @@ match the other reads as a mistake on the page.
 
 ### `site/authority-narrows.webp`
 
-> A clean flat vector technical diagram, editorial infographic style, on a warm
-> off-white background (#FBFAF8). Composition: a centered vertical funnel of
-> three stages, each visibly narrower than the one above it, with generous white
-> space and wide margins. Title, top left, large bold dark ink: "Authority only
-> narrows". Stage 1 (widest, full width): a rounded rectangle with a thin
-> deep-navy outline. Bold label "OPERATOR". Below it in monospace:
-> "ptc-host.json". Below that, smaller warm grey: "credentials · endpoints ·
-> outer ceilings". A short downward rust-orange arrow to stage 2, with small
-> italic text beside it: "selects from, never adds to". Stage 2 (about 75%
-> width): same rounded rectangle style. Bold label "AUTHOR". Monospace:
-> "ptc.json". Smaller warm grey: "aliases · missions · limits". A second
-> downward rust-orange arrow, with small italic text beside it: "splits, never
-> merges". Stage 3 (about 55% width): two rounded rectangles side by side,
-> separated by one thick vertical rust-orange line. Left box: bold "WORKFLOW",
-> then "trusted policy", then "holds the model". Right box: bold "MISSION", then
-> "model-written program", then "holds the tools". Style: flat 2D vector,
-> technical documentation aesthetic, thin 2px strokes, no gradients, no 3D, no
-> drop shadows, no glow. Palette strictly deep navy (#1F3A5F), rust orange
-> (#9A4A1E), warm grey (#6B6459) on warm off-white. Crisp geometric shapes,
-> precise alignment, correctly spelled text. 16:9 aspect ratio.
+> A clean flat vector technical diagram, wide landscape, no 3D, no gradients,
+> no shadows, no photorealism. Warm off-white background (#F8F5EF). Title, upper
+> left, bold geometric sans, deep navy (#1B2A4A): "Authority only narrows".
+> THREE NESTED ROUNDED RECTANGLES, each visibly smaller and inset within the
+> previous one, showing containment. 1. Outermost, near full width, navy 2px
+> outline, label centred at its top: "OPERATOR" in bold sans, beneath it
+> "ptc-host.json" in monospace, beneath that a row of three small pill chips:
+> "credentials", "endpoints", "outer ceilings". A small padlock glyph beside
+> "credentials" with tiny italic caption: "never travels down". 2. Inset inside
+> it, roughly 70% of its width, navy outline: "AUTHOR", "ptc.json" in monospace,
+> three chips: "aliases", "missions", "limits". The area of the outer rectangle
+> NOT covered by this one is filled with light grey diagonal hatching, labelled
+> once in small grey italic: "not selected". 3. Inside the AUTHOR rectangle, two
+> separate rounded rectangles side by side with a clear vertical gap between
+> them, never touching: left — "WORKFLOW", "trusted policy", "holds the model";
+> right — "MISSION", "model-written program", "holds the tools". In the gap, a
+> short vertical burnt-orange rule with small italic label: "splits, never
+> merges". Down the left margin, one slim burnt-orange (#C4562A) arrow running
+> top to bottom across all three layers, with vertical italic label: "selects
+> from, never adds to". Typography: bold geometric sans for layer names and
+> title, monospace for filenames, small grey italic for annotations. Palette
+> limited to navy, burnt orange, warm off-white, and one grey for the hatching.
+> Generous white space, crisp thin strokes, everything aligned to a grid.
 
-The generated PNG was 1672x941 and 969 KB. What ships is
-`cwebp -q 92 <original>.png -o site/authority-narrows.webp` — 83 KB, verified
+The generated PNG was 1647x955 and 1.2 MB. What ships is
+`cwebp -q 92 <original>.png -o site/authority-narrows.webp` — 104 KB, verified
 free of ringing on the smallest text at 2x. Re-encode from an original rather
 than from the WebP if the diagram is ever regenerated.
 
@@ -129,11 +132,12 @@ than cosmetic:
 - **Every label must be spelled exactly.** The filenames `ptc-host.json` and
   `ptc.json` are the whole point; a dropped hyphen is wrong on a page about
   exact documents.
-- **The two bottom boxes may share the width of the box above them.** That is
-  not a failed funnel. The author selects both `providers.workflow` and
-  `providers.mission`, so the split divides that authority into two disjoint
-  halves, each narrower than what was selected. A strict funnel would wrongly
-  imply the two environments draw from one shrinking pool.
+- **The nesting and the hatching are the argument.** Each layer sits inside the
+  one above it, and the hatched band left around the author box is the authority
+  that was not selected. Drop the remainder and the picture asserts narrowing
+  instead of showing it. The two innermost boxes may span the full width of the
+  author box: the split divides selected authority into two disjoint halves, it
+  does not shrink it again.
 
 The image carries a light background in both themes. A dark-mode variant would
 need a second render with the background at `#16150F` and text at `#ECE7DD`,
