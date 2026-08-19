@@ -1,18 +1,21 @@
 name: Nightly
 
 # `:nightly` tests are excluded from `mix test` by default and are not a per-PR
-# gate. Each one compiles a project or drives a real subprocess, so they cost
-# seconds apiece and land on the serial side of the suite: three of them were
-# 40% of the 177.8 s `async: false` floor that set the PR suite's wall clock.
+# gate. Each one compiles a project, drives a real Mix subprocess, or waits on
+# a multi-second deadline, so they cost seconds apiece and used to sit on the
+# serial side of the PR suite.
 #
 # They still have to run, and daily is the right cadence. The downstream-consumer
 # test is a genuine per-commit verdict, so a break should surface within a day of
 # the commit that caused it rather than a week; the benchmark's signal is a trend
-# and daily suits it too.
+# and daily suits it too. Example `mix ptc run` walks and Mix-process CLI
+# wrappers follow the same rule.
 #
-# Reserve `:nightly` for tests that cost tens of seconds. It is not a synonym for
-# `:slow`, which only skips the fast pre-commit path -- see `test/test_helper.exs`
-# for why conflating the two quietly dropped ten correctness tests from every PR.
+# Reserve `:nightly` for those operator-path Mix/OS cases. It is not a synonym
+# for `:slow`, which only skips the fast pre-commit path -- see
+# `test/test_helper.exs` for why conflating the two quietly dropped ten
+# correctness tests from every PR. Do not nightly in-process CommandEngine,
+# TraceLog lease, or pre-push classification tests.
 #
 # Like `soak.yml` this lives outside `test.yml` so it can be dispatched on its
 # own and so a red run never blocks an unrelated pull request.

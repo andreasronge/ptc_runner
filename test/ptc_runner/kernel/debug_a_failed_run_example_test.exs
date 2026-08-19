@@ -15,9 +15,6 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
 
-  @moduletag :slow
-  @moduletag timeout: 180_000
-
   @root Path.expand("../../..", __DIR__)
   @example Path.join(@root, "examples/debug-a-failed-run")
 
@@ -25,8 +22,12 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
   # operator meets it: a real `mix ptc run` capturing a private trace and
   # inspection pair, and a second real run installing that capture as a
   # snapshot provider. An in-process Kernel run would prove neither the
-  # provider alias binding nor the JSON projection the CLI forces.
+  # provider alias binding nor the JSON projection the CLI forces. Five of
+  # those subprocess tests summed to 24.6 s on a warm machine, so they run in
+  # `mix nightly`; the schema and in-process Kernel cases below stay on PRs.
   @tag :tmp_dir
+  @tag :nightly
+  @tag timeout: 180_000
   test "one PTC run walks another run's captured failure to its dependency source", %{
     tmp_dir: directory
   } do
@@ -77,6 +78,8 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
   # seeding, the roots were followed regardless and the closure came back
   # non-empty and complete.
   @tag :tmp_dir
+  @tag :nightly
+  @tag timeout: 180_000
   test "a withheld root leaves the closure empty and explicitly incomplete", %{
     tmp_dir: directory
   } do
@@ -120,6 +123,8 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
   # Fabricating the report keeps this test offline while proving exactly the
   # artifacts and commands the example's live repair agent hands to a human.
   @tag :tmp_dir
+  @tag :nightly
+  @tag timeout: 180_000
   test "a proposed repair is validated by the host suite and promotes to a passing run", %{
     tmp_dir: directory
   } do
@@ -336,6 +341,8 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
   end
 
   @tag :tmp_dir
+  @tag :nightly
+  @tag timeout: 180_000
   test "the same repair path replaces faulty workflow routing while preserving correct missions",
        %{tmp_dir: directory} do
     example = Path.join(directory, "debug-a-failed-run")
@@ -426,6 +433,8 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
   # two directly generated sources, and narrowing the direct page to one must
   # flip generated_sources_truncated rather than silently dropping a source.
   @tag :tmp_dir
+  @tag :nightly
+  @tag timeout: 180_000
   test "the incident packet reports direct generated-source truncation honestly", %{
     tmp_dir: directory
   } do

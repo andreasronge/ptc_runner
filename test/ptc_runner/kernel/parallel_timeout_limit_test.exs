@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.ParallelTimeoutLimitTest do
 
   Before this limit existed, the parallel deadline was a hard-coded 5 s that
   no manifest or host document could reach — two live agents already measured
-  4.1 s against it (#1236). One test pins that narrowing works; the `:slow`
+  4.1 s against it (#1236). One test pins that narrowing works; the nightly
   one proves the old 5 s ceiling is actually gone end to end.
   """
   use ExUnit.Case, async: true
@@ -117,7 +117,9 @@ defmodule PtcRunner.Kernel.ParallelTimeoutLimitTest do
 
   # Proves the removal of the unreachable hard-coded 5s ceiling: a parallel
   # operation over live-model-scale latency now completes under the default.
-  @tag :slow
+  # The cases above already pin that `parallel_timeout_ms` is honored; this
+  # one parks for 5.5 s on purpose, so it belongs on `mix nightly`.
+  @tag :nightly
   @tag timeout: 30_000
   test "a parallel operation outlives the old hard-coded 5s ceiling under the default limit" do
     assert {:ok, result} = run_park_workflow(5_500, [])

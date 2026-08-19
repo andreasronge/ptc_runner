@@ -96,19 +96,21 @@ how it was verified.
   scheduled or manually dispatched Integration workflows.
 - `mix nightly` — the `:nightly` tests, excluded from `mix test` by default.
   The `Nightly` workflow runs them daily; run it locally when you touch the
-  `mix ptc run` downstream path or the benchmark task. Never add `--trace` (or
-  `--slowest`, which implies it) to a suite you want to finish quickly: it
-  pins `--max-cases` to 1.
+  `mix ptc run` downstream path, example operator walks, Mix-process CLI
+  wrappers, or the benchmark task. Never add `--trace` (or `--slowest`,
+  which implies it) to a suite you want to finish quickly: it pins
+  `--max-cases` to 1.
 - `mix soak` — the `:soak` memory-leak suite; the scheduled `Soak` workflow
   runs it. `:soak`, `:e2e`, `:scheduled_e2e`, `:nightly`, and `:clojure` are
   all excluded from `mix test` by default (`:clojure` needs Babashka).
 - Two tags, two meanings, and they must not be conflated. `:nightly` means
-  "costs tens of seconds; excluded everywhere but the `Nightly` workflow" —
-  apply it sparingly, because it removes a test from every PR gate. `:slow`
-  means only "skip on the fast pre-commit path" and is read solely by
-  `.githooks/pre-commit`; those tests still run in `precommit`, pre-push, and
-  CI. Excluding `:slow` globally once dropped ten correctness tests from every
-  PR to save 14.2 s.
+  "operator-path Mix/OS subprocess or an intentional multi-second wait;
+  excluded everywhere but the `Nightly` workflow" — apply it to those
+  tests, not to in-process correctness cases that happen to take a few
+  hundred milliseconds. `:slow` means only "skip on the fast pre-commit
+  path" and is read solely by `.githooks/pre-commit`; those tests still run
+  in `precommit`, pre-push, and CI. Excluding `:slow` globally once dropped
+  ten correctness tests from every PR to save 14.2 s.
 - Fix all failures before committing/pushing.
 
 ### Worktrees

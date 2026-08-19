@@ -13,8 +13,11 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
   alias PtcRunner.Kernel.ViewerAdapter
   alias PtcRunner.MixCommandAdapter
 
+  # One scripted example walk (~4.2 s serial): file, native, and MCP journeys
+  # through Viewer. In-process inspection and Viewer tests cover the Kernel
+  # contracts; this is the operator-path lab, so it runs in `mix nightly`.
   @tag :tmp_dir
-  @tag :slow
+  @tag :nightly
   test "scripted file, native, and MCP journeys produce inspectable Viewer artifacts", %{
     tmp_dir: dir
   } do

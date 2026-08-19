@@ -456,7 +456,11 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
              OwnerFailure.evidence(failure)
   end
 
+  # `run_duration_ms` has to outlive MCP stdio handshake (250 ms expired
+  # during `open/3`), then this waits the remaining budget so eval sees a
+  # closed deadline. That is a multi-second wait on purpose — `mix nightly`.
   @tag :tmp_dir
+  @tag :nightly
   test "a manifest session deadline cancels work and closes its provider once", %{
     tmp_dir: directory
   } do

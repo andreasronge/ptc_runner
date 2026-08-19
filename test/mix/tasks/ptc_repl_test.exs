@@ -1493,8 +1493,10 @@ defmodule PtcRunner.ReplFrontendTest do
     end
   end
 
+  # One real `mix ptc repl` OS process (~2.2 s). In-process JSONL cases in
+  # this file cover session records; this pins the Mix task's stdout.
   @tag :tmp_dir
-  @tag :slow
+  @tag :nightly
   test "profile JSONL works through an actual Mix subprocess", %{tmp_dir: directory} do
     source = Path.join(directory, "source")
     output_directory = Path.join(directory, "output")

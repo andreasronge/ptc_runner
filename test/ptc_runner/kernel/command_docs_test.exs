@@ -67,7 +67,7 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
   end
 
   test "docs outcomes satisfy the published envelope schema" do
-    assert {:ok, root} = JSV.build(CommandContract.schema(), atoms: false, warnings: :silent)
+    assert {:ok, root} = CommandContract.envelope_schema_root()
 
     for argv <- [["docs"], ["docs", "agent-guide"], ["docs", "schema-project"]] do
       assert {:ok, %CommandOutcome{envelope: envelope}} = CommandEngine.dispatch(argv)

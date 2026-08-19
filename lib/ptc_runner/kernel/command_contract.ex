@@ -4,6 +4,9 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   The checked-in JSON artifact is produced from this module. Diagnostic
   phase/code/retryability/message rows come only from `DiagnosticCatalog`.
+
+  Envelope validation compiles that schema once per VM and reuses the JSV
+  root. `schema/0` still materializes the source map for generators and docs.
   """
 
   alias PtcRunner.Kernel.ApplicationSource
@@ -18,6 +21,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
 
   @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v2.schema.json"
+  @envelope_root_key {__MODULE__, :envelope_root}
   @non_run_schema_modes [
     {"help", :help, false, false},
     {"version", :version, false, false},
@@ -179,10 +183,14 @@ defmodule PtcRunner.Kernel.CommandContract do
   end
 
   @doc false
+  @spec envelope_schema_root() :: {:ok, term()} | {:error, term()}
+  def envelope_schema_root, do: compiled_jsv_root(@envelope_root_key, &schema/0)
+
+  @doc false
   @spec valid_envelope?(term()) :: boolean()
   def valid_envelope?(envelope) do
     with true <- JSONValue.value?(envelope),
-         {:ok, root} <- JSV.build(schema(), atoms: false, warnings: :silent),
+         {:ok, root} <- envelope_schema_root(),
          {:ok, _validated} <- JSV.validate(envelope, root, cast: false),
          true <- valid_envelope_semantics?(envelope) do
       true
@@ -217,9 +225,9 @@ defmodule PtcRunner.Kernel.CommandContract do
       when command in [:help, :version, :docs, :init, :validate, :doctor, :models] do
     with true <- JSONValue.value?(result),
          {:ok, root} <-
-           command
-           |> success_result_schema()
-           |> JSV.build(atoms: false, warnings: :silent),
+           compiled_jsv_root({__MODULE__, :success_root, command}, fn ->
+             success_result_schema(command)
+           end),
          {:ok, _validated} <- JSV.validate(result, root, cast: false),
          true <- valid_success_semantics?(command, result) do
       true
@@ -372,7 +380,8 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp valid_doctor_result_shape?(result) do
     with true <- JSONValue.value?(result),
-         {:ok, root} <- JSV.build(doctor_failure_result(), atoms: false, warnings: :silent),
+         {:ok, root} <-
+           compiled_jsv_root({__MODULE__, :doctor_failure_root}, &doctor_failure_result/0),
          {:ok, _validated} <- JSV.validate(result, root, cast: false) do
       true
     else
@@ -1789,5 +1798,22 @@ defmodule PtcRunner.Kernel.CommandContract do
       "required" => required,
       "properties" => properties
     }
+  end
+
+  defp compiled_jsv_root(key, schema_fun) when is_function(schema_fun, 0) do
+    case :persistent_term.get(key, :unset) do
+      :unset ->
+        case JSV.build(schema_fun.(), atoms: false, warnings: :silent) do
+          {:ok, root} = ok ->
+            :persistent_term.put(key, root)
+            ok
+
+          error ->
+            error
+        end
+
+      root ->
+        {:ok, root}
+    end
   end
 end

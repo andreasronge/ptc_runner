@@ -278,10 +278,10 @@ jobs:
       #
       # Dropping `--trace` also restores the default 60 s per-test timeout,
       # which trace mode had set to `:infinity`. That is what the `:nightly`
-      # exclusion in `test/test_helper.exs` pairs with: the slowest test takes
-      # 61.1 s and would otherwise time out here. `:nightly` is a narrow tag --
-      # do not reach for it to make this step faster, because every test it
-      # covers stops being verified on pull requests.
+      # exclusion in `test/test_helper.exs` pairs with: the slowest remaining
+      # Mix-subprocess test takes 61.1 s and would otherwise time out here.
+      # `:nightly` is for operator-path Mix/OS subprocesses and intentional
+      # multi-second waits -- not for in-process correctness tests.
       - name: Compile and run tests
         run: scripts/ci/core-tests.sh
 

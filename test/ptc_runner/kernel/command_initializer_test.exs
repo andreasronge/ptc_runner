@@ -66,8 +66,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
              "ptc.json"
            ]
 
-    assert {:ok, root} =
-             JSV.build(CommandContract.schema(), atoms: false, warnings: :silent)
+    assert {:ok, root} = CommandContract.envelope_schema_root()
 
     assert {:ok, _validated} = JSV.validate(outcome.envelope, root, cast: false)
   end

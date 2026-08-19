@@ -361,6 +361,9 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert_receive {:DOWN, ^inspection_ref, :process, _, _reason}, 2_000
   end
 
+  # The owned sink is `:sys.suspend`ed, so setup waits the EventSink call
+  # budget (~5 s) rather than tearing the config down. `mix nightly`.
+  @tag :nightly
   test "a suspended owned sink fails setup without tearing down the config" do
     parent = self()
 

@@ -237,11 +237,12 @@ defmodule PtcRunner.MixProject do
       coverage: [
         "test --cover"
       ],
-      # Tests costing tens of seconds each. Excluded from `mix test` by default
-      # (test/test_helper.exs); the `Nightly` workflow runs them. `--trace` is
-      # retained here and only here: these tests exceed the default 60 s
-      # per-test timeout, and trace mode sets the timeout to `:infinity`.
-      # Everywhere else `--trace` is a bug -- it pins `--max-cases` to 1.
+      # Tests that spawn Mix/OS processes or wait on multi-second deadlines.
+      # Excluded from `mix test` by default (test/test_helper.exs); the
+      # `Nightly` workflow runs them. `--trace` is retained here and only
+      # here: the downstream-consumer case exceeds the default 60 s per-test
+      # timeout, and trace mode sets the timeout to `:infinity`. Everywhere
+      # else `--trace` is a bug -- it pins `--max-cases` to 1.
       nightly: [
         "test --only nightly --trace"
       ],

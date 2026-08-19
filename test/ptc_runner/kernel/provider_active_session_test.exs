@@ -829,6 +829,10 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert :ok = PreparedRun.close(other)
   end
 
+  # `session.pid` is suspended, so `build_owned/5` waits the provider-session
+  # call budget (~5 s) for a reply that never comes. That bound is the
+  # assertion; it runs in `mix nightly`.
+  @tag :nightly
   @tag timeout: 10_000
   test "a timed-out replay cannot close a claimed active session" do
     {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
