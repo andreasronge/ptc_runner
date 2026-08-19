@@ -135,7 +135,8 @@ A live installation fixes the full model selector, credential, cache policy,
 optional request parameters, and request/response ceilings. `ceilings.max_calls`
 optionally caps how many times that alias may be invoked. Omitted, it defaults
 to the catalog installed default for `workflow_capability_calls_per_name`
-(2048), independent of the host `limits` block. The application may narrow it
+(2048), independent of the host `limits` block; a larger value could never
+bind and is refused at load. The application may narrow it
 with `config.max_calls`; asking above the host ceiling is refused rather than
 clamped. When that selected cap is at or above the run's per-name
 `llm-request` budget, the public per-name quota still binds first.

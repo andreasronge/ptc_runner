@@ -1256,12 +1256,16 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp llm_ceilings(_value), do: {:error, :invalid_ceilings}
 
+  # A ceiling above the per-name installed ceiling can never bind, because the
+  # alias cap applies only when stricter than the run's per-name quota. Refuse
+  # the unreachable value at load instead of installing a silent no-op.
   defp optional_max_calls(value) do
     {:ok, row} = LimitCatalog.fetch(:workflow_capability_calls_per_name)
 
     case Map.get(value, "max_calls", row.installed_default) do
       max_calls
-      when is_integer(max_calls) and max_calls >= row.minimum and max_calls <= row.maximum ->
+      when is_integer(max_calls) and max_calls >= row.minimum and
+             max_calls <= row.installed_default ->
         {:ok, max_calls}
 
       _invalid ->
@@ -1889,7 +1893,7 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp llm_max_calls_schema do
     {:ok, row} = LimitCatalog.fetch(:workflow_capability_calls_per_name)
-    integer_schema(row.minimum, row.maximum, row.installed_default)
+    integer_schema(row.minimum, row.installed_default, row.installed_default)
   end
 
   defp required_object(properties, required) do

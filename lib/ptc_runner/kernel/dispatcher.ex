@@ -316,6 +316,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
        when is_binary(alias_name) and is_integer(max_calls) and max_calls > 0,
        do: %{limit: :max_calls, alias: alias_name, limit_value: max_calls}
 
+  defp max_calls_details(_invocation), do: %{}
+
   defp authenticated?(_state, :workflow, _lease), do: true
 
   defp authenticated?(state, :mission, lease),

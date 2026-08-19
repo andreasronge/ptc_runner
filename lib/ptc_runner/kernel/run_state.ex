@@ -1271,21 +1271,16 @@ defmodule PtcRunner.Kernel.RunState do
   defp route_spent?(_state, _environment, nil), do: false
 
   defp route_spent?(state, environment, %{key: key, max_calls: max_calls}) do
-    case get_in(state.route_calls, [environment, key]) do
-      %{count: count} -> count >= max_calls
-      _missing -> false
-    end
+    (get_in(state.route_calls, [environment, key]) || 0) >= max_calls
   end
 
   defp increment_route_calls(state, _environment, nil), do: state
 
-  defp increment_route_calls(state, environment, %{key: key, max_calls: max_calls}) do
-    current = get_in(state.route_calls, [environment, key]) || %{count: 0, max_calls: max_calls}
-
+  defp increment_route_calls(state, environment, %{key: key}) do
     update_in(
       state,
       [:route_calls, environment],
-      &Map.put(&1, key, %{count: current.count + 1, max_calls: max_calls})
+      &Map.update(&1, key, 1, fn count -> count + 1 end)
     )
   end
 
