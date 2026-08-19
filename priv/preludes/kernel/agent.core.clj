@@ -142,9 +142,29 @@
      "tool_call_id" (get action :tool-call-id)
      "content" content}))
 
+(defn- append-protocol-error [messages action content]
+  (if (= :program-too-large (get action :reason))
+    (append-correlated
+      messages
+      {:rationale (get action :narration)
+       :public-tool-call (get action :offending-call)
+       :tool-call-id (get (get action :offending-call) "id")}
+      content)
+    (if (nonblank-string? (get action :narration))
+      (conj
+        (conj messages {"role" "assistant" "content" (get action :narration)})
+        {"role" "user" "content" content})
+      (conj messages {"role" "user" "content" content}))))
+
 (defn- append-agent-feedback [messages action content]
-  (if (map? action)
+  (cond
+    (= :protocol-error (get action :kind))
+    (append-protocol-error messages action content)
+
+    (map? action)
     (append-correlated messages action content)
+
+    :else
     (conj messages {"role" "user" "content" content})))
 
 (defn- phase-transition-message
@@ -549,7 +569,7 @@
               :protocol-error
               (let [next-state
                     (continuation-state
-                      phases phase-index turn messages nil
+                      phases phase-index turn messages action
                       (agent.feedback/protocol-error action)
                       prompt-state effective-cfg
                       consolidate-at-turns-remaining closing?

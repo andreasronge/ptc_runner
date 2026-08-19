@@ -207,7 +207,11 @@ A valid action contains exactly one tool call with:
 
 Assistant narration may accompany the tool call and is retained with it. Text
 without a call, several calls, a wrong name, malformed arguments, or an invalid
-program produces a protocol correction while a turn remains.
+program produces a protocol correction while a turn remains. The correction
+retains what the model produced: bounded assistant narration (at most 2000
+characters), and, when the call was well-formed except for program size, the
+authentic assistant/tool pair. Malformed `tool_calls` are not replayed. Kernel
+guidance belongs in the user correction, never in an assistant turn.
 
 The initial task and every retained feedback message state the number of turns
 remaining, including the next program. With one turn left, the message requires

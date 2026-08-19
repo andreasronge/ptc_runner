@@ -180,7 +180,11 @@ remain bounded independently. See
   }
 }</code></pre><p>A valid action contains exactly one tool call with:</p><ul><li>a non-empty string ID;</li><li>the name <code class="inline">run_ptc_lisp</code>;</li><li>exactly one <code class="inline">program</code> string argument;</li><li>a non-blank program within <code class="inline">max_program_chars</code>.</li></ul><p>Assistant narration may accompany the tool call and is retained with it. Text
 without a call, several calls, a wrong name, malformed arguments, or an invalid
-program produces a protocol correction while a turn remains.</p><p>The initial task and every retained feedback message state the number of turns
+program produces a protocol correction while a turn remains. The correction
+retains what the model produced: bounded assistant narration (at most 2000
+characters), and, when the call was well-formed except for program size, the
+authentic assistant/tool pair. Malformed <code class="inline">tool_calls</code> are not replayed. Kernel
+guidance belongs in the user correction, never in an assistant turn.</p><p>The initial task and every retained feedback message state the number of turns
 remaining, including the next program. With one turn left, the message requires
 the next program to call <code class="inline">return</code> or <code class="inline">fail</code>. A configured consolidation
 threshold adds domain-blind synthesis guidance before the final turn.</p><p>If the loop spends its effective <code class="inline">max_turns</code> without returning, <code class="inline">run-outcome</code>

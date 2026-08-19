@@ -60,8 +60,16 @@
 (defn protocol-error
   "Renders correction guidance for an invalid model action."
   [action]
-  (str "Protocol error: " (get action :reason)
-       ". Call run_ptc_lisp exactly once with one program string."))
+  (let [reason (get action :reason)
+        limit (get action :limit)
+        size (get action :size)
+        measurement
+        (if (and (integer? limit) (integer? size))
+          (str ". your program was " size " characters; the limit is " limit)
+          "")]
+    (str "Protocol error: " reason
+         measurement
+         ". Call run_ptc_lisp exactly once with one program string.")))
 
 (defn terminal-source-required
   "Renders correction guidance for a program rejected by a terminal-only phase."
