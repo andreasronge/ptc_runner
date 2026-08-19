@@ -127,9 +127,9 @@ defaults while preserving the manifest REPL input grammar. It conflicts with
 <code class="inline">--host-config</code> or <code class="inline">--env-file</code> overrides the matching project reference.</p><p>A provider-bearing manifest requires <code class="inline">--host-config</code>. The session performs the
 same audited-local checks, acquires one provider session, and reuses it for
 every expression. Direct and profile modes reject host configuration.</p><p>Each form evaluates under the manifest's <code class="inline">evaluation_timeout_ms</code>, whose
-effective default of 1,000 ms is shorter than any model call. Raise it in the
-manifest before calling a provider interactively; a form stopped by that
-ceiling names the limit and its configured value.</p><pre><code class="json language-json">{ &quot;limits&quot;: { &quot;evaluation_timeout_ms&quot;: 60000 } }</code></pre><h2 id="work-directly-in-one-manifest-mission">Work directly in one manifest mission</h2><p>Select a declared mission without starting its workflow:</p><pre><code class="console language-console">ptc repl --project ptc-project.json --mission review
+effective default is 30,000 ms. A form stopped by that ceiling names the
+limit and its configured value. Raise it in the manifest if a form needs
+longer:</p><pre><code class="json language-json">{ &quot;limits&quot;: { &quot;evaluation_timeout_ms&quot;: 60000 } }</code></pre><h2 id="work-directly-in-one-manifest-mission">Work directly in one manifest mission</h2><p>Select a declared mission without starting its workflow:</p><pre><code class="console language-console">ptc repl --project ptc-project.json --mission review
 ptc repl --manifest ptc.json --host-config ptc-host.json --mission review
 ptc repl --project ptc-project.json --mission default
 ptc repl --project ptc-project.json --mission review -e '(dir)'</code></pre><p>The project form is the normal local command: the project supplies the

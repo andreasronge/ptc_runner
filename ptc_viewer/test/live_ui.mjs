@@ -171,4 +171,14 @@ assert.equal(
   '1 at installed ceiling'
 );
 
+const hostOnlyTimeout = {
+  name: 'local_preflight_timeout_ms',
+  effective: 5000,
+  default: 5000,
+  ceiling: null,
+  unit: 'milliseconds'
+};
+assert.equal(limitNote(hostOnlyTimeout), '');
+assert.deepEqual(leadingLimitRows([hostOnlyTimeout]), []);
+
 process.stdout.write('ok');

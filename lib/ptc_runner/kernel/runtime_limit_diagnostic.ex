@@ -82,7 +82,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
                                       byte_size(@transcript_suffix)
 
   # `evaluation_timeout_ms` joins the family because the REPL evaluates every
-  # form under it, and a model call cannot finish inside its 1,000 ms default.
+  # form under it.
   @timeout_limits [:evaluation_timeout_ms, :parallel_timeout_ms, :workflow_timeout_ms]
   @timeout_phases [:compilation, :execution]
   @timeout_value_pattern @subordinate_limit_pattern

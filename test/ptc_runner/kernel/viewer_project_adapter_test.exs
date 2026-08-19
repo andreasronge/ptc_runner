@@ -63,6 +63,12 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapterTest do
 
       untouched = by_name["subordinate_evaluations"]
       assert untouched.effective == untouched.default
+      assert is_integer(untouched.ceiling)
+      assert untouched.ceiling > untouched.default
+
+      host_only = by_name["local_preflight_timeout_ms"]
+      assert host_only.effective == host_only.default
+      assert host_only.ceiling == nil
     end
   end
 
@@ -124,6 +130,7 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapterTest do
       by_name = Map.new(project.limits, &{&1.name, &1})
       assert by_name["run_duration_ms"].effective == 90_000
       assert by_name["local_preflight_timeout_ms"].effective == 9_000
+      assert by_name["local_preflight_timeout_ms"].ceiling == nil
     end
 
     @tag :tmp_dir

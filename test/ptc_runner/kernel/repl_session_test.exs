@@ -883,11 +883,10 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert reason in [:compile_timeout, :timeout, :loop_limit_exceeded]
   end
 
-  # The interactive path evaluates every form under `evaluation_timeout_ms`,
-  # whose 1,000 ms default no model call can finish inside. The sandbox reports
-  # only the milliseconds it had left when it killed the worker — a number that
-  # matches no configured value — so the stopped form has to name the ceiling
-  # that bound it and where to raise it.
+  # The interactive path evaluates every form under `evaluation_timeout_ms`.
+  # The sandbox reports only the milliseconds it had left when it killed the
+  # worker — a number that matches no configured value — so the stopped form
+  # has to name the ceiling that bound it and where to raise it.
   test "a form stopped by the evaluation ceiling names the limit and the manifest key" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])

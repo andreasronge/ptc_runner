@@ -663,9 +663,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   # The sandbox reports the milliseconds still left when it killed the worker,
   # a number that matches no configured value and cannot be searched for. The
   # binding ceiling is known here, so say which one stopped the form and where
-  # to raise it, through the same builder `ptc run` uses. A model call cannot
-  # finish inside the 1,000 ms `evaluation_timeout_ms` default, which makes this
-  # the first wall an interactive session hits.
+  # to raise it, through the same builder `ptc run` uses.
   defp name_timeout_limit({:error, %Native{fail: fail} = step}, limits, remaining) do
     case named_timeout_message(fail.reason, Map.get(fail, :message), limits, remaining) do
       {:ok, message} -> {:error, %{step | fail: %{fail | message: message}}}

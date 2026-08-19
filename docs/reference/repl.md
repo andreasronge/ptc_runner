@@ -78,9 +78,9 @@ same audited-local checks, acquires one provider session, and reuses it for
 every expression. Direct and profile modes reject host configuration.
 
 Each form evaluates under the manifest's `evaluation_timeout_ms`, whose
-effective default of 1,000 ms is shorter than any model call. Raise it in the
-manifest before calling a provider interactively; a form stopped by that
-ceiling names the limit and its configured value.
+effective default is 30,000 ms. A form stopped by that ceiling names the
+limit and its configured value. Raise it in the manifest if a form needs
+longer:
 
 ```json
 { "limits": { "evaluation_timeout_ms": 60000 } }
