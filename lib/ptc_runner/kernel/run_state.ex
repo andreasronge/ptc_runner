@@ -3,13 +3,17 @@ defmodule PtcRunner.Kernel.RunState do
   Internal single owner of mutable per-run resource state.
 
   One GenServer owns the deadline, open/closed status, workflow and mission
-  capability counters, live provider-task count, protocol errors, subordinate
+  capability counters, optional per-route call counters keyed by
+  `{public name, route key}`, live provider-task count, protocol errors, subordinate
   evaluation and source-check counts, terminal failure,
   evaluation-continuation lease and revision, and committed native evaluation
   memory/history.
 
   Reservations and commits are deliberately atomic owner operations. Callers
-  must not recreate them as separate read and update steps. The opaque token
+  must not recreate them as separate read and update steps. A routed LLM alias
+  may carry `max_calls`; that per-alias cap is checked inside the same reserve,
+  after the public total and per-name quotas, so a spent alias is named only
+  when those shared buckets still have room. The opaque token
   prevents messages that did not originate through the returned handle from
   mutating state. The process monitors the run owner and automatically exits
   with it. Owner checks compare the actual `GenServer.call/3` caller inside this
@@ -149,12 +153,23 @@ defmodule PtcRunner.Kernel.RunState do
   `{:error, :stale_evaluation}`. This closes the window where a dead
   evaluation's lingering sandbox reserves after the next evaluation was
   admitted and has its late call attributed to the new lease. Workflow
-  reservations carry no lease.
+  reservations carry no lease. When `route` is
+  `%{route_key: alias, max_calls: n}` and `n` is stricter than the public
+  per-name quota, the owner refuses that alias once it has spent `n` calls
+  (`{:error, :route_call_limit}`) after the public total and per-name quotas.
+  An alias cap at or above the per-name budget is ignored so omitted defaults
+  keep today's public quota. A named `max_calls` diagnostic is authenticated
+  only after this owner has actually refused that alias.
   """
-  @spec reserve_capability(t(), environment(), binary(), reference() | nil) ::
+  @spec reserve_capability(t(), environment(), binary(), reference() | nil, map() | nil) ::
           :ok | {:error, atom()}
-  def reserve_capability(state, environment, name, lease),
-    do: safe_call(state, {:reserve_capability, environment, name, lease}, {:error, :run_closed})
+  def reserve_capability(state, environment, name, lease, route \\ nil) do
+    safe_call(
+      state,
+      {:reserve_capability, environment, name, lease, route},
+      {:error, :run_closed}
+    )
+  end
 
   @spec reserve_capability(t(), environment(), binary()) :: :ok | {:error, atom()}
   @doc "Atomically reserves environment, per-name, and live-provider budgets."
@@ -172,6 +187,14 @@ defmodule PtcRunner.Kernel.RunState do
   @spec mission_lease_current?(t(), reference() | nil) :: boolean()
   def mission_lease_current?(state, lease),
     do: safe_call(state, {:mission_lease_current?, lease}, false)
+
+  @spec max_calls_refusal?(t(), map()) :: boolean()
+  @doc false
+  def max_calls_refusal?(state, %{limit: :max_calls, alias: alias_name, limit_value: limit})
+      when is_binary(alias_name) and is_integer(limit) and limit > 0,
+      do: safe_call(state, {:max_calls_refusal?, alias_name, limit}, false)
+
+  def max_calls_refusal?(_state, _details), do: false
 
   @spec attach_provider(t(), pid()) :: :ok | {:error, :closed | :provider_down}
   @doc "Attaches the caller's live provider process to its capability reservation."
@@ -499,6 +522,8 @@ defmodule PtcRunner.Kernel.RunState do
        closed?: false,
        provider_tasks: 0,
        calls: %{workflow: %{}, mission: %{}},
+       route_calls: %{workflow: %{}, mission: %{}},
+       route_refusals: MapSet.new(),
        totals: %{workflow: 0, mission: 0},
        evaluations: 0,
        evaluations_by_mission: %{},
@@ -546,12 +571,12 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   def handle_call(
-        {token, {:reserve_capability, environment, name, lease}},
+        {token, {:reserve_capability, environment, name, lease, route}},
         {caller, _tag},
         %{token: token} = state
       )
       when environment in [:workflow, :mission] do
-    case reserve_capability_state(state, environment, name, caller, lease) do
+    case reserve_capability_state(state, environment, name, caller, lease, route) do
       {:ok, state} -> {:reply, :ok, state}
       {:error, reason, state} -> {:reply, {:error, reason}, state}
     end
@@ -559,6 +584,15 @@ defmodule PtcRunner.Kernel.RunState do
 
   def handle_call({token, {:mission_lease_current?, lease}}, _from, %{token: token} = state),
     do: {:reply, current_mission_lease?(state, lease), state}
+
+  def handle_call(
+        {token, {:max_calls_refusal?, alias_name, limit}},
+        _from,
+        %{token: token} = state
+      )
+      when is_binary(alias_name) and is_integer(limit) and limit > 0 do
+    {:reply, matching_route_refusal?(state, alias_name, limit), state}
+  end
 
   def handle_call({token, {:attach_provider, provider}}, {caller, _tag}, %{token: token} = state) do
     if unavailable?(state) do
@@ -1173,9 +1207,10 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
-  defp reserve_capability_state(state, environment, name, caller, lease) do
+  defp reserve_capability_state(state, environment, name, caller, lease, route) do
     {limit_total, limit_name} = capability_limits(state.limits, environment)
     count = get_in(state.calls, [environment, name]) || 0
+    route_reservation = route_reservation(name, route, limit_name)
 
     cond do
       unavailable?(state) ->
@@ -1195,6 +1230,9 @@ defmodule PtcRunner.Kernel.RunState do
       Map.fetch!(state.totals, environment) >= limit_total or count >= limit_name ->
         {:error, :limit_exceeded, state}
 
+      route_spent?(state, environment, route_reservation) ->
+        {:error, :route_call_limit, record_route_refusal(state, route_reservation)}
+
       Map.has_key?(state.reservations, caller) ->
         {:error, :reservation_held, state}
 
@@ -1211,6 +1249,7 @@ defmodule PtcRunner.Kernel.RunState do
         state =
           state
           |> update_in([:calls, environment], &Map.put(&1, name, count + 1))
+          |> increment_route_calls(environment, route_reservation)
           |> update_in([:totals, environment], &(&1 + 1))
 
         {:ok,
@@ -1220,6 +1259,42 @@ defmodule PtcRunner.Kernel.RunState do
              reservations: Map.put(state.reservations, caller, reservation)
          }}
     end
+  end
+
+  defp route_reservation(name, %{route_key: route_key, max_calls: max_calls}, limit_name)
+       when is_binary(name) and is_binary(route_key) and is_integer(max_calls) and max_calls > 0 and
+              is_integer(limit_name) and max_calls < limit_name,
+       do: %{key: {name, route_key}, max_calls: max_calls}
+
+  defp route_reservation(_name, _route, _limit_name), do: nil
+
+  defp route_spent?(_state, _environment, nil), do: false
+
+  defp route_spent?(state, environment, %{key: key, max_calls: max_calls}) do
+    case get_in(state.route_calls, [environment, key]) do
+      %{count: count} -> count >= max_calls
+      _missing -> false
+    end
+  end
+
+  defp increment_route_calls(state, _environment, nil), do: state
+
+  defp increment_route_calls(state, environment, %{key: key, max_calls: max_calls}) do
+    current = get_in(state.route_calls, [environment, key]) || %{count: 0, max_calls: max_calls}
+
+    update_in(
+      state,
+      [:route_calls, environment],
+      &Map.put(&1, key, %{count: current.count + 1, max_calls: max_calls})
+    )
+  end
+
+  defp matching_route_refusal?(state, alias_name, limit) do
+    MapSet.member?(state.route_refusals, {alias_name, limit})
+  end
+
+  defp record_route_refusal(state, %{key: {_name, alias_name}, max_calls: max_calls}) do
+    %{state | route_refusals: MapSet.put(state.route_refusals, {alias_name, max_calls})}
   end
 
   # Drops the caller's reservation only after its provider is known to be down.

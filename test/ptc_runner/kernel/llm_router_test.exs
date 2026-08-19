@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CapabilityInvocation
   alias PtcRunner.Kernel.CommandRunOutcome
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
@@ -14,10 +15,12 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.ProviderSnapshot
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RoutedCapability
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.TestSupport.TestHelpers
@@ -50,6 +53,431 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              Kernel.run(~S|(return (llm/request {"messages" []}))|, default_config)
 
     assert_receive {:fast, %{"messages" => []}}
+  end
+
+  test "a per-alias max_calls cap leaves other aliases callable" do
+    parent = self()
+    expensive = capability(parent, :expensive, %{content: "paid", tokens: %{}})
+    cheap = capability(parent, :cheap, %{content: "ok", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([
+               route("expensive", "llm", "expensive-v1", false, expensive, 2),
+               route("cheap", "llm", "cheap-v1", true, cheap)
+             ])
+
+    assert {:ok, config} = config(router, "alias-max-calls")
+
+    source = """
+    (do
+      (llm/request {"model" "expensive" "messages" []})
+      (llm/request {"model" "expensive" "messages" []})
+      (return (llm/request {"model" "cheap" "messages" []})))
+    """
+
+    assert {:ok, %{value: %{"content" => "ok"}}} = Kernel.run(source, config)
+    assert_receive {:expensive, %{"messages" => []}}
+    assert_receive {:expensive, %{"messages" => []}}
+    assert_receive {:cheap, %{"messages" => []}}
+    refute_receive {:expensive, _}
+  end
+
+  test "exceeding max_calls names the alias on the envelope and limit-exceeded event" do
+    leaf = capability(self(), :capped, %{content: "paid", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("expensive", "llm", "expensive-v1", false, leaf, 1)])
+
+    assert {:ok, workflow} = WorkflowEnvironment.new(capabilities: [router])
+    assert {:ok, limits} = Limits.new()
+    assert {:ok, state} = RunState.start(limits)
+    assert {:ok, sink} = EventSink.start(:normal, limits, run_id: "max-calls-event")
+    context = TestHelpers.dispatch_context(state, :workflow, 1_000)
+    arguments = %{"model" => "expensive", "messages" => []}
+
+    assert %{status: :ok} =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               arguments,
+               context,
+               sink,
+               nil
+             )
+
+    assert %{
+             status: :error,
+             kind: :limit_exceeded,
+             reason: :capability_quota,
+             details: %{limit: :max_calls, alias: "expensive", limit_value: 1}
+           } =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               arguments,
+               context,
+               sink,
+               nil
+             )
+
+    assert %{
+             data: %{
+               reason: :capability_quota,
+               limit: :max_calls,
+               alias: "expensive",
+               limit_value: 1
+             }
+           } = Enum.find(EventSink.events(sink), &(&1.type == "limit-exceeded"))
+
+    :ok = EventSink.stop(sink)
+    :ok = RunState.stop(state)
+  end
+
+  test "failing a max_calls envelope names the alias on the command diagnostic" do
+    run_id = "max-calls-fail"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = capability(self(), :capped_fail, %{content: "paid", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("expensive", "llm", "expensive-v1", false, leaf, 1)])
+
+    assert {:ok, config} = config(router, run_id)
+
+    source =
+      ~S|(do (llm/request {"model" "expensive" "messages" []}) (fail (llm/request {"model" "expensive" "messages" []})))|
+
+    assert {:error, command_outcome, _counters, events} =
+             project_run(source, config, run_id, run_ref)
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.max_calls_message("expensive", 1)
+    assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert command_outcome.envelope["error"]["message"] == expected
+
+    assert command_outcome.envelope["error"]["source"] == %{
+             "kind" => "runtime",
+             "name" => "ptc-runtime"
+           }
+
+    assert [
+             %{
+               type: "limit-exceeded",
+               data: %{
+                 reason: :capability_quota,
+                 limit: :max_calls,
+                 alias: "expensive",
+                 limit_value: 1
+               }
+             }
+           ] = Enum.filter(events, &(&1.type == "limit-exceeded"))
+  end
+
+  test "an application-authored max_calls lookalike cannot claim the runtime diagnostic" do
+    run_id = "max-calls-forged"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = capability(self(), :unused_forged, %{content: "paid", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("expensive", "llm", "expensive-v1", false, leaf, 1)])
+
+    assert {:ok, config} = config(router, run_id)
+
+    source =
+      ~S|(fail {:status :error :kind :limit-exceeded :reason :capability-quota :details {:limit :max-calls :alias "expensive" :limit_value 1}})|
+
+    assert {:error, command_outcome, _counters, _events} =
+             project_run(source, config, run_id, run_ref)
+
+    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+  end
+
+  test "spending an alias cap without a refused call cannot claim the runtime diagnostic" do
+    run_id = "max-calls-spent-not-refused"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = capability(self(), :spent_not_refused, %{content: "paid", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("expensive", "llm", "expensive-v1", false, leaf, 1)])
+
+    assert {:ok, config} = config(router, run_id)
+
+    source =
+      ~S|(do (llm/request {"model" "expensive" "messages" []}) (fail {:status :error :kind :limit-exceeded :reason :capability-quota :details {:limit :max-calls :alias "expensive" :limit_value 1}}))|
+
+    assert {:error, command_outcome, _counters, _events} =
+             project_run(source, config, run_id, run_ref)
+
+    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+  end
+
+  test "a spent public quota binds before a stricter alias cap" do
+    parent = self()
+    expensive = capability(parent, :collision_expensive, %{content: "paid", tokens: %{}})
+    cheap = capability(parent, :collision_cheap, %{content: "ok", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([
+               route("expensive", "llm", "expensive-v1", false, expensive, 2),
+               route("cheap", "llm", "cheap-v1", true, cheap)
+             ])
+
+    assert {:ok, limits} =
+             Limits.new(workflow_capability_calls: 8, workflow_capability_calls_per_name: 3)
+
+    assert {:ok, workflow} = WorkflowEnvironment.new(capabilities: [router])
+    assert {:ok, state} = RunState.start(limits)
+    context = TestHelpers.dispatch_context(state, :workflow, 1_000)
+
+    assert %{status: :ok} =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               %{"model" => "expensive", "messages" => []},
+               context,
+               nil,
+               nil
+             )
+
+    assert %{status: :ok} =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               %{"model" => "expensive", "messages" => []},
+               context,
+               nil,
+               nil
+             )
+
+    assert %{status: :ok} =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               %{"model" => "cheap", "messages" => []},
+               context,
+               nil,
+               nil
+             )
+
+    assert %{status: :error, kind: :limit_exceeded, reason: :capability_quota} =
+             fourth =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               %{"model" => "expensive", "messages" => []},
+               context,
+               nil,
+               nil
+             )
+
+    refute match?(%{details: %{limit: :max_calls}}, fourth)
+    :ok = RunState.stop(state)
+  end
+
+  test "an alias cap at the per-name budget still binds as the public quota" do
+    leaf = capability(self(), :tied, %{content: "ok", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("tied", "llm", "tied-v1", true, leaf, 2)])
+
+    assert {:ok, limits} =
+             Limits.new(workflow_capability_calls: 8, workflow_capability_calls_per_name: 2)
+
+    assert {:ok, workflow} = WorkflowEnvironment.new(capabilities: [router])
+    assert {:ok, state} = RunState.start(limits)
+    context = TestHelpers.dispatch_context(state, :workflow, 1_000)
+    arguments = %{"messages" => []}
+
+    assert %{status: :ok} =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               arguments,
+               context,
+               nil,
+               nil
+             )
+
+    assert %{status: :ok} =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               arguments,
+               context,
+               nil,
+               nil
+             )
+
+    assert %{status: :error, kind: :limit_exceeded, reason: :capability_quota} =
+             third =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               arguments,
+               context,
+               nil,
+               nil
+             )
+
+    refute match?(%{details: %{limit: :max_calls}}, third)
+    :ok = RunState.stop(state)
+  end
+
+  test "omitted max_calls still binds at the public per-name quota" do
+    leaf = capability(self(), :shared, %{content: "ok", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("shared", "llm", "shared-v1", true, leaf)])
+
+    assert {:ok, limits} =
+             Limits.new(workflow_capability_calls: 8, workflow_capability_calls_per_name: 2)
+
+    assert {:ok, workflow} = WorkflowEnvironment.new(capabilities: [router])
+    assert {:ok, state} = RunState.start(limits)
+    context = TestHelpers.dispatch_context(state, :workflow, 1_000)
+    arguments = %{"messages" => []}
+
+    assert %{status: :ok} =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               arguments,
+               context,
+               nil,
+               nil
+             )
+
+    assert %{status: :ok} =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               arguments,
+               context,
+               nil,
+               nil
+             )
+
+    assert %{status: :error, kind: :limit_exceeded, reason: :capability_quota} =
+             third =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               arguments,
+               context,
+               nil,
+               nil
+             )
+
+    refute match?(%{details: %{limit: :max_calls}}, third)
+    :ok = RunState.stop(state)
+  end
+
+  test "parallel callers contend for a max_calls of one" do
+    assert {:ok, limits} = Limits.new()
+    assert {:ok, state} = RunState.start(limits)
+    route = %{route_key: "expensive", max_calls: 1}
+
+    results =
+      1..2
+      |> Enum.map(fn _index ->
+        Task.async(fn ->
+          RunState.reserve_capability(state, :workflow, "llm-request", nil, route)
+        end)
+      end)
+      |> Enum.map(&Task.await/1)
+      |> Enum.sort()
+
+    assert results == [:ok, {:error, :route_call_limit}]
+    :ok = RunState.stop(state)
+  end
+
+  test "an incomplete route pair does not install a per-alias cap" do
+    assert {:ok, limits} = Limits.new()
+    assert {:ok, state} = RunState.start(limits)
+    route = %{route_key: "expensive"}
+
+    results =
+      1..2
+      |> Enum.map(fn _index ->
+        Task.async(fn ->
+          RunState.reserve_capability(state, :workflow, "llm-request", nil, route)
+        end)
+      end)
+      |> Enum.map(&Task.await/1)
+      |> Enum.sort()
+
+    assert results == [:ok, :ok]
+    :ok = RunState.stop(state)
+  end
+
+  test "llm_identity accepts a three-key legacy declaration config" do
+    current = TestHelpers.llm_snapshot("writer", "stable-v1", "openrouter:writer/model")
+
+    config = Map.delete(current["declaration"]["config"], "max_calls")
+    declaration = Map.put(current["declaration"], "config", config)
+
+    identity = %{
+      "declaration" => declaration,
+      "acquisition" => current["acquisition"],
+      "acquisition_identity_hash" => current["acquisition_identity_hash"]
+    }
+
+    {:ok, bytes} = DeterministicJSON.encode(identity)
+
+    snapshot =
+      identity
+      |> Map.put("provider", "writer")
+      |> Map.put("snapshot_hash", Base.encode16(:crypto.hash(:sha256, bytes), case: :lower))
+
+    assert {:ok,
+            %{
+              alias: "writer",
+              installation_revision: "stable-v1",
+              resolved_model: "openrouter:writer/model"
+            }} = ProviderSnapshot.llm_identity(snapshot)
+  end
+
+  test "llm_identity rejects a four-key config whose max_calls is null" do
+    current = TestHelpers.llm_snapshot("writer", "stable-v1", "openrouter:writer/model")
+    config = Map.put(current["declaration"]["config"], "max_calls", nil)
+    declaration = Map.put(current["declaration"], "config", config)
+
+    identity = %{
+      "declaration" => declaration,
+      "acquisition" => current["acquisition"],
+      "acquisition_identity_hash" => current["acquisition_identity_hash"]
+    }
+
+    {:ok, bytes} = DeterministicJSON.encode(identity)
+
+    snapshot =
+      identity
+      |> Map.put("provider", "writer")
+      |> Map.put("snapshot_hash", Base.encode16(:crypto.hash(:sha256, bytes), case: :lower))
+
+    assert :error = ProviderSnapshot.llm_identity(snapshot)
   end
 
   test "routing failures are exact pre-reservation protocol errors" do
@@ -527,13 +955,14 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     capability
   end
 
-  defp route(alias_name, source, revision, default?, capability) do
+  defp route(alias_name, source, revision, default?, capability, max_calls \\ nil) do
     %{
       alias: alias_name,
       source: source,
       installation_revision: revision,
       default?: default?,
-      capability: capability
+      capability: capability,
+      max_calls: max_calls
     }
   end
 
@@ -542,7 +971,17 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     {:ok, bundle} = Kernel.compile_bundle(components)
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [router])
     {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new()
+
+    limits =
+      case Keyword.get(opts, :limits) do
+        nil ->
+          {:ok, limits} = Limits.new()
+          limits
+
+        %Limits{} = limits ->
+          limits
+      end
+
     {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
 
     RunConfig.new(

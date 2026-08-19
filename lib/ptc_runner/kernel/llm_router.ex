@@ -7,14 +7,15 @@ defmodule PtcRunner.Kernel.LLMRouter do
 
   @alias ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @sources ~w(llm llm_replay custom)
-  @route_keys [:alias, :source, :installation_revision, :default?, :capability]
+  @route_keys [:alias, :source, :installation_revision, :default?, :capability, :max_calls]
 
   @type route :: %{
           alias: binary(),
           source: binary(),
           installation_revision: binary(),
           default?: boolean(),
-          capability: Capability.t()
+          capability: Capability.t(),
+          max_calls: pos_integer() | nil
         }
 
   @spec new([route()]) :: {:ok, RoutedCapability.t()} | {:error, :invalid_llm_router}
@@ -58,10 +59,15 @@ defmodule PtcRunner.Kernel.LLMRouter do
     Map.keys(route) |> Enum.sort() == Enum.sort(@route_keys) and
       is_binary(route.alias) and route.alias =~ @alias and route.source in @sources and
       is_binary(route.installation_revision) and route.installation_revision =~ @alias and
-      is_boolean(route.default?) and match?(%Capability{name: "llm-request"}, route.capability)
+      is_boolean(route.default?) and match?(%Capability{name: "llm-request"}, route.capability) and
+      valid_max_calls?(route.max_calls)
   end
 
   defp valid_route?(_route), do: false
+
+  defp valid_max_calls?(nil), do: true
+  defp valid_max_calls?(max_calls) when is_integer(max_calls) and max_calls > 0, do: true
+  defp valid_max_calls?(_max_calls), do: false
 
   defp compatible_routes?(routes, first) do
     Enum.all?(routes, fn route ->
@@ -136,6 +142,7 @@ defmodule PtcRunner.Kernel.LLMRouter do
        capability: route.capability,
        arguments: arguments,
        route_key: route.alias,
+       max_calls: route.max_calls,
        event_attributes: %{
          alias: route.alias,
          installation_revision: route.installation_revision

@@ -690,14 +690,16 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                  source: "llm_replay",
                  installation_revision: "chosen-v1",
                  default?: false,
-                 capability: chosen
+                 capability: chosen,
+                 max_calls: nil
                },
                %{
                  alias: "other",
                  source: "llm_replay",
                  installation_revision: "other-v1",
                  default?: false,
-                 capability: other
+                 capability: other,
+                 max_calls: nil
                }
              ])
 

@@ -11,12 +11,13 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
     :error_attributes,
     :usage_projection
   ]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [max_calls: nil]
 
   @type t :: %__MODULE__{
           capability: Capability.t(),
           arguments: map(),
           route_key: binary() | nil,
+          max_calls: pos_integer() | nil,
           event_attributes: map(),
           error_attributes: map(),
           usage_projection: nil | :llm_tokens

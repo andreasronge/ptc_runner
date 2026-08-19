@@ -165,18 +165,52 @@ defmodule PtcRunner.Kernel.Dispatcher do
              timeout_ms,
              validation_heap_words,
              validation_deadline_ms
-           ),
-         invocation = put_mission_name(invocation, environment, mission_name),
-         :ok <- RunState.reserve_capability(state, environment, name, evaluation_lease) do
-      invoke_with_events(
-        state,
-        name,
-        invocation,
-        timeout_ms,
-        environment,
-        event_sink,
-        inspection_sink
-      )
+           ) do
+      invocation = put_mission_name(invocation, environment, mission_name)
+
+      case RunState.reserve_capability(
+             state,
+             environment,
+             name,
+             evaluation_lease,
+             route_reservation(invocation)
+           ) do
+        :ok ->
+          invoke_with_events(
+            state,
+            name,
+            invocation,
+            timeout_ms,
+            environment,
+            event_sink,
+            inspection_sink
+          )
+
+        {:error, :route_call_limit} ->
+          limit_error(
+            state,
+            event_sink,
+            :capability_quota,
+            environment,
+            mission_name,
+            max_calls_details(invocation)
+          )
+
+        {:error, :limit_exceeded} ->
+          limit_error(state, event_sink, :capability_quota, environment, mission_name)
+
+        {:error, :live_task_limit} ->
+          limit_error(state, event_sink, :live_provider_tasks, environment, mission_name)
+
+        {:error, :reservation_held} ->
+          limit_error(state, event_sink, :reservation_held, environment, mission_name)
+
+        {:error, :stale_evaluation} ->
+          stale_evaluation_error()
+
+        {:error, :run_closed} ->
+          limit_error(state, event_sink, :run_closed, environment, mission_name)
+      end
     else
       nil ->
         %{status: :error, kind: :capability_denied, reason: :capability_absent, retryable?: false}
@@ -256,23 +290,11 @@ defmodule PtcRunner.Kernel.Dispatcher do
           mission_name
         )
 
-      {:error, :limit_exceeded} ->
-        limit_error(state, event_sink, :capability_quota, environment, mission_name)
-
-      {:error, :live_task_limit} ->
-        limit_error(state, event_sink, :live_provider_tasks, environment, mission_name)
-
-      {:error, :reservation_held} ->
-        limit_error(state, event_sink, :reservation_held, environment, mission_name)
-
       false ->
         stale_evaluation_error()
 
       {:error, :stale_evaluation} ->
         stale_evaluation_error()
-
-      {:error, :run_closed} ->
-        limit_error(state, event_sink, :run_closed, environment, mission_name)
     end
   end
 
@@ -283,6 +305,16 @@ defmodule PtcRunner.Kernel.Dispatcher do
     }
 
   defp put_mission_name(invocation, _environment, _mission_name), do: invocation
+
+  defp route_reservation(%CapabilityInvocation{route_key: route_key, max_calls: max_calls})
+       when is_binary(route_key) and is_integer(max_calls) and max_calls > 0,
+       do: %{route_key: route_key, max_calls: max_calls}
+
+  defp route_reservation(_invocation), do: nil
+
+  defp max_calls_details(%CapabilityInvocation{route_key: alias_name, max_calls: max_calls})
+       when is_binary(alias_name) and is_integer(max_calls) and max_calls > 0,
+       do: %{limit: :max_calls, alias: alias_name, limit_value: max_calls}
 
   defp authenticated?(_state, :workflow, _lease), do: true
 
@@ -1165,10 +1197,19 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
-  defp limit_error(state, event_sink, reason, environment \\ nil, mission_name \\ nil) do
-    data = limit_event_data(reason, environment, mission_name)
+  defp limit_error(
+         state,
+         event_sink,
+         reason,
+         environment \\ nil,
+         mission_name \\ nil,
+         extra \\ %{}
+       ) do
+    data = Map.merge(limit_event_data(reason, environment, mission_name), extra)
     _ = Events.emit(state, event_sink, "limit-exceeded", data)
-    %{status: :error, kind: :limit_exceeded, reason: reason, retryable?: false}
+    envelope = %{status: :error, kind: :limit_exceeded, reason: reason, retryable?: false}
+
+    if extra == %{}, do: envelope, else: Map.put(envelope, :details, extra)
   end
 
   defp maybe_emit_limit(

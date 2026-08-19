@@ -100,7 +100,9 @@ do…">
 <h1 id="use-a-model">Use a model</h1><blockquote><p><strong>Audience:</strong> application authors and operators selecting, verifying, and
 observing a model without working on PtcRunner's provider implementation.</p></blockquote><p>The operator installs a model under a stable alias in the host document. The
 application selects that alias for its trusted workflow. Generated mission code
-does not receive the model route.</p><p>Bind credentials outside the application, preferably through a named environment
+does not receive the model route. Two aliases share the public <code class="inline">llm-request</code>
+call budget; <code class="inline">config.max_calls</code> additionally caps an alias only when it is
+stricter than that shared budget.</p><p>Bind credentials outside the application, preferably through a named environment
 variable or another operator-owned credential source. Then inspect the public
 installation without revealing its credential or private endpoint:</p><pre><code class="console language-console">ptc models ptc-project.json
 ptc doctor ptc-project.json</code></pre><p><code class="inline">models</code> names the selector each LLM alias configured; an endpoint-bearing

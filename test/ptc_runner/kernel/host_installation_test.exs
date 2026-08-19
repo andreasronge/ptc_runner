@@ -940,7 +940,8 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert prepared.workflow_llm_route == %{
              source: "llm",
              installation_revision: "model-policy-v2",
-             default: false
+             default: false,
+             max_calls: 128
            }
 
     assert {:error, :provider_destination_denied} =
@@ -962,6 +963,14 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
                registry,
                "deepseek",
                %{"default" => "yes"},
+               workflow
+             )
+
+    assert {:error, :invalid_llm_selection} =
+             ProviderRegistry.prepare(
+               registry,
+               "deepseek",
+               %{"max_calls" => 2_049},
                workflow
              )
 
@@ -995,7 +1004,8 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
              "config" => %{
                "default" => false,
                "max_request_bytes" => 100_000,
-               "max_response_bytes" => 300_000
+               "max_response_bytes" => 300_000,
+               "max_calls" => 128
              }
            }
 
@@ -1051,6 +1061,38 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert private_built.snapshot["acquisition"] == %{"source" => "llm"}
     refute Map.has_key?(private_built.snapshot["acquisition"], "resolved_model")
     assert :error = ProviderSnapshot.llm_identity(private_built.snapshot)
+  end
+
+  @tag :tmp_dir
+  test "LLM max_calls uses the host ceiling when it sits below per-name", %{tmp_dir: dir} do
+    host =
+      load_host(dir, %{
+        "credentials" => %{"openrouter_key" => %{"literal" => "test-llm-secret"}},
+        "install" => %{
+          "deepseek" => %{
+            "source" => "llm",
+            "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+            "credential" => "openrouter_key",
+            "installation_revision" => "model-policy-v2",
+            "ceilings" => %{"max_calls" => 4}
+          }
+        }
+      })
+
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+    workflow = context(dir, :workflow)
+
+    assert {:ok, prepared} = ProviderRegistry.prepare(registry, "deepseek", %{}, workflow)
+    assert prepared.workflow_llm_route.max_calls == 4
+
+    assert {:ok, narrowed} =
+             ProviderRegistry.prepare(registry, "deepseek", %{"max_calls" => 2}, workflow)
+
+    assert narrowed.workflow_llm_route.max_calls == 2
+
+    assert {:error, :invalid_llm_selection} =
+             ProviderRegistry.prepare(registry, "deepseek", %{"max_calls" => 8}, workflow)
   end
 
   @tag :tmp_dir

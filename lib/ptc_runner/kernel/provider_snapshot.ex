@@ -10,19 +10,22 @@ defmodule PtcRunner.Kernel.ProviderSnapshot do
   Audited executable and launcher content digests may be included as non-secret
   build identity without exposing their paths.
 
-  `llm_identity/1` tolerantly extracts model attribution from a complete current
-  LLM snapshot. It verifies the closed shape and both identity hashes; malformed
-  or legacy snapshots simply provide no attribution and remain loadable by the
-  canonical trace boundary.
+  `llm_identity/1` extracts model attribution from a complete current LLM
+  snapshot, including declaration config that carries `max_calls`. It also
+  accepts the previous three-key config so already-captured traces stay
+  attributable. Malformed or private snapshots return no attribution and remain
+  loadable by the canonical trace boundary.
   """
 
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.ProviderDescriptor
 
   @llm_snapshot_keys ~w(acquisition acquisition_identity_hash declaration provider snapshot_hash)
   @llm_declaration_keys ~w(accepts_data authorization_mode config data_class installation_revision name source)
   @llm_acquisition_keys ~w(resolved_model source)
   @llm_config_keys ~w(default max_request_bytes max_response_bytes)
+  @llm_config_keys_with_max_calls ~w(default max_calls max_request_bytes max_response_bytes)
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @hash ~r/\A[0-9a-f]{64}\z/
 
@@ -73,7 +76,8 @@ defmodule PtcRunner.Kernel.ProviderSnapshot do
   current LLM provider snapshot.
 
   Hash verification detects inconsistent or edited trace data; the hashes are
-  not signatures. Invalid, private, and legacy snapshots return `:error`.
+  not signatures. Invalid and private snapshots return `:error`. A current
+  snapshot whose declaration config omits `max_calls` remains attributable.
   """
   @spec llm_identity(term()) ::
           {:ok, %{alias: binary(), installation_revision: binary(), resolved_model: binary()}}
@@ -132,14 +136,36 @@ defmodule PtcRunner.Kernel.ProviderSnapshot do
   end
 
   defp valid_llm_config?(config) when is_map(config) do
-    exact_keys?(config, @llm_config_keys) and is_boolean(config["default"]) and
-      valid_llm_ceiling?(config["max_request_bytes"]) and
-      valid_llm_ceiling?(config["max_response_bytes"])
+    keys = Enum.sort(Map.keys(config))
+
+    cond do
+      keys == Enum.sort(@llm_config_keys) ->
+        valid_llm_config_fields?(config)
+
+      keys == Enum.sort(@llm_config_keys_with_max_calls) ->
+        valid_llm_config_fields?(config) and valid_declared_max_calls?(config["max_calls"])
+
+      true ->
+        false
+    end
   end
 
   defp valid_llm_config?(_config), do: false
 
+  defp valid_llm_config_fields?(config) do
+    is_boolean(config["default"]) and
+      valid_llm_ceiling?(config["max_request_bytes"]) and
+      valid_llm_ceiling?(config["max_response_bytes"])
+  end
+
   defp valid_llm_ceiling?(value), do: is_integer(value) and value in 1..1_048_576
+
+  defp valid_declared_max_calls?(value) when is_integer(value) do
+    {:ok, row} = LimitCatalog.fetch(:workflow_capability_calls_per_name)
+    LimitCatalog.valid_value?(row, value)
+  end
+
+  defp valid_declared_max_calls?(_value), do: false
 
   defp valid_accepts_data?(classes) when is_list(classes) and classes != [] do
     classes == Enum.sort(Enum.uniq(classes)) and

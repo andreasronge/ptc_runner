@@ -238,6 +238,34 @@ defmodule PtcRunner.Kernel.SafeMetadata do
 
   def llm_provider_failure(_value), do: %{}
 
+  @alias ~r/\A[a-z][a-z0-9._-]{0,127}\z/
+
+  @doc false
+  @spec max_calls_refusal(term()) ::
+          {:ok, %{limit: :max_calls, alias: binary(), limit_value: pos_integer()}} | :error
+  def max_calls_refusal(value) when is_map(value) and not is_struct(value) do
+    with {:ok, status} <- fetch_named(value, "status"),
+         true <- status in [:error, "error"],
+         {:ok, kind} <- fetch_named(value, "kind"),
+         "limit-exceeded" <- normalize_name(kind),
+         {:ok, reason} <- fetch_named(value, "reason"),
+         "capability-quota" <- normalize_name(reason),
+         {:ok, details} when is_map(details) and not is_struct(details) <-
+           fetch_named(value, "details"),
+         {:ok, limit} <- fetch_named(details, "limit"),
+         "max-calls" <- normalize_name(limit),
+         {:ok, alias_name} when is_binary(alias_name) <- fetch_named(details, "alias"),
+         true <- alias_name =~ @alias,
+         {:ok, limit_value} when is_integer(limit_value) and limit_value > 0 <-
+           fetch_named(details, "limit_value") do
+      {:ok, %{limit: :max_calls, alias: alias_name, limit_value: limit_value}}
+    else
+      _not_a_max_calls_refusal -> :error
+    end
+  end
+
+  def max_calls_refusal(_value), do: :error
+
   @doc false
   @spec retain_llm_provider_failure_fields(term()) :: map()
   def retain_llm_provider_failure_fields(%{

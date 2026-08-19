@@ -246,19 +246,7 @@ defmodule PtcRunner.Kernel.Runner do
           state,
           evaluation_id,
           step,
-          %Error{
-            kind: :workflow_failed,
-            reason: :explicit_failure,
-            details:
-              value
-              |> SafeMetadata.failure_taxonomy()
-              |> Map.merge(
-                value
-                |> LLMReplayDiagnostic.failure_metadata()
-                |> authenticated_replay_metadata(state)
-              ),
-            usage: RunState.usage(state)
-          }
+          explicit_failure_error(value, state)
         )
 
       {:ok, step} ->
@@ -744,6 +732,41 @@ defmodule PtcRunner.Kernel.Runner do
      }}
   end
 
+  defp explicit_failure_error(value, state) do
+    case SafeMetadata.max_calls_refusal(value) do
+      {:ok, details} ->
+        if RunState.max_calls_refusal?(state, details) do
+          %Error{
+            kind: :limit_exceeded,
+            reason: :capability_quota,
+            details: details,
+            usage: RunState.usage(state)
+          }
+        else
+          explicit_failure_taxonomy(value, state)
+        end
+
+      :error ->
+        explicit_failure_taxonomy(value, state)
+    end
+  end
+
+  defp explicit_failure_taxonomy(value, state) do
+    %Error{
+      kind: :workflow_failed,
+      reason: :explicit_failure,
+      details:
+        value
+        |> SafeMetadata.failure_taxonomy()
+        |> Map.merge(
+          value
+          |> LLMReplayDiagnostic.failure_metadata()
+          |> authenticated_replay_metadata(state)
+        ),
+      usage: RunState.usage(state)
+    }
+  end
+
   defp apply_provider_cleanup_failure(
          result,
          :ok,
@@ -804,6 +827,13 @@ defmodule PtcRunner.Kernel.Runner do
          }}
     end
   end
+
+  defp maybe_emit_workflow_limit(
+         _state,
+         _sink,
+         {:error, %Error{kind: :limit_exceeded, details: %{limit: :max_calls}}}
+       ),
+       do: :ok
 
   defp maybe_emit_workflow_limit(
          state,

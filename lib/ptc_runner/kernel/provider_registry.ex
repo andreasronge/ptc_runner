@@ -147,6 +147,12 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
                 source: binary(),
                 installation_revision: binary(),
                 default: boolean()
+              }
+            | %{
+                source: binary(),
+                installation_revision: binary(),
+                default: boolean(),
+                max_calls: pos_integer() | nil
               },
           preflight: (-> {:ok, acquire()}
                          | {:ok, acquire(), (-> :ok | {:error, term()})}
@@ -511,13 +517,20 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   defp valid_workflow_llm_route?(true, route)
        when is_map(route) and not is_struct(route) do
-    Enum.sort(Map.keys(route)) == [:default, :installation_revision, :source] and
+    keys = Enum.sort(Map.keys(route))
+
+    (keys == [:default, :installation_revision, :source] or
+       keys == [:default, :installation_revision, :max_calls, :source]) and
       route.source in ["llm", "llm_replay", "custom"] and
       is_binary(route.installation_revision) and valid_name?(route.installation_revision) and
-      is_boolean(route.default)
+      is_boolean(route.default) and valid_optional_max_calls?(Map.get(route, :max_calls))
   end
 
   defp valid_workflow_llm_route?(_workflow_llm?, _route), do: false
+
+  defp valid_optional_max_calls?(nil), do: true
+  defp valid_optional_max_calls?(max_calls) when is_integer(max_calls) and max_calls > 0, do: true
+  defp valid_optional_max_calls?(_max_calls), do: false
 
   # Checked after normalization so an omitted field is compared as the
   # normal-only default it becomes, not as an absent value. `accepts_data` is a

@@ -51,7 +51,8 @@ defmodule PtcRunner.TestSupport.TestHelpers do
       "config" => %{
         "default" => false,
         "max_request_bytes" => 1_000_000,
-        "max_response_bytes" => 1_000_000
+        "max_response_bytes" => 1_000_000,
+        "max_calls" => 2_048
       }
     }
 

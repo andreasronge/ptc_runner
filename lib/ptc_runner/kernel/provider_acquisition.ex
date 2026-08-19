@@ -769,7 +769,8 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       source: entry.workflow_llm_route.source,
       installation_revision: entry.workflow_llm_route.installation_revision,
       default?: entry.workflow_llm_route.default,
-      capability: List.first(entry.capabilities)
+      capability: List.first(entry.capabilities),
+      max_calls: Map.get(entry.workflow_llm_route, :max_calls)
     }
   end
 
@@ -804,11 +805,19 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   defp workflow_llm_route(false, _source, _revision, _config), do: nil
 
   defp workflow_llm_route(true, source, revision, config) do
-    %{
+    route = %{
       source: Atom.to_string(source),
       installation_revision: revision,
       default: Map.get(config, "default", false)
     }
+
+    case Map.get(config, "max_calls") do
+      max_calls when is_integer(max_calls) and max_calls > 0 ->
+        Map.put(route, :max_calls, max_calls)
+
+      _absent ->
+        route
+    end
   end
 
   # Occurrence identity is `{destination, index}` with the index restarting per

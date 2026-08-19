@@ -209,7 +209,10 @@ mappings, effects, and outer ceilings stay in the host document:
 Multiple live or replay LLM aliases may be selected. At most one may be the
 default. A request selects an alias with its `model` field; omitting it works
 only when one alias is selected or a default is declared. Selection never
-falls back implicitly.
+falls back implicitly. Each selected alias may set `config.max_calls` to cap
+requests to that model; the host install's `ceilings.max_calls` is the outer
+ceiling (catalog default 2048 when omitted). An alias cap binds only when it is
+stricter than the public `llm-request` per-name budget.
 
 For MCP, `allow` selects installed public names without changing their
 operator-declared effects. It may be omitted only when every installed mapping

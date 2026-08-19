@@ -28,6 +28,19 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
                  @manifest_remedy <> ", or hold less data in memory at once"
   @heap_maximum_message_bytes byte_size(@heap_prefix) + 10 + byte_size(@heap_suffix)
 
+  @alias ~r/\A[a-z][a-z0-9._-]{0,127}\z/
+  @alias_schema_pattern "[a-z][a-z0-9._-]{0,127}"
+  @max_calls_prefix "max_calls limit "
+  @max_calls_middle " for alias "
+  @max_calls_suffix " was exceeded; raise config.max_calls for this model alias" <>
+                      @manifest_remedy
+  @max_calls_maximum_alias_bytes 128
+  @max_calls_maximum_message_bytes byte_size(@max_calls_prefix) +
+                                     @subordinate_maximum_digits +
+                                     byte_size(@max_calls_middle) +
+                                     @max_calls_maximum_alias_bytes +
+                                     byte_size(@max_calls_suffix)
+
   @result_limit_prefix "terminal_result_bytes limit "
   @result_limit_suffix " bytes was exceeded; raise limits.terminal_result_bytes" <>
                          @manifest_remedy <> ", or return a smaller result"
@@ -190,6 +203,57 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   def heap_words_message?(_message), do: false
 
   @doc false
+  @spec max_calls_message(term(), term()) :: {:ok, binary()} | :error
+  def max_calls_message(alias_name, limit) do
+    with true <- is_binary(alias_name) and alias_name =~ @alias,
+         {:ok, row} <- LimitCatalog.fetch(:workflow_capability_calls_per_name),
+         true <- LimitCatalog.valid_value?(row, limit) do
+      {:ok,
+       @max_calls_prefix <>
+         Integer.to_string(limit) <> @max_calls_middle <> alias_name <> @max_calls_suffix}
+    else
+      _invalid -> :error
+    end
+  end
+
+  @doc false
+  @spec max_calls_message?(term()) :: boolean()
+  def max_calls_message?(message) when is_binary(message) do
+    with true <- String.starts_with?(message, @max_calls_prefix),
+         true <- String.ends_with?(message, @max_calls_suffix),
+         rest_bytes <-
+           byte_size(message) - byte_size(@max_calls_prefix) - byte_size(@max_calls_suffix),
+         true <- rest_bytes > 0,
+         rest <- binary_part(message, byte_size(@max_calls_prefix), rest_bytes),
+         [digits, alias_name] <- String.split(rest, @max_calls_middle, parts: 2),
+         {limit, ""} <- Integer.parse(digits),
+         true <- Integer.to_string(limit) == digits,
+         {:ok, expected} <- max_calls_message(alias_name, limit) do
+      message == expected
+    else
+      _invalid -> false
+    end
+  end
+
+  def max_calls_message?(_message), do: false
+
+  defp max_calls_message_branch do
+    %{
+      "type" => "string",
+      "minLength" => 1,
+      "maxLength" => @max_calls_maximum_message_bytes,
+      "pattern" =>
+        DiagnosticPattern.exact(
+          DiagnosticPattern.escape(@max_calls_prefix) <>
+            @subordinate_limit_pattern <>
+            DiagnosticPattern.escape(@max_calls_middle) <>
+            @alias_schema_pattern <>
+            DiagnosticPattern.escape(@max_calls_suffix)
+        )
+    }
+  end
+
+  @doc false
   @spec result_limit_message(term()) :: {:ok, binary()} | :error
   def result_limit_message(limit) do
     with {:ok, row} <- LimitCatalog.fetch(:terminal_result_bytes),
@@ -224,6 +288,9 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   def details_message(%{limit: :workflow_heap_words, limit_value: value}),
     do: named_limit(:workflow_heap_words, heap_words_message(value))
+
+  def details_message(%{limit: :max_calls, alias: alias_name, limit_value: value}),
+    do: named_limit(:max_calls, max_calls_message(alias_name, value))
 
   def details_message(_details), do: :error
 
@@ -315,7 +382,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   def valid_message?(message) when is_binary(message) do
     subordinate_evaluations_message?(message) or agent_turns_message?(message) or
       transcript_chars_message?(message) or timeout_message?(message) or
-      heap_words_message?(message)
+      heap_words_message?(message) or max_calls_message?(message)
   end
 
   def valid_message?(_message), do: false
@@ -413,7 +480,8 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
       fallback,
       [subordinate_message_branch()] ++
         agent_message_branches() ++
-        [transcript_message_branch()] ++ timeout_message_branches() ++ [heap_message_branch()]
+        [transcript_message_branch()] ++
+        timeout_message_branches() ++ [heap_message_branch(), max_calls_message_branch()]
     )
   end
 
@@ -428,7 +496,8 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
     do:
       message_schema(
         fallback,
-        [subordinate_message_branch() | timeout_message_branches()] ++ [heap_message_branch()]
+        [subordinate_message_branch() | timeout_message_branches()] ++
+          [heap_message_branch(), max_calls_message_branch()]
       )
 
   @doc false
