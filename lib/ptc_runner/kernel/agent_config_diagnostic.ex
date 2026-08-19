@@ -235,6 +235,8 @@ defmodule PtcRunner.Kernel.AgentConfigDiagnostic do
 
   defp int64_digits?("0"), do: true
 
+  defp int64_digits?("-9223372036854775808"), do: true
+
   defp int64_digits?("-" <> digits), do: int64_digits?(digits) and digits != "0"
 
   defp int64_digits?(digits) when is_binary(digits) and byte_size(digits) in 1..19 do

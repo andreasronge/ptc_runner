@@ -1064,6 +1064,30 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert_schema_valid(typed.envelope)
 
+    int64_min = -9_223_372_036_854_775_808
+
+    min_evidence = %{
+      evidence
+      | result:
+          {:error,
+           %Error{
+             kind: :workflow_failed,
+             reason: :invalid_agent_config,
+             details: %{option: "max_turns", min: 1, max: 128, value: int64_min},
+             usage: usage
+           }}
+    }
+
+    assert {:error, %CommandOutcome{} = minimum} =
+             CommandRunOutcome.project(min_evidence, settlement, run_ref, true)
+
+    assert minimum.envelope["error"]["code"] == "invalid_agent_config"
+
+    assert minimum.envelope["error"]["message"] ==
+             "max_turns #{int64_min} is outside the supported range 1–128 for agent.core/run; lower it"
+
+    assert_schema_valid(minimum.envelope)
+
     drifted = %{
       evidence
       | result:
