@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
   alias PtcRunner.Kernel.ReplSessionOwner
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.TestSupport.ProviderSessionFixture
 
@@ -880,6 +881,36 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
              ReplSession.eval(session, "(loop [x 0] (recur (inc x)))")
 
     assert reason in [:compile_timeout, :timeout, :loop_limit_exceeded]
+  end
+
+  # The interactive path evaluates every form under `evaluation_timeout_ms`,
+  # whose 1,000 ms default no model call can finish inside. The sandbox reports
+  # only the milliseconds it had left when it killed the worker — a number that
+  # matches no configured value — so the stopped form has to name the ceiling
+  # that bound it and where to raise it.
+  test "a form stopped by the evaluation ceiling names the limit and the manifest key" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 200, workflow_timeout_ms: 5_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-evaluation-ceiling")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+
+    assert {:error, %{fail: %{reason: :timeout, message: message}}, _session} =
+             ReplSession.eval(session, long_running_body(4))
+
+    assert RuntimeLimitDiagnostic.timeout_message?(message)
+    assert message =~ "evaluation_timeout_ms limit 200 ms was exceeded"
+    assert message =~ "raise limits.evaluation_timeout_ms in the manifest"
   end
 
   test "session-wide evaluation limits do not reset between expressions" do

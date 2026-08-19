@@ -32,6 +32,17 @@ ptc repl --project ptc-project.json \
   -e '(analysis/runs {})'
 ```
 
+Every form evaluates under `evaluation_timeout_ms`, whose effective default is
+1,000 ms — far less than one model call. Raise it in the manifest before trying
+a provider from the REPL:
+
+```json
+{ "limits": { "evaluation_timeout_ms": 60000 } }
+```
+
+A form stopped by that ceiling names it and its configured value, so the error
+says which limit to raise.
+
 Private inspection is a separate explicit mode because it can reveal prompts,
 responses, generated source, and tool payloads. Do not grant it merely to query
 ordinary activity.

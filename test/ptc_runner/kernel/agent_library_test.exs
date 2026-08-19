@@ -1477,24 +1477,32 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     }
 
     out_of_range = [
-      {"max_turns", 0},
-      {"max_turns", 129},
-      {"max_program_chars", 0},
-      {"max_program_chars", 1_000_001},
-      {"max_observation_chars", 0},
-      {"max_observation_chars", 65_537},
-      {"max_transcript_chars", 0},
-      {"max_transcript_chars", 1_000_001}
+      {"max_turns", 0, 1, 128},
+      {"max_turns", 129, 1, 128},
+      {"max_program_chars", 0, 1, 1_000_000},
+      {"max_program_chars", 1_000_001, 1, 1_000_000},
+      {"max_observation_chars", 0, 1, 65_536},
+      {"max_observation_chars", 65_537, 1, 65_536},
+      {"max_transcript_chars", 0, 1, 1_000_000},
+      {"max_transcript_chars", 1_000_001, 1, 1_000_000}
     ]
 
-    for {option, value} <- out_of_range do
+    for {option, value, minimum, maximum} <- out_of_range do
       {:ok, config} = agent_config([response])
 
+      # The loop knows the option and the range it violated, so the failure
+      # carries both to the command instead of leaving it to say only that the
+      # workflow failed.
       assert {:error,
               %{
                 kind: :workflow_failed,
                 reason: :explicit_failure,
-                details: %{failure_kind: "invalid-agent-config"},
+                details: %{
+                  failure_kind: "invalid-agent-config",
+                  agent_config_option: ^option,
+                  agent_config_minimum: ^minimum,
+                  agent_config_maximum: ^maximum
+                },
                 usage: usage
               }} =
                Kernel.run(

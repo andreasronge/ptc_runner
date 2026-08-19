@@ -38,6 +38,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Kernel.ReplSessionOwner
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Kernel.TraceLog
@@ -628,29 +629,56 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp run_lisp(session, memory, history, source) do
     limits = session.config.limits
-    timeout_ms = min(limits.evaluation_timeout_ms, RunState.remaining_ms(session.state))
+    remaining_ms = RunState.remaining_ms(session.state)
+    timeout_ms = min(limits.evaluation_timeout_ms, remaining_ms)
     deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
 
-    Lisp.run_native(source,
-      caller: :repl,
-      context: session.config.input,
-      memory: memory,
-      turn_history: history,
-      tools: tools(session, deadline_ms),
-      prelude: prelude(session.config.workflow_environment),
-      timeout: timeout_ms,
-      compile_timeout: timeout_ms,
-      run_deadline_ms: deadline_ms,
-      pmap_timeout: limits.parallel_timeout_ms,
-      max_heap: limits.evaluation_heap_words,
-      max_parallel_workers: limits.live_provider_tasks,
-      max_program_bytes: limits.subordinate_source_bytes,
-      max_tool_call_result_bytes: limits.capability_result_bytes,
-      preserve_runtime_callables: true,
-      filter_context: false,
-      link: true
-    )
+    result =
+      Lisp.run_native(source,
+        caller: :repl,
+        context: session.config.input,
+        memory: memory,
+        turn_history: history,
+        tools: tools(session, deadline_ms),
+        prelude: prelude(session.config.workflow_environment),
+        timeout: timeout_ms,
+        compile_timeout: timeout_ms,
+        run_deadline_ms: deadline_ms,
+        pmap_timeout: limits.parallel_timeout_ms,
+        max_heap: limits.evaluation_heap_words,
+        max_parallel_workers: limits.live_provider_tasks,
+        max_program_bytes: limits.subordinate_source_bytes,
+        max_tool_call_result_bytes: limits.capability_result_bytes,
+        preserve_runtime_callables: true,
+        filter_context: false,
+        link: true
+      )
+
+    name_timeout_limit(result, limits, remaining_ms)
   end
+
+  # The sandbox reports the milliseconds still left when it killed the worker,
+  # a number that matches no configured value and cannot be searched for. The
+  # binding ceiling is known here, so say which one stopped the form and where
+  # to raise it, through the same builder `ptc run` uses. A model call cannot
+  # finish inside the 1,000 ms `evaluation_timeout_ms` default, which makes this
+  # the first wall an interactive session hits.
+  defp name_timeout_limit({:error, %Native{fail: %{reason: :timeout}} = step}, limits, remaining) do
+    {limit, limit_ms} =
+      if limits.evaluation_timeout_ms <= remaining,
+        do: {:evaluation_timeout_ms, limits.evaluation_timeout_ms},
+        else: {:run_duration_ms, limits.run_duration_ms}
+
+    case RuntimeLimitDiagnostic.live_timeout_message(limit, limit_ms, timeout_phase(step)) do
+      {:ok, message} -> {:error, %{step | fail: %{step.fail | message: message}}}
+      :error -> {:error, step}
+    end
+  end
+
+  defp name_timeout_limit(result, _limits, _remaining), do: result
+
+  defp timeout_phase(%Native{fail: %{details: %{phase: :setup}}}), do: :compilation
+  defp timeout_phase(_step), do: :execution
 
   defp tools(session, validation_deadline_ms) do
     timeout_ms = session.config.limits.evaluation_timeout_ms

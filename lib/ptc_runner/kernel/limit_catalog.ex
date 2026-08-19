@@ -55,7 +55,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     run_duration_ms:
       "Complete ordinary run after optional provider application admission, including active preflight and Kernel execution.",
     workflow_timeout_ms: "One workflow evaluation.",
-    evaluation_timeout_ms: "One subordinate mission evaluation.",
+    evaluation_timeout_ms: "One subordinate mission evaluation, and one interactive REPL form.",
     evaluation_admission_timeout_ms:
       "Wait for the single subordinate-evaluation lease before execution begins.",
     parallel_timeout_ms: "One pmap or pcalls operation, clamped by the run deadline.",

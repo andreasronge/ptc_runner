@@ -159,7 +159,7 @@ it does not add task-specific prompt policy.</p><h2 id="configuration">Configura
 default, and an out-of-range integer fails with
 <code class="inline">invalid-agent-config/option-out-of-range</code> before any provider request or
 mission evaluation; the failure value names the option and its accepted
-inclusive range. Signature validation rejects wrong value types before the
+inclusive range, and the command diagnostic repeats both. Signature validation rejects wrong value types before the
 loop starts. <code class="inline">consolidate_at_turns_remaining</code> fails the same way with
 <code class="inline">invalid-agent-config/invalid-consolidation-threshold</code> when set outside <code class="inline">1</code> to
 the effective <code class="inline">max_turns</code>.</p><p>Omitted or <code class="inline">nil</code> <code class="inline">mission</code> selects <code class="inline">default</code>. An empty, non-string, or unknown

@@ -248,6 +248,7 @@ defmodule PtcRunner.Kernel.Runner do
             details:
               value
               |> SafeMetadata.failure_taxonomy()
+              |> Map.merge(SafeMetadata.agent_config_range(value))
               |> Map.merge(
                 value
                 |> LLMReplayDiagnostic.failure_metadata()
@@ -280,7 +281,10 @@ defmodule PtcRunner.Kernel.Runner do
               %Error{
                 kind: :limit_exceeded,
                 reason: :terminal_result_exceeded,
-                details: %{},
+                details: %{
+                  limit: :terminal_result_bytes,
+                  limit_value: config.limits.terminal_result_bytes
+                },
                 usage: RunState.usage(state)
               }
             )

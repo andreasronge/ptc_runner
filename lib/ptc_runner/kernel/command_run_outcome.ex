@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.CommandRunOutcome do
   @moduledoc false
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.ArtifactPublisher
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandOutcome
@@ -306,6 +307,23 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     do: diagnostic(:execution, :inspection_sink_unavailable, provider_activity)
 
   defp failure_diagnostic(
+         %Error{
+           kind: :limit_exceeded,
+           reason: :terminal_result_exceeded,
+           details: %{limit: :terminal_result_bytes, limit_value: limit}
+         },
+         provider_activity
+       ) do
+    case RuntimeLimitDiagnostic.result_limit_message(limit) do
+      {:ok, message} ->
+        diagnostic(:result_cleanup, :result_limit_exceeded, provider_activity, message: message)
+
+      :error ->
+        diagnostic(:result_cleanup, :result_limit_exceeded, provider_activity)
+    end
+  end
+
+  defp failure_diagnostic(
          %Error{kind: :limit_exceeded, reason: :terminal_result_exceeded},
          provider_activity
        ),
@@ -470,6 +488,28 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     case RuntimeLimitDiagnostic.transcript_chars_message(limit) do
       {:ok, message} ->
         diagnostic(:execution, :runtime_limit_exceeded, provider_activity, message: message)
+
+      :error ->
+        diagnostic(:execution, :workflow_failed, provider_activity)
+    end
+  end
+
+  defp failure_diagnostic(
+         %Error{
+           kind: :workflow_failed,
+           reason: reason,
+           details: %{
+             agent_config_option: option,
+             agent_config_minimum: minimum,
+             agent_config_maximum: maximum
+           }
+         },
+         provider_activity
+       )
+       when reason == :explicit_failure do
+    case AgentConfigDiagnostic.message(option, minimum, maximum) do
+      {:ok, message} ->
+        diagnostic(:execution, :workflow_failed, provider_activity, message: message)
 
       :error ->
         diagnostic(:execution, :workflow_failed, provider_activity)

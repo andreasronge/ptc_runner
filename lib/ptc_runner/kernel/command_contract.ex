@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   root. `schema/0` still materializes the source map for generators and docs.
   """
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandSource
@@ -1206,6 +1207,21 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{"properties" => %{"kind" => %{"const" => "result_contract"}}}
        ),
        do: ResultContractDiagnostic.message_schema(row.message)
+
+  # Neither of these can name a document: the terminal-result ceiling belongs to
+  # the effective limits and the agent option to the shipped loop's own
+  # configuration, so both publish their bounded message against a null source.
+  defp diagnostic_message_schema(
+         %{phase: :result_cleanup, code: :result_limit_exceeded} = row,
+         %{"type" => "null"}
+       ),
+       do: RuntimeLimitDiagnostic.result_limit_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :workflow_failed} = row,
+         %{"type" => "null"}
+       ),
+       do: AgentConfigDiagnostic.message_schema(row.message)
 
   # Only a contract source carries a rule-derived message. The application
   # source reports the same code for a malformed `contracts` section, which has

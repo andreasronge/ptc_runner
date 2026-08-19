@@ -91,16 +91,16 @@ assert.equal(runRoute('cmd-abc/def'), '#/run/cmd-abc%2Fdef');
 assert.equal(
   failurePresentation({
     phase: 'error',
-    outcome_reason: 'parallel_timeout_ms limit 60000 ms was exceeded during execution'
+    outcome_reason: 'parallel_timeout_ms limit 60000 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, at or below the installed host ceiling'
   }),
-  'Limit exceeded: parallel_timeout_ms limit 60000 ms was exceeded during execution'
+  'Limit exceeded: parallel_timeout_ms limit 60000 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, at or below the installed host ceiling'
 );
 assert.equal(
   failurePresentation({
     phase: 'error',
-    outcome_reason: 'run_duration_ms limit 60000 ms was exceeded during execution'
+    outcome_reason: 'run_duration_ms limit 60000 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, at or below the installed host ceiling'
   }),
-  'Limit exceeded: run_duration_ms limit 60000 ms was exceeded during execution'
+  'Limit exceeded: run_duration_ms limit 60000 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, at or below the installed host ceiling'
 );
 assert.equal(failurePresentation({ phase: 'ok', outcome_reason: null }), null);
 

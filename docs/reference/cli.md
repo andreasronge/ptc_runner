@@ -689,9 +689,11 @@ PTC_VIEWER_URL=http://127.0.0.1:4123 ptc run ptc.json
 The reporter is best-effort and does not alter the run result. Frames are
 correlated to their owning run, and the terminal frame is published only after
 provider cleanup and canonical event finalization establish the actual
-outcome. A timeout failure names the binding limit and configured duration in
-both the launch diagnostic and the ended Live card; for example,
-`parallel_timeout_ms limit 60000 ms was exceeded during execution`. Mission
+outcome. A timeout failure names the binding limit, its configured duration,
+and the manifest key that raises it, in both the launch diagnostic and the
+ended Live card; for example, `parallel_timeout_ms limit 60000 ms was exceeded
+during execution; raise limits.parallel_timeout_ms in the manifest, at or below
+the installed host ceiling`. Mission
 sessions currently show their bounded command-output tail in the launch panel
 instead of streaming frames.
 

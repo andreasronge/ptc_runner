@@ -4,13 +4,30 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   alias PtcRunner.Kernel.DiagnosticPattern
   alias PtcRunner.Kernel.LimitCatalog
 
+  # Naming a breached ceiling is only half an answer: the reader also has to know
+  # where the number lives. Raising one means editing `limits` in the *manifest*
+  # — installing a larger ceiling in the host document alone changes nothing,
+  # because the host installs the outer bound and the application requests the
+  # effective value inside it. Every limit remedy therefore names the manifest
+  # key and says the installed ceiling still bounds it.
+  @manifest_remedy " in the manifest, at or below the installed host ceiling"
+
   @subordinate_prefix "subordinate_evaluations limit "
-  @subordinate_suffix " was exceeded; raise the manifest or host ceiling, or reduce total subordinate evaluations or agent turns"
+  @subordinate_suffix " was exceeded; raise limits.subordinate_evaluations" <>
+                        @manifest_remedy <>
+                        ", or reduce total subordinate evaluations or agent turns"
   @subordinate_limit_pattern "(?:[1-9][0-9]{0,8}|1[0-9]{9}|2[0-4][0-9]{8}|25[0-8][0-9]{7}|259[0-1][0-9]{6}|2592000000)"
   @subordinate_maximum_digits 10
   @subordinate_maximum_message_bytes byte_size(@subordinate_prefix) +
                                        @subordinate_maximum_digits +
                                        byte_size(@subordinate_suffix)
+
+  @result_limit_prefix "terminal_result_bytes limit "
+  @result_limit_suffix " bytes was exceeded; raise limits.terminal_result_bytes" <>
+                         @manifest_remedy <> ", or return a smaller result"
+  @result_limit_maximum_message_bytes byte_size(@result_limit_prefix) +
+                                        @subordinate_maximum_digits +
+                                        byte_size(@result_limit_suffix)
 
   # A bounded agent loop can end four ways, and only two of them are answered by
   # buying more turns. Naming `max_turns` for a model that never emitted a
@@ -58,12 +75,24 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
                                       @transcript_maximum_digits +
                                       byte_size(@transcript_suffix)
 
-  @timeout_limits [:parallel_timeout_ms, :workflow_timeout_ms]
+  # `evaluation_timeout_ms` joins the family because the REPL evaluates every
+  # form under it, and a model call cannot finish inside its 1,000 ms default.
+  @timeout_limits [:evaluation_timeout_ms, :parallel_timeout_ms, :workflow_timeout_ms]
   @timeout_phases [:compilation, :execution]
   @timeout_value_pattern @subordinate_limit_pattern
-  @timeout_maximum_message_bytes byte_size("workflow_timeout_ms limit ") +
-                                   @subordinate_maximum_digits +
-                                   byte_size(" ms was exceeded during compilation")
+  @timeout_family [:run_duration_ms | @timeout_limits]
+  @timeout_maximum_message_bytes (for limit <- @timeout_family, phase <- @timeout_phases do
+                                    name = Atom.to_string(limit)
+
+                                    byte_size(name <> " limit ") +
+                                      @subordinate_maximum_digits +
+                                      byte_size(
+                                        " ms was exceeded during " <>
+                                          Atom.to_string(phase) <>
+                                          "; raise limits." <> name <> @manifest_remedy
+                                      )
+                                  end)
+                                 |> Enum.max()
 
   @doc false
   @spec subordinate_evaluations_message(term()) :: {:ok, binary()} | :error
@@ -120,20 +149,38 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @doc false
   @spec live_timeout_message(term(), term(), term()) :: {:ok, binary()} | :error
   def live_timeout_message(limit, limit_ms, phase)
-      when limit in [:run_duration_ms | @timeout_limits] and phase in @timeout_phases do
+      when limit in @timeout_family and phase in @timeout_phases do
     build_timeout_message(limit, limit_ms, phase)
   end
 
   def live_timeout_message(_limit, _limit_ms, _phase), do: :error
 
-  defp build_timeout_message(limit, limit_ms, phase) do
-    with {:ok, row} <- LimitCatalog.fetch(limit),
-         true <- LimitCatalog.valid_value?(row, limit_ms) do
-      {:ok, "#{limit} limit #{limit_ms} ms was exceeded during #{phase}"}
+  @doc false
+  @spec result_limit_message(term()) :: {:ok, binary()} | :error
+  def result_limit_message(limit) do
+    with {:ok, row} <- LimitCatalog.fetch(:terminal_result_bytes),
+         true <- LimitCatalog.valid_value?(row, limit) do
+      {:ok, @result_limit_prefix <> Integer.to_string(limit) <> @result_limit_suffix}
     else
       _invalid -> :error
     end
   end
+
+  defp build_timeout_message(limit, limit_ms, phase) do
+    with {:ok, row} <- LimitCatalog.fetch(limit),
+         true <- LimitCatalog.valid_value?(row, limit_ms) do
+      {:ok,
+       timeout_prefix(limit) <>
+         Integer.to_string(limit_ms) <> timeout_suffix(limit, phase)}
+    else
+      _invalid -> :error
+    end
+  end
+
+  defp timeout_prefix(limit), do: "#{limit} limit "
+
+  defp timeout_suffix(limit, phase),
+    do: " ms was exceeded during #{phase}; raise limits.#{limit}" <> @manifest_remedy
 
   @doc false
   @spec valid_message?(term()) :: boolean()
@@ -180,8 +227,8 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
     Enum.any?(@timeout_phases, fn phase ->
       valid_exact_message?(
         message,
-        "run_duration_ms limit ",
-        " ms was exceeded during #{phase}",
+        timeout_prefix(:run_duration_ms),
+        timeout_suffix(:run_duration_ms, phase),
         @subordinate_maximum_digits,
         &live_timeout_message(:run_duration_ms, &1, phase)
       )
@@ -189,6 +236,20 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   end
 
   def run_duration_message?(_message), do: false
+
+  @doc false
+  @spec result_limit_message?(term()) :: boolean()
+  def result_limit_message?(message) when is_binary(message) do
+    valid_exact_message?(
+      message,
+      @result_limit_prefix,
+      @result_limit_suffix,
+      @subordinate_maximum_digits,
+      &result_limit_message/1
+    )
+  end
+
+  def result_limit_message?(_message), do: false
 
   @doc false
   @spec subordinate_evaluations_message?(term()) :: boolean()
@@ -247,6 +308,11 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   def run_duration_message_schema(fallback) when is_binary(fallback),
     do: message_schema(fallback, run_duration_message_branches())
 
+  @doc false
+  @spec result_limit_message_schema(binary()) :: map()
+  def result_limit_message_schema(fallback) when is_binary(fallback),
+    do: message_schema(fallback, [result_limit_message_branch()])
+
   defp message_schema(fallback, branches) do
     %{
       "oneOf" => [%{"const" => fallback} | branches]
@@ -254,13 +320,21 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   end
 
   defp subordinate_message_branch do
-    %{
-      "type" => "string",
-      "minLength" => 1,
-      "maxLength" => @subordinate_maximum_message_bytes,
-      "pattern" =>
-        "^subordinate_evaluations limit #{@subordinate_limit_pattern} was exceeded; raise the manifest or host ceiling, or reduce total subordinate evaluations or agent turns$(?![\\s\\S])"
-    }
+    bounded_branch(
+      @subordinate_maximum_message_bytes,
+      @subordinate_prefix,
+      @subordinate_limit_pattern,
+      @subordinate_suffix
+    )
+  end
+
+  defp result_limit_message_branch do
+    bounded_branch(
+      @result_limit_maximum_message_bytes,
+      @result_limit_prefix,
+      @subordinate_limit_pattern,
+      @result_limit_suffix
+    )
   end
 
   defp agent_message_branches do
@@ -279,48 +353,52 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   end
 
   defp transcript_message_branch do
+    bounded_branch(
+      @transcript_maximum_message_bytes,
+      @transcript_prefix,
+      @transcript_limit_pattern,
+      @transcript_suffix
+    )
+  end
+
+  defp run_duration_message_branches, do: timeout_branches([:run_duration_ms])
+
+  defp timeout_message_branches, do: timeout_branches(@timeout_limits)
+
+  defp timeout_branches(limits) do
+    for limit <- limits,
+        phase <- @timeout_phases do
+      bounded_branch(
+        @timeout_maximum_message_bytes,
+        timeout_prefix(limit),
+        @timeout_value_pattern,
+        timeout_suffix(limit, phase)
+      )
+    end
+  end
+
+  # Every branch here is prose wrapped around one integer, and the prose now
+  # carries the dotted manifest key. `DiagnosticPattern` escapes only the
+  # ECMA-262 metacharacters, so the pattern keeps matching exactly the message
+  # its builder produces.
+  defp bounded_branch(maximum_bytes, prefix, value_pattern, suffix) do
     %{
       "type" => "string",
       "minLength" => 1,
-      "maxLength" => @transcript_maximum_message_bytes,
+      "maxLength" => maximum_bytes,
       "pattern" =>
-        "^transcript limit #{@transcript_limit_pattern} characters was exceeded; raise max_transcript_chars for this agent.core/run call, or reduce the work carried between turns$(?![\\s\\S])"
+        DiagnosticPattern.exact(
+          DiagnosticPattern.escape(prefix) <>
+            value_pattern <> DiagnosticPattern.escape(suffix)
+        )
     }
   end
 
-  defp run_duration_message_branches do
-    for phase <- @timeout_phases do
-      %{
-        "type" => "string",
-        "minLength" => 1,
-        "maxLength" => @timeout_maximum_message_bytes,
-        "pattern" =>
-          "^run_duration_ms limit #{@timeout_value_pattern} ms was exceeded during #{phase}$(?![\\s\\S])"
-      }
-    end
-  end
-
-  defp timeout_message_branches do
-    for limit <- @timeout_limits,
-        phase <- @timeout_phases do
-      %{
-        "type" => "string",
-        "minLength" => 1,
-        "maxLength" => @timeout_maximum_message_bytes,
-        "pattern" =>
-          "^#{limit} limit #{@timeout_value_pattern} ms was exceeded during #{phase}$(?![\\s\\S])"
-      }
-    end
-  end
-
   defp valid_exact_timeout_message?(message, limit, phase) do
-    prefix = "#{limit} limit "
-    suffix = " ms was exceeded during #{phase}"
-
     valid_exact_message?(
       message,
-      prefix,
-      suffix,
+      timeout_prefix(limit),
+      timeout_suffix(limit, phase),
       @subordinate_maximum_digits,
       &timeout_message(limit, &1, phase)
     )
