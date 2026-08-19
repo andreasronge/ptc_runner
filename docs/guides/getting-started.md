@@ -45,8 +45,16 @@ ptc viewer kernel-tutorial/01-orders.ptc-project.json
 ```
 
 The canonical trace records the command, evaluations, limits, outcome, and
-resource usage. It does not contain prompts, model responses, generated source,
-or tool payloads. Those sensitive records require explicit private inspection.
+resource usage. It never contains prompts, model responses, generated source,
+or tool payloads. Those are private evidence, recorded only when
+`artifacts.inspection` is true and served only when `viewer.private` is also
+true.
+
+The tutorial project documents set both, so the Viewer joins that evidence into
+the transcript: every effective prelude lists a `source` link beside each
+component, and the model-driven steps show each evaluation's generated
+PTC-Lisp under **Program source** along with the model conversation. Set either
+setting back to `false` and the same run shows the canonical trace alone.
 
 You can also explore the workflow directly:
 

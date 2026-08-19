@@ -15,6 +15,7 @@
 
 import { html, mount, rawHtml, toMarkup } from './preact.js';
 import { highlightLisp } from './highlight.js';
+import { privateEvidenceAbsence } from './private-evidence.js';
 
 const SUCCESS = new Set(['ok', 'continued', 'returned', 'completed', 'success']);
 const FAILURE = new Set([
@@ -245,7 +246,15 @@ function Preludes({ metadata, preludeIndex }) {
       [`Mission prelude · ${name}`, 'mission', name, mission.prelude])
   ];
 
+  // Absent sources are worth stating only where a source could have been read.
+  // A run that loaded no component has nothing withheld from it.
+  const named = entries.some(([, , , prelude]) => prelude?.component_ids?.length > 0);
+
   return html`
+    ${preludeIndex.absence && named && html`
+      <p class="kt-prelude-absence">
+        Component sources are private evidence. ${preludeIndex.absence.cause}
+      </p>`}
     <div class="kt-preludes">
       ${entries.map(([title, environment, mission, prelude]) => html`
         <${PreludeCard} key=${mission || environment} title=${title} prelude=${prelude}
@@ -653,8 +662,15 @@ function Tags({ tags }) {
 
 // --- Private prelude source navigation -----------------------------------
 
+// The canonical trace names every prelude component but carries none of their
+// source, so a card with no `source` links is the normal reading of an
+// unauthorized run and looks identical to one whose sources failed to load.
+// The index therefore carries why they are absent alongside the ones present.
 function buildPreludeIndex(preludes) {
   const byComponent = new Map();
+  const absence = preludes?.['available?'] === false
+    ? privateEvidenceAbsence(preludes.reason)
+    : undefined;
 
   (preludes?.items || []).forEach((record, index) => {
     if (!record || typeof record.source !== 'string') return;
@@ -668,7 +684,7 @@ function buildPreludeIndex(preludes) {
     if (!byComponent.has(key)) byComponent.set(key, item);
   });
 
-  return { byComponent };
+  return { byComponent, absence };
 }
 
 function definitionNames(source) {

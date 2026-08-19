@@ -42,6 +42,14 @@ server bundle is committed, so no `npm install` or build is needed.
 Direct manifest invocation with explicit `--env-file` and `--host-config`
 switches remains available as the low-level automation form.
 
+Every project document here sets `artifacts.inspection` and `viewer.private`
+to `true`, because reading the PTC-Lisp is the point of the tutorial. Each run
+therefore writes a private inspection artifact next to its trace, and
+`ptc viewer <project>` shows the prelude sources the run actually loaded and,
+for the model-driven steps, the program the model generated for each
+evaluation. That evidence contains prompts, responses, and tool payloads; a
+project that should not retain it sets both settings back to `false`.
+
 [`ptc-host.json`](ptc-host.json) is the shared operator document these examples
 install from;
 [`docs/guides/host-configuration.md`](../../docs/guides/host-configuration.md)

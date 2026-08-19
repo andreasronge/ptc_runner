@@ -50,7 +50,15 @@ ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 The project selects the shipped agent loop. The model receives a task, writes a
 bounded mission program, observes its result, and completes on the second turn.
 You configure the task, model alias, mission, tools, and limits; you do not need
-to read or edit the generated program.
+to read or edit the generated program. To read it anyway, open the Viewer:
+
+```console
+ptc viewer kernel-tutorial/04-multi-turn-agent.ptc-project.json
+```
+
+The tutorial projects record private inspection and grant it to the Viewer, so
+each evaluation shows the PTC-Lisp the model wrote and each prelude component
+shows the source the run loaded.
 
 Credentials belong to the operator-owned host configuration, never the
 application manifest, generated program, or canonical trace. The manifest can

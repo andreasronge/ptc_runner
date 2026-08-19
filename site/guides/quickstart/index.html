@@ -111,7 +111,9 @@ printf 'OPENROUTER_API_KEY=\n' &gt; kernel-tutorial/.env
 chmod 600 kernel-tutorial/.env</code></pre><p>Set <code class="inline">OPENROUTER_API_KEY</code> in that exact file, then run:</p><pre><code class="console language-console">ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><pre><code class="json language-json">{&quot;ok&quot;:true,&quot;value&quot;:42}</code></pre><p>The project selects the shipped agent loop. The model receives a task, writes a
 bounded mission program, observes its result, and completes on the second turn.
 You configure the task, model alias, mission, tools, and limits; you do not need
-to read or edit the generated program.</p><p>Credentials belong to the operator-owned host configuration, never the
+to read or edit the generated program. To read it anyway, open the Viewer:</p><pre><code class="console language-console">ptc viewer kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><p>The tutorial projects record private inspection and grant it to the Viewer, so
+each evaluation shows the PTC-Lisp the model wrote and each prelude component
+shows the source the run loaded.</p><p>Credentials belong to the operator-owned host configuration, never the
 application manifest, generated program, or canonical trace. The manifest can
 select the installed model alias but cannot name its endpoint or key.</p><h2 id="diagnose-readiness">Diagnose readiness</h2><p>Check configuration without contacting the provider:</p><pre><code class="console language-console">ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><p>Probe credentials and connectivity only when remote work and possible cost are
 intended:</p><pre><code class="console language-console">ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect</code></pre><p>Continue with <a href="/guides/getting-started/">Understand a generated project</a>, <a href="/guides/using-models/">Use a

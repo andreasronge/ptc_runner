@@ -679,16 +679,17 @@ defmodule PtcViewer.Router do
       {:ok, result} ->
         send_private_json(conn, result)
 
+      # Not a transport status: private evidence is withheld by a decision, and
+      # each of these four is a different decision with a different next action.
+      # The body is the reason code the browser renders as the change that would
+      # produce the evidence, so they answer separately rather than as one 404.
+      # The first two are about the run, the last two about the project.
       {:error, :not_found} ->
-        send_resp(conn, 404, "Not found")
+        send_resp(conn, 404, "inspection_run_not_recorded")
 
       {:error, :inspection_run_mismatch} ->
-        send_resp(conn, 404, "Inspection run mismatch")
+        send_resp(conn, 404, "inspection_run_mismatch")
 
-      # Not a transport status: this instance was never given an inspection
-      # artifact. The body is the reason code the browser renders as the
-      # configuration change that would produce one, so the two ways to withhold
-      # the artifact answer separately.
       {:error, :inspection_not_configured} ->
         send_resp(conn, 404, "inspection_not_configured")
 
