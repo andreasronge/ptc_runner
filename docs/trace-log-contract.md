@@ -727,12 +727,13 @@ types and payloads are:
 | `prelude-source` | `component_id` | `environment`, `source`, `source_hash`, `source_bytes` |
 | `mcp-request` | `capability_id`, `request_id` | `transport`, `body` |
 | `mcp-response` | `capability_id`, `request_id` | `transport`, `body` |
+| `mcp-stderr` | `capability_id`, `request_id` | `transport`, `text`, `truncated` |
 | `execution-prints` | `evaluation_id` | `environment`, `prints`, `truncated` |
 | `execution-error` | `evaluation_id` | `environment`, `kind`, `reason`, `details` |
 
 Named-mission ownership is explicit. Mission `capability-input`,
 `capability-exception`, `capability-output`, `evaluation-source`, `evaluation-analysis`,
-`prelude-source`, `mcp-request`, and `mcp-response` payloads require
+`prelude-source`, `mcp-request`, `mcp-response`, and `mcp-stderr` payloads require
 `mission_name`; workflow payloads forbid it.
 Prelude uniqueness is `(environment, mission_name, component_id)`, so the same
 component ID can be inspected independently in multiple missions. Every
@@ -758,6 +759,12 @@ rejected unless the supplied value is already strict JSON. `result` is the
 bounded Dispatcher envelope returned to Lisp, so `llm-request` input/output
 records contain the provider-neutral model request and normalized response, and
 MCP records contain the public connector arguments and normalized result/error.
+Stdio sessions also retain bounded child-stderr text on a sibling `mcp-stderr`
+record correlated to the same `{capability_id, request_id}`; those bytes can
+name host paths and exist only under explicit private-inspection authority.
+Captured stdio exchanges are serialized so that record is one request's capture
+window. `truncated` is true when the launcher hit `stderr_bytes` or otherwise
+signaled overflow.
 When a capability callback raises, `capability-exception` retains the exception
 module name, its message at no more than 4,096 valid UTF-8 bytes, and a formatted
 stacktrace at no more than 64 frames and 65,536 valid UTF-8 bytes. Independent

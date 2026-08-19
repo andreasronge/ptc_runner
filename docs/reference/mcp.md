@@ -165,10 +165,12 @@ The application selects the installed alias in its mission provider list:
 ```
 
 If an installation maps any write tool, every selecting manifest must provide a
-non-empty `allow` list, even when it selects only reads. A failed or timed-out
-write is never retried automatically and may report
+non-empty `allow` list, even when it selects only reads. A timed-out or
+transport-failed write is never retried automatically and may report
 `mutation_state: "indeterminate"`; the external mutation may already have
-happened.
+happened. A complete decoded refusal (`isError: true`) or JSON-RPC error is
+not indeterminate: the server answered, so the caller can treat that outcome
+as known.
 
 The checked-in [writer sample](https://github.com/andreasronge/ptc_runner/tree/main/examples/mcp/writer) shows the
 complete installation, mandatory `allow` list, basename confinement, and the

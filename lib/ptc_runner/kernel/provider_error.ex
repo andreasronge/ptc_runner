@@ -15,7 +15,9 @@ defmodule PtcRunner.Kernel.ProviderError do
   therefore never retryable. `dispatch_provenance` is trusted, internal
   evidence for the mission dispatcher. Providers may set it to
   `:not_dispatched` only when no invocation could have reached the underlying
-  transport; it is never copied into the public Lisp envelope. A replay
+  transport, `:dispatched` when the callee returned a complete answer, or
+  `:possibly_dispatched` when a call may have been sent and the outcome is
+  unknown. It is never copied into the public Lisp envelope. A replay
   provider may attach its validated `:replay_request_hash`; the dispatcher
   records that host-owned evidence separately from the Lisp envelope. Missing
   provenance is treated conservatively after callback entry.
@@ -64,7 +66,7 @@ defmodule PtcRunner.Kernel.ProviderError do
           | :timeout
           | :transport_error
   @type mutation_state :: :indeterminate
-  @type dispatch_provenance :: :not_dispatched | :possibly_dispatched
+  @type dispatch_provenance :: :not_dispatched | :dispatched | :possibly_dispatched
   @type t :: %__MODULE__{
           kind: kind(),
           details: binary() | nil,
@@ -81,7 +83,7 @@ defmodule PtcRunner.Kernel.ProviderError do
   internal `:replay_request_hash` metadata.
 
   Mutation state accepts only `:indeterminate`, and dispatch provenance accepts
-  only `:not_dispatched` or `:possibly_dispatched`. A replay request hash is
+  `:not_dispatched`, `:dispatched`, or `:possibly_dispatched`. A replay request hash is
   valid only for a non-retryable `:not_found` error whose details are the exact
   replay-miss message for that hash. An indeterminate failure is always
   constructed as non-retryable.
@@ -94,7 +96,7 @@ defmodule PtcRunner.Kernel.ProviderError do
          mutation_state when mutation_state in [nil, :indeterminate] <-
            Keyword.get(opts, :mutation_state),
          dispatch_provenance
-         when dispatch_provenance in [nil, :not_dispatched, :possibly_dispatched] <-
+         when dispatch_provenance in [nil, :not_dispatched, :dispatched, :possibly_dispatched] <-
            Keyword.get(opts, :dispatch_provenance),
          replay_request_hash <- Keyword.get(opts, :replay_request_hash),
          {:ok, details} <- bounded_details(details) do
@@ -125,7 +127,7 @@ defmodule PtcRunner.Kernel.ProviderError do
       }) do
     kind in @kinds and valid_details?(details) and is_boolean(retryable?) and
       mutation_state in [nil, :indeterminate] and
-      dispatch_provenance in [nil, :not_dispatched, :possibly_dispatched] and
+      dispatch_provenance in [nil, :not_dispatched, :dispatched, :possibly_dispatched] and
       not (mutation_state == :indeterminate and retryable?) and
       valid_replay_miss?(kind, details, retryable?, mutation_state, replay_request_hash)
   end

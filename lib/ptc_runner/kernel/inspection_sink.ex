@@ -88,20 +88,39 @@ defmodule PtcRunner.Kernel.InspectionSink do
     do: call(sink, :fail)
 
   @doc false
-  @spec emit_mcp_exchange(t(), map(), map(), map()) ::
+  @spec emit_mcp_exchange(t(), map(), map(), map(), map() | nil) ::
           :ok | {:error, :inspection_sink_error}
+  def emit_mcp_exchange(
+        sink,
+        correlation,
+        request_payload,
+        response_payload,
+        stderr_payload \\ nil
+      )
+
   def emit_mcp_exchange(
         %__MODULE__{} = sink,
         correlation,
         request_payload,
-        response_payload
+        response_payload,
+        stderr_payload
       )
-      when is_map(correlation) and is_map(request_payload) and is_map(response_payload) do
-    call(sink, {:emit_mcp_exchange, correlation, request_payload, response_payload})
+      when is_map(correlation) and is_map(request_payload) and is_map(response_payload) and
+             (is_map(stderr_payload) or is_nil(stderr_payload)) do
+    call(
+      sink,
+      {:emit_mcp_exchange, correlation, request_payload, response_payload, stderr_payload}
+    )
   end
 
-  def emit_mcp_exchange(%__MODULE__{} = sink, _correlation, _request_payload, _response_payload),
-    do: call(sink, :fail)
+  def emit_mcp_exchange(
+        %__MODULE__{} = sink,
+        _correlation,
+        _request_payload,
+        _response_payload,
+        _stderr_payload
+      ),
+      do: call(sink, :fail)
 
   @spec records(t()) :: {:ok, [map()]} | {:error, :inspection_sink_error}
   @doc "Returns retained records in sequence order while the required sink is healthy."
@@ -213,14 +232,15 @@ defmodule PtcRunner.Kernel.InspectionSink do
   end
 
   def handle_call(
-        {token, {:emit_mcp_exchange, correlation, request_payload, response_payload}},
+        {token,
+         {:emit_mcp_exchange, correlation, request_payload, response_payload, stderr_payload}},
         _from,
         %{token: token} = state
       ) do
     if state.failed? do
       {:reply, {:error, :inspection_sink_error}, state}
     else
-      retain_mcp_exchange(state, correlation, request_payload, response_payload)
+      retain_mcp_exchange(state, correlation, request_payload, response_payload, stderr_payload)
     end
   end
 
@@ -259,12 +279,25 @@ defmodule PtcRunner.Kernel.InspectionSink do
     end
   end
 
-  defp retain_mcp_exchange(state, correlation, request_payload, response_payload) do
+  defp retain_mcp_exchange(state, correlation, request_payload, response_payload, stderr_payload) do
     with {:ok, next} <- retain_record(state, "mcp-request", correlation, request_payload),
-         {:ok, next} <- retain_record(next, "mcp-response", correlation, response_payload) do
+         {:ok, next} <- retain_record(next, "mcp-response", correlation, response_payload),
+         {:ok, next} <- retain_stderr(next, correlation, stderr_payload) do
       {:reply, :ok, next}
     else
       :error -> {:reply, {:error, :inspection_sink_error}, %{state | failed?: true}}
+    end
+  end
+
+  defp retain_stderr(state, _correlation, nil), do: {:ok, state}
+
+  defp retain_stderr(state, correlation, payload) when is_map(payload) do
+    case Map.get(payload, :text, Map.get(payload, "text")) do
+      text when is_binary(text) and text != "" ->
+        retain_record(state, "mcp-stderr", correlation, payload)
+
+      _empty ->
+        {:ok, state}
     end
   end
 
@@ -389,6 +422,9 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
     ok_or_error(valid?)
   end
+
+  defp shape("mcp-stderr", correlation, payload, 7),
+    do: ok_or_error(InspectionRecordTypes.valid_mcp_stderr?(correlation, payload))
 
   defp shape("execution-prints", %{"evaluation_id" => id}, payload, 7) do
     valid? =

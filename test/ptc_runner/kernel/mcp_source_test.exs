@@ -655,6 +655,49 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "private inspection retains stdio child stderr and a refused write is not indeterminate",
+       %{
+         tmp_dir: dir
+       } do
+    marker = Path.join(dir, "stdio-stderr-methods")
+    inspection_path = Path.join(dir, "stdio.inspection.jsonl")
+    tools = mappings_with_effect("fail", :write)
+    registry = stdio_registry(dir, marker, "stderr-warn", tools: tools)
+
+    assert {:ok, %PtcRunner.Kernel.Result{value: result_value}} =
+             dir
+             |> manifest(["remote.fail"],
+               program: single_call_program("remote.fail", "x"),
+               timeout_ms: 5_000,
+               evaluation_timeout_ms: 5_000
+             )
+             |> directory_request(registry, inspect: inspection_path)
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    failure = get_in(result_value, ["value", "value"])
+
+    assert %{
+             "status" => "error",
+             "kind" => "provider_error",
+             "reason" => "domain_error",
+             "details" => "mcp_domain_error",
+             "retryable?" => false
+           } = failure
+
+    refute Map.has_key?(failure, "mutation_state")
+
+    assert {:ok, records} = InspectionArtifact.load(inspection_path)
+    stderrs = Enum.filter(records, &(&1["record_type"] == "mcp-stderr"))
+
+    assert Enum.any?(stderrs, fn record ->
+             record["payload"]["transport"] == "stdio" and
+               record["payload"]["text"] =~
+                 "stdio-fixture: write_text_file will refuse every call."
+           end)
+  end
+
+  @tag :tmp_dir
   test "both transports measure the selected ceiling on the decoded MCP result", %{tmp_dir: dir} do
     empty_result = %{
       "resultType" => "complete",
@@ -1050,13 +1093,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
-  test "post-dispatch MCP failures preserve their cause and make writes indeterminate", %{
+  test "a decoded MCP refusal is a complete answer and does not make writes indeterminate", %{
     tmp_dir: dir
   } do
     cases = [
       {"structured", [rpc_error_tool: "structured"], :domain_error, "mcp_remote_error", []},
-      {"structured", [structured_value: "wrong"], :invalid_result, "mcp_invalid_result", []},
-      {"structured", [result_and_error?: true], :invalid_result, "mcp_protocol_error", []},
       {"structured", [structured_result: input_required_state_only()], :denied,
        "mcp_input_required_refused", []},
       {"structured",
@@ -1067,57 +1108,45 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
            "requestState" => "load-shed"
          }
        ], :denied, "mcp_input_required_refused", []},
+      {"structured", [structured_result: input_required_with_requests()], :invalid_result,
+       "mcp_capability_negotiation_error", []},
+      {"fail", [], :domain_error, "mcp_domain_error", []}
+    ]
+
+    for effect <- [:read, :write],
+        {upstream, fixture_opts, reason, details, manifest_opts} <- cases do
+      run_post_dispatch_case(dir, effect, upstream, fixture_opts, reason, details, manifest_opts)
+    end
+  end
+
+  @tag :tmp_dir
+  test "post-dispatch MCP failures with an unknown outcome make writes indeterminate", %{
+    tmp_dir: dir
+  } do
+    cases = [
+      {"structured", [structured_value: "wrong"], :invalid_result, "mcp_invalid_result", []},
+      {"structured", [result_and_error?: true], :invalid_result, "mcp_protocol_error", []},
       {"structured",
        [structured_result: %{"resultType" => "input_required", "inputRequests" => %{}}],
        :invalid_result, "mcp_protocol_error", []},
-      {"structured", [structured_result: input_required_with_requests()], :invalid_result,
-       "mcp_capability_negotiation_error", []},
       {"structured", [structured_result: %{"resultType" => "input_required"}], :invalid_result,
        "mcp_protocol_error", []},
-      {"fail", [], :domain_error, "mcp_domain_error", []},
       {"text", [large_text?: true], :invalid_result, "mcp_response_exceeded",
        [max_result_bytes: 1_000]}
     ]
 
     for effect <- [:read, :write],
         {upstream, fixture_opts, reason, details, manifest_opts} <- cases do
-      fixture = fixture(self(), fixture_opts)
-      on_exit(fixture.close)
-      tools = mappings_with_effect(upstream, effect)
-      public_name = tools[upstream].as
-
-      assert {:ok, built} =
-               dir
-               |> manifest(
-                 [public_name],
-                 [
-                   program: single_call_program(public_name, "x"),
-                   evaluation_timeout_ms: 5_000
-                 ] ++ manifest_opts
-               )
-               |> directory_request(
-                 registry(fixture.endpoint,
-                   tools: tools,
-                   timeout_ms: 5_000
-                 )
-               )
-               |> RunLifecycle.build()
-
-      assert {:ok, result} = Kernel.run(built.entry_source, built.config)
-      failure = get_in(result.value, ["value", "value"])
-
-      assert %{
-               "status" => "error",
-               "kind" => "provider_error",
-               "reason" => expected_reason,
-               "details" => ^details,
-               "retryable?" => false
-             } = failure
-
-      assert expected_reason == Atom.to_string(reason)
-
-      assert_effect_state(failure, effect)
-      EventSink.stop(built.config.event_sink)
+      run_post_dispatch_case(
+        dir,
+        effect,
+        upstream,
+        fixture_opts,
+        reason,
+        details,
+        manifest_opts,
+        :unknown
+      )
     end
   end
 
@@ -2683,11 +2712,62 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
            } = result_value
   end
 
-  defp assert_effect_state(failure, :read),
+  defp run_post_dispatch_case(
+         dir,
+         effect,
+         upstream,
+         fixture_opts,
+         reason,
+         details,
+         manifest_opts,
+         outcome \\ :answered
+       ) do
+    fixture = fixture(self(), fixture_opts)
+    on_exit(fixture.close)
+    tools = mappings_with_effect(upstream, effect)
+    public_name = tools[upstream].as
+
+    assert {:ok, built} =
+             dir
+             |> manifest(
+               [public_name],
+               [
+                 program: single_call_program(public_name, "x"),
+                 evaluation_timeout_ms: 5_000
+               ] ++ manifest_opts
+             )
+             |> directory_request(
+               registry(fixture.endpoint,
+                 tools: tools,
+                 timeout_ms: 5_000
+               )
+             )
+             |> RunLifecycle.build()
+
+    assert {:ok, result} = Kernel.run(built.entry_source, built.config)
+    failure = get_in(result.value, ["value", "value"])
+
+    assert %{
+             "status" => "error",
+             "kind" => "provider_error",
+             "reason" => expected_reason,
+             "details" => ^details,
+             "retryable?" => false
+           } = failure
+
+    assert expected_reason == Atom.to_string(reason)
+    assert_effect_state(failure, effect, outcome)
+    EventSink.stop(built.config.event_sink)
+  end
+
+  defp assert_effect_state(failure, :read, _outcome),
     do: refute(Map.has_key?(failure, "mutation_state"))
 
-  defp assert_effect_state(failure, :write),
+  defp assert_effect_state(failure, :write, :unknown),
     do: assert(failure["mutation_state"] == "indeterminate")
+
+  defp assert_effect_state(failure, :write, :answered),
+    do: refute(Map.has_key?(failure, "mutation_state"))
 
   defp input_required_state_only do
     %{

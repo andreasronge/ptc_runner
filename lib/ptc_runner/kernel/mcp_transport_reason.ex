@@ -12,11 +12,12 @@ defmodule PtcRunner.Kernel.MCPTransportReason do
                       {mcp_reason, retryable?}
                     end)
 
-  @type provenance :: :not_dispatched | :possibly_dispatched
+  @type provenance :: :not_dispatched | :dispatched | :possibly_dispatched
 
   @spec from_http(term(), provenance()) ::
           {:error, atom(), provenance()} | {:error, atom()}
-  def from_http(reason, provenance) when provenance in [:not_dispatched, :possibly_dispatched] do
+  def from_http(reason, provenance)
+      when provenance in [:not_dispatched, :dispatched, :possibly_dispatched] do
     case Map.fetch(@reasons, reason) do
       {:ok, {mcp_reason, _retryable?}} -> {:error, mcp_reason, provenance}
       :error -> fallback(reason)
@@ -27,7 +28,7 @@ defmodule PtcRunner.Kernel.MCPTransportReason do
           {:ok, ProviderError.t()} | :error
   def provider_error(reason, effect, provenance)
       when effect in [:read, :write, :unknown] and
-             provenance in [:not_dispatched, :possibly_dispatched] do
+             provenance in [:not_dispatched, :dispatched, :possibly_dispatched] do
     with {:ok, retryable?} <- Map.fetch(@provider_reasons, reason) do
       mutation_options =
         if effect in [:write, :unknown] and provenance == :possibly_dispatched,

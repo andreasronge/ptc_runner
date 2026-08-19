@@ -17,9 +17,9 @@ defmodule PtcRunner.Kernel.Dispatcher do
   default to non-retryable in both environments; Dispatcher-owned provider
   timeouts remain retryable. Write and unknown failures are non-retryable and
   carry `mutation_state: :indeterminate` when invocation may have reached
-  external state. A trusted `ProviderError` with
-  `dispatch_provenance: :not_dispatched` preserves its specific pre-dispatch
-  policy without exposing that internal provenance. Workflow capabilities also
+  external state and the outcome is unknown. A trusted `ProviderError` with
+  `dispatch_provenance: :not_dispatched` or `:dispatched` preserves its
+  specific policy without exposing that internal provenance. Workflow capabilities also
   retain explicit provider-owned retry policy.
   Before a mission provider publishes a terminal policy failure, its monitored
   callback records that classification in RunState so a subsequent evaluator
@@ -850,7 +850,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
          %Capability{effect: effect},
          provenance
        )
-       when effect in [:write, :unknown] and provenance != :not_dispatched do
+       when effect in [:write, :unknown] and provenance in [nil, :possibly_dispatched] do
     result
     |> Map.put(:retryable?, false)
     |> Map.put(:mutation_state, :indeterminate)

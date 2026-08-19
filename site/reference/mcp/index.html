@@ -176,10 +176,12 @@ the server cannot return secrets, paths, or stack traces.</p><h2 id="select-less
     {&quot;name&quot;: &quot;workspace&quot;, &quot;config&quot;: {&quot;allow&quot;: [&quot;workspace.read&quot;]}}
   ]
 }</code></pre><p>If an installation maps any write tool, every selecting manifest must provide a
-non-empty <code class="inline">allow</code> list, even when it selects only reads. A failed or timed-out
-write is never retried automatically and may report
+non-empty <code class="inline">allow</code> list, even when it selects only reads. A timed-out or
+transport-failed write is never retried automatically and may report
 <code class="inline">mutation_state: &quot;indeterminate&quot;</code>; the external mutation may already have
-happened.</p><p>The checked-in <a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/mcp/writer">writer sample</a> shows the
+happened. A complete decoded refusal (<code class="inline">isError: true</code>) or JSON-RPC error is
+not indeterminate: the server answered, so the caller can treat that outcome
+as known.</p><p>The checked-in <a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/mcp/writer">writer sample</a> shows the
 complete installation, mandatory <code class="inline">allow</code> list, basename confinement, and the
 rule that the caller must reconcile an indeterminate result rather than repeat
 the mutation blindly.</p><p>A prompt-visible PTC-Lisp wrapper can present a smaller domain API than the raw

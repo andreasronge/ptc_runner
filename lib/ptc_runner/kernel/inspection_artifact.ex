@@ -369,6 +369,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       outputs: MapSet.new(),
       mcp_requests: %{},
       mcp_responses: MapSet.new(),
+      mcp_stderr: MapSet.new(),
       evaluations: MapSet.new(),
       analyses: MapSet.new(),
       preludes: MapSet.new(),
@@ -467,6 +468,22 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     if Map.get(state.mcp_requests, key) == {transport, payload["mission_name"]} and
          not MapSet.member?(state.mcp_responses, key),
        do: {:cont, {:ok, %{state | mcp_responses: MapSet.put(state.mcp_responses, key)}}},
+       else: invalid_record_join()
+  end
+
+  defp validate_record_join(
+         %{
+           "record_type" => "mcp-stderr",
+           "correlation" => %{"capability_id" => capability_id, "request_id" => request_id},
+           "payload" => %{"transport" => transport} = payload
+         },
+         state
+       ) do
+    key = {capability_id, request_id}
+
+    if Map.get(state.mcp_requests, key) == {transport, payload["mission_name"]} and
+         not MapSet.member?(state.mcp_stderr, key),
+       do: {:cont, {:ok, %{state | mcp_stderr: MapSet.put(state.mcp_stderr, key)}}},
        else: invalid_record_join()
   end
 
@@ -616,6 +633,16 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       payload["transport"] in ["stdio", "streamable_http"] and
       MCPProtocol.valid_inspection_exchange?(record_type, payload["body"], request_id)
   end
+
+  defp valid_shape?(
+         %{
+           "record_type" => "mcp-stderr",
+           "correlation" => correlation,
+           "payload" => payload
+         },
+         7
+       ),
+       do: InspectionRecordTypes.valid_mcp_stderr?(correlation, payload)
 
   defp valid_shape?(
          %{
@@ -1006,7 +1033,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          _prelude_components,
          missing
        )
-       when record_type in ["mcp-request", "mcp-response"] do
+       when record_type in ["mcp-request", "mcp-response", "mcp-stderr"] do
     if valid_request_id?(request_id),
       do:
         correlate_or_mark_missing(

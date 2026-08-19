@@ -112,8 +112,9 @@ this step from a checkout.</p><p>PtcRunner requires the MCP <code class="inline"
 incompatible endpoint fails closed instead of falling back to a legacy
 handshake; check the <a href="/reference/mcp/#protocol-compatibility">protocol compatibility reference</a>
 before choosing a server.</p><p>When adding a real tool:</p><ol><li>install the MCP source in the operator-owned host document;</li><li>map only the upstream operations the mission needs;</li><li>give every public mapping an explicit <code class="inline">read</code> or <code class="inline">write</code> effect;</li><li>select the alias in the intended mission;</li><li>explicitly allow selected write-bearing tools; and</li><li>run plain <code class="inline">doctor</code> before the active <code class="inline">--connect</code> probe.</li></ol><p>Treat an indeterminate write as an unknown outcome, not as a safe automatic
-retry. Keep credentials out of application manifests and model-visible
-descriptions.</p><p>Use the <a href="/reference/mcp/">MCP reference</a> for stdio and HTTP transports,
+retry. A server that returned a complete refusal has already answered; that
+failure is not indeterminate. Keep credentials out of application manifests
+and model-visible descriptions.</p><p>Use the <a href="/reference/mcp/">MCP reference</a> for stdio and HTTP transports,
 tool mapping, effects, authentication, OAuth, lifecycle, cursors, content
 identity, ceilings, and diagnostics.</p>
 </article>
