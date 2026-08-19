@@ -1207,6 +1207,24 @@ defmodule PtcRunner.Kernel.CommandContract do
        ),
        do: ResultContractDiagnostic.message_schema(row.message)
 
+  # The terminal-result ceiling belongs to the effective limits, not to a
+  # document the command can point a source at, so it publishes its bounded
+  # message against a null source.
+  defp diagnostic_message_schema(
+         %{phase: :result_cleanup, code: :result_limit_exceeded} = row,
+         %{"type" => "null"}
+       ),
+       do: RuntimeLimitDiagnostic.result_limit_message_schema(row.message)
+
+  # The message above is admitted only against a null source, so the sourced
+  # branch of the same row must stay pinned to the catalog literal; otherwise
+  # the published schema would accept a pairing the command refuses to build.
+  defp diagnostic_message_schema(
+         %{phase: :result_cleanup, code: :result_limit_exceeded} = row,
+         _source
+       ),
+       do: %{"const" => row.message}
+
   # Only a contract source carries a rule-derived message. The application
   # source reports the same code for a malformed `contracts` section, which has
   # no schema document to locate a rule in, so it keeps the catalog literal.

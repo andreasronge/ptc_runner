@@ -306,6 +306,23 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     do: diagnostic(:execution, :inspection_sink_unavailable, provider_activity)
 
   defp failure_diagnostic(
+         %Error{
+           kind: :limit_exceeded,
+           reason: :terminal_result_exceeded,
+           details: %{limit: :terminal_result_bytes, limit_value: limit}
+         },
+         provider_activity
+       ) do
+    case RuntimeLimitDiagnostic.result_limit_message(limit) do
+      {:ok, message} ->
+        diagnostic(:result_cleanup, :result_limit_exceeded, provider_activity, message: message)
+
+      :error ->
+        diagnostic(:result_cleanup, :result_limit_exceeded, provider_activity)
+    end
+  end
+
+  defp failure_diagnostic(
          %Error{kind: :limit_exceeded, reason: :terminal_result_exceeded},
          provider_activity
        ),

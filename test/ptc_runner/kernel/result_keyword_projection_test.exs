@@ -278,7 +278,15 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
              )
 
     assert {:ok, records} = InspectionSink.records(inspection)
-    refute Enum.any?(records, &(&1["record_type"] == "execution-error"))
+    error = Enum.find(records, &(&1["record_type"] == "execution-error"))
+
+    # The breached ceiling records itself so the failure names its own limit,
+    # but equality between the child result and the boundary value is not
+    # dataflow evidence, so no producer is claimed alongside it.
+    assert error["payload"]["details"] == %{
+             "limit" => "terminal_result_bytes",
+             "limit_value" => 1
+           }
   end
 
   defp boundary_failure_config(run_id) do

@@ -38,11 +38,13 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Kernel.ReplSessionOwner
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Result, as: Native
   alias PtcRunner.Lisp.RetainedSize
 
@@ -216,6 +218,8 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp eval_open(%{mode: %{kind: :mission, name: name}} = session, source) do
     mission = Map.fetch!(session.config.missions, name)
+    limits = session.config.limits
+    remaining_ms = RunState.remaining_ms(session.state)
 
     result =
       Evaluation.evaluate_source(
@@ -223,13 +227,13 @@ defmodule PtcRunner.Kernel.ReplSession do
         name,
         mission.environment,
         source,
-        session.config.limits.evaluation_timeout_ms,
+        limits.evaluation_timeout_ms,
         session.config.event_sink,
         session.config.inspection_sink,
-        result_limit_bytes: session.config.limits.terminal_result_bytes
+        result_limit_bytes: limits.terminal_result_bytes
       )
 
-    mission_result(session, result)
+    mission_result(session, name_mission_timeout(result, limits, remaining_ms))
   catch
     :exit, _reason -> session_closed(session)
   end
@@ -628,29 +632,101 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp run_lisp(session, memory, history, source) do
     limits = session.config.limits
-    timeout_ms = min(limits.evaluation_timeout_ms, RunState.remaining_ms(session.state))
+    remaining_ms = RunState.remaining_ms(session.state)
+    timeout_ms = min(limits.evaluation_timeout_ms, remaining_ms)
     deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
 
-    Lisp.run_native(source,
-      caller: :repl,
-      context: session.config.input,
-      memory: memory,
-      turn_history: history,
-      tools: tools(session, deadline_ms),
-      prelude: prelude(session.config.workflow_environment),
-      timeout: timeout_ms,
-      compile_timeout: timeout_ms,
-      run_deadline_ms: deadline_ms,
-      pmap_timeout: limits.parallel_timeout_ms,
-      max_heap: limits.evaluation_heap_words,
-      max_parallel_workers: limits.live_provider_tasks,
-      max_program_bytes: limits.subordinate_source_bytes,
-      max_tool_call_result_bytes: limits.capability_result_bytes,
-      preserve_runtime_callables: true,
-      filter_context: false,
-      link: true
-    )
+    result =
+      Lisp.run_native(source,
+        caller: :repl,
+        context: session.config.input,
+        memory: memory,
+        turn_history: history,
+        tools: tools(session, deadline_ms),
+        prelude: prelude(session.config.workflow_environment),
+        timeout: timeout_ms,
+        compile_timeout: timeout_ms,
+        run_deadline_ms: deadline_ms,
+        pmap_timeout: limits.parallel_timeout_ms,
+        max_heap: limits.evaluation_heap_words,
+        max_parallel_workers: limits.live_provider_tasks,
+        max_program_bytes: limits.subordinate_source_bytes,
+        max_tool_call_result_bytes: limits.capability_result_bytes,
+        preserve_runtime_callables: true,
+        filter_context: false,
+        link: true
+      )
+
+    name_timeout_limit(result, limits, remaining_ms)
   end
+
+  # The sandbox reports the milliseconds still left when it killed the worker,
+  # a number that matches no configured value and cannot be searched for. The
+  # binding ceiling is known here, so say which one stopped the form and where
+  # to raise it, through the same builder `ptc run` uses. A model call cannot
+  # finish inside the 1,000 ms `evaluation_timeout_ms` default, which makes this
+  # the first wall an interactive session hits.
+  defp name_timeout_limit({:error, %Native{fail: fail} = step}, limits, remaining) do
+    case named_timeout_message(fail.reason, Map.get(fail, :message), limits, remaining) do
+      {:ok, message} -> {:error, %{step | fail: %{fail | message: message}}}
+      :error -> {:error, step}
+    end
+  end
+
+  defp name_timeout_limit(result, _limits, _remaining), do: result
+
+  # A mission form is bounded by the same ceiling as a workflow one, and the
+  # evaluator hands back only the milliseconds it had left. Name the limit here,
+  # before `mission_result/2` copies the message onto the step.
+  defp name_mission_timeout(
+         %{kind: reason, details: %{message: message} = details} = result,
+         limits,
+         remaining
+       ) do
+    case named_timeout_message(reason, message, limits, remaining) do
+      {:ok, named} -> %{result | details: %{details | message: named}}
+      :error -> result
+    end
+  end
+
+  defp name_mission_timeout(result, _limits, _remaining), do: result
+
+  # Compilation and execution are separated the way `ptc run` separates them, by
+  # the reason the evaluator reported rather than by which sandbox stage was
+  # running. A parallel deadline also surfaces as `:timeout`, and answering it
+  # with the evaluation ceiling would name a limit that never fired.
+  defp named_timeout_message(:compile_timeout, _message, limits, remaining),
+    do: window_timeout_message(limits, remaining, :compilation)
+
+  defp named_timeout_message(:timeout, message, limits, remaining) do
+    if parallel_timeout?(message) do
+      RuntimeLimitDiagnostic.live_timeout_message(
+        :parallel_timeout_ms,
+        limits.parallel_timeout_ms,
+        :execution
+      )
+    else
+      window_timeout_message(limits, remaining, :execution)
+    end
+  end
+
+  defp named_timeout_message(_reason, _message, _limits, _remaining), do: :error
+
+  # A form's window is `min(evaluation_timeout_ms, remaining run duration)`, so
+  # whichever produced it is the limit worth naming.
+  defp window_timeout_message(limits, remaining, phase) do
+    {limit, limit_ms} =
+      if limits.evaluation_timeout_ms <= remaining,
+        do: {:evaluation_timeout_ms, limits.evaluation_timeout_ms},
+        else: {:run_duration_ms, limits.run_duration_ms}
+
+    RuntimeLimitDiagnostic.live_timeout_message(limit, limit_ms, phase)
+  end
+
+  defp parallel_timeout?(message) when is_binary(message),
+    do: String.ends_with?(message, Helpers.parallel_timeout_message())
+
+  defp parallel_timeout?(_message), do: false
 
   defp tools(session, validation_deadline_ms) do
     timeout_ms = session.config.limits.evaluation_timeout_ms

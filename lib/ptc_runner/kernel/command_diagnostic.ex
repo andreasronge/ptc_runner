@@ -383,6 +383,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
        do: RuntimeLimitDiagnostic.run_duration_message?(message)
 
   defp valid_message_source?(
+         message,
+         %{phase: :result_cleanup, code: :result_limit_exceeded},
+         nil
+       ),
+       do: RuntimeLimitDiagnostic.result_limit_message?(message)
+
+  defp valid_message_source?(
          _message,
          %{phase: :execution, code: :replay_fixture_missing},
          %CommandSource{kind: :runtime}

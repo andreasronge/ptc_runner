@@ -334,6 +334,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :execution, code: :replay_fixture_missing, message: fallback}),
     do: LLMReplayDiagnostic.message_schema(fallback)
 
+  def message_schema(%{phase: :result_cleanup, code: :result_limit_exceeded, message: fallback}),
+    do: RuntimeLimitDiagnostic.result_limit_message_schema(fallback)
+
   def message_schema(%{phase: :local_preflight, code: code, message: fallback})
       when code in @fixture_codes,
       do: LLMReplayFixtureDiagnostic.message_schema(fallback)
@@ -366,6 +369,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:execution, :replay_fixture_missing, message),
     do: LLMReplayDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:result_cleanup, :result_limit_exceeded, message),
+    do: RuntimeLimitDiagnostic.result_limit_message?(message)
 
   defp valid_dynamic_message?(:local_preflight, code, message) when code in @fixture_codes,
     do: LLMReplayFixtureDiagnostic.valid_message?(message)

@@ -280,7 +280,10 @@ defmodule PtcRunner.Kernel.Runner do
               %Error{
                 kind: :limit_exceeded,
                 reason: :terminal_result_exceeded,
-                details: %{},
+                details: %{
+                  limit: :terminal_result_bytes,
+                  limit_value: config.limits.terminal_result_bytes
+                },
                 usage: RunState.usage(state)
               }
             )

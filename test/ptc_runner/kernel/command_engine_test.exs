@@ -670,21 +670,21 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["execution"]["usage"]["llm_usage"] == nil
 
     assert outcome.envelope["error"]["message"] ==
-             "subordinate_evaluations limit 4 was exceeded; raise the manifest or host ceiling, or reduce total subordinate evaluations or agent turns"
+             "subordinate_evaluations limit 4 was exceeded; raise limits.subordinate_evaluations in the manifest, and the installed host ceiling if it is lower, or reduce total subordinate evaluations or agent turns"
 
     assert {:stderr, rendered} = CommandRenderer.render(outcome)
 
     assert rendered ==
-             "error: execution/runtime_limit_exceeded: subordinate_evaluations limit 4 was exceeded; raise the manifest or host ceiling, or reduce total subordinate evaluations or agent turns (run_ref: #{run_ref})\n"
+             "error: execution/runtime_limit_exceeded: subordinate_evaluations limit 4 was exceeded; raise limits.subordinate_evaluations in the manifest, and the installed host ceiling if it is lower, or reduce total subordinate evaluations or agent turns (run_ref: #{run_ref})\n"
 
     assert_schema_valid(outcome.envelope)
 
     runtime_source = CommandSource.fixed(:runtime)
 
     for invalid_message <- [
-          "subordinate_evaluations limit 0 was exceeded; raise the manifest or host ceiling, or reduce total subordinate evaluations or agent turns",
-          "subordinate_evaluations limit 04 was exceeded; raise the manifest or host ceiling, or reduce total subordinate evaluations or agent turns",
-          "subordinate_evaluations limit 2592000001 was exceeded; raise the manifest or host ceiling, or reduce total subordinate evaluations or agent turns",
+          "subordinate_evaluations limit 0 was exceeded; raise limits.subordinate_evaluations in the manifest, and the installed host ceiling if it is lower, or reduce total subordinate evaluations or agent turns",
+          "subordinate_evaluations limit 04 was exceeded; raise limits.subordinate_evaluations in the manifest, and the installed host ceiling if it is lower, or reduce total subordinate evaluations or agent turns",
+          "subordinate_evaluations limit 2592000001 was exceeded; raise limits.subordinate_evaluations in the manifest, and the installed host ceiling if it is lower, or reduce total subordinate evaluations or agent turns",
           "subordinate_evaluations limit 4 was exceeded; expose private details"
         ] do
       assert {:error, :invalid_command_diagnostic} =
@@ -750,17 +750,17 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
 
     assert outcome.envelope["error"]["message"] ==
-             "parallel_timeout_ms limit 60000 ms was exceeded during execution"
+             "parallel_timeout_ms limit 60000 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, and the installed host ceiling if it is lower"
 
     assert_schema_valid(outcome.envelope)
 
     runtime_source = CommandSource.fixed(:runtime)
 
     for invalid_message <- [
-          "parallel_timeout_ms limit 0 ms was exceeded during execution",
-          "parallel_timeout_ms limit 060000 ms was exceeded during execution",
-          "run_duration_ms limit 60000 ms was exceeded during execution",
-          "parallel_timeout_ms limit 60000 ms was exceeded during execution; private"
+          "parallel_timeout_ms limit 0 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, and the installed host ceiling if it is lower",
+          "parallel_timeout_ms limit 060000 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, and the installed host ceiling if it is lower",
+          "run_duration_ms limit 60000 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower",
+          "parallel_timeout_ms limit 60000 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, and the installed host ceiling if it is lower; private"
         ] do
       assert {:error, :invalid_command_diagnostic} =
                CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
@@ -900,9 +900,41 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.exit_status == 6
 
     assert outcome.envelope["error"]["message"] =~
-             ~r/^run_duration_ms limit 1 ms was exceeded during (compilation|execution)$/
+             ~r/^run_duration_ms limit 1 ms was exceeded during (compilation|execution); raise limits\.run_duration_ms in the manifest, and the installed host ceiling if it is lower$/
 
     assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a result over terminal_result_bytes names the limit, its value, and the manifest key", %{
+    tmp_dir: directory
+  } do
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "wide", "path" => "wide.clj"}],
+        "entry" => "wide/run"
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"terminal_result_bytes" => 100},
+      "providers" => %{"workflow" => [], "mission" => []}
+    }
+
+    application =
+      write_application(directory, "result-limit-exceeded", manifest, [
+        {"wide.clj", ~s|(ns wide) (defn run [input] (return "#{String.duplicate("x", 200)}"))|}
+      ])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["error"]["code"] == "result_limit_exceeded"
+    assert outcome.exit_status == 7
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.result_limit_message(100)
+    assert outcome.envelope["error"]["message"] == expected
+    assert outcome.envelope["error"]["message"] =~ "raise limits.terminal_result_bytes"
     assert_schema_valid(outcome.envelope)
   end
 
@@ -941,7 +973,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:ok, message} =
              RuntimeLimitDiagnostic.live_timeout_message(:run_duration_ms, 3_000, :execution)
 
-    assert message == "run_duration_ms limit 3000 ms was exceeded during execution"
+    assert message ==
+             "run_duration_ms limit 3000 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower"
 
     # The wall-clock stop keeps its own code and status, so a script can still
     # separate it from a turn limit on more than the exit code.
@@ -960,7 +993,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert {:error, :invalid_command_diagnostic} =
              CommandDiagnostic.new(:execution, :run_timeout,
-               message: "run_duration_ms limit 0 ms was exceeded during execution",
+               message:
+                 "run_duration_ms limit 0 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower",
                source: CommandSource.fixed(:runtime),
                provider_activity: true
              )
