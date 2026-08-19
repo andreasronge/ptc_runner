@@ -203,7 +203,7 @@ defmodule PtcRunner.LiveStatusTest do
 
   test "live timeout formatting names the run-duration limit" do
     assert {:ok,
-            "run_duration_ms limit 200 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, at or below the installed host ceiling"} =
+            "run_duration_ms limit 200 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower"} =
              RuntimeLimitDiagnostic.live_timeout_message(
                :run_duration_ms,
                200,
@@ -271,7 +271,7 @@ defmodule PtcRunner.LiveStatusTest do
                     %{
                       phase: "error",
                       outcome_reason:
-                        "parallel_timeout_ms limit 200 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, at or below the installed host ceiling"
+                        "parallel_timeout_ms limit 200 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, and the installed host ceiling if it is lower"
                     }},
                    2_000
   end
@@ -304,7 +304,7 @@ defmodule PtcRunner.LiveStatusTest do
                     %{
                       phase: "error",
                       outcome_reason:
-                        "run_duration_ms limit 200 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, at or below the installed host ceiling"
+                        "run_duration_ms limit 200 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower"
                     }},
                    2_000
   end

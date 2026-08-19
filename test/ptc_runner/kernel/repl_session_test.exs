@@ -909,7 +909,36 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
              ReplSession.eval(session, long_running_body(4))
 
     assert RuntimeLimitDiagnostic.timeout_message?(message)
-    assert message =~ "evaluation_timeout_ms limit 200 ms was exceeded"
+    assert message =~ "evaluation_timeout_ms limit 200 ms was exceeded during execution"
+    assert message =~ "raise limits.evaluation_timeout_ms in the manifest"
+  end
+
+  # A form that never finishes compiling reports its own reason, and the same
+  # ceiling bounds it. The phase is taken from that reason, the way `ptc run`
+  # takes it, so a compile stop is not reported as an execution stop.
+  test "a form stopped while compiling names the same ceiling and the compilation phase" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 1, workflow_timeout_ms: 5_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-compilation-ceiling")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+    source = "(do " <> String.duplicate("(+ 1 2) ", 14_000) <> ")"
+
+    assert {:error, %{fail: %{reason: :compile_timeout, message: message}}, _session} =
+             ReplSession.eval(session, source)
+
+    assert RuntimeLimitDiagnostic.timeout_message?(message)
+    assert message =~ "evaluation_timeout_ms limit 1 ms was exceeded during compilation"
     assert message =~ "raise limits.evaluation_timeout_ms in the manifest"
   end
 

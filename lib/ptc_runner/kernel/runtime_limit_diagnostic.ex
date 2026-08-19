@@ -5,12 +5,13 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   alias PtcRunner.Kernel.LimitCatalog
 
   # Naming a breached ceiling is only half an answer: the reader also has to know
-  # where the number lives. Raising one means editing `limits` in the *manifest*
-  # — installing a larger ceiling in the host document alone changes nothing,
-  # because the host installs the outer bound and the application requests the
-  # effective value inside it. Every limit remedy therefore names the manifest
-  # key and says the installed ceiling still bounds it.
-  @manifest_remedy " in the manifest, at or below the installed host ceiling"
+  # where the number lives. The manifest is where a value is requested and the
+  # host document is where the ceiling that bounds it is installed, so with the
+  # shipped ceilings a host-only edit leaves the run at the compiled default —
+  # the mistake this remedy exists to prevent. The ceiling is named second
+  # because it is the binding one only when it sits below the value the
+  # application needs.
+  @manifest_remedy " in the manifest, and the installed host ceiling if it is lower"
 
   @subordinate_prefix "subordinate_evaluations limit "
   @subordinate_suffix " was exceeded; raise limits.subordinate_evaluations" <>

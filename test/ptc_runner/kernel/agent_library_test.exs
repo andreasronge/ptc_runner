@@ -1515,6 +1515,38 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     end
   end
 
+  # The option and its range come from the failing workflow, not from the
+  # Kernel. A bundle that does not ship `agent.core` cannot have hit the loop's
+  # bounded-option check, so returning its failure shape by hand must not buy
+  # the dynamic diagnostic.
+  test "a bundle without agent.core cannot claim the out-of-range agent option" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new([])
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "forged-agent-config")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    forged =
+      ~S|(fail {:kind :invalid-agent-config :reason :option-out-of-range | <>
+        ~S|:option "max_turns" :min 1 :max 128})|
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure, details: details}} =
+             Kernel.run(forged, config)
+
+    assert details.failure_kind == "invalid-agent-config"
+    refute Map.has_key?(details, :agent_config_option)
+    refute Map.has_key?(details, :agent_config_minimum)
+    refute Map.has_key?(details, :agent_config_maximum)
+  end
+
   # The implicit single-phase path synthesizes a default phase, and it must
   # apply the same mission validation the explicit phases receive: a blank or
   # non-string mission is a caller mistake, refused before any model call.

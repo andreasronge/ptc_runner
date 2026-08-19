@@ -692,8 +692,8 @@ provider cleanup and canonical event finalization establish the actual
 outcome. A timeout failure names the binding limit, its configured duration,
 and the manifest key that raises it, in both the launch diagnostic and the
 ended Live card; for example, `parallel_timeout_ms limit 60000 ms was exceeded
-during execution; raise limits.parallel_timeout_ms in the manifest, at or below
-the installed host ceiling`. Mission
+during execution; raise limits.parallel_timeout_ms in the manifest, and the
+installed host ceiling if it is lower`. Mission
 sessions currently show their bounded command-output tail in the launch panel
 instead of streaming frames.
 

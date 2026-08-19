@@ -662,23 +662,25 @@ defmodule PtcRunner.Kernel.ReplSession do
   # binding ceiling is known here, so say which one stopped the form and where
   # to raise it, through the same builder `ptc run` uses. A model call cannot
   # finish inside the 1,000 ms `evaluation_timeout_ms` default, which makes this
-  # the first wall an interactive session hits.
-  defp name_timeout_limit({:error, %Native{fail: %{reason: :timeout}} = step}, limits, remaining) do
+  # the first wall an interactive session hits. Compilation and execution are
+  # separated the way `ptc run` separates them, by the reason the evaluator
+  # reported rather than by which sandbox stage was running.
+  defp name_timeout_limit({:error, %Native{fail: %{reason: reason}} = step}, limits, remaining)
+       when reason in [:timeout, :compile_timeout] do
     {limit, limit_ms} =
       if limits.evaluation_timeout_ms <= remaining,
         do: {:evaluation_timeout_ms, limits.evaluation_timeout_ms},
         else: {:run_duration_ms, limits.run_duration_ms}
 
-    case RuntimeLimitDiagnostic.live_timeout_message(limit, limit_ms, timeout_phase(step)) do
+    phase = if reason == :compile_timeout, do: :compilation, else: :execution
+
+    case RuntimeLimitDiagnostic.live_timeout_message(limit, limit_ms, phase) do
       {:ok, message} -> {:error, %{step | fail: %{step.fail | message: message}}}
       :error -> {:error, step}
     end
   end
 
   defp name_timeout_limit(result, _limits, _remaining), do: result
-
-  defp timeout_phase(%Native{fail: %{details: %{phase: :setup}}}), do: :compilation
-  defp timeout_phase(_step), do: :execution
 
   defp tools(session, validation_deadline_ms) do
     timeout_ms = session.config.limits.evaluation_timeout_ms
