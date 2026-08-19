@@ -118,9 +118,10 @@ caller should continue only after a successful agent result.</p><h3 id="agent-co
 {:status :subject-failure
  :kind failure-kind
  :error bounded-error}</code></pre><p>Subject failures include model-program failure, exhausted turns, and a
-non-retryable generated-program error. Provider, prompt, transcript, quota,
-evaluation-admission, and other host failures still fail the outer workflow.
-This prevents an evaluator from scoring a provider outage against the subject.</p><h3 id="agent-core-run-result-value"><code class="inline">agent.core/run-result-value</code></h3><pre><code class="clojure language-clojure">(agent.core/run-result-value task config)</code></pre><p>Runs the same loop, validates every model-authored terminal candidate against
+non-retryable generated-program error. Provider, prompt, transcript, quota
+(including a spent per-alias <code class="inline">max_calls</code>), evaluation-admission, and other host
+failures still fail the outer workflow. This prevents an evaluator from scoring
+a provider outage against the subject.</p><h3 id="agent-core-run-result-value"><code class="inline">agent.core/run-result-value</code></h3><pre><code class="clojure language-clojure">(agent.core/run-result-value task config)</code></pre><p>Runs the same loop, validates every model-authored terminal candidate against
 the manifest result contract, and returns the contract-valid value to its
 PTC-Lisp caller. Invalid candidates receive bounded correction feedback while
 a turn remains. If correction is exhausted, the Kernel reports an authenticated

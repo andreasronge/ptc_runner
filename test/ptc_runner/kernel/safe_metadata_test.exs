@@ -4,8 +4,8 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
   alias PtcRunner.Kernel.SafeMetadata
 
   describe "agent-action annotation vocabulary" do
-    test "accepts exactly turn and kind with the closed three-value vocabulary" do
-      for kind <- ["tool-call", "protocol-error", "provider-error"] do
+    test "accepts exactly turn and kind with the closed action vocabulary" do
+      for kind <- ["tool-call", "protocol-error", "provider-error", "max-calls"] do
         assert SafeMetadata.annotation?("agent-action", %{"turn" => 0, "kind" => kind})
       end
 
@@ -21,7 +21,7 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
     end
 
     test "accepts the phased shape with phase, phase-turn, and mission" do
-      for kind <- ["tool-call", "protocol-error", "provider-error"] do
+      for kind <- ["tool-call", "protocol-error", "provider-error", "max-calls"] do
         assert SafeMetadata.annotation?("agent-action", %{
                  "turn" => 3,
                  "kind" => kind,

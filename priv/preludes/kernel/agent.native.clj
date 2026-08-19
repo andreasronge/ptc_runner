@@ -44,8 +44,33 @@
       (json/parse-string arguments)
       arguments)))
 
+(defn- named-token [value]
+  (cond
+    (keyword? value) (name value)
+    (string? value) value
+    :else nil))
+
+(defn- hyphenated? [value expected]
+  (let [token (named-token value)]
+    (or (= token expected)
+        (and (= expected "limit-exceeded") (= token "limit_exceeded"))
+        (and (= expected "capability-quota") (= token "capability_quota"))
+        (and (= expected "max-calls") (= token "max_calls")))))
+
+(defn- max-calls-refusal? [response]
+  (let [details (get response :details)]
+    (and (map? response)
+         (hyphenated? (get response :status) "error")
+         (hyphenated? (get response :kind) "limit-exceeded")
+         (hyphenated? (get response :reason) "capability-quota")
+         (map? details)
+         (hyphenated? (get details :limit) "max-calls")
+         (string? (get details :alias))
+         (integer? (get details :limit_value))
+         (pos? (get details :limit_value)))))
+
 (defn normalize
-  "Normalizes one provider response into a tool call, provider error, or protocol error."
+  "Normalizes one provider response into a tool call, provider error, max-calls refusal, or protocol error."
   [response max-program-chars]
   (let [max-program-chars (if (and (integer? max-program-chars)
                                    (pos? max-program-chars)
@@ -53,6 +78,9 @@
                             max-program-chars
                             64000)]
   (cond
+    (max-calls-refusal? response)
+    {:kind :max-calls :error response}
+
     (and (map? response) (= :error (get response :status)))
     {:kind :provider-error :error response}
 

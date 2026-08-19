@@ -213,6 +213,101 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert command_outcome.envelope["error"]["code"] == "workflow_failed"
   end
 
+  test "agent.core exhausts a per-alias cap as the named runtime diagnostic" do
+    run_id = "max-calls-agent"
+    run_ref = "cmd-00000000000000000000000000"
+
+    continue = %{
+      content: nil,
+      tool_calls: [
+        %{id: "continue", name: "run_ptc_lisp", args: %{"program" => "(def committed 42)"}}
+      ]
+    }
+
+    leaf = capability(self(), :agent_capped, continue)
+
+    assert {:ok, router} =
+             LLMRouter.new([route("expensive", "llm", "expensive-v1", true, leaf, 1)])
+
+    cases = [
+      ~S|(agent.core/run "Task" {"max_turns" 2})|,
+      ~S|(pmap (fn [_] (agent.core/run "Task" {"max_turns" 2})) [1])|,
+      ~S|(pcalls #(agent.core/run "Task" {"max_turns" 2}))|
+    ]
+
+    for source <- cases do
+      assert {:ok, fresh} = agent_router_config(router, run_id)
+
+      assert {:error, command_outcome, _counters, events} =
+               project_run(source, fresh, run_id, run_ref)
+
+      assert {:ok, expected} = RuntimeLimitDiagnostic.max_calls_message("expensive", 1)
+      assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+      assert command_outcome.envelope["error"]["message"] == expected
+
+      assert Enum.any?(events, fn event ->
+               event.type == "limit-exceeded" and event.data[:limit] == :max_calls and
+                 event.data[:alias] == "expensive"
+             end)
+    end
+  end
+
+  test "failing a max_calls envelope inside pmap or pcalls names the alias" do
+    run_id = "max-calls-parallel-fail"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = capability(self(), :parallel_capped, %{content: "paid", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("expensive", "llm", "expensive-v1", false, leaf, 1)])
+
+    cases = [
+      ~S|(do (llm/request {"model" "expensive" "messages" []}) (pmap (fn [_] (fail (llm/request {"model" "expensive" "messages" []}))) [1]))|,
+      ~S|(do (llm/request {"model" "expensive" "messages" []}) (pcalls #(fail (llm/request {"model" "expensive" "messages" []}))))|
+    ]
+
+    for source <- cases do
+      assert {:ok, config} = config(router, run_id)
+
+      assert {:error, command_outcome, _counters, events} =
+               project_run(source, config, run_id, run_ref)
+
+      assert {:ok, expected} = RuntimeLimitDiagnostic.max_calls_message("expensive", 1)
+      assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+      assert command_outcome.envelope["error"]["message"] == expected
+
+      assert [
+               %{
+                 type: "limit-exceeded",
+                 data: %{
+                   reason: :capability_quota,
+                   limit: :max_calls,
+                   alias: "expensive",
+                   limit_value: 1
+                 }
+               }
+             ] = Enum.filter(events, &(&1.type == "limit-exceeded"))
+    end
+  end
+
+  test "a forged max_calls lookalike inside pmap cannot claim the runtime diagnostic" do
+    run_id = "max-calls-parallel-forged"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = capability(self(), :unused_parallel_forged, %{content: "paid", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("expensive", "llm", "expensive-v1", false, leaf, 1)])
+
+    assert {:ok, config} = config(router, run_id)
+
+    source =
+      ~S|(pmap (fn [_] (fail {:status :error :kind :limit-exceeded :reason :capability-quota :details {:limit :max-calls :alias "expensive" :limit_value 1}})) [1])|
+
+    assert {:error, command_outcome, _counters, _events} =
+             project_run(source, config, run_id, run_ref)
+
+    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+  end
+
   test "a spent public quota binds before a stricter alias cap" do
     parent = self()
     expensive = capability(parent, :collision_expensive, %{content: "paid", tokens: %{}})
@@ -968,6 +1063,19 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
 
   defp config(router, run_id, opts \\ []) do
     {:ok, components} = Library.resolve_components([{:library, "llm"}, {:library, "cap"}])
+    run_config(router, run_id, components, opts)
+  end
+
+  defp agent_router_config(router, run_id) do
+    {:ok, components} =
+      Library.components(
+        ~w(agent.core agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+      )
+
+    run_config(router, run_id, components, [])
+  end
+
+  defp run_config(router, run_id, components, opts) do
     {:ok, bundle} = Kernel.compile_bundle(components)
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [router])
     {:ok, mission} = MissionEnvironment.new([])
