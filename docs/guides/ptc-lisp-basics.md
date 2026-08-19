@@ -1,6 +1,6 @@
 # Read and write PTC-Lisp
 
-> **Audience:** anyone meeting PTC-Lisp for the first time — to read what a
+> **Audience:** anyone meeting PTC-Lisp for the first time: to read what a
 > model wrote in a trace, or to try the language by hand before building
 > anything.
 
@@ -29,8 +29,8 @@ ptc> (str "tick" "-" "tock")
 "tick-tock"
 ```
 
-A REPL session keeps state: what one input defines, the next input can use —
-the same way the model works across turns, narrowing a problem step by step.
+A REPL session keeps state: what one input defines, the next input can use.
+The model works the same way across turns, narrowing a problem step by step.
 
 ## Values are JSON values
 
@@ -46,7 +46,7 @@ true          ; => true
 ```
 
 Map keys are strings. Keywords like `:name` are a shorthand you will see
-everywhere in generated code — writing a keyword key stores the string key:
+everywhere in generated code. Writing a keyword key stores the string key:
 
 ```clojure
 (assoc {"a" 1} :b 2) ; => {"a" 1 "b" 2}
@@ -90,7 +90,7 @@ ptc> answer
 ```
 
 Nothing is ever reassigned. Functions return new values and leave their
-arguments untouched — `assoc` above returned a new map.
+arguments untouched. The `assoc` above returned a new map.
 
 ## Reach into maps
 
@@ -101,7 +101,7 @@ arguments untouched — `assoc` above returned a new map.
 ```
 
 A keyword in the function position looks itself up, and string and keyword
-access are interchangeable — generated code uses both.
+access are interchangeable. Generated code uses both.
 
 ## Transform collections
 
@@ -113,7 +113,7 @@ access are interchangeable — generated code uses both.
 (reduce + [1 2 3 4])        ; => 10
 ```
 
-The threading macro `->>` chains steps in reading order — this is the shape
+The threading macro `->>` chains steps in reading order. This is the shape
 most generated programs take:
 
 ```clojure
@@ -176,6 +176,32 @@ in one expression, group the definition and the call with `do`:
 
 Anonymous functions are `(fn [n] ...)`, as in the threading example above.
 
+## Declare types
+
+A function can declare a **signature**: what it takes and what it returns.
+
+```clojure
+(ns invoice "Invoice helpers" {:visibility :prompt})
+
+(defn total
+  "Sum the amounts on an invoice."
+  {:signature "(lines [{amount :float}]) -> :float"}
+  [lines]
+  (reduce + (map :amount lines)))
+```
+
+The runtime checks the arguments before the body runs and the result before it
+leaves. A wrong shape names the field that broke, so the model can fix it on
+the next turn:
+
+```text
+prelude_contract_error: invoice/total input lines.0.amount: expected float, got string
+```
+
+Signatures are PtcRunner's, not Clojure's, and they belong to components and
+preludes, not to a `defn` typed into the REPL. The
+[signature reference](../signature-syntax.md) has the full type vocabulary.
+
 ## Where to go next
 
 - [Explore a project interactively](kernel-repl.md) — the REPL against a real
@@ -186,3 +212,5 @@ Anonymous functions are `(fn [n] ...)`, as in the threading example above.
   with every example validated.
 - [Function reference](../function-reference.md) — everything callable, by
   section.
+- [Signature reference](../signature-syntax.md) — what a component export can
+  declare about its inputs and results, and how those are checked.
