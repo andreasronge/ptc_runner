@@ -21,8 +21,10 @@ The pre-push hook classifies the pushed and dirty paths, then invokes the same
 repository-owned root, Viewer, launcher, release, or documentation entry
 points as GitHub Actions. For mixed documentation and code changes, ExDoc runs
 before the longer test and Dialyzer stages. Plan-only changes skip the
-expensive gate. Unknown paths select every gate, and
-`FORCE_FULL_PRE_PUSH=1` explicitly forces the complete gate.
+expensive gate. Scheduled workflows (`nightly.yml`, `soak.yml`, `e2e.yml`,
+`pages.yml`) and other paths that cannot break a product gate select none.
+Unknown paths select every gate, and `FORCE_FULL_PRE_PUSH=1` explicitly
+forces the complete gate.
 
 After the test suite, the deterministic gates run as concurrent lanes, because
 they own disjoint build trees: core static analysis followed by Dialyzer

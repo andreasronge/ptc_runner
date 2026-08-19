@@ -134,12 +134,56 @@ while IFS= read -r path || [ -n "$path" ]; do
       ;;
 
     .github/workflows/test.yml|.github/actions/setup-elixir/*|\
-      scripts/ci/classify-changes.sh)
+      scripts/ci/classify-changes.sh|scripts/ci/_common.sh)
+      # The PR workflow, the shared Elixir setup, and the classifier itself
+      # can change which jobs run. Keep the fail-safe: exercise every scope.
       select_all
       ;;
 
-    .github/*|scripts/*|.githooks/*|.formatter.exs|.credo.exs|\
-      .dialyzer_ignore.exs|.tool-versions|mise.toml)
+    .github/workflows/nightly.yml|.github/workflows/soak.yml|\
+      .github/workflows/e2e.yml|.github/workflows/pages.yml|\
+      .github/dependabot.yml)
+      # Scheduled or deploy-only workflows are not a per-push product gate.
+      # Editing them must not spend minutes on core tests, Dialyzer, or
+      # release; GitHub still parses the YAML when that workflow next runs.
+      ;;
+
+    .github/workflows/launcher-release.yml|.github/workflows/launcher-publish.yml)
+      launcher=true
+      ;;
+
+    .github/workflows/release.yml)
+      core=true
+      ;;
+
+    scripts/ci/docs.sh|scripts/build_site.sh)
+      docs=true
+      ;;
+
+    scripts/ci/launcher.sh|scripts/ci/launcher-package.sh)
+      launcher=true
+      ;;
+
+    scripts/ci/viewer.sh)
+      core=true
+      viewer=true
+      ;;
+
+    scripts/ci/*|scripts/verify_*.sh|scripts/package_standalone_release.sh|\
+      scripts/build_container_image.sh|scripts/duplication_gate.sh|\
+      scripts/worktree.sh|scripts/install-hooks.sh)
+      core=true
+      ;;
+
+    .githooks/README.md)
+      docs=true
+      ;;
+
+    .githooks/*|.formatter.exs|.credo.exs|.dialyzer_ignore.exs)
+      core=true
+      ;;
+
+    .github/*|scripts/*|.tool-versions|mise.toml)
       select_all
       ;;
 

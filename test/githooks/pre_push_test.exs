@@ -125,6 +125,32 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     refute "ci-gate launcher" in invocations
   end
 
+  test "scheduled workflow changes skip product gates" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_change(".github/workflows/nightly.yml")
+
+    {output, status} = run_hook(repo, path)
+
+    assert status == 0
+    assert output =~ "No product gates selected for these paths"
+    refute output =~ "core tests"
+    refute File.exists?(mix_marker)
+  end
+
+  test "a per-gate CI script runs only that gate" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_change("scripts/build_site.sh")
+
+    {output, status} = run_hook(repo, path)
+
+    assert status == 0
+    assert output =~ "Documentation"
+    refute output =~ "core tests"
+
+    assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
+             ["deps.get --check-locked", "docs --warnings-as-errors"]
+  end
+
   test "launcher-only changes run the launcher gate" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_change("ptc_runner_launcher/c_src/launcher.c")

@@ -386,6 +386,13 @@ docs=false
 source "$SCOPES_FILE"
 rm -f "$SCOPES_FILE"
 
+if [ "$core" != true ] && [ "$launcher" != true ] &&
+   [ "$mcp_http" != true ] && [ "$mcp_filesystem" != true ] &&
+   [ "$java" != true ] && [ "$viewer" != true ] && [ "$docs" != true ]; then
+  echo "📝 No product gates selected for these paths (override: FORCE_FULL_PRE_PUSH=1)"
+  exit 0
+fi
+
 # Documentation failures are deterministic and usually cheap to diagnose. Run
 # this gate before long test and Dialyzer stages so a bad reference does not
 # waste the rest of the push cycle.

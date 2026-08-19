@@ -77,9 +77,11 @@ how it was verified.
   staleness is checked separately, by both `mix precommit` and `mix prepush`.
 - `git push` — the tracked pre-push hook classifies pushed and dirty paths and
   invokes the same repository-owned root, Viewer, launcher, release, and
-  documentation scripts as GitHub Actions. Root changes therefore use the
-  same compile/test flags, `CI=1` property count, static checks, Dialyzer
-  format, and release verification locally and remotely.
+  documentation scripts as GitHub Actions. Scheduled workflows and per-gate
+  scripts select only the gates they can break, so a Nightly YAML edit does
+  not run core tests. Root product changes still use the same compile/test
+  flags, `CI=1` property count, static checks, Dialyzer format, and release
+  verification locally and remotely.
   When one fires, run its matching write form — `mix ptc.gen_docs` for
   generated docs and schemas, or `mix ptc.conformance_report --write-inventory`
   for `conformance_inventory.json` — then stage the result. Do not run
