@@ -629,14 +629,27 @@ just needs a slot.
 ```console
 mix precommit                     # before the first commit and after the last
 MIX_ENV=dev mix docs --warnings-as-errors
-mix ptc.gen_docs                  # commit 2 touches generated surfaces
+mix ptc.gen_docs                  # commits 1 AND 2 — see below
+MIX_ENV=test mix dialyzer         # commit 2 only
 ```
 
-`mix precommit` does not run Dialyzer. Commit 2 adds a `%TrustedError{}` reason
-across five modules, so run `MIX_ENV=test mix dialyzer` explicitly — a
+**Regenerate the schema in each commit, not once at the end.** Commits 1 and 2
+both change `priv/schemas/ptc-command-envelope-v2.schema.json` — commit 1
+through `ExampleLibrary.created/1` feeding `CommandContract.init_result/0`,
+commit 2 through the new diagnostic row and usage key. Since commit 1 is
+declared shippable on its own, it has to carry its own regenerated schema;
+deferring both regenerations to the end would leave commit 1 failing the
+staleness gate in isolation. Expect the two commits to touch adjacent regions
+of that file.
+
+`mix precommit` does **not** run Dialyzer, which is why it is listed above
+separately: commit 2 adds a `%TrustedError{}` reason across five modules and a
 too-narrow `@spec` there hides caller branches.
 
-Resume session `01a01bee-8fcc-7d23-b190-955f960aa4ec` after commit 1 rather
-than reviewing cold — rounds 1 and 2 are already in its context. Take one fresh
-review against a refreshed base before merge; a resumed session is never the
-final gate.
+`mix precommit` runs the Viewer's tests but **not** its formatter, so format
+commit 3's `ptc_viewer/` edits from that directory.
+
+Resume session `01a01bee-8fcc-7d23-b190-955f960aa4ec` rather than reviewing
+cold — rounds 1 through 3 are already in its context. Take one fresh review
+against a refreshed base before merge; a resumed session is never the final
+gate.
