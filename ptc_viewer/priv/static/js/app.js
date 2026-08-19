@@ -303,7 +303,15 @@ async function loadRun(runId, routeGeneration) {
             status: conversationResponse.status,
             reason: await safeBodyText(conversationResponse)
           };
-      const preludes = preludesResponse.ok ? await preludesResponse.json() : null;
+      // Both private routes report an absence the same way, because the
+      // transcript states it the same way: the reason code, not the status.
+      const preludes = preludesResponse.ok
+        ? await preludesResponse.json()
+        : {
+            'available?': false,
+            status: preludesResponse.status,
+            reason: await safeBodyText(preludesResponse)
+          };
 
       return {
         data: {

@@ -188,17 +188,20 @@ defmodule PtcViewer.RouterTest do
   end
 
   test "conversation route classifies fixed source failures", %{trace_dir: trace_dir} do
-    statuses = %{
-      not_found: 404,
-      inspection_run_mismatch: 404,
-      inspection_source_unavailable: 503,
-      inspection_source_changed: 409,
-      inspection_source_limit_exceeded: 413,
-      malformed_inspection_artifact: 422,
-      invalid_inspection_artifact: 422
+    # A run the grant does not cover is a configuration state the reader can
+    # act on, so it answers with a reason code the browser renders as a
+    # sentence. A source that failed is a transport status and stays prose.
+    responses = %{
+      not_found: {404, "inspection_run_not_recorded"},
+      inspection_run_mismatch: {404, "inspection_run_mismatch"},
+      inspection_source_unavailable: {503, "Inspection source unavailable"},
+      inspection_source_changed: {409, "Inspection source changed"},
+      inspection_source_limit_exceeded: {413, "Inspection source too large"},
+      malformed_inspection_artifact: {422, "Unsupported inspection artifact"},
+      invalid_inspection_artifact: {422, "Unsupported inspection artifact"}
     }
 
-    Enum.each(statuses, fn {reason, expected_status} ->
+    Enum.each(responses, fn {reason, {expected_status, expected_body}} ->
       {:ok, store} =
         PtcViewer.InspectionStore.start({:pinned, "fixed.inspection.jsonl"})
 
@@ -211,6 +214,7 @@ defmodule PtcViewer.RouterTest do
         )
 
       assert response.status == expected_status
+      assert response.resp_body == expected_body
       PtcViewer.InspectionStore.stop(store)
     end)
   end

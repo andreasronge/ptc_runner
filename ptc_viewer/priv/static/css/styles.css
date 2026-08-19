@@ -1542,6 +1542,7 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   font-style: normal;
 }
 .kt-prelude-order-note { margin: 2px 0 8px; color: var(--muted); font-size: 10px; font-style: italic; }
+.kt-prelude-absence { margin: 0 0 10px; color: var(--muted); font-size: 11px; }
 .kt-component-rows { margin: 8px 0; padding-left: 20px; }
 .kt-component-rows li { margin: 3px 0; font-size: 11px; }
 .kt-component-rows code { color: var(--fg); }

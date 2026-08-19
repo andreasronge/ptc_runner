@@ -26,6 +26,30 @@ defmodule PtcViewer.SemanticConversationTest do
     assert unconfigured =~ "This project does not record inspection artifacts."
     assert unconfigured =~ "ptc-project.json"
 
+    # Withheld by the project and absent for this run are different states
+    # with different next actions, so they do not share a sentence.
+    unrecorded_run =
+      render(directory, %{
+        "available?" => false,
+        "status" => 404,
+        "reason" => "inspection_run_not_recorded"
+      })
+
+    refute unrecorded_run =~ "HTTP"
+    assert unrecorded_run =~ "Not recorded for this run"
+    assert unrecorded_run =~ "run the project again to record one"
+
+    other_run =
+      render(directory, %{
+        "available?" => false,
+        "status" => 404,
+        "reason" => "inspection_run_mismatch"
+      })
+
+    refute other_run =~ "HTTP"
+    assert other_run =~ "Other run"
+    assert other_run =~ "Start it for this run"
+
     incomplete =
       render(directory, %{
         "complete?" => false,

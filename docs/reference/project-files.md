@@ -164,6 +164,13 @@ project that records no inspection artifact, `inspection_not_private` for one
 that records it and withheld the grant. The second needs no re-run — the
 artifact on disk is already usable once the Viewer restarts with the grant.
 
+A run can also fall outside evidence the Viewer does hold, which the routes
+name separately from the project settings: `inspection_run_not_recorded` for a
+run made before `artifacts.inspection` was set, and `inspection_run_mismatch`
+for a Viewer pinned to one other run's artifact. The
+[debug-navigation reference](debug-navigation.md#reaching-the-ungated-reconstruction)
+carries the complete table.
+
 Viewer-started workflows and missions use the project's `host.env_file` when
 one is declared. `ptc viewer ptc-project.json --env-file FILE` supplies an
 invocation-time override instead. PtcRunner never searches implicitly for

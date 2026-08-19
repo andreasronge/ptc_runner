@@ -98,8 +98,14 @@ want to understand the files, result, and trace without writing an agent loop.</
 files, so commands do not depend on the shell's current directory.</p><h2 id="run-a-data-workflow">Run a data workflow</h2><p>The checked-in orders example is deterministic and needs no credential:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
 ptc run kernel-tutorial/01-orders.ptc-project.json</code></pre><pre><code class="json language-json">{&quot;order_count&quot;:3,&quot;paid_count&quot;:2,&quot;paid_total&quot;:335.75,&quot;pending_ids&quot;:[&quot;A-101&quot;]}</code></pre><p>The application reads structured input and returns one bounded JSON value. No
 model or external tool is involved.</p><h2 id="inspect-the-run">Inspect the run</h2><p>Open the local Viewer:</p><pre><code class="console language-console">ptc viewer kernel-tutorial/01-orders.ptc-project.json</code></pre><p>The canonical trace records the command, evaluations, limits, outcome, and
-resource usage. It does not contain prompts, model responses, generated source,
-or tool payloads. Those sensitive records require explicit private inspection.</p><p>You can also explore the workflow directly:</p><pre><code class="console language-console">ptc repl --project kernel-tutorial/01-orders.ptc-project.json</code></pre><p>Continue with <a href="/guides/manifests-and-capabilities/">Configure an application</a> to add
+resource usage. It never contains prompts, model responses, generated source,
+or tool payloads. Those are private evidence, recorded only when
+<code class="inline">artifacts.inspection</code> is true and served only when <code class="inline">viewer.private</code> is also
+true.</p><p>The tutorial project documents set both, so the Viewer joins that evidence into
+the transcript: every effective prelude lists a <code class="inline">source</code> link beside each
+component, and the model-driven steps show each evaluation's generated
+PTC-Lisp under <strong>Program source</strong> along with the model conversation. Set either
+setting back to <code class="inline">false</code> and the same run shows the canonical trace alone.</p><p>You can also explore the workflow directly:</p><pre><code class="console language-console">ptc repl --project kernel-tutorial/01-orders.ptc-project.json</code></pre><p>Continue with <a href="/guides/manifests-and-capabilities/">Configure an application</a> to add
 input, missions, or selected providers. Use the
 <a href="/reference/project-files/">project-configuration reference</a> for
 the complete local file and artifact contract.</p>

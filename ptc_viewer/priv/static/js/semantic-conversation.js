@@ -1,4 +1,5 @@
 import { html, mount, toMarkup } from './preact.js';
+import { privateEvidenceAbsence } from './private-evidence.js';
 
 export function renderSemanticConversation(container, conversation) {
   const existingHost = container.querySelector('.semantic-conversation-wrapper');
@@ -22,20 +23,6 @@ export function renderSemanticConversationMarkup(conversation) {
   return toMarkup(html`<${Conversation} conversation=${conversation} />`);
 }
 
-// Reasons the Viewer can state as a configuration change rather than a
-// failure. A run of a project that records no inspection artifact is the
-// common case, and an HTTP status is the wrong thing to show a reader for it.
-const CONFIGURATION_REASONS = new Map([
-  ['inspection_not_configured', {
-    status: 'Not recorded',
-    copy: 'This project does not record inspection artifacts. Set "trace" and "inspection" to true under "artifacts" in ptc-project.json and run again.'
-  }],
-  ['inspection_not_private', {
-    status: 'Not granted',
-    copy: 'This project records inspection artifacts, but this Viewer was not granted them. Set "private" to true under "viewer" in ptc-project.json and start the Viewer again. The artifacts on disk are already usable; nothing needs to be re-run.'
-  }]
-]);
-
 function Conversation({ conversation }) {
   if (!conversation) return null;
 
@@ -44,7 +31,7 @@ function Conversation({ conversation }) {
   const incomplete = conversation['complete?'] === false;
   const ambiguous = conversation['ambiguous?'] === true;
   const configuration = unavailable
-    ? CONFIGURATION_REASONS.get(String(conversation.reason || '').trim())
+    ? privateEvidenceAbsence(conversation.reason)
     : undefined;
   const status = unavailable
     ? (configuration ? configuration.status : `Unavailable (HTTP ${conversation.status || 'error'})`)
@@ -57,7 +44,7 @@ function Conversation({ conversation }) {
         <strong>${status}</strong>
       </div>
       ${unavailable && configuration && html`
-        <div class="inspection-sensitivity">${configuration.copy}</div>`}
+        <div class="inspection-sensitivity">${configuration.cause}</div>`}
       ${unavailable && !configuration && html`
         <div class="inspection-sensitivity">
           Private conversation unavailable: ${conversation.reason || 'the analysis request failed'}.

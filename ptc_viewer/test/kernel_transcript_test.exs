@@ -111,6 +111,56 @@ defmodule PtcViewer.KernelTranscriptTest do
     refute rendered =~ "ambiguous-result"
   end
 
+  test "states why named components carry no source", %{tmp_dir: directory} do
+    metadata = %{
+      "run_id" => "unauthorized-run",
+      "workflow_prelude" => %{"component_ids" => ["kernel"], "hash" => "bundle-hash"}
+    }
+
+    unrecorded =
+      render(directory, %{
+        "metadata" => metadata,
+        "turns" => %{"items" => []},
+        "preludes" => %{
+          "available?" => false,
+          "status" => 404,
+          "reason" => "inspection_run_not_recorded"
+        }
+      })
+
+    assert unrecorded =~ "Component sources are private evidence."
+    assert unrecorded =~ "this run recorded none"
+    refute unrecorded =~ "HTTP"
+
+    # A reason the reader cannot resolve by changing a setting is still stated,
+    # as the failure it is. Silence reads as "this run had no sources".
+    failed =
+      render(directory, %{
+        "metadata" => metadata,
+        "turns" => %{"items" => []},
+        "preludes" => %{"available?" => false, "status" => 500, "reason" => "adapter failed"}
+      })
+
+    assert failed =~ "Component sources are private evidence."
+    assert failed =~ "The Viewer could not read them: adapter failed (HTTP 500)."
+    refute failed =~ "ptc-project.json"
+    assert failed =~ "kernel"
+
+    # Nothing was withheld from a run that loaded no component.
+    componentless =
+      render(directory, %{
+        "metadata" => %{"run_id" => "bare-run"},
+        "turns" => %{"items" => []},
+        "preludes" => %{
+          "available?" => false,
+          "status" => 404,
+          "reason" => "inspection_not_configured"
+        }
+      })
+
+    refute componentless =~ "Component sources are private evidence."
+  end
+
   test "labels the workflow prelude hash as the bundle identity", %{tmp_dir: directory} do
     rendered =
       render(directory, %{
