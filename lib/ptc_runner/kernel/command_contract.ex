@@ -9,7 +9,6 @@ defmodule PtcRunner.Kernel.CommandContract do
   root. `schema/0` still materializes the source map for generators and docs.
   """
 
-  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandSource
@@ -1208,28 +1207,18 @@ defmodule PtcRunner.Kernel.CommandContract do
        ),
        do: ResultContractDiagnostic.message_schema(row.message)
 
-  # Neither of these can name a document: the terminal-result ceiling belongs to
-  # the effective limits and the agent option to the shipped loop's own
-  # configuration, so both publish their bounded message against a null source.
+  # The terminal-result ceiling belongs to the effective limits, not to a
+  # document the command can point a source at, so it publishes its bounded
+  # message against a null source.
   defp diagnostic_message_schema(
          %{phase: :result_cleanup, code: :result_limit_exceeded} = row,
          %{"type" => "null"}
        ),
        do: RuntimeLimitDiagnostic.result_limit_message_schema(row.message)
 
-  defp diagnostic_message_schema(
-         %{phase: :execution, code: :workflow_failed} = row,
-         %{"type" => "null"}
-       ),
-       do: AgentConfigDiagnostic.message_schema(row.message)
-
-  # Both dynamic messages above are admitted only against a null source, so the
-  # sourced branches of the same rows must stay pinned to the catalog literal;
-  # otherwise the published schema would accept a pairing the command refuses to
-  # build.
-  defp diagnostic_message_schema(%{phase: :execution, code: :workflow_failed} = row, _source),
-    do: %{"const" => row.message}
-
+  # The message above is admitted only against a null source, so the sourced
+  # branch of the same row must stay pinned to the catalog literal; otherwise
+  # the published schema would accept a pairing the command refuses to build.
   defp diagnostic_message_schema(
          %{phase: :result_cleanup, code: :result_limit_exceeded} = row,
          _source

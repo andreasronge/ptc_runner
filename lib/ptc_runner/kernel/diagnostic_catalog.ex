@@ -7,7 +7,6 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   lower-level reasons never add a public code.
   """
 
-  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.LLMReplayDiagnostic
@@ -335,9 +334,6 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :execution, code: :replay_fixture_missing, message: fallback}),
     do: LLMReplayDiagnostic.message_schema(fallback)
 
-  def message_schema(%{phase: :execution, code: :workflow_failed, message: fallback}),
-    do: AgentConfigDiagnostic.message_schema(fallback)
-
   def message_schema(%{phase: :result_cleanup, code: :result_limit_exceeded, message: fallback}),
     do: RuntimeLimitDiagnostic.result_limit_message_schema(fallback)
 
@@ -373,9 +369,6 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:execution, :replay_fixture_missing, message),
     do: LLMReplayDiagnostic.valid_message?(message)
-
-  defp valid_dynamic_message?(:execution, :workflow_failed, message),
-    do: AgentConfigDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(:result_cleanup, :result_limit_exceeded, message),
     do: RuntimeLimitDiagnostic.result_limit_message?(message)

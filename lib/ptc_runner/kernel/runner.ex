@@ -12,7 +12,6 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
-  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.Result
@@ -249,7 +248,6 @@ defmodule PtcRunner.Kernel.Runner do
             details:
               value
               |> SafeMetadata.failure_taxonomy()
-              |> Map.merge(agent_config_range(value, config))
               |> Map.merge(
                 value
                 |> LLMReplayDiagnostic.failure_metadata()
@@ -437,19 +435,6 @@ defmodule PtcRunner.Kernel.Runner do
 
       {:error, :inspection_sink_error} ->
         :ok = RunState.fail(state, :inspection_sink_error, :inspection_sink_error)
-    end
-  end
-
-  # The option and the range it violated are asserted by the failing workflow,
-  # not proven by the Kernel, so they are admitted only from a bundle that
-  # actually ships the agent library that refuses them. That is the same trust
-  # the transcript ceiling has: a bundle carrying `agent.core` can still report
-  # a bound about itself, and an ordinary workflow cannot borrow the message.
-  defp agent_config_range(value, config) do
-    if Library.shipped_component?(config.workflow_environment.bundle, "agent.core") do
-      SafeMetadata.agent_config_range(value)
-    else
-      %{}
     end
   end
 

@@ -1477,32 +1477,24 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     }
 
     out_of_range = [
-      {"max_turns", 0, 1, 128},
-      {"max_turns", 129, 1, 128},
-      {"max_program_chars", 0, 1, 1_000_000},
-      {"max_program_chars", 1_000_001, 1, 1_000_000},
-      {"max_observation_chars", 0, 1, 65_536},
-      {"max_observation_chars", 65_537, 1, 65_536},
-      {"max_transcript_chars", 0, 1, 1_000_000},
-      {"max_transcript_chars", 1_000_001, 1, 1_000_000}
+      {"max_turns", 0},
+      {"max_turns", 129},
+      {"max_program_chars", 0},
+      {"max_program_chars", 1_000_001},
+      {"max_observation_chars", 0},
+      {"max_observation_chars", 65_537},
+      {"max_transcript_chars", 0},
+      {"max_transcript_chars", 1_000_001}
     ]
 
-    for {option, value, minimum, maximum} <- out_of_range do
+    for {option, value} <- out_of_range do
       {:ok, config} = agent_config([response])
 
-      # The loop knows the option and the range it violated, so the failure
-      # carries both to the command instead of leaving it to say only that the
-      # workflow failed.
       assert {:error,
               %{
                 kind: :workflow_failed,
                 reason: :explicit_failure,
-                details: %{
-                  failure_kind: "invalid-agent-config",
-                  agent_config_option: ^option,
-                  agent_config_minimum: ^minimum,
-                  agent_config_maximum: ^maximum
-                },
+                details: %{failure_kind: "invalid-agent-config"},
                 usage: usage
               }} =
                Kernel.run(
@@ -1513,38 +1505,6 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       assert usage.subordinate_evaluations == 0
       refute_receive {:agent_request, _request}
     end
-  end
-
-  # The option and its range come from the failing workflow, not from the
-  # Kernel. A bundle that does not ship `agent.core` cannot have hit the loop's
-  # bounded-option check, so returning its failure shape by hand must not buy
-  # the dynamic diagnostic.
-  test "a bundle without agent.core cannot claim the out-of-range agent option" do
-    {:ok, workflow} = WorkflowEnvironment.new([])
-    {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new([])
-    {:ok, sink} = EventSink.start(:normal, limits, run_id: "forged-agent-config")
-
-    {:ok, config} =
-      RunConfig.new(
-        workflow_environment: workflow,
-        missions: %{"default" => mission},
-        input: %{},
-        limits: limits,
-        event_sink: sink
-      )
-
-    forged =
-      ~S|(fail {:kind :invalid-agent-config :reason :option-out-of-range | <>
-        ~S|:option "max_turns" :min 1 :max 128})|
-
-    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure, details: details}} =
-             Kernel.run(forged, config)
-
-    assert details.failure_kind == "invalid-agent-config"
-    refute Map.has_key?(details, :agent_config_option)
-    refute Map.has_key?(details, :agent_config_minimum)
-    refute Map.has_key?(details, :agent_config_maximum)
   end
 
   # The implicit single-phase path synthesizes a default phase, and it must

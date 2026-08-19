@@ -1,7 +1,6 @@
 defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSource
@@ -94,7 +93,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   end
 
   defp setting_rows do
-    limit_rows() ++ agent_turn_rows() ++ agent_config_rows()
+    limit_rows() ++ agent_turn_rows()
   end
 
   # Every ceiling a run can breach, with the setting it must name, the
@@ -200,20 +199,6 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
         value: "4",
         remedy: remedy,
         build: fn -> RuntimeLimitDiagnostic.agent_turns_message(4, reason) end
-      }
-    end
-  end
-
-  defp agent_config_rows do
-    for {option, minimum, maximum} <- AgentConfigDiagnostic.options() do
-      %{
-        phase: :execution,
-        code: :workflow_failed,
-        source: nil,
-        setting: option,
-        value: "#{minimum} to #{maximum}",
-        remedy: "set #{option} in the agent configuration",
-        build: fn -> AgentConfigDiagnostic.message(option, minimum, maximum) end
       }
     end
   end

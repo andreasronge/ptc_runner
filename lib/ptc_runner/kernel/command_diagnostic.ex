@@ -24,7 +24,6 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   broke is a later-version change, not a producer-side one.
   """
 
-  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
@@ -382,11 +381,6 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %CommandSource{kind: :runtime}
        ),
        do: RuntimeLimitDiagnostic.run_duration_message?(message)
-
-  # An out-of-range agent option is refused by the shipped loop, which no
-  # command document can point a source at, so it carries the message alone.
-  defp valid_message_source?(message, %{phase: :execution, code: :workflow_failed}, nil),
-    do: AgentConfigDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
          message,

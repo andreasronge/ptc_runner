@@ -10,8 +10,6 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   data therefore require private inspection.
   """
 
-  alias PtcRunner.Kernel.AgentConfigDiagnostic
-
   @label_keys ~w(name model provider tags)
   @tag_values %{
     "environment" => ~w(development test staging production),
@@ -198,36 +196,6 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   end
 
   def failure_taxonomy(_value), do: %{}
-
-  @doc """
-  Projects an out-of-range bounded agent option to its closed name and range.
-
-  The failure value is application-authored, so the projection admits it only
-  when the agent-configuration diagnostic recognises the option and the range
-  the loop reports. Anything else produces no fields and keeps the ordinary
-  workflow failure.
-  """
-  @spec agent_config_range(term()) :: map()
-  def agent_config_range(value) when is_map(value) and not is_struct(value) do
-    with {:ok, kind} <- fetch_named(value, "kind"),
-         "invalid-agent-config" <- normalize_name(kind),
-         {:ok, reason} <- fetch_named(value, "reason"),
-         "option-out-of-range" <- normalize_name(reason),
-         {:ok, option} <- fetch_named(value, "option"),
-         {:ok, minimum} <- fetch_named(value, "min"),
-         {:ok, maximum} <- fetch_named(value, "max"),
-         {:ok, _message} <- AgentConfigDiagnostic.message(option, minimum, maximum) do
-      %{
-        agent_config_option: option,
-        agent_config_minimum: minimum,
-        agent_config_maximum: maximum
-      }
-    else
-      _not_a_bounded_agent_option -> %{}
-    end
-  end
-
-  def agent_config_range(_value), do: %{}
 
   @spec rejection_class(term()) :: map()
   @doc """
