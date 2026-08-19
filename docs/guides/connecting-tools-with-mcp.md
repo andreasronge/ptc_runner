@@ -38,8 +38,9 @@ When adding a real tool:
 6. run plain `doctor` before the active `--connect` probe.
 
 Treat an indeterminate write as an unknown outcome, not as a safe automatic
-retry. Keep credentials out of application manifests and model-visible
-descriptions.
+retry. A server that returned a complete refusal has already answered; that
+failure is not indeterminate. Keep credentials out of application manifests
+and model-visible descriptions.
 
 Use the [MCP reference](../reference/mcp.md) for stdio and HTTP transports,
 tool mapping, effects, authentication, OAuth, lifecycle, cursors, content

@@ -199,6 +199,53 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert response_record["payload"]["body"] == response
   end
 
+  test "retains stdio child stderr with a correlated MCP exchange" do
+    request = %{
+      "jsonrpc" => "2.0",
+      "id" => 7,
+      "method" => "tools/call",
+      "params" => %{"name" => "write_text_file", "arguments" => %{"path" => "x"}}
+    }
+
+    response = %{
+      "jsonrpc" => "2.0",
+      "id" => 7,
+      "result" => %{"isError" => true, "content" => []}
+    }
+
+    correlation = %{capability_id: "cap-1", request_id: 7}
+
+    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+
+    assert :ok =
+             InspectionSink.emit_mcp_exchange(
+               sink,
+               correlation,
+               %{transport: :stdio, body: request},
+               %{transport: :stdio, body: response},
+               %{
+                 transport: :stdio,
+                 text: "stdio-fixture: write_text_file will refuse every call.\n",
+                 truncated: false
+               }
+             )
+
+    assert {:ok, [request_record, response_record, stderr_record]} =
+             InspectionSink.records(sink)
+
+    assert stderr_record["record_type"] == "mcp-stderr"
+    assert stderr_record["correlation"] == %{"capability_id" => "cap-1", "request_id" => 7}
+
+    assert stderr_record["payload"] == %{
+             "transport" => "stdio",
+             "text" => "stdio-fixture: write_text_file will refuse every call.\n",
+             "truncated" => false
+           }
+
+    assert request_record["payload"]["body"] == request
+    assert response_record["payload"]["body"] == response
+  end
+
   test "rejects malformed MCP exchange records" do
     correlation = %{capability_id: "cap-1", request_id: 7}
 

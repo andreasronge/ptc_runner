@@ -9,10 +9,11 @@ defmodule PtcRunner.Kernel.InspectionRecordTypes do
   divergence either module is free to make on its own.
   """
 
-  @record_types ~w(capability-input capability-exception capability-output evaluation-source evaluation-analysis prelude-source mcp-request mcp-response execution-prints execution-error run-result)
+  @record_types ~w(capability-input capability-exception capability-output evaluation-source evaluation-analysis prelude-source mcp-request mcp-response mcp-stderr execution-prints execution-error run-result)
   @max_exception_class_bytes 1_024
   @max_exception_message_bytes 4_096
   @max_exception_stacktrace_bytes 65_536
+  @max_mcp_stderr_bytes 1_048_576
 
   @spec all() :: [binary()]
   @doc "Returns every record type admitted by the current schema."
@@ -42,6 +43,23 @@ defmodule PtcRunner.Kernel.InspectionRecordTypes do
   end
 
   def valid_capability_exception?(_id, _payload), do: false
+
+  @doc false
+  @spec valid_mcp_stderr?(map(), map()) :: boolean()
+  def valid_mcp_stderr?(correlation, payload) when is_map(correlation) and is_map(payload) do
+    request_id = correlation["request_id"]
+
+    exact_keys?(correlation, ~w(capability_id request_id)) and
+      valid_id?(correlation["capability_id"]) and valid_request_id?(request_id) and
+      payload["transport"] == "stdio" and
+      bounded_string?(payload["text"], @max_mcp_stderr_bytes, true) and
+      is_boolean(payload["truncated"]) and
+      (exact_keys?(payload, ~w(transport text truncated)) or
+         (exact_keys?(payload, ~w(transport text truncated mission_name)) and
+            valid_id?(payload["mission_name"])))
+  end
+
+  def valid_mcp_stderr?(_correlation, _payload), do: false
 
   @doc false
   @spec valid_boundary_producer_details?(map()) :: boolean()
@@ -86,6 +104,11 @@ defmodule PtcRunner.Kernel.InspectionRecordTypes do
     is_binary(value) and String.valid?(value) and byte_size(value) <= max_bytes and
       (empty? or value != "")
   end
+
+  defp exact_keys?(map, keys) when is_map(map) and is_list(keys),
+    do: Map.keys(map) |> Enum.sort() == Enum.sort(keys)
+
+  defp valid_request_id?(id), do: is_integer(id) and id > 0
 
   defp valid_id?(id),
     do: is_binary(id) and byte_size(id) in 1..256 and String.valid?(id)

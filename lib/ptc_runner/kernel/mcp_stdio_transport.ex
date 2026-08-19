@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
 
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.ResourceRegistrar
+  alias PtcRunner.Utf8
 
   @enforce_keys [:pid, :outcome]
   defstruct [:pid, :outcome]
@@ -84,7 +85,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
 
   @doc false
   @spec request_exchange(t(), binary(), map(), map(), pos_integer(), pos_integer()) ::
-          {:ok, %{request: map(), response: map()}}
+          {:ok,
+           %{request: map(), response: map(), stderr: binary(), stderr_truncated?: boolean()}}
           | {:error,
              :closed
              | :mcp_protocol_error
@@ -150,6 +152,9 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
          writing: nil,
          retry_scheduled?: false,
          stdout: "",
+         stderr: "",
+         stderr_limit: config.stderr_bytes,
+         stderr_truncated?: false,
          unscoped_notification_bytes: 0,
          closing: nil,
          close_timeout_ms: config.grace_ms * 4 + 2_000,
@@ -305,8 +310,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     end
   end
 
-  def handle_info({port, {:data, <<"E", _bytes::binary>>}}, %{port: port} = state),
-    do: {:noreply, state}
+  def handle_info({port, {:data, <<"E", bytes::binary>>}}, %{port: port} = state),
+    do: {:noreply, append_stderr(state, bytes)}
 
   def handle_info({port, {:data, "T"}}, %{port: port} = state),
     do: {:noreply, state}
@@ -768,13 +773,24 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
       {:ok, %{sent?: true} = pending} ->
         state = %{state | unscoped_notification_bytes: 0}
 
-        result =
-          if pending.response_bytes + bytes <= pending.max_bytes do
-            if pending.exchange?,
-              do: {:ok, %{request: pending.request, response: response}},
-              else: {:ok, response}
-          else
-            {:error, :mcp_response_exceeded}
+        {result, state} =
+          cond do
+            pending.response_bytes + bytes > pending.max_bytes ->
+              {{:error, :mcp_response_exceeded}, state}
+
+            pending.exchange? ->
+              {stderr, truncated?, state} = drain_stderr(state)
+
+              {{:ok,
+                %{
+                  request: pending.request,
+                  response: response,
+                  stderr: stderr,
+                  stderr_truncated?: truncated?
+                }}, state}
+
+            true ->
+              {{:ok, response}, state}
           end
 
         {:ok, reply_pending(state, id, result)}
@@ -1015,6 +1031,34 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     GenServer.call(pid, request, :infinity)
   catch
     :exit, _reason -> {:error, :closed}
+  end
+
+  defp append_stderr(%{stderr_limit: limit} = state, _bytes) when limit <= 0, do: state
+
+  defp append_stderr(state, bytes) when is_binary(bytes) do
+    taken = byte_size(state.stderr)
+    remaining = state.stderr_limit - taken
+
+    cond do
+      remaining <= 0 ->
+        %{state | stderr_truncated?: true}
+
+      byte_size(bytes) <= remaining ->
+        %{state | stderr: state.stderr <> bytes}
+
+      true ->
+        %{
+          state
+          | stderr: state.stderr <> binary_part(bytes, 0, remaining),
+            stderr_truncated?: true
+        }
+    end
+  end
+
+  defp drain_stderr(state) do
+    text = Utf8.truncate_valid(state.stderr, state.stderr_limit)
+
+    {text, state.stderr_truncated?, %{state | stderr: "", stderr_truncated?: false}}
   end
 
   defp redact_status(status) do

@@ -55,6 +55,30 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   end
 
   @tag :tmp_dir
+  test "returns accumulated child stderr with a captured exchange", %{tmp_dir: tmp_dir} do
+    transport = start_transport(tmp_dir)
+
+    assert {:ok,
+            %{
+              request: %{"method" => "stderr-echo"},
+              response: %{"result" => %{"method" => "stderr-echo"}},
+              stderr: stderr,
+              stderr_truncated?: false
+            }} =
+             MCPStdioTransport.request_exchange(
+               transport,
+               "stderr-echo",
+               %{},
+               %{},
+               8_192,
+               1_000
+             )
+
+    assert stderr =~ "child diagnostic\n"
+    assert :ok = MCPStdioTransport.close(transport)
+  end
+
+  @tag :tmp_dir
   test "returns the exact decoded request and response for private capture", %{tmp_dir: tmp_dir} do
     transport = start_transport(tmp_dir)
 

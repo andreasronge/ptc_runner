@@ -57,6 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MCP stdio now retains bounded child stderr in the private inspection
+  artifact, so operator diagnostics that a well-behaved server can only put on
+  stderr are no longer dropped after the launcher captures them. A complete
+  decoded MCP refusal or JSON-RPC error is no longer reported as
+  `mutation_state: "indeterminate"` for write tools; that flag stays reserved
+  for timeouts and other unknown outcomes.
+
 - Reconstructed conversations carry the `system` prompt that shaped each turn,
   so `ptc transcript` and the Viewer's conversation view no longer certify a
   transcript as complete while omitting the instructions the run was given.

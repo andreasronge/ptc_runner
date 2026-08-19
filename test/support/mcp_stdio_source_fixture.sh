@@ -4,6 +4,11 @@ marker=$1
 mode=${2:-serve}
 seen_ids=" "
 
+if [ "$mode" = "stderr-warn" ]; then
+  printf '%s\n' "stdio-fixture: write_text_file will refuse every call." >&2
+  mode=serve
+fi
+
 if [ "$mode" = "mark-close" ]; then
   trap 'printf "%s\n" session-closed >> "$marker"' EXIT
   mode=serve

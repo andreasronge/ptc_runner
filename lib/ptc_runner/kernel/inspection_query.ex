@@ -6,7 +6,8 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   capability. Capability inputs and outputs are paired by `capability_id`, and
   a validated input without an output is retained as an explicitly incomplete
   interrupted attempt. MCP request and response bodies remain paired by
-  `{capability_id, request_id}`. Callers therefore never join private records
+  `{capability_id, request_id}`. Optional stdio `mcp-stderr` records join that
+  same identity and project onto the exchange when present. Callers therefore never join private records
   by timestamp or depend on file order beyond the artifact's validated
   sequence.
 
@@ -241,6 +242,14 @@ defmodule PtcRunner.Kernel.InspectionQuery do
         {{correlation["capability_id"], correlation["request_id"]}, record}
       end)
 
+    stderrs =
+      records
+      |> records_of_type("mcp-stderr")
+      |> Map.new(fn record ->
+        correlation = record["correlation"]
+        {{correlation["capability_id"], correlation["request_id"]}, record}
+      end)
+
     if Map.keys(requests) |> MapSet.new() == Map.keys(responses) |> MapSet.new() do
       pairs =
         requests
@@ -249,7 +258,8 @@ defmodule PtcRunner.Kernel.InspectionQuery do
             capability_id,
             request_id,
             request,
-            Map.fetch!(responses, {capability_id, request_id})
+            Map.fetch!(responses, {capability_id, request_id}),
+            Map.get(stderrs, {capability_id, request_id})
           )
         end)
         |> Enum.sort_by(& &1["request_sequence"])
@@ -312,7 +322,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   defp incomplete_count(items), do: Enum.count(items, &(&1["complete?"] == false))
   defp exception_count(items), do: Enum.count(items, &Map.has_key?(&1, "exception"))
 
-  defp provider_pair(capability_id, request_id, request, response) do
+  defp provider_pair(capability_id, request_id, request, response, stderr) do
     request_payload = request["payload"]
     response_payload = response["payload"]
 
@@ -330,6 +340,20 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       "request" => request_payload["body"],
       "response" => response_payload["body"]
     }
+    |> maybe_put_stderr(stderr)
+  end
+
+  defp maybe_put_stderr(item, nil), do: item
+
+  defp maybe_put_stderr(item, stderr) do
+    payload = stderr["payload"]
+
+    Map.merge(item, %{
+      "stderr_sequence" => stderr["sequence"],
+      "stderr_timestamp" => stderr["timestamp"],
+      "stderr" => payload["text"],
+      "stderr_truncated" => payload["truncated"]
+    })
   end
 
   defp source_item(record, analyses) do

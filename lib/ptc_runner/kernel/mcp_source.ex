@@ -14,7 +14,9 @@ defmodule PtcRunner.Kernel.MCPSource do
   Runtime calls propagate a W3C `traceparent` derived from the private Kernel
   trace and capability-attempt identities. When private inspection is
   explicitly enabled, version 2 inspection records retain paired exact decoded
-  JSON-RPC request and response bodies correlated to that attempt. Transport
+  JSON-RPC request and response bodies correlated to that attempt. Stdio
+  sessions also retain bounded child-stderr records on that same correlation;
+  those bytes can name host paths, so they stay owner-only. Transport
   credentials and environment values are never part of those bodies or
   records.
 
@@ -75,6 +77,12 @@ defmodule PtcRunner.Kernel.MCPSource do
   @sha256 ~r/\Asha256:[0-9a-f]{64}\z/
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @sse_event_separator ~r/(?:\r\n|\r|\n)(?:\r\n|\r|\n)/
+  @answered_reasons [
+    :mcp_remote_error,
+    :mcp_input_required_refused,
+    :mcp_unsupported_result,
+    :mcp_capability_negotiation_error
+  ]
 
   @type builder :: PtcRunner.Kernel.ProviderRegistry.staged_builder()
 
@@ -210,9 +218,12 @@ defmodule PtcRunner.Kernel.MCPSource do
   retryable. Parameter-header projection, outbound-header validation, and a
   closed HTTP request context are trusted `:not_dispatched` failures. Once an HTTP request
   begins or a stdio request may have been written, failures carry internal
-  `:possibly_dispatched` provenance. A possibly dispatched write failure is
+  `:possibly_dispatched` provenance unless the callee returned a complete
+  decoded answer. A possibly dispatched write failure is
   non-retryable and carries `mutation_state: :indeterminate`; the Dispatcher
-  exposes the mutation state but never the transport provenance.
+  exposes the mutation state but never the transport provenance. A complete
+  decoded refusal, JSON-RPC error, or other well-formed answer is
+  `:dispatched` and does not set mutation state.
 
   The safe connector snapshot has top-level fields `provider`, `protocol`,
   `transport`, selected `timeout_ms`, selected `max_result_bytes`,
@@ -864,6 +875,7 @@ defmodule PtcRunner.Kernel.MCPSource do
       {:ok, capabilities, snapshot}
     else
       {:error, :mcp_transport_closed} -> {:error, :mcp_transport_error}
+      {:error, reason, _provenance} -> {:error, reason}
       {:error, _reason} = error -> error
       _reason -> {:error, :mcp_protocol_error}
     end
@@ -1029,11 +1041,11 @@ defmodule PtcRunner.Kernel.MCPSource do
            "mcp_domain_error",
            false,
            effect,
-           :possibly_dispatched
+           :dispatched
          )}
 
       {:error, {:mcp_domain_error, feedback}} ->
-        {:error, provider_error(:domain_error, feedback, false, effect, :possibly_dispatched)}
+        {:error, provider_error(:domain_error, feedback, false, effect, :dispatched)}
 
       {:error, :mcp_invalid_result} ->
         {:error,
@@ -1257,6 +1269,7 @@ defmodule PtcRunner.Kernel.MCPSource do
        ) do
     case rpc(transport, method, params, max_bytes, header_parameters, context) do
       {:ok, _result} = success -> success
+      {:error, _reason, _provenance} = error -> error
       {:error, reason} -> {:error, reason, :possibly_dispatched}
     end
   end
@@ -1280,7 +1293,7 @@ defmodule PtcRunner.Kernel.MCPSource do
            http(request, headers, payload, @max_transport_response_bytes),
          {:ok, body} <- response_body(response, request.id),
          :ok <- capture_exchange(context, :streamable_http, payload, body) do
-      bounded_outcome(body, method, max_bytes)
+      bounded_rpc_outcome(body, method, max_bytes)
     end
   end
 
@@ -1356,12 +1369,12 @@ defmodule PtcRunner.Kernel.MCPSource do
       end
 
     case request do
-      {:ok, %{request: payload, response: body}} ->
-        with :ok <- capture_exchange(context, :stdio, payload, body),
-             do: bounded_outcome(body, method, max_bytes)
+      {:ok, %{request: payload, response: body} = exchange} ->
+        with :ok <- capture_exchange(context, :stdio, payload, body, stderr_capture(exchange)),
+             do: bounded_rpc_outcome(body, method, max_bytes)
 
       {:ok, body} ->
-        bounded_outcome(body, method, max_bytes)
+        bounded_rpc_outcome(body, method, max_bytes)
 
       {:error, :closed} ->
         {:error, :mcp_transport_closed}
@@ -1371,13 +1384,17 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp capture_exchange(nil, _transport, _request, _response), do: :ok
+  defp capture_exchange(context, transport, request, response),
+    do: capture_exchange(context, transport, request, response, nil)
+
+  defp capture_exchange(nil, _transport, _request, _response, _stderr), do: :ok
 
   defp capture_exchange(
          %{inspection_sink: nil},
          _transport,
          _request,
-         _response
+         _response,
+         _stderr
        ),
        do: :ok
 
@@ -1385,7 +1402,8 @@ defmodule PtcRunner.Kernel.MCPSource do
          %{capability_id: capability_id, inspection_sink: sink} = context,
          transport,
          %{"id" => request_id} = request,
-         %{"id" => request_id} = response
+         %{"id" => request_id} = response,
+         stderr
        ) do
     correlation = %{capability_id: capability_id, request_id: request_id}
 
@@ -1403,7 +1421,8 @@ defmodule PtcRunner.Kernel.MCPSource do
       sink,
       correlation,
       payload.(request),
-      payload.(response)
+      payload.(response),
+      stderr_payload(context, stderr)
     )
   end
 
@@ -1411,9 +1430,26 @@ defmodule PtcRunner.Kernel.MCPSource do
          %{inspection_sink: sink},
          _transport,
          _request,
-         _response
+         _response,
+         _stderr
        ),
        do: InspectionSink.emit(sink, "mcp-request", %{}, %{})
+
+  defp stderr_capture(%{stderr: stderr, stderr_truncated?: truncated?})
+       when is_binary(stderr) and stderr != "" do
+    %{transport: :stdio, text: stderr, truncated: truncated?}
+  end
+
+  defp stderr_capture(_exchange), do: nil
+
+  defp stderr_payload(context, %{text: text} = stderr) when is_binary(text) and text != "" do
+    case Map.get(context, :mission_name) do
+      name when is_binary(name) -> Map.put(stderr, :mission_name, name)
+      _ -> stderr
+    end
+  end
+
+  defp stderr_payload(_context, _stderr), do: nil
 
   defp bounded_outcome(body, method, max_result_bytes) do
     with {:ok, result} <- MCPProtocol.outcome(body, method),
@@ -1427,6 +1463,18 @@ defmodule PtcRunner.Kernel.MCPSource do
       {:error, _reason} = error -> error
     end
   end
+
+  defp bounded_rpc_outcome(body, method, max_result_bytes) do
+    case bounded_outcome(body, method, max_result_bytes) do
+      {:ok, result} -> {:ok, result}
+      {:error, reason} -> invocation_error(reason)
+    end
+  end
+
+  defp invocation_error(reason) when reason in @answered_reasons,
+    do: {:error, reason, :dispatched}
+
+  defp invocation_error(reason), do: {:error, reason, :possibly_dispatched}
 
   defp with_request(request_context, callback) do
     case MCPRequestContext.begin_request(request_context) do

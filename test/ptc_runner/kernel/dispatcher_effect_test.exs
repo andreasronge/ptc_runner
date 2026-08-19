@@ -33,6 +33,30 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
     end
   end
 
+  test "trusted dispatched provider errors preserve their policy and omit mutation state" do
+    for effect <- @effects do
+      result =
+        dispatch_mission(effect, fn ->
+          {:error,
+           ProviderError.new(:domain_error, "mcp_domain_error",
+             retryable?: false,
+             dispatch_provenance: :dispatched
+           )}
+        end)
+
+      assert %{
+               status: :error,
+               kind: :provider_error,
+               reason: :domain_error,
+               details: "mcp_domain_error",
+               retryable?: false
+             } = result
+
+      refute Map.has_key?(result, :mutation_state)
+      refute Map.has_key?(result, :dispatch_provenance)
+    end
+  end
+
   test "trusted not-dispatched provider errors preserve their retry policy and omit mutation state" do
     for effect <- @effects do
       result =
@@ -238,7 +262,9 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
       :erlang.raise(:error, %ObservedException{mode: :block}, [])
     end
 
-    {result, events} = dispatch_mission_with_events([], 100, callback, inspection_sink)
+    # Generous enough that spawn-and-raise still wins under a loaded suite.
+    # A formatter that blocked the provider-result path would still miss it.
+    {result, events} = dispatch_mission_with_events([], 5_000, callback, inspection_sink)
 
     assert result == %{
              status: :error,
