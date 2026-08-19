@@ -25,6 +25,20 @@ four new findings, all verified and applied:
   and in the generated schema.
 - Two deferred items were over-deferred; corrected estimates below.
 
+**Round 3** (against `1c03aebe`) — the protocol design is accepted as sound and
+commit 1 is confirmed independent of commit 2. Three [P1] implementation-time
+gaps, all verified and applied:
+
+- `CommandContract.init_result/0` (`command_contract.ex:1571`) seals each
+  example's file list into the published envelope schema as
+  `%{"const" => created}`, so **commit 1** changes the generated schema too.
+- `repl_session.ex:817-834` installs the agent-private tools independently of
+  `runner.ex`, so **commit 2** must register in both or agent execution through
+  a project-backed REPL loses the tools.
+- `alias_rows/1` hardcodes `success? = true` (`llm_usage_summary.ex:63-77`), so
+  it cannot represent failed calls and is the wrong accumulator for **commit
+  3**; and Reporter-owned accumulation is still the original race.
+
 What this plan used to say is recorded where the difference matters, so the same
 wrong turn is not taken twice.
 
@@ -88,7 +102,7 @@ Delete this file before the final PR.
 `{:kind :protocol-error :reason reason}` and discards everything else.
 
 **Correction from review — this plan previously said "a protocol error has no
-`:public-tool-call` by definition". That is false for 7 of the 10 branches.**
+`:public-tool-call` by definition". That is false for 7 of the 11 branches.**
 Only `:assistant-text-without-tool-call`, `:missing-tool-call`, and
 `:multiple-or-missing-tool-calls` arise before a call is selected
 (`agent.native.clj:56-61`). `:wrong-tool-name`, `:invalid-tool-call-id`,
@@ -99,12 +113,17 @@ from a response that **does** carry `tool_calls` — and in the
 Appending narration alone would still discard the model's actual response for
 most of the class.
 
-**Fix — one explicit policy, three branch groups.**
+**Fix — one explicit policy, four branch groups.**
 
-- `agent.native.clj`: carry what the branch actually has. Always
-  `:narration prose`. For post-selection branches also `:offending-call call`,
-  and for `:program-too-large` additionally `:limit max-program-chars` and
-  `:size (count program)`.
+- `agent.native.clj`: carry what the branch actually has. `:narration prose`
+  where `prose` is bound. For post-selection branches also `:offending-call
+  call`, and for `:program-too-large` additionally `:limit max-program-chars`
+  and `:size (count program)`.
+- **Narration cap — decided, so tests do not invent it.** Retain at most
+  **2000 characters** of narration, truncating on a character boundary and
+  appending the marker `… [truncated]`. The cap exists because the narration
+  is model-authored text entering the next request; 2000 is generous for a
+  stated plan and bounded against a runaway response.
 - `agent.core.clj`, new `append-protocol-error`. **Four groups, and one
   attribution rule that governs all of them: the assistant turn carries only
   what the model itself produced. Kernel-authored text goes in the `user`
@@ -280,6 +299,16 @@ change.
 - **README:** rewrite `../../docs/guides/*.md` as `ptc docs <page>`, and rewrite
   the 03 paragraph, which currently claims a committed bundle needs no install.
 
+**This changes a generated artifact — round 3 caught it.**
+`CommandContract.init_result/0` (`command_contract.ex:1571`) builds the init
+envelope's `created` schema as `%{"const" => created}` for **every** example,
+read from `ExampleLibrary.created/1`. Adding `.env` and `.gitignore` therefore
+edits the published V2 envelope schema. Commit 1 must run `mix ptc.gen_docs`,
+stage the regenerated
+`priv/schemas/ptc-command-envelope-v2.schema.json`, and update the exact
+init-envelope tests — otherwise the generated-artifact staleness gate fails at
+push time, not review time. Both commits 1 and 2 legitimately touch that schema.
+
 **Test.** Materialize into a temp directory; assert `.env` and `.gitignore`
 exist, that every `env_file` path each project declares exists, and that the
 README contains no `../../docs/` reference. Filesystem only — default suite.
@@ -345,13 +374,23 @@ attested `agent.core` origin and the caller's declared `tool_refs`
 starting):
 
 `agent.core.clj` · `runtime_tools.ex` · `environment.ex` (both registration
-points) · `run_state.ex` · `helpers.ex` · `runner.ex` · `command_run_outcome.ex`
+points) · `run_state.ex` · `helpers.ex` · `runner.ex` **and
+`repl_session.ex`** · `command_run_outcome.ex`
 · `diagnostic_catalog.ex` · `command_diagnostic.ex` · `command_contract.ex` ·
 restored `agent_config_diagnostic.ex` ·
 `priv/schemas/ptc-command-envelope-v2.schema.json` ·
 `docs/guides/agent-cli-usage.md` · `command_initializer.ex` · the generated site
 guide · probably the generated CLI diagnostic/exit-status catalog · agent-
 library, runtime-tool, setting-diagnostic and end-to-end envelope tests.
+
+**Register in `repl_session.ex` as well as `runner.ex`.** Round 3 caught this:
+`Runner.workflow_tools/4` (`runner.ex:601`) and `RelSession`'s builder
+(`repl_session.ex:817-834`) each install
+`maybe_put_llm_provider_failure`, `maybe_put_result_contract_failure` and
+`maybe_put_runtime_limit_failure` **independently**. Adding the new tools to
+only one leaves agent execution through a project-backed REPL without them —
+and `mix ptc repl --project` is a documented way to drive an agent. Add a
+REPL-path test, not only a run-path one.
 
 **Bounded value rendering — decided, not offered.** `bounded-option` rejects
 arbitrary JSON, not only out-of-range integers (`agent.core.clj:30`), so the
@@ -366,6 +405,20 @@ published ECMA-262 pattern has to match exactly one shape. **The policy is:**
   `max_turns must be an integer in 1–128 for agent.core/run; received a string`
 
 Two message shapes, two pattern branches, no caller-controlled text in either.
+
+**The payload carries the same discipline — round 3.** `agent.core` sends one
+of exactly two closed shapes, and **never the original non-integer value**:
+
+- `{option, min, max, value}` where `value` is an `int64`; or
+- `{option, min, max, type}` where `type` is a closed tag
+  (`:string`, `:float`, `:bool`, `:map`, `:vector`, `:nil`, `:other`).
+
+The `:other` fallback matters: a caller can pass a function or another
+non-projectable value, and ordinary trusted-tool argument projection may fail
+*before* the Kernel gets to classify it. Passing the raw value would also retain
+an arbitrarily large caller-controlled term in the private tool ledger. Tagging
+in `agent.core` — which is itself attested — keeps provenance while making the
+payload small and closed.
 
 > **Phase and exit status — decided.** `{:execution, :invalid_agent_config, 5,
 > false, "…"}`. The reopen comment asks for `application/invalid_agent_config`,
@@ -398,11 +451,27 @@ annotations the loop already emits: they carry `provenance: :workflow` and any
 workflow can emit them, so a usage field read from them would let application
 code write the Kernel-attested `usage` block.
 
-**Test.** Assert the envelope's `agent_protocol_errors` matches the count of
-`protocol-error` annotations in the canonical trace for the same run — the two
-numbers disagreeing is the original bug, so the test is the bug's inverse. Add
-a case proving the counter does **not** consume `protocol_errors` budget and
-does not close the run at any count.
+**Tests.** The primary oracle is the **harness**, not the trace: force N
+protocol errors through StubPlanner and assert `agent_protocol_errors == N`.
+Comparing the envelope against the trace's annotation count is a valid
+*secondary* integration check — two independent observations of the same loop
+decision — but only when qualified, and it must not be the only test:
+
+- assert `events_dropped` is empty and the trace is complete, since annotations
+  can be dropped while the `RunState` counter stays exact;
+- never claim that equality for arbitrary production traces.
+
+Then test the counter mechanism directly:
+
+- one protocol error increments exactly once;
+- successful actions, provider errors and ordinary tool calls do not increment;
+- a **forged** `"agent-action"` annotation emitted by workflow code does not
+  increment it — this is the provenance property, and it is the test that
+  proves the annotation route was rightly rejected;
+- an invalid or non-`agent.core` call of the private tool does not increment;
+- incrementing past `limits.protocol_errors` leaves that ceiling untouched and
+  does not close the `RunState`. ("At any count" is not literally testable —
+  test past the old shared ceiling, and test the `RunState` operation directly.)
 
 ### 2.3 #1502 — the docs half
 
@@ -410,8 +479,14 @@ The two agent-guide command lines (`docs/guides/agent-cli-usage.md:17` and
 `:51`, whose inline comment *"search built-ins and prelude exports"* is false as
 written) and the AGENTS.md scaffold
 (`lib/ptc_runner/kernel/command_initializer.ex:92-93`) all print a form that
-answers "not found" as printed. Add `--project`. Both are generated surfaces —
-run `mix ptc.gen_docs` and stage the result.
+answers "not found" as printed. Add `--project`.
+
+**Neither file is generated** — an earlier draft of this plan said they were.
+`docs/guides/agent-cli-usage.md` is a hand-edited source that `ptc docs
+agent-guide` serves from the compiled-in library, and the AGENTS.md scaffold is
+Elixir source. What *is* generated is `site/guides/agent-cli-usage/`. So: edit
+the two sources, then run `mix ptc.gen_docs` and stage the regenerated site
+page. Do not edit under `site/`.
 
 The message half is deferred (see Deferred 3): `Introspection`
 (`lib/ptc_runner/lisp/introspection.ex:13`) deliberately exposes only callable
@@ -432,16 +507,17 @@ during compilation, in a different module entirely.
 forwards only name, environment, capability_id, status, and live_run. The data
 exists; it is not routed.
 
-**Three constraints the original plan got wrong.**
+**Four constraints the original plan got wrong.**
 
 1. **Cost is terminal-only and all-or-nothing by design.**
    `LLMUsageSummary.totals/1` returns `%{}` unless the batch carries
    `run-stopped` and no `events-dropped` (`llm_usage_summary.ex:82-90`), and
    `complete_total/2` halts to `nil` if any successful call lacks priced usage
-   (`:100-110`). A live tile must accumulate through the `alias_rows/1` seam
-   (`:63` — the `doctor --connect` path, which exists precisely for calls with
-   no event stream) and adopt the same withhold rule. It must never show `0` for
-   unknown, and it must distinguish *unpriced* from *missing or invalid* usage.
+   (`:100-110`). A live tile must adopt the same withhold rule: never show `0` for
+   unknown, and distinguish *unpriced* from *missing or invalid* usage. The
+   `doctor --connect` path (`alias_rows/1`, `:63`) is the right *precedent* —
+   it exists for calls with no event stream — but not the right function; see
+   constraint 4.
 2. **Field names.** The existing keys are `input`, `output`, `total_cost`
    (`llm_usage_summary.ex:12`) — not `input_tokens` / `output_tokens` / `cost`.
    Reuse the real names or the live tile and the completed-run card will drift.
@@ -451,16 +527,31 @@ exists; it is not routed.
    guaranteed, so completion can post the final frame and set `stopping?: true`
    while a last usage event is still in flight. For the activity list a dropped
    entry is cosmetic; for a **total** it is a wrong number on the last frame.
-   A barrier between two different senders does not establish ordering, so
-   **account the totals in owner state**. A plain reporter unit test will not
-   expose this — the test has to force the interleaving.
+   Round 3 is right that "account the totals in owner state" was still
+   ambiguous — read as *Reporter*-owned state it is the original race with
+   extra steps. **The authoritative accumulation is synchronous in
+   `RunState`:** the dispatcher records `{alias, revision, status, usage}`
+   before it returns from the capability call; the run owner cannot reach
+   completion until that dispatch has returned, which is what actually
+   establishes the ordering; and the Reporter's final frame merely *reads* the
+   accumulated value through `RunState.usage/1`, owning nothing. Telemetry
+   stays as it is for the activity feed and must not own the spend total. The
+   test has to force the interleaving, not merely call the API in order.
+4. **`alias_rows/1` is the wrong accumulator.** It hardcodes `success? = true`
+   for every tuple (`llm_usage_summary.ex:63-77`, into `update_counter/5` at
+   `:183`), so it cannot represent a failed call. Live accounting must preserve
+   failures, because terminal accounting counts *all* calls while withholding
+   pricing only for successful ones lacking priced usage — an all-successful
+   accumulator would disagree with the completed-run card precisely when a call
+   fails. Add a **status-aware bounded accumulator** to `LLMUsageSummary`
+   rather than retaining an ever-growing tuple list and re-reducing it per
+   frame.
 
-**Fix.** Forward the usage projection into the `capability :stop` telemetry
-metadata — **plus the alias and `installation_revision`**, which `alias_rows/1`
-takes as `{alias_name, revision, usage}` and which the telemetry payload does
-not currently carry — accumulate in owner-held state, expose on the frame under
-the existing field names with an explicit state for withheld totals, and render
-the tile in
+**Fix.** Record `{alias, revision, status, usage}` into `RunState` from the
+dispatcher before it returns — the alias and `installation_revision` are not in
+the telemetry payload today and the row shape requires them — accumulate
+through the new status-aware API, expose on the frame under the existing field
+names with an explicit state for withheld totals, and render the tile in
 `ptc_viewer/priv/static/js/live.js` beside the existing four, formatted as the
 Runs list already does. Viewer tests and styles are part of this commit; format
 Viewer edits from `ptc_viewer/`.
