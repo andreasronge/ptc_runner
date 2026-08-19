@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+  import PtcRunner.TestSupport.TestHelpers, only: [long_running_body: 1]
 
   alias PtcRunner.Kernel.CommandAcquisition
   alias PtcRunner.Kernel.CommandDiagnostic
@@ -15,6 +16,7 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.ReplSessionOwner
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.TraceLog
 
   @stdio_root Path.expand("../../..", __DIR__)
@@ -214,6 +216,40 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
     assert {:ok, %{return: 42}, session} = ReplSession.eval(session, "(+ retained 2)")
     assert {:ok, _events} = ReplSession.close(session)
     assert_eventually(fn -> "session-closed" in lifecycle(marker) end)
+  end
+
+  # A mission form is bounded by `evaluation_timeout_ms` too, and the evaluator
+  # hands back only the milliseconds it had left. The interactive path must name
+  # the ceiling for a mission session exactly as it does for a workflow one.
+  @tag :tmp_dir
+  test "a mission form stopped by the evaluation ceiling names the limit", %{tmp_dir: directory} do
+    manifest = write_provider_free_application(directory, :normal)
+    document = manifest |> File.read!() |> Jason.decode!()
+
+    document =
+      document
+      |> Map.put("limits", %{"evaluation_timeout_ms" => 200})
+      |> Map.put("missions", %{
+        "review" => %{"components" => [], "data" => %{}, "providers" => []}
+      })
+
+    File.write!(manifest, Jason.encode!(document))
+
+    assert {:ok, session} =
+             ManifestRepl.open(manifest, nil,
+               mission: "review",
+               input_mode: :interactive,
+               terminal_attached: true
+             )
+
+    assert {:error, %{fail: %{reason: :timeout, message: message}}, session} =
+             ReplSession.eval(session, long_running_body(4))
+
+    assert RuntimeLimitDiagnostic.timeout_message?(message)
+    assert message =~ "evaluation_timeout_ms limit 200 ms was exceeded during execution"
+    assert message =~ "raise limits.evaluation_timeout_ms in the manifest"
+
+    assert {:ok, _events} = ReplSession.close(session)
   end
 
   @tag :tmp_dir

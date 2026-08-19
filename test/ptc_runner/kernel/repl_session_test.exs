@@ -913,6 +913,41 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert message =~ "raise limits.evaluation_timeout_ms in the manifest"
   end
 
+  # A parallel deadline surfaces as an ordinary `:timeout` too. Answering it
+  # with the evaluation ceiling would name a limit that never fired, so the
+  # stable parallel message picks `parallel_timeout_ms` out of the family.
+  test "a parallel operation stopped by its own deadline names parallel_timeout_ms" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, limits} =
+      Limits.new(
+        parallel_timeout_ms: 50,
+        evaluation_timeout_ms: 5_000,
+        workflow_timeout_ms: 10_000
+      )
+
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-parallel-ceiling")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+
+    assert {:error, %{fail: %{reason: :timeout, message: message}}, _session} =
+             ReplSession.eval(session, "(pmap (fn [_x] #{long_running_body(4)}) [1])")
+
+    assert RuntimeLimitDiagnostic.timeout_message?(message)
+    assert message =~ "parallel_timeout_ms limit 50 ms was exceeded during execution"
+    assert message =~ "raise limits.parallel_timeout_ms in the manifest"
+  end
+
   # A form that never finishes compiling reports its own reason, and the same
   # ceiling bounds it. The phase is taken from that reason, the way `ptc run`
   # takes it, so a compile stop is not reported as an execution stop.
