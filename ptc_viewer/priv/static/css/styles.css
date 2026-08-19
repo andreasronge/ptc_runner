@@ -2259,6 +2259,17 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
 }
 .live-meter-fill[data-level="warning"] { background: var(--warning); }
 .live-meter-fill[data-level="critical"] { background: var(--error); }
+/* A meter that reached its ceiling is a different fact from one at 90%, and the
+   bar is full either way — so the exceeded state is striped, not just red. */
+.live-meter-fill[data-level="exceeded"] {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--error),
+    var(--error) 4px,
+    color-mix(in srgb, var(--error) 60%, black) 4px,
+    color-mix(in srgb, var(--error) 60%, black) 8px
+  );
+}
 .live-meter-detail {
   text-align: right; color: var(--fg);
   font-variant-numeric: tabular-nums; font-size: 11px;

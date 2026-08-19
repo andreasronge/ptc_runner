@@ -254,7 +254,17 @@ or running beside private inspection data.</p><h2 id="set-installed-ceilings">Se
 }</code></pre><p>Raising <code class="inline">run_duration_ms</code> alone rarely lengthens an agent loop. Check the
 workflow timeout, model-call and mission-call quotas, subordinate evaluations,
 parallel timeout, and event count/byte ceilings too. Source checks have their
-own quota and do not execute code.</p><p>Four timeouts are host-only: <code class="inline">provider_cleanup_timeout_ms</code>,
+own quota and do not execute code.</p><p><code class="inline">install</code> is required and may be empty. A limits-only host document raises
+ceilings for a provider-free application without fabricating a provider:</p><pre><code class="json language-json">{
+  &quot;install&quot;: {},
+  &quot;limits&quot;: {
+    &quot;workflow_heap_words&quot;: 16000000
+  }
+}</code></pre><p>The four heap and concurrency rows (<code class="inline">workflow_heap_words</code>,
+<code class="inline">evaluation_heap_words</code>, <code class="inline">provider_heap_words</code>, <code class="inline">live_provider_tasks</code>) have no
+manifest headroom: raising them is a resource decision and needs both this
+host ceiling and a matching manifest request. Every other application-narrowable
+row can be raised from the manifest alone, up to its installed ceiling.</p><p>Four timeouts are host-only: <code class="inline">provider_cleanup_timeout_ms</code>,
 <code class="inline">local_preflight_timeout_ms</code>, <code class="inline">selection_validation_timeout_ms</code>, and
 <code class="inline">doctor_connectivity_timeout_ms</code>. A manifest cannot declare them.</p><p>The generated <a href="/reference/kernel-limits-reference/">Kernel limits reference</a> is the
 complete table of names, meanings, units, scopes, defaults, accepted ranges,

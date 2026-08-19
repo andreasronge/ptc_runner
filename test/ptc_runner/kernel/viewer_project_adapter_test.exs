@@ -127,6 +127,39 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapterTest do
     end
 
     @tag :tmp_dir
+    test "a limits-only host document displays the raised ceiling without a provider", %{
+      tmp_dir: dir
+    } do
+      manifest = Path.join(dir, "ptc.json")
+      host_config = Path.join(dir, "host.json")
+
+      File.write!(
+        manifest,
+        Jason.encode!(%{
+          "version" => 1,
+          "workflow" => %{"components" => [], "entry" => "app/run"},
+          "input" => %{"value" => %{}},
+          "limits" => %{"workflow_heap_words" => 16_000_000}
+        })
+      )
+
+      File.write!(
+        host_config,
+        Jason.encode!(%{
+          "install" => %{},
+          "limits" => %{"workflow_heap_words" => 16_000_000}
+        })
+      )
+
+      assert {:ok, project} = ViewerProjectAdapter.describe(manifest, host_config: host_config)
+      by_name = Map.new(project.limits, &{&1.name, &1})
+      assert by_name["workflow_heap_words"].effective == 16_000_000
+      assert by_name["workflow_heap_words"].ceiling == 16_000_000
+      assert by_name["workflow_heap_words"].default == 8_000_000
+      assert [%{providers: [], tools: []}] = project.environments
+    end
+
+    @tag :tmp_dir
     test "an unreadable host configuration leaves tools empty rather than failing", %{
       tmp_dir: dir
     } do

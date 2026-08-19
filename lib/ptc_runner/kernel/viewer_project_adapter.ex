@@ -76,7 +76,7 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
            entry: manifest.entry,
            input: manifest.input,
            environments: environments(manifest, host.install),
-           limits: limit_rows(manifest.limits)
+           limits: limit_rows(manifest.limits, host.limits)
          }}
 
       {:error, :not_found} ->
@@ -180,8 +180,10 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
   # --- limits -------------------------------------------------------------
 
   # Every catalog row is reported, so the panel can show the full table and
-  # still lead with the rows a manifest actually moved.
-  defp limit_rows(effective) do
+  # still lead with the rows a manifest actually moved. The installed ceiling
+  # rides along because it is the answer to the question the panel otherwise
+  # provokes: having seen a value, how much further can this manifest raise it?
+  defp limit_rows(effective, installed) do
     defaults = Limits.defaults()
 
     Enum.map(LimitCatalog.rows(), fn row ->
@@ -189,7 +191,8 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
         name: row.name,
         unit: row.unit,
         effective: Map.fetch!(effective, row.field),
-        default: Map.fetch!(defaults, row.field)
+        default: Map.fetch!(defaults, row.field),
+        ceiling: Map.fetch!(installed, row.field)
       }
     end)
   end

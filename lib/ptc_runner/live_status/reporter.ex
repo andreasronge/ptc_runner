@@ -58,9 +58,9 @@ defmodule PtcRunner.LiveStatus.Reporter do
       else: {:error, :invalid_live_status_target}
   end
 
-  @spec complete(pid(), atom(), term()) :: :ok
-  def complete(pid, phase, reason) do
-    GenServer.call(pid, {:complete, phase, reason}, 1_000)
+  @spec complete(pid(), atom(), term(), binary() | nil) :: :ok
+  def complete(pid, phase, reason, limit) do
+    GenServer.call(pid, {:complete, phase, reason, limit}, 1_000)
   catch
     :exit, _reason -> :ok
   end
@@ -115,6 +115,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
       seq: 0,
       phase: "running",
       outcome_reason: nil,
+      outcome_limit: nil,
       sandbox: nil,
       heap_peak: 0,
       heap_baseline: nil,
@@ -135,11 +136,12 @@ defmodule PtcRunner.LiveStatus.Reporter do
   end
 
   @impl GenServer
-  def handle_call({:complete, phase, reason}, _from, state) do
+  def handle_call({:complete, phase, reason, limit}, _from, state) do
     state = %{
       state
       | phase: to_string(phase),
-        outcome_reason: format_reason(reason)
+        outcome_reason: format_reason(reason),
+        outcome_limit: limit
     }
 
     state = state |> sample_heap() |> post_frame()
@@ -386,6 +388,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
       seq: state.seq,
       phase: state.phase,
       outcome_reason: state.outcome_reason,
+      outcome_limit: state.outcome_limit,
       elapsed_ms: elapsed_ms(state),
       remaining_ms: usage && Map.get(usage, :remaining_ms),
       limits: state.limits,

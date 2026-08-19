@@ -485,13 +485,10 @@ function initProject(root, project) {
 
   f['env-count'].textContent = plural(environments.length, 'environment');
   f['comp-count'].textContent = plural(components.length, 'component');
-  const narrowed = limits.filter(limit => limit.effective !== limit.default);
-  f['limit-count'].textContent = narrowed.length
-    ? `${narrowed.length} differ from defaults`
-    : 'all at defaults';
-
+  const leading = leadingLimitRows(limits);
+  f['limit-count'].textContent = limitSummary(leading);
   renderEnvironments(f['env-body'], environments, showSource);
-  renderLimits(f['limit-body'], limits, narrowed);
+  renderLimits(f['limit-body'], limits, leading);
   f['comp-body'].replaceChildren(componentList(components, showSource));
 
   f.disclose.addEventListener('click', () => {
@@ -575,11 +572,11 @@ function renderEnvironments(container, environments, showSource) {
   );
 }
 
-// Deltas lead; the complete catalog stays one click away so the panel never
-// implies the manifest set only these rows.
-function renderLimits(container, limits, narrowed) {
+// Deltas and operator-gated rows lead; the complete catalog stays one click
+// away so the panel never implies the manifest set only these rows.
+function renderLimits(container, limits, leading) {
   const deltas = el('div', 'live-limit-rows');
-  deltas.replaceChildren(...narrowed.map(limitRow));
+  deltas.replaceChildren(...leading.map(limitRow));
 
   const all = el('div', 'live-limit-rows');
   all.hidden = true;
@@ -594,24 +591,54 @@ function renderLimits(container, limits, narrowed) {
   });
 
   container.replaceChildren(
-    narrowed.length ? deltas : el('div', 'live-project-line', 'Every limit is at its default.'),
+    leading.length ? deltas : el('div', 'live-project-line', 'Every limit is at its default.'),
     toggle,
     all,
   );
 }
 
+// The third column answers whichever question the value provokes. A moved
+// limit always keeps its default in view; the installed ceiling rides along
+// because that is how much further the manifest can raise it. A row already
+// at that ceiling says so, because editing the manifest alone will not help.
 function limitRow(limit) {
   const row = el('div', 'live-limit');
   row.append(
     el('span', 'live-limit-name', limit.name),
     el('span', 'live-limit-value', fmtLimit(limit.effective, limit.unit)),
-    el(
-      'span',
-      'live-limit-default',
-      limit.effective === limit.default ? '' : `default ${fmtLimit(limit.default, limit.unit)}`,
-    ),
+    el('span', 'live-limit-default', limitNote(limit)),
   );
   return row;
+}
+
+export function atInstalledCeiling(limit) {
+  return limit.ceiling != null && limit.effective >= limit.ceiling;
+}
+
+export function leadingLimitRows(limits) {
+  return (Array.isArray(limits) ? limits : []).filter(
+    limit => limit.effective !== limit.default || atInstalledCeiling(limit),
+  );
+}
+
+export function limitSummary(leading) {
+  const moved = leading.filter(limit => limit.effective !== limit.default).length;
+  const gated = leading.filter(atInstalledCeiling).length;
+  if (moved && gated) return `${moved} differ from defaults · ${gated} at installed ceiling`;
+  if (moved) return `${moved} differ from defaults`;
+  if (gated) return `${gated} at installed ceiling`;
+  return 'all at defaults';
+}
+
+export function limitNote(limit) {
+  const moved = limit.effective !== limit.default;
+  const defaultNote = moved ? `default ${fmtLimit(limit.default, limit.unit)}` : null;
+  const ceilingNote = atInstalledCeiling(limit)
+    ? 'at installed ceiling'
+    : (limit.ceiling != null ? `ceiling ${fmtLimit(limit.ceiling, limit.unit)}` : null);
+
+  if (defaultNote && ceilingNote) return `${defaultNote} · ${ceilingNote}`;
+  return defaultNote || ceilingNote || '';
 }
 
 function componentList(components, showSource) {
@@ -748,12 +775,13 @@ function updateCard(card, frame) {
   renderActivity(f.activity, frame.activity || []);
 }
 
+// The frame names the breached setting in `outcome_limit`; the old three-name
+// prefix list silently demoted every other ceiling — an agent turn limit, the
+// evaluation ceiling, a transcript or result limit — to a generic failure.
 export function failurePresentation(frame) {
   if (frame?.phase !== 'error' || !frame.outcome_reason) return null;
   const reason = String(frame.outcome_reason).replace(/^:/, '');
-  const limitExceeded = ['parallel_timeout_ms', 'workflow_timeout_ms', 'run_duration_ms']
-    .some(name => reason.startsWith(`${name} limit `));
-  return limitExceeded
+  return frame.outcome_limit
     ? `Limit exceeded: ${reason}`
     : `Failure reason: ${reason}`;
 }
@@ -805,8 +833,14 @@ function renderMeters(container, frame, usage, limits, calls) {
       `${usage.subordinate_evaluations} / ${limits.subordinate_evaluations}`));
   }
   if (limits.workflow_capability_calls) {
-    rows.push(meterRow('Tool calls', calls, limits.workflow_capability_calls,
-      `${calls} / ${limits.workflow_capability_calls}`));
+    const workflowCalls = scopeCalls(usage.capability_calls, 'workflow');
+    rows.push(meterRow('Tool calls', workflowCalls, limits.workflow_capability_calls,
+      `${workflowCalls} / ${limits.workflow_capability_calls}`));
+  }
+  if (usage.capability_calls?.mission && limits.mission_capability_calls) {
+    const missionCalls = scopeCalls(usage.capability_calls, 'mission');
+    rows.push(meterRow('Mission calls', missionCalls, limits.mission_capability_calls,
+      `${missionCalls} / ${limits.mission_capability_calls}`));
   }
   if (usage.evaluation_memory_bytes != null && limits.evaluation_memory_bytes) {
     const bytes = numberOr(usage.evaluation_memory_bytes, limits.evaluation_memory_bytes);
@@ -819,7 +853,10 @@ function renderMeters(container, frame, usage, limits, calls) {
 
 function meterRow(label, value, limit, detail) {
   const fraction = Math.max(0, Math.min(value / limit, 1));
-  const level = fraction >= 0.9 ? 'critical' : fraction >= 0.75 ? 'warning' : 'normal';
+  const level =
+    value >= limit ? 'exceeded'
+      : fraction >= 0.9 ? 'critical'
+        : fraction >= 0.75 ? 'warning' : 'normal';
   const row = document.createElement('div');
   row.className = 'live-meter';
   row.innerHTML = `
@@ -899,6 +936,16 @@ function renderActivity(list, entries) {
 }
 
 /* ---------- formatting ---------- */
+
+function scopeCalls(capabilityCalls, scope) {
+  const counts = capabilityCalls && capabilityCalls[scope];
+  if (!counts || typeof counts !== 'object') return 0;
+  let total = 0;
+  for (const count of Object.values(counts)) {
+    if (typeof count === 'number') total += count;
+  }
+  return total;
+}
 
 function totalCalls(capabilityCalls) {
   if (!capabilityCalls) return 0;

@@ -63,9 +63,11 @@ defmodule PtcRunner.LiveStatus do
   defp restore_target(previous), do: Process.put(@target_key, previous)
 
   @doc "Posts the final frame carrying the run outcome."
-  @spec complete(pid() | nil, atom(), term()) :: :ok
-  def complete(nil, _phase, _reason), do: :ok
-  def complete(pid, phase, reason) when is_pid(pid), do: Reporter.complete(pid, phase, reason)
+  @spec complete(pid() | nil, atom(), term(), binary() | nil) :: :ok
+  def complete(nil, _phase, _reason, _limit), do: :ok
+
+  def complete(pid, phase, reason, limit) when is_pid(pid),
+    do: Reporter.complete(pid, phase, reason, limit)
 
   @doc "Stops the reporter; safe on nil and on an already-dead pid."
   @spec stop(pid() | nil) :: :ok

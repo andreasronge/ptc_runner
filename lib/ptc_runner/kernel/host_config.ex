@@ -13,7 +13,9 @@ defmodule PtcRunner.Kernel.HostConfig do
   operator can permit work measured in hours rather than in one bounded run.
   Omitted names keep their installed default. A manifest requests only
   manifest-narrowable values at or below whatever is installed here;
-  installed-only operational limits remain host-owned.
+  installed-only operational limits remain host-owned. `install` is required
+  and may be empty: a limits-only host document raises ceilings for a
+  provider-free application without fabricating a provider.
 
   Loading is bounded, path-confined, duplicate-key rejecting, and side-effect
   free. In particular, credential declarations are validated but environment
@@ -677,6 +679,9 @@ defmodule PtcRunner.Kernel.HostConfig do
     end
   end
 
+  defp installations(value, _credentials) when is_map(value) and map_size(value) == 0,
+    do: {:ok, %{}}
+
   defp installations(value, credentials)
        when is_map(value) and map_size(value) in 1..@max_installations do
     with {:ok, installations} <-
@@ -1331,7 +1336,7 @@ defmodule PtcRunner.Kernel.HostConfig do
       "$id" => "https://ptc-runner.dev/schemas/ptc-host-config.schema.json",
       "title" => "PtcRunner host configuration",
       "description" =>
-        "Operator-owned provider installation. Runtime loading remains authoritative.",
+        "Operator-owned provider installation and installed ceilings. An empty install map is valid. Runtime loading remains authoritative.",
       "type" => "object",
       "additionalProperties" => false,
       "required" => ["install"],
@@ -1401,7 +1406,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp installations_schema do
     %{
       "type" => "object",
-      "minProperties" => 1,
+      "minProperties" => 0,
       "maxProperties" => @max_installations,
       "propertyNames" => name_schema(),
       "additionalProperties" => installation_schema()

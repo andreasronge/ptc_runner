@@ -15,34 +15,81 @@ defmodule PtcRunner.Kernel.LimitCatalog do
 
   @generic_maximum 2_592_000_000
 
+  # `{field, effective default, installed ceiling}`.
+  #
+  # The two columns answer different questions. The effective default is what a
+  # manifest that says nothing gets, and it has to let an ordinary agent finish:
+  # a model call takes seconds, and one turn spends one `llm-request` and one
+  # subordinate evaluation. The installed ceiling is how far a manifest may
+  # raise its own value.
+  #
+  # Counts and per-step times are cheap to leave generous: every one of them is
+  # already bounded by the run clock, so a larger ceiling changes how the run is
+  # sliced rather than how much it can spend. `run_duration_ms` keeps a
+  # conservative 30 s default because a model call costs money and takes seconds,
+  # which makes the clock the practical cap on how many of them a runaway can
+  # buy. Its 1 800 s installed ceiling is the default authorization an operator
+  # grants by shipping no host document: an application may request up to 30
+  # minutes unless the operator narrows it. Raising it is one manifest edit.
+  #
+  # Retained-buffer byte ceilings (evaluation memory, history, events, source,
+  # payloads) are 16× their defaults. They bound what one run keeps, not live
+  # worker heap, so they do not multiply with `live_provider_tasks`. Sixteen is
+  # the same headroom the call-count rows use, and 64 MB of retained events is
+  # still a buffer, not a sandbox.
   @manifest_defaults [
-    {:run_duration_ms, 30_000, 300_000},
-    {:workflow_timeout_ms, 30_000, 120_000},
-    {:evaluation_timeout_ms, 1_000, 60_000},
-    {:evaluation_admission_timeout_ms, 10_000, 120_000},
-    {:parallel_timeout_ms, 30_000, 300_000},
+    {:run_duration_ms, 30_000, 1_800_000},
+    {:workflow_timeout_ms, 30_000, 1_800_000},
+    {:evaluation_timeout_ms, 30_000, 600_000},
+    {:evaluation_admission_timeout_ms, 10_000, 600_000},
+    {:parallel_timeout_ms, 60_000, 600_000},
     {:workflow_heap_words, 8_000_000, 8_000_000},
     {:evaluation_heap_words, 1_250_000, 1_250_000},
     {:provider_heap_words, 5_000_000, 5_000_000},
     {:live_provider_tasks, 8, 8},
-    {:workflow_capability_calls, 64, 64},
-    {:workflow_capability_calls_per_name, 16, 16},
-    {:mission_capability_calls, 128, 128},
-    {:mission_capability_calls_per_name, 32, 32},
-    {:subordinate_evaluations, 16, 16},
-    {:subordinate_source_checks, 16, 16},
-    {:protocol_errors, 32, 32},
-    {:entry_source_bytes, 262_144, 262_144},
-    {:subordinate_source_bytes, 131_072, 131_072},
-    {:evaluation_memory_bytes, 2_000_000, 2_000_000},
-    {:evaluation_history_bytes, 1_000_000, 1_000_000},
-    {:capability_argument_bytes, 262_144, 262_144},
-    {:capability_result_bytes, 1_000_000, 1_000_000},
-    {:event_payload_bytes, 262_144, 262_144},
-    {:terminal_result_bytes, 1_000_000, 1_000_000},
-    {:normal_event_count, 256, 256},
-    {:normal_event_bytes, 4_000_000, 4_000_000}
+    {:workflow_capability_calls, 256, 4_096},
+    {:workflow_capability_calls_per_name, 128, 2_048},
+    {:mission_capability_calls, 256, 4_096},
+    {:mission_capability_calls_per_name, 128, 2_048},
+    {:subordinate_evaluations, 128, 2_048},
+    {:subordinate_source_checks, 128, 2_048},
+    {:protocol_errors, 64, 512},
+    {:entry_source_bytes, 262_144, 4_000_000},
+    {:subordinate_source_bytes, 131_072, 2_000_000},
+    {:evaluation_memory_bytes, 2_000_000, 32_000_000},
+    {:evaluation_history_bytes, 1_000_000, 16_000_000},
+    {:capability_argument_bytes, 262_144, 4_000_000},
+    {:capability_result_bytes, 1_000_000, 16_000_000},
+    {:event_payload_bytes, 262_144, 4_000_000},
+    {:terminal_result_bytes, 1_000_000, 16_000_000},
+    {:normal_event_count, 256, 4_096},
+    {:normal_event_bytes, 4_000_000, 64_000_000}
   ]
+
+  # Live memory is a product, not a sum. A workflow `pmap`/`pcalls` worker
+  # inherits the sandbox heap cap, which the Runner sets from
+  # `workflow_heap_words`, and each provider callback carries `provider_heap_words`
+  # of its own, so raising `live_provider_tasks` alongside either heap row
+  # multiplies rather than adds. Leaving these four at their installed defaults
+  # keeps a manifest from opting itself into gigabytes without asking anyone: an
+  # application that needs more memory is asking for a resource decision, and a
+  # host document is where a resource decision belongs.
+  @aggregate_memory_rows [
+    :workflow_heap_words,
+    :evaluation_heap_words,
+    :provider_heap_words,
+    :live_provider_tasks
+  ]
+
+  # For every other row a ceiling equal to the default is not a ceiling. It
+  # leaves an application no way to raise its own value except by writing a host
+  # document. Twenty-one rows were in that state; this keeps them out of it.
+  # The four aggregate-memory rows above are the deliberate exception.
+  if Enum.any?(@manifest_defaults, fn {field, default, installed} ->
+       field not in @aggregate_memory_rows and installed <= default
+     end) do
+    raise "every application-narrowable limit needs an installed ceiling above its default"
+  end
 
   @installed_only [
     {:provider_cleanup_timeout_ms, 5_000, true},
