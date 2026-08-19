@@ -39,6 +39,12 @@ gaps, all verified and applied:
   it cannot represent failed calls and is the wrong accumulator for **commit
   3**; and Reporter-owned accumulation is still the original race.
 
+**Round 4** (against `b6c135e2`) — **no [P1]. Verdict: ready to implement.** One
+[P2] (name the rendered states, applied below) plus refinements to the
+accumulator shape, the narration cap, and a commit-1 implementation order. Four
+rounds is where this converged; stop reviewing the document and start writing
+code.
+
 What this plan used to say is recorded where the difference matters, so the same
 wrong turn is not taken twice.
 
@@ -120,10 +126,25 @@ most of the class.
   call`, and for `:program-too-large` additionally `:limit max-program-chars`
   and `:size (count program)`.
 - **Narration cap — decided, so tests do not invent it.** Retain at most
-  **2000 characters** of narration, truncating on a character boundary and
-  appending the marker `… [truncated]`. The cap exists because the narration
-  is model-authored text entering the next request; 2000 is generous for a
-  stated plan and bounded against a runaway response.
+  **2000 characters** of narration, truncating on a character boundary, with
+  the marker `… [truncated]` counted *inside* that 2000 rather than appended
+  past it. Truncate only when the narration actually exceeds the cap. The cap
+  exists because the narration is model-authored text entering the next
+  request; 2000 is a safety bound against a runaway response, generous against
+  the 262,144-character default transcript ceiling
+  (`agent.core.clj:305`).
+
+  **It is a maximum, not a guaranteed retention.** Under a low but valid
+  `max_transcript_chars`, the initial request can fit while the correction
+  request — narration plus guidance — does not. That is the strict transcript
+  limit behaving correctly, but it can block a recovery that shorter narration
+  would have allowed. Test that case explicitly: a ceiling where the first
+  request fits and the correction does not, asserting the run ends in the
+  existing classified `max_transcript_chars` failure rather than anything new.
+  Adaptive truncation to the exact remaining encoded-request budget would
+  recover more, but it requires building the next prompt state and encoding the
+  prospective request before choosing the narration length — not required here,
+  and not worth the coupling.
 - `agent.core.clj`, new `append-protocol-error`. **Four groups, and one
   attribution rule that governs all of them: the assistant turn carries only
   what the model itself produced. Kernel-authored text goes in the `user`
@@ -547,11 +568,57 @@ exists; it is not routed.
    rather than retaining an ever-growing tuple list and re-reducing it per
    frame.
 
-**Fix.** Record `{alias, revision, status, usage}` into `RunState` from the
-dispatcher before it returns — the alias and `installation_revision` are not in
-the telemetry payload today and the row shape requires them — accumulate
-through the new status-aware API, expose on the frame under the existing field
-names with an explicit state for withheld totals, and render the tile in
+**Fix.** One new synchronous owner operation —
+`RunState.record_llm_usage(state, alias, revision, status, usage)` — whose
+`handle_call` performs the **entire** read-modify-write. Never `usage/1`
+followed by a separate update; that is the read-modify-write race the
+repository rules call review-blocking.
+
+Bounded internal shape, keyed by `{alias, installation_revision}`:
+
+```elixir
+%{{alias, revision} => {%{calls: int, successful_calls: int,
+                          usage_calls: int, missing_usage_calls: int,
+                          usage: %{input: int, output: int,
+                                   cache_creation: int, cache_read: int,
+                                   total_cost: number}},
+                        cost_complete?: boolean}}
+```
+
+**No per-call list is retained**, and every bound already exists: at most 128
+installation identities per host (`host_config.ex:68`), at most 4096 workflow
+capability calls and 2048 per name (`limit_catalog.ex:50`), and each usage
+payload normalized to at most 512 bytes with bounded numerics
+(`llm_usage.ex:8`). So the map is bounded by installations, not by calls, and
+the update is O(1) amortized.
+
+**Where to account:** build `stopped_data` first, then record from its final
+`status`, identity and usage — before telemetry and event publication and
+before the dispatcher returns (`dispatcher.ex:410`). That single site already
+merges error attributes, so it covers failed results too, which is what keeps
+live and terminal classification aligned.
+
+> A tempting alternative — folding the usage onto the existing
+> `RunState.release_provider_slot/1` call to save a hop — is **wrong**. That
+> function is called from six sites (`dispatcher.ex:440,592,633,646,674,680`),
+> most of them early-return paths where no `stopped_data` and no usage exist,
+> so the fold would silently under-count and would overload an unrelated API.
+> The extra synchronous call is not material contention: the dispatcher already
+> serializes reservations through `RunState`, and an LLM call is dominated by
+> provider latency.
+
+**Rendered states — name them now, so the tile cannot invent them.** Exactly
+four, and none of the last three may render as zero cost:
+
+| state | meaning |
+| --- | --- |
+| `available` | successful usage complete and priced |
+| `unpriced` | successful usage exists, tokens valid, cost absent |
+| `incomplete` | at least one successful call has missing or invalid usage |
+| `empty` | no successful LLM call yet |
+
+Then expose the accumulated value on the frame under the existing field names,
+and render the tile in
 `ptc_viewer/priv/static/js/live.js` beside the existing four, formatted as the
 Runs list already does. Viewer tests and styles are part of this commit; format
 Viewer edits from `ptc_viewer/`.
@@ -624,6 +691,37 @@ just needs a slot.
 
 ---
 
+## Implementation order — commit 1
+
+A literally green suite after every edit contradicts the repository's own rule
+that a bug fix starts with a failing regression test. The target is therefore
+**green after every issue slice**, not after every edit.
+
+1. **Protocol recovery (#1496 history half)** — add the branch-by-branch
+   failing tests; implement narration bounding in `agent.native`; implement the
+   four history policies in `agent.core`; extend `agent.feedback`; run
+   `agent_library_test.exs`.
+2. **Closed pipe (#1498)** — add the packaged-CLI regression test; implement
+   the narrow Mix rescue; implement `StandaloneCLI` handler removal, narrow
+   rescue and status 141; rebuild the packaged release and run the nightly pipe
+   test.
+3. **Tutorial materialization (#1497)** — add the failing materialization and
+   exact init-envelope tests; update `ptc-host.json`, its
+   `installation_revision` and startup timeout, then the README; generate
+   `.env` and `.gitignore` inside `ExampleLibrary` **before** `created`,
+   `bytes` and listing metadata are calculated, since those are derived from
+   the file map; update the exact `created` expectations; run
+   `mix ptc.gen_docs` immediately; run the initializer, example-library,
+   command-contract and schema tests.
+4. **Commit gate** — format root changes, `mix ptc.gen_docs --check`,
+   documentation warnings, the nightly packaged-pipe test, then `mix precommit`.
+
+Step 3's ordering is the one that bites: `created` is computed from the file
+map, so generating the two files after that calculation produces a manifest
+that disagrees with the tree it just wrote.
+
+---
+
 ## Gates
 
 ```console
@@ -632,6 +730,11 @@ MIX_ENV=dev mix docs --warnings-as-errors
 mix ptc.gen_docs                  # commits 1 AND 2 — see below
 MIX_ENV=test mix dialyzer         # commit 2 only
 ```
+
+Run `mix ptc.gen_docs --check` after each regeneration — it is the same gate
+CI applies. Note the envelope schema is minified onto a single line, so both
+commits will appear to replace nearly all of it; that hurts diff readability
+but is not a conflict.
 
 **Regenerate the schema in each commit, not once at the end.** Commits 1 and 2
 both change `priv/schemas/ptc-command-envelope-v2.schema.json` — commit 1
