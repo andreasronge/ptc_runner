@@ -665,11 +665,15 @@ function Tags({ tags }) {
 // The canonical trace names every prelude component but carries none of their
 // source, so a card with no `source` links is the normal reading of an
 // unauthorized run and looks identical to one whose sources failed to load.
-// The index therefore carries why they are absent alongside the ones present.
+// The index therefore carries why they are absent alongside the ones present:
+// a configuration cause states what to change, and anything else states the
+// transport status rather than a remedy that would not produce the source.
 function buildPreludeIndex(preludes) {
   const byComponent = new Map();
   const absence = preludes?.['available?'] === false
-    ? privateEvidenceAbsence(preludes.reason)
+    ? privateEvidenceAbsence(preludes.reason) || {
+        cause: `The Viewer could not read them: ${preludes.reason || 'the analysis request failed'} (HTTP ${preludes.status || 'error'}).`
+      }
     : undefined;
 
   (preludes?.items || []).forEach((record, index) => {

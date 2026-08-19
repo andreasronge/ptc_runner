@@ -132,8 +132,8 @@ defmodule PtcViewer.KernelTranscriptTest do
     assert unrecorded =~ "this run recorded none"
     refute unrecorded =~ "HTTP"
 
-    # A reason the reader cannot resolve by changing a setting must not be
-    # dressed up as one. The chips stay, the invented remedy does not.
+    # A reason the reader cannot resolve by changing a setting is still stated,
+    # as the failure it is. Silence reads as "this run had no sources".
     failed =
       render(directory, %{
         "metadata" => metadata,
@@ -141,7 +141,9 @@ defmodule PtcViewer.KernelTranscriptTest do
         "preludes" => %{"available?" => false, "status" => 500, "reason" => "adapter failed"}
       })
 
-    refute failed =~ "Component sources are private evidence."
+    assert failed =~ "Component sources are private evidence."
+    assert failed =~ "The Viewer could not read them: adapter failed (HTTP 500)."
+    refute failed =~ "ptc-project.json"
     assert failed =~ "kernel"
 
     # Nothing was withheld from a run that loaded no component.

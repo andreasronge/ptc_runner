@@ -183,7 +183,12 @@ inspection authority to the evaluation session.</p><p>Because <code class="inlin
 routes distinguish which one is missing: <code class="inline">inspection_not_configured</code> for a
 project that records no inspection artifact, <code class="inline">inspection_not_private</code> for one
 that records it and withheld the grant. The second needs no re-run — the
-artifact on disk is already usable once the Viewer restarts with the grant.</p><p>Viewer-started workflows and missions use the project's <code class="inline">host.env_file</code> when
+artifact on disk is already usable once the Viewer restarts with the grant.</p><p>A run can also fall outside evidence the Viewer does hold, which the routes
+name separately from the project settings: <code class="inline">inspection_run_not_recorded</code> for a
+run made before <code class="inline">artifacts.inspection</code> was set, and <code class="inline">inspection_run_mismatch</code>
+for a Viewer pinned to one other run's artifact. The
+<a href="/reference/debug-navigation/#reaching-the-ungated-reconstruction">debug-navigation reference</a>
+carries the complete table.</p><p>Viewer-started workflows and missions use the project's <code class="inline">host.env_file</code> when
 one is declared. <code class="inline">ptc viewer ptc-project.json --env-file FILE</code> supplies an
 invocation-time override instead. PtcRunner never searches implicitly for
 <code class="inline">.env</code>; without either form, credentials must already be present in the Viewer
