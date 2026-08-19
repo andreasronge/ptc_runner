@@ -101,14 +101,23 @@
 <p class="lead"><strong>Build AI agents that are bounded in what they can do, easy to
 change, observable in operation, and designed to improve from evidence.</strong></p>
 
-<h2>The missing middle</h2>
+<h2>Code mode you run yourself</h2>
 
-<p>Agents today sit at two extremes: call tools one at a time, paying a model round trip
-for every step, or hand the model a full coding environment with an external sandbox.
-PtcRunner is the missing middle. The model writes a small, bounded program that calls
-several approved tools, processes their results, and returns only what matters. You
-provide the task, model, tools, data, and limits; PtcRunner executes the program and
-records what happened.</p>
+<p>Agents usually call one tool per model turn. That is slow, and every result lands in
+the context window.</p>
+
+<p>Let the model write a small program instead. It calls several approved tools, filters
+and combines the results, and returns only what matters. The pattern is called code mode,
+or programmatic tool calling, and several products now offer it.</p>
+
+<p>PtcRunner is a version you run yourself, built around the execution boundary. The
+generated program has no shell, no filesystem, no network, and no package installs. It
+reaches the world only through tools you granted, under limits you set. Each run is a
+lightweight process rather than a container, so one machine holds thousands at once.</p>
+
+<p>You normally do not write the program. You provide the task, model, approved tools,
+data, and limits; PtcRunner runs it and leaves a structured trace you can replay and
+compare.</p>
 
 <h2>Bounded in what it can do</h2>
 
@@ -146,6 +155,31 @@ own, and doing so grants no new authority.</p>
   environment, frozen for the run. A local component cannot shadow a shipped library ID, and
   selecting a library installs its dependency closure without granting any tool authority.</figcaption>
 </figure>
+
+<h2>Will the model write it?</h2>
+
+<p>Yes. PTC-Lisp is not a new language to learn. It is a bounded Clojure &mdash; 236 of the
+250 <code>clojure.core</code> names in its audited target &mdash; plus type signatures,
+checked on the way in and on the way out.</p>
+
+<p>The job is narrow: short programs, written turn by turn in a REPL-style loop, against
+typed signatures. That is not the same as writing a large application. In my experience
+over the past year, the ranking of languages changes once you narrow it that way.</p>
+
+<p>Corpus size matters less than it looks. The callable surface is small enough to hand the
+model in full, so it never guesses which library exists. A mistake is a value and costs one
+expression, not the run. A signature violation names the field to fix. And there is nothing
+ambient to reach for: a model fluent in Python reaches for <code>open</code>,
+<code>requests</code> and <code>subprocess</code>, and a sandbox has to block each one. Here
+there is nothing to block.</p>
+
+<p>Small languages can do well at this. A study across 20 languages put Elixir first, ahead
+of much larger corpora; Dashbit's
+<a href="https://dashbit.co/blog/why-elixir-best-language-for-ai">Why Elixir is the best
+language for AI</a> has the numbers.</p>
+
+<p>The tutorials here run on a small, cheap model by default. Better still: point it at your
+own tasks and measure.</p>
 
 <h2>Improves from evidence</h2>
 

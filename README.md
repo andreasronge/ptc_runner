@@ -3,16 +3,23 @@
 **Build AI agents that are bounded in what they can do, easy to change,
 observable in operation, and designed to improve from evidence.**
 
-Today, agents usually choose between two extremes. They either call tools one
-at a time, paying a model round trip and adding context for every step, or use a
-full coding environment and an external sandbox for more complex work.
-PtcRunner provides the missing middle: it lets a model write a small, bounded
-program that calls several approved tools, processes their results, and returns
-only what matters.
+Agents usually call one tool per model turn. That is slow, and every result
+lands in the context window.
 
-You normally do not write that program. You provide the task, model, approved
-tools, data, limits, and agent components. The model writes the mission program;
-PtcRunner executes it and records what happened.
+Let the model write a small program instead. It calls several approved tools,
+filters and combines the results, and returns only what matters. The pattern is
+called code mode, or programmatic tool calling, and several products now offer
+it.
+
+PtcRunner is a version you run yourself, built around the execution boundary.
+The generated program has no shell, no filesystem, no network, and no package
+installs. It reaches the world only through tools you granted, under limits you
+set. Each run is a lightweight process rather than a container, so one machine
+holds thousands at once.
+
+You normally do not write the program. You provide the task, model, approved
+tools, data, limits, and agent components. PtcRunner runs it and leaves a
+structured trace you can replay and compare.
 
 > PtcRunner is a 0.x project under active development. Breaking changes are
 > expected.
@@ -105,10 +112,30 @@ program can call several tools, filter or join their results, branch, and loop
 inside one bounded evaluation. Intermediate data stays out of the model context
 unless the program deliberately returns it.
 
-Internally, model-authored programs use PTC-Lisp, a small purpose-built language
-for bounded data processing and tool calling. Application authors normally
-select the shipped agent components and configure them; writing PTC-Lisp is an
-advanced customization option, not an onboarding requirement.
+Model-authored programs are written in PTC-Lisp. Application authors normally
+select the shipped agent components and configure them; writing PTC-Lisp
+yourself is an advanced option, not an onboarding requirement.
+
+## Will the model write it?
+
+Yes. PTC-Lisp is not a new language to learn. It is a bounded Clojure —
+[236 of the 250 `clojure.core` names in its audited target](docs/conformance/index.md)
+— plus type signatures, checked on the way in and on the way out.
+
+The job is narrow: short programs, written turn by turn in a REPL-style loop,
+against typed signatures. That is not the same as writing a large application.
+In my experience over the past year, the ranking of languages changes once you
+narrow it that way.
+
+Corpus size matters less than it looks. The callable surface is small enough to
+hand the model in full, so it never guesses which library exists. A mistake is a
+value and costs one expression, not the run. A signature violation names the
+field to fix. And there is nothing ambient to reach for: a model fluent in
+Python reaches for `open`, `requests`, and `subprocess`, and a sandbox has to
+block each one. Here there is nothing to block.
+
+The tutorials here run on a small, cheap model by default. Better still: point
+it at your own tasks and measure.
 
 ## Constrain
 
